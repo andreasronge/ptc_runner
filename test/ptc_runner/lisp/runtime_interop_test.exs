@@ -373,4 +373,162 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert step.fail.message =~ ".endsWith: expected string argument, got integer"
     end
   end
+
+  describe ".isBefore" do
+    test "Date: earlier is before later" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isBefore (LocalDate/parse "2023-01-01") (LocalDate/parse "2023-12-31"))|
+               )
+
+      assert step.return == true
+    end
+
+    test "Date: later is not before earlier" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isBefore (LocalDate/parse "2023-12-31") (LocalDate/parse "2023-01-01"))|
+               )
+
+      assert step.return == false
+    end
+
+    test "Date: equal dates return false" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isBefore (LocalDate/parse "2023-06-15") (LocalDate/parse "2023-06-15"))|
+               )
+
+      assert step.return == false
+    end
+
+    test "DateTime: earlier is before later" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isBefore (java.util.Date. "2023-01-01T00:00:00Z") (java.util.Date. "2023-12-31T00:00:00Z"))|
+               )
+
+      assert step.return == true
+    end
+
+    test "DateTime: equal datetimes return false" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isBefore (java.util.Date. "2023-06-15T12:00:00Z") (java.util.Date. "2023-06-15T12:00:00Z"))|
+               )
+
+      assert step.return == false
+    end
+
+    test "error: mixed Date and DateTime" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~s|(.isBefore (LocalDate/parse "2023-01-01") (java.util.Date. "2023-01-01T00:00:00Z"))|
+               )
+
+      assert step.fail.message =~ "cannot compare LocalDate with DateTime"
+    end
+
+    test "error: mixed DateTime and Date" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~s|(.isBefore (java.util.Date. "2023-01-01T00:00:00Z") (LocalDate/parse "2023-01-01"))|
+               )
+
+      assert step.fail.message =~ "cannot compare DateTime with LocalDate"
+    end
+
+    test "error: non-date receiver" do
+      assert {:error, step} = Lisp.run(~s|(.isBefore "2023-01-01" "2023-12-31")|)
+      assert step.fail.message =~ ".isBefore: expected LocalDate or DateTime, got string"
+    end
+
+    test "error: nil receiver" do
+      assert {:error, step} = Lisp.run(~s|(.isBefore nil (LocalDate/parse "2023-01-01"))|)
+      assert step.fail.message =~ ".isBefore: expected LocalDate or DateTime, got nil"
+    end
+
+    test "error: integer receiver" do
+      assert {:error, step} = Lisp.run(~s|(.isBefore 123 456)|)
+      assert step.fail.message =~ ".isBefore: expected LocalDate or DateTime, got integer"
+    end
+
+    test "error: valid Date receiver with invalid argument" do
+      assert {:error, step} =
+               Lisp.run(~s|(.isBefore (LocalDate/parse "2023-01-01") "2023-12-31")|)
+
+      assert step.fail.message =~ ".isBefore: expected LocalDate argument, got string"
+    end
+
+    test "error: valid DateTime receiver with nil argument" do
+      assert {:error, step} =
+               Lisp.run(~s|(.isBefore (java.util.Date. "2023-01-01T00:00:00Z") nil)|)
+
+      assert step.fail.message =~ ".isBefore: expected DateTime argument, got nil"
+    end
+  end
+
+  describe ".isAfter" do
+    test "Date: later is after earlier" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isAfter (LocalDate/parse "2023-12-31") (LocalDate/parse "2023-01-01"))|
+               )
+
+      assert step.return == true
+    end
+
+    test "Date: earlier is not after later" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isAfter (LocalDate/parse "2023-01-01") (LocalDate/parse "2023-12-31"))|
+               )
+
+      assert step.return == false
+    end
+
+    test "Date: equal dates return false" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isAfter (LocalDate/parse "2023-06-15") (LocalDate/parse "2023-06-15"))|
+               )
+
+      assert step.return == false
+    end
+
+    test "DateTime: later is after earlier" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~s|(.isAfter (java.util.Date. "2023-12-31T00:00:00Z") (java.util.Date. "2023-01-01T00:00:00Z"))|
+               )
+
+      assert step.return == true
+    end
+
+    test "error: mixed types rejected" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~s|(.isAfter (LocalDate/parse "2023-01-01") (java.util.Date. "2023-01-01T00:00:00Z"))|
+               )
+
+      assert step.fail.message =~ "cannot compare LocalDate with DateTime"
+    end
+
+    test "error: integer receiver" do
+      assert {:error, step} = Lisp.run(~s|(.isAfter 123 456)|)
+      assert step.fail.message =~ ".isAfter: expected LocalDate or DateTime, got integer"
+    end
+
+    test "error: valid Date receiver with integer argument" do
+      assert {:error, step} = Lisp.run(~s|(.isAfter (LocalDate/parse "2023-01-01") 123)|)
+      assert step.fail.message =~ ".isAfter: expected LocalDate argument, got integer"
+    end
+
+    test "error: valid DateTime receiver with string argument" do
+      assert {:error, step} =
+               Lisp.run(~s|(.isAfter (java.util.Date. "2023-01-01T00:00:00Z") "2023-12-31")|)
+
+      assert step.fail.message =~ ".isAfter: expected DateTime argument, got string"
+    end
+  end
 end

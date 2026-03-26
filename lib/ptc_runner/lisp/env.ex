@@ -436,6 +436,8 @@ defmodule PtcRunner.Lisp.Env do
       {:".toUpperCase", {:normal, &Runtime.dot_to_upper_case/1}},
       {:".startsWith", {:normal, &Runtime.dot_starts_with/2}},
       {:".endsWith", {:normal, &Runtime.dot_ends_with/2}},
+      {:".isBefore", {:normal, &Runtime.dot_is_before/2}},
+      {:".isAfter", {:normal, &Runtime.dot_is_after/2}},
       {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
       {:parse, {:normal, &Runtime.local_date_parse/1}},
 

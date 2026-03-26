@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-12 interop entries across 5 classes.
+14 interop entries across 6 classes.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
 
@@ -42,6 +42,14 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
 | `LocalDate/parse` | Static | `(LocalDate/parse date-string)` | Parse ISO-8601 date string (YYYY-MM-DD) to Date | Returns Elixir Date. Only supports ISO-8601 YYYY-MM-DD format. |
+
+
+### java.time.LocalDate / java.util.Date
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `.isAfter` | Method | `(.isAfter a b)` | Returns true if receiver comes strictly after argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. |
+| `.isBefore` | Method | `(.isBefore a b)` | Returns true if receiver comes strictly before argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. |
 
 
 ### java.util.Date

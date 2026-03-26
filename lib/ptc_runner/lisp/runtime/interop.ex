@@ -261,10 +261,69 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     raise ".endsWith: expected string argument, got #{type_name(suffix)}"
   end
 
+  @doc """
+  Simulates .isBefore method on Date and DateTime objects.
+  Returns true if the first argument comes strictly before the second.
+  Both arguments must be the same type (Date/Date or DateTime/DateTime).
+  """
+  def dot_is_before(%Date{} = a, %Date{} = b), do: Date.compare(a, b) == :lt
+  def dot_is_before(%DateTime{} = a, %DateTime{} = b), do: DateTime.compare(a, b) == :lt
+
+  def dot_is_before(%Date{}, %DateTime{}) do
+    raise ".isBefore: cannot compare LocalDate with DateTime — use same types"
+  end
+
+  def dot_is_before(%DateTime{}, %Date{}) do
+    raise ".isBefore: cannot compare DateTime with LocalDate — use same types"
+  end
+
+  def dot_is_before(%Date{}, b) do
+    raise ".isBefore: expected LocalDate argument, got #{type_name(b)}"
+  end
+
+  def dot_is_before(%DateTime{}, b) do
+    raise ".isBefore: expected DateTime argument, got #{type_name(b)}"
+  end
+
+  def dot_is_before(a, _b) do
+    raise ".isBefore: expected LocalDate or DateTime, got #{type_name(a)}"
+  end
+
+  @doc """
+  Simulates .isAfter method on Date and DateTime objects.
+  Returns true if the first argument comes strictly after the second.
+  Both arguments must be the same type (Date/Date or DateTime/DateTime).
+  """
+  def dot_is_after(%Date{} = a, %Date{} = b), do: Date.compare(a, b) == :gt
+  def dot_is_after(%DateTime{} = a, %DateTime{} = b), do: DateTime.compare(a, b) == :gt
+
+  def dot_is_after(%Date{}, %DateTime{}) do
+    raise ".isAfter: cannot compare LocalDate with DateTime — use same types"
+  end
+
+  def dot_is_after(%DateTime{}, %Date{}) do
+    raise ".isAfter: cannot compare DateTime with LocalDate — use same types"
+  end
+
+  def dot_is_after(%Date{}, b) do
+    raise ".isAfter: expected LocalDate argument, got #{type_name(b)}"
+  end
+
+  def dot_is_after(%DateTime{}, b) do
+    raise ".isAfter: expected DateTime argument, got #{type_name(b)}"
+  end
+
+  def dot_is_after(a, _b) do
+    raise ".isAfter: expected LocalDate or DateTime, got #{type_name(a)}"
+  end
+
   defp type_name(nil), do: "nil"
   defp type_name(x) when is_list(x), do: "list"
+  defp type_name(%Date{}), do: "LocalDate"
+  defp type_name(%DateTime{}), do: "DateTime"
   defp type_name(x) when is_map(x), do: "map"
   defp type_name(x) when is_integer(x), do: "integer"
   defp type_name(x) when is_float(x), do: "float"
+  defp type_name(x) when is_binary(x), do: "string"
   defp type_name(_), do: "non-string"
 end
