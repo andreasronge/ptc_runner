@@ -181,8 +181,12 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     String.contains?(s, substring)
   end
 
-  def dot_contains(s, _substring) do
+  def dot_contains(s, _substring) when not is_binary(s) do
     raise ".contains: expected string, got #{type_name(s)}"
+  end
+
+  def dot_contains(_s, substring) do
+    raise ".contains: expected string argument, got #{type_name(substring)}"
   end
 
   @doc """
@@ -193,8 +197,12 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     PtcRunner.Lisp.Runtime.String.last_index_of(s, substring) || -1
   end
 
-  def dot_last_index_of(s, _substring) do
+  def dot_last_index_of(s, _substring) when not is_binary(s) do
     raise ".lastIndexOf: expected string, got #{type_name(s)}"
+  end
+
+  def dot_last_index_of(_s, substring) do
+    raise ".lastIndexOf: expected string argument, got #{type_name(substring)}"
   end
 
   @doc """
@@ -219,6 +227,38 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   def dot_to_upper_case(s) do
     raise ".toUpperCase: expected string, got #{type_name(s)}"
+  end
+
+  @doc """
+  Simulates .startsWith method on strings.
+  Delegates to `String.starts_with?/2`.
+  """
+  def dot_starts_with(s, prefix) when is_binary(s) and is_binary(prefix) do
+    String.starts_with?(s, prefix)
+  end
+
+  def dot_starts_with(s, _prefix) when not is_binary(s) do
+    raise ".startsWith: expected string, got #{type_name(s)}"
+  end
+
+  def dot_starts_with(_s, prefix) do
+    raise ".startsWith: expected string argument, got #{type_name(prefix)}"
+  end
+
+  @doc """
+  Simulates .endsWith method on strings.
+  Delegates to `String.ends_with?/2`.
+  """
+  def dot_ends_with(s, suffix) when is_binary(s) and is_binary(suffix) do
+    String.ends_with?(s, suffix)
+  end
+
+  def dot_ends_with(s, _suffix) when not is_binary(s) do
+    raise ".endsWith: expected string, got #{type_name(s)}"
+  end
+
+  def dot_ends_with(_s, suffix) do
+    raise ".endsWith: expected string argument, got #{type_name(suffix)}"
   end
 
   defp type_name(nil), do: "nil"

@@ -309,4 +309,68 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert step.fail.message =~ ".toUpperCase: expected string, got integer"
     end
   end
+
+  describe ".startsWith" do
+    test "returns true when string starts with prefix" do
+      assert {:ok, step} = Lisp.run(~s|(.startsWith "hello world" "hello")|)
+      assert step.return == true
+    end
+
+    test "returns false when string does not start with prefix" do
+      assert {:ok, step} = Lisp.run(~s|(.startsWith "hello world" "world")|)
+      assert step.return == false
+    end
+
+    test "empty prefix returns true" do
+      assert {:ok, step} = Lisp.run(~s|(.startsWith "hello" "")|)
+      assert step.return == true
+    end
+
+    test "handles unicode" do
+      assert {:ok, step} = Lisp.run(~s|(.startsWith "über" "üb")|)
+      assert step.return == true
+    end
+
+    test "error on non-string receiver" do
+      assert {:error, step} = Lisp.run(~s|(.startsWith 123 "x")|)
+      assert step.fail.message =~ ".startsWith: expected string, got integer"
+    end
+
+    test "error on non-string prefix" do
+      assert {:error, step} = Lisp.run(~s|(.startsWith "hello" 123)|)
+      assert step.fail.message =~ ".startsWith: expected string argument, got integer"
+    end
+  end
+
+  describe ".endsWith" do
+    test "returns true when string ends with suffix" do
+      assert {:ok, step} = Lisp.run(~s|(.endsWith "hello world" "world")|)
+      assert step.return == true
+    end
+
+    test "returns false when string does not end with suffix" do
+      assert {:ok, step} = Lisp.run(~s|(.endsWith "hello world" "hello")|)
+      assert step.return == false
+    end
+
+    test "empty suffix returns true" do
+      assert {:ok, step} = Lisp.run(~s|(.endsWith "hello" "")|)
+      assert step.return == true
+    end
+
+    test "handles unicode" do
+      assert {:ok, step} = Lisp.run(~s|(.endsWith "über" "ber")|)
+      assert step.return == true
+    end
+
+    test "error on non-string receiver" do
+      assert {:error, step} = Lisp.run(~s|(.endsWith 123 "x")|)
+      assert step.fail.message =~ ".endsWith: expected string, got integer"
+    end
+
+    test "error on non-string suffix" do
+      assert {:error, step} = Lisp.run(~s|(.endsWith "hello" 123)|)
+      assert step.fail.message =~ ".endsWith: expected string argument, got integer"
+    end
+  end
 end

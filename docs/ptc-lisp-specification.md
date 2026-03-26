@@ -3071,6 +3071,8 @@ PTC-Lisp supports Java-style string methods for common operations.
 | `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found |
 | `.toLowerCase` | `(.toLowerCase s)` | Convert string to lower case |
 | `.toUpperCase` | `(.toUpperCase s)` | Convert string to upper case |
+| `.startsWith` | `(.startsWith s prefix)` | Returns true if string starts with prefix |
+| `.endsWith` | `(.endsWith s suffix)` | Returns true if string ends with suffix |
 
 ```clojure
 (.indexOf "hello" "ll")      ; => 2
@@ -3079,6 +3081,8 @@ PTC-Lisp supports Java-style string methods for common operations.
 (.lastIndexOf "hello" "l")   ; => 3 (last 'l')
 (.toLowerCase "Hello")       ; => "hello"
 (.toUpperCase "Hello")       ; => "HELLO"
+(.startsWith "hello" "he")   ; => true
+(.endsWith "hello" "lo")     ; => true
 ```
 
 **Return Value**: These methods return -1 when the substring is not found (Java semantics). **Prefer `index-of` / `last-index-of`** (§8.3) which return `nil` when not found (Clojure semantics).

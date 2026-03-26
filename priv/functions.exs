@@ -145,6 +145,38 @@
       divergences: nil
     },
     %{
+      name: ".startsWith",
+      description: "Returns true if string starts with prefix",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.startsWith s prefix)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: [],
+      clojure_var: ".startsWith",
+      divergences: nil
+    },
+    %{
+      name: ".endsWith",
+      description: "Returns true if string ends with suffix",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.endsWith s suffix)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: [],
+      clojure_var: ".endsWith",
+      divergences: nil
+    },
+    %{
       name: "/",
       description: "Division (always returns float)",
       binding: :variadic_nonempty,
