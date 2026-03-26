@@ -105,7 +105,7 @@ defmodule PtcRunner.LLM do
   @doc """
   Create a SubAgent-compatible callback function for a model.
 
-  Resolves model aliases via `PtcRunner.LLM.Registry.resolve!/1` before
+  Resolves model aliases via the configured model registry before
   creating the callback. Already-resolved `provider:model` strings pass
   through unchanged.
 

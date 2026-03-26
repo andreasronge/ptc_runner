@@ -1,5 +1,14 @@
 defmodule PtcRunner.SubAgent.Definition do
-  @moduledoc false
+  @moduledoc """
+  Struct and type definitions for SubAgent configuration.
+
+  Defines the `t()` struct used throughout the SubAgent pipeline — from
+  compilation through loop execution. Also defines shared types like
+  `language_spec()`, `system_prompt_opts()`, `llm_callback()`, etc.
+
+  You typically don't build this struct directly; use `PtcRunner.SubAgent.Compiler.compile/2`
+  or the DSL macros instead.
+  """
 
   @typedoc """
   Language spec for system prompts.
