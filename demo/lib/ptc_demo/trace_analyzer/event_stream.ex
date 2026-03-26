@@ -143,6 +143,95 @@ defmodule PtcDemo.TraceAnalyzer.EventStream do
     end
   end
 
+  @tail_read_size 512
+
+  @doc """
+  Extract lightweight metadata from a trace file without loading it into memory.
+
+  Reads the first few lines with `IO.read/2` and JSON-decodes them for `trace.start`
+  and `run.start` fields. Reads the last #{@tail_read_size} bytes to decode the small
+  `trace.stop` line (for `duration_ms`) and regex-extract `status` from the `run.stop`
+  line tail.
+
+  Fields like `turns` and `total_tokens` are not available here — they live deep inside
+  the `run.stop` data blob which can exceed 900 KB. Use `trace_summary` for those.
+
+  Returns `{:ok, metadata_map}` or `{:error, reason}`.
+  """
+  @spec trace_metadata(String.t()) :: {:ok, map()} | {:error, String.t()}
+  def trace_metadata(path) do
+    with {:ok, %{size: size}} when size > 0 <- File.stat(path),
+         {trace_start, run_start} <- read_head_events(path),
+         {:ok, trace_stop, status} <- read_tail_fields(path, size) do
+      if trace_start && trace_stop do
+        {:ok,
+         %{
+           filename: Path.basename(path),
+           timestamp: copy(trace_start["timestamp"]),
+           agent_name: run_start && copy(run_start["agent_name"]),
+           status: status,
+           duration_ms: trace_stop && trace_stop["duration_ms"],
+           trace_kind: copy(trace_start["trace_kind"]),
+           producer: copy(trace_start["producer"]),
+           trace_label: copy(trace_start["trace_label"]),
+           query: copy(trace_start["query"]),
+           model: copy(trace_start["model"])
+         }}
+      else
+        {:error, "Incomplete trace (missing required events): #{Path.basename(path)}"}
+      end
+    else
+      _ -> {:error, "Cannot read trace: #{Path.basename(path)}"}
+    end
+  end
+
+  defp read_head_events(path) do
+    {:ok, f} = File.open(path, [:read, :utf8])
+
+    events =
+      for _ <- 1..4,
+          line = IO.read(f, :line),
+          is_binary(line),
+          e = safe_decode(String.trim(line)),
+          not is_nil(e),
+          do: e
+
+    File.close(f)
+
+    trace_start = Enum.find(events, &(&1["event"] == "trace.start"))
+    run_start = Enum.find(events, &(&1["event"] == "run.start"))
+    {trace_start, run_start}
+  end
+
+  defp read_tail_fields(path, size) do
+    tail_size = min(size, @tail_read_size)
+    {:ok, f} = :file.open(path, [:read, :binary])
+    {:ok, _} = :file.position(f, size - tail_size)
+    {:ok, tail} = :file.read(f, tail_size)
+    :file.close(f)
+
+    # Decode trace.stop (last line, always small)
+    last_line = tail |> String.split("\n", trim: true) |> List.last() || ""
+
+    trace_stop =
+      case safe_decode(last_line) do
+        %{"event" => "trace.stop"} = e -> e
+        _ -> nil
+      end
+
+    # Extract status via regex from run.stop tail (status is a simple unescaped value)
+    status =
+      case Regex.run(~r/"status":"([^"]*)"/, tail) do
+        [_, s] -> :binary.copy(s)
+        _ -> nil
+      end
+
+    {:ok, trace_stop, status}
+  end
+
+  defp copy(nil), do: nil
+  defp copy(s) when is_binary(s), do: :binary.copy(s)
+
   # --- Where clause compilation ---
 
   defp compile_where(where) when is_map(where) do
