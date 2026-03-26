@@ -86,6 +86,8 @@ defmodule PtcDemo.TestRunner.Report do
 
     #{generate_results_table(summary.results)}
 
+    #{generate_error_breakdown(summary.results)}
+
     #{generate_failed_details(summary.results)}
 
     #{generate_invalid_clojure_section(summary.results)}
@@ -280,6 +282,33 @@ defmodule PtcDemo.TestRunner.Report do
     [header | rows] |> Enum.join("\n")
   end
 
+  defp generate_error_breakdown(results) do
+    failed = Enum.reject(results, & &1.passed)
+
+    if Enum.empty?(failed) do
+      ""
+    else
+      breakdown =
+        failed
+        |> Enum.map(&ErrorClassification.classify/1)
+        |> Enum.frequencies_by(& &1.category)
+        |> Enum.sort_by(fn {_cat, count} -> count end, :desc)
+
+      header = "| Category | Count |\n|----------|-------|"
+
+      rows =
+        Enum.map(breakdown, fn {category, count} ->
+          "| #{category} | #{count} |"
+        end)
+
+      """
+      ## Error Breakdown
+
+      #{[header | rows] |> Enum.join("\n")}
+      """
+    end
+  end
+
   defp generate_failed_details(results) do
     failed = Enum.reject(results, & &1.passed)
 
@@ -288,6 +317,15 @@ defmodule PtcDemo.TestRunner.Report do
     else
       details =
         Enum.map(failed, fn r ->
+          classification = ErrorClassification.classify(r)
+
+          classification_line =
+            "- **Classification:** #{classification.category}" <>
+              if(classification.subtype,
+                do: " (#{classification.subtype})",
+                else: ""
+              )
+
           programs_section =
             if r[:all_programs] && length(r.all_programs) > 0 do
               programs =
@@ -306,6 +344,7 @@ defmodule PtcDemo.TestRunner.Report do
           """
           ### #{r.index}. #{r.query}#{run_info}
 
+          #{classification_line}
           - **Error:** #{r.error}
           - **Expected:** #{r.description}
           - **Constraint:** `#{inspect(r.constraint)}`
