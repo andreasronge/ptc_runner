@@ -5,19 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-03-26
 
-### Removed
+### Breaking Changes
 
-- **MetaPlanner, PlanExecutor, PlanRunner, PlanTracer, PlanCritic** — The autonomous planning system with JSON task graphs, verification predicates, and replanning has been removed. Use [Composition Patterns](docs/guides/subagent-patterns.md) (`with` chains, `Task.async_stream`, subagents-as-tools) for orchestration instead.
-- Planning prompt templates (`planning-examples.md`, `verification-predicate-guide.md`, `verification-predicate-reminder.md`, `signature-guide.md`)
-- PlanExecutor telemetry events
+- **MetaPlanner, PlanExecutor, PlanRunner, PlanTracer, PlanCritic removed** — The autonomous planning system with JSON task graphs, verification predicates, and replanning has been removed. Use [Composition Patterns](docs/guides/subagent-patterns.md) (`with` chains, `Task.async_stream`, subagents-as-tools) for orchestration instead.
+- Planning prompt templates removed (`planning-examples.md`, `verification-predicate-guide.md`, `verification-predicate-reminder.md`, `signature-guide.md`)
+- PlanExecutor telemetry events removed
+- Internal `llm_client` package removed — use `PtcRunner.LLM` behaviour directly
+- **`plan:` no longer auto-enables `journaling: true`** — Plans are now display-only labels for progress visibility. To use journaled task caching, set `journaling: true` explicitly.
+
+### Added
+
+**Model String Shorthand**
+
+- Accept model strings directly in `SubAgent.run` — e.g., `llm: "haiku"` instead of building an LLM struct
+
+**Clojure Conformance Expansion (~30 new functions/forms)**
+
+- Control flow: `case`, `condp`
+- HOF combinators: `comp`, `partial`, `complement`, `constantly`, `every-pred`, `some-fn`
+- Collection operations: `cons`, `disj`, `empty`, `merge-with`, `reduce-kv`, `zipmap`, `filterv`, `update-keys`, `peek`, `pop`, `subvec`
+- Sequence operations: `split-at`, `split-with`, `partition-by`, `dedupe`, `keep`, `keep-indexed`
+- String/coercion: `format`, `name`, `keyword`, `hash-map`
+- Type predicates: `int?`, `integer?`, `double?`, `float?`, `fn?`, `false?`, `true?`, `symbol?`, `decimal?`, `ratio?`, `rational?`, `nat-int?`, `neg-int?`, `pos-int?`, `infinite?`, `NaN?`
+- Collection capability predicates (`sequential?`, `associative?`, `counted?`, etc.)
+- Named fn for self-recursion (`(fn name [x] ...)`)
+- `%&` rest args in `#()` short function syntax
+- Keyword args via rest destructuring (`[& {:keys [a]}]`)
+- `:strs` map destructuring for string-keyed maps
+- `def`/`defn`/`defonce` can shadow builtins (Clojure-compatible)
+
+**Java Interop Methods**
+
+- String: `.startsWith`, `.endsWith`, `.toLowerCase`, `.toUpperCase`, `.contains`
+- Date/DateTime: `.isBefore`, `.isAfter`
+
+**Prompt System**
+
+- 2-axis composable prompt architecture for flexible prompt composition
+- Language reference included in default prompt compositions
+- Pluggable `progress_fn` for custom turn feedback rendering
+
+**Tracing**
+
+- JSONL trace format v2 with flat event envelope
+- Typed trace headers (`trace_kind`, `producer`, `query`, `model`, `trace_label`)
+- Trace analyzer agent for investigating execution traces
+- Streaming `query_events` and `aggregate_events` tools
+
+### Fixed
+
+- `keys`/`vals` nil-tolerant (like other collection helpers)
+- `concat` type error diagnostics for non-collection args
+- Hyphen/underscore normalization in flex_access lookups
+- `and` returns last truthy value instead of boolean (Clojure conformance)
+- `some` with keyword pred returns extracted value, not boolean
+- `defn` inside `let` now visible across program expressions
+- Code fence parsing uses line-by-line parser instead of regex
+- Runtime exceptions classified as `:runtime_error` not `:tool_error`
+- Sandbox-safe `list_traces` with bounded head/tail reads
 
 ### Changed
 
-- **`plan:` no longer auto-enables `journaling: true`** — Plans are now display-only labels for progress visibility. To use journaled task caching, set `journaling: true` explicitly.
 - Progress checklist renders for any agent with a `plan:`, regardless of `journaling:` setting
 - `step-done` instruction text updated to reflect it is optional
+- Bumped `req_llm` to `~> 1.8`
 
 ## [0.9.0] - 2026-02-27
 
