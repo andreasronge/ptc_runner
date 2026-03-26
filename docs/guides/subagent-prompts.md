@@ -248,6 +248,6 @@ See [Text Mode Guide](subagent-text-mode.md) for Mustache syntax including `{{#s
 - [Text Mode Guide](subagent-text-mode.md) - Mustache templates, structured output, and native tool calling
 - [Core Concepts](subagent-concepts.md) - Context, memory, and firewalls
 - [Advanced Topics](subagent-advanced.md) - System prompt structure details
-- [Benchmark Analysis](benchmark-analysis.md) - Statistical testing of prompt variants
+- [Benchmark Analysis](benchmark-eval.md) - Statistical testing of prompt variants
 - `PtcRunner.Lisp.LanguageSpec` - Full API reference for language specs and profiles
 - `PtcRunner.SubAgent.SystemPrompt` - Prompt generation internals
