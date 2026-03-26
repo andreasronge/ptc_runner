@@ -124,20 +124,7 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
           }
         end)
 
-      errors =
-        events
-        |> Enum.filter(fn e ->
-          String.ends_with?(e["event"] || "", ".exception") or
-            (e["event"] == "turn.stop" and
-               get_in(e, ["data", "type"]) in ["error", "retry"])
-        end)
-        |> Enum.map(fn e ->
-          %{
-            event: e["event"],
-            turn: e["turn"],
-            reason: get_in(e, ["data", "reason"])
-          }
-        end)
+      errors = extract_errors(events)
 
       {:ok,
        %{
@@ -432,6 +419,40 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
         duration_ms: e["duration_ms"]
       }
     end)
+  end
+
+  defp extract_errors(events) do
+    turn_and_exception_errors =
+      events
+      |> Enum.filter(fn e ->
+        String.ends_with?(e["event"] || "", ".exception") or
+          (e["event"] == "turn.stop" and
+             get_in(e, ["data", "type"]) in ["error", "retry"])
+      end)
+      |> Enum.map(fn e ->
+        %{
+          event: e["event"],
+          turn: e["turn"],
+          reason: get_in(e, ["data", "reason"])
+        }
+      end)
+
+    run_level_errors =
+      events
+      |> Enum.filter(fn e ->
+        e["event"] == "run.stop" and get_in(e, ["data", "fail"]) != nil
+      end)
+      |> Enum.map(fn e ->
+        fail = get_in(e, ["data", "fail"])
+
+        %{
+          event: e["event"],
+          turn: e["turn"],
+          reason: fail["reason"] || fail["message"] || "unknown"
+        }
+      end)
+
+    turn_and_exception_errors ++ run_level_errors
   end
 
   defp extract_tool_sequence(events) do

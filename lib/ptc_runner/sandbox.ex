@@ -95,7 +95,7 @@ defmodule PtcRunner.Sandbox do
           memory = get_process_memory()
           send(parent, {:result, result, memory})
         end,
-        [:monitor, {:max_heap_size, max_heap}]
+        [:monitor, {:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}]
       )
 
     # Wait for result with timeout
