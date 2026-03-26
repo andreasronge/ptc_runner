@@ -132,6 +132,8 @@ defmodule Mix.Tasks.Aggregate do
 
     #{generate_summary_stats(reports)}
 
+    #{generate_error_breakdown_section(reports)}
+
     #{generate_failures_section(reports)}
     """
   end
@@ -246,6 +248,42 @@ defmodule Mix.Tasks.Aggregate do
   defp format_duration(ms) when ms < 60_000, do: "#{Float.round(ms / 1000, 1)}s"
   defp format_duration(ms), do: "#{Float.round(ms / 60_000, 1)}m"
 
+  # Generate the error breakdown table across all models
+  defp generate_error_breakdown_section(reports) do
+    all_breakdowns =
+      reports
+      |> Enum.flat_map(fn r -> r[:error_breakdown] || [] end)
+
+    if Enum.empty?(all_breakdowns) do
+      ""
+    else
+      # Sum counts across all reports for each category
+      by_category =
+        all_breakdowns
+        |> Enum.group_by(& &1[:category])
+        |> Enum.map(fn {category, entries} ->
+          {category || "unclassified", Enum.sum(Enum.map(entries, & &1[:count]))}
+        end)
+        |> Enum.sort_by(fn {_cat, count} -> count end, :desc)
+
+      header = "| Category | Count |"
+      separator = "|----------|-------|"
+
+      rows =
+        Enum.map_join(by_category, "\n", fn {cat, count} ->
+          "| #{cat} | #{count} |"
+        end)
+
+      """
+      ## Error Breakdown (All Models)
+
+      #{header}
+      #{separator}
+      #{rows}
+      """
+    end
+  end
+
   # Generate the failures section
   defp generate_failures_section(reports) do
     all_failures =
@@ -267,19 +305,23 @@ defmodule Mix.Tasks.Aggregate do
       No failures across any model.
       """
     else
-      # Group by query to deduplicate
-      failures_by_query =
+      # Group by {query, category} for finer-grained deduplication
+      failures_by_query_and_category =
         all_failures
-        |> Enum.group_by(& &1[:query])
+        |> Enum.group_by(fn f ->
+          category = get_in(f, [:classification, :category]) || "unclassified"
+          {f[:query], category}
+        end)
 
       entries =
-        failures_by_query
+        failures_by_query_and_category
         |> Enum.sort_by(fn {_, failures} -> List.first(failures)[:index] || 0 end)
-        |> Enum.map(fn {query, failures} ->
+        |> Enum.map(fn {{query, _category}, failures} ->
           models = failures |> Enum.map(& &1[:model]) |> Enum.uniq() |> Enum.join(", ")
           first = List.first(failures)
           count = length(failures)
           run_info = if count > 1, do: " (#{count} occurrences)", else: ""
+          category = get_in(first, [:classification, :category]) || "unclassified"
 
           trace_info = format_trace_info(first[:trace])
 
@@ -287,6 +329,7 @@ defmodule Mix.Tasks.Aggregate do
           ### #{first[:index] || "?"}. #{query}
 
           **Models affected:** #{models}#{run_info}
+          **Category:** #{category}
           **Error:** #{first[:error] || "Unknown error"}
           #{trace_info}
           """

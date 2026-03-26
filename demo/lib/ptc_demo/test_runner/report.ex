@@ -15,6 +15,7 @@ defmodule PtcDemo.TestRunner.Report do
   The report title is parameterized by DSL name (e.g., "PTC-JSON Test Report", "PTC-Lisp Test Report").
   """
 
+  alias PtcDemo.ErrorClassification
   alias PtcDemo.TestRunner.Base
 
   @doc """
@@ -149,7 +150,8 @@ defmodule PtcDemo.TestRunner.Report do
           :total_cost,
           :requests
         ]),
-      failures: extract_failures_with_traces(summary.results)
+      failures: extract_failures_with_traces(summary.results),
+      error_breakdown: error_breakdown_from_results(summary.results)
     }
   end
 
@@ -167,14 +169,33 @@ defmodule PtcDemo.TestRunner.Report do
     results
     |> Enum.reject(& &1.passed)
     |> Enum.map(fn r ->
+      step = r[:step]
+
+      turn_classifications =
+        if step, do: ErrorClassification.classify_turns(step), else: []
+
       %{
         index: r.index,
         query: r.query,
         error: r[:error] || "Unknown error",
         run: r[:failed_in_run],
-        trace: r[:trace]
+        trace: r[:trace],
+        classification: ErrorClassification.classify(r),
+        turn_classifications:
+          Enum.map(turn_classifications, fn {turn, c} ->
+            Map.put(c, :turn, turn)
+          end)
       }
     end)
+  end
+
+  defp error_breakdown_from_results(results) do
+    results
+    |> Enum.reject(& &1.passed)
+    |> Enum.map(&ErrorClassification.classify/1)
+    |> Enum.frequencies_by(& &1.category)
+    |> Enum.map(fn {category, count} -> %{category: to_string(category), count: count} end)
+    |> Enum.sort_by(& &1.count, :desc)
   end
 
   @doc """

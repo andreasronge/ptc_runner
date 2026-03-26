@@ -254,6 +254,102 @@ defmodule PtcDemo.TestRunner.ReportTest do
       assert failure.trace == trace
     end
 
+    test "includes classification in failures" do
+      result = %{
+        index: 1,
+        query: "test query",
+        passed: false,
+        error: "Expected 500, got 499",
+        description: "Test",
+        constraint: {:eq, 500},
+        step: nil
+      }
+
+      summary = build_test_summary(failed: 1, results: [result])
+      json = Report.generate_json(summary, "Lisp")
+
+      assert [failure] = json.failures
+      assert failure.classification.category == :validation_error
+      assert failure.classification.subtype == :constraint_failed
+      assert failure.classification.phase == :validation
+    end
+
+    test "includes classification from structured step.fail" do
+      result = %{
+        index: 1,
+        query: "test query",
+        passed: false,
+        error: "Query failed: timeout",
+        description: "Test",
+        constraint: nil,
+        step: %PtcRunner.Step{fail: %{reason: :timeout, message: "exceeded 1000ms"}}
+      }
+
+      summary = build_test_summary(failed: 1, results: [result])
+      json = Report.generate_json(summary, "Lisp")
+
+      assert [failure] = json.failures
+      assert failure.classification.category == :timeout
+      assert failure.classification.phase == :execution
+    end
+
+    test "includes turn_classifications from step.turns" do
+      step = %PtcRunner.Step{
+        fail: nil,
+        turns: [
+          PtcRunner.Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          PtcRunner.Turn.success(2, "raw", "(+ 1 2)", 3)
+        ]
+      }
+
+      result = %{
+        index: 1,
+        query: "test query",
+        passed: false,
+        error: "Expected 500, got 499",
+        description: "Test",
+        constraint: {:eq, 500},
+        step: step
+      }
+
+      summary = build_test_summary(failed: 1, results: [result])
+      json = Report.generate_json(summary, "Lisp")
+
+      assert [failure] = json.failures
+      assert [tc] = failure.turn_classifications
+      assert tc.category == :parse_error
+      assert tc.turn == 1
+
+      # Run-level classification uses last failed turn (parse_error), not string
+      assert failure.classification.category == :parse_error
+      assert failure.classification.phase == :execution
+    end
+
+    test "includes error_breakdown in JSON output" do
+      results = [
+        %{index: 1, query: "q1", passed: false, error: "Wrong type: got 42, expected :string",
+          step: nil, description: "T1", constraint: nil},
+        %{index: 2, query: "q2", passed: false, error: "Expected 500, got 499",
+          step: nil, description: "T2", constraint: {:eq, 500}},
+        %{index: 3, query: "q3", passed: false, error: "Wrong type: got nil, expected :integer",
+          step: nil, description: "T3", constraint: nil},
+        %{index: 4, query: "q4", passed: true, attempts: 1}
+      ]
+
+      summary = build_test_summary(failed: 3, passed: 1, total: 4, results: results)
+      json = Report.generate_json(summary, "Lisp")
+
+      assert is_list(json.error_breakdown)
+      # 2 wrong_type + 1 constraint_failed = 3 validation_error
+      assert [%{category: "validation_error", count: 3}] = json.error_breakdown
+    end
+
+    test "error_breakdown is empty list when no failures" do
+      summary = build_test_summary(passed: 1, results: [%{index: 1, query: "q", passed: true, attempts: 1}])
+      json = Report.generate_json(summary, "Lisp")
+      assert json.error_breakdown == []
+    end
+
     test "handles empty results" do
       summary = build_test_summary()
 
@@ -262,6 +358,7 @@ defmodule PtcDemo.TestRunner.ReportTest do
       assert json.metrics.passed == 0
       assert json.metrics.failed == 0
       assert json.failures == []
+      assert json.error_breakdown == []
     end
 
     test "calculates pass rate correctly for edge cases" do

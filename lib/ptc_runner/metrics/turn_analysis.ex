@@ -219,6 +219,82 @@ defmodule PtcRunner.Metrics.TurnAnalysis do
   def has_failed_turn?(%Step{turns: []}), do: false
   def has_failed_turn?(%Step{turns: turns}), do: Enum.any?(turns, &(not &1.success?))
 
+  @doc """
+  Frequency map of error reasons across failed turns with structured reasons.
+
+  Only counts turns where `result.reason` is a structured atom.
+  Turns without structured reasons are skipped (not counted as `:unknown`).
+  Returns an empty map when there are no qualifying failed turns.
+
+  ## Examples
+
+      iex> t1 = PtcRunner.Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"})
+      iex> t2 = PtcRunner.Turn.success(2, "raw", "(+ 1 2)", 3)
+      iex> t3 = PtcRunner.Turn.failure(3, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"})
+      iex> step = %PtcRunner.Step{turns: [t1, t2, t3]}
+      iex> PtcRunner.Metrics.TurnAnalysis.error_breakdown(step)
+      %{parse_error: 1, eval_error: 1}
+
+  """
+  @spec error_breakdown(Step.t()) :: %{atom() => non_neg_integer()}
+  def error_breakdown(%Step{turns: nil}), do: %{}
+  def error_breakdown(%Step{turns: []}), do: %{}
+
+  def error_breakdown(%Step{turns: turns}) do
+    turns
+    |> Enum.reject(& &1.success?)
+    |> Enum.flat_map(fn turn ->
+      case turn.result do
+        %{reason: reason} when is_atom(reason) -> [reason]
+        _ -> []
+      end
+    end)
+    |> Enum.frequencies()
+  end
+
+  @doc """
+  The most frequent error reason across failed turns, or nil if no errors.
+
+  ## Examples
+
+      iex> t1 = PtcRunner.Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"})
+      iex> t2 = PtcRunner.Turn.failure(2, "raw", nil, %{reason: :parse_error, message: "bad"})
+      iex> t3 = PtcRunner.Turn.failure(3, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"})
+      iex> step = %PtcRunner.Step{turns: [t1, t2, t3]}
+      iex> PtcRunner.Metrics.TurnAnalysis.dominant_error(step)
+      :parse_error
+
+  """
+  @spec dominant_error(Step.t()) :: atom() | nil
+  def dominant_error(step) do
+    case error_breakdown(step) do
+      empty when map_size(empty) == 0 -> nil
+      breakdown -> breakdown |> Enum.max_by(fn {_reason, count} -> count end) |> elem(0)
+    end
+  end
+
+  @doc """
+  Fraction of turns with the given error reason.
+
+  ## Examples
+
+      iex> t1 = PtcRunner.Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"})
+      iex> t2 = PtcRunner.Turn.success(2, "raw", "(+ 1 2)", 3)
+      iex> step = %PtcRunner.Step{turns: [t1, t2]}
+      iex> PtcRunner.Metrics.TurnAnalysis.error_rate(step, :parse_error)
+      0.5
+
+  """
+  @spec error_rate(Step.t(), atom()) :: float()
+  def error_rate(%Step{turns: nil}, _reason), do: 0.0
+  def error_rate(%Step{turns: []}, _reason), do: 0.0
+
+  def error_rate(%Step{turns: turns}, reason) do
+    count = length(turns)
+    errors = Enum.count(turns, &has_error_reason?(&1, reason))
+    errors / count
+  end
+
   # -- Private helpers --
 
   defp extract_tokens(%Step{usage: nil}), do: {0, 0, 0}
@@ -229,15 +305,6 @@ defmodule PtcRunner.Metrics.TurnAnalysis do
       Map.get(usage, :output_tokens, 0),
       Map.get(usage, :total_tokens, 0)
     }
-  end
-
-  defp error_rate(%Step{turns: nil}, _reason), do: 0.0
-  defp error_rate(%Step{turns: []}, _reason), do: 0.0
-
-  defp error_rate(%Step{turns: turns}, reason) do
-    count = length(turns)
-    errors = Enum.count(turns, &has_error_reason?(&1, reason))
-    errors / count
   end
 
   defp has_error_reason?(%{result: %{reason: reason}}, reason), do: true
