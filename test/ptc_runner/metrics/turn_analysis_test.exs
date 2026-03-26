@@ -354,6 +354,30 @@ defmodule PtcRunner.Metrics.TurnAnalysisTest do
       assert result.recoverable_error_salvage_rate == 0.5
     end
 
+    test "includes token stats when present in metrics" do
+      metrics = [
+        %{
+          first_turn_valid?: true,
+          parse_failure_rate: 0.0,
+          no_code_rate: 0.0,
+          multi_code_block_rate: 0.0,
+          turns_to_first_tool_call: nil,
+          budget_exhausted?: false,
+          has_failed_turn?: false,
+          turn_count: 1,
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+          passed?: true
+        }
+      ]
+
+      result = TurnAnalysis.aggregate(metrics)
+      assert result.mean_input_tokens == 0.0
+      assert result.mean_output_tokens == 0.0
+      assert result.mean_total_tokens == 0.0
+    end
+
     test "salvage rate includes runtime failures, not just parse errors" do
       metrics = [
         # Run with runtime error (tool_not_found) that still passed
@@ -373,6 +397,108 @@ defmodule PtcRunner.Metrics.TurnAnalysisTest do
       result = TurnAnalysis.aggregate(metrics)
       # 1 run with failed turns, 1 passed => 1.0
       assert result.recoverable_error_salvage_rate == 1.0
+    end
+  end
+
+  describe "error_breakdown/1" do
+    test "returns frequency map of error reasons" do
+      step = %Step{
+        turns: [
+          Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.success(2, "raw", "(+ 1 2)", 3),
+          Turn.failure(3, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.failure(4, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"})
+        ]
+      }
+
+      assert TurnAnalysis.error_breakdown(step) == %{parse_error: 2, eval_error: 1}
+    end
+
+    test "empty map for all successful turns" do
+      step = %Step{turns: [Turn.success(1, "raw", "(+ 1 2)", 3)]}
+      assert TurnAnalysis.error_breakdown(step) == %{}
+    end
+
+    test "empty map for nil turns" do
+      assert TurnAnalysis.error_breakdown(%Step{turns: nil}) == %{}
+    end
+
+    test "empty map for empty turns" do
+      assert TurnAnalysis.error_breakdown(%Step{turns: []}) == %{}
+    end
+
+    test "skips failed turns without structured reason" do
+      step = %Step{
+        turns: [
+          Turn.failure(1, "raw", nil, "plain string error")
+        ]
+      }
+
+      assert TurnAnalysis.error_breakdown(step) == %{}
+    end
+
+    test "mixed structured and unstructured failures" do
+      step = %Step{
+        turns: [
+          Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.failure(2, "raw", nil, "plain string error"),
+          Turn.failure(3, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"})
+        ]
+      }
+
+      assert TurnAnalysis.error_breakdown(step) == %{parse_error: 1, eval_error: 1}
+    end
+  end
+
+  describe "dominant_error/1" do
+    test "returns most frequent error reason" do
+      step = %Step{
+        turns: [
+          Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.failure(2, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.failure(3, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"})
+        ]
+      }
+
+      assert TurnAnalysis.dominant_error(step) == :parse_error
+    end
+
+    test "nil when no errors" do
+      step = %Step{turns: [Turn.success(1, "raw", "(+ 1 2)", 3)]}
+      assert TurnAnalysis.dominant_error(step) == nil
+    end
+
+    test "nil for nil turns" do
+      assert TurnAnalysis.dominant_error(%Step{turns: nil}) == nil
+    end
+
+    test "nil for empty turns" do
+      assert TurnAnalysis.dominant_error(%Step{turns: []}) == nil
+    end
+  end
+
+  describe "error_rate/2" do
+    test "correct fraction for specific reason" do
+      step = %Step{
+        turns: [
+          Turn.failure(1, "raw", nil, %{reason: :parse_error, message: "bad"}),
+          Turn.success(2, "raw", "(+ 1 2)", 3),
+          Turn.failure(3, "raw", "(/ 1 0)", %{reason: :eval_error, message: "div/0"}),
+          Turn.success(4, "raw", "(+ 3 4)", 7)
+        ]
+      }
+
+      assert TurnAnalysis.error_rate(step, :parse_error) == 0.25
+      assert TurnAnalysis.error_rate(step, :eval_error) == 0.25
+      assert TurnAnalysis.error_rate(step, :timeout) == 0.0
+    end
+
+    test "0.0 for nil turns" do
+      assert TurnAnalysis.error_rate(%Step{turns: nil}, :parse_error) == 0.0
+    end
+
+    test "0.0 for empty turns" do
+      assert TurnAnalysis.error_rate(%Step{turns: []}, :parse_error) == 0.0
     end
   end
 end
