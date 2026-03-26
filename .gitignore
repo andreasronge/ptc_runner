@@ -54,6 +54,7 @@ examples/page_index/bench_runs/
 
 # Jekyll build output.
 blog/_site/
+blog/.jekyll-cache/
 
 # Claude Code worktrees.
 .claude/worktrees/
