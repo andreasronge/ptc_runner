@@ -3020,6 +3020,8 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 | | `(java.util.Date. arg)` | Construct from timestamp (ms/sec) or ISO-8601/RFC 2822 string |
 | `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string into a Date object |
 | `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only**) |
+| `.isBefore` | `(.isBefore a b)` | Returns true if `a` comes strictly before `b` (same-type only) |
+| `.isAfter` | `(.isAfter a b)` | Returns true if `a` comes strictly after `b` (same-type only) |
 | `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
 
 #### Constructor `java.util.Date.`
@@ -3050,14 +3052,23 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 - **Unsupported Methods**: Calling unregistered dot-methods (e.g., `(.toString date)`) provides a hint listing supported interop functions.
 
 #### Comparison
-`java.util.Date` objects themselves do not support direct comparison via `>`, `<`. Instead, extract the milliseconds:
+
+Date and DateTime objects support `.isBefore` and `.isAfter` for direct comparison:
 ```clojure
-(< (.getTime d1) (.getTime d2))  ; check if d1 is before d2
+(.isBefore (LocalDate/parse "2023-01-01") (LocalDate/parse "2023-12-31"))  ; => true
+(.isAfter (java.util.Date. "2024-01-01T00:00:00Z") (java.util.Date. "2023-01-01T00:00:00Z"))  ; => true
 ```
 
-`LocalDate` objects can be compared by converting to strings as they are ISO-8601 formatted:
+Both arguments must be the same type. Comparing a `LocalDate` with a `DateTime` raises an error:
 ```clojure
-(< (str d1) (str d2))  ; lexicographical comparison works for YYYY-MM-DD
+(.isBefore (LocalDate/parse "2023-01-01") (java.util.Date. "2023-01-01T00:00:00Z"))
+; => Error: cannot compare LocalDate with DateTime — use same types
+```
+
+**Legacy alternatives** (still work, but `.isBefore`/`.isAfter` are preferred):
+```clojure
+(< (.getTime d1) (.getTime d2))  ; DateTime millisecond comparison
+(< (str d1) (str d2))            ; LocalDate lexicographic comparison (ISO-8601)
 ```
 
 ### 8.15 String Methods (Java Interop)

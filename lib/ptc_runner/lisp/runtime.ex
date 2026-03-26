@@ -350,4 +350,6 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate dot_to_upper_case(s), to: Interop
   defdelegate dot_starts_with(s, prefix), to: Interop
   defdelegate dot_ends_with(s, suffix), to: Interop
+  defdelegate dot_is_before(a, b), to: Interop
+  defdelegate dot_is_after(a, b), to: Interop
 end

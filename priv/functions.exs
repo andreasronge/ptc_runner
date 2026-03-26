@@ -177,6 +177,38 @@
       divergences: nil
     },
     %{
+      name: ".isBefore",
+      description: "Returns true if date/datetime comes strictly before another (same-type only)",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.isBefore a b)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      see_also: [".isAfter"],
+      clojure_var: ".isBefore",
+      divergences: nil
+    },
+    %{
+      name: ".isAfter",
+      description: "Returns true if date/datetime comes strictly after another (same-type only)",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.isAfter a b)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      see_also: [".isBefore"],
+      clojure_var: ".isAfter",
+      divergences: nil
+    },
+    %{
       name: "/",
       description: "Division (always returns float)",
       binding: :variadic_nonempty,
@@ -7718,6 +7750,22 @@
       description: "Return Unix timestamp in milliseconds from DateTime",
       signatures: ["(.getTime date)"],
       notes: ""
+    },
+    %{
+      name: ".isBefore",
+      class: "java.time.LocalDate / java.util.Date",
+      kind: :method,
+      description: "Returns true if receiver comes strictly before argument (same-type only)",
+      signatures: ["(.isBefore a b)"],
+      notes: "Works on both LocalDate and DateTime. Mixed types raise an error."
+    },
+    %{
+      name: ".isAfter",
+      class: "java.time.LocalDate / java.util.Date",
+      kind: :method,
+      description: "Returns true if receiver comes strictly after argument (same-type only)",
+      signatures: ["(.isAfter a b)"],
+      notes: "Works on both LocalDate and DateTime. Mixed types raise an error."
     },
     %{
       name: "LocalDate/parse",
