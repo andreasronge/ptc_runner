@@ -182,4 +182,3 @@ step.return
 ## See Also
 
 - [v0.7 Plan: Journaled Task System](../../docs/plans/v0.7-journaled-tasks.md)
-- [ROADMAP.md](../../ROADMAP.md) — v0.7 section
