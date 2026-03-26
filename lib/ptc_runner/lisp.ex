@@ -401,6 +401,8 @@ defmodule PtcRunner.Lisp do
            Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
 
         {:error, {:memory_exceeded, bytes}} ->
+          Logger.warning("PTC-Lisp execution killed: heap limit #{bytes} bytes exceeded")
+
           {:error,
            Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory, %{},
              journal: journal
