@@ -395,6 +395,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 | `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found |
 | `.toLowerCase` | `(.toLowerCase s)` | Convert string to lower case |
 | `.toUpperCase` | `(.toUpperCase s)` | Convert string to upper case |
+| `.startsWith` | `(.startsWith s prefix)` | Returns true if string starts with prefix |
+| `.endsWith` | `(.endsWith s suffix)` | Returns true if string ends with suffix |
 | `NEGATIVE_INFINITY` | `NEGATIVE_INFINITY` | Negative infinity constant (Double/NEGATIVE_INFINITY) |
 | `NaN` | `NaN` | Not-a-Number constant (Double/NaN) |
 | `POSITIVE_INFINITY` | `POSITIVE_INFINITY` | Positive infinity constant (Double/POSITIVE_INFINITY) |
