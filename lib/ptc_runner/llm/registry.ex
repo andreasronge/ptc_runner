@@ -49,12 +49,19 @@ defmodule PtcRunner.LLM.Registry do
         end
 
         # Delegate remaining callbacks to DefaultRegistry
+        @impl true
         defdelegate default_model(), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate default_provider(), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate aliases(), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate list_models(), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate preset_models(provider), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate available_providers(), to: PtcRunner.LLM.DefaultRegistry
+        @impl true
         defdelegate provider_from_model(model), to: PtcRunner.LLM.DefaultRegistry
       end
   """
