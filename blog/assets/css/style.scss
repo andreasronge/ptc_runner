@@ -1,0 +1,80 @@
+---
+---
+
+@import 'jekyll-theme-cayman';
+
+// GitHub-style syntax highlighting overrides
+.highlight {
+  background: #f6f8fa;
+  border-radius: 6px;
+
+  // Reset overly bold text from Cayman theme
+  .highlight {
+    background: transparent;
+  }
+
+  pre {
+    font-size: 13.6px;
+    line-height: 1.45;
+  }
+
+  // Comments
+  .c, .c1, .cm, .cs, .ch {
+    color: #6a737d;
+    font-style: italic;
+    font-weight: normal;
+  }
+
+  // Keywords (def, defn, let, fn, if, do, when, cond, etc.)
+  .k, .kd, .kn, .kp, .kr, .kc {
+    color: #d73a49;
+    font-weight: normal;
+  }
+
+  // Built-in names / functions (filter, map, count, println, etc.)
+  .nb, .nf, .nf-b {
+    color: #6f42c1;
+    font-weight: normal;
+  }
+
+  // Strings
+  .s, .s1, .s2, .sb, .sc, .sd, .se, .sh, .si, .sx, .sr {
+    color: #032f62;
+    font-weight: normal;
+  }
+
+  // Numbers
+  .mi, .mf, .mh, .mo, .il, .m {
+    color: #005cc5;
+    font-weight: normal;
+  }
+
+  // Symbols / keywords (:status, :limit, etc.)
+  .ss {
+    color: #005cc5;
+    font-weight: normal;
+  }
+
+  // Names / identifiers
+  .n, .na, .nc, .nd, .ne, .ni, .nl, .nn, .no, .nt, .nv, .p {
+    color: #24292e;
+    font-weight: normal;
+  }
+
+  // Operators
+  .o, .ow {
+    color: #d73a49;
+    font-weight: normal;
+  }
+
+  // Special variables
+  .bp, .vc, .vg, .vi {
+    color: #e36209;
+    font-weight: normal;
+  }
+
+  // Ensure no bold anywhere in code blocks
+  code {
+    font-weight: normal;
+  }
+}
