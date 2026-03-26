@@ -34,13 +34,14 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
      signature:
        "(status :string, label :string, trace_kind :string, limit :int) -> " <>
          "{count :int, traces [{filename :string, timestamp :string, agent_name :string, " <>
-         "status :string, turns :int, total_tokens :int, duration_ms :int, " <>
+         "status :string, duration_ms :int, " <>
          "trace_kind :string, producer :string, trace_label :string, " <>
          "query :string, model :string}]}",
      description:
        "List available trace files. All parameters are optional. " <>
          "Filter by status (ok, error, all), label (substring match on filename), " <>
-         "or trace_kind (benchmark, analysis, planning). Default limit 20."}
+         "or trace_kind (benchmark, analysis, planning). Default limit 20. " <>
+         "Use trace_summary for per-trace turns and token counts."}
   end
 
   defp list_traces(trace_dir, args, exclude_file) do
@@ -49,42 +50,23 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
     kind_filter = args["trace_kind"]
     limit = args["limit"] || 20
 
-    trace_dir
-    |> list_jsonl_files()
-    |> Enum.reject(&(Path.basename(&1) == exclude_file))
-    |> Enum.map(fn path ->
-      try do
-        events = Analyzer.load(path)
-        summary = Analyzer.summary(events)
-        trace_start = find_trace_start(events)
+    traces =
+      trace_dir
+      |> list_jsonl_files()
+      |> Enum.reject(&(Path.basename(&1) == exclude_file))
+      |> Enum.reduce([], fn path, acc ->
+        case EventStream.trace_metadata(path) do
+          {:ok, meta} -> [meta | acc]
+          {:error, _} -> acc
+        end
+      end)
+      |> maybe_filter_status(status_filter)
+      |> maybe_filter_label(label_filter)
+      |> maybe_filter_kind(kind_filter)
+      |> Enum.sort_by(& &1.timestamp, :desc)
+      |> Enum.take(limit)
 
-        %{
-          filename: Path.basename(path),
-          timestamp: extract_timestamp(events),
-          agent_name: extract_agent_name(events),
-          status: summary.status,
-          turns: summary.turns,
-          total_tokens: summary.tokens[:total],
-          duration_ms: summary.duration_ms,
-          trace_kind: trace_start["trace_kind"],
-          producer: trace_start["producer"],
-          trace_label: trace_start["trace_label"],
-          query: trace_start["query"],
-          model: trace_start["model"]
-        }
-      rescue
-        _ -> nil
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
-    |> maybe_filter_status(status_filter)
-    |> maybe_filter_label(label_filter)
-    |> maybe_filter_kind(kind_filter)
-    |> Enum.sort_by(& &1.timestamp, :desc)
-    |> Enum.take(limit)
-    |> then(fn traces ->
-      {:ok, %{count: length(traces), traces: traces}}
-    end)
+    {:ok, %{count: length(traces), traces: traces}}
   end
 
   # --- trace_summary ---
@@ -387,20 +369,6 @@ defmodule PtcDemo.TraceAnalyzer.Tools do
 
   defp find_trace_start(events) do
     Enum.find(events, &(&1["event"] == "trace.start")) || %{}
-  end
-
-  defp extract_timestamp(events) do
-    case Enum.find(events, &(&1["event"] == "trace.start")) do
-      %{"timestamp" => ts} -> ts
-      _ -> nil
-    end
-  end
-
-  defp extract_agent_name(events) do
-    case Enum.find(events, &(&1["event"] == "run.start")) do
-      %{"agent_name" => name} when is_binary(name) -> name
-      _ -> nil
-    end
   end
 
   defp extract_turn_summaries(events) do
