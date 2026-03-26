@@ -108,7 +108,9 @@ defmodule LLMSetup do
   end
 
   defp load_aws_credentials do
-    case System.cmd("aws", [
+    aws_path = System.find_executable("aws") || "/opt/homebrew/bin/aws"
+
+    case System.cmd(aws_path, [
            "configure",
            "export-credentials",
            "--profile",
