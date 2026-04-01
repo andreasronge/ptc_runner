@@ -38,7 +38,8 @@ defmodule PtcDemo.LispTestRunner do
     TestCase.common_test_cases() ++
       TestCase.lisp_specific_cases() ++
       TestCase.multi_turn_cases() ++
-      TestCase.plan_cases()
+      TestCase.plan_cases() ++
+      TestCase.m0_validation_cases()
   end
 
   @doc """
@@ -522,6 +523,10 @@ defmodule PtcDemo.LispTestRunner do
 
   defp filter_test_cases(cases, :plan) do
     Enum.filter(cases, fn tc -> Map.has_key?(tc, :plan) end)
+  end
+
+  defp filter_test_cases(_cases, :m0) do
+    TestCase.m0_validation_cases()
   end
 
   # Select appropriate prompt for test type

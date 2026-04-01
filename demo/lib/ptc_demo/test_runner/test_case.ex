@@ -580,6 +580,320 @@ defmodule PtcDemo.TestRunner.TestCase do
   end
 
   @doc """
+  Return M0 validation cases for meta-learner failure clustering.
+
+  These 25 tests are organized into 5 capability clusters. Within each cluster,
+  tests require the same underlying capability at varying difficulty. When agents
+  fail, failures should cluster by capability gap, enabling M0 to identify which
+  abstraction is missing.
+
+  ## Clusters
+
+  - **String extraction**: substring, parsing, pattern matching on field values
+  - **Date arithmetic**: temporal filtering, duration calculation, period comparison
+  - **Nested aggregation**: group-then-aggregate, multi-level summaries, ranked groups
+  - **Set operations**: intersection, difference, symmetric difference across datasets
+  - **Conditional logic**: branching based on computed values, tiered classification
+  """
+  @spec m0_validation_cases() :: [map()]
+  def m0_validation_cases do
+    [
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CLUSTER A: String Extraction and Manipulation (5 tests)
+      # Capability gap: operating on string field values
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # A1. Extract numeric part from product name ("Product 42" → 42)
+      %{
+        query:
+          "Extract the numeric ID from the name of the most expensive product. " <>
+            "Product names are like 'Product 42'. Return just the number as an integer.",
+        expect: :integer,
+        constraint: {:between, 1, 500},
+        description: "String extraction: parse number from product name field"
+      },
+
+      # A2. Filter by string prefix pattern
+      %{
+        query:
+          "How many products have an ID (from their name 'Product N') that is " <>
+            "a multiple of 10? E.g. Product 10, Product 20, etc.",
+        expect: :integer,
+        constraint: {:eq, 50},
+        description: "String parsing + numeric filter: extract ID, check divisibility"
+      },
+
+      # A3. Categorize by first letter of department
+      %{
+        query:
+          "Group employees by the first letter of their department name. " <>
+            "Return a map where keys are single letters and values are employee counts. " <>
+            "E.g. {:e 50, :s 40, :m 30, :h 20, :f 15}",
+        expect: :map,
+        constraint: {:has_keys, [:e, :s, :m, :h, :f]},
+        description: "String extraction: first character grouping"
+      },
+
+      # A4. Build composite key from multiple fields
+      %{
+        query:
+          "For each department, find the employee with the highest salary. " <>
+            "Return a list of strings in the format 'department:employee_name' " <>
+            "sorted alphabetically by department.",
+        expect: :list,
+        constraint: {:length, 6},
+        description: "String concatenation: build composite key from fields"
+      },
+
+      # A5. Parse date string to extract month
+      %{
+        query:
+          "How many distinct months appear in the orders dataset? " <>
+            "Orders have created_at in 'YYYY-MM-DD' format. Count unique YYYY-MM values.",
+        expect: :integer,
+        constraint: {:between, 1, 12},
+        description: "String parsing: extract month from date string"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CLUSTER B: Date Arithmetic and Temporal Reasoning (5 tests)
+      # Capability gap: comparing, filtering, and computing with date strings
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # B1. Simple date range filter
+      %{
+        query:
+          "How many orders were created in the first quarter of 2024 " <>
+            "(January through March)? Filter where created_at starts with '2024-01', '2024-02', or '2024-03'.",
+        expect: :integer,
+        constraint: {:between, 1, 1000},
+        description: "Date filter: Q1 range using string prefix matching"
+      },
+
+      # B2. Find most recent record
+      %{
+        query:
+          "What is the ID of the most recently created order? " <>
+            "Compare created_at date strings (YYYY-MM-DD format sorts lexicographically).",
+        expect: :integer,
+        constraint: {:between, 1, 1000},
+        description: "Date comparison: find max date via string sorting"
+      },
+
+      # B3. Count per month
+      %{
+        query:
+          "Which month of 2024 had the most orders? Return the month as a string " <>
+            "like '2024-06'. Extract month from created_at (first 7 characters).",
+        expect: :string,
+        constraint: {:starts_with, "2024-"},
+        description: "Date grouping: group by month substring, find max count"
+      },
+
+      # B4. Compare two periods
+      %{
+        query:
+          "Compare total expense amounts between the first half (months 01-06) " <>
+            "and second half (months 07-12) of 2024. Expense dates are in 'YYYY-MM-DD' format. " <>
+            "Return a map with :first_half_total, :second_half_total, and :difference.",
+        expect: :map,
+        constraint: {:has_keys, [:first_half_total, :second_half_total, :difference]},
+        description: "Date arithmetic: period comparison with aggregation"
+      },
+
+      # B5. Temporal join — orders and expenses in same month
+      %{
+        query:
+          "Find months where both orders and expenses exist. For each such month, " <>
+            "return the order count and expense count. Return as a list of maps with " <>
+            ":month, :order_count, :expense_count. Sort by month.",
+        expect: :list,
+        constraint: {:gt_length, 0},
+        max_turns: 3,
+        description: "Date join: match records across datasets by month substring"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CLUSTER C: Nested Aggregation / Multi-level Grouping (5 tests)
+      # Capability gap: composing group-by with aggregation functions
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # C1. Group and count
+      %{
+        query:
+          "How many products are in each category? Return a map where keys are " <>
+            "category names and values are counts.",
+        expect: :map,
+        constraint: {:has_keys, [:electronics, :clothing, :food, :books, :sports, :home, :toys]},
+        description: "Group-by + count: single-level grouping"
+      },
+
+      # C2. Group and aggregate
+      %{
+        query:
+          "For each product category, calculate the average price. " <>
+            "Return a map of category name to average price.",
+        expect: :map,
+        constraint: {:has_keys, [:electronics, :clothing, :food, :books, :sports, :home, :toys]},
+        description: "Group-by + average: single-level with numeric aggregation"
+      },
+
+      # C3. Two-level grouping
+      %{
+        query:
+          "Group employees by department, then within each department count " <>
+            "how many are at each level (junior, mid, senior, lead, manager, director). " <>
+            "Return a map of department → map of level → count. " <>
+            "Only include the engineering department.",
+        expect: :map,
+        constraint: {:has_keys, [:engineering]},
+        max_turns: 3,
+        description: "Nested group-by: two-level grouping with counts"
+      },
+
+      # C4. Group + filter + aggregate
+      %{
+        query:
+          "For each expense category, find the approval rate (approved count / total count). " <>
+            "Return a map of category name to approval rate as a decimal between 0 and 1.",
+        expect: :map,
+        constraint: {:has_keys, [:travel, :equipment, :software, :meals, :office, :training]},
+        max_turns: 2,
+        description: "Group-by + conditional count + division: approval rate per group"
+      },
+
+      # C5. Ranked groups with limit
+      %{
+        query:
+          "Find the top 3 departments by total salary expenditure (sum of all employee salaries). " <>
+            "Return a list of maps with :department and :total_salary, sorted descending by total.",
+        expect: :list,
+        constraint: {:length, 3},
+        description: "Group-by + sum + sort + take: ranked aggregation"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CLUSTER D: Set Operations Across Datasets (5 tests)
+      # Capability gap: intersection, difference, membership testing
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # D1. Simple membership test
+      %{
+        query:
+          "How many employees have at least one expense record? " <>
+            "Count distinct employee IDs that appear in the expenses dataset.",
+        expect: :integer,
+        constraint: {:between, 1, 200},
+        description: "Set membership: count IDs present in another dataset"
+      },
+
+      # D2. Set difference
+      %{
+        query:
+          "How many employees have NO expense records at all? " <>
+            "Find employee IDs not present in the expenses dataset.",
+        expect: :integer,
+        constraint: {:between, 0, 200},
+        description: "Set difference: find IDs missing from another dataset"
+      },
+
+      # D3. Cross-dataset intersection with condition
+      %{
+        query:
+          "How many products that cost over $500 have been ordered with status 'delivered'? " <>
+            "Find product IDs matching both conditions across the products and orders datasets.",
+        expect: :integer,
+        constraint: {:between, 0, 500},
+        description: "Set intersection: filter both datasets, intersect on ID"
+      },
+
+      # D4. Multi-dataset join count
+      %{
+        query:
+          "Which product categories appear in delivered orders? " <>
+            "Join orders (status='delivered') with products by product_id, " <>
+            "then collect distinct categories. Return the sorted list of category names.",
+        expect: :list,
+        constraint: {:gt_length, 0},
+        description: "Set collection: join + distinct across datasets"
+      },
+
+      # D5. Symmetric difference
+      %{
+        query:
+          "Find departments that have EITHER only remote employees OR only office employees " <>
+            "(not a mix of both). Return the list of such department names, or an empty list if " <>
+            "all departments have both. Sort alphabetically.",
+        expect: :list,
+        constraint: {:gte_length, 0},
+        max_turns: 2,
+        description: "Set analysis: find groups with uniform membership"
+      },
+
+      # ═══════════════════════════════════════════════════════════════════════════
+      # CLUSTER E: Conditional Logic and Tiered Classification (5 tests)
+      # Capability gap: if/cond branching based on computed values
+      # ═══════════════════════════════════════════════════════════════════════════
+
+      # E1. Simple conditional classification
+      %{
+        query:
+          "Classify each product as 'cheap' (price < 200), 'mid' (200-700), or 'expensive' (> 700). " <>
+            "Return a map with keys :cheap, :mid, :expensive and values being the count in each tier.",
+        expect: :map,
+        constraint: {:has_keys, [:cheap, :mid, :expensive]},
+        description: "Conditional: three-tier classification with counting"
+      },
+
+      # E2. Conditional with aggregation
+      %{
+        query:
+          "For each employee, calculate total compensation (salary + bonus). " <>
+            "How many employees have total compensation above $150,000?",
+        expect: :integer,
+        constraint: {:between, 0, 200},
+        description: "Conditional: compute derived value, then filter"
+      },
+
+      # E3. Nested conditional
+      %{
+        query:
+          "Classify employees into risk categories based on tenure and level: " <>
+            "'flight_risk' if years_employed < 2 and level is 'senior' or higher " <>
+            "(senior, lead, manager, director), 'stable' otherwise. " <>
+            "Return a map with :flight_risk and :stable counts.",
+        expect: :map,
+        constraint: {:has_keys, [:flight_risk, :stable]},
+        description: "Nested conditional: compound predicate with AND/OR"
+      },
+
+      # E4. Conditional aggregation (weighted)
+      %{
+        query:
+          "Calculate a weighted score for each department: " <>
+            "(average_salary * 0.4) + (average_years_employed * 1000 * 0.3) + " <>
+            "(remote_percentage * 100000 * 0.3). " <>
+            "Which department has the highest weighted score? Return the department name.",
+        expect: :string,
+        constraint: {:one_of, ["engineering", "sales", "marketing", "support", "hr", "finance"]},
+        max_turns: 3,
+        description: "Conditional: weighted multi-factor scoring"
+      },
+
+      # E5. Conditional with fallback
+      %{
+        query:
+          "For each order payment method, calculate the average order total. " <>
+            "Then classify each payment method as 'high_value' if average > $2500, " <>
+            "'standard' otherwise. Return a map of payment_method to classification string.",
+        expect: :map,
+        constraint: {:has_keys, [:credit_card, :paypal, :bank_transfer, :crypto]},
+        description: "Conditional: aggregate then classify result"
+      }
+    ]
+  end
+
+  @doc """
   Returns 1-based indices of plan cases within the full test suite.
   """
   @spec plan_case_indices() :: [pos_integer()]
@@ -588,5 +902,17 @@ defmodule PtcDemo.TestRunner.TestCase do
       length(common_test_cases()) + length(lisp_specific_cases()) + length(multi_turn_cases())
 
     Enum.to_list((offset + 1)..(offset + length(plan_cases())))
+  end
+
+  @doc """
+  Returns 1-based indices of M0 validation cases within the full test suite.
+  """
+  @spec m0_validation_indices() :: [pos_integer()]
+  def m0_validation_indices do
+    offset =
+      length(common_test_cases()) + length(lisp_specific_cases()) +
+        length(multi_turn_cases()) + length(plan_cases())
+
+    Enum.to_list((offset + 1)..(offset + length(m0_validation_cases())))
   end
 end
