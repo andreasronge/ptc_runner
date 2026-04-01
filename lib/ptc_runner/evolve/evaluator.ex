@@ -57,25 +57,25 @@ defmodule PtcRunner.Evolve.Evaluator do
     case result do
       {:ok, step} ->
         correct = matches_output?(step.return, problem.expected_output, problem.output_type)
-        llm_tokens = get_in(step.usage || %{}, [:total_tokens]) || 0
+        llm_tokens = get_in(step.usage, [:total_tokens]) || 0
 
         %{
           correct: correct,
           llm_tokens: llm_tokens,
           output: step.return,
           error: nil,
-          duration_ms: Map.get(step.usage || %{}, :duration_ms, 0)
+          duration_ms: Map.get(step.usage, :duration_ms, 0)
         }
 
       {:error, step} ->
-        llm_tokens = get_in(step.usage || %{}, [:total_tokens]) || 0
+        llm_tokens = get_in(step.usage, [:total_tokens]) || 0
 
         %{
           correct: false,
           llm_tokens: llm_tokens,
           output: nil,
           error: step.fail,
-          duration_ms: Map.get(step.usage || %{}, :duration_ms, 0)
+          duration_ms: Map.get(step.usage, :duration_ms, 0)
         }
     end
   end
@@ -88,7 +88,7 @@ defmodule PtcRunner.Evolve.Evaluator do
   Uses graded partial credit instead of binary correctness to provide
   gradient signal when no program produces the exact answer.
   """
-  @spec fitness(Individual.t(), eval_result(), Evaluator.problem(), config()) :: float()
+  @spec fitness(Individual.t(), eval_result(), problem(), config()) :: float()
   def fitness(%Individual{program_size: size}, eval_result, problem, config \\ @default_config) do
     score = partial_score(eval_result, problem)
 
@@ -107,7 +107,7 @@ defmodule PtcRunner.Evolve.Evaluator do
   - 0.05: produced a value (wrong type, no crash)
   - 0.0: crash/timeout/nil
   """
-  @spec partial_score(eval_result(), Evaluator.problem()) :: float()
+  @spec partial_score(eval_result(), problem()) :: float()
   def partial_score(%{correct: true}, _problem), do: 1.0
   def partial_score(%{error: err}, _problem) when err != nil, do: 0.0
   def partial_score(%{output: nil}, _problem), do: 0.0

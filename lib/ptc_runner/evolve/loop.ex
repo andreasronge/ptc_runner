@@ -55,7 +55,7 @@ defmodule PtcRunner.Evolve.Loop do
       ctx = %{"products" => my_products, ...}
       problem = PtcRunner.Evolve.Loop.make_problem("P1", source, :integer, ctx)
   """
-  @spec make_problem(String.t(), String.t(), atom(), map(), keyword()) :: Evaluator.problem()
+  @spec make_problem(String.t(), String.t(), atom(), map(), keyword()) :: map()
   def make_problem(name, source, output_type, context, opts \\ []) do
     case PtcRunner.Lisp.run(source, context: context) do
       {:ok, step} ->
