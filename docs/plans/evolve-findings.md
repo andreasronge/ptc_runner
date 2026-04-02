@@ -5,6 +5,87 @@ Date: 2026-04-01
 Branch: gstack
 Design doc: `~/.gstack/projects/andreasronge-ptc_runner/andreasronge-gstack-design-20260401-131308.md`
 
+## Background: What is PTC-Lisp and Why Evolve It?
+
+### The problem
+
+When you use an LLM to query data or orchestrate tools, the LLM typically generates
+code that runs once and is thrown away. Each new query costs another LLM call. For a
+benchmark of 55 problems, that's 55 LLM calls. Run it 3 times for statistical
+confidence, that's 165 calls. Evolve 20 agent variants over 10 generations, that's
+33,000 calls. It gets expensive fast.
+
+### PTC-Lisp: programs as the unit of work
+
+PTC-Runner is an Elixir library where LLMs write small programs in PTC-Lisp (a
+Clojure-like Lisp) instead of returning raw text. These programs run inside isolated
+BEAM processes (1 second timeout, 10MB memory limit) and can call tools to access data.
+
+A typical PTC-Lisp program looks like this:
+
+```clojure
+;; Count products over $500 — simple filter + count
+(count (filter (fn [p] (> (get p :price) 500)) data/products))
+```
+
+Or for something more complex, a cross-dataset join:
+
+```clojure
+;; Average expense amount for employees in big departments (>30 headcount)
+;; This is a 4-step pipeline: group → filter groups → collect IDs → join + average
+(let [dept-groups (group-by (fn [e] (get e :department)) data/employees)
+      big-depts (set (map first
+                       (filter (fn [[dept emps]] (> (count emps) 30)) dept-groups)))
+      emp-ids (set (map (fn [e] (get e :id))
+                        (filter (fn [e] (contains? big-depts (get e :department)))
+                                data/employees)))
+      matching (filter (fn [ex] (contains? emp-ids (get ex :employee_id)))
+                       data/expenses)]
+  (/ (reduce + 0 (map (fn [ex] (get ex :amount)) matching))
+     (count matching)))
+```
+
+Key properties:
+- **Small**: programs are typically 5-60 AST nodes (vs thousands of lines for Python)
+- **Fast**: execute in <15ms in the BEAM sandbox
+- **Safe**: isolated process, can't escape the sandbox, automatic timeout
+- **Structured**: the AST is a simple tree of ~10 node types, amenable to programmatic manipulation
+
+### The idea: evolve programs instead of generating them
+
+Instead of asking an LLM to write a new program every time, what if we:
+1. Start with a few seed programs (possibly LLM-generated)
+2. Use genetic programming (GP) to mutate and recombine them
+3. Let the LLM act as an expensive mutation operator (available but penalized)
+4. Over generations, evolution discovers programs that work without needing the LLM
+
+This is "distillation through evolution" — the LLM's knowledge gets compiled into
+PTC-Lisp code that runs for free.
+
+### What we built
+
+```
+lib/ptc_runner/evolve/
+├── individual.ex       # A program with its parsed AST and fitness score
+├── evaluator.ex        # Run programs in sandbox, compare output, score fitness
+├── operators.ex        # GP mutations: tweak numbers, swap functions, restructure AST
+├── llm_operators.ex    # Ask an LLM to improve a program (expensive but creative)
+└── loop.ex             # Evolution loop: evaluate → select → reproduce → repeat
+```
+
+The evolution loop works like this:
+
+```
+Generation 0: [seed programs, possibly wrong]
+     ↓ evaluate each against expected output
+     ↓ score fitness (correctness - LLM_cost - program_size)
+     ↓ select best via tournament
+     ↓ reproduce: GP mutation (free) or LLM mutation (costs tokens)
+Generation 1: [mutated programs, some better]
+     ↓ ... repeat ...
+Generation N: [evolved programs, hopefully correct and LLM-free]
+```
+
 ## Summary
 
 Built a genetic programming system that evolves PTC-Lisp programs in BEAM sandboxes.
@@ -16,24 +97,54 @@ from simple filters to 4-step cross-dataset pipelines.
 ### GP on structurally close seeds (no LLM needed)
 
 When seeds contain the right function calls and GP only needs to tweak arguments,
-pure GP works reliably. P1 (count filtered products): seeds with wrong threshold
-(400, 600) evolved to correct threshold (500) in 1 generation. Zero LLM calls.
+pure GP works reliably. Example: P1 asks "count products over $500" (answer: 261).
+Seeds were wrong — `(> price 400)`, `(> price 600)`, `(< price 500)`. GP's point
+mutation operator changed the threshold number, and by Gen 1 found the correct
+program. Zero LLM calls.
+
+```
+Gen 0: best=-0.0001  correct=0/12   ← no seed is correct
+Gen 1: best= 0.9992  correct=1/12   ← mutation found (> price 500)
+Gen 9: best= 0.9992  correct=12/12  ← entire population converged
+```
 
 ### LLM mutation for structural leaps
 
-P3 (employee count per department): seeds had no `group-by`. LLM mutation invented
-a `reduce`-based counting approach in Gen 1. The winning program uses zero LLM tokens
-at runtime — genuine distillation of LLM knowledge into PTC-Lisp code.
+When the seed programs don't contain the right building blocks (e.g., no `group-by`),
+random GP mutations can't invent them. But the LLM mutation operator can. Example:
+P3 asks "count employees per department" (answer: `{engineering: 29, sales: 32, ...}`).
+Seeds were just `(count data/employees)` — structurally nowhere close.
+
+The LLM mutation invented a `reduce`-based counting approach that nobody on the team
+would have written:
+
+```clojure
+;; LLM-invented solution (different from the Author's group-by approach)
+(let [depts (map (fn [emp] (get emp "department")) data/employees)
+      counts (reduce (fn [acc dept]
+                       (assoc acc dept (+ (get acc dept 0) 1)))
+                     {} depts)]
+  counts)
+```
+
+The winning program uses zero LLM tokens at runtime — the LLM was only used during
+evolution (as a mutation operator), not during execution. This is genuine distillation:
+LLM knowledge compiled into PTC-Lisp code that runs for free.
 
 ### Decomposed LLM mutation with examples
 
-The LLM mutation prompt needs three things to work reliably:
-1. **Problem description** (natural language, what to compute)
-2. **Working PTC-Lisp examples** (especially patterns like set-based joins)
-3. **Explicit syntax rules** (`[x]` for fn params, `(set list)` not `#{...}`)
+Early attempts at LLM mutation failed: the LLM would rewrite entire programs but
+produce invalid PTC-Lisp syntax (Clojure-like constructs that PTC-Lisp doesn't
+support). The fix was decomposed prompting — give the LLM:
 
-With all three, Gemini Flash Lite produces correct cross-dataset join programs
-5/5 on P5 and 5/5 on P7. Without the description, 0/5 on both.
+1. **Problem description** (natural language, what to compute)
+2. **Working PTC-Lisp examples** (copy-pasteable patterns, especially set-based joins)
+3. **Explicit syntax rules** (`[x]` for fn params, `(set list)` not `#{...}`)
+4. **Diagnosis** of what's wrong ("too high — your filter is too broad")
+
+With all four, Gemini Flash Lite produces correct cross-dataset join programs
+5/5 on P5 and 5/5 on P7. Without the description, 0/5 on both. The examples
+are critical — the LLM copies the pattern and adapts it to the specific problem.
 
 ### Partial credit scoring
 
@@ -46,6 +157,23 @@ This keeps diversity alive while the population searches for the correct answer.
 All evaluations run in the BEAM sandbox in <15ms. A full evolution run
 (8 generations × 12 individuals × evaluation) takes seconds for the GP part.
 The bottleneck is LLM API latency, not computation.
+
+## Test Problems
+
+| ID | Description | Type | Difficulty | Answer |
+|----|-------------|------|------------|--------|
+| P1 | Count products with price > $500 | integer | Easy | 261 |
+| P2 | Average order total for delivered orders | number | Easy | 2540.60 |
+| P3 | Count employees per department | map | Medium | `{eng: 29, fin: 26, ...}` |
+| P5 | Count delivered orders for electronics products | integer | Hard | 32 |
+| P6 | Revenue from expensive delivered products | number | Hard | 284689.48 |
+| P7 | Avg expense for big departments (>30 headcount) | number | Hard | 998.18 |
+
+Easy = single dataset, one operation. Medium = single dataset, group-by + aggregate.
+Hard = cross-dataset join requiring set-based ID lookup across two datasets.
+
+Data: 500 products, 1000 orders, 200 employees, 800 expenses. Deterministic with
+seeded RNG `{42, 42, 42}`.
 
 ## Problems Found
 
