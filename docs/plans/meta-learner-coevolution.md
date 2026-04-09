@@ -139,13 +139,54 @@ M needs to not just mutate agent specs but also discover reusable building block
 
 In DGM-H, the hyperagent edits its own source code. In our system, M is PTC-Lisp running in a sandbox — it can't edit files. Self-modification happens through reproduction: M produces M' as a new program. But can M reason about its own code? Can it introspect on its own mutation strategy?
 
+## What We Built and Learned (April 2026)
+
+The simplified two-player system (Author/Solver + M as controller) was implemented
+first. See `evolve-findings.md` for full experimental results.
+
+### Answers to open questions from experiments
+
+**Representation of M:** We chose "PTC-Lisp program with structured interface" — M is a
+`(fn [fv] (cond ...))` that must return an operator keyword. The cond-tree representation
+is small (15-30 AST nodes), fast to evaluate, and amenable to GP mutation. However, the
+cond-tree can only select from a fixed set of 7 operators (6 GP + `:llm_mutation`). It
+cannot compose operators or invent new ones. This is sufficient for the "when to think"
+question but not for "how to think differently."
+
+**Credit assignment:** Paired comparison (all M variants face the same problem set each
+generation) works. The noise from stochastic GP mutation is manageable with population
+sizes of 4-8. The bigger credit assignment problem: M's fitness depends on both its
+operator choices AND the random outcomes of those operators. Two identical M's can get
+different fitness from the same problem set.
+
+**LLM budget strategy:** M-controlled (`:llm_mutation` as an operator choice) works
+mechanically. The key finding: **the budget parameter (lambda_llm) is the dominant
+lever**, not M's policy. At lambda_llm=0.001, LLM is never worth calling. At 0.0,
+LLM dominates. The interesting regime requires careful calibration where LLM is worth
+it for hard problems (~0.00005). This is closer to "annealing" — the human tunes the
+economic environment, and M adapts its policy to the incentive structure.
+
+**Environmental drift:** Implemented via coevolved Authors. Anchor Authors prevent
+collapse. Author mutation (safe point_literal/point_symbol/arg_swap only) creates
+threshold variations that are genuinely different problems. The difficulty frontier
+stabilizes at ~0.30 success rate within 2-3 generations.
+
+**Population sizes:** mu=4, lambda=4 for M; mu=4, lambda=2-3 for Authors. Small but
+functional. Diversity is the main risk — seed-conservative dominated in all runs
+because it's cheapest. Larger populations (8-12) would help maintain strategy diversity.
+
+**Two-player vs three-player:** We implemented the Author/Solver simplification
+(not the full A/T/C). T (Tester) and C (Coder) were unnecessary for the current
+scope — Authors generate problems directly, solvers attempt them. The TDD dynamic
+(T probing specification boundaries) remains a future extension.
+
 ## Possible Exploration Paths (for Claude Code)
 
-Use Claude Code as the outer-loop architect to explore:
+Updated based on experimental findings:
 
-1. **M representation variants**: try different structural constraints on M, see which leads to sustained improvement
-2. **A/T/C interaction patterns**: sequential, adversarial, cooperative — how does the interaction pattern affect M's learning?
-3. **LLM budget strategies**: fixed budget, annealing, M-controlled — which produces the best distillation?
-4. **Environmental drift rates**: too fast and M can't learn, too slow and M over-specializes — what's the sweet spot?
-5. **Population sizes and selection pressure**: tournament selection, proportional, elitist — does it matter?
-6. **Two-player vs three-player**: does the full A/T/C system produce meaningfully better M's than the simpler Author/Solver setup?
+1. **lambda_llm calibration**: find the regime where LLM is worth it for hard problems but not easy ones — this is where distillation dynamics emerge
+2. **M representation expansion**: let M return compound actions (e.g., `[:llm_mutation :point_mutation]` — try LLM first, GP fallback) or parameterized operators
+3. **Author structural mutation**: current Authors only tweak thresholds. Adding template-based mutation (wrap in filter, add group-by) would create structurally novel problems
+4. **Longer runs**: 20+ outer generations to see if M strategies diverge meaningfully or converge
+5. **Heritable mutator genome**: Codex's suggestion — each organism is `{solver_ast, mutator_ast}`. This is the next major architectural leap
+6. **Distillation chart**: the publishable ALife result — LLM tokens per solve dropping while problem difficulty increases

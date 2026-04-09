@@ -258,16 +258,51 @@ If no harness variant beats the seed by >5% solve_rate after 4 generations, stop
 
 This is a library feature within PTC-Runner. Distribution via Hex package (existing pipeline). No new artifacts to distribute.
 
-## Next Steps
+## Implementation Status (April 2026)
 
-1. **Define HarnessSpec struct** — `lib/ptc_runner/meta/harness_spec.ex` with `to_definition(spec, base_definition)` and `to_initial_memory/1`
-2. **Integration test: prelude injection** — verify PTC-Lisp source -> closure -> initial memory -> SubAgent.run/2 works
-3. **Build MetaHarness.Evaluator** — `eval/3` runs spec against problem list with N=3, returns fitness + per-problem results
-4. **Implement 6 mutators** — pure functions in `MetaHarness.Mutators`
-5. **Pick 10 test problems** — 5 from original set + 5 from M0-clustered, covering 3+ capability clusters
-6. **Build the loop** — `MetaHarness.Loop` with (mu+lambda) selection, JSON logging to disk
-7. **Run 8 generations** — does the fitness curve go up? Cost within $5?
-8. **Phase B:** Add trace-aware LLM proposer, compare against Phase A results
+The approach diverged from this plan in a productive direction. Instead of
+HarnessSpec (optimizing SubAgent configurations), we built a lower-level system
+that evolves PTC-Lisp programs directly. See `evolve-findings.md` for the full
+story. The key modules are in `lib/ptc_runner/meta/`:
+
+| Module | Status | What it does |
+|--------|--------|-------------|
+| `failure_vector.ex` | Done | 6-element failure signal from eval results |
+| `meta_learner.ex` | Done | M struct — PTC-Lisp cond-tree selecting operators |
+| `meta_evaluator.ex` | Done | Runs inner evolve loop with M controlling operators |
+| `meta_loop.ex` | Done | Three-species coevolution: Authors + M + Solvers |
+| `author.ex` | Done | Problem generators with difficulty-frontier fitness |
+| `seeds.ex` | Done | 4 M seeds, 3 baselines, 6 Author seeds |
+
+The original Next Steps 1-6 (HarnessSpec, prelude injection, etc.) were superseded.
+The core hypothesis — can we automatically improve agent performance for <$5? — was
+validated through 4 experiments documented in evolve-findings.md.
+
+### What was validated
+
+- **Automatic improvement loop works** (Phase A, Step 7): M improved from 0.167→0.375
+- **Cost within $5** (Step 7): full 4-generation run costs <$5 with Gemini Flash Lite
+- **Trace-aware feedback** (Phase B concept): implemented via failure vectors, not full
+  trace dumps. M receives compile_error, timeout, wrong_type, partial_score, size_bloat,
+  no_improvement signals. Sufficient for operator selection.
+
+### What remains from this plan
+
+- **Phase B trace-aware LLM proposer**: not built. The LLM proposer concept was replaced
+  by M returning `:llm_mutation` — M decides WHEN to call LLM, not the proposer.
+- **lambda_llm calibration**: the dominant open problem. At 0.001 LLM is too expensive;
+  at 0.0 it dominates. The sweet spot (~0.00005) is the next experiment.
+
+## Original Next Steps (superseded)
+
+1. ~~Define HarnessSpec struct~~ → replaced by MetaLearner + FailureVector
+2. ~~Integration test: prelude injection~~ → not needed (M controls operators directly)
+3. ~~Build MetaHarness.Evaluator~~ → replaced by MetaEvaluator
+4. ~~Implement 6 mutators~~ → replaced by M selecting among 7 operators (6 GP + LLM)
+5. ~~Pick 10 test problems~~ → replaced by coevolved Authors
+6. ~~Build the loop~~ → replaced by MetaLoop (three-species coevolution)
+7. ~~Run 8 generations~~ → done (4 experiments, see evolve-findings.md)
+8. ~~Phase B: trace-aware LLM proposer~~ → deferred (M controls LLM directly)
 
 ## What I noticed about how you think
 

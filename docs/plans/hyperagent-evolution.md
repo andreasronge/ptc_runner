@@ -190,6 +190,70 @@ Use Option B from Phase 0 at scale:
 
 As agents improve, the problem generator must keep up. The success rate feedback loop creates an automatic curriculum — problems stay at the difficulty frontier without manual tuning.
 
+## Implementation Status (April 2026)
+
+### What was built
+
+Phases 0-3 were partially realized through a different architecture than originally
+planned. Instead of evolving SubAgent specs (system prompts + parameters), we built
+a three-species coevolution system operating directly on PTC-Lisp programs:
+
+**Species 1: MetaLearner M** — PTC-Lisp cond-trees that select GP operators
+(including `:llm_mutation`) based on a 6-element failure vector. M controls the
+GP-vs-LLM decision for each solver mutation. Located in `lib/ptc_runner/meta/`.
+
+**Species 2: Authors** — PTC-Lisp programs that generate problems by computing
+ground truth from data context. Author fitness = `-abs(success_rate - 0.5)` —
+problems at the difficulty frontier (40-60% solve rate) score highest.
+
+**Species 3: Solvers** — the inner population evolved by the existing `evolve/loop.ex`
+with M controlling operator selection via an `operator_selector` callback.
+
+### Key findings from experiments
+
+1. **GP operators alone cannot make structural leaps.** With no LLM, all M variants
+   perform identically because the operators are equally incapable of inventing new
+   program patterns (e.g., set-based joins, group-by aggregation).
+
+2. **LLM mutation solves everything when unrestricted.** At 30% LLM rate, Gemini
+   Flash Lite solves all problems by Gen 1-3 regardless of M's GP selection.
+
+3. **M found the economically rational strategy.** With lambda_llm=0.001, each LLM
+   call costs ~1.0 fitness while solving one problem is worth ~0.167. M correctly
+   learns to never call LLM. The distillation dynamics require calibrated lambda_llm.
+
+4. **Three-species coevolution is stable** with anchor Authors. Without anchors,
+   Author mutation destroys the ecosystem in 2-3 generations. With permanent seed
+   Authors, the Author pool grows (6→10), the difficulty frontier stabilizes at
+   ~0.30 success rate, and M improves (0.167→0.375 at Gen 1).
+
+5. **Genuine Godelian self-reference works.** M (PTC-Lisp) selects operators for
+   solvers (PTC-Lisp), is mutated by those same operators, and runs in the same
+   sandbox. Authors (PTC-Lisp) generate problems that solvers attempt. All three
+   species share the representation. DGM-H costs $500/run. This costs <$5.
+
+### What's different from the original plan
+
+- **No compile-and-test tool** (Phase 1). Not needed — M controls mutation strategy
+  externally rather than agents testing code internally.
+- **No evolved prelude** (Phase 2). The prelude concept was replaced by M selecting
+  `:llm_mutation` which gives the solver access to LLM-generated structural patterns.
+- **Authors are simpler than planned.** They compute ground truth directly rather than
+  generating description + I/O pairs. Natural language descriptions are optional metadata,
+  not part of the evolved genome.
+- **The unit of evolution is smaller.** Instead of full agent specs (system prompt +
+  parameters + prelude), M is a single cond-tree (~15-30 AST nodes) and Authors are
+  single expressions (~5-50 nodes). This makes GP mutation viable and keeps costs low.
+
+### Remaining open questions from original plan
+
+Open questions 1, 2, 3 are deferred. Questions 4-6 are partially addressed:
+- **Evaluation cost** (Q4): ~$5 for 4 outer generations with 6-10 Authors, 4 M variants.
+  Well within budget. Gemini Flash Lite at ~42 tokens/call is extremely cost-effective.
+- **Generalization** (Q5): not yet tested. Authors generate problems from the same
+  data context — need held-out data to measure overfitting.
+- **Program size** (Q6): solver programs range 3-48 AST nodes. No size explosion observed.
+
 ## Open Questions
 
 1. **`eval` scope:** How tightly to scope the sandboxed `eval`? Only within `compile-and-test`? Or as a general PTC-Lisp form? The tighter the scope, the safer but less expressive.
