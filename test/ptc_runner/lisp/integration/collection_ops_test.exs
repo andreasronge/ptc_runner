@@ -2610,4 +2610,35 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert hd(result) |> length() == 2
     end
   end
+
+  # ============================================================
+  # Nil-as-empty-collection semantics (Clojure conformance)
+  # ============================================================
+
+  describe "nil collection semantics" do
+    test "count of nil returns 0" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(count nil)|)
+      assert result == 0
+    end
+
+    test "reduce 3-arity with nil collection returns init" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce + 0 nil)|)
+      assert result == 0
+    end
+
+    test "reduce 2-arity with nil collection returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(reduce + nil)|)
+      assert result == nil
+    end
+
+    test "assoc on nil treats it as empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(assoc nil :a 1)|)
+      assert result == %{a: 1}
+    end
+
+    test "assoc variadic on nil treats it as empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(assoc nil :a 1 :b 2)|)
+      assert result == %{a: 1, b: 2}
+    end
+  end
 end
