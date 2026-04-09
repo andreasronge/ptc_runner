@@ -1,11 +1,10 @@
-Explore what has been done in the aria of Evolutionary Computation and ALife, from Hillis experiments back in late 1980 to today and how this can be combined with the power of LLM - the quest of finding an evolving meta harness around LLM 
-
-# Evolve Findings: GP+LLM Hybrid on PTC-Lisp
+# Evolution Findings: GP+LLM Hybrid on PTC-Lisp
 
 Status: ACTIVE RESEARCH
-Date: 2026-04-01
+Date: 2026-04-01 (updated 2026-04-09)
 Branch: gstack of ptc_runner on GitHub
-Design doc: `~/.gstack/projects/andreasronge-ptc_runner/andreasronge-gstack-design-20260401-131308.md`
+Roadmap: `evolution-roadmap.md`
+Historical plans: `archive/` (hyperagent-evolution, m0-failure-boundary-mining, meta-evolve-v2-plan, meta-learner-coevolution)
 
 ## Background: What is PTC-Lisp and Why Evolve It?
 
