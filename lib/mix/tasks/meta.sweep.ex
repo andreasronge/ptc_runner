@@ -44,7 +44,13 @@ defmodule Mix.Tasks.Meta.Sweep do
 
     lambdas = parse_lambdas(opts[:lambdas])
     generations = opts[:generations] || @default_generations
-    llm_model = opts[:llm_model] || @default_llm_model
+
+    llm_model =
+      case opts[:llm_model] || @default_llm_model do
+        nil -> nil
+        model -> PtcRunner.LLM.Registry.resolve!(model)
+      end
+
     log_dir = opts[:log_dir] || "demo/tmp/sweep-#{timestamp()}"
     llm_mutation_rate = opts[:llm_mutation_rate] || 0.0
     m_llm_mutation_rate = opts[:m_llm_mutation_rate] || 0.0

@@ -87,24 +87,11 @@ defmodule PtcRunner.Meta.MetaEvaluator do
       }
     end
 
-    per_problem =
-      if config.parallel do
-        config.problems
-        |> Task.async_stream(run_problem,
-          max_concurrency: length(config.problems),
-          timeout: config.task_timeout,
-          on_timeout: :kill_task
-        )
-        |> Enum.map(fn
-          {:ok, result} ->
-            result
-
-          {:exit, _reason} ->
-            %{problem: "failed", solved: false, best_fitness: 0.0, llm_tokens: 0, best_source: ""}
-        end)
-      else
-        Enum.map(config.problems, run_problem)
-      end
+    # Run problems sequentially within each M evaluation.
+    # M variants are already parallelized at the MetaLoop level, so running
+    # problems concurrently here causes Finch connection pool exhaustion
+    # when multiple M variants fire LLM calls simultaneously.
+    per_problem = Enum.map(config.problems, run_problem)
 
     operator_counts = get_operator_counts(counter_ref)
 
