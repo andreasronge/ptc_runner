@@ -516,6 +516,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Count
   # ============================================================
 
+  def count(nil), do: 0
   def count(%MapSet{} = set), do: MapSet.size(set)
   def count(coll) when is_binary(coll), do: String.length(coll)
   def count(coll) when is_list(coll) or is_map(coll), do: Enum.count(coll)
@@ -564,6 +565,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
 
   # reduce with 2 args: (reduce f coll) - uses first element as initial value
+  def reduce(_f, nil), do: nil
+
   def reduce(f, coll) when is_list(coll) do
     case coll do
       [] -> nil
@@ -596,6 +599,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   # reduce with 3 args: (reduce f init coll)
+  def reduce(_f, init, nil), do: init
+
   def reduce(f, init, coll) when is_list(coll) do
     Enum.reduce(coll, init, fn elem, acc -> Callable.call(f, [acc, elem]) end)
   end
