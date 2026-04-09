@@ -43,7 +43,9 @@ defmodule PtcRunner.Meta.MetaLoop do
     solver_seeds: [],
     log_dir: nil,
     eval_config: [],
-    m_llm_mutation_rate: 0.0
+    m_llm_mutation_rate: 0.0,
+    parallel: true,
+    task_timeout: 120_000
   }
 
   @doc """
@@ -185,13 +187,28 @@ defmodule PtcRunner.Meta.MetaLoop do
 
   # Generate problems from Author programs, filtering out broken Authors
   defp generate_problems(authors, config) do
+    gen_fn = fn author ->
+      case Author.generate_problem(author, config.data_context) do
+        {:ok, problem} -> {:ok, author, problem}
+        {:error, _} -> {:error, author}
+      end
+    end
+
     results =
-      Enum.map(authors, fn author ->
-        case Author.generate_problem(author, config.data_context) do
-          {:ok, problem} -> {:ok, author, problem}
-          {:error, _} -> {:error, author}
-        end
-      end)
+      if Map.get(config, :parallel, true) do
+        authors
+        |> Task.async_stream(gen_fn,
+          max_concurrency: length(authors),
+          timeout: 5_000,
+          on_timeout: :kill_task
+        )
+        |> Enum.map(fn
+          {:ok, result} -> result
+          {:exit, _} -> {:error, nil}
+        end)
+      else
+        Enum.map(authors, gen_fn)
+      end
 
     valid_authors =
       Enum.flat_map(results, fn
@@ -213,13 +230,38 @@ defmodule PtcRunner.Meta.MetaLoop do
     eval_opts =
       Keyword.merge(config.eval_config,
         problems: problems,
-        seeds: config.solver_seeds
+        seeds: config.solver_seeds,
+        parallel: Map.get(config, :parallel, true),
+        task_timeout: Map.get(config, :task_timeout, 120_000)
       )
 
-    Enum.map(m_pop, fn m ->
+    evaluate_fn = fn m ->
+      start = System.monotonic_time(:millisecond)
       result = MetaEvaluator.evaluate(m, eval_opts)
+      elapsed = System.monotonic_time(:millisecond) - start
+      IO.puts("  M #{m.id}: fitness=#{format_float(result.fitness, 3)} (#{elapsed}ms)")
       %{m | fitness: result.fitness, metadata: Map.put(m.metadata, :eval_result, result)}
-    end)
+    end
+
+    if Map.get(config, :parallel, true) do
+      m_pop
+      |> Task.async_stream(evaluate_fn,
+        max_concurrency: length(m_pop),
+        timeout: config.task_timeout * length(config.eval_config[:problems] || []) + 30_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.zip(m_pop)
+      |> Enum.map(fn
+        {{:ok, evaluated_m}, _original} ->
+          evaluated_m
+
+        {{:exit, _reason}, original} ->
+          IO.puts("  M #{original.id}: TIMEOUT")
+          %{original | fitness: -999.0}
+      end)
+    else
+      Enum.map(m_pop, evaluate_fn)
+    end
   end
 
   # Score Authors based on how well M variants solved their problems

@@ -33,7 +33,10 @@ defmodule PtcRunner.Meta.MetaEvaluator do
           max_ast_nodes: pos_integer(),
           lambda_llm: float(),
           llm_model: String.t() | nil,
-          llm_mutation_rate: float()
+          llm_mutation_rate: float(),
+          parallel: boolean(),
+          task_timeout: pos_integer(),
+          max_llm_calls_per_problem: pos_integer() | nil
         }
 
   @default_config %{
@@ -44,7 +47,10 @@ defmodule PtcRunner.Meta.MetaEvaluator do
     max_ast_nodes: 80,
     lambda_llm: 0.001,
     llm_model: nil,
-    llm_mutation_rate: 0.0
+    llm_mutation_rate: 0.0,
+    parallel: true,
+    task_timeout: 120_000,
+    max_llm_calls_per_problem: 5
   }
 
   @doc """
@@ -58,29 +64,47 @@ defmodule PtcRunner.Meta.MetaEvaluator do
     config = Map.merge(@default_config, Map.new(opts))
     {selector, counter_ref} = build_selector(m, config)
 
+    run_problem = fn problem ->
+      result =
+        Loop.run(config.seeds, problem,
+          generations: config.inner_generations,
+          population_size: config.inner_population_size,
+          max_ast_nodes: config.max_ast_nodes,
+          operator_selector: selector,
+          llm_model: config.llm_model,
+          llm_mutation_rate: config.llm_mutation_rate
+        )
+
+      best = result.best
+      solved = best.fitness != nil and best.fitness > 0.99
+
+      %{
+        problem: problem.name,
+        solved: solved,
+        best_fitness: best.fitness || 0.0,
+        llm_tokens: Map.get(result, :total_llm_tokens, 0),
+        best_source: best.source
+      }
+    end
+
     per_problem =
-      Enum.map(config.problems, fn problem ->
-        result =
-          Loop.run(config.seeds, problem,
-            generations: config.inner_generations,
-            population_size: config.inner_population_size,
-            max_ast_nodes: config.max_ast_nodes,
-            operator_selector: selector,
-            llm_model: config.llm_model,
-            llm_mutation_rate: config.llm_mutation_rate
-          )
+      if config.parallel do
+        config.problems
+        |> Task.async_stream(run_problem,
+          max_concurrency: length(config.problems),
+          timeout: config.task_timeout,
+          on_timeout: :kill_task
+        )
+        |> Enum.map(fn
+          {:ok, result} ->
+            result
 
-        best = result.best
-        solved = best.fitness != nil and best.fitness > 0.99
-
-        %{
-          problem: problem.name,
-          solved: solved,
-          best_fitness: best.fitness || 0.0,
-          llm_tokens: Map.get(result, :total_llm_tokens, 0),
-          best_source: best.source
-        }
-      end)
+          {:exit, _reason} ->
+            %{problem: "failed", solved: false, best_fitness: 0.0, llm_tokens: 0, best_source: ""}
+        end)
+      else
+        Enum.map(config.problems, run_problem)
+      end
 
     operator_counts = get_operator_counts(counter_ref)
 
@@ -168,10 +192,26 @@ defmodule PtcRunner.Meta.MetaEvaluator do
       |> Map.new()
 
     max_ast_nodes = config.max_ast_nodes
+    max_llm_calls = config.max_llm_calls_per_problem
+    llm_idx = Map.get(operator_index, :llm_mutation, 7)
 
     selector = fn %PtcRunner.Evolve.Individual{} = individual ->
       fv = FailureVector.from_individual(individual, max_ast_nodes: max_ast_nodes)
       op = MetaLearner.select_operator(m, fv)
+
+      # Enforce LLM call cap: if M wants :llm_mutation but we've hit the cap, force GP
+      op =
+        if op == :llm_mutation and max_llm_calls != nil do
+          current_llm_calls = :counters.get(counter_ref, llm_idx)
+
+          if current_llm_calls >= max_llm_calls do
+            :point_mutation
+          else
+            op
+          end
+        else
+          op
+        end
 
       idx = Map.get(operator_index, op, 1)
       :counters.add(counter_ref, idx, 1)

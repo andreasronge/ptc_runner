@@ -43,6 +43,110 @@ Run the LLM mutation prompt N times (no GP) and compare success rate to GP+LLM o
 generations. If raw LLM succeeds at the same rate, GP is overhead. If GP finds solutions
 by combining partial successes, that's the value proposition.
 
+### M Biological Evolution Mechanisms (Staged)
+
+Current M limitations: no crossover between variants, direct encoding (AST = behavior),
+cond branches don't interact, most GP mutations produce broken programs.
+
+**Stage 1: Branch-level crossover** (~30-50 lines)
+
+Exchange cond branches between two M parents. Branches are semantically modular
+units (condition → operator), making them natural crossover points. Implementation:
+extract the cond branch list from two parents, sample/interleave branches, wrap back
+in `(fn [fv] (cond ...))`. Add `crossover_m/2` to MetaLoop alongside existing `mutate_m/2`.
+
+```clojure
+;; Parent A (error-focused)          Parent B (score-focused)
+(fn [fv]                             (fn [fv]
+  (cond                                (cond
+    (get fv :compile_error) :point_mutation    (< (get fv :partial_score) 0.2) :llm_mutation
+    (get fv :timeout)       :subtree_delete    (< (get fv :partial_score) 0.8) :crossover
+    (get fv :wrong_type)    :llm_mutation       (get fv :size_bloat)           :subtree_delete
+    :else                   :point_mutation))   :else                          :arg_swap))
+
+;; Offspring (branches from both)
+(fn [fv]
+  (cond
+    (get fv :compile_error)              :point_mutation     ;; from A
+    (< (get fv :partial_score) 0.2)      :llm_mutation       ;; from B
+    (get fv :timeout)                    :subtree_delete     ;; from A
+    :else                                :arg_swap))         ;; from B
+```
+
+**Key question:** What fraction of crossover offspring are valid? Track this metric.
+If <30% valid, the representation itself needs changing (proceed to Stage 2).
+
+**Why this matters:** Experiments show seed-conservative (cheap) and seed-llm-aware
+(effective) contain complementary strategies. Crossover can produce offspring that are
+conservative on easy problems AND LLM-aware on hard problems — a combination no single
+seed contains.
+
+**Stage 2: Parameter extraction (if crossover validity is low)** (~100 lines)
+
+Separate M into genotype (parameter vector) and phenotype (fixed cond-tree template).
+The genotype is a PTC-Lisp map of thresholds/weights; the phenotype is a fixed
+interpreter. GP mutation operates on the parameter map — always produces valid M.
+
+```clojure
+;; GENOTYPE — evolvable numeric parameters
+{:error_weight 0.8
+ :score_low 0.2
+ :score_high 0.8
+ :size_threshold 0.7
+ :llm_bias 0.3
+ :crossover_bias 0.15}
+
+;; PHENOTYPE — fixed template parameterized by genotype
+(fn [fv genome]
+  (let [score (get fv :partial_score)]
+    (cond
+      (and (get fv :compile_error)
+           (> (get genome :error_weight) 0.5))     :point_mutation
+      (and (< score (get genome :score_low))
+           (> (get genome :llm_bias) 0.2))          :llm_mutation
+      (and (get fv :no_improvement)
+           (> (get genome :crossover_bias) 0.1))    :crossover
+      (< score (get genome :score_high))            :arg_swap
+      :else                                         :point_mutation)))
+```
+
+Benefits:
+- **Every mutation valid** — tweak 0.2 → 0.25, can't break cond structure
+- **Neutral mutations** — changing score_low from 0.2 to 0.19 may not change behavior
+  now but creates diversity for future selection pressure
+- **Smooth landscape** — intermediate strategies between conservative and LLM-aware
+  can be discovered incrementally
+- **Crossover trivial** — uniform crossover on parameter vectors
+
+Tradeoff: M can only discover strategies within the template's structure. Trades
+expressiveness for evolvability. Consider evolving the template itself (Stage 3).
+
+**Stage 3: Epistatic interactions (future)**
+
+Add `let`-bindings that create intermediate "regulatory" signals combining failure
+vector fields. Multiple cond branches read these signals, creating non-linear
+interactions between conditions.
+
+```clojure
+(fn [fv]
+  (let [aggressive? (and (< (get fv :partial_score) 0.3)
+                         (get fv :no_improvement))
+        structural? (or (get fv :wrong_type)
+                        (not (get fv :has_join_pattern)))]
+    (cond
+      (get fv :compile_error)           :point_mutation
+      (and aggressive? structural?)     :llm_mutation      ;; epistatic
+      aggressive?                       :crossover
+      structural?                       :wrap_form
+      :else                             :point_mutation)))
+```
+
+**Biological analogies that DON'T map well to M** (skip these):
+- Diploidy — M too small (15-30 nodes), double evaluation cost for no benefit
+- Epigenetics — M has no persistent state, would need MetaLoop architectural changes
+- Speciation — population of 4-8 too small for reproductive isolation
+- Developmental timing — M runs once per selection, no development to sequence
+
 ### M Representation Expansion
 
 Current M returns a single operator keyword. Extensions:

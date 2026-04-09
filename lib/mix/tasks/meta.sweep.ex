@@ -24,6 +24,7 @@ defmodule Mix.Tasks.Meta.Sweep do
 
   @default_lambdas [0.0, 0.00001, 0.00005, 0.0001, 0.001]
   @default_generations 4
+  @default_llm_model "gemini-flash-lite"
 
   @impl Mix.Task
   def run(args) do
@@ -43,7 +44,7 @@ defmodule Mix.Tasks.Meta.Sweep do
 
     lambdas = parse_lambdas(opts[:lambdas])
     generations = opts[:generations] || @default_generations
-    llm_model = opts[:llm_model]
+    llm_model = opts[:llm_model] || @default_llm_model
     log_dir = opts[:log_dir] || "demo/tmp/sweep-#{timestamp()}"
     llm_mutation_rate = opts[:llm_mutation_rate] || 0.0
     m_llm_mutation_rate = opts[:m_llm_mutation_rate] || 0.0
@@ -78,6 +79,8 @@ defmodule Mix.Tasks.Meta.Sweep do
         :rand.seed(:exsss, {42, 42, 42})
         ctx = generate_data_context()
 
+        start = System.monotonic_time(:second)
+
         result =
           MetaLoop.run(
             outer_generations: generations,
@@ -92,7 +95,10 @@ defmodule Mix.Tasks.Meta.Sweep do
             ]
           )
 
-        %{lambda: lambda, result: result}
+        elapsed = System.monotonic_time(:second) - start
+        IO.puts("\nlambda=#{lambda} completed in #{elapsed}s")
+
+        %{lambda: lambda, result: result, elapsed_seconds: elapsed}
       end)
 
     # Print comparison summary
