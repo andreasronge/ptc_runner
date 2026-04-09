@@ -257,49 +257,6 @@ Key design decisions:
 - Seeded RNG for deterministic data (`{42, 42, 42}`)
 - Data accessed via `data/products` etc. in PTC-Lisp context
 
-## Possible Improvements
-
-### Prompt engineering for LLM mutation
-
-- **Incremental prompting**: instead of "fix the whole program," ask "what ONE
-  function call should I add?" then "where should I insert it?" Multiple small
-  LLM calls may work better than one big rewrite.
-- **Error-specific prompts**: when the program crashes with a specific error
-  (e.g., `:arity_error`), include the error in the prompt and ask for a targeted fix.
-- **Program decomposition**: ask the LLM to write each step of a pipeline separately,
-  then compose them. This avoids the "write a 100-node program in one shot" failure mode.
-
-### Better partial credit
-
-- **Structural similarity**: compare AST structure, not just output values.
-  A program using `filter` + `count` on the right dataset should score higher
-  than a degenerate program even if numerically further.
-- **Intermediate value credit**: run the program, capture intermediate values
-  (tool calls, let bindings), compare against the Author's intermediates.
-  This gives gradient signal for multi-step pipelines.
-- **Type-weighted scoring**: producing a list when a map is expected (0.05) should
-  score higher than producing an integer (wrong structure entirely).
-
-### GP operator improvements
-
-- **Guided mutation**: use partial evaluation results to pick mutation targets.
-  If a program's output has the wrong type, mutate the outermost form. If the
-  value is close but wrong, mutate the filter predicate.
-- **Library-aware mutation**: instead of random symbol swaps, know which functions
-  are available and what types they expect. Don't swap `count` (coll -> int) with
-  `first` (coll -> elem) if the context expects an integer.
-- **Template insertion**: have a library of PTC-Lisp "templates" (e.g., filter+count,
-  group-by+into, set-join pattern) that mutation can insert at appropriate points.
-
-### Anti-collapse measures
-
-- **Diversity preservation**: use novelty search or fitness sharing to prevent
-  the population from converging to one program.
-- **Island model**: run multiple sub-populations with different strategies
-  (one GP-heavy, one LLM-heavy) and migrate between them.
-- **Minimum size threshold**: don't let programs shrink below a minimum node count
-  to prevent collapse to degenerate 3-node programs.
-
 ## Phase A: Self-Improving Meta-Learner M (April 2026)
 
 ### What was built
@@ -311,11 +268,12 @@ subjects share the same representation.
 
 ```
 lib/ptc_runner/meta/
-├── failure_vector.ex     # 6-element failure signal from eval results
+├── failure_vector.ex     # 8-element failure signal (6 original + node_count, has_join_pattern)
 ├── meta_learner.ex       # M struct with sandbox-based operator selection
-├── meta_evaluator.ex     # Runs inner evolve loop with M controlling operators
-├── meta_loop.ex          # Outer (mu+lambda) evolution of M population
-└── seeds.ex              # 4 seed M variants + 3 baselines
+├── meta_evaluator.ex     # Runs inner evolve loop with M controlling operators + 6 metrics
+├── meta_loop.ex          # Outer (mu+lambda) evolution of M population + LLM-as-M-mutator
+├── author.ex             # Coevolved problem generators with difficulty frontier scoring
+└── seeds.ex              # 4 seed M variants + 3 baselines + 6 seed Authors
 ```
 
 Integration: `evolve/loop.ex` accepts an `operator_selector` callback.
@@ -552,6 +510,91 @@ same M seeds and Authors. `mix meta.sweep` with gemini-2.0-flash-lite.
    regime is lambda ∈ [5e-6, 1e-5] where hard-problem LLM calls have positive ROI
    but easy-problem calls don't (since GP already solves easy problems at 0 token cost).
 
+### Example Programs from Each Population
+
+All examples from Experiment 5, lambda=0.0, Gen 1.
+
+**M variants (operator selectors)** — cond-trees that take a failure vector and return an operator:
+
+```clojure
+;; meta-2451 (evolved, 100% solve) — calls LLM for small stuck programs
+(fn [fv]
+  (cond
+    (get fv :compile_error)            :point_mutation
+    (get fv :timeout)                  :subtree_delete
+    (get fv :size_bloat)               :subtree_delete
+    (get fv :wrong_type)               :llm_mutation
+    (and (< (get fv :partial_score) 0.3)
+         (< (get fv :node_count) 20))  :llm_mutation
+    (get fv :no_improvement)           :crossover
+    (< 0.8 (get fv :partial_score))    :arg_swap
+    :else                              :point_mutation))
+
+;; seed-conservative (14% solve, 0 tokens) — never calls LLM
+(fn [fv]
+  (cond
+    (get fv :compile_error)  :point_mutation
+    (get fv :timeout)        :subtree_delete
+    (get fv :size_bloat)     :subtree_delete
+    (get fv :wrong_type)     :arg_swap
+    (get fv :no_improvement) :crossover
+    :else                    :point_mutation))
+```
+
+Note: meta-2451 differs from its parent (seed-adaptive) by a GP mutation that flipped
+`(< (get fv :partial_score) 0.8)` to `(< 0.8 (get fv :partial_score))` — reversing
+the comparison. This accidentally made it call `:arg_swap` less often and `:point_mutation`
+more, slightly changing the operator distribution. The strategy difference is marginal;
+both llm-aware M's achieve 100% solve.
+
+**Authors (problem generators)** — programs that compute ground truth from data context:
+
+```clojure
+;; author-count-filtered [ANCHOR, easy] — count products above price threshold
+(count (filter (fn [p] (> (get p "price") 500)) data/products))
+
+;; author-cross-dataset [ANCHOR, hard] — cross-dataset join: engineering expenses
+(let [eng-ids (set (map (fn [e] (get e "id"))
+                        (filter (fn [e] (= (get e "department") "engineering"))
+                                data/employees)))
+      eng-expenses (filter (fn [ex] (contains? eng-ids (get ex "employee_id")))
+                           data/expenses)]
+  (count eng-expenses))
+
+;; author-2440 [EVOLVED from author-grouped-count] — mutated field name
+;; GP point_symbol changed "department" → "department_mut" creating a new problem
+(let [grouped (group-by (fn [e] (get e "department_mut")) data/employees)]
+  (into {} (map (fn [[k v]] [k (count v)]) grouped)))
+```
+
+Author mutations create genuinely different problems by tweaking field names and
+thresholds. `"department_mut"` doesn't exist in the data, so the grouped result is
+`{nil: 200}` — a trivially solvable problem (fitness penalized for being too easy).
+
+**Solvers (evolved programs)** — best program per problem, from seed-llm-aware's inner loop:
+
+```clojure
+;; Easy: count all products (solved by GP, 0 LLM tokens)
+(count data/products)
+
+;; Medium: average of delivered orders (LLM-assisted, 947 tokens)
+(let [delivered-orders (filter (fn [x] (= (get x :status) "delivered")) data/orders)]
+  (/ (reduce + 0 (map (fn [x] (get x :total)) delivered-orders))
+     (count delivered-orders)))
+
+;; Hard: cross-dataset join for engineering expenses (LLM-invented, 15559 tokens)
+(let [eng-ids (set (map (fn [e] (get e :id))
+                        (filter (fn [e] (= (get e :department) "engineering"))
+                                data/employees)))
+      eng-expenses (filter (fn [ex] (contains? eng-ids (get ex :employee_id)))
+                           data/expenses)]
+  (count eng-expenses))
+```
+
+The hard solver program was invented by LLM mutation — GP cannot discover `set` +
+`contains?` patterns from seeds that don't contain them. Once invented, the program
+runs for free (~5ms in the BEAM sandbox, 0 tokens at runtime).
+
 ### What's next
 
 **Priority 1: Re-run sweep with finer lambdas** in the range [0, 1e-6, 5e-6, 1e-5, 2e-5].
@@ -564,57 +607,4 @@ decrease across outer generations? That's the publishable chart.
 **Priority 3: LLM-evolved M.** With `m_llm_mutation_rate > 0`, does LLM mutation on M
 produce better strategies than GP mutation of M? The meta-meta question.
 
-## Next Things to Investigate
-
-### 1. Does GP add value over raw LLM generation?
-
-The critical experiment: run the LLM mutation prompt N times (no GP) and compare
-success rate to GP+LLM over N generations. If raw LLM succeeds at the same rate,
-GP is overhead. If GP finds solutions the LLM alone misses (e.g., by combining
-partial successes from multiple LLM calls), that's the value proposition.
-
-### 2. Author co-evolution (Phase 2)
-
-Build the Author population that generates problems. The Author is a PTC-Lisp
-program that runs against the data and produces ground truth + description.
-Author fitness = `-abs(solver_success_rate - 0.5)`. This creates automatic
-curriculum and prevents benchmark saturation.
-
-Key question: how does the Author generate natural language descriptions?
-Options: (a) LLM generates description from code, (b) description is part
-of the evolved genome, (c) description is derived from the AST structure.
-
-### 3. LLM cost annealing
-
-Start with low LLM cost penalty, increase over generations. Early generations
-use LLM mutation freely. Later generations must internalize patterns. Track
-average LLM tokens per generation — does it decrease over time?
-
-### 4. Multi-problem generalization
-
-Current setup: one Solver population per problem. Next: one Solver population
-evaluated across ALL problems. Can a single evolved program solve multiple
-data pipeline tasks? This requires more general programs (closer to a
-"harness" than a specific solution).
-
-### 5. Operator analytics
-
-Track which operator produced each individual that enters the top-K.
-After 50+ generations, we'll know: what % of improvements come from LLM
-mutation vs GP operators? This determines whether to invest in better GP
-or better LLM prompting.
-
-### 6. Prelude discovery (reconnect with M0 vision)
-
-When the Solver evolves a useful subexpression (e.g., the set-join pattern),
-extract it as a named prelude function. Future generations can use it as a
-building block. This is the original M0 vision — discovering reusable
-abstractions from execution — but driven by evolution rather than hand-written
-analysis.
-
-### 7. Compare with SubAgent.run
-
-The current Solver evolves programs directly. An alternative: evolve the
-SubAgent configuration (system prompt, parameters) and let the LLM generate
-programs at runtime. This is closer to the Meta-Harness approach. Compare:
-which produces better results per dollar spent?
+See `evolution-roadmap.md` for future directions and next experiments.
