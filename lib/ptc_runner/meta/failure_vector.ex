@@ -30,7 +30,8 @@ defmodule PtcRunner.Meta.FailureVector do
     :wrap_form,
     :subtree_delete,
     :subtree_dup,
-    :crossover
+    :crossover,
+    :llm_mutation
   ]
 
   @doc """

@@ -185,32 +185,43 @@ defmodule PtcRunner.Evolve.Loop do
   end
 
   defp produce_child(parent, pop, problem, config) do
+    # If operator_selector is set, let M control the mutation strategy entirely
+    case config.operator_selector do
+      selector when is_function(selector) ->
+        selected_op = selector.(parent)
+        produce_child_with_op(selected_op, parent, pop, problem, config)
+
+      nil ->
+        produce_child_default(parent, pop, problem, config)
+    end
+  end
+
+  # M selected :llm_mutation — force LLM path
+  defp produce_child_with_op(:llm_mutation, parent, pop, problem, config) do
+    if config.llm_model != nil do
+      llm_mutate(parent, pop, problem, config)
+    else
+      # LLM not configured, fall back to random GP
+      gp_mutate(parent, pop, config)
+    end
+  end
+
+  # M selected a GP operator — use it directly
+  defp produce_child_with_op(op, parent, pop, _problem, config) do
+    case Operators.mutate(parent, operator: op) do
+      {:ok, child} -> child
+      {:error, _} -> gp_mutate(parent, pop, config)
+    end
+  end
+
+  # Default path when no operator_selector (backward compat)
+  defp produce_child_default(parent, pop, problem, config) do
     roll = :rand.uniform()
 
     cond do
-      # LLM mutation: ask LLM to fix the program
       config.llm_model != nil and roll < config.llm_mutation_rate ->
-        # Evaluate parent to get its output for the LLM prompt
-        result = Evaluator.evaluate(parent, problem, config.eval_config)
+        llm_mutate(parent, pop, problem, config)
 
-        case LLMOperators.improve(
-               parent,
-               result.output,
-               problem.expected_output,
-               problem.output_type,
-               config.llm_model,
-               Map.get(problem, :description, "")
-             ) do
-          {:ok, child, _tokens} ->
-            IO.write("*")
-            child
-
-          {:error, _reason} ->
-            IO.write("x")
-            gp_mutate(parent, pop, config)
-        end
-
-      # Crossover: 20% of non-LLM reproductions
       roll < config.llm_mutation_rate + 0.2 ->
         other = Enum.random(pop)
 
@@ -219,25 +230,37 @@ defmodule PtcRunner.Evolve.Loop do
           {:error, _} -> gp_mutate(parent, pop, config)
         end
 
-      # GP mutation: the default
       true ->
         gp_mutate(parent, pop, config)
     end
   end
 
-  defp gp_mutate(parent, _pop, config) do
-    case apply_gp_operator(parent, config) do
-      {:ok, child} -> child
-      {:error, _} -> parent
+  defp llm_mutate(parent, pop, problem, config) do
+    result = Evaluator.evaluate(parent, problem, config.eval_config)
+
+    case LLMOperators.improve(
+           parent,
+           result.output,
+           problem.expected_output,
+           problem.output_type,
+           config.llm_model,
+           Map.get(problem, :description, "")
+         ) do
+      {:ok, child, _tokens} ->
+        IO.write("*")
+        child
+
+      {:error, _reason} ->
+        IO.write("x")
+        gp_mutate(parent, pop, config)
     end
   end
 
-  defp apply_gp_operator(parent, %{operator_selector: nil}) do
-    Operators.mutate(parent)
-  end
-
-  defp apply_gp_operator(parent, %{operator_selector: selector}) when is_function(selector) do
-    Operators.mutate(parent, operator: selector.(parent))
+  defp gp_mutate(parent, _pop, _config) do
+    case Operators.mutate(parent) do
+      {:ok, child} -> child
+      {:error, _} -> parent
+    end
   end
 
   defp tournament_select(population, tournament_size) do

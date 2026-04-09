@@ -43,7 +43,8 @@ defmodule PtcRunner.Evolve.Operators do
     wrap_form: :wrap,
     subtree_delete: :subtree_delete,
     subtree_dup: :subtree_dup,
-    crossover: :point_symbol
+    crossover: :point_symbol,
+    llm_mutation: :llm_mutation
   }
 
   @doc """
@@ -73,7 +74,8 @@ defmodule PtcRunner.Evolve.Operators do
           ])
 
         external_op ->
-          Map.get(@operator_mapping, external_op, :point_literal)
+          # Accept both external names (from M) and internal names (direct calls)
+          Map.get(@operator_mapping, external_op, external_op)
       end
 
     case apply_mutation(ast, operator) do

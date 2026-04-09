@@ -393,19 +393,76 @@ LLM rate lowered to 0.1. Token tracking fixed.
    (crossover+subtree_dup). The mechanism works mechanically; the action space
    just can't affect outcomes for hard problems.
 
-### What's next for M
+### What was built next (Phase A.5)
 
-**Priority 1:** Add `:llm_mutation` as M's 7th operator option. When M returns
-`:llm_mutation`, the inner loop uses LLM mutation for that individual regardless
-of the random roll. M learns: "when partial_score < 0.3 and the program is
-structurally simple, call the LLM."
+**`:llm_mutation` as M's 7th operator.** When operator_selector returns `:llm_mutation`,
+`produce_child` bypasses the random roll and forces LLM mutation. M now fully controls
+the GP-vs-LLM decision. The `llm_mutation_rate` config is only used in the backward-
+compatible default path (when no operator_selector is set).
 
-**Priority 2:** Track "LLM tokens per successful solve" as the distillation
-metric. If M learns to solve P1/P2/P4 with GP-only and reserve LLM for P3,
-the tokens-per-solve should drop while solve_rate holds. That's the chart.
+**Author struct + coevolution.** `lib/ptc_runner/meta/author.ex` — Authors are PTC-Lisp
+programs that compute ground truth from data context. Author fitness =
+`-abs(success_rate - 0.5) - size_penalty`. 6 seed Authors spanning easy (count-all) to
+hard (cross-dataset join). Authors mutated with safe operators (point_literal, point_symbol,
+arg_swap) and validated — rejected if output type changes or program crashes.
 
-**Priority 3:** Run the outer MetaLoop (evolving M variants) with `:llm_mutation`
-enabled. Does the evolved M learn a better GP-vs-LLM policy than the baselines?
+**Three-species MetaLoop.** Authors + M variants + Solvers coevolve. Anchor Authors
+(the 6 seeds) persist across all generations to prevent ecosystem collapse. Evolved
+Author mutants compete in a separate pool.
+
+### Experiment 4: Three-species coevolution
+
+**Setup:** 4 M seeds (including seed-llm-aware, seed-adaptive with `:llm_mutation`),
+6 anchor Authors, author_lambda=3 (3 mutants per gen), 4 outer generations,
+llm_mutation_rate=0.0 (M controls LLM decisions), lambda_llm=0.001.
+
+**Results:**
+
+| Gen | M_best | M_tokens | Authors | Author_rate |
+|-----|--------|----------|---------|-------------|
+| 0 | 0.167 | 9,622 | 6 | 0.50 |
+| 1 | 0.375 | 0 | 8 | 0.50 |
+| 2 | 0.273 | 0 | 10 | 0.30 |
+| 3 | 0.333 | 0 | 10 | 0.30 |
+| 4 | 0.250 | 0 | 10 | 0.30 |
+
+**Key findings:**
+
+1. **No ecosystem collapse.** Anchor Authors prevent the death spiral from earlier
+   runs. The system runs 4+ generations stably with growing Author diversity.
+
+2. **M improved at Gen 1** (0.167→0.375). First real M improvement observed in
+   any experiment. seed-conservative won — never calls LLM, lowest cost.
+
+3. **Author diversity emerges.** Mutant Authors create genuinely different problems:
+   `(> 500 (get p "price"))` (reversed comparison), `(> (get p "price") 499)` (shifted
+   threshold). The Author pool grew from 6→10 across 4 generations.
+
+4. **Author success rate stabilized at 0.30** — between trivial anchors (rate=1.0) and
+   hard anchors (rate=0.0). A difficulty frontier exists and is stable.
+
+5. **LLM-calling M variants were eliminated.** At lambda_llm=0.001, each LLM call
+   costs ~1.0 fitness (1000 tokens * 0.001). Solving one problem is worth ~0.167
+   (1/6 problems). Net: -0.833 per LLM call. M correctly learns to never call LLM
+   because the penalty exceeds the benefit. This is economically rational but means
+   the distillation dynamics can't emerge at this penalty level.
+
+6. **tokens=0 after Gen 0.** All LLM-aware M variants eliminated in the first
+   selection round. The surviving M (seed-conservative) and its offspring never
+   return `:llm_mutation`.
+
+### What's next
+
+**Priority 1: Calibrate lambda_llm.** At 0.001, LLM is too expensive. At 0.0, LLM is
+free and dominates. The sweet spot: LLM cost should be less than the solve benefit for
+hard problems but more than the benefit for easy problems. Try lambda_llm=0.00005
+(1000 tokens = 0.05 fitness, solving 1/6 problems = 0.167 fitness, net positive).
+
+**Priority 2: More outer generations.** The Author pool takes 2-3 generations to
+diversify. M needs 4+ generations to adapt. Run 8-10 outer generations.
+
+**Priority 3: Track distillation.** With calibrated lambda_llm, measure LLM tokens
+per successful solve across generations. Does M learn to use LLM selectively?
 
 ## Next Things to Investigate
 
