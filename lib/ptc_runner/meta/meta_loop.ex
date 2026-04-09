@@ -42,7 +42,8 @@ defmodule PtcRunner.Meta.MetaLoop do
     data_context: %{},
     solver_seeds: [],
     log_dir: nil,
-    eval_config: []
+    eval_config: [],
+    m_llm_mutation_rate: 0.0
   }
 
   @doc """
@@ -114,7 +115,7 @@ defmodule PtcRunner.Meta.MetaLoop do
 
           m_children =
             m_parents
-            |> Enum.map(&mutate_m/1)
+            |> Enum.map(&mutate_m(&1, config))
             |> Enum.reject(&is_nil/1)
             |> Enum.map(fn m -> %{m | generation: gen} end)
 
@@ -266,7 +267,19 @@ defmodule PtcRunner.Meta.MetaLoop do
     elite ++ remaining
   end
 
-  defp mutate_m(%MetaLearner{source: source, id: parent_id}) do
+  defp mutate_m(%MetaLearner{source: source, id: parent_id} = m, config) do
+    llm_model = get_in(config, [:eval_config]) |> get_llm_model()
+    m_llm_rate = Map.get(config, :m_llm_mutation_rate, 0.0)
+
+    # Occasionally use LLM to mutate M if a model is configured
+    if llm_model != nil and :rand.uniform() < m_llm_rate do
+      llm_mutate_m(m, llm_model, config)
+    else
+      gp_mutate_m(source, parent_id)
+    end
+  end
+
+  defp gp_mutate_m(source, parent_id) do
     case Individual.from_source(source, parent_ids: [parent_id]) do
       {:ok, ind} ->
         case Operators.mutate(ind) do
@@ -288,6 +301,117 @@ defmodule PtcRunner.Meta.MetaLoop do
     end
   end
 
+  defp llm_mutate_m(%MetaLearner{source: source, id: parent_id} = m, llm_model, _config) do
+    eval = Map.get(m.metadata, :eval_result, %{})
+    solve_rate = Map.get(eval, :solve_rate, 0.0)
+    tokens = Map.get(eval, :total_llm_tokens, 0)
+    gp_suf = Map.get(eval, :gp_sufficiency, 0.0)
+
+    prompt = """
+    You are improving a meta-learner M — a PTC-Lisp function that selects mutation operators
+    for an inner GP evolution loop. M takes a failure vector and returns an operator keyword.
+
+    Current M program:
+    #{source}
+
+    Performance: solve_rate=#{Float.round(solve_rate, 3)}, llm_tokens=#{tokens}, gp_sufficiency=#{Float.round(gp_suf, 2)}
+
+    Strategy diagnosis:
+    #{diagnose_m_strategy(eval)}
+
+    Valid operators M can return:
+    :point_mutation — tweak a literal value (number, string)
+    :arg_swap — swap arguments of a function call
+    :wrap_form — wrap a subtree in a function call
+    :subtree_delete — replace a subtree with a simple value
+    :subtree_dup — copy one subtree over another
+    :crossover — swap subtrees between two programs
+    :llm_mutation — call LLM to rewrite the program (expensive but creative)
+
+    Failure vector fields available via (get fv :field):
+    :compile_error (bool) — program failed to parse
+    :timeout (bool) — sandbox timeout
+    :wrong_type (bool) — output type mismatch
+    :partial_score (0.0-1.0) — how close to correct
+    :size_bloat (bool) — program too large
+    :no_improvement (bool) — no fitness gain over parent
+    :node_count (int) — AST size of the program
+    :has_join_pattern (bool) — program uses set+contains? pattern
+
+    Improve M's operator selection strategy. Return ONLY the improved (fn [fv] ...) program.
+    No explanation. No markdown fences.
+    """
+
+    request = %{
+      system:
+        "You write PTC-Lisp operator selection functions. " <>
+          "Return ONLY valid PTC-Lisp (fn [fv] (cond ...)) code.",
+      messages: [%{role: :user, content: prompt}]
+    }
+
+    case PtcRunner.LLM.call(llm_model, request) do
+      {:ok, %{content: content}} ->
+        new_source = clean_llm_source(content)
+
+        case MetaLearner.from_source(new_source,
+               parent_id: parent_id,
+               metadata: %{operator: :llm_m_mutation}
+             ) do
+          {:ok, new_m} ->
+            IO.write("M*")
+            new_m
+
+          {:error, _} ->
+            IO.write("Mx")
+            gp_mutate_m(source, parent_id)
+        end
+
+      {:error, _} ->
+        IO.write("Mx")
+        gp_mutate_m(source, parent_id)
+    end
+  end
+
+  defp diagnose_m_strategy(eval) do
+    solve_rate = Map.get(eval, :solve_rate, 0.0)
+    gp_suf = Map.get(eval, :gp_sufficiency, 0.0)
+    tokens = Map.get(eval, :total_llm_tokens, 0)
+    hard_rate = Map.get(eval, :hard_solve_rate, 0.0)
+
+    cond do
+      solve_rate < 0.2 ->
+        "Very low solve rate. M needs to try more aggressive operators or use :llm_mutation for hard problems."
+
+      solve_rate > 0.8 and tokens > 10_000 ->
+        "High solve rate but too many LLM tokens. M should reserve :llm_mutation for problems where GP fails."
+
+      hard_rate < 0.1 and solve_rate > 0.3 ->
+        "Solves easy problems but fails hard ones (cross-dataset joins). M should use :llm_mutation when :has_join_pattern is false and score is low."
+
+      gp_suf > 0.9 ->
+        "Almost all solves from GP. M could achieve more by using :llm_mutation on structural problems."
+
+      true ->
+        "Mixed performance. Look for patterns in which failures respond to which operators."
+    end
+  end
+
+  defp clean_llm_source(content) do
+    content
+    |> String.trim()
+    |> String.replace(~r/^```[\w]*\n?/, "")
+    |> String.replace(~r/\n?```\s*$/, "")
+    |> String.trim()
+  end
+
+  defp get_llm_model(nil), do: nil
+
+  defp get_llm_model(eval_config) when is_list(eval_config) do
+    Keyword.get(eval_config, :llm_model)
+  end
+
+  defp get_llm_model(_), do: nil
+
   defp tournament_select(population, tournament_size, _type) do
     population
     |> Enum.take_random(min(tournament_size, length(population)))
@@ -298,13 +422,52 @@ defmodule PtcRunner.Meta.MetaLoop do
     m_fitnesses = m_population |> Enum.map(& &1.fitness) |> Enum.reject(&is_nil/1)
     a_fitnesses = author_population |> Enum.map(& &1.fitness) |> Enum.reject(&is_nil/1)
 
+    m_eval_results =
+      Enum.map(m_population, fn m -> Map.get(m.metadata, :eval_result, %{}) end)
+
     m_tokens =
-      m_population
-      |> Enum.map(fn m -> get_in(m.metadata, [:eval_result, :total_llm_tokens]) || 0 end)
+      Enum.map(m_eval_results, fn r -> Map.get(r, :total_llm_tokens, 0) end)
 
     author_rates =
       author_population
       |> Enum.map(fn a -> Map.get(a.metadata, :success_rate, 0.0) end)
+
+    # Aggregate measurement metrics across M variants
+    avg_tokens_per_solve = safe_avg(m_eval_results, :tokens_per_solve)
+    avg_hard_solve_rate = safe_avg(m_eval_results, :hard_solve_rate)
+    avg_llm_precision = safe_avg(m_eval_results, :llm_precision)
+    avg_gp_sufficiency = safe_avg(m_eval_results, :gp_sufficiency)
+    total_llm_calls = Enum.sum(Enum.map(m_eval_results, &Map.get(&1, :llm_call_count, 0)))
+
+    # Per-M variant detail for logging (compute entropy once per variant)
+    m_variants =
+      Enum.map(m_population, fn m ->
+        eval = Map.get(m.metadata, :eval_result, %{})
+
+        entropy =
+          case Map.get(eval, :operator_counts) do
+            nil -> 0.0
+            counts -> MetaEvaluator.operator_entropy(counts)
+          end
+
+        %{
+          id: m.id,
+          fitness: m.fitness,
+          solve_rate: Map.get(eval, :solve_rate, 0.0),
+          tokens: Map.get(eval, :total_llm_tokens, 0),
+          tokens_per_solve: Map.get(eval, :tokens_per_solve, 0.0),
+          hard_solve_rate: Map.get(eval, :hard_solve_rate, 0.0),
+          llm_precision: Map.get(eval, :llm_precision, 0.0),
+          gp_sufficiency: Map.get(eval, :gp_sufficiency, 0.0),
+          llm_calls: Map.get(eval, :llm_call_count, 0),
+          entropy: entropy
+        }
+      end)
+
+    avg_entropy =
+      if m_variants == [],
+        do: 0.0,
+        else: Enum.sum(Enum.map(m_variants, & &1.entropy)) / length(m_variants)
 
     %{
       generation: gen,
@@ -316,19 +479,50 @@ defmodule PtcRunner.Meta.MetaLoop do
       author_avg_fitness:
         if(a_fitnesses == [], do: 0.0, else: Enum.sum(a_fitnesses) / length(a_fitnesses)),
       author_avg_success_rate:
-        if(author_rates == [], do: 0.0, else: Enum.sum(author_rates) / length(author_rates))
+        if(author_rates == [], do: 0.0, else: Enum.sum(author_rates) / length(author_rates)),
+      # Measurement metrics (Phase A.6)
+      avg_tokens_per_solve: avg_tokens_per_solve,
+      avg_hard_solve_rate: avg_hard_solve_rate,
+      avg_llm_precision: avg_llm_precision,
+      avg_gp_sufficiency: avg_gp_sufficiency,
+      avg_operator_entropy: avg_entropy,
+      total_llm_calls: total_llm_calls,
+      m_variants: m_variants
     }
+  end
+
+  defp safe_avg(eval_results, key) do
+    values = Enum.map(eval_results, &Map.get(&1, key, 0.0))
+    if values == [], do: 0.0, else: Enum.sum(values) / length(values)
   end
 
   defp print_summary(s) do
     IO.puts(
       "Gen #{String.pad_leading(Integer.to_string(s.generation), 3)}: " <>
         "M best=#{Float.round(s.m_best_fitness, 3)} avg=#{Float.round(s.m_avg_fitness, 3)} " <>
-        "tokens=#{round(s.m_avg_tokens)} | " <>
+        "tokens=#{round(s.m_avg_tokens)} tok/solve=#{Float.round(s.avg_tokens_per_solve, 0)} " <>
+        "llm_prec=#{Float.round(s.avg_llm_precision, 2)} " <>
+        "gp_suf=#{Float.round(s.avg_gp_sufficiency, 2)} | " <>
         "Authors(#{s.author_count}) avg_rate=#{Float.round(s.author_avg_success_rate, 2)} " <>
         "avg_fit=#{Float.round(s.author_avg_fitness, 3)}"
     )
+
+    # Print per-M variant detail
+    Enum.each(s.m_variants, fn v ->
+      IO.puts(
+        "  #{String.pad_trailing(v.id, 20)} " <>
+          "fit=#{format_float(v.fitness, 3)} " <>
+          "solve=#{format_float(v.solve_rate, 2)} " <>
+          "tok=#{v.tokens} " <>
+          "tok/s=#{format_float(v.tokens_per_solve, 0)} " <>
+          "llm=#{v.llm_calls} " <>
+          "ent=#{format_float(v.entropy, 2)}"
+      )
+    end)
   end
+
+  defp format_float(nil, _decimals), do: "nil"
+  defp format_float(f, decimals), do: Float.round(f * 1.0, decimals) |> to_string()
 
   defp log_generation(_gen, _m_pop, _auth_pop, nil), do: :ok
 

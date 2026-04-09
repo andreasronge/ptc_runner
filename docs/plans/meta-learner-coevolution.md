@@ -184,7 +184,7 @@ scope — Authors generate problems directly, solvers attempt them. The TDD dyna
 
 Updated based on experimental findings:
 
-1. **lambda_llm calibration**: find the regime where LLM is worth it for hard problems but not easy ones — this is where distillation dynamics emerge
+1. **lambda_llm calibration**: break-even at 1.25e-5 (tokens_per_solve~10k, solve_value~0.125). Sweep with [0, 1e-6, 5e-6, 1e-5, 2e-5] to bracket the distillation regime
 2. **M representation expansion**: let M return compound actions (e.g., `[:llm_mutation :point_mutation]` — try LLM first, GP fallback) or parameterized operators
 3. **Author structural mutation**: current Authors only tweak thresholds. Adding template-based mutation (wrap in filter, add group-by) would create structurally novel problems
 4. **Longer runs**: 20+ outer generations to see if M strategies diverge meaningfully or converge

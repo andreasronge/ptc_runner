@@ -451,18 +451,119 @@ llm_mutation_rate=0.0 (M controls LLM decisions), lambda_llm=0.001.
    selection round. The surviving M (seed-conservative) and its offspring never
    return `:llm_mutation`.
 
+## Phase A.6: Measurement Infrastructure + lambda_llm Calibration (April 2026)
+
+### What was built
+
+Enhanced the three-species coevolution with comprehensive measurement metrics and
+a lambda_llm calibration sweep tool. Also extended M's representation with AST
+features and added LLM-as-M-mutator.
+
+**Measurement metrics added to MetaEvaluator:**
+- `tokens_per_solve` — total LLM tokens / problems solved (distillation metric)
+- `hard_solve_rate` — solve rate on cross-dataset/grouped problems only
+- `llm_precision` — successful LLM solves / problems with LLM tokens used
+- `gp_sufficiency` — problems solved without LLM / total solved
+- `llm_call_count` — how many times M selected `:llm_mutation`
+- `operator_entropy` — per-M-variant Shannon entropy of operator distribution
+
+**FailureVector AST features:**
+- `node_count` — AST size of the individual being mutated
+- `has_join_pattern` — whether the program uses `set` + `contains?` (join indicator)
+
+**LLM-as-M-mutator:** MetaLoop can now apply LLM mutation to M itself (controlled
+by `m_llm_mutation_rate` config). The LLM receives M's source, performance metrics,
+and a strategy diagnosis, then rewrites the cond-tree.
+
+**Calibration sweep:** `mix meta.sweep` runs MetaLoop at multiple lambda_llm values
+and produces a comparison summary. Logs per-generation metrics to JSON files.
+
+### Experiment 5: lambda_llm = 0.0 (no LLM penalty)
+
+**Setup:** 4 M seeds (seed-random, seed-conservative, seed-llm-aware, seed-adaptive),
+6 anchor Authors, 4 outer generations, llm_model=gemini-2.0-flash-lite,
+llm_mutation_rate=0.0 (M controls LLM decisions), lambda_llm=0.0 (no LLM cost).
+
+**Results (Gen 1):**
+
+| M variant | solve | tokens | tok/solve | llm_prec | gp_suf | hard_solve |
+|-----------|-------|--------|-----------|----------|--------|------------|
+| meta-2451 (evolved) | **1.000** | 70,896 | 10,128 | 1.00 | 0.00 | **1.00** |
+| seed-llm-aware | **1.000** | 66,357 | 9,480 | 1.00 | 0.14 | **1.00** |
+| seed-adaptive | 0.857 | 57,026 | 9,504 | 0.83 | 0.17 | **1.00** |
+| seed-random | 0.429 | 11,438 | 3,813 | 1.00 | 0.33 | 0.00 |
+| seed-conservative | 0.143 | 0 | 0 | 0.00 | 1.00 | 0.00 |
+
+**Key findings:**
+
+1. **M strategies differentiate massively at lambda=0.0.** From 0.143 (conservative,
+   GP-only) to 1.000 (llm-aware, mostly LLM). The flat scores from Experiment 3
+   (all 0.333) are gone — removing the LLM penalty reveals the actual strategy space.
+
+2. **Evolved M (meta-2451) achieved 100% solve rate.** A GP mutation of a seed M
+   produced a variant that solves all 7 problems including cross-dataset joins. Evolution
+   can improve M, not just propagate the best seed.
+
+3. **hard_solve_rate is the differentiator.** seed-conservative and seed-random both
+   fail hard problems (0.0 hard solve). seed-adaptive and seed-llm-aware solve them
+   (1.0 hard solve). The new metric correctly identifies this.
+
+4. **gp_sufficiency reveals the cost structure.** seed-conservative achieves 1.0 GP
+   sufficiency (all solves from GP) but only 0.143 solve rate. seed-llm-aware achieves
+   0.14 gp_sufficiency (mostly LLM) but 1.000 solve rate. The tradeoff is quantified.
+
+5. **llm_precision is uniformly high** (0.83-1.00 for variants that use LLM). When M
+   does call LLM, it works. The problem isn't LLM effectiveness but M's decision about
+   WHEN to call it.
+
+6. **tokens_per_solve is ~10k for LLM-heavy variants** (~$0.001/solve with Gemini Flash
+   Lite). This is the baseline cost before distillation.
+
+### Experiment 6: Full lambda_llm calibration sweep
+
+**Setup:** 4 lambda values (0.0, 5e-5, 1e-4, 1e-3), 4 outer generations each,
+same M seeds and Authors. `mix meta.sweep` with gemini-2.0-flash-lite.
+
+**Results (best M per lambda):**
+
+| lambda | best_M | solve_rate | tokens | tok/solve | hard_solve | gp_suf |
+|--------|--------|-----------|--------|-----------|------------|--------|
+| 0.0 | meta-7069 (evolved) | **1.000** | 86,052 | 8,605 | **1.00** | 0.10 |
+| 5e-5 | seed-conservative | 0.375 | 0 | 0 | 0.00 | 1.00 |
+| 1e-4 | seed-conservative | 0.182 | 0 | 0 | 0.00 | 1.00 |
+| 1e-3 | seed-conservative | 0.444 | 0 | 0 | 0.00 | 1.00 |
+
+**Key findings:**
+
+1. **The sweet spot is below 5e-5.** At every non-zero lambda tested, seed-conservative
+   (GP-only) wins because LLM costs exceed solve benefits. Break-even analysis:
+   tokens_per_solve ~10k, solve_value = 1/num_problems ~= 0.125. Break-even lambda =
+   0.125 / 10000 = **1.25e-5**. The sweep missed it — need lambdas below 5e-5.
+
+2. **At lambda=0.0, evolution produces a 100% solver.** meta-7069 (evolved M) achieves
+   1.0 solve rate including hard problems, using 86k tokens. This proves the mechanism
+   works when LLM has no cost. gp_sufficiency=0.10 confirms LLM did the heavy lifting.
+
+3. **At non-zero lambdas, all M variants converge to GP-only.** Even at 5e-5, every
+   M variant has 0 tokens and 1.0 gp_sufficiency. LLM-using variants are eliminated
+   in early selection rounds.
+
+4. **The distillation dynamics require lambda < 1.25e-5.** Above this, LLM is always
+   uneconomical. Below it, LLM is net-positive for hard problems. The interesting
+   regime is lambda ∈ [5e-6, 1e-5] where hard-problem LLM calls have positive ROI
+   but easy-problem calls don't (since GP already solves easy problems at 0 token cost).
+
 ### What's next
 
-**Priority 1: Calibrate lambda_llm.** At 0.001, LLM is too expensive. At 0.0, LLM is
-free and dominates. The sweet spot: LLM cost should be less than the solve benefit for
-hard problems but more than the benefit for easy problems. Try lambda_llm=0.00005
-(1000 tokens = 0.05 fitness, solving 1/6 problems = 0.167 fitness, net positive).
+**Priority 1: Re-run sweep with finer lambdas** in the range [0, 1e-6, 5e-6, 1e-5, 2e-5].
+This brackets the 1.25e-5 break-even point. The critical question: does M learn to
+use LLM selectively at the break-even lambda?
 
-**Priority 2: More outer generations.** The Author pool takes 2-3 generations to
-diversify. M needs 4+ generations to adapt. Run 8-10 outer generations.
+**Priority 2: Track distillation over time.** At the optimal lambda, does tokens_per_solve
+decrease across outer generations? That's the publishable chart.
 
-**Priority 3: Track distillation.** With calibrated lambda_llm, measure LLM tokens
-per successful solve across generations. Does M learn to use LLM selectively?
+**Priority 3: LLM-evolved M.** With `m_llm_mutation_rate > 0`, does LLM mutation on M
+produce better strategies than GP mutation of M? The meta-meta question.
 
 ## Next Things to Investigate
 

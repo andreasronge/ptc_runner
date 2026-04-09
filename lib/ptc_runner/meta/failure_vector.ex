@@ -21,7 +21,9 @@ defmodule PtcRunner.Meta.FailureVector do
           wrong_type: boolean(),
           partial_score: float(),
           size_bloat: boolean(),
-          no_improvement: boolean()
+          no_improvement: boolean(),
+          node_count: non_neg_integer(),
+          has_join_pattern: boolean()
         }
 
   @valid_operators [
@@ -51,6 +53,7 @@ defmodule PtcRunner.Meta.FailureVector do
     current_fitness = Keyword.get(opts, :current_fitness, nil)
     program_size = Keyword.get(opts, :program_size, 0)
     max_ast_nodes = Keyword.get(opts, :max_ast_nodes, 80)
+    ast = Keyword.get(opts, :ast, nil)
 
     %{
       compile_error: compile_error?(eval_result),
@@ -58,7 +61,9 @@ defmodule PtcRunner.Meta.FailureVector do
       wrong_type: wrong_type?(eval_result, opts),
       partial_score: compute_partial_score(eval_result),
       size_bloat: program_size > max_ast_nodes * 0.8,
-      no_improvement: no_improvement?(parent_fitness, current_fitness)
+      no_improvement: no_improvement?(parent_fitness, current_fitness),
+      node_count: program_size,
+      has_join_pattern: has_join_pattern?(ast)
     }
   end
 
@@ -74,7 +79,9 @@ defmodule PtcRunner.Meta.FailureVector do
       ":wrong_type #{to_lisp_bool(fv.wrong_type)} " <>
       ":partial_score #{fv.partial_score} " <>
       ":size_bloat #{to_lisp_bool(fv.size_bloat)} " <>
-      ":no_improvement #{to_lisp_bool(fv.no_improvement)}}"
+      ":no_improvement #{to_lisp_bool(fv.no_improvement)} " <>
+      ":node_count #{fv.node_count} " <>
+      ":has_join_pattern #{to_lisp_bool(fv.has_join_pattern)}}"
   end
 
   @doc """
@@ -85,7 +92,7 @@ defmodule PtcRunner.Meta.FailureVector do
   `compile_error`, `timeout`, and `wrong_type` default to false.
   """
   @spec from_individual(PtcRunner.Evolve.Individual.t(), keyword()) :: t()
-  def from_individual(%{fitness: fitness, program_size: size}, opts \\ []) do
+  def from_individual(%{fitness: fitness, program_size: size, ast: ast}, opts \\ []) do
     max_ast_nodes = Keyword.get(opts, :max_ast_nodes, 80)
 
     %{
@@ -94,7 +101,9 @@ defmodule PtcRunner.Meta.FailureVector do
       wrong_type: false,
       partial_score: fitness || 0.0,
       size_bloat: size > max_ast_nodes * 0.8,
-      no_improvement: fitness == nil or fitness <= 0.0
+      no_improvement: fitness == nil or fitness <= 0.0,
+      node_count: size,
+      has_join_pattern: has_join_pattern?(ast)
     }
   end
 
@@ -159,4 +168,22 @@ defmodule PtcRunner.Meta.FailureVector do
 
   defp to_lisp_bool(true), do: "true"
   defp to_lisp_bool(false), do: "false"
+
+  # Detect set+contains? join pattern in AST
+  defp has_join_pattern?(nil), do: false
+
+  defp has_join_pattern?(ast) do
+    symbols = collect_symbols(ast)
+    :set in symbols and :contains? in symbols
+  end
+
+  defp collect_symbols({:symbol, s}), do: [s]
+  defp collect_symbols({:list, items}), do: Enum.flat_map(items, &collect_symbols/1)
+  defp collect_symbols({:vector, items}), do: Enum.flat_map(items, &collect_symbols/1)
+
+  defp collect_symbols({:map, pairs}) do
+    Enum.flat_map(pairs, fn {k, v} -> collect_symbols(k) ++ collect_symbols(v) end)
+  end
+
+  defp collect_symbols(_), do: []
 end

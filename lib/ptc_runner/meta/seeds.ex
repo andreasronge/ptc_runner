@@ -95,13 +95,14 @@ defmodule PtcRunner.Meta.Seeds do
   end
 
   defp seed_llm_aware do
-    # Uses LLM for hard cases (low score, wrong type), GP for easy refinements
+    # Uses LLM for hard cases: low score, wrong type, or needs join pattern
     source = """
     (fn [fv]
       (cond
         (get fv :compile_error)            :point_mutation
         (get fv :wrong_type)               :llm_mutation
-        (< (get fv :partial_score) 0.2)    :llm_mutation
+        (and (< (get fv :partial_score) 0.2)
+             (not (get fv :has_join_pattern))) :llm_mutation
         (get fv :size_bloat)               :subtree_delete
         (< (get fv :partial_score) 0.7)    :arg_swap
         :else                              :point_mutation))
@@ -114,7 +115,7 @@ defmodule PtcRunner.Meta.Seeds do
   end
 
   defp seed_adaptive do
-    # Balanced: LLM for structural problems, GP for numeric refinement
+    # Balanced: LLM for structural problems (small programs stuck at low score), GP for refinement
     source = """
     (fn [fv]
       (cond
@@ -122,7 +123,8 @@ defmodule PtcRunner.Meta.Seeds do
         (get fv :timeout)                  :subtree_delete
         (get fv :size_bloat)               :subtree_delete
         (get fv :wrong_type)               :llm_mutation
-        (< (get fv :partial_score) 0.3)    :llm_mutation
+        (and (< (get fv :partial_score) 0.3)
+             (< (get fv :node_count) 20))  :llm_mutation
         (get fv :no_improvement)           :crossover
         (< (get fv :partial_score) 0.8)    :arg_swap
         :else                              :point_mutation))

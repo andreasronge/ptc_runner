@@ -16,7 +16,13 @@ defmodule PtcRunner.Meta.MetaEvaluator do
           solve_rate: float(),
           total_llm_tokens: non_neg_integer(),
           per_problem: [map()],
-          operator_counts: map()
+          operator_counts: map(),
+          llm_call_count: non_neg_integer(),
+          llm_success_count: non_neg_integer(),
+          llm_precision: float(),
+          hard_solve_rate: float(),
+          tokens_per_solve: float(),
+          gp_sufficiency: float()
         }
 
   @type config :: %{
@@ -87,12 +93,40 @@ defmodule PtcRunner.Meta.MetaEvaluator do
 
     fitness = solve_rate - config.lambda_llm * total_llm_tokens
 
+    # LLM call metrics
+    # llm_call_count: how many times M selected :llm_mutation (operator invocations)
+    llm_call_count = Map.get(operator_counts, :llm_mutation, 0)
+    # llm_problems_with_tokens: how many problems had LLM tokens spent on them
+    llm_problems_with_tokens = Enum.count(per_problem, &(&1.llm_tokens > 0))
+    llm_solved = Enum.count(per_problem, &(&1.solved and &1.llm_tokens > 0))
+
+    # Hard problem metrics (cross-dataset problems have "cross" in name or description)
+    hard_problems = Enum.filter(per_problem, &hard_problem?/1)
+    hard_total = length(hard_problems)
+    hard_solved = Enum.count(hard_problems, & &1.solved)
+    hard_solve_rate = if hard_total > 0, do: hard_solved / hard_total, else: 0.0
+
+    # Tokens per solve
+    tokens_per_solve =
+      if solved_count > 0, do: total_llm_tokens / solved_count, else: 0.0
+
+    # GP sufficiency: problems solved without LLM tokens
+    gp_solved = Enum.count(per_problem, &(&1.solved and &1.llm_tokens == 0))
+    gp_sufficiency = if solved_count > 0, do: gp_solved / solved_count, else: 0.0
+
     %{
       fitness: fitness,
       solve_rate: solve_rate,
       total_llm_tokens: total_llm_tokens,
       per_problem: per_problem,
-      operator_counts: operator_counts
+      operator_counts: operator_counts,
+      llm_call_count: llm_call_count,
+      llm_success_count: llm_solved,
+      llm_precision:
+        if(llm_problems_with_tokens > 0, do: llm_solved / llm_problems_with_tokens, else: 0.0),
+      hard_solve_rate: hard_solve_rate,
+      tokens_per_solve: tokens_per_solve,
+      gp_sufficiency: gp_sufficiency
     }
   end
 
@@ -118,6 +152,10 @@ defmodule PtcRunner.Meta.MetaEvaluator do
       end)
       |> Enum.sum()
     end
+  end
+
+  defp hard_problem?(%{problem: name}) do
+    String.contains?(name, "cross") or String.contains?(name, "grouped")
   end
 
   defp build_selector(m, config) do

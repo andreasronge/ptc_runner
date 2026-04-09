@@ -199,8 +199,10 @@ planned. Instead of evolving SubAgent specs (system prompts + parameters), we bu
 a three-species coevolution system operating directly on PTC-Lisp programs:
 
 **Species 1: MetaLearner M** — PTC-Lisp cond-trees that select GP operators
-(including `:llm_mutation`) based on a 6-element failure vector. M controls the
-GP-vs-LLM decision for each solver mutation. Located in `lib/ptc_runner/meta/`.
+(including `:llm_mutation`) based on an 8-element failure vector (6 original +
+`node_count`, `has_join_pattern`). M controls the GP-vs-LLM decision for each
+solver mutation. Located in `lib/ptc_runner/meta/`. Can itself be mutated by
+LLM via `m_llm_mutation_rate` config.
 
 **Species 2: Authors** — PTC-Lisp programs that generate problems by computing
 ground truth from data context. Author fitness = `-abs(success_rate - 0.5)` —
@@ -244,6 +246,19 @@ with M controlling operator selection via an `operator_selector` callback.
 - **The unit of evolution is smaller.** Instead of full agent specs (system prompt +
   parameters + prelude), M is a single cond-tree (~15-30 AST nodes) and Authors are
   single expressions (~5-50 nodes). This makes GP mutation viable and keeps costs low.
+
+### Phase A.6: Measurement infrastructure + lambda_llm calibration
+
+Added 6 measurement metrics to MetaEvaluator (`tokens_per_solve`, `hard_solve_rate`,
+`llm_precision`, `gp_sufficiency`, `llm_call_count`, `operator_entropy`), extended
+FailureVector with AST features (`node_count`, `has_join_pattern`), added LLM-as-M-mutator,
+and built `mix meta.sweep` calibration tool.
+
+**lambda_llm calibration results:** At lambda=0.0, evolved M achieves 1.0 solve rate
+(100%, including hard cross-dataset joins) using 86k tokens. At lambda>=5e-5, all M
+variants converge to GP-only (0 tokens, 0 hard solves). Break-even lambda = 1.25e-5
+(tokens_per_solve ~10k, solve_value ~0.125). The distillation regime requires lambda
+∈ [5e-6, 1e-5] — below our initial sweep range.
 
 ### Remaining open questions from original plan
 
