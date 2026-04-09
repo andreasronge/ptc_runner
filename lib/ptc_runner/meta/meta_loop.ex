@@ -44,6 +44,7 @@ defmodule PtcRunner.Meta.MetaLoop do
     log_dir: nil,
     eval_config: [],
     m_llm_mutation_rate: 0.0,
+    m_crossover_rate: 0.5,
     parallel: true,
     task_timeout: 120_000
   }
@@ -109,16 +110,9 @@ defmodule PtcRunner.Meta.MetaLoop do
           all_authors_this_gen = anchors ++ evolved ++ author_children
           {problems, all_authors_this_gen} = generate_problems(all_authors_this_gen, config)
 
-          # --- Evolve M ---
-          m_parents =
-            Enum.map(1..config.m_lambda, fn _ ->
-              tournament_select(m_pop, config.tournament_size, :m)
-            end)
-
+          # --- Evolve M (crossover + mutation) ---
           m_children =
-            m_parents
-            |> Enum.map(&mutate_m(&1, config))
-            |> Enum.reject(&is_nil/1)
+            reproduce_m(m_pop, config)
             |> Enum.map(fn m -> %{m | generation: gen} end)
 
           all_m = m_pop ++ m_children
@@ -309,6 +303,22 @@ defmodule PtcRunner.Meta.MetaLoop do
     elite ++ remaining
   end
 
+  defp reproduce_m(m_pop, config) do
+    crossover_rate = Map.get(config, :m_crossover_rate, 0.5)
+
+    Enum.map(1..config.m_lambda, fn _ ->
+      if :rand.uniform() < crossover_rate and length(m_pop) >= 2 do
+        parent_a = tournament_select(m_pop, config.tournament_size, :m)
+        parent_b = tournament_select(m_pop, config.tournament_size, :m)
+        crossover_m(parent_a, parent_b) || mutate_m(parent_a, config)
+      else
+        parent = tournament_select(m_pop, config.tournament_size, :m)
+        mutate_m(parent, config)
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
   defp mutate_m(%MetaLearner{source: source, id: parent_id} = m, config) do
     llm_model = get_in(config, [:eval_config]) |> get_llm_model()
     m_llm_rate = Map.get(config, :m_llm_mutation_rate, 0.0)
@@ -319,6 +329,93 @@ defmodule PtcRunner.Meta.MetaLoop do
     else
       gp_mutate_m(source, parent_id)
     end
+  end
+
+  @doc false
+  # Branch-level crossover between two M variants.
+  # Extracts cond branches from both parents and interleaves them.
+  # Always ends with an :else branch from one parent.
+  def crossover_m(%MetaLearner{} = a, %MetaLearner{} = b) do
+    with {:ok, branches_a} <- extract_cond_branches(a.ast),
+         {:ok, branches_b} <- extract_cond_branches(b.ast) do
+      # Separate :else branches from regular branches
+      {regular_a, else_a} = split_else_branch(branches_a)
+      {regular_b, else_b} = split_else_branch(branches_b)
+
+      # Interleave: randomly sample from both parents
+      all_regular = regular_a ++ regular_b
+      shuffled = Enum.shuffle(all_regular)
+
+      # Take a subset (between min and max of parent branch counts)
+      min_branches = max(1, min(length(regular_a), length(regular_b)))
+      max_branches = length(regular_a) + length(regular_b)
+      take_count = min_branches + :rand.uniform(max(1, max_branches - min_branches)) - 1
+      selected = Enum.take(shuffled, take_count)
+
+      # Pick :else from either parent
+      else_branch = if :rand.uniform() < 0.5, do: else_a, else: else_b
+
+      # Rebuild the (fn [fv] (cond ...)) AST
+      cond_items =
+        Enum.flat_map(selected, fn {condition, result} -> [condition, result] end) ++
+          else_branch
+
+      new_ast =
+        {:list,
+         [
+           {:symbol, :fn},
+           {:vector, [{:symbol, :fv}]},
+           {:list, [{:symbol, :cond} | cond_items]}
+         ]}
+
+      new_source = Operators.format_ast(new_ast)
+
+      case MetaLearner.from_source(new_source,
+             parent_id: "#{a.id}+#{b.id}",
+             metadata: %{operator: :crossover_m, parents: [a.id, b.id]}
+           ) do
+        {:ok, new_m} ->
+          IO.write("X")
+          new_m
+
+        {:error, _} ->
+          nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  # Extract cond branches as [{condition_ast, result_ast}] pairs from M's AST.
+  # M structure: (fn [fv] (cond condition1 result1 condition2 result2 ... :else resultN))
+  defp extract_cond_branches(
+         {:list, [{:symbol, :fn}, {:vector, _}, {:list, [{:symbol, :cond} | body]}]}
+       ) do
+    branches = pair_cond_body(body)
+    if branches == [], do: {:error, :no_branches}, else: {:ok, branches}
+  end
+
+  defp extract_cond_branches(_), do: {:error, :not_a_cond_fn}
+
+  defp pair_cond_body([]), do: []
+
+  defp pair_cond_body([condition, result | rest]),
+    do: [{condition, result} | pair_cond_body(rest)]
+
+  defp pair_cond_body([_single]), do: []
+
+  # Split the :else branch from regular branches
+  defp split_else_branch(branches) do
+    {else_branches, regular} =
+      Enum.split_with(branches, fn {condition, _result} -> condition == {:keyword, :else} end)
+
+    else_part =
+      case else_branches do
+        [{_cond, result} | _] -> [{:keyword, :else}, result]
+        [] -> [{:keyword, :else}, {:keyword, :point_mutation}]
+      end
+
+    {regular, else_part}
   end
 
   defp gp_mutate_m(source, parent_id) do
