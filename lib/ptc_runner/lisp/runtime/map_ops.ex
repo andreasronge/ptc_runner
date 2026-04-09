@@ -100,6 +100,10 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.assoc_variadic([%{}, :a, 1, :b, 2, :c, 3])
       %{a: 1, b: 2, c: 3}
   """
+  def assoc_variadic([nil | pairs]) when rem(length(pairs), 2) == 0 do
+    assoc_variadic([%{} | pairs])
+  end
+
   def assoc_variadic([m | pairs]) when is_map(m) and rem(length(pairs), 2) == 0 do
     pairs
     |> Enum.chunk_every(2)
@@ -127,6 +131,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   # Keep the 3-arg version for direct calls
+  def assoc(nil, k, v), do: %{k => v}
   def assoc(m, k, v) when is_map(m), do: Map.put(m, k, v)
 
   # List support - Clojure allows index == length for appending
