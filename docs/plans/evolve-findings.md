@@ -1,8 +1,10 @@
+Explore what has been done in the aria of Evolutionary Computation and ALife, from Hillis experiments back in late 1980 to today and how this can be combined with the power of LLM - the quest of finding an evolving meta harness around LLM 
+
 # Evolve Findings: GP+LLM Hybrid on PTC-Lisp
 
 Status: ACTIVE RESEARCH
 Date: 2026-04-01
-Branch: gstack
+Branch: gstack of ptc_runner on GitHub
 Design doc: `~/.gstack/projects/andreasronge-ptc_runner/andreasronge-gstack-design-20260401-131308.md`
 
 ## Background: What is PTC-Lisp and Why Evolve It?
@@ -298,6 +300,112 @@ Key design decisions:
   (one GP-heavy, one LLM-heavy) and migrate between them.
 - **Minimum size threshold**: don't let programs shrink below a minimum node count
   to prevent collapse to degenerate 3-node programs.
+
+## Phase A: Self-Improving Meta-Learner M (April 2026)
+
+### What was built
+
+A meta-evolution system where M variants (PTC-Lisp cond-trees) compete to
+select GP operators for the inner evolution loop. M is itself subject to GP
+mutation — genuine Godelian self-reference where the meta-learner and its
+subjects share the same representation.
+
+```
+lib/ptc_runner/meta/
+├── failure_vector.ex     # 6-element failure signal from eval results
+├── meta_learner.ex       # M struct with sandbox-based operator selection
+├── meta_evaluator.ex     # Runs inner evolve loop with M controlling operators
+├── meta_loop.ex          # Outer (mu+lambda) evolution of M population
+└── seeds.ex              # 4 seed M variants + 3 baselines
+```
+
+Integration: `evolve/loop.ex` accepts an `operator_selector` callback.
+`evolve/operators.ex` accepts an explicit `operator:` option. Both are
+backward-compatible — existing behavior unchanged when no callback is provided.
+
+Also fixed: nil `step.usage` crash in `evolve/evaluator.ex` (pre-existing bug
+exposed by GP mutations producing broken programs).
+
+### Experiment 1: GP-only (no LLM mutation)
+
+**Setup:** 4 seed M variants + 3 baselines, 3 problems (count-expensive,
+avg-order, count-all), 8 inner generations, population 12, no LLM.
+
+**Result:** All 7 variants scored identically (0.333 solve_rate — only
+the trivial P3 solved). Zero differentiation across M variants.
+
+**Why:** GP operators alone cannot make structural leaps. P1 needed a
+threshold change from 400→500 (too far for point mutation). P2 needed
+a structural rewrite (count→get+first). M's operator selection is
+irrelevant when all operators are equally incapable.
+
+### Experiment 2: GP+LLM (0.3 mutation rate, gemini-flash-lite)
+
+**Setup:** Same variants, 4 problems (added active-expensive), 0.3 LLM
+mutation rate, `openrouter:google/gemini-3.1-flash-lite-preview`.
+
+**Result:** All variants solved all 4 problems (1.0 solve_rate). LLM
+mutation solved everything by Gen 1-3. Token tracking was broken
+(tokens=0 everywhere due to evaluate_population overwriting the field).
+
+**Why:** At 0.3 LLM rate, the LLM fires frequently enough to solve
+everything regardless of M's GP operator selection. M is irrelevant
+in the other direction — too much LLM help.
+
+### Experiment 3: GP+LLM (0.1 mutation rate, harder problems)
+
+**Setup:** Same variants, 4 problems including cross-dataset join
+(eng-expense-count requiring set+contains?+filter across employees→expenses).
+LLM rate lowered to 0.1. Token tracking fixed.
+
+**Results:**
+
+| variant | solve | fitness | tokens | entropy |
+|---------|-------|---------|--------|---------|
+| baseline-random | 0.75 | -10.06 | 10,813 | 0.0 |
+| seed-random | 0.75 | -12.47 | 13,215 | 2.43 |
+| seed-conservative | 0.75 | -14.53 | 15,283 | 0.0 |
+| seed-aggressive | 0.75 | -17.42 | 18,166 | 0.78 |
+| seed-adaptive | 0.75 | -18.38 | 19,127 | 0.34 |
+| baseline-handwritten | 0.75 | -18.53 | 19,278 | 1.33 |
+| baseline-llm-heavy | 1.0 | -33.95 | 34,954 | 0.0 |
+
+**Key findings:**
+
+1. **Cross-dataset join (P3) is the differentiator.** Only baseline-llm-heavy
+   solved it, spending 13,924 tokens. All others failed — GP cannot invent
+   `set` + `contains?` patterns from seeds that don't contain them.
+
+2. **Token tracking works.** baseline-random: 10,813 tokens. baseline-llm-heavy:
+   34,954 tokens. The 3x cost difference is now visible in fitness.
+
+3. **The real tension:** baseline-llm-heavy solves everything (1.0) at 3x cost.
+   baseline-random is cheapest but misses P3. The optimal strategy: use LLM only
+   for structurally hard problems, GP for the rest.
+
+4. **M's action space is too narrow.** M can select among 6 GP operators but
+   cannot request LLM mutation. The GP-vs-LLM decision is made by a random roll
+   (10% chance), not by M. M needs `:llm_mutation` as a 7th option to control
+   WHEN to spend tokens. That's where distillation happens.
+
+5. **Operator entropy confirms M variants behave differently.** seed-random=2.43
+   (all operators), seed-conservative=0.0 (collapsed to arg_swap), seed-aggressive=0.78
+   (crossover+subtree_dup). The mechanism works mechanically; the action space
+   just can't affect outcomes for hard problems.
+
+### What's next for M
+
+**Priority 1:** Add `:llm_mutation` as M's 7th operator option. When M returns
+`:llm_mutation`, the inner loop uses LLM mutation for that individual regardless
+of the random roll. M learns: "when partial_score < 0.3 and the program is
+structurally simple, call the LLM."
+
+**Priority 2:** Track "LLM tokens per successful solve" as the distillation
+metric. If M learns to solve P1/P2/P4 with GP-only and reserve LLM for P3,
+the tokens-per-solve should drop while solve_rate holds. That's the chart.
+
+**Priority 3:** Run the outer MetaLoop (evolving M variants) with `:llm_mutation`
+enabled. Does the evolved M learn a better GP-vs-LLM policy than the baselines?
 
 ## Next Things to Investigate
 

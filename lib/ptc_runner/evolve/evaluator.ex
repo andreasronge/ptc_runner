@@ -57,25 +57,27 @@ defmodule PtcRunner.Evolve.Evaluator do
     case result do
       {:ok, step} ->
         correct = matches_output?(step.return, problem.expected_output, problem.output_type)
-        llm_tokens = get_in(step.usage, [:total_tokens]) || 0
+        usage = step.usage || %{}
+        llm_tokens = get_in(usage, [:total_tokens]) || 0
 
         %{
           correct: correct,
           llm_tokens: llm_tokens,
           output: step.return,
           error: nil,
-          duration_ms: Map.get(step.usage, :duration_ms, 0)
+          duration_ms: Map.get(usage, :duration_ms, 0)
         }
 
       {:error, step} ->
-        llm_tokens = get_in(step.usage, [:total_tokens]) || 0
+        usage = step.usage || %{}
+        llm_tokens = get_in(usage, [:total_tokens]) || 0
 
         %{
           correct: false,
           llm_tokens: llm_tokens,
           output: nil,
           error: step.fail,
-          duration_ms: Map.get(step.usage, :duration_ms, 0)
+          duration_ms: Map.get(usage, :duration_ms, 0)
         }
     end
   end

@@ -20,6 +20,8 @@ defmodule PtcRunner.Evolve.Loop do
 
   alias PtcRunner.Evolve.{Evaluator, Individual, LLMOperators, Operators}
 
+  @type operator_selector :: (Individual.t() -> atom()) | nil
+
   @type config :: %{
           generations: pos_integer(),
           population_size: pos_integer(),
@@ -28,7 +30,8 @@ defmodule PtcRunner.Evolve.Loop do
           max_ast_nodes: pos_integer(),
           llm_mutation_rate: float(),
           llm_model: String.t() | nil,
-          eval_config: Evaluator.config()
+          eval_config: Evaluator.config(),
+          operator_selector: operator_selector()
         }
 
   @default_config %{
@@ -39,6 +42,7 @@ defmodule PtcRunner.Evolve.Loop do
     max_ast_nodes: 80,
     llm_mutation_rate: 0.0,
     llm_model: nil,
+    operator_selector: nil,
     eval_config: %{
       lambda_llm: 0.01,
       lambda_size: 0.005,
@@ -107,40 +111,45 @@ defmodule PtcRunner.Evolve.Loop do
     print_generation_summary(0, population)
 
     # Evolution loop
-    {final_pop, history} =
-      Enum.reduce(1..config.generations, {population, [gen_summary(0, population)]}, fn gen,
-                                                                                        {pop,
-                                                                                         hist} ->
-        # Select parents via tournament
-        parents =
-          Enum.map(1..config.population_size, fn _ ->
-            tournament_select(pop, config.tournament_size)
-          end)
+    {final_pop, history, total_llm_tokens} =
+      Enum.reduce(
+        1..config.generations,
+        {population, [gen_summary(0, population)], 0},
+        fn gen, {pop, hist, tokens_acc} ->
+          # Select parents via tournament
+          parents =
+            Enum.map(1..config.population_size, fn _ ->
+              tournament_select(pop, config.tournament_size)
+            end)
 
-        # Produce children via mutation, crossover, or LLM mutation
-        children =
-          parents
-          |> Enum.map(fn parent ->
-            produce_child(parent, pop, problem, config)
-          end)
-          |> Enum.filter(fn child -> child.program_size <= config.max_ast_nodes end)
+          # Produce children via mutation, crossover, or LLM mutation
+          children =
+            parents
+            |> Enum.map(fn parent ->
+              produce_child(parent, pop, problem, config)
+            end)
+            |> Enum.filter(fn child -> child.program_size <= config.max_ast_nodes end)
 
-        # Evaluate children
-        children = evaluate_population(children, problem, config.eval_config)
+          # Track LLM tokens from mutation (before evaluate_population resets them)
+          gen_llm_tokens = Enum.sum(Enum.map(children, & &1.llm_tokens_used))
 
-        # (mu+lambda) selection with elitism
-        all = pop ++ children
-        sorted = Enum.sort_by(all, & &1.fitness, :desc)
+          # Evaluate children
+          children = evaluate_population(children, problem, config.eval_config)
 
-        # Elitism: top N pass through unchanged
-        elite = Enum.take(sorted, config.elitism)
-        rest = Enum.drop(sorted, config.elitism)
-        remaining = Enum.take(rest, config.population_size - config.elitism)
-        new_pop = elite ++ remaining
+          # (mu+lambda) selection with elitism
+          all = pop ++ children
+          sorted = Enum.sort_by(all, & &1.fitness, :desc)
 
-        print_generation_summary(gen, new_pop)
-        {new_pop, hist ++ [gen_summary(gen, new_pop)]}
-      end)
+          # Elitism: top N pass through unchanged
+          elite = Enum.take(sorted, config.elitism)
+          rest = Enum.drop(sorted, config.elitism)
+          remaining = Enum.take(rest, config.population_size - config.elitism)
+          new_pop = elite ++ remaining
+
+          print_generation_summary(gen, new_pop)
+          {new_pop, hist ++ [gen_summary(gen, new_pop)], tokens_acc + gen_llm_tokens}
+        end
+      )
 
     best = Enum.max_by(final_pop, & &1.fitness)
 
@@ -148,6 +157,7 @@ defmodule PtcRunner.Evolve.Loop do
     IO.puts("Fitness: #{Float.round(best.fitness, 4)}")
     IO.puts("Size: #{best.program_size} nodes")
     IO.puts("Source: #{best.source}")
+    IO.puts("LLM tokens used (total run): #{total_llm_tokens}")
     IO.puts("")
 
     # Verify best against problem
@@ -159,7 +169,8 @@ defmodule PtcRunner.Evolve.Loop do
       population: final_pop,
       best: best,
       history: history,
-      problem: problem.name
+      problem: problem.name,
+      total_llm_tokens: total_llm_tokens
     }
   end
 
@@ -167,7 +178,9 @@ defmodule PtcRunner.Evolve.Loop do
     Enum.map(population, fn ind ->
       result = Evaluator.evaluate(ind, problem, eval_config)
       fitness = Evaluator.fitness(ind, result, problem, eval_config)
-      %{ind | fitness: fitness, llm_tokens_used: result.llm_tokens}
+      # Preserve LLM mutation tokens (set by produce_child), add any runtime tokens
+      total_tokens = ind.llm_tokens_used + result.llm_tokens
+      %{ind | fitness: fitness, llm_tokens_used: total_tokens}
     end)
   end
 
@@ -194,7 +207,7 @@ defmodule PtcRunner.Evolve.Loop do
 
           {:error, _reason} ->
             IO.write("x")
-            gp_mutate(parent, pop)
+            gp_mutate(parent, pop, config)
         end
 
       # Crossover: 20% of non-LLM reproductions
@@ -203,20 +216,28 @@ defmodule PtcRunner.Evolve.Loop do
 
         case Operators.crossover(parent, other) do
           {:ok, child} -> child
-          {:error, _} -> gp_mutate(parent, pop)
+          {:error, _} -> gp_mutate(parent, pop, config)
         end
 
       # GP mutation: the default
       true ->
-        gp_mutate(parent, pop)
+        gp_mutate(parent, pop, config)
     end
   end
 
-  defp gp_mutate(parent, _pop) do
-    case Operators.mutate(parent) do
+  defp gp_mutate(parent, _pop, config) do
+    case apply_gp_operator(parent, config) do
       {:ok, child} -> child
       {:error, _} -> parent
     end
+  end
+
+  defp apply_gp_operator(parent, %{operator_selector: nil}) do
+    Operators.mutate(parent)
+  end
+
+  defp apply_gp_operator(parent, %{operator_selector: selector}) when is_function(selector) do
+    Operators.mutate(parent, operator: selector.(parent))
   end
 
   defp tournament_select(population, tournament_size) do

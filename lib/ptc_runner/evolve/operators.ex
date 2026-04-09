@@ -36,23 +36,45 @@ defmodule PtcRunner.Evolve.Operators do
   # Common wrapping functions
   @wrap_fns [:count, :first, :last, :sort, :reverse, :keys, :vals, :str]
 
+  # Maps external operator names (used by M) to internal mutation operator names
+  @operator_mapping %{
+    point_mutation: :point_literal,
+    arg_swap: :arg_swap,
+    wrap_form: :wrap,
+    subtree_delete: :subtree_delete,
+    subtree_dup: :subtree_dup,
+    crossover: :point_symbol
+  }
+
   @doc """
   Apply a random mutation to an individual, returning a new individual.
 
   Picks one of the cheap mutation operators at random and applies it.
   Returns `{:ok, new_individual}` or `{:error, reason}`.
+
+  Options:
+  - `:operator` — an explicit operator atom (from M's selection). Maps external names
+    like `:point_mutation` to internal operators. If not provided, picks randomly.
   """
-  @spec mutate(Individual.t()) :: {:ok, Individual.t()} | {:error, term()}
-  def mutate(%Individual{ast: ast, id: parent_id, generation: gen} = _parent) do
+  @spec mutate(Individual.t(), keyword()) :: {:ok, Individual.t()} | {:error, term()}
+  def mutate(individual, opts \\ [])
+
+  def mutate(%Individual{ast: ast, id: parent_id, generation: gen}, opts) do
     operator =
-      Enum.random([
-        :point_literal,
-        :point_symbol,
-        :arg_swap,
-        :subtree_delete,
-        :subtree_dup,
-        :wrap
-      ])
+      case Keyword.get(opts, :operator) do
+        nil ->
+          Enum.random([
+            :point_literal,
+            :point_symbol,
+            :arg_swap,
+            :subtree_delete,
+            :subtree_dup,
+            :wrap
+          ])
+
+        external_op ->
+          Map.get(@operator_mapping, external_op, :point_literal)
+      end
 
     case apply_mutation(ast, operator) do
       {:ok, new_ast} ->
