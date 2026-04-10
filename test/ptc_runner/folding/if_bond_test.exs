@@ -68,16 +68,19 @@ defmodule PtcRunner.Folding.IfBondTest do
   end
 
   describe "if through phenotype pipeline" do
-    test "genotype producing if expression" do
-      # 3KX5ST should produce an if with comparison
-      case Phenotype.develop("3KX5ST") do
-        {:ok, source} ->
-          assert String.contains?(source, "if")
+    test "some genotypes produce if expressions" do
+      # Try several genotypes containing X(if) — at least one should produce if
+      candidates = ["XK53ST", "3KX5ST", "XS5T3K", "5XK3ST", "SX3T5K", "XG7MAJ"]
 
-        {:error, _} ->
-          # Some fold geometries won't produce if — that's okay
-          :ok
-      end
+      if_count =
+        Enum.count(candidates, fn g ->
+          case Phenotype.develop(g) do
+            {:ok, source} -> String.contains?(source, "if")
+            {:error, _} -> false
+          end
+        end)
+
+      assert if_count > 0, "None of the candidate genotypes produced an if expression"
     end
   end
 

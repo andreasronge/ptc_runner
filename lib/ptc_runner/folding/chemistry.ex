@@ -403,19 +403,25 @@ defmodule PtcRunner.Folding.Chemistry do
     end
   end
 
-  # if + predicate + then_expr + else_expr → (if predicate then else)
-  # Predicate: assembled comparison, match tool call, or boolean-producing expression
-  # Branches: any value or assembled expression
+  # if + predicate + then_expr [+ else_expr] → (if predicate then [else])
+  # Any adjacent fragment can serve as predicate (PTC-Lisp treats truthy values as true).
+  # Prefer proper predicates (comparisons, match, connectives) when available.
+  # Only needs 2 adjacent fragments minimum (predicate + then-branch).
   defp try_if_bond(pos, fmap, adj, consumed) do
     neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
 
-    # Find a predicate (comparison, match result, connective, or boolean-like)
-    predicates = Enum.filter(neighbors, fn {_p, f} -> predicate_fragment?(f) end)
-    # Find branch expressions (any value fragment)
-    branches = Enum.filter(neighbors, fn {_p, f} -> branch_fragment?(f) end)
+    # All usable neighbors (anything that's not another if/match)
+    usable =
+      Enum.reject(neighbors, fn {_p, f} ->
+        match?({:fn_fragment, :if}, f) or match?({:fn_fragment, :match}, f)
+      end)
 
-    case {predicates, branches} do
-      {[{pred_pos, pred_frag} | _], [{then_pos, then_frag}, {else_pos, else_frag} | _]} ->
+    # Sort: prefer predicates first, then branches
+    {preds, non_preds} = Enum.split_with(usable, fn {_p, f} -> predicate_fragment?(f) end)
+    sorted = preds ++ non_preds
+
+    case sorted do
+      [{pred_pos, pred_frag}, {then_pos, then_frag}, {else_pos, else_frag} | _] ->
         ast =
           {:list,
            [
@@ -428,22 +434,13 @@ defmodule PtcRunner.Folding.Chemistry do
         fmap = Map.put(fmap, pos, {:assembled, ast})
 
         consumed =
-          consumed
-          |> MapSet.put(pred_pos)
-          |> MapSet.put(then_pos)
-          |> MapSet.put(else_pos)
+          consumed |> MapSet.put(pred_pos) |> MapSet.put(then_pos) |> MapSet.put(else_pos)
 
         {fmap, consumed}
 
-      {[{pred_pos, pred_frag} | _], [{then_pos, then_frag}]} ->
-        # Two-branch if: missing else, use nil
+      [{pred_pos, pred_frag}, {then_pos, then_frag}] ->
         ast =
-          {:list,
-           [
-             {:symbol, :if},
-             fragment_to_ast(pred_frag),
-             fragment_to_ast(then_frag)
-           ]}
+          {:list, [{:symbol, :if}, fragment_to_ast(pred_frag), fragment_to_ast(then_frag)]}
 
         fmap = Map.put(fmap, pos, {:assembled, ast})
         consumed = consumed |> MapSet.put(pred_pos) |> MapSet.put(then_pos)
@@ -462,13 +459,6 @@ defmodule PtcRunner.Folding.Chemistry do
   # Match tool calls are predicates (return boolean)
   defp predicate_fragment?({:assembled, {:list, [{:ns_symbol, :tool, :match} | _]}}), do: true
   defp predicate_fragment?(_), do: false
-
-  # A branch can be any value-producing fragment
-  defp branch_fragment?({:assembled, _}), do: true
-  defp branch_fragment?({:literal, _}), do: true
-  defp branch_fragment?({:data_source, _}), do: true
-  defp branch_fragment?({:field_key, _}), do: true
-  defp branch_fragment?(_), do: false
 
   defp assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions) do
     pattern_str =
