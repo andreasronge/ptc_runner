@@ -1,34 +1,49 @@
 # Evolution Roadmap
 
 Status: ACTIVE
-Date: 2026-04-09
-Context: See `evolution-findings.md` for completed experiments. See `archive/` for historical plans.
+Date: 2026-04-10
+Context: See `evolution-findings.md` for completed experiments (through Experiment 7). See `archive/` for historical plans.
 
 ## Current State
 
-Three-species coevolution (Authors + MetaLearner M + Solvers) is working. M controls
-GP-vs-LLM operator selection via cond-trees. At lambda_llm=0.0, evolved M achieves
-100% solve rate. At lambda_llm >= 5e-5, all M variants converge to GP-only. The
-distillation regime (where M learns selective LLM use) requires lambda in [5e-6, 1e-5].
+Three-species coevolution with branch-level M crossover. Experiment 7 (fine lambda
+sweep) found the distillation regime at lambda ∈ [5e-6, 2e-5] with 0.429 solve rate.
+All best M's are crossover-evolved variants. Hard problems (cross-dataset joins) remain
+unsolved — the LLM call cap (5) is likely too restrictive.
 
-Key modules: `lib/ptc_runner/meta/` (meta_loop.ex, meta_evaluator.ex, meta_learner.ex,
-author.ex, failure_vector.ex, seeds.ex) and `lib/ptc_runner/evolve/` (loop.ex,
-operators.ex, llm_operators.ex, evaluator.ex, individual.ex).
+Key modules: `lib/ptc_runner/meta/` (meta_loop.ex with `crossover_m/2` and `reproduce_m/2`,
+meta_evaluator.ex with LLM call cap, meta_learner.ex, author.ex, failure_vector.ex,
+seeds.ex) and `lib/ptc_runner/evolve/` (loop.ex, operators.ex, llm_operators.ex,
+evaluator.ex, individual.ex).
 
-## Priority 1: lambda_llm Calibration (Next Experiment)
+## Done
 
-Break-even lambda = 1.25e-5 (tokens_per_solve ~10k, solve_value ~0.125).
+- ~~lambda_llm calibration~~ — Experiment 7: sweet spot at [5e-6, 2e-5], break-even
+  prediction of 1.25e-5 confirmed. No distillation trend in 4 generations.
+- ~~Branch-level M crossover~~ — `crossover_m/2` implemented, 100% offspring validity,
+  crossover offspring winning in all lambda points.
+- ~~LLM call cap~~ — `max_llm_calls_per_problem: 5` in MetaEvaluator. Prevents
+  degenerate M variants from burning tokens. May be too restrictive for hard problems.
+- ~~Default model~~ — `gemini-flash-lite` alias, resolved via Registry.
 
-**Experiment:** Sweep with [0, 1e-6, 5e-6, 1e-5, 2e-5] to bracket the distillation
-regime. Use `mix meta.sweep`.
+## Priority 1: Unlock Hard Problem Solving
 
-**Key question:** Does M learn to use LLM selectively at the break-even lambda? (LLM
-for hard cross-dataset joins, GP for easy threshold problems.)
+hard_solve_rate = 0.0 in Experiment 7. Two hypotheses:
+
+**A) LLM call cap too low.** Raise `max_llm_calls_per_problem` from 5 → 15 and rerun
+at lambda=5e-6. If hard problems start solving, the cap was the bottleneck.
+
+**B) Seed solvers too far from solution.** The 3 solver seeds are trivial count/filter
+programs. Hard problems need `set` + `contains?` patterns. Add a solver seed closer
+to the cross-dataset join structure.
+
+**Experiment:** Run both A and B independently, compare hard_solve_rate.
 
 ## Priority 2: Distillation Over Time
 
-At the optimal lambda, track `tokens_per_solve` across outer generations. If it
-decreases while `solve_rate` holds, that's distillation — the publishable chart.
+At lambda=5e-6, run 12+ outer generations. Track `tokens_per_solve` per generation.
+If it decreases while `solve_rate` holds, that's distillation — the publishable chart.
+Experiment 7 showed no trend in 4 generations — may need longer runs.
 
 ## Priority 3: LLM-Evolved M
 

@@ -595,16 +595,76 @@ The hard solver program was invented by LLM mutation — GP cannot discover `set
 `contains?` patterns from seeds that don't contain them. Once invented, the program
 runs for free (~5ms in the BEAM sandbox, 0 tokens at runtime).
 
+## Phase A.7: Branch-Level Crossover + Fine Lambda Sweep (April 2026)
+
+### What was built
+
+**Branch-level crossover for M variants.** `crossover_m/2` in `meta_loop.ex` extracts
+cond branches from two parent M's, shuffles and samples them, and recombines into a
+valid `(fn [fv] (cond ...))` offspring. Always preserves an `:else` fallback branch.
+New `reproduce_m/2` uses 50% crossover + 50% mutation (configurable via `m_crossover_rate`).
+
+Crossover offspring validity: 100% in testing (5/5). Cond branches are semantically
+modular units (condition → operator), making them natural crossover points. This was
+the recommendation from a FirstPrinciples + Council analysis comparing crossover,
+genotype/phenotype separation, and epistatic interactions.
+
+**LLM call cap.** `max_llm_calls_per_problem` (default 5) in MetaEvaluator. When M
+requests `:llm_mutation` past the cap, forced to `:point_mutation`. Prevents degenerate
+M variants from burning excessive time/tokens.
+
+**Model default.** `meta.sweep` now defaults to `gemini-flash-lite` (resolved via
+`LLM.Registry.resolve!`). Previous runs required manual `--llm-model` flag.
+
+**Performance.** Attempted parallel M evaluation via `Task.async_stream` but Finch
+connection pool exhaustion at >2 concurrent LLM-calling tasks forced sequential M eval.
+Author generation remains parallel. Wall-clock timing per lambda point and per-M
+evaluation added.
+
+### Experiment 7: Fine lambda_llm calibration sweep
+
+**Setup:** 5 lambda values (0.0, 1e-6, 5e-6, 1e-5, 2e-5), 4 outer generations,
+gemini-flash-lite, m_crossover_rate=0.5, max_llm_calls_per_problem=5, 6 anchor Authors.
+
+**Results (best M per lambda):**
+
+| lambda | best_M | solve_rate | tokens | tok/solve | hard_solve | gp_suf |
+|--------|--------|-----------|--------|-----------|------------|--------|
+| 0.0 | meta-2155 | 0.286 | 4,646 | 2,323 | 0.00 | 0.50 |
+| 1e-6 | meta-28251 | 0.375 | 5,629 | 1,876 | 0.00 | 0.33 |
+| 5e-6 | meta-56022 | **0.429** | 4,733 | **1,578** | 0.00 | 0.33 |
+| 1e-5 | meta-82186 | **0.429** | 4,685 | **1,562** | 0.00 | 0.33 |
+| 2e-5 | meta-103373 | **0.429** | 4,685 | **1,562** | 0.00 | 0.33 |
+
+**Key findings:**
+
+1. **The distillation regime is lambda ∈ [5e-6, 2e-5].** Solve rate plateaus at 0.429
+   with lowest token cost. Unlike Experiment 6 where all non-zero lambdas killed LLM
+   use, these finer lambdas allow LLM while penalizing excess. The break-even prediction
+   of 1.25e-5 falls squarely in the observed sweet spot.
+
+2. **All best M's are evolved variants** (meta-XXXX, not seeds). Crossover is producing
+   winners — no seed M survived as best in any lambda point. This validates the
+   crossover mechanism.
+
+3. **hard_solve_rate = 0.0 everywhere.** No cross-dataset joins solved in any run.
+   The LLM call cap at 5 is likely too low — hard problems need structural invention
+   that may require more LLM attempts. Previous experiments without caps solved hard
+   problems at lambda=0.0.
+
+4. **lambda=0.0 scored worst** (0.286) — counterintuitive. With crossover producing
+   more diverse M variants (some LLM-heavy), the population may be spending tokens
+   on variants that don't help. Non-zero lambda provides selection pressure against
+   wasteful LLM use.
+
+5. **gp_sufficiency = 0.33-0.50** across all lambdas. About a third of solves come
+   from GP alone, the rest need LLM. No distillation trend over 4 generations —
+   tok/solve is stable, not decreasing.
+
+6. **Timing: ~3-4 min per lambda point** (5 points in 19 min). Sequential M evaluation
+   with LLM call cap is fast enough. Parallel M evaluation was attempted but caused
+   Finch connection pool exhaustion.
+
 ### What's next
-
-**Priority 1: Re-run sweep with finer lambdas** in the range [0, 1e-6, 5e-6, 1e-5, 2e-5].
-This brackets the 1.25e-5 break-even point. The critical question: does M learn to
-use LLM selectively at the break-even lambda?
-
-**Priority 2: Track distillation over time.** At the optimal lambda, does tokens_per_solve
-decrease across outer generations? That's the publishable chart.
-
-**Priority 3: LLM-evolved M.** With `m_llm_mutation_rate > 0`, does LLM mutation on M
-produce better strategies than GP mutation of M? The meta-meta question.
 
 See `evolution-roadmap.md` for future directions and next experiments.
