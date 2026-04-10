@@ -20,7 +20,7 @@ defmodule PtcRunner.Folding.Alphabet do
   - `{:data_source, atom}` — a data source reference
   - `{:field_key, atom}` — a field key
   - `{:literal, integer}` — a numeric literal
-  - `:spacer` — fold-only character (W, X, Y, Z)
+  - `:spacer` — fold-only character (Z)
 
   ## Examples
 
@@ -33,7 +33,7 @@ defmodule PtcRunner.Folding.Alphabet do
       iex> PtcRunner.Folding.Alphabet.to_fragment(?5)
       {:literal, 500}
 
-      iex> PtcRunner.Folding.Alphabet.to_fragment(?W)
+      iex> PtcRunner.Folding.Alphabet.to_fragment(?Z)
       :spacer
   """
   @spec to_fragment(char()) :: term()
@@ -71,8 +71,10 @@ defmodule PtcRunner.Folding.Alphabet do
   # Conditional (if predicate then-expr else-expr)
   def to_fragment(?X), do: {:fn_fragment, :if}
 
-  # Spacers (fold-only, no code — Y=right, Z=reverse)
-  def to_fragment(?Y), do: :spacer
+  # Data transformation (assoc for building modified records)
+  def to_fragment(?Y), do: {:fn_fragment, :assoc}
+
+  # Spacer (fold-only, no code — Z=reverse)
   def to_fragment(?Z), do: :spacer
 
   # Field keys (lowercase)
@@ -85,8 +87,15 @@ defmodule PtcRunner.Folding.Alphabet do
   def to_fragment(?g), do: {:field_key, :category}
   def to_fragment(?h), do: {:field_key, :employee_id}
 
+  # Collection-returning functions (same bond as count/first but output is a list)
+  # These make the tester role achievable: 2-character assembly produces list of maps
+  def to_fragment(?i), do: {:fn_fragment, :reverse}
+  def to_fragment(?j), do: {:fn_fragment, :sort}
+  def to_fragment(?k), do: {:fn_fragment, :rest}
+  def to_fragment(?l), do: {:fn_fragment, :last}
+
   # Remaining lowercase → wildcards (used in match patterns, fold straight)
-  def to_fragment(c) when c in ?i..?z, do: :wildcard
+  def to_fragment(c) when c in ?m..?z, do: :wildcard
 
   # Digits → numeric literals (0→0, 1→100, ..., 9→900)
   def to_fragment(c) when c in ?0..?9, do: {:literal, (c - ?0) * 100}

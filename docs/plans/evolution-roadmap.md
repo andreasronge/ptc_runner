@@ -204,24 +204,25 @@ freely. Later generations must internalize patterns.
 
 ### Folding Evolution: Protein-Inspired Genotype-Phenotype Mapping
 
-**Status**: Phase 1-2 + measurement + dynamics experiment complete
-(`lib/ptc_runner/folding/`, 55 tests). See `folding-evolution.md` for full results.
+**Status**: Phase 1-2 + measurement + dynamics + triad coevolution complete
+(`lib/ptc_runner/folding/`, 21 modules, 163 tests). See `folding-evolution.md`.
 
-**Summary**: Folding loses on static metrics (lower neutrality, more breaks, worse
-crossover preservation) but **wins decisively on evolutionary dynamics**. In regime-shift
-experiments, folding discovers target programs (fitness 0.79) while direct encoding
-cannot escape baseline (fitness 0.10). Folding recovers from regime shifts; direct doesn't.
-Direct encoding's high neutrality is evolutionary inertia, not robustness.
+**Summary**: Folding loses on static metrics but **wins decisively on evolutionary
+dynamics** (regime-shift: folding 0.79, direct 0.10). Three coevolution architectures
+implemented: profile-matching, interactive (external oracle), and triad (self-defined
+solver/tester/oracle roles). Replaced hash-based ChallengeDecoder with direct data
+transformation via OutputInterpreter. Added `assoc` to alphabet for data modification.
 
-**Key insight**: Folding's pleiotropy — non-local mutation effects from the 2D fold
-topology — enables restructuring that the canalized direct encoding cannot achieve.
-Static metrics were misleading: they favored the representation that was safe but inert.
+**Key results**:
+- Folding's pleiotropy enables structural innovation that canalized direct encoding can't
+- Triad coevolution (three self-defined roles) works without external task definitions
+- Tester role needs genotype_length=50+ to evolve data-transforming phenotypes
+- Direct encoding's high neutrality (97%) is evolutionary inertia, not robustness
 
 **Next priorities**:
-1. Harder task targets (filter, map, group-by) — does folding's advantage persist?
-2. Historical contingency — run many seeds, measure outcome variance
-3. Red Queen responsiveness — continuous regime shifts
-4. Genotype-level rewriting (Phase 3) — now justified by the dynamics results
+1. Triad coevolution at length 50 for 100+ generations (tester breakthrough)
+2. Stabilizing vs directional selection comparison (Altenberg framework)
+3. Genotype-level rewriting (Phase 3) — justified by dynamics results
 
 ### Compare with SubAgent.run
 

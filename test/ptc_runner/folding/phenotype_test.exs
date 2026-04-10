@@ -12,7 +12,7 @@ defmodule PtcRunner.Folding.PhenotypeTest do
     end
 
     test "returns error for spacer-only genotype" do
-      assert {:error, :no_fragments} = Phenotype.develop("YYYZZ")
+      assert {:error, :no_fragments} = Phenotype.develop("ZZZZZ")
     end
 
     test "single data source character produces a symbol" do

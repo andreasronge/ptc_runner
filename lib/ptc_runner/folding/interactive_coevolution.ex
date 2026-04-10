@@ -33,12 +33,11 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
   alias PtcRunner.Folding.{
     Alphabet,
     Archive,
-    ChallengeDecoder,
-    ChallengeTransform,
     Individual,
     MatchTool,
     Operators,
-    Oracle
+    Oracle,
+    OutputInterpreter
   }
 
   alias PtcRunner.Lisp
@@ -209,16 +208,16 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
   end
 
   defp evaluate_tester(tester, solvers, base_contexts, task_defs, config) do
-    # For each context, generate a challenge and evaluate solvers
-    # Pick a representative solver source for the tester's match tool
+    # For each context, run tester to produce a data transformation,
+    # then evaluate solvers against the modified context.
     representative_solver = Enum.find(solvers, & &1.valid?)
 
-    challenges =
+    context_results =
       Enum.map(base_contexts, fn base_ctx ->
-        # Build tester context with solver info + peer_source for match tool
+        # Build tester context with solver info
         tester_ctx = build_tester_context(base_ctx, solvers, config)
 
-        # Run tester with match tool targeting representative solver
+        # Run tester — its output IS the data transformation
         peer_source = if representative_solver, do: representative_solver.source
         match_tools = build_match_tools(peer_source)
 
@@ -234,14 +233,10 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
             {:error, _} -> nil
           end
 
-        # Decode to challenge spec
-        challenge = ChallengeDecoder.decode(raw_output)
-
-        # Apply transformation
-        modified_ctx = ChallengeTransform.apply_challenge(challenge, base_ctx)
+        # Interpret the output as a context modification
+        modified_ctx = OutputInterpreter.interpret(tester.source, raw_output, base_ctx)
 
         # Evaluate each solver against the modified context
-        # Each solver gets match tool targeting the tester's source
         solver_scores =
           Map.new(solvers, fn solver ->
             score =
@@ -250,16 +245,15 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
             {solver.id, score}
           end)
 
-        %{challenge: challenge, solver_scores: solver_scores}
+        %{modified: modified_ctx != base_ctx, solver_scores: solver_scores}
       end)
 
     # Aggregate across contexts
     all_solver_scores =
-      Enum.reduce(challenges, %{}, fn %{solver_scores: scores}, acc ->
+      Enum.reduce(context_results, %{}, fn %{solver_scores: scores}, acc ->
         Map.merge(acc, scores, fn _k, v1, v2 -> v1 + v2 end)
       end)
 
-    # Average across contexts
     num_contexts = max(length(base_contexts), 1)
 
     avg_solver_scores =
@@ -267,7 +261,7 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
 
     %{
       tester_id: tester.id,
-      challenges: Enum.map(challenges, & &1.challenge),
+      modified_count: Enum.count(context_results, & &1.modified),
       solver_scores: avg_solver_scores
     }
   end

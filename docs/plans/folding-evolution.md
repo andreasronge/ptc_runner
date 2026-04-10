@@ -1,6 +1,6 @@
 # Folding Evolution: Protein-Inspired Genotype-Phenotype Mapping for PTC-Lisp
 
-Status: ACTIVE (Phase 1-2 implemented)
+Status: ACTIVE (Phase 1-2 + measurement + dynamics + triad coevolution)
 Date: 2026-04-10
 Updated: 2026-04-10
 Context: Evolved from the meta-learner M work (see `evolution-findings.md`). The question shifted from "how to evolve better operator selectors" to "how does the development process itself affect evolvability?"
@@ -333,17 +333,33 @@ These metrics characterize the development process, not specific programs. They 
 
 ```
 lib/ptc_runner/folding/
-├── alphabet.ex      # 62-char alphabet → fragment types
-├── fold.ex          # genotype string → 2D grid placement
-├── chemistry.ex     # 4-pass bond assembly → AST fragments
-├── phenotype.ex     # full pipeline: genotype → PTC-Lisp source
-├── operators.ex     # genotype-level genetic operators (point/insert/delete/crossover)
-├── individual.ex    # folded individual with auto phenotype development
-├── loop.ex          # basic evolution loop (static problems, tournament selection)
-└── coevolution.ex   # solver/tester coevolution (multi-context profiles)
+├── alphabet.ex              # 62-char alphabet → fragment types (incl. assoc, match, if)
+├── fold.ex                  # genotype string → 2D grid placement
+├── chemistry.ex             # 5-pass bond assembly → AST fragments (incl. assoc bonds)
+├── phenotype.ex             # full pipeline: genotype → PTC-Lisp source
+├── operators.ex             # genotype-level genetic operators (point/insert/delete/crossover)
+├── individual.ex            # folded individual with auto phenotype development
+├── direct.ex                # direct encoding baseline (recursive descent, no folding)
+├── direct_individual.ex     # individual using direct encoding
+├── loop.ex                  # basic evolution loop (static problems)
+├── coevolution.ex           # solver/tester coevolution (multi-context profiles)
+├── interactive_coevolution.ex # interactive coevolution with oracle + OutputInterpreter
+├── triad_coevolution.ex     # three-role coevolution (solver/tester/oracle — all self-defined)
+├── separated_coevolution.ex # three separate populations (solver/tester/oracle — independent)
+├── output_interpreter.ex    # interprets tester output as data context modification
+├── oracle.ex                # external oracle for computing correct answers
+├── metrics.ex               # neutral mutation, crossover preservation, mutation spectrum
+├── dynamics.ex              # regime-shift experiments (folding vs direct)
+├── challenge_spec.ex        # structured challenge spec (legacy, replaced by OutputInterpreter)
+├── challenge_decoder.ex     # hash-based decoder (legacy, replaced by OutputInterpreter)
+├── challenge_transform.ex   # spec-based transform (legacy, replaced by OutputInterpreter)
+├── archive.ex               # hall-of-fame archive for coevolution
+└── match_tool.ex            # structural pattern matching tool for tester context
 ```
 
-Tests: 44 folding-specific tests in `test/ptc_runner/folding/`.
+Scripts: `demo/scripts/folding_length_sweep.exs`, `demo/scripts/folding_vs_direct.exs`
+
+Tests: 163 folding-specific tests in `test/ptc_runner/folding/`.
 
 ### Findings
 
@@ -456,6 +472,215 @@ adapt). This is an environment design problem, not a representation problem.
    (e.g., produce `3` for count_products). The coevolution creates its own internal
    pressure but doesn't align with external objectives. The `w_robust` weight may need
    to be higher, or more diverse static problems are needed.
+
+### Direct Data Transformation (replacing ChallengeDecoder)
+
+The original interactive coevolution used a hash-based `ChallengeDecoder` that mapped
+tester output (an integer, boolean, etc.) to a `ChallengeSpec` via modular arithmetic.
+This created an arbitrary mapping: output `3` → `:swap_field`, output `4` → `:truncate`,
+with no semantic relationship. Small mutations caused completely different challenge types.
+
+**Replaced with `OutputInterpreter`:** The tester's phenotype IS the data transformation.
+If the tester produces a list of maps, it directly replaces the relevant data source in
+the context. `OutputInterpreter` detects which `data/X` the phenotype references and
+replaces that source.
+
+Example flow:
+```
+Tester phenotype: (filter (fn [x] (> (get x :price) 200)) data/products)
+  → output: [%{"price" => 300}, %{"price" => 400}]
+  → OutputInterpreter detects "data/products" → replaces products in context
+  → Solver runs against modified context
+  → Oracle computes correct answer on modified context
+```
+
+**Added `assoc` to the alphabet (Y character).** Bonds as `(assoc x :key value)` in
+chemistry pass 1. Enables testers to produce transformations like
+`(map (fn [x] (assoc x :price 500)) data/products)` — modifying field values, not just
+filtering.
+
+**Advantage over ChallengeDecoder:** Small genotype mutations → small transformation
+changes → smooth fitness gradient. No arbitrary hash indirection.
+
+### Triad Coevolution: Three Self-Defined Roles
+
+The most elegant coevolution design: every individual plays all three roles depending
+on interaction context. No external task definitions needed — the population defines
+its own tasks.
+
+**Protocol:** For each sampled triple (solver S, tester T, oracle O):
+1. T runs against base context → T_output
+2. `OutputInterpreter(T.source, T_output, base_ctx)` → modified_ctx
+3. O runs against modified_ctx → expected_answer (oracle defines "correct")
+4. S runs against modified_ctx → solver_answer
+5. S passes if `solver_answer == expected_answer`
+
+**Fitness:**
+```
+fitness = w_solve * (fraction of oracle tasks passed under tester challenges)
+        + w_test  * (fraction of solvers that fail under my challenges)
+        + w_oracle * (my tasks hit the difficulty frontier — ~50% pass rate)
+```
+
+**Tester potential gradient:** Since evolving programs that produce list-of-maps is hard
+(requires `filter` or `map+assoc` assemblies), a gradient rewards output type:
+nil → 0.0, scalar → 0.02, list → 0.08, list-of-maps → 0.15. This provides selection
+pressure toward valid data transformations even before they emerge.
+
+**Results (pop=50, genotype_length=30, 30 generations, 3 contexts):**
+- Solver and oracle roles activate immediately: solve=0.93, oracle=0.22-0.53
+- Test role has gradient (0.02) but testers haven't broken through to list-of-maps yet
+- 9-22 unique phenotypes maintained (good diversity)
+- Population discovered `(if * * data/expenses)` — returns a list of maps under some
+  conditions, approaching a valid tester transformation
+- Best fitness: 0.686 with solve=1.0, oracle=0.4
+
+**The tester breakthrough needs:** Longer genotypes (50+, the sweet spot from measurement)
+and more generations. The phenotype complexity for `(filter (fn [x] ...) data/X)` requires
+4+ characters in fold adjacency — rare at length 25-30 but feasible at 50.
+
+**Key insight:** The three-role design is self-sustaining. Oracles at the difficulty
+frontier get high oracle scores; solvers that match many oracles get high solve scores;
+testers that create discriminating contexts get high test scores. No external tasks needed.
+
+### Strict Gating + Per-Role Elitism (Option C) — Failed
+
+**Problem:** The original test scoring gave all individuals a nonzero test score via
+frontier scoring on base context (even without data transformation). This meant the
+tester role was "free" — no selection pressure to actually produce list-of-maps output.
+
+**Solution attempted:**
+
+1. **Strict tester gating:** `test_score = 0` unless the individual produces a valid
+   data transformation (list of maps via `OutputInterpreter`).
+2. **Per-role elitism:** Top-1 individual by each role score preserved regardless of
+   overall fitness.
+
+**Results (pop=50, genotype_length=50, 100 generations, 3 contexts):**
+- Per-role elitism kept exactly 1 tester alive from gen 1 onwards
+- That tester: `(or (reverse data/products) 100)` — test=0.667, solve=0.0, oracle=0.1
+- Overall fitness: 0.23 (far below avg of ~0.49) — survived only via elitism
+- Genetic material never spread: crossover offspring inherited tester genes but couldn't
+  compete on overall fitness with solve=0.0
+- Population converged to solve=0.92, test=0.01, oracle=0.46 — tester remained a
+  protected singleton, not a growing niche
+
+**Why it failed:** The fundamental problem is role conflict. In a single population with
+`fitness = w_solve * solve + w_test * test + w_oracle * oracle`, a tester-specialist
+(test=1.0, solve=0.0, oracle=0.0) gets fitness 0.3 while a solver-specialist (solve=0.9)
+gets 0.36. Testers can never compete on overall fitness. Per-role elitism keeps one alive
+but can't create a lineage.
+
+### Separated Coevolution: Three Independent Populations
+
+**Design:** Three separate populations, each with unambiguous selection pressure:
+- **Solvers** (pop=30): fitness = fraction of (tester, oracle) pairs where solver matches oracle
+- **Testers** (pop=30): fitness = frontier_score(solver fail rate under my modification).
+  Must produce valid list-of-maps or fitness = 0.
+- **Oracles** (pop=30): fitness = frontier_score(solver pass rate on my task).
+  Must produce non-nil output or fitness = 0.
+
+No role conflict. A tester doesn't need to also be a good solver.
+
+**Implementation:** `SeparatedCoevolution` module. Script: `demo/scripts/separated_experiment.exs`.
+
+**Results (solver=30, tester=30, oracle=30, genotype_length=50, 100 generations, 3 contexts):**
+- **Tester breakthrough by gen 3:** 30/30 testers producing valid data transformations
+  (vs 1 protected singleton in triad)
+- **Role activation solved:** Full tester population, no role conflict
+
+**Why it works where triad failed:**
+1. **No role conflict** — tester fitness is purely "how many solvers fail", not a weighted
+   sum with solve/oracle scores
+2. **Full population devoted to each role** — 30 individuals exploring tester space vs 1
+   protected singleton
+3. **Rapid niche filling** — once 2 testers exist in gen 0, crossover spreads the pattern
+   to the whole population by gen 3
+
+### Degenerate Equilibrium: Constant-Output Collapse
+
+**Problem discovered through diagnostics:** Despite role activation, all three populations
+collapsed to trivial constant-expression agreement. Solver pass rate: 100% — testers
+were not discriminating at all.
+
+**Diagnostic analysis (100 gen run with full per-tester pass rate measurement):**
+- All 30 solvers: `(= 800 0)` → `false` (constant, ignores data)
+- All 30 oracles: `(not 400)` → `false`, `(< 900 800)` → `false` (constants)
+- All 30 testers: variations of `(reverse data/expenses)` (valid but vacuous)
+- Solver pass rate per tester: **100%** across all 30 testers
+- Testers evolved `rest`, `reverse`, `rest+sort` compositions but they can't break
+  solvers that ignore data entirely
+
+**Root cause:** Self-referential evaluation without grounding collapses to trivial
+agreement. When oracles define "correct = false", every solver that returns `false` passes
+every test regardless of tester modifications. This is a known failure mode in competitive
+coevolution — "mediocre stable states."
+
+### Hybrid Oracle Attempt — Partial Success, Then Dropped
+
+**Attempted fix:** Anchor oracle fitness to external ground truth tasks:
+`oracle_fitness = 0.5 * frontier_score + 0.5 * correctness_vs_ground_truth`
+
+**Result:** Oracle correctness = 0.0 for all 100 generations. No oracle ever produced
+output matching `(count data/X)` results because `count` requires a specific 2-character
+fold adjacency that's hard to evolve from scratch. The anchor provided zero selection
+signal. However, one run incidentally produced 68.7% solver pass rate with data-dependent
+phenotypes — but this was initialization-dependent, not a stable outcome.
+
+**Conclusion:** Dropped the correctness anchor. The 68.7% result was a fluke — confirmed
+by subsequent runs that reliably collapsed to constants without it. External anchoring
+fails when the target phenotype is too hard to reach from random initialization.
+
+### Data-Dependence Gate — The Fix That Worked
+
+**The minimum intervention:** Fitness = 0 if output is identical on all base contexts.
+One line of logic. Constants like `false`, `(= 800 0)`, `(> 700 700)` all produce the
+same output on every context → fitness 0. Programs like `(count data/products)` produce
+different outputs (2, 3, 5) → eligible for scoring.
+
+Applied to both solvers AND oracles. Testers already gated (must produce list-of-maps).
+
+**Results (solver=30, tester=30, oracle=30, genotype_length=50, 200 generations, 3 contexts):**
+- Solver avg fitness: **0.66-0.69** (was 0.97-1.0 without gate)
+- Discriminating testers: **30/30** at 66.7% pass rate (was 0/30)
+- No collapse to constants across 200 generations
+- All 30 solvers: `(count (rest (rest data/employees)))` — genuinely data-dependent
+- All 30 oracles: `(count (rest (rest data/products)))` — real task definition
+- Testers: `(reverse data/employees)`, `(reverse data/orders)`, `(sort data/employees)`
+- Trend: solver avg gen 11-100 = 0.663, gen 101-200 = 0.685 → **plateau** (delta 0.022)
+
+**Why it works:** Constants are the degenerate attractor. Block them structurally, and
+the system finds data-dependent programs naturally. `rest/reverse` testers ARE sufficient
+to discriminate between different `count` expressions — a solver counting employees
+responds differently to `(reverse data/products)` than one counting products.
+
+### Coevolution Synthesis: The Complexity Ceiling
+
+After many experiments, a clear pattern emerged:
+
+1. **The folding representation works** — it produces valid PTC-Lisp, enables regime-shift
+   adaptation, and has interesting measurement properties
+2. **Simple programs dominate every run** — `count`, `rest`, `reverse` win because they're
+   1-2 bond assemblies. 4+ bond programs (`filter`, `map+fn`, `let+set+contains`) never
+   emerge through evolution
+3. **Coevolution finds equilibria, not arms races** — whether single-population, triad,
+   or three-population, the system settles quickly and stops innovating
+
+**The fundamental limitation isn't the coevolution design** (we've tried many) — it's that
+the folding chemistry's complexity ceiling is too low for meaningful competition. When the
+most complex evolved program is `(count (rest (rest data/X)))` (3 bonds), there aren't
+enough possible strategies for an arms race. You need a richer phenotype space for testers
+to have room to escalate and solvers to have room to adapt.
+
+**What would move the needle** (if pursued):
+- Genotype length 80-100 with populations of 100+ and 500+ generations
+- Seeded genotypes containing known 4-bond programs (`filter+fn+predicate+data`) so
+  evolution starts with complex programs and must maintain/improve them
+- Complexity-biased selection — bonus fitness for programs with more bonds
+
+**Or accept that the key findings are in hand.** The folding-vs-direct dynamics result,
+the Altenberg connection, and the coevolution design iterations form a coherent research
+story. The complexity ceiling is a known limitation, not an unsolved mystery.
 
 ## Representation Measurement Results
 
@@ -806,6 +1031,29 @@ environment is stable (favor low pleiotropy) or changing (favor directional vari
    direct encoding wins under (a), folding wins under (b). This is the clean test of
    the theoretical framework.
 
+8. **Triad coevolution with longer genotypes.** ✓ DONE — Option C (strict gating +
+   per-role elitism) kept 1 tester alive but couldn't create a lineage. Role conflict
+   is fundamental in single-population multi-role design.
+
+9. **Separated coevolution.** ✓ DONE — three independent populations solved role
+   activation (30/30 valid testers by gen 3). But exposed degenerate equilibrium:
+   all populations collapsed to constant-expression agreement (solver pass rate 100%).
+
+10. **Data-dependence gate.** ✓ DONE — fitness = 0 if output identical on all contexts.
+    One line of logic blocks constant-expression collapse. Solver pass rate dropped to
+    66.7%, all populations compute data-dependent programs. System reaches stable
+    equilibrium around `count+rest+reverse` (3-bond programs).
+
+11. **Complexity ceiling identified.** The folding chemistry's phenotype space is too
+    shallow for sustained arms races. Most complex evolved program: `(count (rest (rest
+    data/X)))` (3 bonds). 4+ bond programs (`filter+fn+predicate+data`) never emerge
+    through evolution. This is the fundamental limitation — not coevolution design.
+
+12. **If pursuing further** (optional — key findings may already be in hand):
+    - Genotype length 80-100, populations 100+, 500+ generations
+    - Seed genotypes with known 4-bond programs for evolution to maintain/improve
+    - Complexity-biased selection (bonus fitness for programs with more bonds)
+
 ## Implementation Plan
 
 ### Phase 1: Fold + Bond + Assemble ✓ DONE
@@ -814,24 +1062,32 @@ Core pipeline implemented and tested. Validity rate ~100% for random genotypes. 
 priority sorting ensures assembled fragments preferred over raw values. Data sources
 emit namespace symbols for correct PTC-Lisp evaluation.
 
-### Phase 2: Evolution Loop + Solver/Tester Coevolution ✓ DONE
+### Phase 2: Evolution + Coevolution ✓ DONE
 
-Both basic loop (`loop.ex`, static problems) and coevolution loop (`coevolution.ex`,
-multi-context solver/tester roles) implemented. Key design choice: output profiles across
-multiple context variations prevent collusion. Evolution discovers correct programs
-(e.g., `(count data/products)`) within 1-3 generations on simple problems.
+Basic loop, profile-matching coevolution, interactive coevolution with oracle, and triad
+coevolution (solver/tester/oracle all self-defined). Multi-context profiles prevent
+collusion. OutputInterpreter replaced hash-based ChallengeDecoder for direct data
+transformation.
+
+### Phase 2.5: Representation Measurement ✓ DONE
+
+Metrics module (neutral mutation rate at 3 levels, crossover preservation, mutation
+spectrum, complexity distribution). Direct encoding baseline. Regime-shift dynamics
+experiment. Key result: folding loses on statics but wins on dynamics.
 
 ### Phase 3: Genotype-Level Rewriting
 
-Add rewriter/compressor roles. Individuals propose genotype string edits on peers. Edits validated against behavioral test archive. Fitness expands to include rewrite success, compression ability, and rewrite resistance.
+Add rewriter/compressor roles. Individuals propose genotype string edits on peers.
+Justified by dynamics results — folding's pleiotropy enables structural innovation.
 
 ### Phase 4: Full Ecology + Competitive Repair
 
-Complete interaction cycle: solve → test → repair → compress → attack. Measure niche emergence and whether program-on-program evolution improves evolvability.
+Complete interaction cycle: solve → test → repair → compress → attack.
 
 ### Phase 5: Compare Development Processes
 
-Implement codon table and/or pattern accumulator as alternative development processes. Same genotype strings, same evolution, same coevolution. Compare the measurement metrics to answer: which development process produces the most evolvable representations?
+Alternative genotype-to-phenotype maps (codon table, stack machine). Same genotypes,
+same evolution, different development. Compare metrics.
 
 ## Open Questions
 

@@ -131,7 +131,8 @@ defmodule PtcRunner.Folding.Direct do
   end
 
   # Wrappers: consume one expression -> (op expr)
-  defp parse_fn_fragment(op, rest) when op in [:count, :first] do
+  defp parse_fn_fragment(op, rest)
+       when op in [:count, :first, :reverse, :sort, :rest, :last] do
     parse_unary_op(op, rest)
   end
 
@@ -151,6 +152,19 @@ defmodule PtcRunner.Folding.Direct do
 
   # Contains?: consume two expressions
   defp parse_fn_fragment(:contains?, rest), do: parse_binary_op(:contains?, rest)
+
+  # Assoc: consume key + value → (assoc x key value)
+  # Like get, always uses x as the target (for use inside fn bodies)
+  defp parse_fn_fragment(:assoc, rest) do
+    {key_expr, rest1} = parse_expression(rest)
+    {val_expr, rest2} = parse_expression(rest1)
+
+    if key_expr != nil and val_expr != nil do
+      {{:list, [{:symbol, :assoc}, {:symbol, :x}, key_expr, val_expr]}, rest2}
+    else
+      fallback_leaf(:assoc, rest)
+    end
+  end
 
   # Fn: consume one expression, wrap in (fn [x] ...)
   defp parse_fn_fragment(:fn, rest) do

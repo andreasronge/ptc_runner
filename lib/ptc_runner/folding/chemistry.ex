@@ -87,8 +87,14 @@ defmodule PtcRunner.Folding.Chemistry do
 
   defp pass_leaf_bonds(fmap, adj, consumed) do
     # get + field_key → (get x key)
+    {fmap, consumed} =
+      Enum.reduce(Map.keys(fmap), {fmap, consumed}, fn pos, {fm, cons} ->
+        if MapSet.member?(cons, pos), do: {fm, cons}, else: try_get_bond(pos, fm, adj, cons)
+      end)
+
+    # assoc + field_key + value → (assoc x key value)
     Enum.reduce(Map.keys(fmap), {fmap, consumed}, fn pos, {fm, cons} ->
-      if MapSet.member?(cons, pos), do: {fm, cons}, else: try_get_bond(pos, fm, adj, cons)
+      if MapSet.member?(cons, pos), do: {fm, cons}, else: try_assoc_bond(pos, fm, adj, cons)
     end)
   end
 
@@ -106,6 +112,31 @@ defmodule PtcRunner.Folding.Chemistry do
             {fmap, consumed}
 
           nil ->
+            {fmap, consumed}
+        end
+
+      _ ->
+        {fmap, consumed}
+    end
+  end
+
+  defp try_assoc_bond(pos, fmap, adj, consumed) do
+    case Map.get(fmap, pos) do
+      {:fn_fragment, :assoc} ->
+        neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
+        key_frag = Enum.find(neighbors, fn {_p, f} -> match?({:field_key, _}, f) end)
+        val_frag = Enum.find(neighbors, fn {_p, f} -> value_fragment?(f) end)
+
+        case {key_frag, val_frag} do
+          {{kp, {:field_key, key}}, {vp, val}} ->
+            ast =
+              {:list, [{:symbol, :assoc}, {:symbol, :x}, {:keyword, key}, fragment_to_ast(val)]}
+
+            fmap = Map.put(fmap, pos, {:assembled, ast})
+            consumed = consumed |> MapSet.put(kp) |> MapSet.put(vp)
+            {fmap, consumed}
+
+          _ ->
             {fmap, consumed}
         end
 
@@ -235,7 +266,7 @@ defmodule PtcRunner.Folding.Chemistry do
 
   defp try_wrapper_bond(pos, fmap, adj, consumed) do
     case Map.get(fmap, pos) do
-      {:fn_fragment, op} when op in [:count, :first] ->
+      {:fn_fragment, op} when op in [:count, :first, :reverse, :sort, :rest, :last] ->
         neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
 
         case Enum.find(neighbors, fn {_p, f} -> collection_fragment?(f) end) do

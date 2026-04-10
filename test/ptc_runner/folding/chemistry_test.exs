@@ -32,7 +32,7 @@ defmodule PtcRunner.Folding.ChemistryTest do
     end
 
     test "spacers are excluded from fragments" do
-      grid = %{{0, 0} => ?Y, {1, 0} => ?Z}
+      grid = %{{0, 0} => ?Z, {1, 0} => ?Z}
       fragments = Chemistry.assemble(grid)
       assert fragments == []
     end
@@ -53,6 +53,17 @@ defmodule PtcRunner.Folding.ChemistryTest do
       assert length(assembled) == 1
       [{:assembled, ast}] = assembled
       assert ast == {:list, [{:symbol, :count}, {:ns_symbol, :data, :products}]}
+    end
+
+    test "assoc + field_key + value bonds into (assoc x key value)" do
+      # Y(assoc) at (0,0), a(:price) at (1,0), 5(500) at (0,1) — all adjacent
+      grid = %{{0, 0} => ?Y, {1, 0} => ?a, {0, 1} => ?5}
+      fragments = Chemistry.assemble(grid)
+
+      assembled = Enum.filter(fragments, fn f -> match?({:assembled, _}, f) end)
+      assert assembled != []
+      [{:assembled, ast}] = assembled
+      assert ast == {:list, [{:symbol, :assoc}, {:symbol, :x}, {:keyword, :price}, 500]}
     end
 
     test "empty grid produces no fragments" do
