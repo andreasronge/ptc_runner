@@ -68,8 +68,10 @@ defmodule PtcRunner.Folding.Alphabet do
   # Match function (for structural pattern matching on peer source)
   def to_fragment(?W), do: {:fn_fragment, :match}
 
-  # Spacers (fold-only, no code — X=left, Y=right, Z=reverse)
-  def to_fragment(?X), do: :spacer
+  # Conditional (if predicate then-expr else-expr)
+  def to_fragment(?X), do: {:fn_fragment, :if}
+
+  # Spacers (fold-only, no code — Y=right, Z=reverse)
   def to_fragment(?Y), do: :spacer
   def to_fragment(?Z), do: :spacer
 

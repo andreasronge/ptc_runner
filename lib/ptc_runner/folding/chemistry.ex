@@ -72,9 +72,9 @@ defmodule PtcRunner.Folding.Chemistry do
     # Pass 4: Composition bonds (and/or/not + exprs)
     {fragment_map, consumed} = pass_composition_bonds(fragment_map, adjacency, consumed)
 
-    # Pass 5: Match bonds (match + any adjacent fragments → tool/match with stringified pattern)
+    # Pass 5: Conditional bonds (if + predicate + branches, match + pattern → tool/match)
     {fragment_map, consumed} =
-      pass_match_bonds(fragment_map, adjacency, consumed, wildcard_positions)
+      pass_conditional_bonds(fragment_map, adjacency, consumed, wildcard_positions)
 
     # Return unconsumed fragments (the top-level assembled results)
     fragment_map
@@ -374,37 +374,101 @@ defmodule PtcRunner.Folding.Chemistry do
   # Adjacent fragments are converted to a pattern string with wildcards.
   # The match tool reads peer_source from context internally.
 
-  defp pass_match_bonds(fmap, adj, consumed, wildcard_positions) do
+  defp pass_conditional_bonds(fmap, adj, consumed, wildcard_positions) do
     Enum.reduce(Map.keys(fmap), {fmap, consumed}, fn pos, {fm, cons} ->
-      if MapSet.member?(cons, pos),
-        do: {fm, cons},
-        else: try_match_bond(pos, fm, adj, cons, wildcard_positions)
+      if MapSet.member?(cons, pos) do
+        {fm, cons}
+      else
+        case Map.get(fm, pos) do
+          {:fn_fragment, :match} -> try_match_bond(pos, fm, adj, cons, wildcard_positions)
+          {:fn_fragment, :if} -> try_if_bond(pos, fm, adj, cons)
+          _ -> {fm, cons}
+        end
+      end
     end)
   end
 
   defp try_match_bond(pos, fmap, adj, consumed, wildcard_positions) do
-    case Map.get(fmap, pos) do
-      {:fn_fragment, :match} ->
-        neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
+    neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
 
-        # Collect all adjacent fragments (excluding other match fragments)
-        pattern_fragments =
-          neighbors
-          |> Enum.reject(fn {_p, f} -> match?({:fn_fragment, :match}, f) end)
-          |> Enum.sort_by(fn {p, _f} -> p end)
+    # Collect all adjacent fragments (excluding other match/if fragments)
+    pattern_fragments =
+      neighbors
+      |> Enum.reject(fn {_p, f} -> match?({:fn_fragment, _}, f) end)
+      |> Enum.sort_by(fn {p, _f} -> p end)
 
-        case pattern_fragments do
-          [] ->
-            {fmap, consumed}
+    case pattern_fragments do
+      [] -> {fmap, consumed}
+      _ -> assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions)
+    end
+  end
 
-          _ ->
-            assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions)
-        end
+  # if + predicate + then_expr + else_expr → (if predicate then else)
+  # Predicate: assembled comparison, match tool call, or boolean-producing expression
+  # Branches: any value or assembled expression
+  defp try_if_bond(pos, fmap, adj, consumed) do
+    neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
+
+    # Find a predicate (comparison, match result, connective, or boolean-like)
+    predicates = Enum.filter(neighbors, fn {_p, f} -> predicate_fragment?(f) end)
+    # Find branch expressions (any value fragment)
+    branches = Enum.filter(neighbors, fn {_p, f} -> branch_fragment?(f) end)
+
+    case {predicates, branches} do
+      {[{pred_pos, pred_frag} | _], [{then_pos, then_frag}, {else_pos, else_frag} | _]} ->
+        ast =
+          {:list,
+           [
+             {:symbol, :if},
+             fragment_to_ast(pred_frag),
+             fragment_to_ast(then_frag),
+             fragment_to_ast(else_frag)
+           ]}
+
+        fmap = Map.put(fmap, pos, {:assembled, ast})
+
+        consumed =
+          consumed
+          |> MapSet.put(pred_pos)
+          |> MapSet.put(then_pos)
+          |> MapSet.put(else_pos)
+
+        {fmap, consumed}
+
+      {[{pred_pos, pred_frag} | _], [{then_pos, then_frag}]} ->
+        # Two-branch if: missing else, use nil
+        ast =
+          {:list,
+           [
+             {:symbol, :if},
+             fragment_to_ast(pred_frag),
+             fragment_to_ast(then_frag)
+           ]}
+
+        fmap = Map.put(fmap, pos, {:assembled, ast})
+        consumed = consumed |> MapSet.put(pred_pos) |> MapSet.put(then_pos)
+        {fmap, consumed}
 
       _ ->
         {fmap, consumed}
     end
   end
+
+  # A predicate is something that produces a boolean-ish value
+  defp predicate_fragment?({:assembled, {:list, [{:symbol, op} | _]}})
+       when op in [:>, :<, :=, :and, :or, :not, :contains?],
+       do: true
+
+  # Match tool calls are predicates (return boolean)
+  defp predicate_fragment?({:assembled, {:list, [{:ns_symbol, :tool, :match} | _]}}), do: true
+  defp predicate_fragment?(_), do: false
+
+  # A branch can be any value-producing fragment
+  defp branch_fragment?({:assembled, _}), do: true
+  defp branch_fragment?({:literal, _}), do: true
+  defp branch_fragment?({:data_source, _}), do: true
+  defp branch_fragment?({:field_key, _}), do: true
+  defp branch_fragment?(_), do: false
 
   defp assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions) do
     pattern_str =
