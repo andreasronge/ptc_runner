@@ -65,8 +65,10 @@ defmodule PtcRunner.Folding.Alphabet do
   def to_fragment(?U), do: {:data_source, :orders}
   def to_fragment(?V), do: {:data_source, :expenses}
 
-  # Spacers (fold-only, no code)
-  def to_fragment(?W), do: :spacer
+  # Match function (for structural pattern matching on peer source)
+  def to_fragment(?W), do: {:fn_fragment, :match}
+
+  # Spacers (fold-only, no code — X=left, Y=right, Z=reverse)
   def to_fragment(?X), do: :spacer
   def to_fragment(?Y), do: :spacer
   def to_fragment(?Z), do: :spacer
@@ -81,8 +83,8 @@ defmodule PtcRunner.Folding.Alphabet do
   def to_fragment(?g), do: {:field_key, :category}
   def to_fragment(?h), do: {:field_key, :employee_id}
 
-  # Remaining lowercase → spacers (fold-only, straight direction)
-  def to_fragment(c) when c in ?i..?z, do: :spacer
+  # Remaining lowercase → wildcards (used in match patterns, fold straight)
+  def to_fragment(c) when c in ?i..?z, do: :wildcard
 
   # Digits → numeric literals (0→0, 1→100, ..., 9→900)
   def to_fragment(c) when c in ?0..?9, do: {:literal, (c - ?0) * 100}

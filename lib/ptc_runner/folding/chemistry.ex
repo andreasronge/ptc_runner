@@ -49,6 +49,13 @@ defmodule PtcRunner.Folding.Chemistry do
       |> Enum.reject(fn {_pos, frag} -> frag == :spacer end)
       |> Map.new()
 
+    # Track which positions hold wildcards (for match pattern assembly)
+    wildcard_positions =
+      fragment_map
+      |> Enum.filter(fn {_pos, frag} -> frag == :wildcard end)
+      |> Enum.map(fn {pos, _} -> pos end)
+      |> MapSet.new()
+
     # Track which positions have been consumed into larger fragments
     # A consumed position's fragment lives in its parent
     consumed = MapSet.new()
@@ -64,6 +71,10 @@ defmodule PtcRunner.Folding.Chemistry do
 
     # Pass 4: Composition bonds (and/or/not + exprs)
     {fragment_map, consumed} = pass_composition_bonds(fragment_map, adjacency, consumed)
+
+    # Pass 5: Match bonds (match + any adjacent fragments → tool/match with stringified pattern)
+    {fragment_map, consumed} =
+      pass_match_bonds(fragment_map, adjacency, consumed, wildcard_positions)
 
     # Return unconsumed fragments (the top-level assembled results)
     fragment_map
@@ -358,6 +369,96 @@ defmodule PtcRunner.Folding.Chemistry do
     end
   end
 
+  # === Pass 5: Match Bonds ===
+  # match + adjacent fragments → (tool/match {:pattern "stringified_pattern"})
+  # Adjacent fragments are converted to a pattern string with wildcards.
+  # The match tool reads peer_source from context internally.
+
+  defp pass_match_bonds(fmap, adj, consumed, wildcard_positions) do
+    Enum.reduce(Map.keys(fmap), {fmap, consumed}, fn pos, {fm, cons} ->
+      if MapSet.member?(cons, pos),
+        do: {fm, cons},
+        else: try_match_bond(pos, fm, adj, cons, wildcard_positions)
+    end)
+  end
+
+  defp try_match_bond(pos, fmap, adj, consumed, wildcard_positions) do
+    case Map.get(fmap, pos) do
+      {:fn_fragment, :match} ->
+        neighbors = adjacent_unconsumed(pos, adj, consumed, fmap)
+
+        # Collect all adjacent fragments (excluding other match fragments)
+        pattern_fragments =
+          neighbors
+          |> Enum.reject(fn {_p, f} -> match?({:fn_fragment, :match}, f) end)
+          |> Enum.sort_by(fn {p, _f} -> p end)
+
+        case pattern_fragments do
+          [] ->
+            {fmap, consumed}
+
+          _ ->
+            assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions)
+        end
+
+      _ ->
+        {fmap, consumed}
+    end
+  end
+
+  defp assemble_match_bond(pos, pattern_fragments, fmap, consumed, wildcard_positions) do
+    pattern_str =
+      pattern_fragments
+      |> Enum.map(fn {npos, frag} ->
+        if MapSet.member?(wildcard_positions, npos),
+          do: "*",
+          else: frag |> fragment_to_ast() |> format_pattern_ast()
+      end)
+      |> build_pattern_string()
+
+    ast =
+      {:list,
+       [
+         {:ns_symbol, :tool, :match},
+         {:map, [{{:keyword, :pattern}, {:string, pattern_str}}]}
+       ]}
+
+    consumed_positions =
+      Enum.reduce(pattern_fragments, consumed, fn {npos, _}, acc -> MapSet.put(acc, npos) end)
+
+    {Map.put(fmap, pos, {:assembled, ast}), consumed_positions}
+  end
+
+  # Build a pattern string from fragment strings.
+  # If there's one assembled fragment, wrap it: "(count *)" style.
+  # If there are multiple, join with spaces: "count * data/products"
+  defp build_pattern_string(parts) do
+    case parts do
+      [single] -> single
+      parts -> "(" <> Enum.join(parts, " ") <> ")"
+    end
+  end
+
+  # Format an AST node as a pattern string (for match tool patterns)
+  defp format_pattern_ast(nil), do: "*"
+  defp format_pattern_ast({:symbol, s}), do: Atom.to_string(s)
+  defp format_pattern_ast({:keyword, k}), do: ":#{k}"
+  defp format_pattern_ast({:ns_symbol, ns, name}), do: "#{ns}/#{name}"
+  defp format_pattern_ast(n) when is_integer(n), do: Integer.to_string(n)
+  defp format_pattern_ast({:string, s}), do: ~s("#{s}")
+
+  defp format_pattern_ast({:list, items}) do
+    inner = Enum.map_join(items, " ", &format_pattern_ast/1)
+    "(#{inner})"
+  end
+
+  defp format_pattern_ast({:vector, items}) do
+    inner = Enum.map_join(items, " ", &format_pattern_ast/1)
+    "[#{inner}]"
+  end
+
+  defp format_pattern_ast(_), do: "*"
+
   # === Fragment Classification ===
 
   defp value_fragment?({:assembled, _}), do: true
@@ -397,6 +498,7 @@ defmodule PtcRunner.Folding.Chemistry do
   defp fragment_to_ast({:fn_fragment, name}), do: {:symbol, name}
   defp fragment_to_ast({:comparator, op}), do: {:symbol, op}
   defp fragment_to_ast({:connective, op}), do: {:symbol, op}
+  defp fragment_to_ast(:wildcard), do: {:symbol, :*}
   defp fragment_to_ast(nil), do: nil
 
   # === Adjacency Helpers ===

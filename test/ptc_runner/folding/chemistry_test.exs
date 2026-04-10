@@ -32,7 +32,7 @@ defmodule PtcRunner.Folding.ChemistryTest do
     end
 
     test "spacers are excluded from fragments" do
-      grid = %{{0, 0} => ?W, {1, 0} => ?X, {2, 0} => ?Y}
+      grid = %{{0, 0} => ?X, {1, 0} => ?Y, {2, 0} => ?Z}
       fragments = Chemistry.assemble(grid)
       assert fragments == []
     end

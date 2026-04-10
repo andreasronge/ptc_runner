@@ -97,6 +97,7 @@ defmodule PtcRunner.Folding.Phenotype do
 
   defp select_phenotype(fragments) do
     fragments
+    |> Enum.reject(&(&1 == :wildcard))
     |> Enum.max_by(&fragment_complexity/1, fn -> nil end)
   end
 
@@ -104,6 +105,7 @@ defmodule PtcRunner.Folding.Phenotype do
   defp fragment_complexity({:literal, _}), do: 1
   defp fragment_complexity({:data_source, _}), do: 1
   defp fragment_complexity({:field_key, _}), do: 1
+  defp fragment_complexity(:wildcard), do: 0
   defp fragment_complexity(_), do: 0
 
   defp ast_size({:list, items}), do: 1 + Enum.sum(Enum.map(items, &ast_size/1))
@@ -118,4 +120,5 @@ defmodule PtcRunner.Folding.Phenotype do
   defp fragment_to_ast({:fn_fragment, name}), do: {:symbol, name}
   defp fragment_to_ast({:comparator, op}), do: {:symbol, op}
   defp fragment_to_ast({:connective, op}), do: {:symbol, op}
+  defp fragment_to_ast(:wildcard), do: {:symbol, :*}
 end
