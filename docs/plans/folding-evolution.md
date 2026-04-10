@@ -412,6 +412,31 @@ With 3 context variations, pop=40, 25 generations:
 The solve_score/test_score tradeoff is visible: individuals with high solve scores (match
 many peers) tend to have lower test scores (their "test" is common/trivial), and vice versa.
 
+### Interactive Coevolution with Match + If (April 2026)
+
+Added structural pattern matching (`tool/match` with `*` wildcards) and `if` conditional
+to the folding chemistry. Programs can now branch on structural properties of their peer:
+
+```clojure
+(if (tool/match {:pattern "(count *)"}) 200 500)
+```
+
+**Alphabet changes:** W→match, X→if, i-z→wildcard (was spacers). Relaxed `if` bonding
+to accept any 2+ adjacent fragments (not just predicates), increasing `if` appearance
+from 1-10% to 16-31% of random genotypes. Combined `if`+`match` appears in ~1.5%.
+
+**Finding: no `if`/`match` programs survived evolution.** Simple `count` expressions
+(2 characters, immediate fitness) outcompete conditional programs before they can
+demonstrate an advantage. The `if`/`match` machinery works mechanically (verified via
+hand-crafted programs and unit tests) but there is no ecological pressure that rewards
+conditionals — `(count data/employees)` scores robust=0.86 uniformly across all contexts.
+
+**Implication:** Conditionals need an environment where different contexts require
+different strategies. Currently all contexts have the same data sources, so one expression
+works everywhere. To create pressure for conditionals, contexts would need to differ
+structurally (e.g., some contexts have products but no employees, forcing the solver to
+adapt). This is an environment design problem, not a representation problem.
+
 ### Known Issues
 
 1. **Phenotype complexity is low.** Most evolved phenotypes are 1-2 bond assemblies
