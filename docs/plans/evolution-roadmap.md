@@ -202,6 +202,27 @@ problems. Can a single evolved program solve multiple data pipeline tasks?
 Start with low LLM cost penalty, increase over generations. Early generations use LLM
 freely. Later generations must internalize patterns.
 
+### Folding Evolution: Protein-Inspired Genotype-Phenotype Mapping
+
+**Status**: Phase 1-2 + measurement + dynamics experiment complete
+(`lib/ptc_runner/folding/`, 55 tests). See `folding-evolution.md` for full results.
+
+**Summary**: Folding loses on static metrics (lower neutrality, more breaks, worse
+crossover preservation) but **wins decisively on evolutionary dynamics**. In regime-shift
+experiments, folding discovers target programs (fitness 0.79) while direct encoding
+cannot escape baseline (fitness 0.10). Folding recovers from regime shifts; direct doesn't.
+Direct encoding's high neutrality is evolutionary inertia, not robustness.
+
+**Key insight**: Folding's pleiotropy — non-local mutation effects from the 2D fold
+topology — enables restructuring that the canalized direct encoding cannot achieve.
+Static metrics were misleading: they favored the representation that was safe but inert.
+
+**Next priorities**:
+1. Harder task targets (filter, map, group-by) — does folding's advantage persist?
+2. Historical contingency — run many seeds, measure outcome variance
+3. Red Queen responsiveness — continuous regime shifts
+4. Genotype-level rewriting (Phase 3) — now justified by the dynamics results
+
 ### Compare with SubAgent.run
 
 Evolve SubAgent configurations (system prompt, parameters) instead of programs directly.
