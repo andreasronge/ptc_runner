@@ -36,6 +36,7 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
     ChallengeDecoder,
     ChallengeTransform,
     Individual,
+    MatchTool,
     Operators,
     Oracle
   }
@@ -209,15 +210,22 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
 
   defp evaluate_tester(tester, solvers, base_contexts, task_defs, config) do
     # For each context, generate a challenge and evaluate solvers
+    # Pick a representative solver source for the tester's match tool
+    representative_solver = Enum.find(solvers, & &1.valid?)
+
     challenges =
       Enum.map(base_contexts, fn base_ctx ->
-        # Build tester context with solver info
+        # Build tester context with solver info + peer_source for match tool
         tester_ctx = build_tester_context(base_ctx, solvers, config)
 
-        # Run tester phenotype to get raw output
+        # Run tester with match tool targeting representative solver
+        peer_source = if representative_solver, do: representative_solver.source
+        match_tools = build_match_tools(peer_source)
+
         raw_output =
           case Lisp.run(tester.source,
                  context: tester_ctx,
+                 tools: match_tools,
                  timeout: config.timeout,
                  max_heap: config.max_heap,
                  filter_context: false
@@ -233,9 +241,12 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
         modified_ctx = ChallengeTransform.apply_challenge(challenge, base_ctx)
 
         # Evaluate each solver against the modified context
+        # Each solver gets match tool targeting the tester's source
         solver_scores =
           Map.new(solvers, fn solver ->
-            score = evaluate_solver_on_challenge(solver, modified_ctx, task_defs, config)
+            score =
+              evaluate_solver_on_challenge(solver, modified_ctx, tester.source, task_defs, config)
+
             {solver.id, score}
           end)
 
@@ -261,13 +272,17 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
     }
   end
 
-  defp evaluate_solver_on_challenge(%{valid?: false}, _ctx, _task_defs, _config), do: 0.0
+  defp evaluate_solver_on_challenge(%{valid?: false}, _ctx, _peer_source, _task_defs, _config),
+    do: 0.0
 
-  defp evaluate_solver_on_challenge(solver, modified_ctx, task_defs, config) do
-    # Run solver against modified context
+  defp evaluate_solver_on_challenge(solver, modified_ctx, peer_source, task_defs, config) do
+    # Run solver against modified context with match tool targeting tester
+    match_tools = build_match_tools(peer_source)
+
     solver_output =
       case Lisp.run(solver.source,
              context: modified_ctx,
+             tools: match_tools,
              timeout: config.timeout,
              max_heap: config.max_heap,
              filter_context: false
@@ -374,11 +389,14 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
   defp compute_robust_score(%{valid?: false}, _contexts, _task_defs, _config), do: 0.0
 
   defp compute_robust_score(ind, base_contexts, task_defs, config) do
+    match_tools = build_match_tools(nil)
+
     scores =
       Enum.flat_map(base_contexts, fn ctx ->
         solver_output =
           case Lisp.run(ind.source,
                  context: ctx,
+                 tools: match_tools,
                  timeout: config.timeout,
                  max_heap: config.max_heap,
                  filter_context: false
@@ -396,6 +414,20 @@ defmodule PtcRunner.Folding.InteractiveCoevolution do
       end)
 
     if scores == [], do: 0.0, else: Enum.sum(scores) / length(scores)
+  end
+
+  # === Match Tool Integration ===
+
+  # Build a tools map with the match tool configured for a specific peer source.
+  # The match tool reads the peer source from the closure, not from the context.
+  defp build_match_tools(peer_source) do
+    match_fn = fn args ->
+      pattern = Map.get(args, "pattern", "")
+      source = peer_source || ""
+      {:ok, MatchTool.matches?(source, pattern)}
+    end
+
+    %{"match" => match_fn}
   end
 
   # === Population Management ===
