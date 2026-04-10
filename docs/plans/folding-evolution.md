@@ -696,6 +696,54 @@ exhibited punctuated fitness dynamics. The direct encoding's high neutrality cor
 to evolutionary inertia rather than robustness — mutations were absorbed without effect,
 but the representation could not explore beyond its initial basin.**
 
+### Theoretical Grounding: Altenberg's Constructional Selection
+
+Our regime shift results align with Lee Altenberg's framework from "Genome Growth and
+the Evolution of the Genotype-Phenotype Map" (1995/2023, `private/LeeGGEGPM.pdf`).
+Key connections:
+
+**Bonner's Low Pleiotropy Principle vs Directional Selection.** Altenberg discusses
+Bonner's (1974) argument that low pleiotropy is necessary for evolvability — mutations
+that affect few traits are less likely to be lethal. Our static metrics confirmed this:
+direct encoding's low pleiotropy (87% neutrality, 2% large breaks) looks "safer." But
+Altenberg distinguishes between *stabilizing* selection (where low pleiotropy wins) and
+*directional* selection (where variation aligned with the selection gradient wins, even
+if pleiotropic). Our regime shift IS directional selection — the environment changed and
+the population needed to reach a new phenotype. Folding's high pleiotropy enabled the
+large phenotypic jumps that direct encoding's canalized structure could not achieve.
+
+**Latent Directional Selection (Section 2.7).** Altenberg describes populations stuck on
+"constrained peaks" — appearing to be at a fitness maximum, but only because the
+genotype-phenotype map can't produce the right variation. This is exactly what happened
+with direct encoding at fitness 0.10. It wasn't at a true peak — higher-fitness programs
+exist — but the representation created a *kinetic constraint*. The "latent directional
+selection" was invisible until folding opened up the right variational dimensions through
+its 2D fold topology.
+
+**The Genome as Population (Section 2.4).** Altenberg proposes treating the genome as a
+population of genes, where genes with high "constructional fitness" proliferate. For our
+genotype strings: subsequences that fold into useful active sites should proliferate
+within evolved genotypes over evolutionary time. This predicts measurable motif
+enrichment in evolved populations.
+
+**Type I and Type II Effects (Sections 2.4-2.5).**
+- Type I (genic selection): genes that produce good duplicates proliferate within the
+  genome. Our Phase 3 genotype-level rewriting IS a Type I mechanism — rewriters that
+  produce useful edits proliferate.
+- Type II (correlated allelic variation): alleles of established genes tend to be
+  adaptive because the gene's mode of action is correlated between its origin and its
+  subsequent variation. Our folding chemistry creates Type II effects — a character's
+  phenotypic contribution depends on its fold neighbors, and the fold topology is
+  heritable across generations.
+
+**Wagner's Linear Model (Section 4).** The three-layer model (genotype x → phenotype
+y = Ax → fitness) provides a formal framework for our system. Our fold is a non-linear
+"A matrix." Altenberg shows that under Gaussian stabilizing selection, new genes with
+low pleiotropy are favored. This predicts that under steady-state conditions (no regime
+shifts), folding should be at a disadvantage to direct encoding — and our static metrics
+confirm this. The key insight: the *right* development process depends on whether the
+environment is stable (favor low pleiotropy) or changing (favor directional variability).
+
 ### Next Steps
 
 1. **Vary the task difficulty.** The current targets are simple count expressions. Test
@@ -708,9 +756,30 @@ but the representation could not explore beyond its initial basin.**
 
 3. **Red Queen responsiveness.** Under continuous regime shifts (every N generations),
    compare adaptation lag between encodings. Folding should show faster response.
+   Altenberg's framework predicts folding wins under directional selection (regime
+   shifts) but loses under stabilizing selection (stable targets).
 
 4. **Longer runs.** 20 generations may not be enough to see full recovery. Run 100+
    post-shift generations to measure asymptotic recovery level.
+
+5. **Motif enrichment analysis.** Measure whether evolved genotypes contain repeated
+   subsequences that fold into useful active sites, as predicted by Altenberg's
+   "genome as population" model. Compare motif frequencies in evolved vs random
+   genotypes. If functional motifs proliferate, this is constructional selection
+   operating on our genotype strings.
+
+6. **Pleiotropy measurement per mutation.** For each point mutation, count how many
+   phenotypic traits change (bonds formed, program output, active sites). Compare
+   folding vs direct encoding. Altenberg predicts that under constructional selection,
+   surviving genes should have lower pleiotropy than random genes. Measure: do
+   mutations in evolved genotypes have lower pleiotropy than mutations in random
+   genotypes? If yes, evolution has shaped the genotype-phenotype map itself.
+
+7. **Stabilizing vs directional selection experiment.** Run both encodings under (a) a
+   fixed target for 100 generations (stabilizing) and (b) a shifting target every 10
+   generations (directional). Measure fitness in both conditions. Altenberg predicts
+   direct encoding wins under (a), folding wins under (b). This is the clean test of
+   the theoretical framework.
 
 ## Implementation Plan
 
@@ -835,10 +904,27 @@ Implement codon table and/or pattern accumulator as alternative development proc
   - Stochastic bond selection when multiple candidates exist
   - Affinity scores (some pairs bond more readily than others)
 
+### Near-term (Altenberg-inspired experiments)
+
+- **Stabilizing vs directional selection.** Fixed target 100 gens vs shifting target
+  every 10 gens. Clean test of whether the right G-P map depends on environmental
+  stability. Altenberg predicts direct wins stable, folding wins shifting.
+
+- **Motif enrichment.** Extract all 3-character subsequences from evolved vs random
+  genotypes. Compute enrichment ratio. If functional motifs (e.g., "DaK" = get+price+>)
+  are enriched, constructional selection is operating on the genotype string.
+
+- **Pleiotropy per mutation.** For each point mutation in evolved genotypes, count
+  phenotypic traits changed. Compare to random genotypes. If evolved genotypes have
+  lower pleiotropy, evolution has shaped the G-P map itself — the central prediction
+  of Altenberg's theory.
+
 ### Long-term (Phase 3+ from the plan)
 
 - **Genotype-level rewriting**: The most novel aspect of the design. Requires careful
-  thought about how a PTC-Lisp program can output splice instructions.
+  thought about how a PTC-Lisp program can output splice instructions. Altenberg's
+  Type I effect predicts that rewriters producing useful edits will proliferate —
+  this is constructional selection operating through program-on-program evolution.
 
 - **Competitive repair cycle**: solve → test → repair → compress → attack. Requires
   rewriting infrastructure first.
@@ -846,3 +932,19 @@ Implement codon table and/or pattern accumulator as alternative development proc
 - **Compare development processes**: Implement codon table or stack machine as
   alternative genotype-to-phenotype maps. Same genotypes, same evolution, different
   development. Compare neutral mutation rate, crossover viability, evolvability.
+  Altenberg's framework predicts that each development process creates a different
+  pleiotropy profile, and the "best" process depends on the selection regime.
+
+## References
+
+- Altenberg, L. (1995/2023). "Genome Growth and the Evolution of the Genotype-Phenotype
+  Map." In *Evolution and Biocomputation*, Springer LNCS vol. 899, pp. 205-259.
+  (`private/LeeGGEGPM.pdf`) — Constructional selection theory, pleiotropy and
+  evolvability, genome-as-population model.
+- Hillis, W.D. (1990). "Co-evolving parasites improve simulated evolution as an
+  optimization procedure." — Parasitic coevolution for sorting networks.
+- Bonner, J.T. (1974). *On Development*. — Low pleiotropy principle.
+- Wagner, G.P. (1989). "The origin of morphological characters and the biological basis
+  of homology." — Linear quantitative-genetic model of G-P maps.
+- Kauffman, S.A. (1989). "Adaptation on rugged fitness landscapes." — NK adaptive
+  landscape model.
