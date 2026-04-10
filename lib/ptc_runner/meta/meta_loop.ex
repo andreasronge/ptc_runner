@@ -237,25 +237,10 @@ defmodule PtcRunner.Meta.MetaLoop do
       %{m | fitness: result.fitness, metadata: Map.put(m.metadata, :eval_result, result)}
     end
 
-    if Map.get(config, :parallel, true) do
-      m_pop
-      |> Task.async_stream(evaluate_fn,
-        max_concurrency: length(m_pop),
-        timeout: config.task_timeout * length(config.eval_config[:problems] || []) + 30_000,
-        on_timeout: :kill_task
-      )
-      |> Enum.zip(m_pop)
-      |> Enum.map(fn
-        {{:ok, evaluated_m}, _original} ->
-          evaluated_m
-
-        {{:exit, _reason}, original} ->
-          IO.puts("  M #{original.id}: TIMEOUT")
-          %{original | fitness: -999.0}
-      end)
-    else
-      Enum.map(m_pop, evaluate_fn)
-    end
+    # Sequential M evaluation — parallel causes Finch connection pool exhaustion
+    # when multiple M variants fire LLM calls simultaneously. The LLM call cap
+    # (max_llm_calls_per_problem) keeps individual M eval fast enough.
+    Enum.map(m_pop, evaluate_fn)
   end
 
   # Score Authors based on how well M variants solved their problems
