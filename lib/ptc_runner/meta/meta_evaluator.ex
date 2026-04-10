@@ -76,12 +76,12 @@ defmodule PtcRunner.Meta.MetaEvaluator do
         )
 
       best = result.best
-      solved = best.fitness != nil and best.fitness > 0.99
+      solved = best.fitness > 0.99
 
       %{
         problem: problem.name,
         solved: solved,
-        best_fitness: best.fitness || 0.0,
+        best_fitness: best.fitness,
         llm_tokens: Map.get(result, :total_llm_tokens, 0),
         best_source: best.source
       }

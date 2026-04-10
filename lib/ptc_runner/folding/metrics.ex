@@ -308,7 +308,7 @@ defmodule PtcRunner.Folding.Metrics do
     phenotype_neutral = mutant.source == ind.source
 
     behavioral_neutral =
-      if mutant.valid? and original_profile != :error do
+      if mutant.valid? do
         mutant_profile = output_profile(mutant.source, contexts, timeout)
         mutant_profile == original_profile
       else

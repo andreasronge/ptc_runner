@@ -47,7 +47,7 @@ defmodule PtcRunner.Folding.Loop do
   @doc """
   Build a problem from PTC-Lisp source and context.
   """
-  @spec make_problem(String.t(), String.t(), atom(), map()) :: Evaluator.problem()
+  @spec make_problem(String.t(), String.t(), atom(), map()) :: map()
   def make_problem(name, source, output_type, context) do
     case Lisp.run(source, context: context) do
       {:ok, step} ->
