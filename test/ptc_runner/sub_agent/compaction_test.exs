@@ -160,14 +160,14 @@ defmodule PtcRunner.SubAgent.CompactionTest do
   end
 
   describe "maybe_compact/3 — disabled" do
-    test "passes through messages and returns :disabled" do
+    test "passes through messages and returns nil stats" do
       msgs = [u("hi"), a("hello")]
-      assert {:disabled, ^msgs} = Compaction.maybe_compact(msgs, ctx(), {:disabled, []})
+      assert {^msgs, nil} = Compaction.maybe_compact(msgs, ctx(), {:disabled, []})
     end
   end
 
   describe ":trim — does not trigger below threshold" do
-    test "no triggers fired returns :not_triggered" do
+    test "no triggers fired returns input messages with triggered: false stats" do
       msgs =
         for i <- 1..6 do
           if rem(i, 2) == 1, do: u("u#{i}"), else: a("a#{i}")
@@ -175,18 +175,23 @@ defmodule PtcRunner.SubAgent.CompactionTest do
 
       {:trim, opts} = Compaction.normalize(true)
 
-      assert {:not_triggered, ^msgs, stats} =
-               Compaction.maybe_compact(msgs, ctx(turn: 3), {:trim, opts})
+      assert {^msgs, stats} = Compaction.maybe_compact(msgs, ctx(turn: 3), {:trim, opts})
 
-      assert stats == %{enabled: true, triggered: false, strategy: "trim"}
+      assert stats.triggered == false
+      assert stats.enabled == true
+      assert stats.strategy == "trim"
+      assert stats.reason == nil
+      # Consistent stats shape: messages_before == messages_after when not triggered.
+      assert stats.messages_before == 6
+      assert stats.messages_after == 6
     end
 
-    test "fewer messages than min_required returns :not_triggered even past turn threshold" do
+    test "fewer messages than min_required passes through even past turn threshold" do
       msgs = [u("only"), a("response")]
       {:trim, opts} = Compaction.normalize(true)
 
-      assert {:not_triggered, ^msgs, _stats} =
-               Compaction.maybe_compact(msgs, ctx(turn: 50), {:trim, opts})
+      assert {^msgs, stats} = Compaction.maybe_compact(msgs, ctx(turn: 50), {:trim, opts})
+      assert stats.triggered == false
     end
   end
 
@@ -221,8 +226,8 @@ defmodule PtcRunner.SubAgent.CompactionTest do
 
       {:trim, opts} = Compaction.normalize(trigger: [turns: 5], keep_recent_turns: 2)
 
-      assert {:not_triggered, ^msgs, _} =
-               Compaction.maybe_compact(msgs, ctx(turn: 5), {:trim, opts})
+      assert {^msgs, stats} = Compaction.maybe_compact(msgs, ctx(turn: 5), {:trim, opts})
+      assert stats.triggered == false
     end
   end
 
@@ -377,13 +382,7 @@ defmodule PtcRunner.SubAgent.CompactionTest do
 
       # Run again on trimmed output. Pressure heuristics may or may not fire on
       # the smaller list; idempotence means the message list is the same shape.
-      result_2 = Compaction.maybe_compact(trimmed_1, ctx(turn: 7), {:trim, opts})
-
-      trimmed_2 =
-        case result_2 do
-          {:not_triggered, msgs2, _} -> msgs2
-          {msgs2, _} -> msgs2
-        end
+      {trimmed_2, _stats_2} = Compaction.maybe_compact(trimmed_1, ctx(turn: 7), {:trim, opts})
 
       assert trimmed_1 == trimmed_2
       assert stats_1.triggered == true

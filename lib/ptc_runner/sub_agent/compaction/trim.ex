@@ -54,12 +54,11 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
   @doc """
   Run the trim strategy.
 
-  Returns `{messages, stats}` when triggered, or `{:not_triggered, messages, stats}`
-  when no pressure threshold was crossed (or when there aren't enough messages
-  to trim usefully).
+  Always returns `{messages, stats}`. Use `stats.triggered` (boolean) to
+  distinguish triggered from not-triggered runs — the stats map always has
+  the same shape, so callers can rely on every field being present.
   """
-  @spec run([message()], Context.t(), keyword()) ::
-          {[message()], stats()} | {:not_triggered, [message()], stats()}
+  @spec run([message()], Context.t(), keyword()) :: {[message()], stats()}
   def run(messages, %Context{} = ctx, opts) when is_list(messages) and is_list(opts) do
     keep_recent_turns = Keyword.fetch!(opts, :keep_recent_turns)
     keep_initial_user = Keyword.fetch!(opts, :keep_initial_user)
@@ -69,7 +68,7 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
 
     case detect_pressure(messages, ctx, trigger, tokens_before) do
       nil ->
-        {:not_triggered, messages, not_triggered_stats()}
+        {messages, not_triggered_stats(messages, tokens_before, keep_recent_turns)}
 
       reason ->
         do_run(messages, ctx, opts, keep_recent_turns, keep_initial_user, tokens_before, reason)
@@ -85,7 +84,7 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
     min_required = keep_recent_turns * 2 + if(will_keep_initial?, do: 1, else: 0)
 
     if length(messages) <= min_required do
-      {:not_triggered, messages, not_triggered_stats()}
+      {messages, not_triggered_stats(messages, tokens_before, keep_recent_turns)}
     else
       {trimmed, kept_initial?} = do_trim(messages, keep_recent_turns, keep_initial_user)
       tokens_after = estimate_tokens(trimmed, ctx.token_counter)
@@ -191,7 +190,22 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
     end
   end
 
-  defp not_triggered_stats do
-    %{enabled: true, triggered: false, strategy: "trim"}
+  # Stats shape stays consistent whether we trimmed or not — same keys, same
+  # types — so callers can read every field without `Map.has_key?` guards.
+  # When not triggered, "before" and "after" counts are equal.
+  defp not_triggered_stats(messages, tokens_before, keep_recent_turns) do
+    %{
+      enabled: true,
+      triggered: false,
+      strategy: "trim",
+      reason: nil,
+      messages_before: length(messages),
+      messages_after: length(messages),
+      estimated_tokens_before: tokens_before,
+      estimated_tokens_after: tokens_before,
+      kept_initial_user?: false,
+      kept_recent_turns: keep_recent_turns,
+      over_budget?: false
+    }
   end
 end

@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{Compression, KeyNormalizer, SystemPrompt, Telemetry}
+  alias PtcRunner.SubAgent.{Compaction, Compression, KeyNormalizer, SystemPrompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -509,13 +509,16 @@ defmodule PtcRunner.SubAgent.Loop do
         state.journal
       )
 
-    # Build messages - use compression if enabled and turn > 1
-    {messages, compression_stats} = build_llm_messages(agent, state, system_prompt)
+    # Build messages: compaction takes precedence over compression when both
+    # are configured. Compression remains supported until step 4 of the
+    # pressure-triggered compaction migration.
+    {messages, compression_stats, compaction_stats} =
+      build_llm_messages(agent, state, system_prompt)
 
     state =
-      if compression_stats,
-        do: %{state | compression_stats: compression_stats},
-        else: state
+      state
+      |> maybe_put_state(:compression_stats, compression_stats)
+      |> maybe_put_state(:compaction_stats, compaction_stats)
 
     # Strip tools in must-return mode
     tool_names =
@@ -1099,25 +1102,66 @@ defmodule PtcRunner.SubAgent.Loop do
     {message, initial_progress_state}
   end
 
-  # Build messages for LLM input
-  # Uses compression strategy if enabled and turn > 1; otherwise uses accumulated messages
-  # Returns {messages, compression_stats | nil}
+  # Build messages for LLM input.
+  #
+  # Dispatch order (compaction wins when both are configured — step 3 of the
+  # pressure-triggered compaction migration; compression goes away in step 4):
+  #
+  # 1. Compaction enabled and `agent.max_turns > 1` → run Compaction.maybe_compact/3.
+  #    Skips for single-shot and single-shot+retry (locked-in decision §4 of
+  #    docs/plans/pressure-triggered-context-compaction.md).
+  # 2. Else compression strategy enabled and `state.turn > 1` and
+  #    (`agent.max_turns > 1` or `agent.retry_turns > 0`) → legacy compression.
+  # 3. Else use accumulated messages as-is.
+  #
+  # Returns `{messages, compression_stats | nil, compaction_stats | nil}`.
   defp build_llm_messages(agent, state, system_prompt) do
-    # Normalize compression option
-    {strategy, opts} = Compression.normalize(agent.compression)
+    cond do
+      compaction_enabled?(agent) ->
+        build_compacted_messages(agent, state)
 
-    # Use compressed messages if:
-    # 1. Compression strategy is enabled (not nil)
-    # 2. We're past turn 1 (have history to compress)
-    # 3. Not in single-shot mode without retries (SS-001: max_turns == 1 skips compression)
-    #    BUT: single-shot with retry_turns > 0 DOES use compression for context collapsing
-    if strategy && state.turn > 1 && (agent.max_turns > 1 or agent.retry_turns > 0) do
-      build_compressed_messages(agent, state, system_prompt, strategy, opts)
-    else
-      # Uncompressed mode - use accumulated messages as-is, no compression stats
-      {state.messages, nil}
+      compression_active?(agent, state) ->
+        {strategy, opts} = Compression.normalize(agent.compression)
+        {messages, stats} = build_compressed_messages(agent, state, system_prompt, strategy, opts)
+        {messages, stats, nil}
+
+      true ->
+        {state.messages, nil, nil}
     end
   end
+
+  defp compaction_enabled?(agent) do
+    case Compaction.normalize(agent.compaction) do
+      {:disabled, _} -> false
+      {:trim, _} -> agent.max_turns > 1
+    end
+  end
+
+  defp compression_active?(agent, state) do
+    {strategy, _} = Compression.normalize(agent.compression)
+    strategy && state.turn > 1 && (agent.max_turns > 1 or agent.retry_turns > 0)
+  end
+
+  defp build_compacted_messages(agent, state) do
+    {:trim, opts} = Compaction.normalize(agent.compaction)
+
+    ctx =
+      Compaction.build_context(
+        [
+          turn: state.turn,
+          max_turns: agent.max_turns,
+          retry_phase?: state.work_turns_remaining <= 0,
+          memory: state.memory
+        ],
+        opts
+      )
+
+    {msgs, stats} = Compaction.maybe_compact(state.messages, ctx, {:trim, opts})
+    {msgs, nil, stats}
+  end
+
+  defp maybe_put_state(state, _key, nil), do: state
+  defp maybe_put_state(state, key, value), do: Map.put(state, key, value)
 
   # Build compressed messages using the strategy
   # Returns {messages, compression_stats}
