@@ -210,18 +210,20 @@ defmodule PtcRunner.SubAgent.Compaction do
   end
 
   @doc """
-  Run compaction (or skip it) for a list of LLM-input messages.
+  Run compaction for a list of LLM-input messages.
 
-  `normalized` is the output of `normalize/1`. Returns `{messages, stats}` when
-  triggered, or `{:not_triggered, messages, stats}` when no pressure threshold
-  was crossed. Returns `{:disabled, messages}` when compaction is off.
+  `normalized` is the output of `normalize/1`. Always returns
+  `{messages, stats | nil}`:
+
+  - When the strategy is `:disabled`, returns `{messages, nil}` — no work, no stats.
+  - Otherwise dispatches to the strategy and returns its `{messages, stats}` result.
+    Use `stats.triggered` (boolean) to distinguish a triggered trim from a
+    not-triggered pass-through; the stats shape is consistent either way.
   """
   @spec maybe_compact([message()], Context.t(), normalized()) ::
-          {[message()], stats()}
-          | {:not_triggered, [message()], stats()}
-          | {:disabled, [message()]}
+          {[message()], stats() | nil}
   def maybe_compact(messages, %Context{} = _ctx, {:disabled, _}) do
-    {:disabled, messages}
+    {messages, nil}
   end
 
   def maybe_compact(messages, %Context{} = ctx, {:trim, opts}) do
