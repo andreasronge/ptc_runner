@@ -46,6 +46,7 @@ defmodule PtcRunner.SubAgent do
   @type llm_callback :: Definition.llm_callback()
   @type llm_registry :: Definition.llm_registry()
   @type compression_opts :: Definition.compression_opts()
+  @type compaction_opts :: Definition.compaction_opts()
   @type output_mode :: Definition.output_mode()
   @type format_options :: Definition.format_options()
   @type plan_step :: Definition.plan_step()
@@ -110,6 +111,7 @@ defmodule PtcRunner.SubAgent do
   - `format_options` - Keyword list controlling output truncation (merged with defaults)
   - `float_precision` - Non-negative integer for decimal places in floats (default: 2)
   - `compression` - Compression strategy for turn history (see `t:compression_opts/0`)
+  - `compaction` - Pressure-triggered context compaction (see `t:compaction_opts/0`)
   - `pmap_timeout` - Positive integer for max milliseconds per `pmap` parallel operation (default: 5000)
   - `pmap_max_concurrency` - Positive integer for max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools or API rate limits.
   - `max_depth` - Positive integer for maximum recursion depth in nested agents (default: 3)
@@ -256,6 +258,7 @@ defmodule PtcRunner.SubAgent do
         :llm,
         :system_prompt,
         :compression,
+        :compaction,
         :thinking,
         :memory_limit,
         :max_depth,
@@ -291,6 +294,7 @@ defmodule PtcRunner.SubAgent do
         :system_prompt,
         :mission,
         :compression,
+        :compaction,
         :thinking,
         :memory_limit,
         :max_depth,
