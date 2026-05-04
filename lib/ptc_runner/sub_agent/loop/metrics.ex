@@ -84,7 +84,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
   ## Returns
 
-  Map with usage statistics including cache token metrics and compression stats when available.
+  Map with usage statistics including cache token metrics, compression stats,
+  and compaction stats when available.
   """
   @spec build_final_usage(map(), non_neg_integer(), non_neg_integer(), integer()) :: map()
   def build_final_usage(state, duration_ms, memory_bytes, turn_offset \\ 0) do
@@ -97,6 +98,10 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     # Add compression stats if captured from compression strategy
     compression_stats = state.compression_stats
     base = if compression_stats, do: Map.put(base, :compression, compression_stats), else: base
+
+    # Add compaction stats if captured from compaction strategy
+    compaction_stats = state.compaction_stats
+    base = if compaction_stats, do: Map.put(base, :compaction, compaction_stats), else: base
 
     # Add token counts if any LLM calls were made with token reporting
     if state.total_input_tokens > 0 or state.total_output_tokens > 0 do
