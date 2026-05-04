@@ -390,6 +390,58 @@ defmodule PtcRunner.SubAgent.CompactionTest do
     end
   end
 
+  describe "regressions — codex P2 findings" do
+    # Regression for codex review finding #1: short non-empty messages were
+    # silently scored 0 tokens (div(2, 4) == 0), so `trigger: [tokens: N]`
+    # could never fire on conversations of concise messages. The fix mirrors
+    # `Loop.Metrics.estimate_tokens/1` and floors non-empty content at 1 token.
+    test "token pressure fires on histories of short messages (default counter)" do
+      # 12 messages, each 2 chars. Pre-fix: each scored 0 → total 0 → never fires.
+      # Post-fix: each scores >= 1 → total >= 12 → fires at threshold 5.
+      msgs =
+        for i <- 1..12, do: if(rem(i, 2) == 1, do: u("u#{i}"), else: a("a#{i}"))
+
+      {:trim, opts} =
+        Compaction.normalize(
+          trigger: [tokens: 5],
+          keep_recent_turns: 2,
+          keep_initial_user: true
+        )
+
+      assert {trimmed, stats} = Compaction.maybe_compact(msgs, ctx(turn: 1), {:trim, opts})
+
+      assert stats.triggered == true
+      assert stats.reason == :token_pressure
+      assert stats.estimated_tokens_before >= 12
+      assert length(trimmed) < length(msgs)
+    end
+
+    # Regression for codex review finding #2: when `keep_initial_user: true`
+    # but the head wasn't `:user`, the threshold reserved an initial-user slot
+    # that would never be filled. For an exact-boundary history like 5 messages
+    # with `keep_recent_turns: 2`, this returned the original assistant-leading
+    # list unchanged even after pressure fired.
+    test "trims assistant-leading history at the exact boundary (5 msgs, k=2)" do
+      msgs = [a("a1"), u("u1"), a("a2"), u("u2"), a("a3")]
+
+      {:trim, opts} =
+        Compaction.normalize(
+          trigger: [turns: 1],
+          keep_recent_turns: 2,
+          keep_initial_user: true
+        )
+
+      assert {trimmed, stats} = Compaction.maybe_compact(msgs, ctx(turn: 5), {:trim, opts})
+
+      assert stats.triggered == true
+      assert stats.kept_initial_user? == false
+      # Per the documented contract: never produce an assistant-leading slice.
+      assert hd(trimmed).role == :user
+      # And it actually trimmed something — wasn't a no-op.
+      assert length(trimmed) < length(msgs)
+    end
+  end
+
   describe "build_context/2" do
     test "uses default token counter when none provided" do
       built = Compaction.build_context([turn: 2, max_turns: 10], [])
