@@ -14,22 +14,26 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 ## Quick Start
 
 ```elixir
-# Conceptual example - see Getting Started guide for runnable code
-{:ok, step} = PtcRunner.SubAgent.run(
-  "What's the total value of orders over ${{threshold}}?",
-  tools: %{"get_orders" => &MyApp.Orders.list/0},
-  signature: "{total :float}",
-  context: %{threshold: 100},
-  llm: PtcRunner.LLM.callback("haiku")
-)
-
-step.return.total  #=> 2450.00
+# Runnable doctest — uses a mock LLM so it works without API access.
+# In production, swap `mock_llm` for `PtcRunner.LLM.callback("haiku")`.
+iex> mock_llm = fn _request ->
+...>   {:ok, "(->> (tool/get_orders) (filter #(> % data/threshold)) (reduce +))"}
+...> end
+iex> {:ok, step} = PtcRunner.SubAgent.run(
+...>   "Total value of orders over ${{threshold}}",
+...>   tools: %{"get_orders" => fn _ -> [1500.0, 950.0, 50.0] end},
+...>   context: %{threshold: 100},
+...>   llm: mock_llm,
+...>   max_turns: 1
+...> )
+iex> step.return
+2450.0
 ```
 
-For tests, the `llm:` option accepts any 1-arity function — pass an inline lambda
-(`fn _ -> {:ok, "..."} end`) instead of a real callback. There is no separate
-`stub`/`mock` helper. See the [Testing guide](docs/guides/subagent-testing.md)
-for scripted callbacks and integration patterns.
+The `llm:` option accepts any 1-arity function — for tests, pass an inline lambda
+like `mock_llm` above. There is no separate `stub`/`mock` helper. See the
+[Testing guide](docs/guides/subagent-testing.md) for scripted callbacks and
+integration patterns.
 
 **Try it yourself:** The [Getting Started guide](docs/guides/subagent-getting-started.md) includes fully runnable examples you can copy-paste.
 
