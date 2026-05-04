@@ -9,7 +9,7 @@ Add the dependencies:
 ```elixir
 def deps do
   [
-    {:ptc_runner, "~> 0.10.0"},
+    {:ptc_runner, "~> 0.10.1"},
     {:req_llm, "~> 1.8"}  # enables the built-in adapter
   ]
 end
