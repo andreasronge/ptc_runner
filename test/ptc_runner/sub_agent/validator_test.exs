@@ -121,6 +121,54 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :text
     end
 
+    test "rejects text mode with compaction: true" do
+      assert_raise ArgumentError, "output: :text cannot be used with compaction", fn ->
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x :string}",
+          compaction: true
+        )
+      end
+    end
+
+    test "rejects text mode with compaction keyword" do
+      assert_raise ArgumentError, "output: :text cannot be used with compaction", fn ->
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x :string}",
+          compaction: [trigger: [turns: 5]]
+        )
+      end
+    end
+
+    test "accepts text mode with compaction: nil" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x :string}",
+          compaction: nil
+        )
+
+      assert agent.output == :text
+      assert agent.compaction == nil
+    end
+
+    test "accepts text mode with compaction: false" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x :string}",
+          compaction: false
+        )
+
+      assert agent.output == :text
+      assert agent.compaction == false
+    end
+
     test "rejects json mode with firewall field in signature" do
       assert_raise ArgumentError,
                    ~r/output: :text signature cannot have firewall fields \(_hidden\)/,
@@ -412,6 +460,84 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     test "rejects 1-arity function" do
       assert_raise ArgumentError, ~r/progress_fn must be a 2-arity function/, fn ->
         SubAgent.new(prompt: "test", progress_fn: fn _input -> "" end)
+      end
+    end
+  end
+
+  describe "compaction validation" do
+    test "accepts compaction: true (defaults to :trim)" do
+      agent = SubAgent.new(prompt: "test", compaction: true)
+      assert agent.compaction == true
+    end
+
+    test "accepts compaction: false (default)" do
+      agent = SubAgent.new(prompt: "test", compaction: false)
+      assert agent.compaction == false
+    end
+
+    test "compaction defaults to false when omitted" do
+      agent = SubAgent.new(prompt: "test")
+      assert agent.compaction == false
+    end
+
+    test "accepts valid compaction keyword list" do
+      agent =
+        SubAgent.new(
+          prompt: "test",
+          compaction: [
+            strategy: :trim,
+            trigger: [turns: 4, tokens: 1_000],
+            keep_recent_turns: 2,
+            keep_initial_user: false
+          ]
+        )
+
+      assert agent.compaction[:keep_recent_turns] == 2
+    end
+
+    test "rejects empty keyword (compaction: [])" do
+      assert_raise ArgumentError, ~r/compaction: \[\] is invalid/, fn ->
+        SubAgent.new(prompt: "test", compaction: [])
+      end
+    end
+
+    test "rejects unsupported strategy with phase 2 pointer" do
+      assert_raise ArgumentError,
+                   ~r/Phase 1 supports `strategy: :trim` only.*phase-2/,
+                   fn ->
+                     SubAgent.new(prompt: "test", compaction: [strategy: :summarize])
+                   end
+    end
+
+    test "rejects custom strategy module forms with phase 2 pointer" do
+      assert_raise ArgumentError, ~r/Custom strategy modules.*phase-2/, fn ->
+        SubAgent.new(prompt: "test", compaction: SomeModule)
+      end
+
+      assert_raise ArgumentError, ~r/Custom strategy modules.*phase-2/, fn ->
+        SubAgent.new(prompt: "test", compaction: {SomeModule, []})
+      end
+    end
+
+    test "rejects unknown top-level keys" do
+      assert_raise ArgumentError, ~r/Unknown compaction option/, fn ->
+        SubAgent.new(prompt: "test", compaction: [keep_recent_turn: 3])
+      end
+    end
+
+    test "rejects bad trigger types" do
+      assert_raise ArgumentError, ~r/trigger\[:turns\] must be a positive integer/, fn ->
+        SubAgent.new(prompt: "test", compaction: [trigger: [turns: 0]])
+      end
+
+      assert_raise ArgumentError, ~r/trigger must specify at least one of/, fn ->
+        SubAgent.new(prompt: "test", compaction: [trigger: []])
+      end
+    end
+
+    test "rejects bad token_counter arity" do
+      assert_raise ArgumentError, ~r/token_counter must be a 1-arity function/, fn ->
+        SubAgent.new(prompt: "test", compaction: [token_counter: fn _a, _b -> 0 end])
       end
     end
   end

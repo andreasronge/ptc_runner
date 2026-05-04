@@ -88,6 +88,23 @@ defmodule PtcRunner.SubAgent.Definition do
   @type compression_opts :: nil | false | true | module() | {module(), keyword()}
 
   @typedoc """
+  Compaction configuration for multi-turn agents.
+
+  Pressure-triggered context compaction. Compaction reduces the LLM-input
+  message list when turn count or estimated token usage crosses a threshold.
+
+  Can be:
+  - `nil` or `false` - Compaction disabled (default)
+  - `true` - Use the `:trim` strategy with default options
+  - `keyword()` - Use the `:trim` strategy with custom options
+
+  See `PtcRunner.SubAgent.Compaction` for option details and validation rules.
+  Phase 1 supports `strategy: :trim` only; custom strategy modules and
+  `:summarize` are deferred.
+  """
+  @type compaction_opts :: nil | false | true | keyword()
+
+  @typedoc """
   Output mode for SubAgent execution.
 
   - `:ptc_lisp` - Default. LLM generates PTC-Lisp code that is executed.
@@ -154,6 +171,7 @@ defmodule PtcRunner.SubAgent.Definition do
           format_options: format_options(),
           float_precision: non_neg_integer(),
           compression: compression_opts(),
+          compaction: compaction_opts(),
           thinking: boolean(),
           output: output_mode(),
           max_tool_calls: pos_integer() | nil,
@@ -190,6 +208,7 @@ defmodule PtcRunner.SubAgent.Definition do
     :field_descriptions,
     :context_descriptions,
     :compression,
+    compaction: false,
     thinking: false,
     tools: %{},
     llm_query: false,

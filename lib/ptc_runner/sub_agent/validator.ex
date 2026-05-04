@@ -6,6 +6,8 @@ defmodule PtcRunner.SubAgent.Validator do
   Extracted from `PtcRunner.SubAgent` to keep that module under the 800-line threshold.
   """
 
+  alias PtcRunner.SubAgent.Compaction
+
   @doc """
   Validates all SubAgent options, raising on invalid input.
 
@@ -57,6 +59,20 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_progress_fn!(opts)
     validate_completion_mode!(opts)
     validate_self_tool_requires_signature!(opts)
+    validate_compaction!(opts)
+  end
+
+  defp validate_compaction!(opts) do
+    case Keyword.fetch(opts, :compaction) do
+      :error ->
+        :ok
+
+      {:ok, value} ->
+        # Defer to Compaction.normalize/1 — it already raises ArgumentError
+        # with detailed messages for every invalid shape.
+        _ = Compaction.normalize(value)
+        :ok
+    end
   end
 
   defp validate_prompt!(opts) do
@@ -275,8 +291,9 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_text_mode_constraints!(opts) do
-    # Text mode: no compression, no firewall fields (when signature present)
+    # Text mode: no compression, no compaction, no firewall fields (when signature present)
     validate_text_no_compression!(opts)
+    validate_text_no_compaction!(opts)
 
     # Only validate signature-related constraints when signature is present
     case Keyword.fetch(opts, :signature) do
@@ -295,6 +312,16 @@ defmodule PtcRunner.SubAgent.Validator do
     case Keyword.fetch(opts, :compression) do
       {:ok, compression} when compression not in [nil, false] ->
         raise ArgumentError, "output: :text cannot be used with compression"
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp validate_text_no_compaction!(opts) do
+    case Keyword.fetch(opts, :compaction) do
+      {:ok, compaction} when compaction not in [nil, false] ->
+        raise ArgumentError, "output: :text cannot be used with compaction"
 
       _ ->
         :ok
