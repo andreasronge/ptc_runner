@@ -305,7 +305,8 @@ defmodule PtcRunner.MixProject do
 
   defp package do
     [
-      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/prompts),
+      files:
+        ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/prompts usage-rules.md usage-rules),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",
