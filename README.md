@@ -16,14 +16,20 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 ```elixir
 # Conceptual example - see Getting Started guide for runnable code
 {:ok, step} = PtcRunner.SubAgent.run(
-  "What's the total value of orders over $100?",
+  "What's the total value of orders over ${{threshold}}?",
   tools: %{"get_orders" => &MyApp.Orders.list/0},
   signature: "{total :float}",
-  llm: my_llm
+  context: %{threshold: 100},
+  llm: PtcRunner.LLM.callback("haiku")
 )
 
 step.return.total  #=> 2450.00
 ```
+
+For tests, the `llm:` option accepts any 1-arity function — pass an inline lambda
+(`fn _ -> {:ok, "..."} end`) instead of a real callback. There is no separate
+`stub`/`mock` helper. See the [Testing guide](docs/guides/subagent-testing.md)
+for scripted callbacks and integration patterns.
 
 **Try it yourself:** The [Getting Started guide](docs/guides/subagent-getting-started.md) includes fully runnable examples you can copy-paste.
 

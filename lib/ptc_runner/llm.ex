@@ -34,6 +34,18 @@ defmodule PtcRunner.LLM do
         %{done: true, tokens: t} -> track_usage(t)
       end) |> Stream.run()
 
+  ## Testing
+
+  The `llm:` option on `SubAgent.run/2` accepts any 1-arity function. For tests,
+  pass an inline lambda instead of a real callback — there is no separate
+  `stub`/`mock`/`fake` helper:
+
+      mock_llm = fn _request -> {:ok, ~S|(return {:result 42})|} end
+      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: mock_llm)
+
+  See [Testing SubAgents](guides/subagent-testing.md) for scripted callbacks,
+  error paths, and integration testing patterns.
+
   ## Custom Adapters
 
   Implement the `PtcRunner.LLM` behaviour:
