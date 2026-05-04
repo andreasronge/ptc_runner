@@ -118,6 +118,34 @@ defmodule PtcRunner.SubAgent.RunTest do
 
       assert step.return == 7
     end
+
+    test "string form propagates invalid compaction options to the validator" do
+      # Same regression: bad compaction config must raise via the validator
+      # even when entering through the run/2 string surface.
+      llm = fn _input -> {:ok, "ok"} end
+
+      assert_raise ArgumentError, ~r/compaction: \[\] is invalid/, fn ->
+        SubAgent.run("test", max_turns: 1, llm: llm, compaction: [])
+      end
+
+      assert_raise ArgumentError, ~r/Phase 1 supports `strategy: :trim` only/, fn ->
+        SubAgent.run("test", max_turns: 1, llm: llm, compaction: [strategy: :summarize])
+      end
+    end
+
+    test "string form rejects text mode with compaction" do
+      # Same regression path: text-mode + compaction must raise via run/2 too.
+      llm = fn _input -> {:ok, "ok"} end
+
+      assert_raise ArgumentError, "output: :text cannot be used with compaction", fn ->
+        SubAgent.run("test",
+          output: :text,
+          signature: "() -> {x :string}",
+          llm: llm,
+          compaction: true
+        )
+      end
+    end
   end
 
   describe "run/2 - tool/data conflict validation" do

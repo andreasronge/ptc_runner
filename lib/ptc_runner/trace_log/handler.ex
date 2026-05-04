@@ -163,6 +163,7 @@ defmodule PtcRunner.TraceLog.Handler do
       :thinking,
       :journaling,
       :compression,
+      :compaction,
       :llm,
       :float_precision,
       :format_options,
