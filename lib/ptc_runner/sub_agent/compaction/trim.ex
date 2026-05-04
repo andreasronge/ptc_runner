@@ -77,7 +77,12 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
   end
 
   defp do_run(messages, ctx, opts, keep_recent_turns, keep_initial_user, tokens_before, reason) do
-    min_required = keep_recent_turns * 2 + if(keep_initial_user, do: 1, else: 0)
+    # Reserve the initial-user slot in the threshold only when we'll actually
+    # fill it. If `keep_initial_user: true` but the head isn't `:user`, we'll
+    # skip retention — counting that slot would suppress trimming for an
+    # exact-boundary assistant-leading history.
+    will_keep_initial? = keep_initial_user and match?([%{role: :user} | _], messages)
+    min_required = keep_recent_turns * 2 + if(will_keep_initial?, do: 1, else: 0)
 
     if length(messages) <= min_required do
       {:not_triggered, messages, not_triggered_stats()}

@@ -229,22 +229,30 @@ defmodule PtcRunner.SubAgent.Compaction do
   end
 
   @doc """
-  Default token counter — `String.length/1` divided by 4.
+  Default token counter — `String.length/1` divided by 4, with a floor of 1
+  for any non-empty content.
 
-  Pressure heuristic, not adapter-accurate.
+  Mirrors `PtcRunner.SubAgent.Loop.Metrics.estimate_tokens/1` so token-pressure
+  detection still fires on histories made of short messages. Pressure heuristic,
+  not adapter-accurate.
 
   ## Examples
 
       iex> PtcRunner.SubAgent.Compaction.default_token_counter("hello world")
       2
 
+      iex> PtcRunner.SubAgent.Compaction.default_token_counter("hi")
+      1
+
       iex> PtcRunner.SubAgent.Compaction.default_token_counter("")
       0
 
   """
   @spec default_token_counter(String.t()) :: non_neg_integer()
+  def default_token_counter(""), do: 0
+
   def default_token_counter(content) when is_binary(content) do
-    div(String.length(content), 4)
+    max(1, div(String.length(content), 4))
   end
 
   @doc """
