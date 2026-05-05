@@ -176,20 +176,24 @@ defmodule PtcDemo.Agent do
   @doc """
   Get the current compaction setting.
 
-  Returns `false` (disabled), `true` (default strategy), or `{module, opts}`.
+  Returns `false` (disabled) or `true` (default `:trim` strategy).
   """
   def compaction do
     GenServer.call(__MODULE__, :compaction)
   end
 
   @doc """
-  Set the compaction strategy.
+  Set the compaction setting.
 
-  Accepts:
+  Accepts the same shapes as `PtcRunner.SubAgent`'s `:compaction` option that
+  this demo wires through (Phase 1):
+
   - `false` or `nil` - disable compaction
-  - `true` - enable with default strategy (Trim)
-  - `module` - use a specific compaction module
-  - `{module, opts}` - use module with custom options
+  - `true` - enable with the default `:trim` strategy
+  - `keyword()` - `:trim` strategy with custom options (e.g.
+    `[trigger: [turns: 5], keep_recent_turns: 2]`)
+
+  Custom strategy modules and `:summarize` are not supported in Phase 1.
   """
   def set_compaction(compaction) do
     GenServer.call(__MODULE__, {:set_compaction, compaction})

@@ -229,8 +229,8 @@ preview = SubAgent.preview_prompt(agent, context: %{})
 IO.puts(preview.system)
 IO.puts(preview.user)
 
-# After execution, see compressed view
-SubAgent.Debug.print_trace(step, view: :compressed)
+# After execution, see what the LLM actually received per turn
+SubAgent.Debug.print_trace(step, messages: true)
 ```
 
 ### Strict Termination
