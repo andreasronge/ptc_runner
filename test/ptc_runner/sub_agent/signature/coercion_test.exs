@@ -354,4 +354,48 @@ defmodule PtcRunner.SubAgent.Signature.CoercionTest do
       assert {:ok, "09:14:00", _} = Coercion.coerce(~T[09:14:00], :string, [])
     end
   end
+
+  describe "coerce/2 - :datetime" do
+    test "ISO 8601 string with Z normalizes to UTC %DateTime{}" do
+      assert {:ok, %DateTime{} = dt, ["normalized to UTC"]} =
+               Coercion.coerce("2026-05-03T09:14:00Z", :datetime, [])
+
+      assert dt == ~U[2026-05-03 09:14:00Z]
+    end
+
+    test "ISO 8601 string with non-UTC offset shifts to UTC and warns" do
+      assert {:ok, %DateTime{} = dt, warnings} =
+               Coercion.coerce("2026-05-03T09:14:00+02:00", :datetime, [])
+
+      assert dt == ~U[2026-05-03 07:14:00Z]
+      assert "non-UTC offset in datetime, normalized to UTC" in warnings
+    end
+
+    test "%DateTime{} passes through unchanged" do
+      assert {:ok, ~U[2026-05-03 09:14:00Z], []} =
+               Coercion.coerce(~U[2026-05-03 09:14:00Z], :datetime, [])
+    end
+
+    test "naive ISO 8601 (no offset) is rejected" do
+      assert {:error, msg} = Coercion.coerce("2026-05-03T09:14:00", :datetime, [])
+      assert msg =~ "naive"
+      assert msg =~ "timezone offset"
+    end
+
+    test "garbage string is rejected" do
+      assert {:error, msg} = Coercion.coerce("not a date", :datetime, [])
+      assert msg =~ "invalid datetime"
+    end
+
+    test "non-string non-DateTime is rejected with a hint" do
+      assert {:error, msg} = Coercion.coerce(42, :datetime, [])
+      assert msg =~ "ISO 8601"
+      assert msg =~ "%DateTime{}"
+    end
+
+    test "%NaiveDateTime{} is rejected (use %DateTime{} or string with offset)" do
+      assert {:error, msg} = Coercion.coerce(~N[2026-05-03 09:14:00], :datetime, [])
+      assert msg =~ "ISO 8601"
+    end
+  end
 end

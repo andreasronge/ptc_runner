@@ -38,10 +38,13 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
     |> optional(ascii_string(identifier_rest, min: 1))
     |> reduce({ParserHelpers, :concat_identifier, []})
 
-  # Type keyword (:string, :int, :float, :bool, :keyword, :any, :map)
+  # Type keyword (:string, :int, :float, :bool, :keyword, :any, :map, :datetime).
+  # `datetime` listed first among "starts with same prefix" alternatives; nimble_parsec
+  # is greedy/order-sensitive on `string("...")` choices, so longer-or-distinct first.
   type_keyword =
     ignore(ascii_char([?:]))
     |> choice([
+      string("datetime"),
       string("string"),
       string("int"),
       string("float"),
@@ -179,7 +182,7 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
     parsec(:signature) |> eos()
   )
 
-  @valid_types ~w(string int float bool keyword map any)
+  @valid_types ~w(string int float bool keyword map any datetime)
 
   @doc """
   Parse a signature string into AST.

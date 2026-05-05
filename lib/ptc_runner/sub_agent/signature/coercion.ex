@@ -152,6 +152,34 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
     {:error, "cannot coerce to string"}
   end
 
+  # `:datetime` is a real semantic type, not a prettier `:string`. Policy:
+  # accept RFC 3339 / ISO 8601 with offset (or `Z`), normalize to a UTC
+  # `%DateTime{}`, and pass that through to the caller. Reject offsetless /
+  # naive ISO strings — temporal ambiguity at the type boundary is the bug
+  # we're trying to prevent. A `%DateTime{}` from a tool passes through
+  # untouched.
+  defp coerce_impl(%DateTime{} = dt, :datetime), do: {:ok, dt, []}
+
+  defp coerce_impl(value, :datetime) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} ->
+        {:ok, DateTime.shift_zone!(dt, "Etc/UTC"),
+         maybe_warn_non_utc(value, ["normalized to UTC"])}
+
+      {:error, :missing_offset} ->
+        {:error,
+         "datetime requires a timezone offset (got naive ISO 8601 #{inspect(value)}); use \"...Z\" or \"...+HH:MM\""}
+
+      {:error, reason} ->
+        {:error, "invalid datetime #{inspect(value)}: #{reason}"}
+    end
+  end
+
+  defp coerce_impl(_value, :datetime) do
+    {:error,
+     "cannot coerce to datetime — expected ISO 8601 string with offset (e.g. \"2026-05-03T09:14:00Z\") or %DateTime{}"}
+  end
+
   defp coerce_impl(value, :int) when is_integer(value) and not is_boolean(value) do
     {:ok, value, []}
   end
@@ -413,4 +441,15 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
   defp float(value) when is_integer(value) do
     value * 1.0
   end
+
+  # Surface a warning when an LLM emitted a non-UTC offset and we shifted to
+  # UTC. The agent's caller still gets a UTC `%DateTime{}` (the type's
+  # canonical form), but knowing the model picked a non-UTC zone is useful
+  # for prompt-tuning.
+  defp maybe_warn_non_utc(<<_::binary-19, "Z", _::binary>>, base), do: base
+  defp maybe_warn_non_utc(<<_::binary-19, "+00:00", _::binary>>, base), do: base
+  defp maybe_warn_non_utc(<<_::binary-19, "-00:00", _::binary>>, base), do: base
+
+  defp maybe_warn_non_utc(_other, base),
+    do: base ++ ["non-UTC offset in datetime, normalized to UTC"]
 end

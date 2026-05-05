@@ -974,4 +974,61 @@ defmodule PtcRunner.SubAgent.TextModeJsonTest do
       assert step.field_descriptions == %{sentiment: "The detected sentiment"}
     end
   end
+
+  describe ":datetime end-to-end" do
+    test "ISO 8601 string is coerced to %DateTime{} so caller can use struct ops directly" do
+      llm = fn _ -> {:ok, ~s|{"event": "deploy", "at": "2026-05-03T09:14:00Z"}|} end
+
+      agent =
+        SubAgent.new(
+          prompt: "When did the deploy happen?",
+          output: :text,
+          signature: "{event :string, at :datetime}"
+        )
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+
+      assert match?(%DateTime{}, step.return["at"])
+      assert step.return["at"] == ~U[2026-05-03 09:14:00Z]
+      assert step.return["event"] == "deploy"
+      # Caller can do struct operations directly without parsing
+      assert DateTime.diff(~U[2026-05-04 09:14:00Z], step.return["at"]) == 86_400
+    end
+
+    test "non-UTC offset shifts to UTC" do
+      llm = fn _ -> {:ok, ~s|{"at": "2026-05-03T11:14:00+02:00"}|} end
+
+      agent =
+        SubAgent.new(
+          prompt: "When?",
+          output: :text,
+          signature: "{at :datetime}"
+        )
+
+      {:ok, step} = Loop.run(agent, llm: llm)
+      assert step.return["at"] == ~U[2026-05-03 09:14:00Z]
+    end
+
+    test "naive (offsetless) ISO string is rejected by validation" do
+      llm = fn _ -> {:ok, ~s|{"at": "2026-05-03T09:14:00"}|} end
+
+      agent =
+        SubAgent.new(
+          prompt: "When?",
+          output: :text,
+          signature: "{at :datetime}"
+        )
+
+      assert {:error, step} = Loop.run(agent, llm: llm)
+      assert step.fail.reason == :validation_error
+      assert step.fail.message =~ "datetime"
+    end
+
+    test "JSON Schema generated for :datetime carries format: date-time" do
+      alias PtcRunner.SubAgent.Signature
+      agent = SubAgent.new(prompt: "?", output: :text, signature: "{at :datetime}")
+      schema = Signature.to_json_schema(agent.parsed_signature)
+      assert schema["properties"]["at"] == %{"type" => "string", "format" => "date-time"}
+    end
+  end
 end

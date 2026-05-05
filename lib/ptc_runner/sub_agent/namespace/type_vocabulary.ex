@@ -21,6 +21,12 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
       iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(MapSet.new([1, 2]))
       "set[2]"
 
+      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(~U[2026-05-03 09:14:00Z])
+      "datetime"
+
+      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(~D[2026-05-03])
+      "date"
+
       iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of({:closure, [], nil, %{}, [], %{}})
       "#fn[...]"
 
@@ -52,6 +58,13 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
   def type_of([]), do: "list[0]"
   def type_of(list) when is_list(list), do: "list[#{length(list)}]"
   def type_of(%MapSet{} = set), do: "set[#{MapSet.size(set)}]"
+  # Temporal structs are scalars semantically, even though they're maps in
+  # Elixir's runtime. These clauses must precede the generic `is_map` match
+  # below — the LLM-facing data inventory should say "datetime", not "map[7]".
+  def type_of(%DateTime{}), do: "datetime"
+  def type_of(%NaiveDateTime{}), do: "datetime"
+  def type_of(%Date{}), do: "date"
+  def type_of(%Time{}), do: "time"
   def type_of(map) when is_map(map), do: "map[#{map_size(map)}]"
   def type_of(s) when is_binary(s), do: "string"
   def type_of(n) when is_integer(n), do: "integer"

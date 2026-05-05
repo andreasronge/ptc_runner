@@ -319,4 +319,32 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
                )
     end
   end
+
+  describe "validate/2 - :datetime" do
+    test "validates a %DateTime{}" do
+      assert :ok = Validator.validate(~U[2026-05-03 09:14:00Z], :datetime)
+    end
+
+    test "rejects a string (must be coerced first)" do
+      assert {:error, [%{message: msg}]} =
+               Validator.validate("2026-05-03T09:14:00Z", :datetime)
+
+      assert msg =~ "expected datetime"
+    end
+
+    test "rejects a NaiveDateTime (only %DateTime{} is valid)" do
+      assert {:error, [%{message: msg}]} =
+               Validator.validate(~N[2026-05-03 09:14:00], :datetime)
+
+      assert msg =~ "expected datetime"
+    end
+
+    test "validates :datetime inside a map field" do
+      assert :ok =
+               Validator.validate(
+                 %{"at" => ~U[2026-05-03 09:14:00Z]},
+                 {:map, [{"at", :datetime}]}
+               )
+    end
+  end
 end

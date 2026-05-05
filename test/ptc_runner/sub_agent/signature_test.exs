@@ -325,5 +325,17 @@ defmodule PtcRunner.SubAgent.SignatureTest do
       assert Map.has_key?(schema, "type"),
              ":any schema must have 'type' field for Bedrock compatibility (currently returns #{inspect(schema)})"
     end
+
+    test ":datetime emits {type: string, format: date-time}" do
+      {:ok, sig} = Signature.parse("() -> :datetime")
+      assert %{"type" => "string", "format" => "date-time"} = Signature.to_json_schema(sig)
+    end
+
+    test ":datetime inside a map field carries the format down" do
+      {:ok, sig} = Signature.parse("() -> {at :datetime, who :string}")
+      schema = Signature.to_json_schema(sig)
+      assert schema["properties"]["at"] == %{"type" => "string", "format" => "date-time"}
+      assert schema["properties"]["who"] == %{"type" => "string"}
+    end
   end
 end

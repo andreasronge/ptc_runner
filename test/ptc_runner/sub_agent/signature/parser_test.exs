@@ -244,4 +244,24 @@ defmodule PtcRunner.SubAgent.Signature.ParserTest do
                Parser.parse("{user {profile {settings {theme {colors {primary :string}}}}}}")
     end
   end
+
+  describe ":datetime primitive" do
+    test "parses bare :datetime" do
+      assert {:ok, {:signature, [], :datetime}} = Parser.parse(":datetime")
+    end
+
+    test "parses :datetime in field position" do
+      assert {:ok, {:signature, [], {:map, [{"at", :datetime}]}}} =
+               Parser.parse("{at :datetime}")
+    end
+
+    test "parses :datetime? as optional" do
+      assert {:ok, {:signature, [], {:map, [{"at", {:optional, :datetime}}]}}} =
+               Parser.parse("{at :datetime?}")
+    end
+
+    test "parses [:datetime] as a list of datetimes" do
+      assert {:ok, {:signature, [], {:list, :datetime}}} = Parser.parse("[:datetime]")
+    end
+  end
 end

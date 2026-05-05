@@ -13,7 +13,7 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Types
 
-  - Primitives: `:string`, `:int`, `:float`, `:bool`, `:keyword`, `:any`
+  - Primitives: `:string`, `:int`, `:float`, `:bool`, `:keyword`, `:any`, `:datetime`
   - Collections: `[:type]` (list), `{field :type}` (map), `:map` (untyped map)
   - Optional: `:type?` (nullable field or parameter)
 
@@ -45,6 +45,7 @@ defmodule PtcRunner.SubAgent.Signature do
           | :keyword
           | :any
           | :map
+          | :datetime
           | {:optional, type()}
           | {:list, type()}
           | {:map, [field()]}
@@ -203,6 +204,11 @@ defmodule PtcRunner.SubAgent.Signature do
   def type_to_json_schema(:float), do: %{"type" => "number"}
   def type_to_json_schema(:bool), do: %{"type" => "boolean"}
   def type_to_json_schema(:keyword), do: %{"type" => "string"}
+  # `:datetime` is RFC 3339 / ISO 8601 with offset. OpenAI's structured output
+  # respects `format: "date-time"` server-side; Anthropic treats it as guidance
+  # in tool schemas. Either way, coercion validates the string locally so an
+  # invalid date never reaches the caller.
+  def type_to_json_schema(:datetime), do: %{"type" => "string", "format" => "date-time"}
   # Bedrock requires input_schema to have a "type" field, so :any uses "object"
   def type_to_json_schema(:any), do: %{"type" => "object"}
   def type_to_json_schema(:map), do: %{"type" => "object"}
