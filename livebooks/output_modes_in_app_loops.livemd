@@ -1,0 +1,368 @@
+# Output Modes in an Application Loop
+
+```elixir
+repo_root = Path.expand("..", __DIR__)
+
+deps =
+  if File.exists?(Path.join(repo_root, "mix.exs")) do
+    [{:ptc_runner, path: repo_root}]
+  else
+    [{:ptc_runner, "~> 0.10.1"}]
+  end
+
+Mix.install(deps ++ [{:req_llm, "~> 1.8"}, {:kino, "~> 0.14"}], consolidate_protocols: false)
+```
+
+## Read this first
+
+**PtcRunner does not manage chat sessions. Your application does.**
+
+`SubAgent.run/2` is mission-oriented: one prompt, one multi-turn agentic loop, one
+answer. There is no durable agent process, no hidden memory, no "session" the library
+holds onto across user messages. If your app feels like a chatbot, that's because
+*your app* maintains the conversation state and feeds the relevant slice into each
+mission.
+
+This livebook shows how to pick the right output mode per user message, with three
+runnable cells over a tiny support-inbox scenario. Each user message becomes one
+SubAgent mission. The history is just an Elixir list owned by the cell.
+
+| Mode                            | Pick when…                                                | Tool calling                |
+| ------------------------------- | --------------------------------------------------------- | --------------------------- |
+| `:text` (plain string)          | The LLM can answer directly with a short answer           | Provider's native tool API  |
+| `:text` (with complex signature) | You need a single structured extraction, no computation   | Provider's native tool API  |
+| `:ptc_lisp` (default)           | Computation, filtering, multi-step orchestration of tools | Sandbox runs LLM-written code |
+
+> "JSON mode" isn't a separate mode — it's `:text` with a complex return type. The
+> Elixir docs call this "structured text mode" to avoid confusion.
+
+## Setup
+
+```elixir
+local_path = Path.join(__DIR__, "llm_setup.exs")
+
+if File.exists?(local_path) do
+  Code.require_file(local_path)
+else
+  %{body: code} = Req.get!("https://raw.githubusercontent.com/andreasronge/ptc_runner/main/livebooks/llm_setup.exs")
+  Code.eval_string(code)
+end
+
+setup = LLMSetup.setup()
+```
+
+```elixir
+setup = LLMSetup.choose_provider(setup)
+```
+
+```elixir
+my_llm = LLMSetup.choose_model(setup)
+```
+
+## The scenario: a small support inbox
+
+A few fake tickets, two helper tools, and a `now/0` clock. Same fixture is used
+across all three turns.
+
+```elixir
+tickets = [
+  %{
+    id: 123,
+    customer: "Acme Corp",
+    product: "WidgetPro 9000",
+    severity: "high",
+    status: "open",
+    opened_at: ~U[2026-05-03 09:14:00Z],
+    body: """
+    Our production line halted after the latest firmware update. The WidgetPro 9000
+    no longer recognizes the calibration cartridge. We need this resolved today —
+    every hour of downtime is roughly $40k in lost output.
+    """
+  },
+  %{
+    id: 124,
+    customer: "Bluebird Labs",
+    product: "WidgetPro 9000",
+    severity: "low",
+    status: "open",
+    opened_at: ~U[2026-05-04 14:22:00Z],
+    body: "Shipping label printout is cropped at the bottom. Workaround works fine."
+  },
+  %{
+    id: 125,
+    customer: "Cardinal Industries",
+    product: "WidgetMini",
+    severity: "medium",
+    status: "resolved",
+    opened_at: ~U[2026-05-02 11:00:00Z],
+    body: "Battery drains faster than spec. Issue resolved with replacement unit."
+  },
+  %{
+    id: 126,
+    customer: "Delta Robotics",
+    product: "WidgetPro 9000",
+    severity: "high",
+    status: "open",
+    opened_at: ~U[2026-05-01 08:00:00Z],
+    body:
+      "Repeated calibration drift over 24h. Firmware logs attached. Need RCA by EOW."
+  }
+]
+
+# Pretend "now" — fixed for reproducibility
+now_iso = "2026-05-05T10:00:00Z"
+
+# Defining the helpers as a module gives us @doc/@spec metadata that
+# PtcRunner can convert to JSON Schema for native tool calling in text mode.
+defmodule SupportTools do
+  @moduledoc false
+
+  @doc "Fetch a single ticket by id."
+  @spec get_ticket(%{id: integer()}) :: map() | nil
+  def get_ticket(%{"id" => id}), do: Process.get(:tickets, []) |> Enum.find(&(&1.id == id))
+
+  @doc "List every ticket. Returns a list of ticket maps."
+  @spec list_tickets(%{}) :: [map()]
+  def list_tickets(_args), do: Process.get(:tickets, [])
+
+  @doc "Return the current UTC time as ISO 8601."
+  @spec now(%{}) :: String.t()
+  def now(_args), do: Process.get(:fake_now, DateTime.utc_now() |> DateTime.to_iso8601())
+end
+
+Process.put(:tickets, tickets)
+Process.put(:fake_now, now_iso)
+:ok
+```
+
+## Application-owned history
+
+The conversation log is just an Elixir list. Your app appends to it after each
+mission completes. The library never sees this list directly; you decide what to
+include in `context` for the next mission.
+
+A few rules of thumb worth following from day one:
+
+1. **Per-mission tools, not global.** Don't expose `list_tickets` to a turn that's
+   only summarizing one ticket — it invites the LLM to wander.
+2. **Per-mission signatures.** A summarization turn and an extraction turn should
+   not share a wrapper. The shape is part of the mission contract.
+3. **Bounded history.** Append-forever transcripts blow up token usage and
+   cost. Keep last N turns plus a summary line, not the full log.
+
+We'll keep things simple here and just append a one-line role+content tuple per
+turn. Real apps usually do better.
+
+```elixir
+defmodule ConvoLog do
+  @moduledoc false
+
+  def append(history, role, content) do
+    history ++ [%{role: role, content: content}]
+  end
+
+  def print(history) do
+    for msg <- history do
+      tag = if msg.role == :user, do: "USER ", else: "BOT  "
+      content = if is_binary(msg.content), do: msg.content, else: inspect(msg.content, pretty: true)
+      IO.puts("#{tag}| #{content}")
+      IO.puts("")
+    end
+  end
+
+  def context_summary(history, last_n \\ 4) do
+    history
+    |> Enum.take(-last_n)
+    |> Enum.map_join("\n", fn m -> "#{String.upcase(to_string(m.role))}: #{inspect(m.content)}" end)
+  end
+end
+
+history = []
+:ok
+```
+
+## Turn 1 — Plain text (`:text`)
+
+> User: *"Summarize ticket 123 for me."*
+
+The mission is "answer in a sentence or two after looking up the ticket". No
+structure required. Pick `:text` mode with no signature → SubAgent returns a raw
+string. Native tool calling does the lookup.
+
+```elixir
+alias PtcRunner.SubAgent
+
+user_message_1 = "Summarize ticket 123 for me."
+history = ConvoLog.append(history, :user, user_message_1)
+
+{:ok, step1} =
+  SubAgent.run(
+    user_message_1,
+    output: :text,
+    tools: %{"get_ticket" => &SupportTools.get_ticket/1},
+    llm: my_llm,
+    max_turns: 4
+  )
+
+answer_1 = step1.return
+history = ConvoLog.append(history, :assistant, answer_1)
+
+ConvoLog.print(history)
+```
+
+Note: only `get_ticket` is exposed. `list_tickets` and `now` aren't relevant to a
+single-ticket summary, so they're not in scope. This is the per-mission-tools rule
+in action.
+
+## Turn 2 — Structured text (`:text` with complex signature)
+
+> User: *"Extract customer, product, severity, and requested action from ticket 123."*
+
+Now we need a structured payload, not prose. Same `:text` mode, but with a
+`{...}` signature. SubAgent returns a map validated against that signature.
+
+```elixir
+user_message_2 = "Extract customer, product, severity, and requested action from ticket 123."
+history = ConvoLog.append(history, :user, user_message_2)
+
+{:ok, step2} =
+  SubAgent.run(
+    user_message_2,
+    output: :text,
+    signature:
+      "{customer :string, product :string, severity :string, requested_action :string}",
+    tools: %{"get_ticket" => &SupportTools.get_ticket/1},
+    llm: my_llm,
+    max_turns: 4
+  )
+
+answer_2 = step2.return
+history = ConvoLog.append(history, :assistant, answer_2)
+
+ConvoLog.print(history)
+```
+
+The mission contract changed (different signature), so we issued a fresh
+`SubAgent.run/2`. We didn't try to "reuse the previous agent" — there isn't one.
+Each call is its own mission with its own contract.
+
+## Turn 3 — PTC-Lisp (`:ptc_lisp`)
+
+> User: *"Which open tickets are older than 48h and high priority?"*
+
+This needs computation: list everything, parse timestamps, compare against
+`now`, filter by severity, sort. The LLM is bad at arithmetic over lists; PTC-Lisp
+is great at it. Switch to `:ptc_lisp` mode and expand the tool surface.
+
+```elixir
+user_message_3 = "Which open tickets are older than 48h and high priority?"
+history = ConvoLog.append(history, :user, user_message_3)
+
+{:ok, step3} =
+  SubAgent.run(
+    user_message_3,
+    signature: "[{id :int, customer :string, age_hours :int}]",
+    tools: %{
+      "list_tickets" => &SupportTools.list_tickets/1,
+      "now" => &SupportTools.now/1
+    },
+    llm: my_llm,
+    max_turns: 6
+  )
+
+answer_3 = step3.return
+history = ConvoLog.append(history, :assistant, answer_3)
+
+ConvoLog.print(history)
+```
+
+The LLM wrote a small program. You can see what it generated:
+
+```elixir
+SubAgent.Debug.print_trace(step3)
+```
+
+This is what `:ptc_lisp` mode is for. The model didn't try to compute "older
+than 48h" in its head — it threaded `(now)` and ticket timestamps through
+`(filter ...)` and got a deterministic answer.
+
+## What this scenario teaches
+
+| Turn | Mode                       | Why this mode                                                                                        |
+| ---- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 1    | `:text` (plain)            | Free-form summary. No structure to validate. Native tool call to fetch the ticket.                   |
+| 2    | `:text` (complex sig)      | Structured extraction. Single LLM hop with native tool calling. No computation needed.               |
+| 3    | `:ptc_lisp`                | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it.             |
+
+The router question — *"how does the app know which mode to pick?"* — is a
+separate concern. Three real-world options:
+
+1. **Explicit dispatch in your app code** (what we did here): the app knows
+   what each user request type needs. Simplest and most predictable.
+2. **A meta-SubAgent that classifies** the incoming message and dispatches.
+   Adds an LLM hop and nondeterminism — useful when the user input is genuinely
+   open-ended.
+3. **Always use `:ptc_lisp`** with a richer toolbox. Works, but pays a tax
+   on simple questions that didn't need a program.
+
+This livebook shows option 1 because it makes the mode boundaries visible.
+Option 2 is straightforward to add on top — your app would call one extra
+`SubAgent.run/2` first that returns a tag like `{kind :string}` and dispatch on
+that.
+
+## What this livebook deliberately does NOT do
+
+- **Hold session state inside SubAgent.** The library has no `start/3` /
+  `send_message/2` / `close/1` chat API. Each turn is a fresh `run/2`.
+- **Pass full transcripts as context.** That's how token bills explode. Keep
+  bounded history (`ConvoLog.context_summary(history, last_n: 4)` is a
+  starting point) or summarize older turns and only carry the summary forward.
+- **Expose all tools to all turns.** Tools are part of the mission contract.
+- **Use any chat UI machinery.** Plain `IO.puts` keeps the focus on the
+  abstraction. A real app would render to whatever frontend it has.
+
+## Bounded-history sketch (for production apps)
+
+Threading conversation history into a follow-up mission is your call. The
+shape that usually works: a one-line summary + last N turns, fed as `context`.
+
+```elixir
+followup_user_message = "Are any of those from Acme?"
+history = ConvoLog.append(history, :user, followup_user_message)
+
+{:ok, step4} =
+  SubAgent.run(
+    """
+    Given the conversation so far and the previous result, answer: {{question}}
+
+    Prior result: {{prior_result}}
+    Recent turns:
+    {{recent_turns}}
+    """,
+    output: :text,
+    context: %{
+      question: followup_user_message,
+      prior_result: inspect(answer_3),
+      recent_turns: ConvoLog.context_summary(history, 4)
+    },
+    llm: my_llm,
+    max_turns: 2
+  )
+
+history = ConvoLog.append(history, :assistant, step4.return)
+ConvoLog.print(history)
+```
+
+That's it. The history is yours; the library is mission-by-mission. Pick the
+right contract per user message and you have a chat-shaped app without
+pretending the library is a chat library.
+
+## See also
+
+- [SubAgent Examples](ptc_runner_llm_agent.livemd) — broader survey of the SubAgent API
+- [Text Mode guide](https://hexdocs.pm/ptc_runner/subagent-text-mode.html) — all four
+  variants of `:text` mode (plain / structured / tool+text / tool+structured)
+- [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context,
+  memory, firewall fields
+- [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
+  each mission did
