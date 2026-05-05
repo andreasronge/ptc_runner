@@ -14,6 +14,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   This module replaces the former `JsonMode` and `ToolCallingMode`.
   """
 
+  require Logger
+
   alias PtcRunner.Prompts
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.BuiltinTools
@@ -600,24 +602,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     {result_str, result, error} =
       case Map.fetch(state.normalized_tools_map, resolved_name) do
         {:ok, tool_fn} when is_function(tool_fn, 1) ->
-          try do
-            result = tool_fn.(tool_args)
-            {encode_tool_result(result), result, nil}
-          rescue
-            e ->
-              error_msg = Exception.message(e)
-              {Jason.encode!(%{"error" => error_msg}), nil, error_msg}
-          end
+          invoke_tool(tool_fn, tool_name, tool_args)
 
         {:ok, {tool_fn, _opts}} when is_function(tool_fn, 1) ->
-          try do
-            result = tool_fn.(tool_args)
-            {encode_tool_result(result), result, nil}
-          rescue
-            e ->
-              error_msg = Exception.message(e)
-              {Jason.encode!(%{"error" => error_msg}), nil, error_msg}
-          end
+          invoke_tool(tool_fn, tool_name, tool_args)
 
         _ ->
           error_msg = "Tool '#{tool_name}' not found"
@@ -637,6 +625,51 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     {result_str, step_entry}
   end
+
+  # Invoke a tool function and translate any raised exception into a structured
+  # error that's actually useful to (a) the LLM trying to recover and (b) the
+  # developer reading logs. Vanilla `Exception.message/1` for FunctionClauseError
+  # gives "no function clause matching in M.f/1" — which doesn't tell either
+  # audience why the call failed.
+  defp invoke_tool(tool_fn, tool_name, tool_args) do
+    result = tool_fn.(tool_args)
+    {encode_tool_result(result), result, nil}
+  rescue
+    e ->
+      kind = e.__struct__ |> Module.split() |> List.last()
+      base_msg = Exception.message(e)
+      hint = exception_hint(e, tool_args)
+
+      # Developer-facing log so the root cause is visible without opening
+      # the trace. Args are inspected with a generous limit so the user can
+      # see the actual shape mismatch.
+      Logger.warning(
+        "[ptc_runner] tool #{inspect(tool_name)} raised #{kind}: #{base_msg}. " <>
+          "args=#{inspect(tool_args, limit: 50)}#{if hint, do: " hint=" <> hint, else: ""}"
+      )
+
+      # LLM-facing payload so it can self-correct on the next turn instead of
+      # retrying the same call until max_turns.
+      llm_payload =
+        Jason.encode!(%{
+          "error" => base_msg,
+          "tool" => tool_name,
+          "args_received" => tool_args,
+          "hint" => hint
+        })
+
+      {llm_payload, nil, base_msg}
+  end
+
+  defp exception_hint(%FunctionClauseError{}, tool_args) do
+    ~s|Tool received args #{inspect(tool_args)} but no function clause matched. | <>
+      ~s|If you're using @spec auto-extraction with a bare-map argument like | <>
+      ~s|`%{id: integer()}`, the LLM may be wrapping the call as | <>
+      ~s|`{"map": {...}}`. Use an explicit `signature: "(id :int) -> ..."` | <>
+      ~s|on the tool definition to control the parameter name the LLM sees.|
+  end
+
+  defp exception_hint(_e, _tool_args), do: nil
 
   defp encode_tool_result(result) do
     case Jason.encode(result) do
