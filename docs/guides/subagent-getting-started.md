@@ -476,6 +476,7 @@ See [Phoenix Streaming](phoenix-streaming.md) for a full LiveView integration re
 
 - [LLM Setup](subagent-llm-setup.md) - Providers, streaming, custom adapters, framework integration
 - [Text Mode Guide](subagent-text-mode.md) - Text mode, Mustache templates, tool calling, and structured output
+- [Output Modes in an App Loop](../../livebooks/output_modes_in_app_loops.livemd) - Runnable livebook showing how to pick `:text` plain, `:text` structured, or `:ptc_lisp` per user message
 - [Phoenix Streaming](phoenix-streaming.md) - Real-time streaming in LiveView
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
