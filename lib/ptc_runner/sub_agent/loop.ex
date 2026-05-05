@@ -1134,7 +1134,39 @@ defmodule PtcRunner.SubAgent.Loop do
         opts
       )
 
-    Compaction.maybe_compact(state.messages, ctx, {:trim, opts})
+    {messages, stats} = Compaction.maybe_compact(state.messages, ctx, {:trim, opts})
+    maybe_emit_compaction_triggered(state, agent, stats)
+    {messages, stats}
+  end
+
+  # Emit one telemetry event per triggered firing. Quiet on non-triggered
+  # checks — token estimation already runs every multi-turn call, no need
+  # to add per-turn telemetry noise. Fires before [:llm, :start] because
+  # compaction determines what messages that LLM call will see.
+  defp maybe_emit_compaction_triggered(_state, _agent, nil), do: :ok
+  defp maybe_emit_compaction_triggered(_state, _agent, %{triggered: false}), do: :ok
+
+  defp maybe_emit_compaction_triggered(state, agent, %{triggered: true} = stats) do
+    measurements = %{
+      messages_before: stats.messages_before,
+      messages_after: stats.messages_after,
+      estimated_tokens_before: stats.estimated_tokens_before,
+      estimated_tokens_after: stats.estimated_tokens_after
+    }
+
+    metadata = %{
+      agent: agent,
+      agent_name: state.agent_name,
+      agent_id: state.agent_id,
+      turn: state.turn,
+      strategy: stats.strategy,
+      reason: stats.reason,
+      kept_initial_user?: stats.kept_initial_user?,
+      kept_recent_turns: stats.kept_recent_turns,
+      over_budget?: stats.over_budget?
+    }
+
+    Telemetry.emit([:compaction, :triggered], measurements, metadata)
   end
 
   defp maybe_put_state(state, _key, nil), do: state

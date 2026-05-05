@@ -22,6 +22,10 @@ defmodule PtcRunner.SubAgent.Telemetry do
   | `[:tool, :start]` | `%{}` | agent, tool_name, args, span_id, parent_span_id |
   | `[:tool, :stop]` | `%{duration: native_time}` | agent, tool_name, result, span_id, parent_span_id |
   | `[:tool, :exception]` | `%{duration: native_time}` | agent, tool_name, kind, reason, stacktrace, span_id, parent_span_id |
+  | `[:compaction, :triggered]` | `%{messages_before, messages_after, estimated_tokens_before, estimated_tokens_after}` | agent, agent_name, agent_id, turn, strategy, reason, kept_initial_user?, kept_recent_turns, over_budget?, span_id, parent_span_id |
+
+  Note: `[:compaction, :triggered]` is a single emit (not a span) and only fires
+  on triggered compaction events. Non-triggered pressure checks are silent.
 
   ## Span Correlation
 

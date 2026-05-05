@@ -59,6 +59,21 @@ defmodule PtcRunner.TraceLog.Event do
     :telemetry_span_context
   ]
 
+  # Measurement keys already promoted to top level (or auto-injected by
+  # :telemetry.span). Anything not in this set is merged into the data bag
+  # so events with descriptive numeric measurements (e.g. compaction's
+  # messages_before / messages_after) don't lose their values to JSONL.
+  @promoted_measurement_keys [
+    :duration,
+    :input_tokens,
+    :output_tokens,
+    :tokens,
+    :cache_creation_tokens,
+    :cache_read_tokens,
+    :system_time,
+    :monotonic_time
+  ]
+
   @doc """
   Returns the current schema version.
 
@@ -102,8 +117,10 @@ defmodule PtcRunner.TraceLog.Event do
     duration_ms = extract_duration_ms(measurements)
     token_fields = extract_tokens(measurements)
 
-    # Build remaining data bag from metadata (minus promoted/stripped keys)
-    data = build_data_bag(metadata)
+    # Build the data bag from metadata (minus promoted/stripped keys),
+    # merged with any non-promoted measurements (so descriptive numeric
+    # measurements survive into JSONL).
+    data = build_data_bag(metadata, measurements)
 
     # Build flat envelope
     %{
@@ -246,12 +263,20 @@ defmodule PtcRunner.TraceLog.Event do
     }
   end
 
-  # Build the data bag from remaining metadata, sanitized
-  defp build_data_bag(metadata) do
-    remaining =
+  # Build the data bag from remaining metadata + non-promoted measurements,
+  # sanitized. Measurements that aren't already promoted to top level
+  # (duration, token counts) are folded in so events like
+  # `compaction.triggered` don't lose `messages_before` / `messages_after`.
+  defp build_data_bag(metadata, measurements) do
+    remaining_metadata =
       metadata
       |> Map.drop(@stripped_keys)
       |> Map.drop(@promoted_metadata_keys)
+
+    remaining_measurements = Map.drop(measurements, @promoted_measurement_keys)
+
+    # Metadata wins on key collision so emitter intent is preserved.
+    remaining = Map.merge(remaining_measurements, remaining_metadata)
 
     if map_size(remaining) == 0 do
       nil
