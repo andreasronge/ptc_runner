@@ -3017,7 +3017,7 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 | Symbol | Signature | Description |
 |--------|-----------|-------------|
 | `java.util.Date.` | `(java.util.Date.)` | Current UTC time |
-| | `(java.util.Date. arg)` | Construct from timestamp (ms/sec) or ISO-8601/RFC 2822 string |
+| | `(java.util.Date. arg)` | Construct from timestamp (ms/sec), ISO-8601/RFC 2822 string, or an existing DateTime/NaiveDateTime/Date |
 | `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string into a Date object |
 | `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only**) |
 | `.isBefore` | `(.isBefore a b)` | Returns true if `a` comes strictly before `b` (same-type only) |
@@ -3031,9 +3031,11 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
     - If `abs(ts) < 1,000,000,000,000`: Treated as **Unix seconds**.
     - Otherwise: Treated as **Unix milliseconds**.
 - **String argument**: Attempts to parse in the following order:
-    1. **ISO-8601** (e.g., `"2026-01-08T14:30:00Z"`)
-    2. **Date-only ISO** (e.g., `"2026-01-08"`, defaults to midnight UTC)
-    3. **RFC 2822** (e.g., `"Wed, 8 Jan 2026 14:30:00 +0000"`, common in email headers)
+    1. **ISO-8601 with offset** (e.g., `"2026-01-08T14:30:00Z"`)
+    2. **ISO-8601 without offset** (e.g., `"2026-01-08T14:30:00"` — what `(str ~N[...])` produces; treated as UTC)
+    3. **Date-only ISO** (e.g., `"2026-01-08"`, defaults to midnight UTC)
+    4. **RFC 2822** (e.g., `"Wed, 8 Jan 2026 14:30:00 +0000"`, common in email headers)
+- **Temporal struct argument**: Pass-through for `DateTime`; `Date` and `NaiveDateTime` upgrade to UTC (midnight for Date). `Time` alone raises (no date component). Lets generated programs write `(java.util.Date. (:opened_at t))` directly when a tool returns Elixir temporal values.
 
 #### `java.time.LocalDate/parse`
 

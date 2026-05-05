@@ -1671,11 +1671,16 @@
     },
     %{
       name: "java.util.Date.",
-      description: "Current UTC time",
+      description:
+        "Construct DateTime: no-arg returns current UTC, integer is Unix seconds/ms, string is ISO-8601 (offset optional, treated as UTC if absent) or RFC-2822, existing DateTime/NaiveDateTime/Date passes through",
       binding: :multi_arity,
       category: :interop,
       dispatch: :env,
-      signatures: ["(java.util.Date.)", "(java.util.Date. millis)"],
+      signatures: [
+        "(java.util.Date.)",
+        "(java.util.Date. millis-or-string)",
+        "(java.util.Date. datetime-or-date)"
+      ],
       since: nil,
       section: "Interop",
       ptc_extension?: false,
@@ -7738,10 +7743,15 @@
       name: "java.util.Date.",
       class: "java.util.Date",
       kind: :constructor,
-      description: "Construct current UTC time or from timestamp/ISO-8601/RFC-2822 string",
-      signatures: ["(java.util.Date.)", "(java.util.Date. timestamp-or-string)"],
+      description:
+        "Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value",
+      signatures: [
+        "(java.util.Date.)",
+        "(java.util.Date. timestamp-or-string)",
+        "(java.util.Date. datetime-or-date)"
+      ],
       notes:
-        "Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601, RFC 2822."
+        "Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component)."
     },
     %{
       name: ".getTime",
