@@ -330,4 +330,28 @@ defmodule PtcRunner.SubAgent.Signature.CoercionTest do
                Coercion.coerce("42", :int, nested: true)
     end
   end
+
+  # Regression: the @doc says "DateTime.t() -> :string" but the actual
+  # `:string` clauses used to reject anything that wasn't a binary or atom.
+  # An agent returning a DateTime through a `:string` field would fail
+  # validation. Now the temporal-struct clauses normalize to ISO 8601.
+  describe "coerce/2 - temporal structs to :string" do
+    test "DateTime coerces to ISO 8601" do
+      assert {:ok, "2026-05-03T09:14:00Z", _} =
+               Coercion.coerce(~U[2026-05-03 09:14:00Z], :string, [])
+    end
+
+    test "NaiveDateTime coerces to ISO 8601" do
+      assert {:ok, "2026-05-03T09:14:00", _} =
+               Coercion.coerce(~N[2026-05-03 09:14:00], :string, [])
+    end
+
+    test "Date coerces to ISO 8601" do
+      assert {:ok, "2026-05-03", _} = Coercion.coerce(~D[2026-05-03], :string, [])
+    end
+
+    test "Time coerces to ISO 8601" do
+      assert {:ok, "09:14:00", _} = Coercion.coerce(~T[09:14:00], :string, [])
+    end
+  end
 end

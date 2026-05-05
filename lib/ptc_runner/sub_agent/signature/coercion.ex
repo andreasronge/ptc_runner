@@ -131,6 +131,23 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
     {:ok, atom_to_string(value), ["coerced keyword to string"]}
   end
 
+  # Temporal structs coerce to their ISO 8601 form. The coercion docstring
+  # above already documents `DateTime.t() -> :string`; this clause makes the
+  # promise actually deliver. Without it, an agent whose signature returns
+  # `:string` and whose program returns a DateTime would fail validation
+  # despite the type-extractor's contract saying it should work.
+  defp coerce_impl(%DateTime{} = dt, :string),
+    do: {:ok, DateTime.to_iso8601(dt), ["coerced DateTime to ISO 8601 string"]}
+
+  defp coerce_impl(%NaiveDateTime{} = dt, :string),
+    do: {:ok, NaiveDateTime.to_iso8601(dt), ["coerced NaiveDateTime to ISO 8601 string"]}
+
+  defp coerce_impl(%Date{} = d, :string),
+    do: {:ok, Date.to_iso8601(d), ["coerced Date to ISO 8601 string"]}
+
+  defp coerce_impl(%Time{} = t, :string),
+    do: {:ok, Time.to_iso8601(t), ["coerced Time to ISO 8601 string"]}
+
   defp coerce_impl(_value, :string) do
     {:error, "cannot coerce to string"}
   end

@@ -378,15 +378,30 @@ defmodule PtcRunner.SubAgent.PromptExpander do
     end
   end
 
-  # Convert nested map keys to strings for Mustache compatibility
+  # Convert nested map keys to strings for Mustache compatibility.
+  #
+  # Temporal structs (`%DateTime{}` etc.) are scalars from the LLM's perspective,
+  # not nested maps — without this, the `is_map(v)` branch would treat them as
+  # nested data, Mustache would reject them, and the prompt would silently
+  # ship with `{{my_date}}` literally unexpanded. See `PtcRunner.Temporal`.
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn
+      {_k, %DateTime{}} = pair -> normalize_temporal_pair(pair)
+      {_k, %NaiveDateTime{}} = pair -> normalize_temporal_pair(pair)
+      {_k, %Date{}} = pair -> normalize_temporal_pair(pair)
+      {_k, %Time{}} = pair -> normalize_temporal_pair(pair)
       {k, v} when is_map(v) -> {to_string(k), stringify_keys(v)}
       {k, v} when is_list(v) -> {to_string(k), Enum.map(v, &maybe_stringify_keys/1)}
       {k, v} -> {to_string(k), v}
     end)
   end
 
+  defp normalize_temporal_pair({k, v}), do: {to_string(k), PtcRunner.Temporal.iso8601(v)}
+
+  defp maybe_stringify_keys(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp maybe_stringify_keys(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+  defp maybe_stringify_keys(%Date{} = d), do: Date.to_iso8601(d)
+  defp maybe_stringify_keys(%Time{} = t), do: Time.to_iso8601(t)
   defp maybe_stringify_keys(v) when is_map(v), do: stringify_keys(v)
   defp maybe_stringify_keys(v), do: v
 
@@ -394,6 +409,18 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   # This matches old regex-based behavior which called to_string/1 on any value
   defp stringify_values_for_expansion(map) when is_map(map) do
     Map.new(map, fn
+      {_k, %DateTime{}} = pair ->
+        normalize_temporal_pair(pair)
+
+      {_k, %NaiveDateTime{}} = pair ->
+        normalize_temporal_pair(pair)
+
+      {_k, %Date{}} = pair ->
+        normalize_temporal_pair(pair)
+
+      {_k, %Time{}} = pair ->
+        normalize_temporal_pair(pair)
+
       {k, v} when is_map(v) ->
         # Nested maps: recurse to handle nested access like {{user.name}}
         {to_string(k), stringify_values_for_expansion(v)}

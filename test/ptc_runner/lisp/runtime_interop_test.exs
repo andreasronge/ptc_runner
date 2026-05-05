@@ -531,4 +531,46 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert step.fail.message =~ ".isAfter: expected DateTime argument, got string"
     end
   end
+
+  # Regression: when a tool returns a `%DateTime{}` and the LLM calls
+  # `(java.util.Date. dt)` directly, the call must accept the struct as a
+  # no-op (or upgrade Date/NaiveDateTime to a UTC DateTime). Forcing the LLM
+  # to stringify-then-parse is unnecessary friction.
+  describe "java.util.Date. with already-temporal arguments" do
+    test "DateTime is returned as-is" do
+      {:ok, step} =
+        Lisp.run("(.getTime (java.util.Date. data/dt))",
+          context: %{dt: ~U[2026-05-03 09:14:00Z]}
+        )
+
+      assert is_integer(step.return)
+      assert step.return == DateTime.to_unix(~U[2026-05-03 09:14:00Z], :millisecond)
+    end
+
+    test "NaiveDateTime is upgraded to UTC DateTime" do
+      {:ok, step} =
+        Lisp.run("(.getTime (java.util.Date. data/ndt))",
+          context: %{ndt: ~N[2026-05-03 09:14:00]}
+        )
+
+      assert is_integer(step.return)
+    end
+
+    test "Date is upgraded to UTC DateTime at midnight" do
+      {:ok, step} =
+        Lisp.run("(.getTime (java.util.Date. data/d))",
+          context: %{d: ~D[2026-05-03]}
+        )
+
+      assert is_integer(step.return)
+      assert step.return == DateTime.to_unix(~U[2026-05-03 00:00:00Z], :millisecond)
+    end
+
+    test "Time alone raises (no date component)" do
+      assert {:error, step} =
+               Lisp.run("(java.util.Date. data/t)", context: %{t: ~T[09:14:00]})
+
+      assert step.fail.message =~ "Time"
+    end
+  end
 end

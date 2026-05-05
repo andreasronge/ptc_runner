@@ -36,6 +36,22 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     end
   end
 
+  # Already-temporal arguments are a no-op (or the obvious upgrade): if the LLM
+  # has a `%DateTime{}` from a tool result and writes `(java.util.Date. dt)`,
+  # don't make it stringify-then-parse first. The internal representation is
+  # `%DateTime{}` either way, so just return it (or upgrade Date/Time/NaiveDateTime
+  # to a UTC DateTime so `.getTime` works downstream).
+  def java_util_date(%DateTime{} = dt), do: dt
+
+  def java_util_date(%NaiveDateTime{} = ndt),
+    do: DateTime.from_naive!(ndt, "Etc/UTC")
+
+  def java_util_date(%Date{} = d),
+    do: DateTime.new!(d, ~T[00:00:00], "Etc/UTC")
+
+  def java_util_date(%Time{}),
+    do: raise("java.util.Date: cannot construct from a Time alone (no date component)")
+
   def java_util_date(other) do
     raise "java.util.Date: cannot construct from #{inspect(other)}"
   end
