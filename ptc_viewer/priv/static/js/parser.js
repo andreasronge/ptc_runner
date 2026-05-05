@@ -115,6 +115,43 @@ export function extractRunEvents(events, runSpanId) {
   return events.filter(e => spanIds.has(e.span_id));
 }
 
+/**
+ * Bucket `compaction.triggered` events by turn number. Pass `rootSpanId`
+ * whenever the event collection might cover multiple agents in one file —
+ * compaction events share the run's span_id (they're emitted via
+ * Telemetry.emit during the turn, not wrapped in their own span), so this
+ * matches `e.span_id === rootSpanId`. The same scoping pattern is used for
+ * turn pairs in agent-view.js so parent and child agents stay separated.
+ *
+ * Without `rootSpanId`, events from different agents that share a turn
+ * number will collide (last write wins). All current callers scope to a
+ * specific run.
+ *
+ * Returns Map<turnNumber, stats>. `stats` has the JS-friendly shape consumed
+ * by both `agent-view.js` (turn pills) and `execution-tree.js` (compact rows).
+ */
+export function compactionsByTurn(events, rootSpanId = null) {
+  const byTurn = new Map();
+  for (const e of events) {
+    if (e.event !== 'compaction.triggered') continue;
+    if (rootSpanId && e.span_id !== rootSpanId) continue;
+    if (e.turn == null) continue;
+    const d = e.data || {};
+    byTurn.set(e.turn, {
+      messagesBefore: d.messages_before,
+      messagesAfter: d.messages_after,
+      tokensBefore: d.estimated_tokens_before,
+      tokensAfter: d.estimated_tokens_after,
+      reason: d.reason,
+      strategy: d.strategy,
+      keptInitialUser: d['kept_initial_user?'],
+      keptRecentTurns: d.kept_recent_turns,
+      overBudget: d['over_budget?']
+    });
+  }
+  return byTurn;
+}
+
 export function getEarliestTimestamp(pairs) {
   let earliest = null;
   for (const pair of pairs) {

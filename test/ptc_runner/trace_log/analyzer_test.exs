@@ -642,6 +642,51 @@ defmodule PtcRunner.TraceLog.AnalyzerTest do
 
       assert length(tids) > 1
     end
+
+    test "surfaces compaction.triggered events as Chrome instant events", %{tmp_dir: dir} do
+      compaction_event = %{
+        "schema_version" => 2,
+        "event" => "compaction.triggered",
+        "span_id" => "compaction-c1",
+        "parent_span_id" => "turn-chrome-compact",
+        "timestamp" => "2025-01-15T10:00:00.150Z",
+        "turn" => 1,
+        "data" => %{
+          "strategy" => "trim",
+          "reason" => "turn_pressure",
+          "messages_before" => 13,
+          "messages_after" => 7,
+          "estimated_tokens_before" => 31_200,
+          "estimated_tokens_after" => 12_400,
+          "kept_initial_user?" => true,
+          "kept_recent_turns" => 3,
+          "over_budget?" => false
+        }
+      }
+
+      trace_path = Path.join(dir, "trace.jsonl")
+
+      write_trace!(
+        trace_path,
+        tree_trace_events("chrome-compact", extra_events: [compaction_event])
+      )
+
+      {:ok, tree} = Analyzer.load_tree(trace_path)
+      output_path = Path.join(dir, "trace.json")
+      Analyzer.export_chrome_trace(tree, output_path)
+
+      %{"traceEvents" => events} = output_path |> File.read!() |> Jason.decode!()
+      compactions = Enum.filter(events, &(&1["cat"] == "compaction"))
+
+      assert [event] = compactions
+      assert event["ph"] == "i"
+      assert event["s"] == "t"
+      assert event["name"] == "compaction 13→7"
+      assert event["args"]["reason"] == "turn_pressure"
+      assert event["args"]["messages_before"] == 13
+      assert event["args"]["messages_after"] == 7
+      assert event["args"]["kept_initial_user?"] == true
+    end
   end
 
   describe "format_tree/1" do

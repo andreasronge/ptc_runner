@@ -622,6 +622,15 @@ input[type="file"] { display: none; }
 .turn-pill .turn-badge.sub-agent {
   color: var(--warning);
 }
+.turn-badge.compaction {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+  color: var(--accent);
+  background: rgba(86, 156, 214, 0.12);
+  padding: 1px 4px;
+  border-radius: 3px;
+  cursor: help;
+}
 
 /* === Turn Timeline Overview === */
 .turn-timeline {

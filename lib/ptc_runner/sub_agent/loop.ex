@@ -255,7 +255,6 @@ defmodule PtcRunner.SubAgent.Loop do
     # PTC-Lisp mode: use annotations (data is in Data Inventory section)
     expanded_prompt = expand_template(agent.prompt, run_opts.context, agent.output)
 
-    # Normalize tools for Step.tools (used by Debug.print_trace compressed view)
     normalized_tools = normalize_tools_for_step(agent.tools)
 
     # Build first user message — context goes in user message or system prompt
@@ -1303,7 +1302,6 @@ defmodule PtcRunner.SubAgent.Loop do
   # Tool Normalization for Step
   # ============================================================
 
-  # Normalize tools to %{name => %Tool{}} for Step.tools (used by Debug compressed view)
   defp normalize_tools_for_step(tools) do
     Enum.map(tools, fn {name, format} ->
       case PtcRunner.Tool.new(name, format) do

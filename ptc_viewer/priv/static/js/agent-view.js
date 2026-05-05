@@ -1,5 +1,5 @@
-import { formatDuration, formatTokens, formatTokenBreakdown, truncate, escapeHtml, findFileByTraceId } from './utils.js';
-import { pairEvents, buildSpanTree, extractRunEvents, extractThinking, extractProgram, getLastUserMessage } from './parser.js';
+import { formatDuration, formatTokens, formatTokenBreakdown, truncate, escapeHtml, findFileByTraceId, renderCompactionBadge } from './utils.js';
+import { pairEvents, buildSpanTree, extractRunEvents, extractThinking, extractProgram, getLastUserMessage, compactionsByTurn } from './parser.js';
 import { highlightLisp } from './highlight.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 import { renderForkJoin } from './fork-join.js';
@@ -162,6 +162,7 @@ export function renderAgentView(container, state, data) {
       <span class="turn-num">${turn.turnNumber || idx + 1}</span>
       ${turn.subAgentTools.length > 0 ? groupByName(turn.subAgentTools).map(({name, count}) => `<span class="turn-badge sub-agent">\u{1F33F}${escapeHtml(name)}${count > 1 ? '\u00d7' + count : ''}</span>`).join('') : ''}
       ${turn.toolCount > 0 ? `<span class="turn-badge">\u{1F527}${turn.toolCount}</span>` : ''}
+      ${renderCompactionBadge(turn.compaction)}
       ${turn.hasError ? '<span class="turn-icon">&#10007;</span>' : turn.hasReturn ? '<span class="turn-icon">&#10003;</span>' : ''}
     </div>`;
   });
@@ -660,6 +661,11 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
     if (num) turnByNum[num] = p;
   });
 
+  // Compaction events share the run's span_id (Telemetry.emit during the
+  // turn, no separate turn span on the stack). Scope by rootSpanId — same
+  // pattern as turnPairs above — so child agents don't bleed in.
+  const compactionByTurn = compactionsByTurn(events, rootSpanId);
+
   return llmPairs.map((llmPair, idx) => {
     const stop = llmPair.stop;
     const start = llmPair.start;
@@ -747,7 +753,8 @@ function buildTurnsFromEvents(events, paired, targetRunSpanId = null) {
       agentSig: rootAgent?.signature || null,
       agentToolNames: rootAgent ? Object.keys(rootAgent.tools || {}) : null,
       agentMaxTurns: rootAgent?.max_turns ?? null,
-      agentOutput: agentOutputMode
+      agentOutput: agentOutputMode,
+      compaction: compactionByTurn.get(turnNumber) || null
     };
   });
 }

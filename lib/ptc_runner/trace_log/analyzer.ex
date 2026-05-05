@@ -654,27 +654,63 @@ defmodule PtcRunner.TraceLog.Analyzer do
     # Find the earliest timestamp to compute relative offsets
     base_timestamp = find_base_timestamp(events)
 
-    # Pair start/stop events and convert to Chrome "X" (complete) events
-    # Exclude trace.start/stop — already represented by the tree's main_span
-    events
-    |> pair_start_stop_events()
-    |> Enum.reject(fn {start_event, _} -> start_event["event"] == "trace.start" end)
-    |> Enum.map(fn {start_event, stop_event} ->
-      event_type = event_type_from_name(start_event["event"])
-      duration_us = (stop_event["duration_ms"] || 0) * 1000
+    paired =
+      events
+      |> pair_start_stop_events()
+      |> Enum.reject(fn {start_event, _} -> start_event["event"] == "trace.start" end)
+      |> Enum.map(fn {start_event, stop_event} ->
+        event_type = event_type_from_name(start_event["event"])
+        duration_us = (stop_event["duration_ms"] || 0) * 1000
+        start_offset_us = timestamp_offset_us(start_event["timestamp"], base_timestamp)
 
-      # Use real timestamps for accurate positioning
-      start_offset_us = timestamp_offset_us(start_event["timestamp"], base_timestamp)
+        %{
+          "name" => event_name(event_type, stop_event),
+          "cat" => event_type,
+          "ph" => "X",
+          "ts" => base_time_us + start_offset_us,
+          "dur" => duration_us,
+          "pid" => 1,
+          "tid" => tid,
+          "args" => event_args(event_type, start_event, stop_event)
+        }
+      end)
+
+    # Compaction events are punctual (no start/stop pair). Surface them as
+    # Chrome instant events ("ph": "i") so they appear as flags on the timeline.
+    instant = compaction_instant_events(events, base_time_us, base_timestamp, tid)
+
+    paired ++ instant
+  end
+
+  defp compaction_instant_events(events, base_time_us, base_timestamp, tid) do
+    events
+    |> Enum.filter(&(&1["event"] == "compaction.triggered"))
+    |> Enum.map(fn event ->
+      offset_us = timestamp_offset_us(event["timestamp"], base_timestamp)
+      data = event["data"] || %{}
+      before_count = data["messages_before"]
+      after_count = data["messages_after"]
 
       %{
-        "name" => event_name(event_type, stop_event),
-        "cat" => event_type,
-        "ph" => "X",
-        "ts" => base_time_us + start_offset_us,
-        "dur" => duration_us,
+        "name" => "compaction #{before_count}→#{after_count}",
+        "cat" => "compaction",
+        "ph" => "i",
+        "s" => "t",
+        "ts" => base_time_us + offset_us,
         "pid" => 1,
         "tid" => tid,
-        "args" => event_args(event_type, start_event, stop_event)
+        "args" => %{
+          "turn" => event["turn"],
+          "reason" => data["reason"],
+          "strategy" => data["strategy"],
+          "messages_before" => before_count,
+          "messages_after" => after_count,
+          "estimated_tokens_before" => data["estimated_tokens_before"],
+          "estimated_tokens_after" => data["estimated_tokens_after"],
+          "kept_initial_user?" => data["kept_initial_user?"],
+          "kept_recent_turns" => data["kept_recent_turns"],
+          "over_budget?" => data["over_budget?"]
+        }
       }
     end)
   end
