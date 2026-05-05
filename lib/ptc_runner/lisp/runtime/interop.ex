@@ -58,12 +58,24 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   defp parse_date_string(s) do
     with {:error, _} <- DateTime.from_iso8601(s),
+         {:error, _} <- parse_iso8601_naive(s),
          {:error, _} <- parse_iso8601_date(s),
          {:error, _} <- parse_rfc2822(s) do
       {:error, "java.util.Date: cannot parse '#{s}'. Expected ISO-8601, RFC 2822, or timestamp."}
     else
       {:ok, dt, _offset} -> {:ok, dt}
       {:ok, dt} -> {:ok, dt}
+    end
+  end
+
+  # Offsetless ISO 8601 (e.g. "2026-05-03T09:14:00") — what
+  # `NaiveDateTime.to_iso8601/1` emits and what the LLM gets from
+  # `(str some-naive-datetime)` in PTC-Lisp. Treat as UTC so the
+  # advertised round-trip `(java.util.Date. (str data/ndt))` works.
+  defp parse_iso8601_naive(s) do
+    case NaiveDateTime.from_iso8601(s) do
+      {:ok, ndt} -> {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
+      error -> error
     end
   end
 
