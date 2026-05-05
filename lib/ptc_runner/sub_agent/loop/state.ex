@@ -25,7 +25,7 @@ defmodule PtcRunner.SubAgent.Loop.State do
 
   **Transient** — set per-turn, not carried across runs:
   `current_turn_type`, `current_system_prompt`, `current_messages`,
-  `compression_stats`, `compaction_stats`
+  `compaction_stats`
   """
 
   alias PtcRunner.Turn
@@ -116,7 +116,6 @@ defmodule PtcRunner.SubAgent.Loop.State do
     current_turn_type: nil,
     current_system_prompt: nil,
     current_messages: nil,
-    compression_stats: nil,
     compaction_stats: nil,
 
     # TextMode-specific fields
@@ -196,7 +195,6 @@ defmodule PtcRunner.SubAgent.Loop.State do
           current_turn_type: :normal | :must_return | :retry | nil,
           current_system_prompt: String.t() | nil,
           current_messages: [map()] | nil,
-          compression_stats: map() | nil,
           compaction_stats: map() | nil,
           # TextMode-specific fields
           schema: map() | nil,

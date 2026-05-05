@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{Compaction, Compression, KeyNormalizer, SystemPrompt, Telemetry}
+  alias PtcRunner.SubAgent.{Compaction, KeyNormalizer, SystemPrompt, Telemetry}
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -509,16 +509,11 @@ defmodule PtcRunner.SubAgent.Loop do
         state.journal
       )
 
-    # Build messages: compaction takes precedence over compression when both
-    # are configured. Compression remains supported until step 4 of the
-    # pressure-triggered compaction migration.
-    {messages, compression_stats, compaction_stats} =
-      build_llm_messages(agent, state, system_prompt)
+    # Build messages: pressure-triggered compaction trims older turns when
+    # the threshold is reached; otherwise the raw accumulated history is sent.
+    {messages, compaction_stats} = build_llm_messages(agent, state)
 
-    state =
-      state
-      |> maybe_put_state(:compression_stats, compression_stats)
-      |> maybe_put_state(:compaction_stats, compaction_stats)
+    state = maybe_put_state(state, :compaction_stats, compaction_stats)
 
     # Strip tools in must-return mode
     tool_names =
@@ -1009,7 +1004,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # Expand template placeholders
   # - Text mode: embed actual values (no Data section, values are in the task)
   # - PTC-Lisp mode: use annotated references (data is in Data Inventory section)
-  defp expand_template(prompt, context, output_mode \\ :ptc_lisp) when is_map(context) do
+  defp expand_template(prompt, context, output_mode) when is_map(context) do
     alias PtcRunner.SubAgent.PromptExpander
 
     case output_mode do
@@ -1104,29 +1099,17 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Build messages for LLM input.
   #
-  # Dispatch order (compaction wins when both are configured — step 3 of the
-  # pressure-triggered compaction migration; compression goes away in step 4):
+  # When compaction is enabled and `agent.max_turns > 1`, dispatches to
+  # `Compaction.maybe_compact/3`. Single-shot and single-shot+retry skip
+  # compaction (locked-in decision §4 of
+  # `docs/plans/pressure-triggered-context-compaction.md`).
   #
-  # 1. Compaction enabled and `agent.max_turns > 1` → run Compaction.maybe_compact/3.
-  #    Skips for single-shot and single-shot+retry (locked-in decision §4 of
-  #    docs/plans/pressure-triggered-context-compaction.md).
-  # 2. Else compression strategy enabled and `state.turn > 1` and
-  #    (`agent.max_turns > 1` or `agent.retry_turns > 0`) → legacy compression.
-  # 3. Else use accumulated messages as-is.
-  #
-  # Returns `{messages, compression_stats | nil, compaction_stats | nil}`.
-  defp build_llm_messages(agent, state, system_prompt) do
-    cond do
-      compaction_enabled?(agent) ->
-        build_compacted_messages(agent, state)
-
-      compression_active?(agent, state) ->
-        {strategy, opts} = Compression.normalize(agent.compression)
-        {messages, stats} = build_compressed_messages(agent, state, system_prompt, strategy, opts)
-        {messages, stats, nil}
-
-      true ->
-        {state.messages, nil, nil}
+  # Returns `{messages, compaction_stats | nil}`.
+  defp build_llm_messages(agent, state) do
+    if compaction_enabled?(agent) do
+      build_compacted_messages(agent, state)
+    else
+      {state.messages, nil}
     end
   end
 
@@ -1135,11 +1118,6 @@ defmodule PtcRunner.SubAgent.Loop do
       {:disabled, _} -> false
       {:trim, _} -> agent.max_turns > 1
     end
-  end
-
-  defp compression_active?(agent, state) do
-    {strategy, _} = Compression.normalize(agent.compression)
-    strategy && state.turn > 1 && (agent.max_turns > 1 or agent.retry_turns > 0)
   end
 
   defp build_compacted_messages(agent, state) do
@@ -1156,57 +1134,11 @@ defmodule PtcRunner.SubAgent.Loop do
         opts
       )
 
-    {msgs, stats} = Compaction.maybe_compact(state.messages, ctx, {:trim, opts})
-    {msgs, nil, stats}
+    Compaction.maybe_compact(state.messages, ctx, {:trim, opts})
   end
 
   defp maybe_put_state(state, _key, nil), do: state
   defp maybe_put_state(state, key, value), do: Map.put(state, key, value)
-
-  # Build compressed messages using the strategy
-  # Returns {messages, compression_stats}
-  defp build_compressed_messages(agent, state, system_prompt, strategy, opts) do
-    # Gather completed turns from state.turns (stored in reverse order)
-    turns = Enum.reverse(state.turns)
-
-    # Normalize tools for compression (use the same normalization as execution)
-    normalized_tools =
-      Enum.map(agent.tools, fn {name, format} ->
-        case PtcRunner.Tool.new(name, format) do
-          {:ok, tool} -> {name, tool}
-          {:error, _} -> {name, %PtcRunner.Tool{name: to_string(name), signature: nil}}
-        end
-      end)
-      |> Map.new()
-
-    # Calculate turns left for the indicator
-    # In retry phase (work_turns_remaining <= 0), we're always on final turn (turns_left = 0)
-    # This handles single-shot with retry_turns where turn > max_turns
-    turns_left = max(0, state.work_turns_remaining - 1)
-
-    # Build compression options with context
-    compression_opts =
-      opts
-      |> Keyword.put(:prompt, expand_template(agent.prompt, state.context))
-      |> Keyword.put(:system_prompt, system_prompt)
-      |> Keyword.put(:tools, normalized_tools)
-      |> Keyword.put(:data, state.context)
-      |> Keyword.put(:turns_left, turns_left)
-      |> Keyword.put(:signature, agent.signature)
-      |> Keyword.put(:field_descriptions, agent.field_descriptions)
-
-    # Call the compression strategy
-    # Strategy returns {[%{role: :system, ...}, %{role: :user, ...}], stats}
-    {compressed_messages, stats} = strategy.to_messages(turns, state.memory, compression_opts)
-
-    # Extract just the user message(s) since system prompt is passed separately
-    # The loop sends system prompt via llm_input.system, not in messages
-    messages =
-      compressed_messages
-      |> Enum.reject(fn msg -> msg.role == :system end)
-
-    {messages, stats}
-  end
 
   # Calculate approximate memory size in bytes
   defp memory_size(memory) when is_map(memory) do
@@ -1301,7 +1233,7 @@ defmodule PtcRunner.SubAgent.Loop do
         errors
       )
 
-    # Build validation error info for the turn (so compression can show the actual error)
+    # Build validation error info for the turn so it remains visible in the trail
     validation_error = %{
       reason: :return_validation_failed,
       message: error_message,

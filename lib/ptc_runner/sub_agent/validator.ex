@@ -291,8 +291,7 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_text_mode_constraints!(opts) do
-    # Text mode: no compression, no compaction, no firewall fields (when signature present)
-    validate_text_no_compression!(opts)
+    # Text mode: no compaction, no firewall fields (when signature present)
     validate_text_no_compaction!(opts)
 
     # Only validate signature-related constraints when signature is present
@@ -304,16 +303,6 @@ defmodule PtcRunner.SubAgent.Validator do
 
       _ ->
         # No signature is valid for text mode (plain text return)
-        :ok
-    end
-  end
-
-  defp validate_text_no_compression!(opts) do
-    case Keyword.fetch(opts, :compression) do
-      {:ok, compression} when compression not in [nil, false] ->
-        raise ArgumentError, "output: :text cannot be used with compression"
-
-      _ ->
         :ok
     end
   end

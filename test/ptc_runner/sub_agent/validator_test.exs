@@ -75,52 +75,6 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.parsed_signature == nil
     end
 
-    test "rejects text mode with compression: true" do
-      assert_raise ArgumentError, "output: :text cannot be used with compression", fn ->
-        SubAgent.new(
-          prompt: "Test",
-          output: :text,
-          signature: "() -> {x :string}",
-          compression: true
-        )
-      end
-    end
-
-    test "rejects json mode with compression module" do
-      assert_raise ArgumentError, "output: :text cannot be used with compression", fn ->
-        SubAgent.new(
-          prompt: "Test",
-          output: :text,
-          signature: "() -> {x :string}",
-          compression: SomeModule
-        )
-      end
-    end
-
-    test "accepts json mode with compression: nil" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          output: :text,
-          signature: "() -> {x :string}",
-          compression: nil
-        )
-
-      assert agent.output == :text
-    end
-
-    test "accepts json mode with compression: false" do
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          output: :text,
-          signature: "() -> {x :string}",
-          compression: false
-        )
-
-      assert agent.output == :text
-    end
-
     test "rejects text mode with compaction: true" do
       assert_raise ArgumentError, "output: :text cannot be used with compaction", fn ->
         SubAgent.new(
@@ -382,12 +336,12 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :ptc_lisp
     end
 
-    test "ptc_lisp mode allows compression" do
+    test "ptc_lisp mode allows compaction" do
       agent =
         SubAgent.new(
           prompt: "Test",
           output: :ptc_lisp,
-          compression: true
+          compaction: true
         )
 
       assert agent.output == :ptc_lisp

@@ -292,26 +292,4 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
       assert length(turn4) < uncompacted_at_turn_4
     end
   end
-
-  describe "compression coexistence (until step 4)" do
-    test "compaction takes precedence over compression when both are set" do
-      log = capture_messages_log()
-      llm = recording_llm(log, 4)
-
-      agent =
-        SubAgent.new(
-          prompt: "Test",
-          max_turns: 5,
-          compression: true,
-          compaction: [trigger: [turns: 1], keep_recent_turns: 1]
-        )
-
-      {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-
-      assert step.return == %{"result" => 42}
-      # Compaction stats present, compression stats not set (compaction won).
-      assert %{triggered: true} = step.usage.compaction
-      refute Map.has_key?(step.usage, :compression)
-    end
-  end
 end

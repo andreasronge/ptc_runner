@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking
+
+- **Removed `compression:` option.** Use `compaction: true` or
+  `compaction: [strategy: :trim, ...]` instead. The `PtcRunner.SubAgent.Compression`
+  module and the `SingleUserCoalesced` strategy are gone.
+- **Compaction is opt-in (was on-by-default for compression in some paths).**
+  Library default is `compaction: false`.
+- **Compaction no longer runs for single-shot or single-shot+retry.** The previous
+  compression path activated for `retry_turns > 0` even with `max_turns: 1`. If your
+  single-shot agent relied on compression collapsing retry context, restructure to
+  multi-turn or accept the raw retry context. The retry budget is small by design.
+- **Behavior change: compaction triggers only under pressure** (turn count or
+  estimated token usage), not from turn 2 onward. Short conversations now keep raw
+  history, which gives the LLM a clearer breadcrumb trail.
+- **`step.usage.compression` is gone.** Use `step.usage.compaction` instead. The
+  stats shape is consistent whether compaction triggered or not.
+- **`Debug.print_trace(step, view: :compressed)` is gone.** Use `messages: true`
+  to see what the LLM received.
+- `:summarize` and custom strategy modules are deferred to a follow-up. If you used
+  a custom compression module, you'll need to wait or trim manually. See
+  `docs/plans/pressure-triggered-context-compaction-phase-2.md`.
+
+### Added
+
+- `compaction:` option for pressure-triggered context compaction. Phase 1 ships the
+  `:trim` strategy. See `docs/guides/subagent-compaction.md`.
+
 ## [0.10.1] - 2026-05-04
 
 ### Fixed

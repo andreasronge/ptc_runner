@@ -34,7 +34,7 @@ defmodule PtcDemo.Agent do
     :model,
     :data_mode,
     :prompt_profile,
-    :compression,
+    :compaction,
     :thinking,
     :max_turns,
     :retry_turns,
@@ -174,25 +174,25 @@ defmodule PtcDemo.Agent do
   end
 
   @doc """
-  Get the current compression setting.
+  Get the current compaction setting.
 
   Returns `false` (disabled), `true` (default strategy), or `{module, opts}`.
   """
-  def compression do
-    GenServer.call(__MODULE__, :compression)
+  def compaction do
+    GenServer.call(__MODULE__, :compaction)
   end
 
   @doc """
-  Set the compression strategy.
+  Set the compaction strategy.
 
   Accepts:
-  - `false` or `nil` - disable compression
-  - `true` - enable with default strategy (SingleUserCoalesced)
-  - `module` - use a specific compression module
+  - `false` or `nil` - disable compaction
+  - `true` - enable with default strategy (Trim)
+  - `module` - use a specific compaction module
   - `{module, opts}` - use module with custom options
   """
-  def set_compression(compression) do
-    GenServer.call(__MODULE__, {:set_compression, compression})
+  def set_compaction(compaction) do
+    GenServer.call(__MODULE__, {:set_compaction, compaction})
   end
 
   @doc """
@@ -257,7 +257,7 @@ defmodule PtcDemo.Agent do
     model = resolve_model_from_env()
     data_mode = Keyword.get(opts, :data_mode, :schema)
     prompt_profile = Keyword.get(opts, :prompt, :single_shot)
-    compression = Keyword.get(opts, :compression, false)
+    compaction = Keyword.get(opts, :compaction, false)
     thinking = Keyword.get(opts, :thinking, false)
     max_turns = Keyword.get(opts, :max_turns, @max_turns)
     retry_turns = Keyword.get(opts, :retry_turns, 0)
@@ -275,7 +275,7 @@ defmodule PtcDemo.Agent do
        model: model,
        data_mode: data_mode,
        prompt_profile: prompt_profile,
-       compression: compression,
+       compaction: compaction,
        thinking: thinking,
        max_turns: max_turns,
        retry_turns: retry_turns,
@@ -303,12 +303,12 @@ defmodule PtcDemo.Agent do
     # Per-run overrides for ablation experiments
     prompt_profile = Keyword.get(opts, :prompt_profile, state.prompt_profile)
     format_options = Keyword.get(opts, :format_options)
-    # Build the SubAgent with requested max_turns, signature, compression, and retry_turns
+    # Build the SubAgent with requested max_turns, signature, compaction, and retry_turns
     agent =
       build_agent(
         state.data_mode,
         prompt_profile,
-        state.compression,
+        state.compaction,
         max_turns,
         signature,
         retry_turns,
@@ -349,7 +349,7 @@ defmodule PtcDemo.Agent do
           data_mode: state.data_mode,
           max_turns: max_turns,
           retry_turns: retry_turns,
-          compression: inspect(state.compression),
+          compaction: inspect(state.compaction),
           thinking: state.thinking,
           signature: signature
         }
@@ -493,7 +493,7 @@ defmodule PtcDemo.Agent do
 
   @impl true
   def handle_call(:system_prompt, _from, state) do
-    agent = build_agent(state.data_mode, state.prompt_profile, state.compression)
+    agent = build_agent(state.data_mode, state.prompt_profile, state.compaction)
     preview = SubAgent.preview_prompt(agent, context: state.datasets)
     {:reply, preview.system, state}
   end
@@ -509,13 +509,13 @@ defmodule PtcDemo.Agent do
   end
 
   @impl true
-  def handle_call(:compression, _from, state) do
-    {:reply, state.compression, state}
+  def handle_call(:compaction, _from, state) do
+    {:reply, state.compaction, state}
   end
 
   @impl true
-  def handle_call({:set_compression, compression}, _from, state) do
-    {:reply, :ok, %{state | compression: compression}}
+  def handle_call({:set_compaction, compaction}, _from, state) do
+    {:reply, :ok, %{state | compaction: compaction}}
   end
 
   @impl true
@@ -553,8 +553,8 @@ defmodule PtcDemo.Agent do
 
   # --- Private Functions ---
 
-  defp build_agent(data_mode, prompt_profile, compression) do
-    build_agent(data_mode, prompt_profile, compression, @max_turns, nil, 0, "{{question}}",
+  defp build_agent(data_mode, prompt_profile, compaction) do
+    build_agent(data_mode, prompt_profile, compaction, @max_turns, nil, 0, "{{question}}",
       plan: nil,
       thinking: false
     )
@@ -563,7 +563,7 @@ defmodule PtcDemo.Agent do
   defp build_agent(
          data_mode,
          prompt_profile,
-         compression,
+         compaction,
          max_turns,
          signature,
          retry_turns,
@@ -584,7 +584,7 @@ defmodule PtcDemo.Agent do
       tools: build_tools(),
       context_descriptions: context_descriptions_for(data_mode),
       system_prompt: build_system_prompt(prompt_profile, max_turns),
-      compression: compression,
+      compaction: compaction,
       thinking: thinking
     ]
 

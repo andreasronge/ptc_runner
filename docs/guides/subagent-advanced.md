@@ -198,7 +198,7 @@ Understanding what the LLM receives helps debug unexpected behavior.
 | **SYSTEM** | Role, language reference, `return`/`fail` usage, output format | Static (cacheable) |
 | **USER** | Mission + namespaces + execution history + turns left | Partial (tool/data stable) |
 
-**Note:** With compression enabled, tools and data are in the USER message (not SYSTEM) to leverage prompt caching on the stable content.
+**Note:** Tools and data are placed in the USER message (not SYSTEM) so prompt caching can hit the stable content while the volatile mission/history changes.
 
 ### Namespace Model
 

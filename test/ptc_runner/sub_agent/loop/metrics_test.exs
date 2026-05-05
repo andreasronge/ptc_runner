@@ -7,7 +7,6 @@ defmodule PtcRunner.SubAgent.Loop.MetricsTest do
     Map.merge(
       %{
         turn: 1,
-        compression_stats: nil,
         compaction_stats: nil,
         total_input_tokens: 0,
         total_output_tokens: 0,
@@ -43,22 +42,6 @@ defmodule PtcRunner.SubAgent.Loop.MetricsTest do
       usage = Metrics.build_final_usage(base_state(), 100, 2_048)
 
       refute Map.has_key?(usage, :compaction)
-    end
-
-    test "compaction and compression coexist independently" do
-      compression = %{enabled: true, strategy: "single_user_coalesced"}
-      compaction = %{enabled: true, triggered: false, strategy: "trim"}
-
-      state =
-        base_state(%{
-          compression_stats: compression,
-          compaction_stats: compaction
-        })
-
-      usage = Metrics.build_final_usage(state, 100, 2_048)
-
-      assert usage.compression == compression
-      assert usage.compaction == compaction
     end
   end
 end

@@ -205,7 +205,7 @@ mix lisp --help        # Show all available options
 | `--test=<n>` | Run a single test by index (e.g., `--test=14`) |
 | `--verbose`, `-v` | Verbose output (for test mode) |
 | `--debug`, `-d` | Debug mode - shows full LLM responses (useful for troubleshooting) |
-| `--compression` | Enable message compression (coalesces history into single message) |
+| `--compaction` | Enable pressure-triggered context compaction (older turns trimmed) |
 | `--filter=<type>` | Filter tests: `multi_turn`, `single_turn`, or `all` (default: all) |
 | `--report[=<file>]` | Generate markdown report (auto-names if no file given) |
 | `--runs=<n>` | Run tests multiple times for reliability testing |
@@ -223,7 +223,7 @@ mix lisp --prompt=single_shot             # Use single-shot prompt explicitly
 mix lisp --test --model=deepseek -v       # Test with DeepSeek
 mix lisp --test --validate-clojure        # Validate syntax with Babashka
 mix lisp --debug                          # Debug mode to see full LLM responses
-mix lisp --test --filter=multi_turn --compression  # Multi-turn tests with compression
+mix lisp --test --filter=multi_turn --compaction   # Multi-turn tests with compaction
 ```
 
 ## Prompt Profiles
@@ -294,7 +294,7 @@ PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return])
 | `/mode` | Show/change data mode (schema/explore) |
 | `/model` | Show/change model |
 | `/prompt` | Show/change prompt profile |
-| `/compression` | Show/toggle message compression (`on`/`off`) |
+| `/compaction` | Show/toggle pressure-triggered compaction (`on`/`off`) |
 | `/debug` | Show/toggle debug mode (`on`/`off`) |
 | `/system` | Show system prompt |
 | `/context` | Show conversation history |

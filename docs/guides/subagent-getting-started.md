@@ -90,7 +90,7 @@ SubAgent.new(
 )
 ```
 
-**Constraints:** Signature is optional. Tools are optional. Compression and firewall fields are not supported.
+**Constraints:** Signature is optional. Tools are optional. Compaction and firewall fields are not supported.
 
 See [Text Mode Guide](subagent-text-mode.md) for Mustache syntax, validation rules, tool calling, and examples.
 
@@ -179,7 +179,7 @@ The `retry_turns` option uses a **unified budget model** alongside `max_turns`:
 
 This separation lets agents safely explore solutions during work turns, then recover from validation errors during retry turns without consuming the main work budget.
 
-> **Note:** Single-shot agents with `retry_turns > 0` use compression to collapse previous failed attempts, preventing context window inflation during retries. For multi-turn agents with signatures, use signatures to enable validation in your return statement.
+> **Note:** Single-shot agents with `retry_turns > 0` accumulate the failed attempts in raw form — the retry budget is small by design, so context inflation isn't a concern. For multi-turn agents that need long-running history management, see [Context Compaction](subagent-compaction.md).
 
 ## Debugging Execution
 
@@ -202,7 +202,7 @@ PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
 
 This is essential for identifying why a model might be failing or ignoring tool instructions.
 
-> **More options:** See [Observability](subagent-observability.md) for compression, telemetry, and production tips.
+> **More options:** See [Observability](subagent-observability.md) for compaction, telemetry, and production tips.
 
 ## Signatures (Optional)
 

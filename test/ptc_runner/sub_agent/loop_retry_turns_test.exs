@@ -278,31 +278,26 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert turn2.type == :normal
     end
 
-    test "context is collapsed during retry phase (single-shot with retry_turns)" do
-      # Previous failed responses are NOT accumulated in message history.
-      # Only the most recent error is shown.
-      #
-      # This test verifies that compression is enabled for single-shot mode
-      # when retry_turns > 0, preventing context window inflation.
+    test "single-shot+retry context is NOT compacted (behavior change from compression)" do
+      # Behavior change documented in the compaction migration: with the
+      # legacy `compression:` removed, the single-shot+retry path no longer
+      # collapses context. The retry budget is small by design, so raw
+      # accumulation through 3-4 messages is fine and gives the LLM the
+      # full error trail. (Plan §"Decisions Locked In" item 4.)
       agent =
         SubAgent.new(
           prompt: "Return a float",
           signature: "{value :float}",
           max_turns: 1,
-          retry_turns: 3,
-          compression: true
+          retry_turns: 3
         )
 
       llm = fn %{turn: turn, messages: messages} ->
-        # Track message count to verify context collapsing
         send(self(), {:messages, turn, length(messages)})
 
         case turn do
-          # Turn 1 (must-return): returns string (fails validation)
           1 -> {:ok, "```clojure\n(return {:value \"bad\"})\n```"}
-          # Turn 2 (retry 1): returns boolean (fails validation)
           2 -> {:ok, "```clojure\n(return {:value true})\n```"}
-          # Turn 3 (retry 2): returns float (succeeds)
           3 -> {:ok, "```clojure\n(return {:value 1.0})\n```"}
           _ -> {:ok, "```clojure\n(return {:value 0.0})\n```"}
         end
@@ -313,23 +308,16 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert step.return == %{"value" => 1.0}
       assert length(step.turns) == 3
 
-      # Collect message counts
       assert_receive {:messages, 1, msg_count_1}
       assert_receive {:messages, 2, msg_count_2}
       assert_receive {:messages, 3, msg_count_3}
 
-      # Turn 1: single user message
+      # Turn 1: single user message. Each retry adds an assistant message
+      # (the failed response) and a user message (the validation feedback),
+      # so message count grows monotonically.
       assert msg_count_1 == 1
-
-      # Turn 2 & 3: With compression enabled, message count should stay constant
-      # (compressed to single user message), not grow by 2 each turn.
-      # If compression was NOT enabled, we'd see: 1, 3, 5 messages (accumulating)
-      # With compression enabled, we expect: 1, 1, 1 messages (collapsed)
-      assert msg_count_2 == 1,
-             "Expected compressed single message on turn 2, got #{msg_count_2}"
-
-      assert msg_count_3 == 1,
-             "Expected compressed single message on turn 3, got #{msg_count_3}"
+      assert msg_count_2 > msg_count_1
+      assert msg_count_3 > msg_count_2
     end
 
     test "budget exhausted when LLM continues without (return ...) in retry phase" do
