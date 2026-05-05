@@ -65,6 +65,10 @@ A few fake tickets, two helper tools, and a `now/0` clock. Same fixture is used
 across all three turns.
 
 ```elixir
+# `opened_at` is stored as an ISO 8601 string, not a DateTime struct. PTC-Lisp's
+# `(str ...)` on a DateTime returns the Elixir `~U[...]` sigil (Inspect format),
+# which `(java.util.Date. ...)` can't parse. Strings keep the data shape simple
+# for the LLM and let `(java.util.Date. (:opened_at t))` work directly in turn 3.
 tickets = [
   %{
     id: 123,
@@ -72,7 +76,7 @@ tickets = [
     product: "WidgetPro 9000",
     severity: "high",
     status: "open",
-    opened_at: ~U[2026-05-03 09:14:00Z],
+    opened_at: "2026-05-03T09:14:00Z",
     body: """
     Our production line halted after the latest firmware update. The WidgetPro 9000
     no longer recognizes the calibration cartridge. We need this resolved today —
@@ -85,7 +89,7 @@ tickets = [
     product: "WidgetPro 9000",
     severity: "low",
     status: "open",
-    opened_at: ~U[2026-05-04 14:22:00Z],
+    opened_at: "2026-05-04T14:22:00Z",
     body: "Shipping label printout is cropped at the bottom. Workaround works fine."
   },
   %{
@@ -94,7 +98,7 @@ tickets = [
     product: "WidgetMini",
     severity: "medium",
     status: "resolved",
-    opened_at: ~U[2026-05-02 11:00:00Z],
+    opened_at: "2026-05-02T11:00:00Z",
     body: "Battery drains faster than spec. Issue resolved with replacement unit."
   },
   %{
@@ -103,7 +107,7 @@ tickets = [
     product: "WidgetPro 9000",
     severity: "high",
     status: "open",
-    opened_at: ~U[2026-05-01 08:00:00Z],
+    opened_at: "2026-05-01T08:00:00Z",
     body:
       "Repeated calibration drift over 24h. Firmware logs attached. Need RCA by EOW."
   }
@@ -119,30 +123,39 @@ now_iso = "2026-05-05T10:00:00Z"
 # `map`, the LLM dutifully calls `tool/get_ticket {:map {:id 123}}`, and the
 # function clause `%{"id" => id}` no longer matches. Explicit signatures
 # sidestep that — you tell the LLM exactly what arguments to send.
-get_ticket = fn %{"id" => id} ->
-  Process.get(:tickets, []) |> Enum.find(&(&1.id == id))
-end
+#
+# Why closures capture `tickets` directly (instead of `Process.get(:tickets)`):
+# `:ptc_lisp` mode runs the LLM-generated program in a sandboxed BEAM process,
+# so `Process.put` from this cell does NOT reach the tool when invoked there.
+# Closures travel with their captured environment, so the data crosses the
+# process boundary cleanly. Production apps would back this with ETS or a
+# GenServer; closures are fine for a livebook fixture.
+get_ticket = fn %{"id" => id} -> Enum.find(tickets, &(&1.id == id)) end
+list_tickets = fn _args -> tickets end
+now = fn _args -> now_iso end
 
-list_tickets = fn _args -> Process.get(:tickets, []) end
-now = fn _args -> Process.get(:fake_now, DateTime.utc_now() |> DateTime.to_iso8601()) end
+ticket_schema =
+  "Each ticket: %{id :int, customer :string, product :string, " <>
+    "severity (\"low\" | \"medium\" | \"high\"), status (\"open\" | \"resolved\"), " <>
+    "opened_at (ISO 8601), body :string}"
 
 # Tool maps re-built per turn so each mission only sees the tools it needs.
 support_tools = %{
   "get_ticket" =>
     {get_ticket,
      signature: "(id :int) -> :any",
-     description: "Fetch a single ticket by id. Returns the ticket map or nil."}
+     description: "Fetch a single ticket by id. Returns the ticket map or nil. " <> ticket_schema}
 }
 
 inbox_tools = %{
   "list_tickets" =>
-    {list_tickets, signature: "() -> [:any]", description: "List every ticket."},
+    {list_tickets,
+     signature: "() -> [:any]",
+     description: "List every ticket. " <> ticket_schema},
   "now" =>
     {now, signature: "() -> :string", description: "Current UTC time as ISO 8601."}
 }
 
-Process.put(:tickets, tickets)
-Process.put(:fake_now, now_iso)
 :ok
 ```
 
@@ -302,11 +315,11 @@ that's the cause.
 
 ## What this scenario teaches
 
-| Turn | Mode                  | Why this mode                                                                            |
-| ---- | --------------------- | ---------------------------------------------------------------------------------------- |
-| 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.       |
+| Turn | Mode                  | Why this mode                                                                                 |
+| ---- | --------------------- | --------------------------------------------------------------------------------------------- |
+| 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.            |
 | 2    | `:text` (complex sig) | Structured extraction. Native tool-calling loop (tool call → result → final JSON answer). |
-| 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it. |
+| 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it.      |
 
 The router question — *"how does the app know which mode to pick?"* — is a
 separate concern. Three real-world options:
@@ -381,4 +394,4 @@ pretending the library is a chat library.
 * [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
   each mission did
 
-<!-- livebook:{"offset":13047,"stamp":{"token":"XCP.hWB_IvzSjh_rsshAIr0BEGhmghDqrMHb2j57ZocqRmg0yu4A8cw_eQKYhlBd5ep2yzq4hPVTK_J2jqW24zxgQKlAvTJ-gNmiyxpAVZehDHdmQFYXI09Bm6NQCz97","version":2}} -->
+<!-- livebook:{"offset":13485,"stamp":{"token":"XCP.g3EDinsKMr-reKN3W9_eW9isLJ6161DJU8o0IyFttTuKoty-fgafm3iK557-Ko8dwEj7hTIAATPlWvDB28PhobAmLNz5VFa_-ZmLdQP1nXUcV0yr8Q5qwRHtshQD","version":2}} -->
