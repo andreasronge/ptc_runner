@@ -145,6 +145,72 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
 
       assert step.return == %{"answer" => "handled error"}
     end
+
+    test "FunctionClauseError feeds args + hint back to LLM so it can self-correct" do
+      # Tool only matches `%{"id" => _}`. The LLM sends `%{"map" => ...}` first
+      # (mimicking the auto-extraction footgun) — the tool raises, the loop must
+      # surface the args and a hint instead of an opaque "no function clause"
+      # message, so the model can fix itself on the next turn.
+      tools = %{
+        "get_thing" =>
+          {fn %{"id" => id} -> %{"id" => id, "name" => "thing-#{id}"} end,
+           signature: "(id :int) -> :any", description: "Get a thing"}
+      }
+
+      # Capture the second-turn user message the LLM sees so we can assert the
+      # hint flowed through.
+      seen_messages = :counters.new(1, [:atomics])
+      test_pid = self()
+
+      llm = fn req ->
+        idx = :counters.get(seen_messages, 1)
+        :counters.add(seen_messages, 1, 1)
+
+        case idx do
+          0 ->
+            {:ok,
+             %{
+               tool_calls: [%{id: "c1", name: "get_thing", args: %{"map" => %{"id" => 7}}}],
+               content: nil,
+               tokens: nil
+             }}
+
+          _ ->
+            send(test_pid, {:tool_message, req.messages})
+            {:ok, ~S|{"answer": "recovered"}|}
+        end
+      end
+
+      agent = make_agent(tools: tools)
+
+      # test_helper.exs sets the OTP primary log level to :critical to silence
+      # sandbox crash reports. Lift it for this test so we can verify the
+      # developer-facing warning lands; restore on exit.
+      previous = :logger.get_primary_config()
+      :logger.set_primary_config(:level, :warning)
+      on_exit(fn -> :logger.set_primary_config(:level, previous.level) end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {:ok, step} = SubAgent.run(agent, llm: llm)
+          assert step.return == %{"answer" => "recovered"}
+        end)
+
+      # The tool error message the LLM saw must include the args it sent and
+      # the FunctionClauseError hint pointing at the explicit-signature fix.
+      assert_received {:tool_message, msgs}
+      tool_msg = Enum.find(msgs, &(&1.role == :tool))
+      assert tool_msg, "expected a tool result message"
+      payload = Jason.decode!(tool_msg.content)
+      assert payload["tool"] == "get_thing"
+      assert payload["args_received"] == %{"map" => %{"id" => 7}}
+      assert payload["hint"] =~ "explicit"
+      assert payload["hint"] =~ "signature"
+
+      # And the developer-facing log line must include the tool name and args.
+      assert log =~ "tool \"get_thing\" raised FunctionClauseError"
+      assert log =~ "args=%{\"map\""
+    end
   end
 
   describe "max_turns exceeded" do
