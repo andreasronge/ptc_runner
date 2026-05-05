@@ -97,6 +97,10 @@ The LLM can "walk" the data across turns:
 (return {:report_id 123 :reasoning "..."})
 ```
 
+> **Long-running agents:** Multi-turn agents that run beyond ~8 turns or accumulate large
+> intermediate results can push toward the model's context window. See
+> [Context Compaction](subagent-compaction.md) for opt-in pressure-triggered trimming.
+
 ## Debugging
 
 ### Prompt Preview
@@ -315,6 +319,7 @@ key                            ; Access stored value
 ## See Also
 
 - [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Context Compaction](subagent-compaction.md) - Pressure-triggered trimming for long-running multi-turn agents
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition

@@ -63,6 +63,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 - **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs
 - **Ad-hoc LLM queries**: `llm-query` calls an LLM from within PTC-Lisp with signature-validated responses
 - **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows ([interactive Livebook](livebooks/observability_and_tracing.livemd))
+- **[Context compaction](docs/guides/subagent-compaction.md)**: Pressure-triggered trimming for long-running multi-turn agents — opt in with `compaction: true` to drop older turns once a turn or token threshold is hit
 - **BEAM-native**: Parallel tool calling (`pmap`/`pcalls`), process isolation with timeout and heap limits, fault tolerance
 
 ### Examples

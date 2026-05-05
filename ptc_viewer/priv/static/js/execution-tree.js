@@ -1,5 +1,5 @@
-import { formatDuration, escapeHtml, truncate, findFileByTraceId } from './utils.js';
-import { pairEvents, extractProgram, extractRunEvents } from './parser.js';
+import { formatDuration, escapeHtml, truncate, findFileByTraceId, renderCompactionBadge } from './utils.js';
+import { pairEvents, extractProgram, extractRunEvents, compactionsByTurn } from './parser.js';
 
 const MAX_DEPTH = 10;
 const pendingFetches = new Map();
@@ -85,6 +85,7 @@ function buildCompactTurns(events) {
     (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
   const toolPairs = paired.filter(p => p.type === 'tool' &&
     (!rootSpanId || p.start?.parent_span_id === rootSpanId || p.stop?.parent_span_id === rootSpanId));
+  const compactionByTurn = compactionsByTurn(events, rootSpanId);
 
   return llmPairs.map((llmPair, idx) => {
     const stop = llmPair.stop;
@@ -126,7 +127,8 @@ function buildCompactTurns(events) {
       duration,
       hasError,
       hasReturn,
-      childTools: turnTools
+      childTools: turnTools,
+      compaction: compactionByTurn.get(turnNumber) || null
     };
   });
 }
@@ -202,6 +204,7 @@ function renderCompactTurns(turns, state, data, childEvents, depth) {
     html += `<div class="exec-tree-turn" data-turn-num="${turn.turnNumber}">`;
     html += `<span class="exec-tree-turn-num">T${turn.turnNumber}</span>`;
     html += `<span class="exec-tree-turn-program">${escapeHtml(programPreview)}</span>`;
+    html += renderCompactionBadge(turn.compaction);
     html += `<span class="exec-tree-duration">${formatDuration(turn.duration)}</span>`;
     html += statusIcon;
     html += '</div>';

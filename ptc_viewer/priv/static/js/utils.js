@@ -49,6 +49,26 @@ export function truncatePlan(str, len) {
   return str.length > len ? str.slice(0, len) + '...' : str;
 }
 
+/**
+ * Render a compaction badge from stats (returned by `compactionsByTurn`) as
+ * an HTML string. Returns '' when stats is falsy so callers can interpolate
+ * unconditionally.
+ */
+export function renderCompactionBadge(stats) {
+  if (!stats) return '';
+  const before = escapeHtml(String(stats.messagesBefore ?? '?'));
+  const after = escapeHtml(String(stats.messagesAfter ?? '?'));
+  const reasonLabel = stats.reason === 'token_pressure' ? 'tokens'
+    : stats.reason === 'turn_pressure' ? 'turns'
+    : (stats.reason || '');
+  const tokenDelta = (stats.tokensBefore != null && stats.tokensAfter != null)
+    ? `, ~${formatTokens(stats.tokensBefore)}→${formatTokens(stats.tokensAfter)} tok`
+    : '';
+  const overBudget = stats.overBudget ? ' (over budget)' : '';
+  const tooltip = `compaction (${stats.strategy || 'trim'}) — reason: ${reasonLabel}${tokenDelta}, kept_recent: ${stats.keptRecentTurns ?? '?'}${overBudget}`;
+  return `<span class="turn-badge compaction" title="${escapeHtml(tooltip)}">✂${before}→${after}</span>`;
+}
+
 export function findFileByTraceId(state, traceId) {
   for (const [name, data] of state.files) {
     if (data.traceId === traceId) return name;
