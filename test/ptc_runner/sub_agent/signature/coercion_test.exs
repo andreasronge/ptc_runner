@@ -371,6 +371,25 @@ defmodule PtcRunner.SubAgent.Signature.CoercionTest do
       assert "non-UTC offset in datetime, normalized to UTC" in warnings
     end
 
+    test "fractional-second UTC strings do NOT trigger a spurious non-UTC warning" do
+      # Regression: the previous binary-pattern shape check
+      # (`<<_::binary-19, "Z", _::binary>>`) only matched at exactly 19 chars
+      # before the offset. Inputs like "2026-05-03T09:14:00.123Z" have 23
+      # chars, so they got falsely flagged as non-UTC. Fixed by basing the
+      # warning on the parsed offset (0 = UTC) instead of string shape.
+      assert {:ok, _dt, warnings} =
+               Coercion.coerce("2026-05-03T09:14:00.123Z", :datetime, [])
+
+      refute "non-UTC offset in datetime, normalized to UTC" in warnings
+    end
+
+    test "fractional-second +00:00 offset is also recognized as UTC" do
+      assert {:ok, _dt, warnings} =
+               Coercion.coerce("2026-05-03T09:14:00.123+00:00", :datetime, [])
+
+      refute "non-UTC offset in datetime, normalized to UTC" in warnings
+    end
+
     test "%DateTime{} passes through unchanged" do
       assert {:ok, ~U[2026-05-03 09:14:00Z], []} =
                Coercion.coerce(~U[2026-05-03 09:14:00Z], :datetime, [])

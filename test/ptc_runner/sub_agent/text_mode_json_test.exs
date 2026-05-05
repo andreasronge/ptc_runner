@@ -1024,11 +1024,11 @@ defmodule PtcRunner.SubAgent.TextModeJsonTest do
       assert step.fail.message =~ "datetime"
     end
 
-    test "JSON Schema generated for :datetime carries format: date-time" do
+    test "JSON Schema for :datetime is a plain string (provider-strict-mode safe)" do
       alias PtcRunner.SubAgent.Signature
       agent = SubAgent.new(prompt: "?", output: :text, signature: "{at :datetime}")
       schema = Signature.to_json_schema(agent.parsed_signature)
-      assert schema["properties"]["at"] == %{"type" => "string", "format" => "date-time"}
+      assert schema["properties"]["at"] == %{"type" => "string"}
     end
   end
 end

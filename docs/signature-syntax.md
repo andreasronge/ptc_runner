@@ -71,10 +71,12 @@ DateTime.diff(DateTime.utc_now(), step.return["at"])  # works directly
 | `"2026-05-03T11:14:00+02:00"` | Shifted to `~U[2026-05-03 09:14:00Z]` with a "non-UTC offset" warning |
 | `"2026-05-03T09:14:00"` (no offset) | Validation error — naive strings are ambiguous and rejected at the type boundary |
 
-The JSON Schema sent to the LLM provider includes `format: "date-time"`. OpenAI's
-structured output enforces this server-side; Anthropic treats it as guidance.
-Either way, coercion validates the string locally so an invalid date never
-reaches the caller.
+The JSON Schema sent to the LLM provider is a plain `{"type": "string"}` —
+the `format: "date-time"` keyword is omitted because OpenAI's strict-mode
+structured output rejects unsupported keywords and would 400 the request.
+Local coercion validates the ISO 8601 + offset shape, so an invalid date
+never reaches the caller. The prompt-side example value
+(`"2026-05-03T09:14:00Z"`) covers the LLM-guidance role.
 
 **When to pick `:string` vs `:datetime`:**
 - `:datetime` if your code does anything with the value (compare, diff, format,

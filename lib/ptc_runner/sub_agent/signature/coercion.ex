@@ -162,9 +162,13 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   defp coerce_impl(value, :datetime) when is_binary(value) do
     case DateTime.from_iso8601(value) do
-      {:ok, dt, _offset} ->
+      {:ok, dt, offset_seconds} ->
+        # Use the parsed offset (in seconds) to decide whether to warn, NOT a
+        # pattern match on the raw string shape — fractional seconds shift the
+        # offset characters, so `~r/^.{19}Z/` would false-positive on inputs
+        # like "2026-05-03T09:14:00.123Z" even though they're valid UTC.
         {:ok, DateTime.shift_zone!(dt, "Etc/UTC"),
-         maybe_warn_non_utc(value, ["normalized to UTC"])}
+         offset_warnings(offset_seconds, ["normalized to UTC"])}
 
       {:error, :missing_offset} ->
         {:error,
@@ -446,10 +450,13 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
   # UTC. The agent's caller still gets a UTC `%DateTime{}` (the type's
   # canonical form), but knowing the model picked a non-UTC zone is useful
   # for prompt-tuning.
-  defp maybe_warn_non_utc(<<_::binary-19, "Z", _::binary>>, base), do: base
-  defp maybe_warn_non_utc(<<_::binary-19, "+00:00", _::binary>>, base), do: base
-  defp maybe_warn_non_utc(<<_::binary-19, "-00:00", _::binary>>, base), do: base
+  #
+  # Driven by the offset returned by `DateTime.from_iso8601/1` (seconds from
+  # UTC) rather than the raw string shape — fractional-second timestamps
+  # would otherwise false-positive a non-UTC warning on "...Z" / "+00:00"
+  # inputs because they shift the offset chars beyond a fixed binary pattern.
+  defp offset_warnings(0, base), do: base
 
-  defp maybe_warn_non_utc(_other, base),
+  defp offset_warnings(_offset, base),
     do: base ++ ["non-UTC offset in datetime, normalized to UTC"]
 end

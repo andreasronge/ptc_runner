@@ -204,11 +204,16 @@ defmodule PtcRunner.SubAgent.Signature do
   def type_to_json_schema(:float), do: %{"type" => "number"}
   def type_to_json_schema(:bool), do: %{"type" => "boolean"}
   def type_to_json_schema(:keyword), do: %{"type" => "string"}
-  # `:datetime` is RFC 3339 / ISO 8601 with offset. OpenAI's structured output
-  # respects `format: "date-time"` server-side; Anthropic treats it as guidance
-  # in tool schemas. Either way, coercion validates the string locally so an
-  # invalid date never reaches the caller.
-  def type_to_json_schema(:datetime), do: %{"type" => "string", "format" => "date-time"}
+  # `:datetime` ships as a plain `{"type": "string"}` to providers. We initially
+  # emitted `format: "date-time"` here, but OpenAI's strict-mode structured
+  # output (and strict tool schemas) reject any keyword outside their supported
+  # subset, including `format`. Strict-mode requests would 400 before our
+  # local DateTime coercion got a chance to run. Local coercion does the
+  # actual ISO 8601 + offset validation; the type's value to the caller (a
+  # `%DateTime{}` struct, not a string) is what makes `:datetime` more than
+  # `:string`. The prompt-side example value (`"2026-05-03T09:14:00Z"`)
+  # covers the LLM-guidance role that `format` would have played.
+  def type_to_json_schema(:datetime), do: %{"type" => "string"}
   # Bedrock requires input_schema to have a "type" field, so :any uses "object"
   def type_to_json_schema(:any), do: %{"type" => "object"}
   def type_to_json_schema(:map), do: %{"type" => "object"}
