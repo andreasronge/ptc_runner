@@ -572,5 +572,24 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
 
       assert step.fail.message =~ "Time"
     end
+
+    # Regression (codex review on the temporal sweep): `(str ~N[...])` produces
+    # an offsetless ISO string. `(java.util.Date. ...)` used to reject those
+    # because `DateTime.from_iso8601/1` requires an offset. The advertised path
+    # `(java.util.Date. (str data/ndt))` was broken until we taught the parser
+    # to fall through to NaiveDateTime + assume UTC.
+    test "string round-trip via (str ndt) -> (java.util.Date. ...) works for NaiveDateTime" do
+      {:ok, step} =
+        Lisp.run("(.getTime (java.util.Date. (str data/ndt)))",
+          context: %{ndt: ~N[2026-05-03 09:14:00]}
+        )
+
+      assert step.return == DateTime.to_unix(~U[2026-05-03 09:14:00Z], :millisecond)
+    end
+
+    test "(java.util.Date. \"2026-05-03T09:14:00\") parses offsetless ISO as UTC" do
+      {:ok, step} = Lisp.run(~s|(.getTime (java.util.Date. "2026-05-03T09:14:00"))|)
+      assert step.return == DateTime.to_unix(~U[2026-05-03 09:14:00Z], :millisecond)
+    end
   end
 end
