@@ -393,16 +393,23 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp execute_tool_turn(agent, llm, state) do
     system_prompt = build_tool_system_prompt(agent)
 
-    messages =
+    {messages, state} =
       if state.turn == 1 do
+        # `loop.ex` seeds state.messages with a PTC-Lisp formatted user prompt
+        # (signatures rendered in kebab-case for `(return {...})` examples).
+        # That's wrong for text mode — the LLM should see a snake-case JSON
+        # schema. Rebuild the user message here AND persist it into
+        # state.messages so subsequent turns (which rely on `state.messages`)
+        # don't fall back to the stale PTC-Lisp version.
         expanded_prompt =
           PromptExpander.expand(agent.prompt, state.context, on_missing: :keep)
           |> elem(1)
 
         user_msg = build_tool_user_message(agent, expanded_prompt, state.context)
-        (state.initial_messages || []) ++ [%{role: :user, content: user_msg}]
+        msgs = (state.initial_messages || []) ++ [%{role: :user, content: user_msg}]
+        {msgs, %{state | messages: msgs}}
       else
-        state.messages
+        {state.messages, state}
       end
 
     # Tool variants never send schema in llm_input (tool loop owns JSON validation)
