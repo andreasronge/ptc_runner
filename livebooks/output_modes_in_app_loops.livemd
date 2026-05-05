@@ -292,14 +292,20 @@ SubAgent.Debug.print_trace(step3)
 
 This is what `:ptc_lisp` mode is for. The model didn't try to compute "older
 than 48h" in its head — it threaded `(now)` and ticket timestamps through
-`(filter ...)` and got a deterministic answer.
+`(filter ...)` so the arithmetic runs in the sandbox, not in the model's
+weights. The answer is deterministic *as long as the generated program uses
+real date operations* — PTC-Lisp exposes `(java.time.LocalDate/parse
+"2026-01-15")` and `(.getTime date)` for ISO 8601 → millis. Capable models
+pick those up from the system prompt; weaker ones may invent functions
+(`parse-iso`) and fail. If the trace shows an "Undefined variable" error,
+that's the cause.
 
 ## What this scenario teaches
 
 | Turn | Mode                  | Why this mode                                                                            |
 | ---- | --------------------- | ---------------------------------------------------------------------------------------- |
 | 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.       |
-| 2    | `:text` (complex sig) | Structured extraction. Single LLM hop with native tool calling. No computation needed.   |
+| 2    | `:text` (complex sig) | Structured extraction. Native tool-calling loop (tool call → result → final JSON answer). |
 | 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it. |
 
 The router question — *"how does the app know which mode to pick?"* — is a
@@ -375,4 +381,4 @@ pretending the library is a chat library.
 * [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
   each mission did
 
-<!-- livebook:{"offset":12655,"stamp":{"token":"XCP.CVwtqkXF9TKaoe_JUSwE8UWczGzpLe8Ka4wZRC-aD2du29deiR_nsUxFVZhadP14RMi8mpX6E9Meo6p3_oBSODVzL9lO8CgQzT7TyTP4xLKr6gCdbsyhMNiMsvH7","version":2}} -->
+<!-- livebook:{"offset":13047,"stamp":{"token":"XCP.hWB_IvzSjh_rsshAIr0BEGhmghDqrMHb2j57ZocqRmg0yu4A8cw_eQKYhlBd5ep2yzq4hPVTK_J2jqW24zxgQKlAvTJ-gNmiyxpAVZehDHdmQFYXI09Bm6NQCz97","version":2}} -->
