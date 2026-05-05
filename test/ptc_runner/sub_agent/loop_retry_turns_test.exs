@@ -278,12 +278,10 @@ defmodule PtcRunner.SubAgent.LoopReturnRetriesTest do
       assert turn2.type == :normal
     end
 
-    test "single-shot+retry context is NOT compacted (behavior change from compression)" do
-      # Behavior change documented in the compaction migration: with the
-      # legacy `compression:` removed, the single-shot+retry path no longer
-      # collapses context. The retry budget is small by design, so raw
-      # accumulation through 3-4 messages is fine and gives the LLM the
-      # full error trail. (Plan §"Decisions Locked In" item 4.)
+    test "single-shot+retry context is NOT compacted" do
+      # The single-shot+retry path does not collapse context. The retry budget
+      # is small by design, so raw accumulation through 3-4 messages is fine
+      # and gives the LLM the full error trail.
       agent =
         SubAgent.new(
           prompt: "Return a float",
