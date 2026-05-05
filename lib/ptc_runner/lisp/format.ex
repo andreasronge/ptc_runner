@@ -202,6 +202,21 @@ defmodule PtcRunner.Lisp.Format do
     {"\"#{Date.to_iso8601(date)}\"", false}
   end
 
+  # Other temporal structs render as ISO 8601 strings too — without these the
+  # `%_{} = struct` clause below sends them to inspect, leaking sigil syntax
+  # (`~U[...]`/`~N[...]`/`~T[...]`) into data inventory samples shown to the LLM.
+  defp format_clojure(%DateTime{} = dt, _opts) do
+    {"\"#{DateTime.to_iso8601(dt)}\"", false}
+  end
+
+  defp format_clojure(%NaiveDateTime{} = dt, _opts) do
+    {"\"#{NaiveDateTime.to_iso8601(dt)}\"", false}
+  end
+
+  defp format_clojure(%Time{} = t, _opts) do
+    {"\"#{Time.to_iso8601(t)}\"", false}
+  end
+
   defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}
 
   defp format_clojure(list, opts) when is_list(list) do

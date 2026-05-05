@@ -679,9 +679,15 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp exception_hint(_e, _tool_args), do: nil
 
   defp encode_tool_result(result) do
-    case Jason.encode(result) do
+    # Walk the result first so DateTime/NaiveDateTime/Date/Time become ISO 8601
+    # strings before Jason sees them. Without this, Jason has no encoder for
+    # temporal structs, falls through to the inspect fallback below, and the
+    # LLM gets `~U[2026-05-03 09:14:00Z]` instead of a parseable date string.
+    normalized = PtcRunner.Temporal.walk(result)
+
+    case Jason.encode(normalized) do
       {:ok, json} -> json
-      {:error, _} -> inspect(result, limit: 500)
+      {:error, _} -> inspect(normalized, limit: 500)
     end
   end
 

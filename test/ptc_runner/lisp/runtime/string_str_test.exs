@@ -60,4 +60,47 @@ defmodule PtcRunner.Lisp.Runtime.StringStrTest do
       assert run!("(str)") == ""
     end
   end
+
+  # Regression: temporal structs must render as ISO 8601, not as Elixir sigils.
+  # Without these clauses the LLM's program would see `~U[2026-05-03 09:14:00Z]`
+  # which `(java.util.Date. ...)` cannot parse. See `PtcRunner.Temporal`.
+  describe "(str) with temporal structs" do
+    defp run_with!(code, context) do
+      {:ok, step} = PtcRunner.Lisp.run(code, context: context)
+      step.return
+    end
+
+    test "DateTime renders as ISO 8601" do
+      assert run_with!("(str data/dt)", %{dt: ~U[2026-05-03 09:14:00Z]}) ==
+               "2026-05-03T09:14:00Z"
+    end
+
+    test "NaiveDateTime renders as ISO 8601 (no offset)" do
+      assert run_with!("(str data/dt)", %{dt: ~N[2026-05-03 09:14:00]}) ==
+               "2026-05-03T09:14:00"
+    end
+
+    test "Date renders as ISO 8601" do
+      assert run_with!("(str data/d)", %{d: ~D[2026-05-03]}) == "2026-05-03"
+    end
+
+    test "Time renders as ISO 8601" do
+      assert run_with!("(str data/t)", %{t: ~T[09:14:00]}) == "09:14:00"
+    end
+
+    test "(java.util.Date. (str dt)) round-trips through PTC-Lisp" do
+      # The whole point: an LLM's program can stringify and re-parse a DateTime.
+      result =
+        run_with!(
+          "(.getTime (java.util.Date. (str data/dt)))",
+          %{dt: ~U[2026-05-03 09:14:00Z]}
+        )
+
+      assert is_integer(result)
+      # Sanity check: 2026-05-03T09:14:00Z is a real instant, just confirm it's
+      # in the right ballpark (UNIX millis around 1.77e12 for that date).
+      assert result > 1_700_000_000_000
+      assert result < 2_000_000_000_000
+    end
+  end
 end

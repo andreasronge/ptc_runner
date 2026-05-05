@@ -146,6 +146,78 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
       assert step.return == %{"answer" => "handled error"}
     end
 
+    test "tool returning DateTime is encoded as ISO 8601 (not Elixir sigil)" do
+      # Without temporal normalization, Jason.encode/1 fails on a `%DateTime{}`
+      # tool result and `encode_tool_result/1` falls through to inspect, which
+      # ships `~U[2026-05-03 09:14:00Z]` to the LLM. The fix is in
+      # `PtcRunner.Temporal.walk/1` applied before Jason.encode.
+      tools = %{
+        "now" =>
+          {fn _ -> ~U[2026-05-03 09:14:00Z] end,
+           signature: "() -> :string", description: "Current time"}
+      }
+
+      test_pid = self()
+      counter = :counters.new(1, [:atomics])
+
+      llm = fn req ->
+        idx = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+        send(test_pid, {:turn_messages, idx, req.messages})
+
+        case idx do
+          0 ->
+            {:ok, %{tool_calls: [%{id: "c1", name: "now", args: %{}}], content: nil, tokens: nil}}
+
+          _ ->
+            {:ok, ~S|{"answer": "got it"}|}
+        end
+      end
+
+      agent = make_agent(tools: tools)
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      assert_received {:turn_messages, 1, msgs}
+      tool_msg = Enum.find(msgs, &(&1.role == :tool))
+      assert tool_msg.content == "\"2026-05-03T09:14:00Z\""
+      refute tool_msg.content =~ "~U["
+    end
+
+    test "tool returning a map with DateTime fields normalizes recursively" do
+      tools = %{
+        "get_event" =>
+          {fn _ ->
+             %{id: 1, at: ~U[2026-05-03 09:14:00Z], on: ~D[2026-05-03], type: "click"}
+           end, signature: "() -> :any", description: "Fetch event"}
+      }
+
+      test_pid = self()
+      counter = :counters.new(1, [:atomics])
+
+      llm = fn req ->
+        idx = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+        send(test_pid, {:turn_messages, idx, req.messages})
+
+        case idx do
+          0 -> {:ok, %{tool_calls: [%{id: "c1", name: "get_event", args: %{}}], content: nil}}
+          _ -> {:ok, ~S|{"answer": "ok"}|}
+        end
+      end
+
+      agent = make_agent(tools: tools)
+      {:ok, _step} = SubAgent.run(agent, llm: llm)
+
+      assert_received {:turn_messages, 1, msgs}
+      tool_msg = Enum.find(msgs, &(&1.role == :tool))
+      payload = Jason.decode!(tool_msg.content)
+      assert payload["at"] == "2026-05-03T09:14:00Z"
+      assert payload["on"] == "2026-05-03"
+      assert payload["type"] == "click"
+      refute tool_msg.content =~ "~U["
+      refute tool_msg.content =~ "~D["
+    end
+
     test "tool variant keeps text-mode prompt format on turn 2 (no kebab-case leak)" do
       # Regression: state.messages is seeded by loop.ex with a PTC-Lisp user
       # prompt (kebab-case signatures, `(return {...})` examples). Turn 1 of

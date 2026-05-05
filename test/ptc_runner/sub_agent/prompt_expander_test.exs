@@ -226,4 +226,39 @@ defmodule PtcRunner.SubAgent.PromptExpanderTest do
       refute result =~ "{{#articles}}"
     end
   end
+
+  # Regression: a `%DateTime{}` (etc.) value in context used to be treated as
+  # a nested map by stringify_values_for_expansion/1. Mustache then rejected
+  # the map-valued variable and the expander silently fell back to the
+  # original unexpanded template — the LLM saw `{{my_date}}` literally.
+  describe "temporal struct values in context" do
+    test "DateTime expands to ISO 8601 (not the ~U[...] sigil, not unexpanded)" do
+      assert {:ok, "happened at 2026-05-03T09:14:00Z"} =
+               PromptExpander.expand(
+                 "happened at {{when}}",
+                 %{when: ~U[2026-05-03 09:14:00Z]}
+               )
+    end
+
+    test "Date expands to ISO 8601" do
+      assert {:ok, "born 2026-05-03"} =
+               PromptExpander.expand("born {{day}}", %{day: ~D[2026-05-03]})
+    end
+
+    test "NaiveDateTime and Time expand to ISO 8601" do
+      assert {:ok, "n=2026-05-03T09:14:00 t=09:14:00"} =
+               PromptExpander.expand(
+                 "n={{n}} t={{t}}",
+                 %{n: ~N[2026-05-03 09:14:00], t: ~T[09:14:00]}
+               )
+    end
+
+    test "DateTime nested in a map expands cleanly via dotted access" do
+      assert {:ok, "alice at 2026-05-03T09:14:00Z"} =
+               PromptExpander.expand(
+                 "{{user.name}} at {{user.last_seen}}",
+                 %{user: %{name: "alice", last_seen: ~U[2026-05-03 09:14:00Z]}}
+               )
+    end
+  end
 end

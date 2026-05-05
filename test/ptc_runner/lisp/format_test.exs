@@ -284,4 +284,33 @@ defmodule PtcRunner.Lisp.FormatTest do
       refute result =~ "hidden"
     end
   end
+
+  # Regression: data inventory samples used to render DateTime/NaiveDateTime/Time
+  # with `inspect/1`, leaking sigil syntax (`~U[...]`, `~N[...]`, `~T[...]`) into
+  # the system prompt. The LLM then shaped its programs around the wrong format.
+  describe "to_clojure/2 with temporal structs" do
+    test "DateTime renders as quoted ISO 8601" do
+      assert {"\"2026-05-03T09:14:00Z\"", false} =
+               Format.to_clojure(~U[2026-05-03 09:14:00Z])
+    end
+
+    test "NaiveDateTime renders as quoted ISO 8601 (no offset)" do
+      assert {"\"2026-05-03T09:14:00\"", false} =
+               Format.to_clojure(~N[2026-05-03 09:14:00])
+    end
+
+    test "Date renders as quoted ISO 8601" do
+      assert {"\"2026-05-03\"", false} = Format.to_clojure(~D[2026-05-03])
+    end
+
+    test "Time renders as quoted ISO 8601" do
+      assert {"\"09:14:00\"", false} = Format.to_clojure(~T[09:14:00])
+    end
+
+    test "temporal struct nested in a map renders cleanly" do
+      {result, _} = Format.to_clojure(%{at: ~U[2026-05-03 09:14:00Z]})
+      assert result =~ "\"2026-05-03T09:14:00Z\""
+      refute result =~ "~U["
+    end
+  end
 end

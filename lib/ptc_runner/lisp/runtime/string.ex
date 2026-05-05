@@ -44,6 +44,14 @@ defmodule PtcRunner.Lisp.Runtime.String do
   def to_str(:nan), do: "NaN"
   def to_str(atom) when is_atom(atom), do: inspect(atom)
 
+  # Temporal structs: render as ISO 8601 so `(java.util.Date. (str dt))` works
+  # and the LLM never sees the Elixir sigil form. Must precede the generic map
+  # clause below since these are %DateTime{} etc. structs.
+  def to_str(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  def to_str(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+  def to_str(%Date{} = d), do: Date.to_iso8601(d)
+  def to_str(%Time{} = t), do: Time.to_iso8601(t)
+
   def to_str(x) when is_map(x) or is_list(x) do
     Format.to_clojure(x) |> elem(0)
   end
