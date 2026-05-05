@@ -292,14 +292,20 @@ SubAgent.Debug.print_trace(step3)
 
 This is what `:ptc_lisp` mode is for. The model didn't try to compute "older
 than 48h" in its head — it threaded `(now)` and ticket timestamps through
-`(filter ...)` and got a deterministic answer.
+`(filter ...)` so the arithmetic runs in the sandbox, not in the model's
+weights. The answer is deterministic *as long as the generated program uses
+real date operations* — PTC-Lisp exposes `(java.time.LocalDate/parse
+"2026-01-15")` and `(.getTime date)` for ISO 8601 → millis. Capable models
+pick those up from the system prompt; weaker ones may invent functions
+(`parse-iso`) and fail. If the trace shows an "Undefined variable" error,
+that's the cause.
 
 ## What this scenario teaches
 
 | Turn | Mode                  | Why this mode                                                                            |
 | ---- | --------------------- | ---------------------------------------------------------------------------------------- |
 | 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.       |
-| 2    | `:text` (complex sig) | Structured extraction. Single LLM hop with native tool calling. No computation needed.   |
+| 2    | `:text` (complex sig) | Structured extraction. Native tool-calling loop (tool call → result → final JSON answer). |
 | 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it. |
 
 The router question — *"how does the app know which mode to pick?"* — is a
