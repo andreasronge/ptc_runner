@@ -1069,6 +1069,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp format_type_name(:keyword), do: "string"
   defp format_type_name(:any), do: "any"
   defp format_type_name(:map), do: "object"
+
+  defp format_type_name(:datetime),
+    do: "ISO 8601 datetime string with offset (e.g. \"2026-05-03T09:14:00Z\")"
+
   defp format_type_name({:list, inner}), do: "array of #{format_type_name(inner)}"
   defp format_type_name({:optional, inner}), do: "#{format_type_name(inner)} (optional)"
   defp format_type_name({:map, _fields}), do: "object"
@@ -1089,6 +1093,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp build_example_value(:keyword), do: "keyword"
   defp build_example_value(:any), do: %{"key" => "value", "data" => "..."}
   defp build_example_value(:map), do: %{}
+  defp build_example_value(:datetime), do: "2026-05-03T09:14:00Z"
   defp build_example_value({:list, inner}), do: [build_example_value(inner)]
   defp build_example_value({:optional, inner}), do: build_example_value(inner)
 

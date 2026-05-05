@@ -49,4 +49,22 @@ defmodule PtcRunner.SubAgent.Signature.RendererTest do
       assert Renderer.render_type(type) == "{q1_total :float}"
     end
   end
+
+  describe ":datetime rendering" do
+    test "bare :datetime renders as ':datetime'" do
+      assert Renderer.render_type(:datetime) == ":datetime"
+    end
+
+    test ":datetime in a map field" do
+      assert Renderer.render_type({:map, [{"at", :datetime}]}) == "{at :datetime}"
+    end
+
+    test "[:datetime] list" do
+      assert Renderer.render_type({:list, :datetime}) == "[:datetime]"
+    end
+
+    test "optional :datetime" do
+      assert Renderer.render_type({:optional, :datetime}) == ":datetime?"
+    end
+  end
 end

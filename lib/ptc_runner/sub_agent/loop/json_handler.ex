@@ -141,6 +141,20 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     atomize_value(value, inner_type)
   end
 
+  # `:datetime` carries a real semantic type, not a prettier string. JSON
+  # delivered the value as an ISO 8601 string; coerce it to `%DateTime{}`
+  # before validation so the caller gets a struct they can pass to
+  # `DateTime.diff/2`, `DateTime.compare/2`, etc. directly. Invalid strings
+  # stay as strings and the validator rejects them with a clear message.
+  def atomize_value(value, :datetime) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> DateTime.shift_zone!(dt, "Etc/UTC")
+      {:error, _} -> value
+    end
+  end
+
+  def atomize_value(%DateTime{} = dt, :datetime), do: dt
+
   def atomize_value(map, _type) when is_map(map) do
     Map.new(map, fn {k, v} ->
       key = if is_binary(k), do: safe_to_atom(k), else: k

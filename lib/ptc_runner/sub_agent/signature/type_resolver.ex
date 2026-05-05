@@ -94,6 +94,11 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
   def scalar_type?(:bool), do: true
   def scalar_type?(:keyword), do: true
   def scalar_type?(:any), do: true
+  # `:datetime` is scalar from the LLM's perspective even though it carries a
+  # `%DateTime{}` struct in Elixir. Without this, Mustache would try to walk
+  # into it as nested data (same shape as the silent-prompt-failure bug we
+  # fixed earlier in `PromptExpander`).
+  def scalar_type?(:datetime), do: true
   def scalar_type?({:optional, inner}), do: scalar_type?(inner)
   def scalar_type?(_), do: false
 

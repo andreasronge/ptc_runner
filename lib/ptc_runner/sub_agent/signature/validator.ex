@@ -83,6 +83,16 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     []
   end
 
+  # `:datetime` accepts only `%DateTime{}` post-coercion. A bare ISO string
+  # would mean coercion ran but didn't produce the canonical form — that's a
+  # validator bug, not a happy path. Hard-fail on anything else so misuse
+  # surfaces immediately.
+  defp validate_type(%DateTime{}, :datetime, _path), do: []
+
+  defp validate_type(data, :datetime, path) do
+    [error_at(path, "expected datetime (%DateTime{}), got #{type_name(data)}")]
+  end
+
   # Optional types
   defp validate_type(nil, {:optional, _type}, _path) do
     []

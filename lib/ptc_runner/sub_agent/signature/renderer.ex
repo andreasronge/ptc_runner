@@ -92,6 +92,7 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
   def render_type(:keyword, _opts), do: ":keyword"
   def render_type(:any, _opts), do: ":any"
   def render_type(:map, _opts), do: ":map"
+  def render_type(:datetime, _opts), do: ":datetime"
 
   def render_type({:optional, type}, opts) do
     render_type(type, opts) <> "?"

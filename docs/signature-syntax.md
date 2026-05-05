@@ -44,7 +44,43 @@ signature: "{name :string, price :float}"
 | `:float` | Floating point | `3.14`, `-0.5` |
 | `:bool` | Boolean | `true`, `false` |
 | `:keyword` | Keyword/atom | `:pending`, `:active` |
+| `:datetime` | UTC `%DateTime{}` (RFC 3339 / ISO 8601 with offset) | `~U[2026-05-03 09:14:00Z]` |
 | `:any` | Any value | Matches everything |
+
+### `:datetime` in detail
+
+`:datetime` is a real semantic type, not a prettier `:string`. The wire form is
+ISO 8601 with offset (the LLM emits `"2026-05-03T09:14:00Z"`), but the value
+your code receives is an Elixir `%DateTime{}` struct in UTC.
+
+```elixir
+{:ok, step} =
+  SubAgent.run("When did the deploy happen?",
+    output: :text,
+    signature: "{event :string, at :datetime}",
+    llm: my_llm
+  )
+
+step.return["at"]                                  #=> ~U[2026-05-03 09:14:00Z]
+DateTime.diff(DateTime.utc_now(), step.return["at"])  # works directly
+```
+
+| LLM emits | Result |
+|-----------|--------|
+| `"2026-05-03T09:14:00Z"` | `~U[2026-05-03 09:14:00Z]` (UTC) |
+| `"2026-05-03T11:14:00+02:00"` | Shifted to `~U[2026-05-03 09:14:00Z]` with a "non-UTC offset" warning |
+| `"2026-05-03T09:14:00"` (no offset) | Validation error — naive strings are ambiguous and rejected at the type boundary |
+
+The JSON Schema sent to the LLM provider includes `format: "date-time"`. OpenAI's
+structured output enforces this server-side; Anthropic treats it as guidance.
+Either way, coercion validates the string locally so an invalid date never
+reaches the caller.
+
+**When to pick `:string` vs `:datetime`:**
+- `:datetime` if your code does anything with the value (compare, diff, format,
+  store in a typed column).
+- `:string` if you only display or pass through. Cheaper to validate, no zone
+  semantics to worry about.
 
 ### Invalid Type Names (Common Mistakes)
 

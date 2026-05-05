@@ -103,6 +103,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   defp generate_return_example_value(:keyword), do: ":ok"
   defp generate_return_example_value(:any), do: "..."
   defp generate_return_example_value(:map), do: "{}"
+  defp generate_return_example_value(:datetime), do: "\"2026-05-03T09:14:00Z\""
 
   defp generate_return_example_value({:optional, type}) do
     generate_return_example_value(type)
