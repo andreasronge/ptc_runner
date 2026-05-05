@@ -27,11 +27,11 @@ This livebook shows how to pick the right output mode per user message, with thr
 runnable cells over a tiny support-inbox scenario. Each user message becomes one
 SubAgent mission. The history is just an Elixir list owned by the cell.
 
-| Mode                            | Pick when…                                                | Tool calling                |
-| ------------------------------- | --------------------------------------------------------- | --------------------------- |
-| `:text` (plain string)          | The LLM can answer directly with a short answer           | Provider's native tool API  |
-| `:text` (with complex signature) | You need a single structured extraction, no computation   | Provider's native tool API  |
-| `:ptc_lisp` (default)           | Computation, filtering, multi-step orchestration of tools | Sandbox runs LLM-written code |
+| Mode                             | Pick when…                                              | Tool calling                  |
+| -------------------------------- | --------------------------------------------------------- | ----------------------------- |
+| `:text` (plain string)           | The LLM can answer directly with a short answer           | Provider's native tool API    |
+| `:text` (with complex signature) | You need a single structured extraction, no computation   | Provider's native tool API    |
+| `:ptc_lisp` (default)            | Computation, filtering, multi-step orchestration of tools | Sandbox runs LLM-written code |
 
 > "JSON mode" isn't a separate mode — it's `:text` with a complex return type. The
 > Elixir docs call this "structured text mode" to avoid confusion.
@@ -112,23 +112,34 @@ tickets = [
 # Pretend "now" — fixed for reproducibility
 now_iso = "2026-05-05T10:00:00Z"
 
-# Defining the helpers as a module gives us @doc/@spec metadata that
-# PtcRunner can convert to JSON Schema for native tool calling in text mode.
-defmodule SupportTools do
-  @moduledoc false
-
-  @doc "Fetch a single ticket by id."
-  @spec get_ticket(%{id: integer()}) :: map() | nil
-  def get_ticket(%{"id" => id}), do: Process.get(:tickets, []) |> Enum.find(&(&1.id == id))
-
-  @doc "List every ticket. Returns a list of ticket maps."
-  @spec list_tickets(%{}) :: [map()]
-  def list_tickets(_args), do: Process.get(:tickets, [])
-
-  @doc "Return the current UTC time as ISO 8601."
-  @spec now(%{}) :: String.t()
-  def now(_args), do: Process.get(:fake_now, DateTime.utc_now() |> DateTime.to_iso8601())
+# Tools as inline functions with **explicit signatures**. We could also use a
+# module with @doc/@spec and let PtcRunner auto-extract — that path works for
+# simple types (`:string`, `:int`, lists), but it's brittle when the parameter
+# is a bare map like `%{id: integer()}`: the auto-extractor names the parameter
+# `map`, the LLM dutifully calls `tool/get_ticket {:map {:id 123}}`, and the
+# function clause `%{"id" => id}` no longer matches. Explicit signatures
+# sidestep that — you tell the LLM exactly what arguments to send.
+get_ticket = fn %{"id" => id} ->
+  Process.get(:tickets, []) |> Enum.find(&(&1.id == id))
 end
+
+list_tickets = fn _args -> Process.get(:tickets, []) end
+now = fn _args -> Process.get(:fake_now, DateTime.utc_now() |> DateTime.to_iso8601()) end
+
+# Tool maps re-built per turn so each mission only sees the tools it needs.
+support_tools = %{
+  "get_ticket" =>
+    {get_ticket,
+     signature: "(id :int) -> :any",
+     description: "Fetch a single ticket by id. Returns the ticket map or nil."}
+}
+
+inbox_tools = %{
+  "list_tickets" =>
+    {list_tickets, signature: "() -> [:any]", description: "List every ticket."},
+  "now" =>
+    {now, signature: "() -> :string", description: "Current UTC time as ISO 8601."}
+}
 
 Process.put(:tickets, tickets)
 Process.put(:fake_now, now_iso)
@@ -199,7 +210,7 @@ history = ConvoLog.append(history, :user, user_message_1)
   SubAgent.run(
     user_message_1,
     output: :text,
-    tools: %{"get_ticket" => &SupportTools.get_ticket/1},
+    tools: support_tools,
     llm: my_llm,
     max_turns: 4
   )
@@ -231,7 +242,7 @@ history = ConvoLog.append(history, :user, user_message_2)
     output: :text,
     signature:
       "{customer :string, product :string, severity :string, requested_action :string}",
-    tools: %{"get_ticket" => &SupportTools.get_ticket/1},
+    tools: support_tools,
     llm: my_llm,
     max_turns: 4
   )
@@ -262,10 +273,7 @@ history = ConvoLog.append(history, :user, user_message_3)
   SubAgent.run(
     user_message_3,
     signature: "[{id :int, customer :string, age_hours :int}]",
-    tools: %{
-      "list_tickets" => &SupportTools.list_tickets/1,
-      "now" => &SupportTools.now/1
-    },
+    tools: inbox_tools,
     llm: my_llm,
     max_turns: 6
   )
@@ -288,11 +296,11 @@ than 48h" in its head — it threaded `(now)` and ticket timestamps through
 
 ## What this scenario teaches
 
-| Turn | Mode                       | Why this mode                                                                                        |
-| ---- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 1    | `:text` (plain)            | Free-form summary. No structure to validate. Native tool call to fetch the ticket.                   |
-| 2    | `:text` (complex sig)      | Structured extraction. Single LLM hop with native tool calling. No computation needed.               |
-| 3    | `:ptc_lisp`                | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it.             |
+| Turn | Mode                  | Why this mode                                                                            |
+| ---- | --------------------- | ---------------------------------------------------------------------------------------- |
+| 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.       |
+| 2    | `:text` (complex sig) | Structured extraction. Single LLM hop with native tool calling. No computation needed.   |
+| 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it. |
 
 The router question — *"how does the app know which mode to pick?"* — is a
 separate concern. Three real-world options:
@@ -312,13 +320,13 @@ that.
 
 ## What this livebook deliberately does NOT do
 
-- **Hold session state inside SubAgent.** The library has no `start/3` /
+* **Hold session state inside SubAgent.** The library has no `start/3` /
   `send_message/2` / `close/1` chat API. Each turn is a fresh `run/2`.
-- **Pass full transcripts as context.** That's how token bills explode. Keep
+* **Pass full transcripts as context.** That's how token bills explode. Keep
   bounded history (`ConvoLog.context_summary(history, last_n: 4)` is a
   starting point) or summarize older turns and only carry the summary forward.
-- **Expose all tools to all turns.** Tools are part of the mission contract.
-- **Use any chat UI machinery.** Plain `IO.puts` keeps the focus on the
+* **Expose all tools to all turns.** Tools are part of the mission contract.
+* **Use any chat UI machinery.** Plain `IO.puts` keeps the focus on the
   abstraction. A real app would render to whatever frontend it has.
 
 ## Bounded-history sketch (for production apps)
@@ -359,10 +367,12 @@ pretending the library is a chat library.
 
 ## See also
 
-- [SubAgent Examples](ptc_runner_llm_agent.livemd) — broader survey of the SubAgent API
-- [Text Mode guide](https://hexdocs.pm/ptc_runner/subagent-text-mode.html) — all four
+* [SubAgent Examples](ptc_runner_llm_agent.livemd) — broader survey of the SubAgent API
+* [Text Mode guide](https://hexdocs.pm/ptc_runner/subagent-text-mode.html) — all four
   variants of `:text` mode (plain / structured / tool+text / tool+structured)
-- [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context,
+* [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context,
   memory, firewall fields
-- [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
+* [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
   each mission did
+
+<!-- livebook:{"offset":12655,"stamp":{"token":"XCP.CVwtqkXF9TKaoe_JUSwE8UWczGzpLe8Ka4wZRC-aD2du29deiR_nsUxFVZhadP14RMi8mpX6E9Meo6p3_oBSODVzL9lO8CgQzT7TyTP4xLKr6gCdbsyhMNiMsvH7","version":2}} -->
