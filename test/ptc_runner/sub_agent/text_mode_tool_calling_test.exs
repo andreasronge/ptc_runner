@@ -146,6 +146,74 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
       assert step.return == %{"answer" => "handled error"}
     end
 
+    test "tool variant keeps text-mode prompt format on turn 2 (no kebab-case leak)" do
+      # Regression: state.messages is seeded by loop.ex with a PTC-Lisp user
+      # prompt (kebab-case signatures, `(return {...})` examples). Turn 1 of
+      # the tool variant rebuilt a correct JSON-schema message locally but
+      # never persisted it. On turn 2 the LLM saw the stale PTC-Lisp prompt
+      # and emitted JSON with kebab-case keys ("requested-action" instead of
+      # "requested_action"), which then failed signature validation.
+      tools = %{
+        "get_thing" =>
+          {fn %{"id" => id} -> %{"id" => id, "name" => "thing-#{id}"} end,
+           signature: "(id :int) -> :any", description: "Get a thing"}
+      }
+
+      test_pid = self()
+      counter = :counters.new(1, [:atomics])
+
+      llm = fn req ->
+        idx = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+        send(test_pid, {:turn_messages, idx, req.messages})
+
+        case idx do
+          0 ->
+            {:ok,
+             %{
+               tool_calls: [%{id: "c1", name: "get_thing", args: %{"id" => 1}}],
+               content: nil,
+               tokens: nil
+             }}
+
+          _ ->
+            {:ok,
+             ~s|{"customer":"Acme","product":"Widget","severity":"high","requested_action":"fix it"}|}
+        end
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "Extract fields from thing 1",
+          signature:
+            "{customer :string, product :string, severity :string, requested_action :string}",
+          output: :text,
+          tools: tools,
+          max_turns: 4
+        )
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return["requested_action"] == "fix it"
+
+      # The LLM must see the same JSON-schema text-mode user message on every
+      # turn — never the PTC-Lisp `Expected Output` block with kebab-case keys.
+      assert_received {:turn_messages, 0, t1_msgs}
+      assert_received {:turn_messages, 1, t2_msgs}
+
+      t1_user = Enum.find(t1_msgs, &(&1.role == :user))
+      t2_user = Enum.find(t2_msgs, &(&1.role == :user))
+
+      # Turn 1 user message: snake_case JSON schema, no PTC-Lisp markers.
+      assert t1_user.content =~ "requested_action"
+      refute t1_user.content =~ "requested-action"
+      refute t1_user.content =~ ";; === tools ==="
+      refute t1_user.content =~ "(return"
+
+      # Turn 2 must inherit the same user message verbatim — not regenerate
+      # from the PTC-Lisp template.
+      assert t2_user.content == t1_user.content
+    end
+
     test "FunctionClauseError feeds args + hint back to LLM so it can self-correct" do
       # Tool only matches `%{"id" => _}`. The LLM sends `%{"map" => ...}` first
       # (mimicking the auto-extraction footgun) — the tool raises, the loop must
