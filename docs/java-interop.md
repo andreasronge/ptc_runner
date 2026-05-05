@@ -57,5 +57,5 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
 | `.getTime` | Method | `(.getTime date)` | Return Unix timestamp in milliseconds from DateTime |  |
-| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. timestamp-or-string)` | Construct current UTC time or from timestamp/ISO-8601/RFC-2822 string | Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601, RFC 2822. |
+| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. timestamp-or-string), (java.util.Date. datetime-or-date)` | Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value | Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component). |
 

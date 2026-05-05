@@ -102,6 +102,28 @@ context: %{user: %{name: "Alice"}, topic: "billing"}
 # Expands to: "Find emails for Alice about billing"
 ```
 
+### Temporal values
+
+Pass `DateTime`, `NaiveDateTime`, `Date`, and `Time` values directly. PtcRunner
+normalizes them to ISO 8601 strings at every LLM-facing boundary — Mustache
+template substitution, data inventory rendering, tool result encoding, `:string`
+coercion, and PTC-Lisp `(str ...)`. The LLM never sees Elixir's `~U[...]`
+sigil form.
+
+```elixir
+prompt: "Event happened at {{when}}"
+context: %{when: ~U[2026-05-03 09:14:00Z]}
+# Expands to: "Event happened at 2026-05-03T09:14:00Z"
+```
+
+In `:ptc_lisp` mode, generated programs can pass tool-returned temporal values
+straight to date primitives:
+
+```clojure
+;; tool/get_ticket returns a map with :opened_at (a %DateTime{} on the Elixir side)
+(.getTime (java.util.Date. (:opened_at (tool/get_ticket {:id 123}))))
+```
+
 ### Chaining Context
 
 When passing a previous `Step` to `context:`, the return data is automatically extracted:

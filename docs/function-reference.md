@@ -403,7 +403,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 | `NaN` | `NaN` | Not-a-Number constant (Double/NaN) |
 | `POSITIVE_INFINITY` | `POSITIVE_INFINITY` | Positive infinity constant (Double/POSITIVE_INFINITY) |
 | `currentTimeMillis` | `(System/currentTimeMillis)` | Return current time in milliseconds since epoch |
-| `java.util.Date.` | `(java.util.Date.), (java.util.Date. millis)` | Current UTC time |
+| `java.util.Date.` | `(java.util.Date.), (java.util.Date. millis-or-string), (java.util.Date. datetime-or-date)` | Construct DateTime: no-arg returns current UTC, integer is Unix seconds/ms, string is ISO-8601 (offset optional, treated as UTC if absent) or RFC-2822, existing DateTime/NaiveDateTime/Date passes through |
 | `parse` | `(LocalDate/parse date-str)` | Parse date string to DateTime |
 
 
