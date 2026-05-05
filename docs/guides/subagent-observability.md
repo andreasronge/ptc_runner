@@ -145,6 +145,7 @@ Analyzer.slowest(events, 5)
 
 # Filter by event type
 Analyzer.filter(events, type: "llm")
+Analyzer.filter(events, type: "compaction")  # see Compaction events below
 Analyzer.filter(events, min_duration_ms: 100)
 
 # Print timeline
@@ -161,6 +162,42 @@ Analyzer.print_timeline(events)
 - **Debugging** - Understand what happened during agent execution
 - **Performance analysis** - Identify slow LLM calls or bottlenecks
 - **Comparison** - Compare traces across different configurations or models
+
+### Compaction Events
+
+When `compaction:` is enabled and a pressure threshold fires, the loop emits
+a single telemetry event per firing:
+
+```
+[:ptc_runner, :sub_agent, :compaction, :triggered]
+```
+
+- **Measurements** (numeric): `messages_before`, `messages_after`,
+  `estimated_tokens_before`, `estimated_tokens_after`.
+- **Metadata** (descriptive): `strategy`, `reason` (`:turn_pressure` |
+  `:token_pressure`), `turn`, `kept_initial_user?`, `kept_recent_turns`,
+  `over_budget?`, plus the usual `agent_name`, `agent_id`, `span_id`,
+  `parent_span_id`.
+
+Non-triggered pressure checks are silent — only actual trim events emit. The
+event fires before the LLM call's `[:llm, :start]` so trace timelines stay
+intelligible (compaction happens before the LLM sees the messages).
+
+In TraceLog JSONL output, the event surfaces as `compaction.triggered` with
+all numeric and descriptive fields available under `data`:
+
+```elixir
+events = Analyzer.load(trace_path)
+compactions = Analyzer.filter(events, type: "compaction")
+
+Enum.each(compactions, fn e ->
+  d = e["data"]
+  IO.puts("turn #{e["turn"]}: trimmed #{d["messages_before"]} → #{d["messages_after"]} messages (#{d["reason"]})")
+end)
+```
+
+`step.usage.compaction` still reports the **last** firing's stats. For full
+multi-firing visibility, use the telemetry event or the trace log.
 
 ### Chrome DevTools Export
 

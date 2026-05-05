@@ -292,4 +292,135 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
       assert length(turn4) < uncompacted_at_turn_4
     end
   end
+
+  describe "telemetry — [:ptc_runner, :sub_agent, :compaction, :triggered]" do
+    test "emits one event per triggered firing with the documented shape" do
+      handler_id = "test-compaction-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:ptc_runner, :sub_agent, :compaction, :triggered],
+          fn event, measurements, metadata, _ ->
+            send(test_pid, {:compaction_event, event, measurements, metadata})
+          end,
+          nil
+        )
+
+      try do
+        log = capture_messages_log()
+        llm = recording_llm(log, 5)
+
+        # Aggressive trigger: turns > 1 fires from turn 2 onward, so we
+        # expect one event per intermediate turn (turns 2..5).
+        agent =
+          SubAgent.new(
+            prompt: "Test",
+            max_turns: 6,
+            compaction: [trigger: [turns: 1], keep_recent_turns: 1, keep_initial_user: true]
+          )
+
+        {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+
+        assert step.return == %{"result" => 42}
+
+        # Drain all events.
+        events = drain_compaction_events()
+        assert events != [], "Expected at least one compaction.triggered event"
+
+        # Check shape on the first event.
+        {event, measurements, metadata} = hd(events)
+        assert event == [:ptc_runner, :sub_agent, :compaction, :triggered]
+
+        # Numeric fields live in measurements.
+        assert is_integer(measurements.messages_before)
+        assert is_integer(measurements.messages_after)
+        assert is_integer(measurements.estimated_tokens_before)
+        assert is_integer(measurements.estimated_tokens_after)
+        assert measurements.messages_after < measurements.messages_before
+
+        # Descriptive fields live in metadata, plus span correlation.
+        assert metadata.strategy == "trim"
+        assert metadata.reason in [:turn_pressure, :token_pressure]
+        assert is_integer(metadata.turn)
+        assert is_boolean(metadata.kept_initial_user?)
+        assert is_integer(metadata.kept_recent_turns)
+        assert is_boolean(metadata.over_budget?)
+        # span_id is auto-injected by Telemetry.emit/3
+        assert is_binary(metadata.span_id) or metadata.span_id == nil
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
+
+    test "does NOT emit on non-triggered pressure checks" do
+      handler_id = "test-compaction-quiet-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:ptc_runner, :sub_agent, :compaction, :triggered],
+          fn _e, _m, _meta, _ -> send(test_pid, :compaction_event) end,
+          nil
+        )
+
+      try do
+        log = capture_messages_log()
+        llm = recording_llm(log, 3)
+
+        # High threshold: pressure never fires.
+        agent =
+          SubAgent.new(
+            prompt: "Test",
+            max_turns: 4,
+            compaction: [trigger: [turns: 1000], keep_recent_turns: 2]
+          )
+
+        {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+        assert step.return == %{"result" => 42}
+
+        # Confirm zero events were sent.
+        refute_receive :compaction_event, 50
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
+
+    test "emits zero events when compaction is disabled" do
+      handler_id = "test-compaction-disabled-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:ptc_runner, :sub_agent, :compaction, :triggered],
+          fn _e, _m, _meta, _ -> send(test_pid, :compaction_event) end,
+          nil
+        )
+
+      try do
+        log = capture_messages_log()
+        llm = recording_llm(log, 3)
+
+        agent = SubAgent.new(prompt: "Test", max_turns: 4, compaction: false)
+
+        {:ok, step} = Loop.run(agent, llm: llm, context: %{})
+        assert step.return == %{"result" => 42}
+
+        refute_receive :compaction_event, 50
+      after
+        :telemetry.detach(handler_id)
+      end
+    end
+  end
+
+  defp drain_compaction_events(acc \\ []) do
+    receive do
+      {:compaction_event, e, m, meta} -> drain_compaction_events([{e, m, meta} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
 end

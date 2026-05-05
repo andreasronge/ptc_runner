@@ -260,5 +260,64 @@ defmodule PtcRunner.TraceLogIntegrationTest do
       events = TraceLog.Analyzer.load(trace_path)
       assert events != []
     end
+
+    test "captures compaction.triggered events with full numeric data in JSONL",
+         %{tmp_dir: dir} do
+      # Codex review for step 4 flagged that handler errors are swallowed at
+      # debug level — a test that just runs the agent and checks step.return
+      # would silently miss broken JSONL writes. So this test reads the file
+      # and asserts both the event presence AND that the numeric measurements
+      # survived the from_telemetry/4 → JSONL round-trip.
+
+      path = Path.join(dir, "trace.jsonl")
+
+      content = String.duplicate("x", 200)
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          max_turns: 6,
+          compaction: [trigger: [turns: 1], keep_recent_turns: 1, keep_initial_user: true]
+        )
+
+      llm =
+        mock_llm([
+          "\"#{content}\"",
+          "\"#{content}\"",
+          "\"#{content}\"",
+          "(return {:result 42})"
+        ])
+
+      {:ok, {:ok, step}, trace_path} =
+        TraceLog.with_trace(fn -> SubAgent.run(agent, llm: llm) end, path: path)
+
+      assert step.return == %{"result" => 42}
+
+      events = TraceLog.Analyzer.load(trace_path)
+
+      # `Analyzer.filter` accepts a `type:` prefix match.
+      compaction_events = TraceLog.Analyzer.filter(events, type: "compaction")
+
+      assert compaction_events != [], "Expected at least one compaction event in JSONL"
+
+      first = hd(compaction_events)
+      assert first["event"] == "compaction.triggered"
+      assert is_integer(first["turn"])
+
+      # Critical: the numeric measurements must survive into data. Pre-fix,
+      # Event.from_telemetry/4 dropped non-promoted measurements entirely.
+      data = first["data"] || %{}
+      assert is_integer(data["messages_before"])
+      assert is_integer(data["messages_after"])
+      assert is_integer(data["estimated_tokens_before"])
+      assert is_integer(data["estimated_tokens_after"])
+      assert data["messages_after"] < data["messages_before"]
+
+      # Descriptive metadata also lands in data.
+      assert data["strategy"] == "trim"
+      assert data["reason"] in ["turn_pressure", "token_pressure"]
+      assert is_boolean(data["kept_initial_user?"])
+      assert is_integer(data["kept_recent_turns"])
+    end
   end
 end
