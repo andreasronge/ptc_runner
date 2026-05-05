@@ -76,7 +76,6 @@ SubAgent.Debug.print_trace(step, usage: true)
 | Option | Description |
 |--------|-------------|
 | `view: :turns` | (default) Show programs + results from Turn structs |
-| `view: :compressed` | Show what LLM sees when compression is enabled |
 | `raw: true` | Include `raw_response` in turns view |
 | `messages: true` | Show full messages sent to LLM each turn |
 | `usage: true` | Add token statistics after trace |
@@ -287,7 +286,7 @@ System.convert_time_unit(duration, :native, :millisecond)
 
 ## See Also
 
-- [Message Compression](subagent-compression.md) - Reduce token usage in multi-turn agents
+- [Context Compaction](subagent-compaction.md) - Pressure-triggered trimming for long-running agents
 - [Troubleshooting](subagent-troubleshooting.md) - Common issues and debugging
 - [Testing](subagent-testing.md) - Mock LLMs and test strategies
 - `PtcRunner.TraceLog.with_trace/2` - Capture execution traces to JSONL files

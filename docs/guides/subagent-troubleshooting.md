@@ -122,10 +122,10 @@ Common issues and solutions when working with SubAgents.
    )
    ```
 
-3. **Enable compression** for multi-turn agents:
+3. **Enable compaction** for long-running multi-turn agents:
    ```elixir
    PtcRunner.SubAgent.run(prompt,
-     compression: true,  # Coalesces history into single USER message
+     compaction: true,  # Trims older turns once turn/token threshold is hit
      llm: llm
    )
    ```
@@ -380,7 +380,7 @@ Child agents automatically inherit this setting from their parent.
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
-- [Message Compression](subagent-compression.md) - Reduce context size in multi-turn agents
+- [Context Compaction](subagent-compaction.md) - Pressure-triggered trimming for long-running agents
 - [Core Concepts](subagent-concepts.md) - Context, memory, error handling
 - [Testing](subagent-testing.md) - Mock LLMs and debug strategies
 - `PtcRunner.SubAgent` - API reference

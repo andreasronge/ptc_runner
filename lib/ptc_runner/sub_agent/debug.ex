@@ -44,7 +44,6 @@ defmodule PtcRunner.SubAgent.Debug do
 
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Step
-  alias PtcRunner.SubAgent.Compression.SingleUserCoalesced
   alias PtcRunner.Turn
 
   @box_width 60
@@ -60,10 +59,9 @@ defmodule PtcRunner.SubAgent.Debug do
 
   - `step` - A `%Step{}` struct with trace data
   - `opts` - Keyword list of options:
-    - `view` - `:turns` (default) or `:compressed` - perspective to render
     - `raw` - Include raw input (messages, excluding system prompt) and raw response (default: `false`)
     - `messages` - Show all messages sent to LLM including system prompt (default: `false`)
-    - `usage` - Show token usage, tool call statistics, and compression summary (default: `false`)
+    - `usage` - Show token usage, tool call statistics, and compaction summary (default: `false`)
 
   ## Examples
 
@@ -76,11 +74,7 @@ defmodule PtcRunner.SubAgent.Debug do
       iex> PtcRunner.SubAgent.Debug.print_trace(step, raw: true)
       :ok
 
-      # Show compressed view
-      iex> PtcRunner.SubAgent.Debug.print_trace(step, view: :compressed)
-      :ok
-
-      # Show messages sent to LLM (verify compression)
+      # Show messages sent to LLM
       iex> PtcRunner.SubAgent.Debug.print_trace(step, messages: true)
       :ok
 
@@ -103,7 +97,6 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   def print_trace(%Step{turns: turns, usage: usage} = step, opts) when is_list(turns) do
-    view = Keyword.get(opts, :view, :turns)
     show_usage = Keyword.get(opts, :usage, false)
     system_opt = Keyword.get(opts, :system)
     original_prompt = step.original_prompt
@@ -119,20 +112,14 @@ defmodule PtcRunner.SubAgent.Debug do
       print_system_sections(turns, system_opt)
       return_ok()
     else
-      case view do
-        :turns ->
-          show_raw = opts[:raw] == true
-          show_all_messages = opts[:messages] == true
-          raw_mode = show_raw and not show_all_messages
+      show_raw = opts[:raw] == true
+      show_all_messages = opts[:messages] == true
+      raw_mode = show_raw and not show_all_messages
 
-          Enum.each(
-            turns,
-            &print_turn(&1, show_raw, show_all_messages, raw_mode, original_prompt)
-          )
-
-        :compressed ->
-          print_compressed_view(step)
-      end
+      Enum.each(
+        turns,
+        &print_turn(&1, show_raw, show_all_messages, raw_mode, original_prompt)
+      )
 
       # Print plan progress summaries if any
       if step.summaries && map_size(step.summaries) > 0 do
@@ -145,9 +132,9 @@ defmodule PtcRunner.SubAgent.Debug do
         # Print tool call statistics
         print_tool_stats(turns)
 
-        # Print compression stats if available
-        if compression = Map.get(usage, :compression) do
-          print_compression_summary(compression)
+        # Print compaction stats if available
+        if compaction = Map.get(usage, :compaction) do
+          print_compaction_summary(compaction)
         end
       end
 
@@ -334,42 +321,6 @@ defmodule PtcRunner.SubAgent.Debug do
     end)
   end
 
-  # Print compressed view using SingleUserCoalesced compression
-  defp print_compressed_view(%Step{turns: turns, memory: memory, prompt: prompt, tools: tools}) do
-    header = " Compressed View "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
-
-    # Use compression strategy to render what LLM would see
-    {messages, _stats} =
-      SingleUserCoalesced.to_messages(turns, memory,
-        system_prompt: "(system prompt omitted)",
-        prompt: prompt || "(mission not available)",
-        tools: tools || %{},
-        data: %{},
-        turns_left: 0
-      )
-
-    # Print each message
-    Enum.each(messages, fn msg ->
-      role_color = if msg.role == :system, do: :dim, else: :yellow
-
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)} #{ansi(:bold)}[#{msg.role}]#{ansi(:reset)}")
-
-      msg.content
-      |> String.split("\n")
-      |> Enum.each(fn line ->
-        IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(role_color)}#{line}#{ansi(:reset)}")
-      end)
-
-      IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}")
-    end)
-
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
-  end
-
   # ============================================================
   # Private Helpers - Chain
   # ============================================================
@@ -548,49 +499,44 @@ defmodule PtcRunner.SubAgent.Debug do
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
   end
 
-  # Print compression statistics summary
-  defp print_compression_summary(compression) do
-    header = " Compression "
+  # Print compaction statistics summary
+  defp print_compaction_summary(compaction) do
+    header = " Compaction "
 
     IO.puts(
       "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
     )
 
-    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Strategy:     #{compression.strategy}")
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Strategy:     #{compaction.strategy}")
 
-    IO.puts(
-      "#{ansi(:cyan)}|#{ansi(:reset)}   Turns:        #{compression.turns_compressed} compressed"
-    )
+    triggered_str =
+      if compaction.triggered do
+        reason = compaction.reason || "—"
+        "#{ansi(:yellow)}yes#{ansi(:reset)} (reason: #{reason})"
+      else
+        "no"
+      end
 
-    # Tool calls
-    if compression.tool_calls_total > 0 do
-      dropped_str =
-        if compression.tool_calls_dropped > 0,
-          do: " #{ansi(:yellow)}(#{compression.tool_calls_dropped} dropped)#{ansi(:reset)}",
-          else: ""
+    IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Triggered:    #{triggered_str}")
+
+    if compaction.triggered do
+      IO.puts(
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Messages:     #{compaction.messages_after}/#{compaction.messages_before}"
+      )
 
       IO.puts(
-        "#{ansi(:cyan)}|#{ansi(:reset)}   Tool calls:   #{compression.tool_calls_shown}/#{compression.tool_calls_total} shown#{dropped_str}"
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Tokens (est): #{compaction.estimated_tokens_after}/#{compaction.estimated_tokens_before}"
       )
-    end
-
-    # Printlns
-    if compression.printlns_total > 0 do
-      dropped_str =
-        if compression.printlns_dropped > 0,
-          do: " #{ansi(:yellow)}(#{compression.printlns_dropped} dropped)#{ansi(:reset)}",
-          else: ""
 
       IO.puts(
-        "#{ansi(:cyan)}|#{ansi(:reset)}   Printlns:     #{compression.printlns_shown}/#{compression.printlns_total} shown#{dropped_str}"
+        "#{ansi(:cyan)}|#{ansi(:reset)}   Recent kept:  #{compaction.kept_recent_turns} turn(s)"
       )
-    end
 
-    # Error turns collapsed
-    if compression.error_turns_collapsed > 0 do
-      IO.puts(
-        "#{ansi(:cyan)}|#{ansi(:reset)}   Errors:       #{compression.error_turns_collapsed} turn(s) collapsed"
-      )
+      if compaction[:over_budget?] do
+        IO.puts(
+          "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:yellow)}Note:#{ansi(:reset)}        a retained message exceeds the token budget"
+        )
+      end
     end
 
     IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")

@@ -193,7 +193,7 @@ For progress visibility, use the `plan:` option to define step labels. A progres
 | `memory_limit` | `1_048_576` | Max bytes for memory map (1MB) |
 | `memory_strategy` | `:strict` | `:strict` (fatal) or `:rollback` (recover) on memory limit exceeded |
 | `float_precision` | `2` | Decimal places for floats in results |
-| `compression` | `false` | Enable message history compression |
+| `compaction` | `false` | Enable pressure-triggered context compaction (multi-turn only) |
 | `pmap_timeout` | `5000` | Timeout (ms) for parallel `pmap` operations |
 | `max_depth` | `3` | Maximum recursion depth for nested agents |
 | `turn_budget` | `20` | Total turn budget across retries |
@@ -204,7 +204,7 @@ For progress visibility, use the `plan:` option to define step labels. A progres
 
 - [Getting Started](subagent-getting-started.md) - Build your first SubAgent
 - [Text Mode Guide](subagent-text-mode.md) - Text mode for structured output and native tool calling
-- [Observability](subagent-observability.md) - Debug mode, compression, and tracing
+- [Observability](subagent-observability.md) - Debug mode, compaction, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
 - [Advanced Topics](subagent-advanced.md) - Prompt structure and internals

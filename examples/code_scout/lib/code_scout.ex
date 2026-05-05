@@ -11,10 +11,10 @@ defmodule CodeScout do
   def query(query_string, opts \\ []) do
     agent = Agent.new()
 
-    # Apply compression option to agent if specified
+    # Apply compaction option to agent if specified
     agent =
-      if opts[:compression] do
-        %{agent | compression: true}
+      if opts[:compaction] do
+        %{agent | compaction: true}
       else
         agent
       end

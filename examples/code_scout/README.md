@@ -149,15 +149,15 @@ Then load in Chrome: DevTools (F12) → Performance → Load profile.
 
 See [Observability Guide](../../docs/guides/subagent-observability.md#chrome-devtools-export) for details.
 
-### Compression
+### Compaction
 
-For multi-turn agents, use `--compression` (or `-c`) to coalesce message history into a compact format. This reduces token usage but may affect error recovery in complex queries:
+For multi-turn agents, use `--compaction` (or `-c`) to enable pressure-triggered context compaction. Older turns are trimmed once turn count or estimated token usage crosses a threshold; recent turns stay intact:
 
 ```bash
-mix code.scout "How does the sandbox work?" --compression
+mix code.scout "How does the sandbox work?" --compaction
 ```
 
-See [Message Compression](../../docs/guides/subagent-compression.md) for details on how compression works.
+See [Context Compaction](../../docs/guides/subagent-compaction.md) for the full option reference.
 
 ### Inspecting the System Prompt
 

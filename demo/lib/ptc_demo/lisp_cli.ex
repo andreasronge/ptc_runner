@@ -34,7 +34,7 @@ defmodule PtcDemo.LispCLI do
     report_path = opts[:report]
     runs = opts[:runs]
     validate_clojure = opts[:validate_clojure]
-    compression = Map.get(opts, :compression, false)
+    compaction = Map.get(opts, :compaction, false)
     thinking = Map.get(opts, :thinking, false)
     filter = Map.get(opts, :filter, :all)
     retry_turns = Map.get(opts, :retry_turns, 0)
@@ -58,7 +58,7 @@ defmodule PtcDemo.LispCLI do
       PtcDemo.Agent.start_link(
         data_mode: data_mode,
         prompt: initial_prompt,
-        compression: compression,
+        compaction: compaction,
         thinking: thinking,
         retry_turns: retry_turns
       )
@@ -73,7 +73,7 @@ defmodule PtcDemo.LispCLI do
       run_comparison_and_exit(prompts_for_comparison,
         verbose: verbose,
         data_mode: data_mode,
-        compression: compression
+        compaction: compaction
       )
     end
 
@@ -87,7 +87,7 @@ defmodule PtcDemo.LispCLI do
         validate_clojure: validate_clojure,
         test_index: test_index,
         prompt: prompt_profile,
-        compression: compression,
+        compaction: compaction,
         thinking: thinking,
         filter: filter,
         retry_turns: retry_turns
@@ -98,7 +98,7 @@ defmodule PtcDemo.LispCLI do
           PtcDemo.Agent.model(),
           PtcDemo.Agent.data_mode(),
           PtcDemo.Agent.prompt_profile(),
-          PtcDemo.Agent.compression()
+          PtcDemo.Agent.compaction()
         )
       )
 
@@ -258,27 +258,27 @@ defmodule PtcDemo.LispCLI do
     loop(opts)
   end
 
-  defp handle_input("/compression", opts) do
-    compression = PtcDemo.Agent.compression()
-    status = if compression, do: "enabled", else: "disabled"
-    IO.puts("   [Compression: #{status}]\n")
+  defp handle_input("/compaction", opts) do
+    compaction = PtcDemo.Agent.compaction()
+    status = if compaction, do: "enabled", else: "disabled"
+    IO.puts("   [Compaction: #{status}]\n")
     loop(opts)
   end
 
-  defp handle_input("/compression on", opts) do
-    PtcDemo.Agent.set_compression(true)
-    IO.puts("   [Compression enabled - message history will be coalesced]\n")
+  defp handle_input("/compaction on", opts) do
+    PtcDemo.Agent.set_compaction(true)
+    IO.puts("   [Compaction enabled - older turns will be trimmed under pressure]\n")
     loop(opts)
   end
 
-  defp handle_input("/compression off", opts) do
-    PtcDemo.Agent.set_compression(false)
-    IO.puts("   [Compression disabled - full message history preserved]\n")
+  defp handle_input("/compaction off", opts) do
+    PtcDemo.Agent.set_compaction(false)
+    IO.puts("   [Compaction disabled - full message history preserved]\n")
     loop(opts)
   end
 
-  defp handle_input("/compression " <> _invalid, opts) do
-    IO.puts("   [Unknown option. Use: /compression, /compression on, or /compression off]\n")
+  defp handle_input("/compaction " <> _invalid, opts) do
+    IO.puts("   [Unknown option. Use: /compaction, /compaction on, or /compaction off]\n")
     loop(opts)
   end
 
@@ -435,7 +435,7 @@ defmodule PtcDemo.LispCLI do
     loop(opts)
   end
 
-  defp banner(model, data_mode, prompt_profile, compression) do
+  defp banner(model, data_mode, prompt_profile, compaction) do
     data_mode_desc =
       case data_mode do
         :schema -> "schema (LLM receives full schema)"
@@ -443,7 +443,7 @@ defmodule PtcDemo.LispCLI do
       end
 
     prompt_desc = "#{prompt_profile}"
-    compression_desc = if compression, do: "enabled", else: "disabled"
+    compaction_desc = if compaction, do: "enabled", else: "disabled"
 
     """
 
@@ -458,7 +458,7 @@ defmodule PtcDemo.LispCLI do
     Model:       #{model}
     Data:        #{data_mode_desc}
     Prompt:      #{prompt_desc}
-    Compression: #{compression_desc}
+    Compaction: #{compaction_desc}
 
     Type /help for commands, /examples for sample queries.
     """
@@ -484,9 +484,9 @@ defmodule PtcDemo.LispCLI do
       /prompt <name>   - Switch prompt profile (default, minimal, single_shot, multi_turn)
       /model           - Show current model and available presets
       /model <name>    - Switch model (haiku, gemini, deepseek, kimi, gpt)
-      /compression     - Show current compression setting
-      /compression on  - Enable message history compression
-      /compression off - Disable message history compression
+      /compaction     - Show current compaction setting
+      /compaction on  - Enable message history compaction
+      /compaction off - Disable message history compaction
       /turns           - Show current max turns setting
       /turns <n>       - Set max turns (e.g., /turns 10)
       /debug           - Show current debug mode setting
@@ -512,8 +512,8 @@ defmodule PtcDemo.LispCLI do
       mix lisp --list-prompts      Show available prompt profiles and exit
       mix lisp --show-prompt       Show system prompt and exit
       mix lisp --thinking           Start with thinking section enabled
-      mix lisp --compression       Start with compression enabled
-      mix lisp --no-compression    Start with compression disabled (default)
+      mix lisp --compaction       Start with compaction enabled
+      mix lisp --no-compaction    Start with compaction disabled (default)
       mix lisp --debug             Start with debug mode enabled (show raw LLM responses)
     """
   end

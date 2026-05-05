@@ -51,15 +51,15 @@ defmodule PtcDemo.LispTestRunner do
     * `:model` - Model to use (default: agent's current model)
     * `:data_mode` - Data mode :schema or :explore (default: :schema)
     * `:verbose` - Show detailed output per run (default: false)
-    * `:compression` - Enable message history compression (default: false)
+    * `:compaction` - Enable message history compaction (default: false)
 
   ## Examples
 
       # Compare single_shot vs explicit_return prompts
       PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return])
 
-      # Compare with compression enabled
-      PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return], compression: true)
+      # Compare with compaction enabled
+      PtcDemo.LispTestRunner.run_comparison([:single_shot, :explicit_return], compaction: true)
   """
   def run_comparison(prompts, opts \\ []) when is_list(prompts) do
     CLIBase.load_dotenv()
@@ -142,7 +142,7 @@ defmodule PtcDemo.LispTestRunner do
     * `:report` - Path to write markdown report file (optional)
     * `:runs` - Number of times to run all tests (default: 1)
     * `:validate_clojure` - Validate generated programs against Babashka (default: false)
-    * `:compression` - Enable message history compression (default: false)
+    * `:compaction` - Enable message history compaction (default: false)
     * `:filter` - Filter tests by type: :multi_turn, :single_turn, or :all (default: :all)
 
   ## Examples
@@ -154,8 +154,8 @@ defmodule PtcDemo.LispTestRunner do
       PtcDemo.LispTestRunner.run_all(report: "test_report.md")
       PtcDemo.LispTestRunner.run_all(runs: 3)
       PtcDemo.LispTestRunner.run_all(validate_clojure: true)
-      PtcDemo.LispTestRunner.run_all(compression: true)
-      PtcDemo.LispTestRunner.run_all(filter: :multi_turn, compression: true)
+      PtcDemo.LispTestRunner.run_all(compaction: true)
+      PtcDemo.LispTestRunner.run_all(filter: :multi_turn, compaction: true)
   """
   def run_all(opts \\ []) do
     agent_mod = Keyword.get(opts, :agent, Agent)
@@ -173,7 +173,7 @@ defmodule PtcDemo.LispTestRunner do
     report_path = Keyword.get(opts, :report)
     runs = Keyword.get(opts, :runs, 1)
     validate_clojure = Keyword.get(opts, :validate_clojure, false)
-    compression = Keyword.get(opts, :compression, false)
+    compaction = Keyword.get(opts, :compaction, false)
     thinking = Keyword.get(opts, :thinking, false)
     filter = Keyword.get(opts, :filter, :all)
     retry_turns = Keyword.get(opts, :retry_turns, 0)
@@ -183,7 +183,7 @@ defmodule PtcDemo.LispTestRunner do
     clojure_available = check_clojure_validation(validate_clojure)
 
     # Ensure agent is started
-    ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod)
+    ensure_agent_started(data_mode, prompt_profile, compaction, thinking, agent_mod)
 
     # Set model if specified
     if model do
@@ -214,8 +214,8 @@ defmodule PtcDemo.LispTestRunner do
         IO.puts("Clojure validation: enabled")
       end
 
-      if compression do
-        IO.puts("Compression: enabled")
+      if compaction do
+        IO.puts("Compaction: enabled")
       end
 
       if filter != :all do
@@ -389,7 +389,7 @@ defmodule PtcDemo.LispTestRunner do
       debug = Keyword.get(opts, :debug, false)
       report_path = Keyword.get(opts, :report)
       runs = Keyword.get(opts, :runs, 1)
-      compression = Keyword.get(opts, :compression, false)
+      compaction = Keyword.get(opts, :compaction, false)
       thinking = Keyword.get(opts, :thinking, false)
       retry_turns = Keyword.get(opts, :retry_turns, 0)
       agent_overrides = Keyword.get(opts, :agent_overrides, [])
@@ -397,7 +397,7 @@ defmodule PtcDemo.LispTestRunner do
       test_case = Enum.at(cases, index - 1)
 
       # Use :single_shot as default for starting the agent (will be overridden)
-      ensure_agent_started(data_mode, :single_shot, compression, thinking, agent_mod)
+      ensure_agent_started(data_mode, :single_shot, compaction, thinking, agent_mod)
 
       if model do
         agent_mod.set_model(model)
@@ -531,7 +531,7 @@ defmodule PtcDemo.LispTestRunner do
 
   defp prompt_for_test(_test_case, explicit_profile), do: explicit_profile
 
-  defp ensure_agent_started(data_mode, prompt_profile, compression, thinking, agent_mod) do
+  defp ensure_agent_started(data_mode, prompt_profile, compaction, thinking, agent_mod) do
     # When :auto, use :single_shot as default for starting (will be overridden per-test)
     start_prompt = if prompt_profile == :auto, do: :single_shot, else: prompt_profile
 
@@ -544,7 +544,7 @@ defmodule PtcDemo.LispTestRunner do
             Agent.start_link(
               data_mode: data_mode,
               prompt: start_prompt,
-              compression: compression,
+              compaction: compaction,
               thinking: thinking
             )
 
@@ -555,7 +555,7 @@ defmodule PtcDemo.LispTestRunner do
           Agent.reset()
           Agent.set_data_mode(data_mode)
           Agent.set_prompt_profile(start_prompt)
-          Agent.set_compression(compression)
+          Agent.set_compaction(compaction)
           Agent.set_thinking(thinking)
           :ok
       end

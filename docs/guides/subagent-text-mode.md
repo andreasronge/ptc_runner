@@ -93,7 +93,7 @@ step.return  #=> "Elixir is a dynamic, functional language..."  (raw string)
 step.return["result"]  #=> 42
 ```
 
-**Constraints:** Signature is optional. Tools are optional. When no signature or a `:string` return type is used, text mode returns a raw string. When a complex return type (map, list, float, int) is used, text mode returns JSON. Compression and firewall fields are not supported.
+**Constraints:** Signature is optional. Tools are optional. When no signature or a `:string` return type is used, text mode returns a raw string. When a complex return type (map, list, float, int) is used, text mode returns JSON. Compaction and firewall fields are not supported.
 
 ## How It Works
 
@@ -359,7 +359,7 @@ The LLM receives `{"error": "service unavailable"}` as the tool result and can a
 | Computation | None | None (tools only) | Full Lisp runtime |
 | Memory | N/A | Always `%{}` | Accumulated across turns |
 | System prompt | Minimal | Minimal | Full PTC-Lisp spec |
-| Compression | Not supported | Not supported | Supported |
+| Compaction | Not supported | Not supported | Supported |
 | Sandbox | N/A | Direct function calls | Isolated BEAM process |
 | Best for | Classification, extraction | Small/fast LLMs with tools | Capable LLMs |
 

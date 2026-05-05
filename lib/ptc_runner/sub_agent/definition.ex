@@ -75,19 +75,6 @@ defmodule PtcRunner.SubAgent.Definition do
   @type llm_registry :: %{atom() => llm_callback()}
 
   @typedoc """
-  Compression strategy configuration.
-
-  Can be:
-  - `nil` or `false` - Compression disabled (default)
-  - `true` - Use default strategy (`SingleUserCoalesced`) with default options
-  - `Module` - Use custom strategy module with default options
-  - `{Module, opts}` - Use custom strategy module with custom options
-
-  See `PtcRunner.SubAgent.Compression` for details.
-  """
-  @type compression_opts :: nil | false | true | module() | {module(), keyword()}
-
-  @typedoc """
   Compaction configuration for multi-turn agents.
 
   Pressure-triggered context compaction. Compaction reduces the LLM-input
@@ -170,7 +157,6 @@ defmodule PtcRunner.SubAgent.Definition do
           context_descriptions: map() | nil,
           format_options: format_options(),
           float_precision: non_neg_integer(),
-          compression: compression_opts(),
           compaction: compaction_opts(),
           thinking: boolean(),
           output: output_mode(),
@@ -207,7 +193,6 @@ defmodule PtcRunner.SubAgent.Definition do
     :description,
     :field_descriptions,
     :context_descriptions,
-    :compression,
     compaction: false,
     thinking: false,
     tools: %{},

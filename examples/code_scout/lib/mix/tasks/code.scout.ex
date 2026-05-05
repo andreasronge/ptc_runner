@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Code.Scout do
           verbose: :boolean,
           raw: :boolean,
           system_prompt: :boolean,
-          compression: :boolean,
+          compaction: :boolean,
           max_turns: :integer,
           model: :string
         ],
@@ -35,7 +35,7 @@ defmodule Mix.Tasks.Code.Scout do
           v: :verbose,
           r: :raw,
           s: :system_prompt,
-          c: :compression,
+          c: :compaction,
           m: :max_turns
         ]
       )
@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Code.Scout do
       Mix.shell().error("Error: Please provide a query.")
 
       Mix.shell().info(
-        "Usage: mix code.scout \"query\" [--model MODEL] [--trace] [--verbose] [--raw] [--compression] [--max-turns N] [--system-prompt]"
+        "Usage: mix code.scout \"query\" [--model MODEL] [--trace] [--verbose] [--raw] [--compaction] [--max-turns N] [--system-prompt]"
       )
     else
       if opts[:system_prompt] do
@@ -57,7 +57,7 @@ defmodule Mix.Tasks.Code.Scout do
         query_opts =
           [
             debug: opts[:trace] || false,
-            compression: opts[:compression] || false
+            compaction: opts[:compaction] || false
           ]
           |> then(fn o ->
             if opts[:max_turns], do: Keyword.put(o, :max_turns, opts[:max_turns]), else: o

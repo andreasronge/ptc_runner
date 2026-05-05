@@ -84,10 +84,10 @@ defmodule PtcDemo.CLIBase do
     - --validate-clojure: validate generated programs against Babashka
     - --no-validate-clojure: skip Clojure validation
     - --thinking: enable thinking section in output format
-    - --compression: enable message history compression
-    - --no-compression: disable message history compression (default)
+    - --compaction: enable message history compaction
+    - --no-compaction: disable message history compaction (default)
 
-  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure, :thinking, :compression
+  Returns a map with keys: :explore, :test, :test_index, :verbose, :model, :prompt, :report, :runs, :list_models, :list_prompts, :show_prompt, :validate_clojure, :thinking, :compaction
   """
   def parse_common_args(args) do
     Enum.reduce(args, %{}, fn arg, acc ->
@@ -186,11 +186,11 @@ defmodule PtcDemo.CLIBase do
         arg == "--thinking" ->
           Map.put(acc, :thinking, true)
 
-        arg == "--compression" ->
-          Map.put(acc, :compression, true)
+        arg == "--compaction" ->
+          Map.put(acc, :compaction, true)
 
-        arg == "--no-compression" ->
-          Map.put(acc, :compression, false)
+        arg == "--no-compaction" ->
+          Map.put(acc, :compaction, false)
 
         String.starts_with?(arg, "--filter=") ->
           filter_str = String.replace_prefix(arg, "--filter=", "")
