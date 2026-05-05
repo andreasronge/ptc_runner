@@ -138,8 +138,8 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
 
       assert step.return == %{"result" => 42}
-      # Behavior change documented in the migration: compaction does NOT run
-      # for single-shot+retry. The previous compression default did.
+      # Compaction does not run for single-shot+retry — the retry budget is
+      # small by design and the raw error trail helps the LLM recover.
       refute Map.has_key?(step.usage, :compaction)
     end
   end

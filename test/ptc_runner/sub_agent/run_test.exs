@@ -149,9 +149,8 @@ defmodule PtcRunner.SubAgent.RunTest do
 
     test "string form propagates compaction stats through to step.usage" do
       # End-to-end: compaction: [...] passed to run/2 must reach the loop and
-      # produce stats on the resulting step. Step 4 dropped the compression
-      # branch; this guards against a regression where the option is lost
-      # somewhere between run/2 and Compaction.maybe_compact/3.
+      # produce stats on the resulting step. Guards against a regression where
+      # the option is lost somewhere between run/2 and Compaction.maybe_compact/3.
       content = String.duplicate("x", 200)
 
       llm = fn %{turn: turn} ->

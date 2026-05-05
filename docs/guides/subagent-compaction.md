@@ -63,26 +63,6 @@ When pressure is detected, `:trim`:
 If slicing would produce an `:assistant`-leading recent slice (e.g. odd boundaries),
 `:trim` drops one more message from the front so the slice begins with `:user`.
 
-## Behavior change vs. the legacy `compression:` option
-
-If you migrated from `compression: true`:
-
-- **Compaction is opt-in.** `compression: true` is removed entirely; nothing happens
-  unless you set `compaction: true` (or a keyword config).
-- **Compaction skips single-shot and single-shot+retry.** The legacy compression path
-  ran for `retry_turns > 0` even with `max_turns: 1`. Compaction does not. The retry
-  budget is small by design and raw error trails help the LLM recover.
-- **Triggers are pressure-based, not turn-2.** `compression` activated from turn 2.
-  Compaction only fires when turn count or token estimate crosses your threshold.
-- **Stats are different.** `step.usage.compression` is gone. `step.usage.compaction`
-  is set whenever compaction was active for the agent (triggered or not).
-
-If your agent depended on compression collapsing every multi-turn run from turn 2,
-either:
-
-- Restructure to multi-turn so compaction can fire under pressure, or
-- Accept the raw history (most short tasks won't hit a context limit).
-
 ## What you'll see in `step.usage.compaction`
 
 Triggered:
