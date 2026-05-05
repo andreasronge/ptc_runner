@@ -197,6 +197,77 @@ IO.puts("Slow events (>100ms): #{length(slow)}")
 :ok
 ```
 
+### Context Compaction in Traces
+
+Compaction (`compaction: true` on the agent) trims older messages from the LLM-input
+history once turn count or estimated tokens cross a threshold, keeping recent turns
+verbatim. When it fires, it emits a `[:ptc_runner, :sub_agent, :compaction, :triggered]`
+telemetry event that lands in the trace. See the
+[Compaction guide](https://hexdocs.pm/ptc_runner/subagent-compaction.html) for the full
+option reference.
+
+To make this deterministic in a livebook we drive a long multi-turn run with a stub LLM
+that answers each turn until it eventually returns. The default trigger fires once a
+multi-turn agent's turn count exceeds 8.
+
+```elixir
+# Stub LLM: ten "still working" turns, then a return on turn 11.
+# Returning a string is the simplest shape the LLM callback contract accepts.
+stub_llm =
+  fn %{turn: turn} ->
+    response =
+      if turn >= 11 do
+        "(return {:answer 42})"
+      else
+        "(println \"still working on turn #{turn}\")"
+      end
+
+    {:ok, response}
+  end
+
+long_agent =
+  SubAgent.new(
+    prompt: "Run a long multi-turn task and eventually return {:answer 42}",
+    signature: "{answer :int}",
+    max_turns: 12,
+    compaction: true
+  )
+
+{:ok, {_, compact_step}, compact_trace_path} =
+  TraceLog.with_trace(fn ->
+    {:ok, step} = SubAgent.run(long_agent, llm: stub_llm)
+    {:ok, step}
+  end)
+
+IO.inspect(compact_step.usage.compaction, label: "step.usage.compaction")
+```
+
+The `:triggered` flag tells you whether trimming actually happened on this run, and
+`messages_before` / `messages_after` show how many LLM-input messages were dropped.
+`reason` is `:turn_pressure` or `:token_pressure` depending on which threshold fired
+first.
+
+Filter the trace to just the compaction firings:
+
+```elixir
+compact_events = Analyzer.load(compact_trace_path)
+compactions = Analyzer.filter(compact_events, type: "compaction")
+
+for e <- compactions do
+  d = e["data"] || %{}
+
+  IO.puts(
+    "turn #{e["turn"]}: " <>
+      "#{d["messages_before"]} → #{d["messages_after"]} messages " <>
+      "(reason: #{d["reason"]})"
+  )
+end
+```
+
+> When you open the trace in `mix ptc.viewer`, turns that fired compaction show a
+> `✂N→M` badge on their pill, and Chrome DevTools (next section) renders each firing
+> as a flag marker on the timeline.
+
 ### Chrome DevTools Export
 
 Export the trace to Chrome's flame chart format for visual analysis.

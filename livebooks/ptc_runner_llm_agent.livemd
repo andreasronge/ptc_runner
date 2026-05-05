@@ -300,7 +300,6 @@ SubAgent.preview_prompt(agent).system |> IO.puts()
 | `raw: true`         | Show raw LLM input/output                 |
 | `messages: true`    | Show all messages including system prompt |
 | `usage: true`       | Show token usage                          |
-| `view: :compressed` | Show what LLM sees (compressed format)    |
 
 ## Learn More
 
