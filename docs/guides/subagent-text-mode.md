@@ -413,6 +413,7 @@ summarize = SubAgent.new(
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage
+- [Output Modes in an App Loop](../../livebooks/output_modes_in_app_loops.livemd) - Runnable livebook contrasting `:text` plain, `:text` structured, and `:ptc_lisp` over one scenario
 - [Core Concepts](subagent-concepts.md) - Context, memory, and data flow
 - [Patterns](subagent-patterns.md) - Chaining and composition patterns
 - [Signature Syntax](../signature-syntax.md) - Full type syntax reference

@@ -260,8 +260,10 @@ defmodule PtcRunner.MixProject do
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
         "livebooks/ptc_runner_llm_agent.livemd",
+        "livebooks/output_modes_in_app_loops.livemd",
         "livebooks/joke_workflow.livemd",
-        "livebooks/observability_and_tracing.livemd"
+        "livebooks/observability_and_tracing.livemd",
+        "livebooks/prompt_caching.livemd"
       ],
       groups_for_extras: [
         "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
