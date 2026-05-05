@@ -146,6 +146,34 @@ defmodule PtcRunner.SubAgent.RunTest do
         )
       end
     end
+
+    test "string form propagates compaction stats through to step.usage" do
+      # End-to-end: compaction: [...] passed to run/2 must reach the loop and
+      # produce stats on the resulting step. Step 4 dropped the compression
+      # branch; this guards against a regression where the option is lost
+      # somewhere between run/2 and Compaction.maybe_compact/3.
+      content = String.duplicate("x", 200)
+
+      llm = fn %{turn: turn} ->
+        if turn < 4 do
+          {:ok, "```clojure\n\"#{content}\"\n```"}
+        else
+          {:ok, "```clojure\n(return {:result 42})\n```"}
+        end
+      end
+
+      {:ok, step} =
+        SubAgent.run("Test",
+          llm: llm,
+          max_turns: 5,
+          compaction: [trigger: [turns: 2], keep_recent_turns: 1, keep_initial_user: true]
+        )
+
+      assert step.return == %{"result" => 42}
+      assert step.usage.compaction.strategy == "trim"
+      assert step.usage.compaction.triggered == true
+      assert step.usage.compaction.reason == :turn_pressure
+    end
   end
 
   describe "run/2 - tool/data conflict validation" do

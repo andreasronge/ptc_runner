@@ -15,13 +15,6 @@ defmodule PtcRunner.SubAgent.Debug do
   For all messages including the system prompt, use `messages: true` instead.
   Note: `messages: true` wraps long lines to 160 chars.
 
-  ## View Modes
-
-  | View | Description |
-  |------|-------------|
-  | `:turns` (default) | Show programs + results from Turn structs |
-  | `:compressed` | Show what the LLM sees (compressed format) |
-
   ## Examples
 
       # Default compact view
@@ -31,11 +24,8 @@ defmodule PtcRunner.SubAgent.Debug do
       # Include raw input and raw response
       SubAgent.Debug.print_trace(step, raw: true)
 
-      # Show all messages including system prompt
+      # Show all messages including system prompt (the LLM's actual view)
       SubAgent.Debug.print_trace(step, messages: true)
-
-      # Show compressed view (what LLM sees)
-      SubAgent.Debug.print_trace(step, view: :compressed)
 
       # Print agent chain
       SubAgent.Debug.print_chain([step1, step2, step3])

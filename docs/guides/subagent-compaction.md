@@ -151,8 +151,8 @@ The counter must be a 1-arity function returning a non-negative integer.
 - **Not applied to single-shot or single-shot+retry.** Gate is `agent.max_turns > 1`.
 - **Token counter is a heuristic.** Adapter-aware counting is deferred to Phase 2.
 
-For the deferred items, see
-[Phase 2 plan](../plans/pressure-triggered-context-compaction-phase-2.md).
+For the deferred items, see the Phase 2 design stub at
+`docs/plans/pressure-triggered-context-compaction-phase-2.md` in the repo.
 
 ## See Also
 

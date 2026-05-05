@@ -61,10 +61,7 @@ SubAgent.Debug.print_trace(step)
 # Include raw LLM output (reasoning/commentary)
 SubAgent.Debug.print_trace(step, raw: true)
 
-# Show what the LLM sees (compressed format)
-SubAgent.Debug.print_trace(step, view: :compressed)
-
-# Show actual messages sent to LLM
+# Show actual messages sent to LLM (what the LLM saw)
 SubAgent.Debug.print_trace(step, messages: true)
 
 # Include token usage
