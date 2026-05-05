@@ -294,8 +294,14 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
   end
 
   describe "telemetry — [:ptc_runner, :sub_agent, :compaction, :triggered]" do
+    # Each test gets a unique agent_name and the handler filters on it.
+    # Without this filter the suite is flaky under async ExUnit because the
+    # global `:telemetry` event stream delivers events from every concurrent
+    # test that triggers compaction (e.g. the trace_log integration test).
+
     test "emits one event per triggered firing with the documented shape" do
-      handler_id = "test-compaction-#{System.unique_integer([:positive])}"
+      uniq = "compaction-emit-#{System.unique_integer([:positive])}"
+      handler_id = "test-#{uniq}"
       test_pid = self()
 
       :ok =
@@ -303,7 +309,9 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
           handler_id,
           [:ptc_runner, :sub_agent, :compaction, :triggered],
           fn event, measurements, metadata, _ ->
-            send(test_pid, {:compaction_event, event, measurements, metadata})
+            if metadata[:agent_name] == uniq do
+              send(test_pid, {:compaction_event, event, measurements, metadata})
+            end
           end,
           nil
         )
@@ -317,6 +325,7 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
         agent =
           SubAgent.new(
             prompt: "Test",
+            name: uniq,
             max_turns: 6,
             compaction: [trigger: [turns: 1], keep_recent_turns: 1, keep_initial_user: true]
           )
@@ -355,14 +364,19 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
     end
 
     test "does NOT emit on non-triggered pressure checks" do
-      handler_id = "test-compaction-quiet-#{System.unique_integer([:positive])}"
+      uniq = "compaction-quiet-#{System.unique_integer([:positive])}"
+      handler_id = "test-#{uniq}"
       test_pid = self()
 
       :ok =
         :telemetry.attach(
           handler_id,
           [:ptc_runner, :sub_agent, :compaction, :triggered],
-          fn _e, _m, _meta, _ -> send(test_pid, :compaction_event) end,
+          fn _e, _m, metadata, _ ->
+            if metadata[:agent_name] == uniq do
+              send(test_pid, :compaction_event)
+            end
+          end,
           nil
         )
 
@@ -374,6 +388,7 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
         agent =
           SubAgent.new(
             prompt: "Test",
+            name: uniq,
             max_turns: 4,
             compaction: [trigger: [turns: 1000], keep_recent_turns: 2]
           )
@@ -381,7 +396,7 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
         {:ok, step} = Loop.run(agent, llm: llm, context: %{})
         assert step.return == %{"result" => 42}
 
-        # Confirm zero events were sent.
+        # Confirm zero events were sent for THIS agent.
         refute_receive :compaction_event, 50
       after
         :telemetry.detach(handler_id)
@@ -389,14 +404,19 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
     end
 
     test "emits zero events when compaction is disabled" do
-      handler_id = "test-compaction-disabled-#{System.unique_integer([:positive])}"
+      uniq = "compaction-disabled-#{System.unique_integer([:positive])}"
+      handler_id = "test-#{uniq}"
       test_pid = self()
 
       :ok =
         :telemetry.attach(
           handler_id,
           [:ptc_runner, :sub_agent, :compaction, :triggered],
-          fn _e, _m, _meta, _ -> send(test_pid, :compaction_event) end,
+          fn _e, _m, metadata, _ ->
+            if metadata[:agent_name] == uniq do
+              send(test_pid, :compaction_event)
+            end
+          end,
           nil
         )
 
@@ -404,7 +424,7 @@ defmodule PtcRunner.SubAgent.LoopCompactionTest do
         log = capture_messages_log()
         llm = recording_llm(log, 3)
 
-        agent = SubAgent.new(prompt: "Test", max_turns: 4, compaction: false)
+        agent = SubAgent.new(prompt: "Test", name: uniq, max_turns: 4, compaction: false)
 
         {:ok, step} = Loop.run(agent, llm: llm, context: %{})
         assert step.return == %{"result" => 42}
