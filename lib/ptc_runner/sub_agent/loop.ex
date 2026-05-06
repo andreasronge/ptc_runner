@@ -1360,13 +1360,17 @@ defmodule PtcRunner.SubAgent.Loop do
   # Pmap/Pcalls Telemetry
   # ============================================================
 
+  @doc false
   # Emit telemetry events for pmap/pcalls executions recorded during Lisp evaluation.
   # Since pmap/pcalls run inside the sandbox (isolated process), telemetry can't be
   # emitted during execution. Instead, we record execution metadata in EvalContext
   # and emit events after the sandbox returns.
-  defp emit_pmap_telemetry(_state, %{pmap_calls: []}), do: :ok
+  #
+  # Public-but-internal: shared with sibling `Loop.PtcToolCall` so the
+  # `:tool_call` transport gets the same telemetry as `:content` mode (R27).
+  def emit_pmap_telemetry(_state, %{pmap_calls: []}), do: :ok
 
-  defp emit_pmap_telemetry(state, %{pmap_calls: pmap_calls}) do
+  def emit_pmap_telemetry(state, %{pmap_calls: pmap_calls}) do
     Enum.each(pmap_calls, fn pmap_call ->
       type_prefix =
         case pmap_call.type do

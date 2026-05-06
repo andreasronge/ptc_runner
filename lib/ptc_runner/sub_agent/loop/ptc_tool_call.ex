@@ -31,6 +31,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.{BuiltinTools, Definition, KeyNormalizer}
 
+  alias PtcRunner.SubAgent.Loop
+
   alias PtcRunner.SubAgent.Loop.{
     Budget,
     JsonHandler,
@@ -299,6 +301,30 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     end
   end
 
+  # `(fail v)` must be matched before the single-shot catch-all below;
+  # otherwise a single-shot agent's explicit failure would be routed
+  # through `terminate_with_return/6` and surface as `{:ok, step}` instead
+  # of `{:error, step}`. Parity with multi-turn `:tool_call` mode and with
+  # `:content` mode.
+  defp handle_lisp_success(
+         program,
+         native_call,
+         assistant_content,
+         %{return: {:__ptc_fail__, fail_args}} = lisp_step,
+         agent,
+         state
+       ) do
+    terminate_with_fail(
+      program,
+      native_call,
+      assistant_content,
+      lisp_step,
+      fail_args,
+      agent,
+      state
+    )
+  end
+
   # Single-shot mode without retry_turns: skip validation (parity with :content mode).
   defp handle_lisp_success(
          program,
@@ -315,25 +341,6 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       native_call,
       assistant_content,
       normalized_step,
-      agent,
-      state
-    )
-  end
-
-  defp handle_lisp_success(
-         program,
-         native_call,
-         assistant_content,
-         %{return: {:__ptc_fail__, fail_args}} = lisp_step,
-         agent,
-         state
-       ) do
-    terminate_with_fail(
-      program,
-      native_call,
-      assistant_content,
-      lisp_step,
-      fail_args,
       agent,
       state
     )
@@ -1060,14 +1067,11 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
   defp check_memory_limit(_memory, nil), do: {:ok, 0}
 
-  defp emit_pmap_telemetry(_state, %{pmap_calls: []}), do: :ok
-
-  defp emit_pmap_telemetry(_state, _lisp_step) do
-    # Loop-level emits live in Loop; PtcToolCall reuses Loop's path
-    # for parity. For now defer — Loop emits on the success/error
-    # roundtrip via its own helper. (Tests do not assert pmap
-    # telemetry for ptc_transport: :tool_call.)
-    :ok
+  # Delegate to `Loop.emit_pmap_telemetry/2` so `:tool_call` mode emits
+  # the same `[:pmap, :start | :stop]` / `[:pcalls, :start | :stop]`
+  # events as `:content` mode (R27).
+  defp emit_pmap_telemetry(state, lisp_step) do
+    Loop.emit_pmap_telemetry(state, lisp_step)
   end
 
   # ----------------------------------------------------------------

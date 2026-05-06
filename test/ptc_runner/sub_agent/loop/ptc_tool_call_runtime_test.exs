@@ -114,6 +114,28 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
       {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
       assert paired_tool_call_id?(step.messages, "abc")
     end
+
+    # Regression: in single-shot mode (`max_turns: 1, retry_turns: 0`), a
+    # `(fail v)` invocation must produce `{:error, step}` — same shape as
+    # multi-turn mode. Previously the single-shot catch-all clause matched
+    # before the `(fail ...)` clause and routed through `terminate_with_return/6`.
+    test "(fail v) in single-shot mode (max_turns: 1, retry_turns: 0) returns {:error, step}" do
+      llm =
+        scripted_llm([
+          tool_call_response(~s|(fail {:reason :nope :message "no"})|)
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          ptc_transport: :tool_call,
+          max_turns: 1,
+          retry_turns: 0
+        )
+
+      assert {:error, step} = SubAgent.run(agent, llm: llm)
+      assert step.fail.reason == :failed
+    end
   end
 
   # ============================================================
@@ -960,6 +982,54 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
       assert paired_tool_call_id?(step.messages, "ae")
+    end
+  end
+
+  # ============================================================
+  # pmap telemetry parity (R27)
+  # ============================================================
+
+  describe "pmap telemetry parity (R27)" do
+    test "(pmap ...) inside ptc_lisp_execute emits :pmap start/stop events" do
+      events_table =
+        :ets.new(:tool_call_pmap_events, [:bag, :public, write_concurrency: true])
+
+      handler_id = "ptc-tool-call-pmap-#{:erlang.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:ptc_runner, :sub_agent, :pmap, :start],
+          [:ptc_runner, :sub_agent, :pmap, :stop]
+        ],
+        fn event, measurements, metadata, config ->
+          :ets.insert(config.table, {event, measurements, metadata})
+        end,
+        %{table: events_table}
+      )
+
+      try do
+        program = "(return (pmap inc [1 2 3]))"
+        llm = scripted_llm([tool_call_response(program)])
+
+        agent =
+          SubAgent.new(prompt: "Test", ptc_transport: :tool_call, max_turns: 3)
+
+        assert {:ok, step} = SubAgent.run(agent, llm: llm)
+        assert step.return == [2, 3, 4]
+
+        events = :ets.tab2list(events_table)
+        suffixes = Enum.map(events, fn {event, _, _} -> List.last(event) end)
+
+        assert :start in suffixes,
+               "expected :pmap start event in :tool_call mode, got #{inspect(suffixes)}"
+
+        assert :stop in suffixes,
+               "expected :pmap stop event in :tool_call mode, got #{inspect(suffixes)}"
+      after
+        :telemetry.detach(handler_id)
+        :ets.delete(events_table)
+      end
     end
   end
 
