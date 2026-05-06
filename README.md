@@ -236,6 +236,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[LLM Setup](docs/guides/subagent-llm-setup.md)** - Providers, streaming, custom adapters, framework integration
 - **[Core Concepts](docs/guides/subagent-concepts.md)** - Context, memory, and the firewall convention
 - **[PTC-Lisp Transport](docs/guides/subagent-ptc-transport.md)** - `ptc_transport: :content` (default) vs `:tool_call` (opt-in)
+- **[Text Mode + PTC-Lisp Compute](docs/guides/text-mode-ptc-compute.md)** - Combined mode (`output: :text, ptc_transport: :tool_call`) for chat agents that escalate to deterministic compute
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions

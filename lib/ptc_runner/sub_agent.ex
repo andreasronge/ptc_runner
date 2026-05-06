@@ -31,6 +31,7 @@ defmodule PtcRunner.SubAgent do
   - [Getting Started](guides/subagent-getting-started.md) - Full walkthrough
   - [Core Concepts](guides/subagent-concepts.md) - Context, memory, firewall
   - [Patterns](guides/subagent-patterns.md) - Composition and orchestration
+  - [Text Mode + PTC-Lisp Compute](guides/text-mode-ptc-compute.md) - Combined mode (`output: :text, ptc_transport: :tool_call`)
   - `new/1` - All struct fields and options
   - `run/2` - Runtime options and LLM registry
   - `chat/3` - Multi-turn chat with history threading
