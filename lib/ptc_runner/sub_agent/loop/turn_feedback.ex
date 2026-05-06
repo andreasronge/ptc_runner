@@ -170,11 +170,17 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     `append_turn_info` or `append_progress` output.
   - `:prints` — the raw `lisp_step.prints` list (untruncated; truncation is
     reflected in `feedback` and the top-level `truncated` flag).
-  - `:result` — preview string of `lisp_step.return` (or `nil` when no preview
-    is rendered, e.g. when `prints` is non-empty or for single-turn agents).
+  - `:result` — preview string of `lisp_step.return` (`"user=> ..."`), or
+    `nil` when `lisp_step.return` is `nil` or a `Var`. Rendered
+    unconditionally for the structured field — the suppression rules that
+    `format/3` applies to its human-readable string (single-turn agents,
+    or turns with non-empty `prints`) do **not** affect this field. Phase 4
+    of the PTC-Lisp tool-call plan relies on this so the `ptc_lisp_execute`
+    tool-result JSON always carries the final value.
   - `:memory.changed` — map of `name => preview` for memory bindings that are
     new or whose value changed since the previous turn. String-keyed for
-    direct use in tool-result JSON.
+    direct use in tool-result JSON. Populated unconditionally regardless of
+    `agent.max_turns`, for the same Phase 4 reason.
   - `:memory.stored_keys` — sorted list of all currently-stored memory binding
     names (string-keyed). Fallback orientation hint when nothing changed or
     previews were truncated.
@@ -198,10 +204,26 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     preview_max = Keyword.get(agent.format_options, :preview_max_chars, 250)
 
     {prints_output, prints_truncated?} = format_prints(lisp_step.prints, max_chars)
-    result_preview = format_result_preview(prints_output, agent, lisp_step, preview_max)
 
-    {stored_hint, memory_changed, memory_truncated?} =
-      build_memory_section(agent, state, lisp_step, preview_max)
+    # Unconditional structured fields — always rendered regardless of agent.max_turns
+    # or whether prints is non-empty. These populate the structured `:result` and
+    # `:memory.changed` fields, which Phase 4's tool-call transport reuses to build
+    # the `ptc_lisp_execute` tool-result JSON. The human-readable `feedback` string
+    # below still applies the historical suppression rules (single-turn agents and
+    # agents with println output omit the result preview / stored hint) so that
+    # content-mode parity is preserved byte-for-byte.
+    result_preview_unconditional =
+      format_result_preview_unconditional(lisp_step, preview_max)
+
+    {memory_hint_unconditional, memory_changed, memory_truncated?} =
+      build_memory_section_unconditional(state, lisp_step, preview_max)
+
+    # Suppressed variants for the feedback string (parity with format/3).
+    result_preview_for_feedback =
+      format_result_preview(prints_output, agent, lisp_step, result_preview_unconditional)
+
+    memory_hint_for_feedback =
+      memory_section_for_feedback(agent, lisp_step, memory_hint_unconditional)
 
     prints_with_hint =
       if prints_truncated? do
@@ -211,7 +233,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
       end
 
     feedback =
-      [result_preview, prints_with_hint, stored_hint]
+      [result_preview_for_feedback, prints_with_hint, memory_hint_for_feedback]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("\n\n")
 
@@ -220,7 +242,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     %{
       feedback: feedback,
       prints: lisp_step.prints || [],
-      result: result_preview,
+      result: result_preview_unconditional,
       memory: %{
         changed: memory_changed,
         stored_keys: stored_keys(lisp_step),
@@ -308,9 +330,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   defp format_prints(_, _max_chars), do: {nil, false}
 
-  # Show truncated result preview when no println output and result is not a Var
-  defp format_result_preview(nil = _prints, agent, lisp_step, preview_max)
-       when agent.max_turns > 1 do
+  # Always renders a result preview when `lisp_step.return` is a non-nil,
+  # non-Var value. Returns the preview string or `nil`. This is the
+  # "unsuppressed" path used to populate the structured `:result` field of
+  # `execution_feedback/3` regardless of `agent.max_turns` or whether prints
+  # are non-empty. The `format_result_preview/4` wrapper applies the
+  # human-feedback suppression rules on top of this.
+  defp format_result_preview_unconditional(lisp_step, preview_max) do
     if lisp_step.return != nil and not var?(lisp_step.return) do
       {text, was_truncated?} = truncate_value(lisp_step.return, preview_max)
 
@@ -323,17 +349,25 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     end
   end
 
-  defp format_result_preview(_prints, _agent, _lisp_step, _preview_max), do: nil
-
-  # Returns `{stored_hint_text_or_nil, changed_previews_map, any_truncated?}`.
-  #
-  # `stored_hint_text_or_nil` is the human-readable hint string used in the
-  # `feedback` text. `changed_previews_map` is a string-keyed map of changed
-  # bindings to their EDN previews, surfaced as `memory.changed` in the
-  # structured return of `execution_feedback/3`. The two are computed together
-  # because they share the same `changed_vars` + `truncate_value` traversal.
-  defp build_memory_section(agent, state, lisp_step, preview_max)
+  # Suppressed variant for the human-readable feedback string. Mirrors the
+  # historical rules: only render when there is no println output AND the
+  # agent is multi-turn. Defers actual rendering to the unconditional helper.
+  defp format_result_preview(nil = _prints, agent, _lisp_step, unconditional_preview)
        when agent.max_turns > 1 do
+    unconditional_preview
+  end
+
+  defp format_result_preview(_prints, _agent, _lisp_step, _unconditional_preview), do: nil
+
+  # Always renders the memory section (hint text + changed map + truncation
+  # flag) whenever `lisp_step.memory` is non-empty. Returns
+  # `{hint_text_or_nil, changed_previews_map, any_truncated?}`. This is the
+  # "unsuppressed" path used to populate the structured `:memory.changed`
+  # field of `execution_feedback/3` regardless of `agent.max_turns`.
+  #
+  # The hint text and changed map are computed together because they share
+  # the same `changed_vars` + `truncate_value` traversal.
+  defp build_memory_section_unconditional(state, lisp_step, preview_max) do
     if is_map(lisp_step.memory) and map_size(lisp_step.memory) > 0 do
       prev_memory = state.memory || %{}
       changed = changed_vars(prev_memory, lisp_step.memory)
@@ -371,7 +405,16 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     end
   end
 
-  defp build_memory_section(_agent, _state, _lisp_step, _preview_max), do: {nil, %{}, false}
+  # Suppressed variant of the memory hint text for the human-readable feedback
+  # string. Mirrors the historical rule: only render the stored hint for
+  # multi-turn agents. The structured `:memory.changed` field is populated
+  # from the unconditional helper regardless.
+  defp memory_section_for_feedback(agent, lisp_step, unconditional_hint)
+       when agent.max_turns > 1 and is_map(lisp_step.memory) do
+    unconditional_hint
+  end
+
+  defp memory_section_for_feedback(_agent, _lisp_step, _unconditional_hint), do: nil
 
   defp stored_keys(lisp_step) do
     case lisp_step.memory do

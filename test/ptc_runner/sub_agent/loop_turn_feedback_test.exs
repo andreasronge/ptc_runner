@@ -534,6 +534,70 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert result.feedback =~ "user=>"
     end
 
+    test ":result is non-nil when prints is non-empty AND return is set (multi-turn)" do
+      # Phase 4 needs the structured :result field even when there is println
+      # output. format/3's human-readable feedback string still suppresses the
+      # "user=> ..." preview in this case (parity preserved by other tests).
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 5)
+      state = build_state()
+      lisp_step = build_lisp_step(return: 42, prints: ["hello"])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=> 42"
+    end
+
+    test ":result is non-nil for max_turns: 1 agents that returned a value" do
+      # Phase 4 needs the structured :result field even for single-turn agents.
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+      lisp_step = build_lisp_step(return: [1, 2, 3])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=>"
+      assert result.result =~ "[1 2 3]"
+    end
+
+    test ":memory.changed is populated for max_turns: 1 agents with changed bindings" do
+      # Phase 4 needs the structured :memory.changed field even for single-turn
+      # agents. format/3's human-readable feedback string still suppresses the
+      # "Stored: ..." hint for max_turns: 1 (parity preserved).
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: nil,
+          memory: %{items: [1, 2, 3], count: 3}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert Map.has_key?(result.memory.changed, "items")
+      assert Map.has_key?(result.memory.changed, "count")
+    end
+
+    test ":result is non-nil for single-turn agent with both prints AND return" do
+      # Worst-case combination: max_turns: 1 (memory hint suppressed) AND
+      # prints non-empty (result preview suppressed). Both structured fields
+      # must still be populated for Phase 4's tool-result JSON.
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: %{ok: true},
+          prints: ["working..."],
+          memory: %{step: "done"}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=>"
+      assert Map.has_key?(result.memory.changed, "step")
+    end
+
     test "stored_keys is empty list when memory is empty" do
       agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
       state = build_state()

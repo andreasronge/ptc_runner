@@ -183,6 +183,23 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
       refute_received :llm_invoked
     end
 
+    test "string-form SubAgent.run/2 forwards :ptc_transport and triggers guard" do
+      # Regression: prior to this fix, the string-form clause's Keyword.take/drop
+      # lists omitted :ptc_transport, so the option was silently dropped and the
+      # agent fell back to :content. The guard at run_single_shot/7 never fired.
+      llm = fn _ -> flunk("LLM should not be invoked — guard must fire first") end
+
+      assert_raise ArgumentError,
+                   "ptc_transport: :tool_call not yet implemented",
+                   fn ->
+                     SubAgent.run("hello",
+                       ptc_transport: :tool_call,
+                       llm: llm,
+                       max_turns: 1
+                     )
+                   end
+    end
+
     test ":content transport executes through Loop without the guard firing" do
       # Sanity check that the guard is gated on :tool_call only.
       llm = fn _input ->
