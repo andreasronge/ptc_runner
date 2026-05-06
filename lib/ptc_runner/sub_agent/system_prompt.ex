@@ -82,6 +82,39 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   </output_format>
   """
 
+  # Tool-call transport output format (ptc_transport: :tool_call).
+  #
+  # The model invokes the native `ptc_lisp_execute` tool for any
+  # deterministic computation or app-tool orchestration; app tools must
+  # be called as `(tool/name ...)` from inside the program, not as
+  # native provider tool calls. When the answer is ready, the model
+  # returns it directly in the requested signature shape — no fenced
+  # code block, no `ptc_lisp_execute` call.
+  @output_format_tool_call """
+  <output_format>
+  Two ways to respond, depending on what you need to do:
+
+  1. **Run a program.** Call the native `ptc_lisp_execute` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls. The runtime returns the program's result so you can decide what to do next.
+  2. **Return the final answer.** When you are ready to answer the mission, return it directly in the requested signature shape as the assistant message content. No tool call. No ```clojure fences. Just the answer.
+
+  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `ptc_lisp_execute` is available natively.
+  </output_format>
+  """
+
+  @output_format_tool_call_thinking """
+  <output_format>
+  For complex tasks, think through the problem first, then respond in one of two ways:
+
+  thinking:
+  [your reasoning here]
+
+  1. **Run a program.** Call the native `ptc_lisp_execute` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls.
+  2. **Return the final answer.** When you are ready, return the answer directly in the requested signature shape as the assistant message content. No tool call. No ```clojure fences.
+
+  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `ptc_lisp_execute` is available natively.
+  </output_format>
+  """
+
   @doc """
   Generate a complete system prompt for a SubAgent.
 
@@ -492,7 +525,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
           :explicit_return
       end
 
-    default_output = if agent.thinking, do: @output_format_thinking, else: @output_format
+    default_output = default_output_format(agent)
 
     case agent.system_prompt do
       opts when is_map(opts) ->
@@ -509,6 +542,22 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         {LanguageSpec.get(default_spec), default_output}
     end
   end
+
+  # Pick the output-format constant based on ptc_transport and thinking.
+  #
+  # `:content` (default) keeps the existing markdown-fenced contract so
+  # all current behavior is unchanged. `:tool_call` selects the
+  # tool-call variant which instructs the model to call
+  # `ptc_lisp_execute` for computation and return final answers
+  # directly in signature shape (no fenced code blocks).
+  defp default_output_format(%{ptc_transport: :tool_call, thinking: true}),
+    do: @output_format_tool_call_thinking
+
+  defp default_output_format(%{ptc_transport: :tool_call}),
+    do: @output_format_tool_call
+
+  defp default_output_format(%{thinking: true}), do: @output_format_thinking
+  defp default_output_format(_agent), do: @output_format
 
   # Instructions injected when llm_query: true
   defp llm_query_reference do

@@ -159,24 +159,108 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
 
   defp align_user_leading([%{role: :user} | _] = recent, _all, _skip, _n), do: recent
 
-  defp align_user_leading([%{role: :assistant} | rest], all, skip, n) do
-    # Drop one more from the front so the slice starts with :user. If that
-    # would over-shrink and re-include the head we already kept (or below 0),
-    # just return what's left.
+  # Tool-call transport produces `:assistant` messages carrying `tool_calls:
+  # [...]` paired with `role: :tool` messages keyed by `tool_call_id`. After
+  # trimming, the recent slice may begin with such a pair instead of with a
+  # `:user` message — and that is fine: strict providers (Anthropic) require
+  # every `tool_use` to have a paired `tool_result`, but they do not require
+  # the slice to start with `:user`. The initial-user message is preserved
+  # via `keep_initial_user: true` and concatenated before the slice, yielding
+  # `[initial_user, assistant_with_tool_calls, tool, ...]` — provider-valid.
+  #
+  # The only correctness rule is "no orphan `:tool` at the head" — a `:tool`
+  # message whose matching assistant was trimmed away. Drop one orphan,
+  # recurse. A complete assistant-with-tool_calls pair head is kept.
+  defp align_user_leading([%{role: :tool, tool_call_id: id} | rest] = recent, all, skip, n) do
+    if assistant_pair_present?(recent, id) do
+      recent
+    else
+      available = length(all) - skip
+      next_n = min(n - 1, available)
+
+      if next_n <= 0 do
+        rest
+      else
+        next_recent = Enum.take(all, -next_n)
+        align_user_leading(next_recent, all, skip, next_n)
+      end
+    end
+  end
+
+  defp align_user_leading([%{role: :assistant} = msg | rest] = recent, all, skip, n) do
+    if assistant_with_tool_calls?(msg) and tool_results_present?(recent, assistant_call_ids(msg)) do
+      recent
+    else
+      available = length(all) - skip
+      next_n = min(n - 1, available)
+
+      if next_n <= 0 do
+        rest
+      else
+        next_recent = Enum.take(all, -next_n)
+        align_user_leading(next_recent, all, skip, next_n)
+      end
+    end
+  end
+
+  # Fallback for any other unexpected leading role (system etc.) — preserve
+  # historical drop-until-user behavior.
+  defp align_user_leading([_ | rest], all, skip, n) do
     available = length(all) - skip
     next_n = min(n - 1, available)
 
     if next_n <= 0 do
       rest
     else
-      recent = Enum.take(all, -next_n)
-      align_user_leading(recent, all, skip, next_n)
+      next_recent = Enum.take(all, -next_n)
+      align_user_leading(next_recent, all, skip, next_n)
     end
   end
 
+  # An assistant-with-tool_calls is paired in the slice iff its id appears
+  # in the slice's assistant tool_calls field. This is the inverse lookup
+  # used to validate a leading `:tool` head.
+  defp assistant_pair_present?(slice, tool_call_id) do
+    Enum.any?(slice, fn
+      %{role: :assistant} = msg ->
+        assistant_with_tool_calls?(msg) and tool_call_id in assistant_call_ids(msg)
+
+      _ ->
+        false
+    end)
+  end
+
+  # All declared tool_call ids on the leading assistant must have at least
+  # one paired `:tool` result somewhere later in the slice. Partial pairing
+  # would still produce a provider-invalid transcript.
+  defp tool_results_present?(slice, ids) when is_list(ids) and ids != [] do
+    tool_ids =
+      slice
+      |> Enum.flat_map(fn
+        %{role: :tool, tool_call_id: id} -> [id]
+        _ -> []
+      end)
+      |> MapSet.new()
+
+    Enum.all?(ids, &MapSet.member?(tool_ids, &1))
+  end
+
+  defp tool_results_present?(_slice, _ids), do: false
+
+  defp assistant_with_tool_calls?(%{tool_calls: calls}) when is_list(calls) and calls != [],
+    do: true
+
+  defp assistant_with_tool_calls?(_), do: false
+
+  defp assistant_call_ids(%{tool_calls: calls}) when is_list(calls) do
+    Enum.map(calls, fn c -> Map.get(c, :id) || Map.get(c, "id") end)
+  end
+
+  defp assistant_call_ids(_), do: []
+
   defp estimate_tokens(messages, token_counter) do
-    Enum.reduce(messages, 0, fn %{content: content}, acc ->
-      acc + token_counter.(content)
+    Enum.reduce(messages, 0, fn msg, acc ->
+      acc + token_counter.(message_text_for_estimate(msg))
     end)
   end
 
@@ -186,9 +270,18 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
         false
 
       budget when is_integer(budget) ->
-        Enum.any?(messages, fn %{content: content} -> token_counter.(content) > budget end)
+        Enum.any?(messages, fn msg ->
+          token_counter.(message_text_for_estimate(msg)) > budget
+        end)
     end
   end
+
+  # Token estimation must tolerate the new ptc_transport: :tool_call message
+  # shape, where assistant messages may carry `content: nil` alongside
+  # `tool_calls` and role: :tool messages carry tool-result JSON in `content`.
+  defp message_text_for_estimate(%{content: content}) when is_binary(content), do: content
+  defp message_text_for_estimate(%{content: nil}), do: ""
+  defp message_text_for_estimate(_msg), do: ""
 
   # Stats shape stays consistent whether we trimmed or not — same keys, same
   # types — so callers can read every field without `Map.has_key?` guards.

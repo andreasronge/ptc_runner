@@ -69,6 +69,7 @@ defmodule PtcRunner.SubAgent.Loop do
     Budget,
     LLMRetry,
     Metrics,
+    PtcToolCall,
     ResponseHandler,
     ReturnValidation,
     State,
@@ -514,26 +515,12 @@ defmodule PtcRunner.SubAgent.Loop do
 
     state = maybe_put_state(state, :compaction_stats, compaction_stats)
 
-    # Strip tools in must-return mode
-    tool_names =
-      if must_return_mode do
-        []
-      else
-        Map.keys(BuiltinTools.effective_tools(agent))
-      end
-
-    llm_input = %{
-      system: system_prompt,
-      messages: messages,
-      turn: state.turn,
-      output: :ptc_lisp,
-      tool_names: tool_names,
-      cache: state.cache
-    }
+    llm_input =
+      build_llm_input(agent, system_prompt, messages, state, must_return_mode)
 
     # Call LLM with telemetry
     case call_llm_with_telemetry(llm, llm_input, state, agent) do
-      {:ok, %{content: content, tokens: tokens}} ->
+      {:ok, %{tokens: tokens} = response} ->
         state_with_metadata =
           state
           |> Metrics.accumulate_tokens(tokens)
@@ -543,7 +530,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Check budget callback
         case Budget.check_callback(state_with_metadata) do
           :continue ->
-            handle_llm_response(content, agent, state_with_metadata)
+            dispatch_response(response, agent, state_with_metadata)
 
           :stop ->
             # Budget exceeded - return error (no turn to emit)
@@ -561,6 +548,48 @@ defmodule PtcRunner.SubAgent.Loop do
           StepAssembler.finalize(step, state, duration_ms: duration_ms, is_error: true)
 
         {:stop, {:error, final_step}, nil, nil}
+    end
+  end
+
+  @doc false
+  # Build the LLM-input request map for a given agent / state / messages.
+  #
+  # Public to support request-shape tests for `:tool_call` transport
+  # without going through `Loop.run/2` (the Phase 1 runtime guard fires
+  # in `run/2` before any LLM call, so testing the helper directly is
+  # the cleanest seam — see Phase 3 of the plan).
+  #
+  # In `:tool_call` mode the `tools` field contains exactly one entry
+  # (`ptc_lisp_execute`) regardless of how many app tools the agent
+  # declares. App tools stay inside the system prompt's Tool Inventory
+  # and are callable only from inside the sandbox via `(tool/name ...)`.
+  #
+  # In `:content` mode the request matches today's behavior (no native
+  # `tools` field is set; PTC-Lisp app tools are not exposed natively).
+  @spec build_llm_input(Definition.t(), String.t(), [map()], State.t(), boolean()) :: map()
+  def build_llm_input(agent, system_prompt, messages, state, must_return_mode) do
+    # `tool_names` is a metadata hint surfaced to the LLM input map; it
+    # is *not* the native `tools` array. Keep the existing semantics
+    # (strip in must-return mode) for parity with `:content` behavior.
+    tool_names =
+      if must_return_mode do
+        []
+      else
+        Map.keys(BuiltinTools.effective_tools(agent))
+      end
+
+    base = %{
+      system: system_prompt,
+      messages: messages,
+      turn: state.turn,
+      output: :ptc_lisp,
+      tool_names: tool_names,
+      cache: state.cache
+    }
+
+    case PtcToolCall.request_tools(agent) do
+      nil -> base
+      tools -> Map.put(base, :tools, tools)
     end
   end
 
@@ -629,6 +658,21 @@ defmodule PtcRunner.SubAgent.Loop do
 
       {result, extra_measurements, stop_meta}
     end)
+  end
+
+  # Dispatch the normalized LLM response to the right transport handler.
+  # `:content` mode uses the existing fenced-PTC-Lisp parser path.
+  # `:tool_call` mode delegates to `PtcToolCall.handle_response/3`.
+  @spec dispatch_response(map(), Definition.t(), State.t()) ::
+          {:continue, State.t(), Turn.t()}
+          | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
+  defp dispatch_response(response, %{ptc_transport: :tool_call} = agent, state) do
+    PtcToolCall.handle_response(response, agent, state)
+  end
+
+  defp dispatch_response(response, agent, state) do
+    content = Map.get(response, :content) || ""
+    handle_llm_response(content, agent, state)
   end
 
   # Handle LLM response - parse and execute code
@@ -1316,13 +1360,17 @@ defmodule PtcRunner.SubAgent.Loop do
   # Pmap/Pcalls Telemetry
   # ============================================================
 
+  @doc false
   # Emit telemetry events for pmap/pcalls executions recorded during Lisp evaluation.
   # Since pmap/pcalls run inside the sandbox (isolated process), telemetry can't be
   # emitted during execution. Instead, we record execution metadata in EvalContext
   # and emit events after the sandbox returns.
-  defp emit_pmap_telemetry(_state, %{pmap_calls: []}), do: :ok
+  #
+  # Public-but-internal: shared with sibling `Loop.PtcToolCall` so the
+  # `:tool_call` transport gets the same telemetry as `:content` mode (R27).
+  def emit_pmap_telemetry(_state, %{pmap_calls: []}), do: :ok
 
-  defp emit_pmap_telemetry(state, %{pmap_calls: pmap_calls}) do
+  def emit_pmap_telemetry(state, %{pmap_calls: pmap_calls}) do
     Enum.each(pmap_calls, fn pmap_call ->
       type_prefix =
         case pmap_call.type do

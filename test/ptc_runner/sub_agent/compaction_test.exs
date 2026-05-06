@@ -441,6 +441,122 @@ defmodule PtcRunner.SubAgent.CompactionTest do
     end
   end
 
+  # ============================================================
+  # ptc_transport: :tool_call message shape (R28)
+  # ============================================================
+  # Build an assistant message with `tool_calls: [%{id: id}]` paired with a
+  # `role: :tool` message keyed by `tool_call_id`. Mirrors what
+  # `Loop.PtcToolCall.assistant_with_tool_calls_messages/3` emits.
+  defp assistant_call(id, content \\ "") do
+    %{role: :assistant, content: content, tool_calls: [%{id: id}]}
+  end
+
+  defp tool_result(id, content \\ ~s({"status":"ok"})) do
+    %{role: :tool, tool_call_id: id, content: content}
+  end
+
+  describe ":trim — preserves assistant + tool pairs in tool_call transport" do
+    test "keeps the most recent assistant+tool pair when compaction triggers" do
+      # Transcript: [user, a/c1, t/c1, a/c2, t/c2, a/c3, t/c3]
+      msgs = [
+        u("first"),
+        assistant_call("c1"),
+        tool_result("c1"),
+        assistant_call("c2"),
+        tool_result("c2"),
+        assistant_call("c3"),
+        tool_result("c3")
+      ]
+
+      opts =
+        default_trim_opts(trigger: [turns: 1], keep_recent_turns: 2, keep_initial_user: true)
+
+      assert {trimmed, stats} = Trim.run(msgs, ctx(turn: 5), opts)
+      assert stats.triggered == true
+
+      # Initial user kept up front per `keep_initial_user: true`.
+      assert hd(trimmed) == u("first")
+
+      # Recent slice (everything after the kept initial user) must contain
+      # at least the most recent complete pair — not collapse to empty.
+      [_first | rest] = trimmed
+      assert rest != []
+      assert Enum.any?(rest, fn m -> m.role == :assistant end)
+      assert Enum.any?(rest, fn m -> m.role == :tool and m.tool_call_id == "c3" end)
+
+      # No orphan `:tool` at the slice head: every `:tool` in `rest` must
+      # have a paired assistant present in `rest`.
+      assistant_ids =
+        rest
+        |> Enum.flat_map(fn
+          %{role: :assistant, tool_calls: calls} when is_list(calls) ->
+            Enum.map(calls, & &1.id)
+
+          _ ->
+            []
+        end)
+        |> MapSet.new()
+
+      tool_msgs = Enum.filter(rest, &(&1.role == :tool))
+
+      Enum.each(tool_msgs, fn t ->
+        assert MapSet.member?(assistant_ids, t.tool_call_id),
+               "orphan :tool message at id=#{inspect(t.tool_call_id)} in trimmed slice"
+      end)
+    end
+
+    test "drops orphan :tool message at slice head (no matching assistant in slice)" do
+      # Recent slice begins with `t/c-orphan` whose paired assistant was
+      # trimmed away. The orphan must be dropped — strict providers reject it.
+      msgs = [
+        u("first"),
+        assistant_call("c-trimmed-1"),
+        tool_result("c-trimmed-1"),
+        assistant_call("c-trimmed-2"),
+        # The orphan: its paired assistant won't be in the recent slice.
+        tool_result("c-orphan"),
+        assistant_call("c-keep"),
+        tool_result("c-keep")
+      ]
+
+      opts =
+        default_trim_opts(trigger: [turns: 1], keep_recent_turns: 1, keep_initial_user: true)
+
+      assert {trimmed, stats} = Trim.run(msgs, ctx(turn: 5), opts)
+      assert stats.triggered == true
+
+      # Initial user is kept; the slice that follows must NOT lead with an
+      # orphan `:tool`.
+      [_first | rest] = trimmed
+
+      refute match?([%{role: :tool, tool_call_id: "c-orphan"} | _], rest)
+    end
+
+    test "complete assistant+tool pair leading the slice is preserved" do
+      # Without an initial-user message, the recent slice can legitimately
+      # lead with an assistant-with-tool_calls + tool pair. Provider validity
+      # only requires every tool_use to have a paired tool_result — it does
+      # not require the slice to start with `:user`.
+      msgs = [
+        a("warmup-a"),
+        u("warmup-u"),
+        assistant_call("p1"),
+        tool_result("p1"),
+        assistant_call("p2"),
+        tool_result("p2")
+      ]
+
+      opts =
+        default_trim_opts(trigger: [turns: 1], keep_recent_turns: 2, keep_initial_user: false)
+
+      assert {trimmed, _stats} = Trim.run(msgs, ctx(turn: 5), opts)
+
+      # Slice ends with the most recent pair.
+      assert List.last(trimmed) == tool_result("p2")
+      assert Enum.any?(trimmed, &(&1.role == :assistant and match?(%{tool_calls: [_ | _]}, &1)))
+    end
+  end
+
   describe "build_context/2" do
     test "uses default token counter when none provided" do
       built = Compaction.build_context([turn: 2, max_turns: 10], [])

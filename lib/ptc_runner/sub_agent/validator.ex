@@ -52,6 +52,8 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_format_options!(opts)
     validate_builtin_tools!(opts)
     validate_output!(opts)
+    validate_ptc_transport!(opts)
+    validate_reserved_tool_names!(opts)
     validate_thinking!(opts)
     validate_memory_strategy!(opts)
     validate_max_tool_calls!(opts)
@@ -289,6 +291,54 @@ defmodule PtcRunner.SubAgent.Validator do
         :ok
     end
   end
+
+  defp validate_ptc_transport!(opts) do
+    case Keyword.fetch(opts, :ptc_transport) do
+      :error ->
+        :ok
+
+      {:ok, transport} when transport in [:content, :tool_call] ->
+        validate_ptc_transport_compatibility!(transport, opts)
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "ptc_transport must be :content or :tool_call, got #{inspect(other)}"
+    end
+  end
+
+  defp validate_ptc_transport_compatibility!(_transport, opts) do
+    case Keyword.fetch(opts, :output) do
+      {:ok, :text} ->
+        raise ArgumentError,
+              "ptc_transport cannot be set with output: :text — ptc_transport applies only to output: :ptc_lisp"
+
+      _ ->
+        :ok
+    end
+  end
+
+  # Reserve `ptc_lisp_execute` as a tool name globally — see Phase 1 of
+  # docs/plans/ptc-lisp-tool-call-transport.md (R4). The reservation applies
+  # regardless of `ptc_transport` value or `output` mode so that adding the
+  # transport in a later phase cannot collide with a user-defined tool.
+  defp validate_reserved_tool_names!(opts) do
+    case Keyword.fetch(opts, :tools) do
+      {:ok, tools} when is_map(tools) ->
+        if Enum.any?(tools, fn {name, _value} -> reserved_tool_name?(name) end) do
+          raise ArgumentError,
+                "tool name \"ptc_lisp_execute\" is reserved by PtcRunner — choose a different name"
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp reserved_tool_name?(:ptc_lisp_execute), do: true
+  defp reserved_tool_name?("ptc_lisp_execute"), do: true
+  defp reserved_tool_name?(_), do: false
 
   defp validate_text_mode_constraints!(opts) do
     # Text mode: no compaction, no firewall fields (when signature present)

@@ -1,8 +1,10 @@
 defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
+  alias PtcRunner.SubAgent.Loop.TurnFeedback
 
   describe "turn feedback format" do
     test "shows correct turn number, remaining count, and advance warning" do
@@ -345,6 +347,310 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert_raise ArgumentError, ~r/progress_fn must return/, fn ->
         Loop.run(agent, llm: llm, context: %{})
       end
+    end
+  end
+
+  describe "execution_feedback/3" do
+    # Minimal state shape consumed by execution_feedback/3 (only :memory is read).
+    # append_turn_info / append_progress are intentionally NOT exercised here —
+    # those are layered by format/3 and must not appear in execution_feedback/3
+    # output (this is the Phase 4 parity requirement).
+    defp build_state(memory \\ %{}) do
+      %{
+        memory: memory,
+        summaries: %{},
+        turn: 1,
+        work_turns_remaining: 5,
+        retry_turns_remaining: 0,
+        progress_state: nil
+      }
+    end
+
+    defp build_lisp_step(opts) do
+      %Step{
+        return: Keyword.get(opts, :return),
+        memory: Keyword.get(opts, :memory, %{}),
+        prints: Keyword.get(opts, :prints, []),
+        tool_calls: Keyword.get(opts, :tool_calls, []),
+        summaries: Keyword.get(opts, :summaries, %{})
+      }
+    end
+
+    test "returns the documented shape with all keys present" do
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: 42,
+          memory: %{items: [1, 2, 3]},
+          prints: ["hello"]
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert is_binary(result.feedback)
+      assert is_list(result.prints)
+      assert Map.has_key?(result, :result)
+      assert is_map(result.memory)
+      assert Map.has_key?(result.memory, :changed)
+      assert Map.has_key?(result.memory, :stored_keys)
+      assert Map.has_key?(result.memory, :truncated)
+      assert is_boolean(result.truncated)
+    end
+
+    test "memory.changed includes only new/changed bindings, not unchanged ones" do
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
+      # Previous memory had stable=10; current adds new_var and bumps stable→20.
+      state = build_state(%{stable: 10, untouched: "same"})
+
+      lisp_step =
+        build_lisp_step(
+          return: nil,
+          memory: %{stable: 20, untouched: "same", new_var: "fresh"}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert Map.has_key?(result.memory.changed, "stable")
+      assert Map.has_key?(result.memory.changed, "new_var")
+      refute Map.has_key?(result.memory.changed, "untouched")
+    end
+
+    test "memory.stored_keys lists every current memory binding, sorted" do
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: nil,
+          memory: %{zeta: 1, alpha: 2, mu: 3}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.memory.stored_keys == ["alpha", "mu", "zeta"]
+    end
+
+    test "memory.truncated and top-level truncated flag oversize previews" do
+      # Force preview_max small so a long binding value triggers truncation.
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 20]
+        )
+
+      state = build_state()
+      big_list = Enum.to_list(1..200)
+
+      lisp_step =
+        build_lisp_step(
+          return: nil,
+          memory: %{huge: big_list}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.memory.truncated == true
+      assert result.truncated == true
+      assert result.feedback =~ "truncated"
+    end
+
+    test "top-level truncated flag also reflects prints truncation" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [feedback_max_chars: 20]
+        )
+
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(prints: ["a very long line of printed output that exceeds twenty bytes"])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == true
+      assert result.feedback =~ "truncated"
+    end
+
+    test "feedback string excludes append_turn_info output" do
+      # Multi-turn agent — format/3 would append "Turn 2 of 5 ..." style info.
+      # execution_feedback/3 must NOT include any of that.
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 5)
+      state = build_state()
+
+      lisp_step = build_lisp_step(return: 42)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      refute result.feedback =~ "Turn "
+      refute result.feedback =~ "remaining"
+      refute result.feedback =~ "FINAL WORK TURN"
+      refute result.feedback =~ "next turn is your LAST"
+    end
+
+    test "feedback string excludes append_progress output even with custom progress_fn" do
+      # This is the Phase 4 parity test: a user-set progress_fn must not leak
+      # into execution_feedback/3's output, but format/3 must still include it.
+      progress_fn = fn _input, state ->
+        {"PROGRESS_MARKER_DO_NOT_LEAK", state}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 5,
+          progress_fn: progress_fn
+        )
+
+      state = build_state()
+      lisp_step = build_lisp_step(return: 42)
+
+      # execution_feedback/3 must NOT contain the progress marker.
+      execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
+      refute execution.feedback =~ "PROGRESS_MARKER_DO_NOT_LEAK"
+
+      # format/3 (the wrapper) MUST contain it — proves the parity gap is real.
+      {format_feedback, _truncated, _progress_state} =
+        TurnFeedback.format(agent, state, lisp_step)
+
+      assert format_feedback =~ "PROGRESS_MARKER_DO_NOT_LEAK"
+    end
+
+    test "result preview is rendered for non-Var return values on multi-turn agents" do
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
+      state = build_state()
+      lisp_step = build_lisp_step(return: [1, 2, 3])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=>"
+      assert result.feedback =~ "user=>"
+    end
+
+    test ":result is non-nil when prints is non-empty AND return is set (multi-turn)" do
+      # Phase 4 needs the structured :result field even when there is println
+      # output. format/3's human-readable feedback string still suppresses the
+      # "user=> ..." preview in this case (parity preserved by other tests).
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 5)
+      state = build_state()
+      lisp_step = build_lisp_step(return: 42, prints: ["hello"])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=> 42"
+    end
+
+    test ":result is non-nil for max_turns: 1 agents that returned a value" do
+      # Phase 4 needs the structured :result field even for single-turn agents.
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+      lisp_step = build_lisp_step(return: [1, 2, 3])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=>"
+      assert result.result =~ "[1 2 3]"
+    end
+
+    test ":memory.changed is populated for max_turns: 1 agents with changed bindings" do
+      # Phase 4 needs the structured :memory.changed field even for single-turn
+      # agents. format/3's human-readable feedback string still suppresses the
+      # "Stored: ..." hint for max_turns: 1 (parity preserved).
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: nil,
+          memory: %{items: [1, 2, 3], count: 3}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert Map.has_key?(result.memory.changed, "items")
+      assert Map.has_key?(result.memory.changed, "count")
+    end
+
+    test ":result is non-nil for single-turn agent with both prints AND return" do
+      # Worst-case combination: max_turns: 1 (memory hint suppressed) AND
+      # prints non-empty (result preview suppressed). Both structured fields
+      # must still be populated for Phase 4's tool-result JSON.
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 1)
+      state = build_state()
+
+      lisp_step =
+        build_lisp_step(
+          return: %{ok: true},
+          prints: ["working..."],
+          memory: %{step: "done"}
+        )
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.result =~ "user=>"
+      assert Map.has_key?(result.memory.changed, "step")
+    end
+
+    test "top-level truncated flag reflects result-preview truncation" do
+      # Force a small preview_max so a long return value triggers truncation
+      # of the :result field, while prints/memory remain untruncated.
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 10]
+        )
+
+      state = build_state()
+      big_list = Enum.to_list(1..200)
+      lisp_step = build_lisp_step(return: big_list)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == true
+      assert result.result =~ "... (truncated, use println on specific fields)"
+      # Sanity: this case isn't being detected via prints/memory channels.
+      assert result.memory.truncated == false
+    end
+
+    test "top-level truncated flag is false when result fits and prints/memory untruncated" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 250]
+        )
+
+      state = build_state()
+      lisp_step = build_lisp_step(return: 42, memory: %{x: 1}, prints: ["hi"])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == false
+      assert result.memory.truncated == false
+      assert result.result =~ "user=> 42"
+      refute result.result =~ "truncated"
+    end
+
+    test "stored_keys is empty list when memory is empty" do
+      agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
+      state = build_state()
+      lisp_step = build_lisp_step(memory: %{})
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.memory.stored_keys == []
+      assert result.memory.changed == %{}
+      assert result.memory.truncated == false
     end
   end
 end

@@ -267,6 +267,7 @@ defmodule PtcRunner.SubAgent do
         :format_options,
         :float_precision,
         :output,
+        :ptc_transport,
         :memory_strategy,
         :max_tool_calls,
         :plan,
@@ -302,6 +303,7 @@ defmodule PtcRunner.SubAgent do
         :format_options,
         :float_precision,
         :output,
+        :ptc_transport,
         :memory_strategy,
         :max_tool_calls,
         :plan,
@@ -666,6 +668,29 @@ defmodule PtcRunner.SubAgent do
   end
 
   # Single-shot execution: one LLM call, no tools, expression result returned
+  defp run_single_shot(
+         agent,
+         llm,
+         context,
+         _start_time,
+         _llm_registry,
+         received_field_descriptions,
+         opts
+       )
+       when agent.ptc_transport == :tool_call do
+    # `:tool_call` transport always routes through Loop.run/2 even for
+    # single-shot agents — the single-shot fast path here only handles
+    # the fenced-Clojure (`:content`) response shape.
+    updated_opts =
+      opts
+      |> Keyword.put(:context, context)
+      |> Keyword.put(:llm, llm)
+      |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
+
+    alias PtcRunner.SubAgent.Loop
+    Loop.run(agent, updated_opts)
+  end
+
   defp run_single_shot(
          agent,
          llm,

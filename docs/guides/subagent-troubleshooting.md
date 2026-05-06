@@ -376,9 +376,102 @@ config :ptc_runner, default_max_heap: 200_000_000
 
 Child agents automatically inherit this setting from their parent.
 
+## `ptc_transport: :tool_call` issues
+
+These troubleshooting entries apply only when an agent is constructed with
+`ptc_transport: :tool_call`. The default (`ptc_transport: :content`) is
+unaffected by everything below. For the full transport guide, see
+[PTC-Lisp Transport](subagent-ptc-transport.md).
+
+### `:llm_error` immediately after enabling `ptc_transport: :tool_call`
+
+**Symptom:** `{:error, step}` with `step.fail.reason == :llm_error` and a
+provider-side reason string mentioning that tool calling is unsupported (most
+common with Ollama and openai-compat endpoints without native tool calling).
+
+**Cause:** `:tool_call` requires a provider/model with native tool calling.
+PtcRunner does **not** silently fall back to `:content` — that would obscure a
+real capability mismatch.
+
+**Solutions:**
+
+1. **Switch to a tool-calling-capable model** (most Anthropic, OpenAI,
+   Bedrock-hosted variants, and tool-calling models on OpenRouter qualify).
+   See the per-provider table in
+   [`usage-rules/llm-setup.md`](../../usage-rules/llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling).
+
+2. **Or drop `ptc_transport`** to use the default `:content` transport. It
+   works on every provider PtcRunner supports.
+
+   ```elixir
+   # Was:
+   SubAgent.new(prompt: "...", tools: tools, ptc_transport: :tool_call)
+
+   # If you can't change the model:
+   SubAgent.new(prompt: "...", tools: tools)  # implicit :content
+   ```
+
+### Agent returns fenced Clojure as content in `:tool_call` mode
+
+**Symptom:** In `ptc_transport: :tool_call` you see assistant turns whose
+content is a markdown ` ```clojure ` block instead of a `ptc_lisp_execute`
+tool call. Traces show retry feedback rather than program execution.
+
+**Cause:** The model is trying to use the `:content` transport (fenced code)
+even though the agent is configured for `:tool_call`. **This is expected
+behavior** — PtcRunner deliberately does *not* parse fenced code in
+`:tool_call` mode. Instead, it sends targeted feedback telling the model to
+call the `ptc_lisp_execute` tool with the program.
+
+**Solutions:**
+
+1. **Let the loop self-correct.** One turn of feedback is usually enough for
+   the model to switch to the tool. Each fenced-content recovery turn does
+   consume one `max_turns` slot, so leave headroom in `max_turns:`.
+
+2. **If it persists across multiple turns,** the provider/model is poorly
+   suited for `:tool_call` on this workload. Switch back to the default
+   `ptc_transport: :content` — fenced code becomes the *correct* output again,
+   and you skip an unnecessary recovery loop. `:content` is not a downgrade;
+   it is the right transport for models that don't follow native tool-calling
+   instructions reliably.
+
+3. **Verify the system prompt is being sent.** If the model never sees the
+   "use the `ptc_lisp_execute` tool" guidance, it will default to whatever
+   output style it knows. Check
+   [LLM Returns Prose Instead of Code](#llm-returns-prose-instead-of-code)
+   above for diagnosis steps — they apply equally here.
+
+### `:tool_call` mode is no faster than `:content` (or is slower)
+
+**Symptom:** You enabled `ptc_transport: :tool_call` expecting a speedup and
+saw the same latency, or worse, more LLM turns and higher cost.
+
+**Cause:** This is by design. `:tool_call` is **not** a latency or cost
+optimization. It trades extra LLM turns (call `ptc_lisp_execute`, get tool
+result, return final answer) for native-tool-calling reliability on
+providers/models where that is materially better than fenced-code parsing. A
+workload that finishes in one `:content` turn typically takes two or three in
+`:tool_call`.
+
+**Solutions:**
+
+1. **If latency or cost matters, use `:content`.** It is the default for a
+   reason — *one program, one deterministic orchestration*, single LLM turn.
+
+2. **Reach for `:tool_call` only when** native tool calling is materially more
+   reliable on your provider/model, *or* when the workload genuinely needs
+   iterative refinement (model inspects an intermediate result before writing
+   the next program). Both cases are real, but neither is the common case.
+
+3. **Measure before standardizing.** If you're not sure which transport fits a
+   workload, run both on a representative input set and compare turn count
+   plus cost. The transports are stable in either direction.
+
 ## See Also
 
 - [Getting Started](subagent-getting-started.md) - Basic SubAgent usage
+- [PTC-Lisp Transport](subagent-ptc-transport.md) - `ptc_transport: :content` vs `:tool_call`
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Context Compaction](subagent-compaction.md) - Pressure-triggered trimming for long-running agents
 - [Core Concepts](subagent-concepts.md) - Context, memory, error handling

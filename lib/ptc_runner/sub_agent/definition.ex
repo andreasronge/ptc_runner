@@ -104,6 +104,19 @@ defmodule PtcRunner.SubAgent.Definition do
   @type output_mode :: :ptc_lisp | :text
 
   @typedoc """
+  Transport mode for `output: :ptc_lisp` agents.
+
+  - `:content` - Default. LLM emits a markdown-fenced PTC-Lisp program in the
+    assistant message content; the loop parses and executes it.
+  - `:tool_call` - LLM invokes the internal `ptc_lisp_execute` native tool with
+    a `program` argument; final answers are returned as direct content and
+    validated against `signature:`. Valid only with `output: :ptc_lisp`.
+
+  See `docs/plans/ptc-lisp-tool-call-transport.md` for the full design.
+  """
+  @type ptc_transport :: :content | :tool_call
+
+  @typedoc """
   Output format options for truncation and display.
 
   Fields:
@@ -160,6 +173,7 @@ defmodule PtcRunner.SubAgent.Definition do
           compaction: compaction_opts(),
           thinking: boolean(),
           output: output_mode(),
+          ptc_transport: ptc_transport(),
           max_tool_calls: pos_integer() | nil,
           pmap_max_concurrency: pos_integer(),
           memory_strategy: :strict | :rollback,
@@ -210,6 +224,7 @@ defmodule PtcRunner.SubAgent.Definition do
     float_precision: 2,
     max_tool_calls: nil,
     output: :ptc_lisp,
+    ptc_transport: :content,
     memory_strategy: :strict,
     plan: [],
     progress_fn: nil,
