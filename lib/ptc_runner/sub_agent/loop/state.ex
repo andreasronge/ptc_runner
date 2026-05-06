@@ -124,6 +124,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
     tool_schemas: nil,
     normalized_tools_map: nil,
     api_name_map: nil,
+    tools_meta: nil,
+    combined_mode: false,
     total_tool_calls: 0,
     all_tool_calls: []
   ]
@@ -202,6 +204,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           tool_schemas: [map()] | nil,
           normalized_tools_map: map() | nil,
           api_name_map: map() | nil,
+          tools_meta: %{optional(String.t()) => PtcRunner.Tool.t()} | nil,
+          combined_mode: boolean(),
           total_tool_calls: non_neg_integer(),
           all_tool_calls: [map()]
         }
