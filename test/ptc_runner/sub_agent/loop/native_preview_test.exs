@@ -219,6 +219,46 @@ defmodule PtcRunner.SubAgent.Loop.NativePreviewTest do
 
       assert length(preview["rows"]) == 20
     end
+
+    # Tier 3.5 Fix 6: rows containing temporal structs (DateTime, Date,
+    # Time, NaiveDateTime) must be normalized via PtcRunner.Temporal.walk/1
+    # before reaching Jason — those structs have no Jason encoder and
+    # would otherwise crash the preview builder.
+    test "rows with %DateTime{} and %Date{} values: temporal structs become ISO 8601 strings" do
+      {:ok, dt, 0} = DateTime.from_iso8601("2026-05-06T12:00:00Z")
+      d = ~D[2026-05-06]
+
+      rows = [
+        %{"id" => 1, "created_at" => dt, "due" => d},
+        %{"id" => 2, "created_at" => dt, "due" => d}
+      ]
+
+      {:ok, preview} =
+        NativePreview.build(tool("t", native_result: [preview: :rows, limit: 5]), rows, %{})
+
+      # Encodable: no Jason crash.
+      assert is_binary(Jason.encode!(preview))
+
+      [first_row | _] = preview["rows"]
+      assert first_row["created_at"] == "2026-05-06T12:00:00Z"
+      assert first_row["due"] == "2026-05-06"
+      assert first_row["id"] == 1
+    end
+
+    test "rows with %NaiveDateTime{} and %Time{} values: also normalize to ISO 8601" do
+      ndt = ~N[2026-05-06 12:00:00]
+      t = ~T[12:00:00]
+
+      rows = [%{"started_at" => ndt, "open_at" => t}]
+
+      {:ok, preview} =
+        NativePreview.build(tool("t", native_result: [preview: :rows]), rows, %{})
+
+      assert is_binary(Jason.encode!(preview))
+      [first_row | _] = preview["rows"]
+      assert first_row["started_at"] == "2026-05-06T12:00:00"
+      assert first_row["open_at"] == "12:00:00"
+    end
   end
 
   # ---------------------------------------------------------------------------
