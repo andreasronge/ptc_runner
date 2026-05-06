@@ -598,6 +598,49 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert Map.has_key?(result.memory.changed, "step")
     end
 
+    test "top-level truncated flag reflects result-preview truncation" do
+      # Force a small preview_max so a long return value triggers truncation
+      # of the :result field, while prints/memory remain untruncated.
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 10]
+        )
+
+      state = build_state()
+      big_list = Enum.to_list(1..200)
+      lisp_step = build_lisp_step(return: big_list)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == true
+      assert result.result =~ "... (truncated, use println on specific fields)"
+      # Sanity: this case isn't being detected via prints/memory channels.
+      assert result.memory.truncated == false
+    end
+
+    test "top-level truncated flag is false when result fits and prints/memory untruncated" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 250]
+        )
+
+      state = build_state()
+      lisp_step = build_lisp_step(return: 42, memory: %{x: 1}, prints: ["hi"])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == false
+      assert result.memory.truncated == false
+      assert result.result =~ "user=> 42"
+      refute result.result =~ "truncated"
+    end
+
     test "stored_keys is empty list when memory is empty" do
       agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
       state = build_state()

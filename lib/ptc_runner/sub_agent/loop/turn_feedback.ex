@@ -212,7 +212,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     # below still applies the historical suppression rules (single-turn agents and
     # agents with println output omit the result preview / stored hint) so that
     # content-mode parity is preserved byte-for-byte.
-    result_preview_unconditional =
+    {result_preview_unconditional, result_truncated?} =
       format_result_preview_unconditional(lisp_step, preview_max)
 
     {memory_hint_unconditional, memory_changed, memory_truncated?} =
@@ -237,7 +237,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
       |> Enum.reject(&is_nil/1)
       |> Enum.join("\n\n")
 
-    truncated? = prints_truncated? or memory_truncated?
+    truncated? = prints_truncated? or memory_truncated? or result_truncated?
 
     %{
       feedback: feedback,
@@ -331,11 +331,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   defp format_prints(_, _max_chars), do: {nil, false}
 
   # Always renders a result preview when `lisp_step.return` is a non-nil,
-  # non-Var value. Returns the preview string or `nil`. This is the
+  # non-Var value. Returns `{preview_string_or_nil, truncated?}`. This is the
   # "unsuppressed" path used to populate the structured `:result` field of
   # `execution_feedback/3` regardless of `agent.max_turns` or whether prints
-  # are non-empty. The `format_result_preview/4` wrapper applies the
-  # human-feedback suppression rules on top of this.
+  # are non-empty. The boolean propagates to the top-level `:truncated` flag
+  # so Phase 4's tool-result JSON correctly signals an incomplete preview.
+  # The `format_result_preview/4` wrapper applies the human-feedback
+  # suppression rules on top of the string portion only.
   defp format_result_preview_unconditional(lisp_step, preview_max) do
     if lisp_step.return != nil and not var?(lisp_step.return) do
       {text, was_truncated?} = truncate_value(lisp_step.return, preview_max)
@@ -345,7 +347,9 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
           do: "\n... (truncated, use println on specific fields)",
           else: ""
 
-      "user=> #{text}#{hint}"
+      {"user=> #{text}#{hint}", was_truncated?}
+    else
+      {nil, false}
     end
   end
 
