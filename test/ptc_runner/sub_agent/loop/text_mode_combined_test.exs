@@ -36,6 +36,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Definition
+  alias PtcRunner.SubAgent.SystemPrompt
 
   import PtcRunner.TestSupport.SubAgentTestHelpers, only: [tool_calling_llm: 1]
 
@@ -566,6 +567,93 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
       {:ok, step} = SubAgent.run(agent, llm: llm)
 
       assert step.return == "found 3 rows"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Tier 3.5 Fix 2 — reference card reaches the LLM at runtime
+  # ---------------------------------------------------------------------------
+
+  describe "Tier 3.5 Fix 2: PTC-Lisp reference card included in runtime system prompt" do
+    # Pre-fix: text_mode's `build_tool_system_prompt/1` returned just
+    # `Prompts.tool_calling_system()` — the combined-mode card was only
+    # appended by `SystemPrompt.generate_system/2`, which the text-mode
+    # runtime never calls. Result: combined-mode runs sent the
+    # tool-calling system prompt without the new card.
+    test "combined mode: system prompt sent to LLM contains the reference card" do
+      tools = %{
+        "search" =>
+          {fn _ -> [] end, signature: "(q :string) -> [:any]", expose: :both, cache: false}
+      }
+
+      test_pid = self()
+
+      capturing_llm = fn input ->
+        send(test_pid, {:system_prompt, input.system})
+        {:ok, %{content: "done", tokens: %{input: 1, output: 1}}}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "do work",
+          output: :text,
+          ptc_transport: :tool_call,
+          tools: tools,
+          max_turns: 2
+        )
+
+      {:ok, _step} = SubAgent.run(agent, llm: capturing_llm)
+
+      assert_received {:system_prompt, system_prompt}
+      # Static-card pin: `(def name value)` appears in the combined-mode
+      # reference card from priv/prompts/.
+      assert system_prompt =~ "(def name value)"
+      assert system_prompt =~ "<ptc_lisp_reference>"
+    end
+
+    test "ptc_transport: :content (output: :ptc_lisp) — no reference card in tool system prompt" do
+      # `output: :ptc_lisp, ptc_transport: :content` is a separate code
+      # path (not text mode at all), but ensure that any TextMode build
+      # doesn't accidentally include the card. Running a `:ptc_lisp`
+      # agent goes through `Loop.PtcToolCall` / equivalent, not
+      # TextMode; that's already proven by the validator + system
+      # prompt tests. Here we pin: `combined_mode_reference_card/1`
+      # returns nil for output: :ptc_lisp.
+      agent =
+        SubAgent.new(
+          prompt: "do work",
+          output: :ptc_lisp,
+          ptc_transport: :tool_call
+        )
+
+      assert SystemPrompt.combined_mode_reference_card(agent) == nil
+    end
+
+    test "pure text mode — no reference card in system prompt" do
+      tools = %{
+        "search" => {fn _ -> [] end, signature: "(q :string) -> [:any]"}
+      }
+
+      test_pid = self()
+
+      capturing_llm = fn input ->
+        send(test_pid, {:system_prompt, input.system})
+        {:ok, %{content: "done", tokens: %{input: 1, output: 1}}}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt: "do work",
+          output: :text,
+          tools: tools,
+          max_turns: 2
+        )
+
+      {:ok, _step} = SubAgent.run(agent, llm: capturing_llm)
+
+      assert_received {:system_prompt, system_prompt}
+      refute system_prompt =~ "(def name value)"
+      refute system_prompt =~ "<ptc_lisp_reference>"
     end
   end
 

@@ -36,14 +36,6 @@ SubAgent mission. The history is just an Elixir list owned by the cell.
 > "JSON mode" isn't a separate mode — it's `:text` with a complex return type. The
 > Elixir docs call this "structured text mode" to avoid confusion.
 
-`:ptc_lisp` mode has two **transports** that change only how the LLM ships its
-program — not the program itself, not the sandbox, not how app tools are called.
-The default `ptc_transport: :content` parses a markdown-fenced block from the
-assistant message; the opt-in `ptc_transport: :tool_call` ships the program as
-the argument to a single internal `ptc_lisp_execute` native tool call. App tools
-stay inside PTC-Lisp in **both** transports — only `ptc_lisp_execute` is
-exposed natively. This livebook demos both at the end of the scenario.
-
 ## Setup
 
 ```elixir
@@ -318,83 +310,13 @@ pick those up from the system prompt; weaker ones may invent functions
 (`parse-iso`) and fail. If the trace shows an "Undefined variable" error,
 that's the cause.
 
-## Turn 4 — PTC-Lisp with `ptc_transport: :tool_call`
-
-> User: *"Same question as Turn 3, but route the program through native tool calling."*
-
-Same workload as Turn 3 — list tickets, parse timestamps, filter — but with
-`ptc_transport: :tool_call`. PtcRunner exposes one internal native tool
-(`ptc_lisp_execute`) to the provider; the LLM puts the PTC-Lisp source in the
-tool's `program` argument. The sandbox runs it identically to Turn 3, and the
-final answer can come back either as a `(return v)` from inside the program or
-as a direct content message after one or more `ptc_lisp_execute` calls.
-
-```elixir
-user_message_4 = "Same question as Turn 3, but use the native tool transport."
-history = ConvoLog.append(history, :user, user_message_4)
-
-{:ok, step4} =
-  SubAgent.run(
-    user_message_4,
-    signature:     "[{id :int, customer :string, age_hours :int}]",
-    tools:         inbox_tools,
-    ptc_transport: :tool_call,
-    llm:           my_llm,
-    max_turns:     6
-  )
-
-answer_4 = step4.return
-history = ConvoLog.append(history, :assistant, answer_4)
-
-ConvoLog.print(history)
-```
-
-Inspect the trace to see *both* layers — the native `ptc_lisp_execute` tool
-call on the provider wire and the app-tool calls (`tool/list_tickets`,
-`tool/now`) the program made inside the sandbox:
-
-```elixir
-SubAgent.Debug.print_trace(step4)
-```
-
-The two layers stay separate by design:
-
-| Layer | What it is | How the LLM invokes it |
-| ----- | ---------- | ---------------------- |
-| Provider-native | One tool: `ptc_lisp_execute`. | Native function-calling on the provider. |
-| PTC-Lisp | All app tools registered on the agent. | From inside the program: `(tool/name ...)`. |
-
-App tools never become provider-native tools. That preserves the sandbox,
-`max_tool_calls`, the tool cache, and `(pmap ...)` / `(pcalls ...)` parallel
-execution.
-
-### When to pick which transport
-
-* **`:content` (default)** — *one program, one deterministic orchestration.*
-  Lower latency, lower cost, single LLM turn. Stay here unless you have a
-  specific reason to switch.
-* **`:tool_call` (opt-in)** — providers/models where native tool calling is
-  materially more reliable than fenced-code parsing, *or* workloads that
-  genuinely need iterative refinement across multiple program executions
-  (model inspects an intermediate result before writing the next program).
-  The extra round-tripping is a tradeoff, not an upgrade.
-
-`:tool_call` requires a provider/model with native tool calling. Models without
-it surface as `:llm_error` — there is no automatic fallback. Re-run this cell
-with `ptc_transport: :content` (or just delete the option) to use the default
-transport, which works on every provider PtcRunner supports.
-
-For the full decision guide, see the
-[PTC-Lisp Transport guide](https://hexdocs.pm/ptc_runner/subagent-ptc-transport.html).
-
 ## What this scenario teaches
 
-| Turn | Mode                                   | Why this mode                                                                                  |
-| ---- | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 1    | `:text` (plain)                        | Free-form summary. No structure to validate. Native tool call to fetch the ticket.             |
-| 2    | `:text` (complex sig)                  | Structured extraction. Native tool-calling loop (tool call → result → final JSON answer).      |
-| 3    | `:ptc_lisp` (`ptc_transport: :content`)   | Filter + sort + arithmetic over a list. One program, one turn, fenced-clojure transport.       |
-| 4    | `:ptc_lisp` (`ptc_transport: :tool_call`) | Same workload, native tool-call transport. Use when fenced-code parsing isn't reliable enough. |
+| Turn | Mode                  | Why this mode                                                                                 |
+| ---- | --------------------- | --------------------------------------------------------------------------------------------- |
+| 1    | `:text` (plain)       | Free-form summary. No structure to validate. Native tool call to fetch the ticket.            |
+| 2    | `:text` (complex sig) | Structured extraction. Native tool-calling loop (tool call → result → final JSON answer). |
+| 3    | `:ptc_lisp`           | Filter + sort + arithmetic over a list. The LLM writes the program; the sandbox runs it.      |
 
 The router question — *"how does the app know which mode to pick?"* — is a
 separate concern. Three real-world options:
@@ -464,11 +386,9 @@ pretending the library is a chat library.
 * [SubAgent Examples](ptc_runner_llm_agent.livemd) — broader survey of the SubAgent API
 * [Text Mode guide](https://hexdocs.pm/ptc_runner/subagent-text-mode.html) — all four
   variants of `:text` mode (plain / structured / tool+text / tool+structured)
-* [PTC-Lisp Transport guide](https://hexdocs.pm/ptc_runner/subagent-ptc-transport.html) —
-  full decision: `ptc_transport: :content` (default) vs `:tool_call` (opt-in)
 * [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context,
   memory, firewall fields
 * [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
   each mission did
 
-<!-- livebook:{"offset":14131,"stamp":{"token":"XCP.rJtMCFzSA-nLadQkHrbBh8qr-re3HqS01nKtU6F0ZFkOz8W2DWZvloLxK55Xx3B5jaEBZYNfop0nOrNe5iMiYLudPzKNUl9W_JI7m5A-TWc1dmC0Zvuk1ExrDMUc","version":2}} -->
+<!-- livebook:{"offset":14131,"stamp":{"token":"XCP.OENxvqTteVFq5Uhth3LP88RjgSZo0pmnf9tvHE7IwHcd2tVHestCfZzESi4vEyH5h4B1oJ75ETHXXwBFFRkzUlG_50iFnQ3KzoNlFdwRuzPjyp_rfYzBjymgC9X9","version":2}} -->

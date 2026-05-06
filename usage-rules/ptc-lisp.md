@@ -101,6 +101,44 @@ atoms), refs, agents, lazy seqs (everything is eager), macros, namespaces.
 | `tool/name` | Calls a registered tool. |
 | `*1`, `*2`, `*3` | Last 1/2/3 turn results (multi-turn agents only). |
 
+## Temporal values
+
+Pass Elixir temporal structs (`DateTime`, `NaiveDateTime`, `Date`, `Time`)
+directly in `context:` and tool results. PtcRunner normalizes them to ISO 8601
+strings at LLM-facing boundaries (templates, data inventory, tool result
+encoding, `:string` coercion, and PTC-Lisp `(str ...)`). Do not pre-render
+Elixir sigils like `"~U[2026-05-03 09:14:00Z]"` for the LLM.
+
+```elixir
+{:ok, step} =
+  PtcRunner.SubAgent.run(
+    "How old is this event in hours?",
+    context: %{opened_at: ~U[2026-05-03 09:14:00Z]},
+    tools: %{"now" => fn _args -> ~U[2026-05-05 10:00:00Z] end},
+    llm: llm
+  )
+```
+
+In PTC-Lisp, use the Java-shaped interop functions the model is likely to know:
+
+```clojure
+(def opened-ms (.getTime (java.util.Date. data/opened_at)))
+(def now-ms (.getTime (java.util.Date. (tool/now))))
+(return {:age_hours (int (/ (- now-ms opened-ms) 3600000))})
+```
+
+Supported date/time interop includes:
+
+- `(java.util.Date.)` for current UTC time.
+- `(java.util.Date. value)` for ISO 8601 strings, RFC 2822 strings, Unix
+  seconds/milliseconds, and Elixir `DateTime` / `NaiveDateTime` / `Date` values.
+- `(.getTime date)` for Unix milliseconds.
+- `(java.time.LocalDate/parse "2026-05-03")` for ISO dates.
+- `(.isBefore a b)` / `(.isAfter a b)` for same-type date comparisons.
+
+Mixed `Date` vs `DateTime` comparisons raise; convert both sides to the same
+shape first.
+
 ## Memory contract
 
 The top-level program's value passes through to `step.return` **unchanged** —
