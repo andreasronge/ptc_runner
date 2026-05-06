@@ -132,6 +132,41 @@ PtcRunner.SubAgent.run(agent,
 `retry_turns` is unrelated — it's for **validation** retries after the LLM's
 return value fails the signature.
 
+## `ptc_transport: :tool_call` and provider tool calling
+
+`SubAgent.new(ptc_transport: :tool_call, ...)` requires a provider/model with
+**native tool calling** — PtcRunner ships the LLM a single internal tool
+(`ptc_lisp_execute`) and expects native `tool_calls` back. See
+[`usage-rules/subagent.md`](subagent.md#ptc-lisp-transport-ptc_transport)
+for the full transport semantics; this section covers only provider
+compatibility.
+
+| Provider prefix (in `PtcRunner.LLM.callback/2`) | `ptc_transport: :tool_call` |
+|--------------------------------------------------|------------------------------|
+| `anthropic:` (most Claude models)                | supported                   |
+| `openai:` (most GPT-4 / GPT-4.1 / o-series)      | supported                   |
+| `bedrock:` (Anthropic + supported OpenAI variants on Bedrock) | supported     |
+| `openrouter:<provider>/<model>`                  | supported when the upstream model is itself a tool-calling model — passes through whatever the upstream offers |
+| `ollama:` (most local models)                    | not supported               |
+| `openai-compat:` against endpoints without tool-calling | not supported        |
+
+Caveats apply at the *model* level, not the provider level: a
+tool-calling-capable provider can still host non-tool-calling models. If you
+pin a specific model ID, check the provider's docs for native tool-calling
+support before flipping `ptc_transport: :tool_call`.
+
+If you call a provider/model that doesn't expose native tool calling while
+`ptc_transport: :tool_call` is set, the run surfaces as `{:error, %Step{}}`
+with `step.fail.reason == :llm_error` and the provider's own reason string in
+`step.fail.message` (Ollama and openai-compat without tools are typical
+sources). **There is no automatic fallback to `:content`** — callers either
+pick a different model or change `ptc_transport`. This is intentional:
+silently downgrading the transport would obscure capability mismatches.
+
+When in doubt, leave `ptc_transport` at its default (`:content`) — it works
+across every provider PtcRunner supports, including those without native tool
+calling.
+
 ## Don't
 
 - Don't call `PtcRunner.LLM.callback/2` unless `req_llm` is in deps **or**

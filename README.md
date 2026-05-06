@@ -170,6 +170,17 @@ step.return["result"]  #=> 35
 
 For full control (or anonymous functions), pass an explicit signature string instead. See the [Text Mode guide](docs/guides/subagent-text-mode.md) for all four variants (plain text, JSON, tool+text, tool+JSON).
 
+### PTC-Lisp Transport (`ptc_transport`)
+
+For `output: :ptc_lisp` agents, `ptc_transport` controls how the LLM ships its program. `:content` (default) parses a markdown-fenced PTC-Lisp block from the assistant message — *one program, one deterministic orchestration*, lower latency and cost in a single LLM turn. `:tool_call` (opt-in) exposes a single internal `ptc_lisp_execute` tool to the provider's native tool-calling API; the model can call it zero or more times before returning a final answer directly. App tools stay inside PTC-Lisp in **both** transports — only `ptc_lisp_execute` is exposed natively.
+
+| Transport | Default? | Use when |
+|-----------|----------|----------|
+| `:content` | yes | One PTC-Lisp program is enough. Lowest latency and cost. |
+| `:tool_call` | opt-in | Native tool calling is materially more reliable than fenced-code parsing on your provider/model, **or** the workload genuinely needs iterative refinement across multiple program executions. |
+
+`:tool_call` turns one program into a ReAct-style loop: that's a tradeoff, not an upgrade. Pay for it deliberately. Models without native tool calling cannot use `:tool_call` — those runs surface as `:llm_error`, with no fallback. See the [PTC-Lisp Transport guide](docs/guides/subagent-ptc-transport.md) for the full decision and a runnable walkthrough.
+
 ### Signatures and JSON Schema
 
 Signatures are compact type contracts that validate SubAgent inputs and outputs:
@@ -224,6 +235,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[Getting Started](docs/guides/subagent-getting-started.md)** - Build your first SubAgent
 - **[LLM Setup](docs/guides/subagent-llm-setup.md)** - Providers, streaming, custom adapters, framework integration
 - **[Core Concepts](docs/guides/subagent-concepts.md)** - Context, memory, and the firewall convention
+- **[PTC-Lisp Transport](docs/guides/subagent-ptc-transport.md)** - `ptc_transport: :content` (default) vs `:tool_call` (opt-in)
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
