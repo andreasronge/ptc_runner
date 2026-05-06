@@ -159,10 +159,12 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
 
   defp align_user_leading([%{role: :user} | _] = recent, _all, _skip, _n), do: recent
 
-  defp align_user_leading([%{role: :assistant} | rest], all, skip, n) do
-    # Drop one more from the front so the slice starts with :user. If that
-    # would over-shrink and re-include the head we already kept (or below 0),
-    # just return what's left.
+  # Drop any non-:user leading messages to keep the slice provider-valid.
+  # In ptc_transport: :tool_call this also strips orphan `:tool` / assistant-
+  # with-tool_calls messages whose paired counterpart was trimmed away — a
+  # role: :tool message without its matching assistant is rejected by strict
+  # providers (Anthropic), so dropping until :user is the correctness path.
+  defp align_user_leading([%{role: role} | rest], all, skip, n) when role != :user do
     available = length(all) - skip
     next_n = min(n - 1, available)
 
@@ -175,8 +177,8 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
   end
 
   defp estimate_tokens(messages, token_counter) do
-    Enum.reduce(messages, 0, fn %{content: content}, acc ->
-      acc + token_counter.(content)
+    Enum.reduce(messages, 0, fn msg, acc ->
+      acc + token_counter.(message_text_for_estimate(msg))
     end)
   end
 
@@ -186,9 +188,18 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
         false
 
       budget when is_integer(budget) ->
-        Enum.any?(messages, fn %{content: content} -> token_counter.(content) > budget end)
+        Enum.any?(messages, fn msg ->
+          token_counter.(message_text_for_estimate(msg)) > budget
+        end)
     end
   end
+
+  # Token estimation must tolerate the new ptc_transport: :tool_call message
+  # shape, where assistant messages may carry `content: nil` alongside
+  # `tool_calls` and role: :tool messages carry tool-result JSON in `content`.
+  defp message_text_for_estimate(%{content: content}) when is_binary(content), do: content
+  defp message_text_for_estimate(%{content: nil}), do: ""
+  defp message_text_for_estimate(_msg), do: ""
 
   # Stats shape stays consistent whether we trimmed or not — same keys, same
   # types — so callers can read every field without `Map.has_key?` guards.

@@ -114,7 +114,7 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
     end
   end
 
-  describe "Phase 1 runtime guard (loop.ex)" do
+  describe "Phase 4 — :tool_call transport executes end-to-end" do
     test "constructing a :tool_call agent succeeds" do
       agent =
         SubAgent.new(
@@ -126,17 +126,18 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
       assert agent.ptc_transport == :tool_call
     end
 
-    test "executing a :tool_call agent raises before LLM is called" do
-      test_pid = self()
-
-      # llm callback fails the test if invoked, proving the guard fires first.
+    test ":tool_call agent runs through Loop and returns via (return ...)" do
       llm = fn _input ->
-        send(test_pid, :llm_invoked)
-        {:ok, "should not be reached"}
+        {:ok,
+         %{
+           content: nil,
+           tool_calls: [
+             %{id: "call_1", name: "ptc_lisp_execute", args: %{"program" => "(return 42)"}}
+           ],
+           tokens: %{input: 0, output: 0}
+         }}
       end
 
-      # max_turns: 2 forces routing through Loop.run/2 (not the single-shot
-      # fast path in SubAgent.run/2 which bypasses Loop).
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -144,27 +145,22 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
           max_turns: 2
         )
 
-      assert_raise ArgumentError,
-                   "ptc_transport: :tool_call not yet implemented",
-                   fn ->
-                     SubAgent.run(agent, llm: llm)
-                   end
-
-      refute_received :llm_invoked
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == 42
     end
 
-    test "executing a :tool_call agent on the single-shot fast path also raises" do
-      test_pid = self()
-
-      # llm callback fails the test if invoked, proving the guard fires first.
+    test ":tool_call agent on single-shot fast path routes through Loop" do
       llm = fn _input ->
-        send(test_pid, :llm_invoked)
-        {:ok, "should not be reached"}
+        {:ok,
+         %{
+           content: nil,
+           tool_calls: [
+             %{id: "call_1", name: "ptc_lisp_execute", args: %{"program" => ~s|(return "hi")|}}
+           ],
+           tokens: %{input: 0, output: 0}
+         }}
       end
 
-      # max_turns: 1, no tools, retry_turns: 0 routes through SubAgent.run/2's
-      # single-shot fast path (run_single_shot), bypassing Loop.run/2. The
-      # single-shot guard must mirror the Loop guard.
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -174,34 +170,35 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
           tools: %{}
         )
 
-      assert_raise ArgumentError,
-                   "ptc_transport: :tool_call not yet implemented",
-                   fn ->
-                     SubAgent.run(agent, llm: llm)
-                   end
-
-      refute_received :llm_invoked
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == "hi"
     end
 
-    test "string-form SubAgent.run/2 forwards :ptc_transport and triggers guard" do
-      # Regression: prior to this fix, the string-form clause's Keyword.take/drop
-      # lists omitted :ptc_transport, so the option was silently dropped and the
-      # agent fell back to :content. The guard at run_single_shot/7 never fired.
-      llm = fn _ -> flunk("LLM should not be invoked — guard must fire first") end
+    test "string-form SubAgent.run/2 forwards :ptc_transport and runs through Loop" do
+      # Regression: the string-form clause's Keyword.take/drop lists must
+      # include :ptc_transport so it isn't silently dropped.
+      llm = fn _ ->
+        {:ok,
+         %{
+           content: nil,
+           tool_calls: [
+             %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}}
+           ],
+           tokens: %{input: 0, output: 0}
+         }}
+      end
 
-      assert_raise ArgumentError,
-                   "ptc_transport: :tool_call not yet implemented",
-                   fn ->
-                     SubAgent.run("hello",
-                       ptc_transport: :tool_call,
-                       llm: llm,
-                       max_turns: 1
-                     )
-                   end
+      assert {:ok, step} =
+               SubAgent.run("hello",
+                 ptc_transport: :tool_call,
+                 llm: llm,
+                 max_turns: 1
+               )
+
+      assert step.return == 1
     end
 
-    test ":content transport executes through Loop without the guard firing" do
-      # Sanity check that the guard is gated on :tool_call only.
+    test ":content transport still executes through Loop unchanged" do
       llm = fn _input ->
         {:ok, "```clojure\n(return \"hi\")\n```"}
       end

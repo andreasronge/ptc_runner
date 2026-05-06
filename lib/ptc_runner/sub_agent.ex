@@ -672,16 +672,34 @@ defmodule PtcRunner.SubAgent do
          agent,
          llm,
          context,
+         _start_time,
+         _llm_registry,
+         received_field_descriptions,
+         opts
+       )
+       when agent.ptc_transport == :tool_call do
+    # `:tool_call` transport always routes through Loop.run/2 even for
+    # single-shot agents — the single-shot fast path here only handles
+    # the fenced-Clojure (`:content`) response shape.
+    updated_opts =
+      opts
+      |> Keyword.put(:context, context)
+      |> Keyword.put(:llm, llm)
+      |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
+
+    alias PtcRunner.SubAgent.Loop
+    Loop.run(agent, updated_opts)
+  end
+
+  defp run_single_shot(
+         agent,
+         llm,
+         context,
          start_time,
          llm_registry,
          received_field_descriptions,
          opts
        ) do
-    # Phase 1 runtime guard — removed in Phase 4
-    if agent.ptc_transport == :tool_call do
-      raise ArgumentError, "ptc_transport: :tool_call not yet implemented"
-    end
-
     collect_messages = Keyword.get(opts, :collect_messages, false)
 
     # Expand template in mission

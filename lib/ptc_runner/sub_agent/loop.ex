@@ -125,11 +125,6 @@ defmodule PtcRunner.SubAgent.Loop do
   """
   @spec run(Definition.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(%Definition{} = agent, opts) do
-    # Phase 1 runtime guard — removed in Phase 4
-    if agent.ptc_transport == :tool_call do
-      raise ArgumentError, "ptc_transport: :tool_call not yet implemented"
-    end
-
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -525,7 +520,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Call LLM with telemetry
     case call_llm_with_telemetry(llm, llm_input, state, agent) do
-      {:ok, %{content: content, tokens: tokens}} ->
+      {:ok, %{tokens: tokens} = response} ->
         state_with_metadata =
           state
           |> Metrics.accumulate_tokens(tokens)
@@ -535,7 +530,7 @@ defmodule PtcRunner.SubAgent.Loop do
         # Check budget callback
         case Budget.check_callback(state_with_metadata) do
           :continue ->
-            handle_llm_response(content, agent, state_with_metadata)
+            dispatch_response(response, agent, state_with_metadata)
 
           :stop ->
             # Budget exceeded - return error (no turn to emit)
@@ -663,6 +658,21 @@ defmodule PtcRunner.SubAgent.Loop do
 
       {result, extra_measurements, stop_meta}
     end)
+  end
+
+  # Dispatch the normalized LLM response to the right transport handler.
+  # `:content` mode uses the existing fenced-PTC-Lisp parser path.
+  # `:tool_call` mode delegates to `PtcToolCall.handle_response/3`.
+  @spec dispatch_response(map(), Definition.t(), State.t()) ::
+          {:continue, State.t(), Turn.t()}
+          | {:stop, {:ok | :error, Step.t()}, Turn.t() | nil, map() | nil}
+  defp dispatch_response(response, %{ptc_transport: :tool_call} = agent, state) do
+    PtcToolCall.handle_response(response, agent, state)
+  end
+
+  defp dispatch_response(response, agent, state) do
+    content = Map.get(response, :content) || ""
+    handle_llm_response(content, agent, state)
   end
 
   # Handle LLM response - parse and execute code
