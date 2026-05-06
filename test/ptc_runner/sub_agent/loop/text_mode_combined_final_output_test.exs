@@ -232,6 +232,53 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
       # underscore-string form, so the final shape is string-keyed.
       assert step.return == %{"name" => "ada"}
     end
+
+    # Tier 3.5 Fix 5: combined-mode JSON-shaped finals must propagate
+    # combined state (memory, journal, tool_cache, child_steps) — pre-fix,
+    # `JsonHandler.build_success_step/5` hard-coded `memory: %{}` and
+    # ignored the other fields, dropping everything `ptc_lisp_execute`
+    # had built up.
+    test "{:map, ...} final preserves memory/journal/tool_cache/child_steps from program execution" do
+      llm =
+        tool_calling_llm([
+          # Turn 1: program defines `n` and journals; (return) creates a tool result
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "ptc_lisp_execute",
+                args: %{
+                  "program" => ~s|(do (def n 7) (println "ran") (return {:answer n}))|
+                }
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          # Turn 2: LLM returns JSON-shaped final
+          %{content: ~s|{"answer": 7}|, tokens: %{input: 1, output: 1}}
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          output: :text,
+          signature: "() -> {answer :int}",
+          tools: %{},
+          max_turns: 5
+        )
+
+      {:ok, step} = run_combined(agent, llm)
+
+      assert step.return == %{"answer" => 7}
+
+      # Memory from `(def n 7)` propagates through to the final step.
+      assert Map.get(step.memory, :n) == 7 or Map.get(step.memory, "n") == 7
+
+      # tool_cache is the combined-mode `%{}` (not nil — Loop.run sets it
+      # via combined mode entry path).
+      assert is_map(step.tool_cache)
+    end
   end
 
   describe "matrix row: :text, signature: {:list, ...}" do

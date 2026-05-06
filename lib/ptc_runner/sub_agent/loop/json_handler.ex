@@ -278,12 +278,20 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     # Tool calling mode includes tool_calls in the turn and step
     all_tool_calls = Keyword.get(opts, :all_tool_calls, [])
 
+    # Tier 3.5 Fix 5: combined-mode JSON-shaped finals must propagate
+    # state accumulated by `ptc_lisp_execute` runs (memory, journal,
+    # tool_cache, child_steps, summaries). Pure JSON mode passes
+    # `preserve_state: false` (default) and gets the legacy zeroed
+    # fields. Combined mode passes `preserve_state: true` from
+    # `Loop.TextMode.handle_final_answer_combined/3`.
+    preserve_state? = Keyword.get(opts, :preserve_state, false)
+
     turn =
       Metrics.build_turn(state, response, nil, normalized_return,
         success?: true,
         prints: [],
         tool_calls: all_tool_calls,
-        memory: %{}
+        memory: if(preserve_state?, do: state.memory || %{}, else: %{})
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
@@ -295,27 +303,45 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
       |> Metrics.build_final_usage(duration_ms, 0)
       |> add_schema_metrics(state.schema)
 
-    final_step = %Step{
-      return: normalized_return,
-      fail: nil,
-      memory: %{},
-      usage: usage,
-      turns:
-        Metrics.apply_trace_filter(
-          Enum.reverse([turn | state.turns]),
-          state.trace_mode,
-          false
-        ),
-      field_descriptions: agent.field_descriptions,
-      messages: build_collected_messages(state, final_messages),
-      prompt: state.expanded_prompt,
-      original_prompt: state.original_prompt,
-      prints: [],
-      tool_calls: all_tool_calls,
-      tools: state.normalized_tools
-    }
+    final_step =
+      %Step{
+        return: normalized_return,
+        fail: nil,
+        memory: if(preserve_state?, do: state.memory || %{}, else: %{}),
+        usage: usage,
+        turns:
+          Metrics.apply_trace_filter(
+            Enum.reverse([turn | state.turns]),
+            state.trace_mode,
+            false
+          ),
+        field_descriptions: agent.field_descriptions,
+        messages: build_collected_messages(state, final_messages),
+        prompt: state.expanded_prompt,
+        original_prompt: state.original_prompt,
+        prints: [],
+        tool_calls: all_tool_calls,
+        tools: state.normalized_tools
+      }
+      |> maybe_preserve_combined_state(state, preserve_state?)
 
     {turn, final_step}
+  end
+
+  # Tier 3.5 Fix 5 — propagate combined-mode state on the success step
+  # when the caller opts in. Mirrors the field set populated by
+  # `Loop.TextMode.build_tool_text_success_step/3` for non-JSON-shaped
+  # finals.
+  defp maybe_preserve_combined_state(step, _state, false), do: step
+
+  defp maybe_preserve_combined_state(step, state, true) do
+    %{
+      step
+      | journal: Map.get(state, :journal),
+        tool_cache: state.tool_cache || %{},
+        child_steps: Map.get(state, :child_steps),
+        summaries: Map.get(state, :summaries)
+    }
   end
 
   defp build_error_step(reason, message, response, state, _agent, opts) do

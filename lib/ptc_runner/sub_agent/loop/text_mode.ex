@@ -1723,11 +1723,22 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       {:signature, _params, {:map, _}} ->
         # Map/list deferral — JsonHandler already implements the
         # parse-as-JSON + validate path for these signature shapes.
-        json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
+        # Tier 3.5 Fix 5: pass `preserve_state: true` so combined-mode
+        # state (memory, journal, tool_cache, child_steps, summaries)
+        # propagates onto the success step.
+        json_handler_opts = [
+          all_tool_calls: Enum.reverse(state.all_tool_calls),
+          preserve_state: true
+        ]
+
         JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
 
       {:signature, _params, {:list, _}} ->
-        json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
+        json_handler_opts = [
+          all_tool_calls: Enum.reverse(state.all_tool_calls),
+          preserve_state: true
+        ]
+
         JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
 
       {:signature, _params, return_type} ->
