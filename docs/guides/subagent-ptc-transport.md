@@ -134,6 +134,36 @@ It is tempting to read `:tool_call` as the modern, production-grade option and
 - **`:tool_call` adds turns.** A workload that takes one turn in `:content`
   often takes two or three in `:tool_call` (call `ptc_lisp_execute`, get
   result, return final answer). Pay for the extra turns deliberately.
+- **`:tool_call` can hurt reliability on capable models.** Models that
+  already emit fenced code cleanly (e.g., recent Anthropic) sometimes do
+  *worse* on `:tool_call`: the loop encourages them to fragment one-program
+  work into multiple `ptc_lisp_execute` calls, replan between turns, or
+  embed the answer in conversational prose. This is not hypothetical —
+  measure before switching.
+- **Each `:tool_call` turn re-ships the `ptc_lisp_execute` schema.**
+  In practice that's ~800 input tokens of overhead per turn. On simple
+  workloads, this can dominate the total prompt cost.
+
+### Empirical note (one small benchmark)
+
+A 7-query demo suite — 3 in-memory queries, 4 multi-turn search/fetch
+queries — run 5 times per cell:
+
+| Model | `:content` pass | `:tool_call` pass | `:content` wall | `:tool_call` wall | `:tool_call` input tokens |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Claude Haiku 4.5 | 34/35 | **27/35** | 94 s | 162 s | **+162 %** |
+| Gemini 3.1 Flash Lite | 35/35 | 34/35 | 69 s | 61 s | +58 % |
+
+Reading the table:
+
+- On Haiku, `:tool_call` dropped pass rate (97 % → 77 %) and roughly doubled
+  latency. `:content` is the right default here.
+- On Gemini Flash Lite, pass rates were close. `:tool_call` was ~26 %
+  *faster* on the multi-turn tool queries but ~25 % *slower* on the simple
+  in-memory queries, and always cost more input tokens.
+- The right transport depends on **(model × workload)**, not just model.
+  One small benchmark on one suite is not a universal recommendation —
+  reproduce the comparison on your own workload before standardizing.
 
 ## Provider compatibility
 

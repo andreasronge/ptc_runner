@@ -167,6 +167,12 @@ When in doubt, leave `ptc_transport` at its default (`:content`) — it works
 across every provider PtcRunner supports, including those without native tool
 calling.
 
+> **Compatibility ≠ recommendation.** A model supporting `:tool_call` does not
+> mean `:tool_call` is the right default for your workload. On some capable
+> models it actively reduces pass rate and increases token cost. See the
+> [transport guide](../docs/guides/subagent-ptc-transport.md#choosing-a-transport)
+> for tradeoffs and a small benchmark.
+
 ## Don't
 
 - Don't call `PtcRunner.LLM.callback/2` unless `req_llm` is in deps **or**
