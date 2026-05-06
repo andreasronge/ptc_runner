@@ -675,6 +675,11 @@ defmodule PtcRunner.SubAgent do
          received_field_descriptions,
          opts
        ) do
+    # Phase 1 runtime guard — removed in Phase 4
+    if agent.ptc_transport == :tool_call do
+      raise ArgumentError, "ptc_transport: :tool_call not yet implemented"
+    end
+
     collect_messages = Keyword.get(opts, :collect_messages, false)
 
     # Expand template in mission

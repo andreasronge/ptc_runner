@@ -153,6 +153,36 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
       refute_received :llm_invoked
     end
 
+    test "executing a :tool_call agent on the single-shot fast path also raises" do
+      test_pid = self()
+
+      # llm callback fails the test if invoked, proving the guard fires first.
+      llm = fn _input ->
+        send(test_pid, :llm_invoked)
+        {:ok, "should not be reached"}
+      end
+
+      # max_turns: 1, no tools, retry_turns: 0 routes through SubAgent.run/2's
+      # single-shot fast path (run_single_shot), bypassing Loop.run/2. The
+      # single-shot guard must mirror the Loop guard.
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          ptc_transport: :tool_call,
+          max_turns: 1,
+          retry_turns: 0,
+          tools: %{}
+        )
+
+      assert_raise ArgumentError,
+                   "ptc_transport: :tool_call not yet implemented",
+                   fn ->
+                     SubAgent.run(agent, llm: llm)
+                   end
+
+      refute_received :llm_invoked
+    end
+
     test ":content transport executes through Loop without the guard firing" do
       # Sanity check that the guard is gated on :tool_call only.
       llm = fn _input ->
