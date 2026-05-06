@@ -608,18 +608,28 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     end
   end
 
-  # Tier 3e: combined-mode (`output: :text, ptc_transport: :tool_call`)
-  # PTC-Lisp reference card. Returns the static compact card from
-  # priv/prompts/ plus a dynamically rendered tool-inventory section
-  # for tools whose effective `expose:` is `:ptc_lisp` or `:both`.
-  #
-  # Per Addendum #19: included even when zero PTC-callable tools exist
-  # — the static portion documents `ptc_lisp_execute` itself, which is
-  # always callable.
-  #
-  # Returns `nil` for non-combined-mode agents so the caller filters it
-  # out of the section list.
-  defp combined_mode_reference_card(%{output: :text, ptc_transport: :tool_call} = agent) do
+  @doc """
+  Combined-mode (`output: :text, ptc_transport: :tool_call`) PTC-Lisp
+  reference card.
+
+  Returns the static compact card from `priv/prompts/` plus a dynamically
+  rendered tool-inventory section for tools whose effective `expose:` is
+  `:ptc_lisp` or `:both`.
+
+  Per Addendum #19: included even when zero PTC-callable tools exist —
+  the static portion documents `ptc_lisp_execute` itself, which is
+  always callable.
+
+  Returns `nil` for non-combined-mode agents (used by callers to filter
+  the section out of their prompt assembly).
+
+  Tier 3.5 Fix 2: exported as a public helper so `Loop.TextMode` can
+  append it to the tool-calling system prompt at runtime — the runtime
+  text-mode path uses `Prompts.tool_calling_system()` rather than
+  `generate_system/2`, so this is the integration point.
+  """
+  @spec combined_mode_reference_card(PtcRunner.SubAgent.Definition.t()) :: String.t() | nil
+  def combined_mode_reference_card(%{output: :text, ptc_transport: :tool_call} = agent) do
     case agent.ptc_reference do
       :compact ->
         static = Prompts.ptc_text_mode_compact_reference()
@@ -635,7 +645,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
     end
   end
 
-  defp combined_mode_reference_card(_agent), do: nil
+  def combined_mode_reference_card(_agent), do: nil
 
   # Render a one-line PTC entry per tool exposed to PTC-Lisp (effective
   # expose ∈ {:ptc_lisp, :both}). Per the plan's "Tool-inventory rule",

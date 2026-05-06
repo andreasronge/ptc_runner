@@ -36,7 +36,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{PromptExpander, Signature, Telemetry}
+  alias PtcRunner.SubAgent.{PromptExpander, Signature, SystemPrompt, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
   alias PtcRunner.Tool
 
@@ -2090,16 +2090,28 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp build_json_system_prompt(_), do: Prompts.json_system()
 
-  # Tool system prompt (with text or JSON output instruction)
-  defp build_tool_system_prompt(%{system_prompt: nil}), do: Prompts.tool_calling_system()
+  # Tool system prompt (with text or JSON output instruction).
+  #
+  # Tier 3.5 Fix 2: in combined mode, append the PTC-Lisp reference card
+  # produced by `SystemPrompt.combined_mode_reference_card/1`. The runtime
+  # tool-mode path doesn't go through `SystemPrompt.generate_system/2`
+  # (which is the PTC-Lisp prompt builder), so the card has to be
+  # plumbed in here. Pure text mode and `output: :ptc_lisp` agents are
+  # untouched: the helper returns `nil` for them.
+  defp build_tool_system_prompt(agent) do
+    base = base_tool_system_prompt(agent)
+    append_combined_reference_card(base, agent)
+  end
 
-  defp build_tool_system_prompt(%{system_prompt: override}) when is_binary(override), do: override
+  defp base_tool_system_prompt(%{system_prompt: nil}), do: Prompts.tool_calling_system()
 
-  defp build_tool_system_prompt(%{system_prompt: transformer}) when is_function(transformer, 1) do
+  defp base_tool_system_prompt(%{system_prompt: override}) when is_binary(override), do: override
+
+  defp base_tool_system_prompt(%{system_prompt: transformer}) when is_function(transformer, 1) do
     transformer.(Prompts.tool_calling_system())
   end
 
-  defp build_tool_system_prompt(%{system_prompt: opts}) when is_map(opts) do
+  defp base_tool_system_prompt(%{system_prompt: opts}) when is_map(opts) do
     base = Prompts.tool_calling_system()
     prefix = Map.get(opts, :prefix, "")
     suffix = Map.get(opts, :suffix, "")
@@ -2109,7 +2121,15 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     |> Enum.join("\n\n")
   end
 
-  defp build_tool_system_prompt(_), do: Prompts.tool_calling_system()
+  defp base_tool_system_prompt(_), do: Prompts.tool_calling_system()
+
+  defp append_combined_reference_card(base, agent) do
+    case SystemPrompt.combined_mode_reference_card(agent) do
+      nil -> base
+      "" -> base
+      card -> base <> "\n\n" <> card
+    end
+  end
 
   # Tool user message
   defp build_tool_user_message(agent, expanded_prompt, context) do
