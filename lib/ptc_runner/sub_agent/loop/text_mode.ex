@@ -31,6 +31,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     LLMRetry,
     Metrics,
     NativePreview,
+    ResponseHandler,
     ToolNormalizer,
     TurnFeedback
   }
@@ -956,14 +957,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp handle_lisp_success(lisp_step, program, call, agent, state, duration_ms) do
     case check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->
-        # Intermediate value — render success and continue. Tier 3b
-        # will re-introduce turn_history advance for this branch
-        # specifically; for now, mirror the conservative
-        # "no advance" rule documented in the Tier 3a brief.
+        # Intermediate value — render success and continue. Tier 3b:
+        # advance `turn_history` so the program's final expression
+        # value becomes `*1` for the next program (mirrors v1 PTC
+        # `:tool_call` `Loop.PtcToolCall.continue_with_intermediate/7`).
         execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
         result_json = PtcToolProtocol.render_success(lisp_step, execution: execution)
 
-        state_next = thread_lisp_step_state(state, lisp_step, advance_turn_history: false)
+        state_next = thread_lisp_step_state(state, lisp_step, advance_turn_history: true)
         emit_ptc_lisp_telemetry(state, duration_ms, false)
 
         step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, nil)
@@ -1052,11 +1053,25 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         :error -> base
       end
 
-    # Tier 3a: do not advance turn_history here. Tier 3b will refine.
+    # Tier 3b: advance `turn_history` only when the caller explicitly
+    # asks. Successful intermediate `ptc_lisp_execute` results pass
+    # `true`; `(return v)`, `(fail v)`, runtime errors, memory rollback,
+    # native tool calls, and direct text turns all leave it unchanged.
     case Keyword.get(opts, :advance_turn_history, false) do
-      false -> base
-      true -> base
+      false ->
+        base
+
+      true ->
+        truncated = ResponseHandler.truncate_for_history(lisp_step.return)
+        %{base | turn_history: append_turn_history(state.turn_history, truncated)}
     end
+  end
+
+  # Mirrors `Loop.PtcToolCall.update_turn_history/2`: append the new
+  # result and keep only the most recent three entries (the `*1`/`*2`/
+  # `*3` window).
+  defp append_turn_history(history, new_result) do
+    (history ++ [new_result]) |> Enum.take(-3)
   end
 
   defp ptc_lisp_step_entry(call, lisp_step, duration_ms, error) do
