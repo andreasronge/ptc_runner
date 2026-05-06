@@ -86,8 +86,11 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   Applied recursively to every value in `args`:
 
-  1. **Map keys** — converted to strings (`:foo` → `"foo"`). Atom keys and
-     string keys collapse to the same canonical form.
+  1. **Map keys** — converted to strings AND hyphens normalized to
+     underscores (`:foo` → `"foo"`, `:"was-improved"` → `"was_improved"`).
+     Atom keys and string keys collapse to the same canonical form, and
+     hyphenated and underscored keys collapse together — matching the
+     PTC-Lisp `stringify_key/1` boundary normalization in `eval.ex`.
   2. **Maps** — Elixir maps are structurally compared regardless of
      insertion order, so two maps with the same string-keyed entries
      produced from differently-ordered inputs are `==`.
@@ -97,12 +100,23 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
      pass through unchanged because `trunc/1` raises on them; do not pass
      them in via tool args.
   4. **Lists** — recurse into elements; order is preserved.
-  5. **Tuples** — recurse into elements; order is preserved. Tuples don't
-     normally appear in JSON-decoded args but PTC-Lisp call paths may
-     produce them.
+  5. **Tuples** — converted to lists for parity with PTC-Lisp, where the
+     vector literal `[1 2]` evaluates to a list. A native cache write
+     using a tuple `{1, 2}` and a PTC-Lisp lookup using `[1 2]` collapse
+     to the same key. (Spec previously said "preserve tuples"; PTC-Lisp
+     parity wins.)
   6. **Strings, booleans, `nil`, atoms (other than nil/true/false)** —
      unchanged for values. Atom-keyed maps are converted by rule 1; atom
      **values** stay atoms.
+
+  ## Non-map args (Tier 3.5 Fix 3b)
+
+  When `args` is not a map (e.g., a list or scalar from a misbehaving
+  tool plumbing path), the result is `{tool_name, {:non_map, args}}`.
+  This is chaos-resilient: rather than crash with `FunctionClauseError`
+  the cache layer produces a deterministic key. Two equal non-map args
+  share the same key; cache hits remain possible even on the off-spec
+  shape.
 
   ## Examples
 
@@ -112,6 +126,12 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
       # Atom and string keys converge.
       iex> a = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{foo: 1})
       iex> b = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"foo" => 1})
+      iex> a == b
+      true
+
+      # Hyphenated and underscored keys converge (PTC-Lisp parity).
+      iex> a = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"was-improved" => true})
+      iex> b = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"was_improved" => true})
       iex> a == b
       true
 
@@ -127,10 +147,24 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
       iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{xs: [%{a: 1.0}, %{a: 2.0}]})
       {"t", %{"xs" => [%{"a" => 1}, %{"a" => 2}]}}
 
+      # Tuples canonicalize to lists for PTC-Lisp parity.
+      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{p: {1, 2}})
+      {"t", %{"p" => [1, 2]}}
+
+      # Non-map args wrap in a `{:non_map, args}` sentinel rather than crash.
+      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", [1, 2, 3])
+      {"t", {:non_map, [1, 2, 3]}}
+
   """
-  @spec canonical_cache_key(String.t(), map()) :: {String.t(), map()}
+  @spec canonical_cache_key(String.t(), term()) :: {String.t(), term()}
   def canonical_cache_key(tool_name, args) when is_binary(tool_name) and is_map(args) do
     {tool_name, canonicalize(args)}
+  end
+
+  # Tier 3.5 Fix 3b: non-map args (list, scalar, nil, etc.) get a sentinel
+  # cache key rather than raising. Keeps the cache path chaos-resilient.
+  def canonical_cache_key(tool_name, args) when is_binary(tool_name) do
+    {tool_name, {:non_map, args}}
   end
 
   # Maps: stringify keys, recurse into values. Insertion order is irrelevant
@@ -143,11 +177,14 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
     Enum.map(value, &canonicalize/1)
   end
 
+  # Tier 3.5 Fix 3c: tuples canonicalize to lists for PTC-Lisp parity.
+  # PTC-Lisp's `[1 2]` vector evaluates to a list; a native cache write
+  # using `{1, 2}` would otherwise miss when PTC-Lisp follows the
+  # cache_hint.
   defp canonicalize(value) when is_tuple(value) do
     value
     |> Tuple.to_list()
     |> Enum.map(&canonicalize/1)
-    |> List.to_tuple()
   end
 
   # Float collapse: integer-equal floats become integers. BEAM does not
@@ -164,7 +201,10 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   defp canonicalize(value), do: value
 
-  defp stringify_key(k) when is_binary(k), do: k
-  defp stringify_key(k) when is_atom(k), do: Atom.to_string(k)
+  # Tier 3.5 Fix 3a: re-use `normalize_key/1` so hyphenated and underscored
+  # keys collapse together, matching `Lisp.Eval.stringify_key/1` at the
+  # PTC-Lisp tool boundary. Without this, a native cache write with
+  # `"was-improved"` and a PTC-Lisp lookup with `"was_improved"` miss.
+  defp stringify_key(k) when is_binary(k) or is_atom(k), do: normalize_key(k)
   defp stringify_key(k), do: k
 end

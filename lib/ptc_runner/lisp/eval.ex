@@ -834,7 +834,10 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
-    cache_key = KeyNormalizer.canonical_cache_key(tool_name, args_map)
+    # Tier 3.5 Fix 3d: only compute the canonical cache key when the call
+    # is actually cacheable. Avoids the cost of canonicalization for
+    # every non-cacheable tool call.
+    cache_key = if cacheable?, do: KeyNormalizer.canonical_cache_key(tool_name, args_map)
 
     # Check cache for hit (cached calls don't count against limit - already counted)
     if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
