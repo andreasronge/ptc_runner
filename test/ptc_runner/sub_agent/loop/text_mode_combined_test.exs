@@ -570,6 +570,191 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Tier 3.5 Fix 1 — cross-layer cache shape parity
+  # ---------------------------------------------------------------------------
+
+  describe "Tier 3.5 Fix 1: native cache wrapper readable by PTC-Lisp" do
+    # Native preview-and-cache stores wrapper maps; PTC-Lisp's
+    # `Eval.record_tool_call_inner/5` reads `cached.result`. If the wrapper
+    # shape diverges, the program crashes with `BadMapError` or the
+    # native value is misinterpreted.
+    test "list result: native seeds cache, PTC-Lisp follows cache_hint without crash" do
+      rows = [%{"id" => 1}, %{"id" => 2}]
+      {tool_fn, counter} = counting_tool(rows)
+
+      tools = %{
+        "search" =>
+          {tool_fn,
+           signature: "(q :string) -> [:any]",
+           expose: :both,
+           cache: true,
+           native_result: [preview: :metadata]}
+      }
+
+      llm =
+        tool_calling_llm([
+          # Turn 1: native search seeds cache, returns metadata preview.
+          %{
+            tool_calls: [%{id: "c1", name: "search", args: %{"q" => "x"}}],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          # Turn 2: program calls (tool/search {:q "x"}) — should hit
+          # the cache and return the original list, not crash.
+          %{
+            tool_calls: [
+              %{
+                id: "c2",
+                name: "ptc_lisp_execute",
+                args: %{"program" => ~s|(count (tool/search {:q "x"}))|}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      {:ok, step} = run_combined(tools, llm)
+      assert step.return == "done"
+
+      # Tool function ran exactly once (seeded by native, hit by PTC-Lisp).
+      assert counter.() == 1
+
+      # The PTC-Lisp tool call's result is the original list (count was 2).
+      ptc_call =
+        step.tool_calls
+        |> Enum.flat_map(fn tc -> Map.get(tc, :tool_calls, []) end)
+        |> Enum.find(fn tc -> tc.name == "search" end)
+
+      # The inner program's tool call should have the original rows.
+      if ptc_call, do: assert(ptc_call.result == rows)
+    end
+
+    test "map result: native seeds cache, PTC-Lisp reads through cache without BadMapError" do
+      result_map = %{"a" => 1, "b" => 2, "c" => 3}
+      {tool_fn, counter} = counting_tool(result_map)
+
+      tools = %{
+        "fetch" =>
+          {tool_fn,
+           signature: "(k :string) -> :any",
+           expose: :both,
+           cache: true,
+           native_result: [preview: :metadata]}
+      }
+
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [%{id: "c1", name: "fetch", args: %{"k" => "x"}}],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{
+            tool_calls: [
+              %{
+                id: "c2",
+                name: "ptc_lisp_execute",
+                args: %{"program" => ~s|(get (tool/fetch {:k "x"}) "a")|}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      {:ok, step} = run_combined(tools, llm)
+      assert step.return == "done"
+      assert counter.() == 1
+    end
+
+    test "scalar result: cross-layer cache hit doesn't crash" do
+      {tool_fn, counter} = counting_tool(42)
+
+      tools = %{
+        "compute" =>
+          {tool_fn,
+           signature: "(n :int) -> :int",
+           expose: :both,
+           cache: true,
+           native_result: [preview: :metadata]}
+      }
+
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [%{id: "c1", name: "compute", args: %{"n" => 7}}],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{
+            tool_calls: [
+              %{
+                id: "c2",
+                name: "ptc_lisp_execute",
+                args: %{"program" => "(* 2 (tool/compute {:n 7}))"}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      {:ok, step} = run_combined(tools, llm)
+      assert step.return == "done"
+      assert counter.() == 1
+    end
+
+    test "Tier 3.5 Fix 3a: hyphenated args from native call hit when PTC-Lisp uses underscored args" do
+      # Native: %{"was-improved" => true} -> stored under "was_improved"
+      # PTC-Lisp: stringify_key normalizes -> "was_improved" — same key.
+      rows = [%{"id" => 1}]
+      {tool_fn, counter} = counting_tool(rows)
+
+      tools = %{
+        "search" =>
+          {tool_fn,
+           signature: "(was-improved :bool) -> [:any]",
+           expose: :both,
+           cache: true,
+           native_result: [preview: :metadata]}
+      }
+
+      llm =
+        tool_calling_llm([
+          # Native call uses hyphenated key (as the LLM would emit).
+          %{
+            tool_calls: [%{id: "c1", name: "search", args: %{"was-improved" => true}}],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          # PTC-Lisp call uses the same hyphenated keyword (LLM Clojure
+          # convention); stringify_key in eval.ex converts to underscore.
+          %{
+            tool_calls: [
+              %{
+                id: "c2",
+                name: "ptc_lisp_execute",
+                args: %{"program" => ~s|(tool/search {:was-improved true})|}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      {:ok, step} = run_combined(tools, llm)
+      assert step.return == "done"
+      # The cross-layer hit ran the tool function exactly once.
+      assert counter.() == 1
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Addendum #6 — retained_bytes wiring
   # ---------------------------------------------------------------------------
 

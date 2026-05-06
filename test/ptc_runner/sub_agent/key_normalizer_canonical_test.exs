@@ -155,24 +155,93 @@ defmodule PtcRunner.SubAgent.KeyNormalizerCanonicalTest do
     end
   end
 
-  describe "rule 5 — tuples recurse and preserve order" do
-    test "tuple value recurses element-wise" do
-      assert {"t", %{"pair" => {1, 2}}} =
+  describe "rule 5 — tuples canonicalize to lists (PTC-Lisp parity)" do
+    # Tier 3.5 Fix 3c: PTC-Lisp evaluates `[1 2]` (vector) to a list, not a
+    # tuple. To share cache identity across layers, tuples canonicalize to
+    # lists here. This deliberately diverges from the v1 spec wording
+    # ("preserve tuples"); parity with PTC-Lisp wins.
+    test "tuple value canonicalizes to a list" do
+      assert {"t", %{"pair" => [1, 2]}} =
                KeyNormalizer.canonical_cache_key("t", %{pair: {1.0, 2.0}})
     end
 
-    test "tuple order is preserved" do
-      assert {"t", %{"trip" => {3, 1, 2}}} =
+    test "tuple order is preserved when collapsed to list" do
+      assert {"t", %{"trip" => [3, 1, 2]}} =
                KeyNormalizer.canonical_cache_key("t", %{trip: {3.0, 1.0, 2.0}})
     end
 
-    test "nested tuple inside list recurses" do
-      assert {"t", %{"xs" => [{1, 2}, {3, 4}]}} =
+    test "nested tuple inside list canonicalizes to nested list" do
+      assert {"t", %{"xs" => [[1, 2], [3, 4]]}} =
                KeyNormalizer.canonical_cache_key("t", %{xs: [{1.0, 2.0}, {3.0, 4.0}]})
     end
 
-    test "empty tuple passes through" do
-      assert {"t", %{"u" => {}}} = KeyNormalizer.canonical_cache_key("t", %{u: {}})
+    test "empty tuple becomes an empty list" do
+      assert {"t", %{"u" => []}} = KeyNormalizer.canonical_cache_key("t", %{u: {}})
+    end
+
+    test "tuple {1, 2} and list [1, 2] produce equal cache keys (PTC-Lisp parity)" do
+      a = KeyNormalizer.canonical_cache_key("t", %{xs: {1, 2}})
+      b = KeyNormalizer.canonical_cache_key("t", %{xs: [1, 2]})
+      assert a == b
+    end
+  end
+
+  describe "rule 7 — hyphen→underscore key normalization (Tier 3.5 Fix 3a)" do
+    # PTC-Lisp's stringify_key/1 in eval.ex applies hyphen→underscore to
+    # map keys at the tool boundary, so a native cache write keyed
+    # "was-improved" must match a PTC-Lisp lookup keyed "was_improved".
+    test "atom key with hyphen normalizes to underscore" do
+      assert {"t", %{"was_improved" => true}} =
+               KeyNormalizer.canonical_cache_key("t", %{:"was-improved" => true})
+    end
+
+    test "string key with hyphen normalizes to underscore" do
+      assert {"t", %{"was_improved" => true}} =
+               KeyNormalizer.canonical_cache_key("t", %{"was-improved" => true})
+    end
+
+    test "hyphen and underscore variants produce equal cache keys" do
+      a = KeyNormalizer.canonical_cache_key("t", %{"was-improved" => true})
+      b = KeyNormalizer.canonical_cache_key("t", %{"was_improved" => true})
+      assert a == b
+    end
+
+    test "nested map keys with hyphens also normalize" do
+      input = %{"outer-key" => %{"inner-key" => 1}}
+
+      assert {"t", %{"outer_key" => %{"inner_key" => 1}}} =
+               KeyNormalizer.canonical_cache_key("t", input)
+    end
+  end
+
+  describe "rule 8 — non-map args sentinel fallback (Tier 3.5 Fix 3b)" do
+    # Non-map args get wrapped in a `{:non_map, args}` sentinel rather than
+    # crashing the cache layer. Chaos-resilient: a misbehaving tool plumbing
+    # path producing a list/scalar arg still produces a deterministic key.
+    test "list args produce {:non_map, list} sentinel" do
+      assert {"t", {:non_map, [1, 2, 3]}} =
+               KeyNormalizer.canonical_cache_key("t", [1, 2, 3])
+    end
+
+    test "scalar args produce {:non_map, scalar} sentinel" do
+      assert {"t", {:non_map, "foo"}} =
+               KeyNormalizer.canonical_cache_key("t", "foo")
+    end
+
+    test "nil args produce {:non_map, nil} sentinel" do
+      assert {"t", {:non_map, nil}} = KeyNormalizer.canonical_cache_key("t", nil)
+    end
+
+    test "two equal non-map args produce equal cache keys" do
+      a = KeyNormalizer.canonical_cache_key("t", [1, 2])
+      b = KeyNormalizer.canonical_cache_key("t", [1, 2])
+      assert a == b
+    end
+
+    test "different non-map args produce different cache keys" do
+      a = KeyNormalizer.canonical_cache_key("t", [1, 2])
+      b = KeyNormalizer.canonical_cache_key("t", [1, 3])
+      refute a == b
     end
   end
 
@@ -221,11 +290,8 @@ defmodule PtcRunner.SubAgent.KeyNormalizerCanonicalTest do
       end
     end
 
-    test "raises on non-map args" do
-      assert_raise FunctionClauseError, fn ->
-        KeyNormalizer.canonical_cache_key("t", "not a map")
-      end
-    end
+    # Tier 3.5 Fix 3b: non-map args no longer raise; they wrap in a
+    # `{:non_map, args}` sentinel. See rule 8 tests above.
   end
 
   describe "cache-identity guarantees" do

@@ -1524,12 +1524,21 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # failure (raise / `{:error, _}`) does NOT seed the cache and falls
   # back to the legacy error JSON shape — same behavior native callers
   # see today.
+  #
+  # Cache entries are wrapped in the shape PTC-Lisp's `Eval` reads at
+  # `record_tool_call_inner/5`:
+  #
+  #     %{result: full_result, child_step: nil, child_trace_id: nil}
+  #
+  # Native preview-and-cache produces no child trace (only SubAgent tools
+  # do); the wrapper keys exist solely so a PTC-Lisp `(tool/...)` follow-up
+  # call can read the cache without a `BadMapError` (Tier 3.5 Fix 1).
   defp execute_with_cache(%Tool{} = tool, tool_name, tool_args, state) do
     cache_key = KeyNormalizer.canonical_cache_key(tool.name, tool_args)
     cache = state.tool_cache || %{}
 
     case Map.fetch(cache, cache_key) do
-      {:ok, full_result} ->
+      {:ok, %{result: full_result}} ->
         # Cache hit: rebuild the same preview shape without re-running
         # the tool function. The full result stays in cache for any
         # subsequent PTC-Lisp `(tool/...)` consumer.
@@ -1566,7 +1575,11 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       # success normalization treats both raw and `{:ok, v}` as
       # successful partial values).
       full_result = unwrap_ok(result)
-      new_cache = Map.put(state.tool_cache || %{}, cache_key, full_result)
+      # Tier 3.5 Fix 1 — wrap value in the same shape PTC-Lisp's
+      # `Eval.record_tool_call_inner/5` expects. Native previews never
+      # produce a child trace, so the metadata fields are nil.
+      cached_entry = %{result: full_result, child_step: nil, child_trace_id: nil}
+      new_cache = Map.put(state.tool_cache || %{}, cache_key, cached_entry)
 
       preview_map = preview_or_fallback(tool, full_result, tool_args)
 
