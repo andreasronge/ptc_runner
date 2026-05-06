@@ -25,6 +25,7 @@ defmodule PtcRunner.Prompts do
   | `json-user.md` | `json_user/0` | `JsonMode` |
   | `json-error.md` | `json_error/0` | `JsonMode` |
   | `tool-calling-system.md` | `tool_calling_system/0` | `ToolCallingMode` |
+  | `ptc_text_mode_compact_reference.md` | `ptc_text_mode_compact_reference/0` | `SystemPrompt` (combined mode) |
   | `turn-feedback-must-return.md` | `must_return_warning/0` | `TurnFeedback` |
   | `turn-feedback-retry.md` | `retry_feedback/0` | `TurnFeedback` |
 
@@ -183,6 +184,33 @@ defmodule PtcRunner.Prompts do
   def tool_calling_system, do: @tool_calling_system
 
   # ============================================================================
+  # PTC Text-Mode Compact Reference (combined mode)
+  # ============================================================================
+
+  @ptc_text_mode_compact_reference_file Path.join(
+                                          @prompts_dir,
+                                          "ptc_text_mode_compact_reference.md"
+                                        )
+
+  @external_resource @ptc_text_mode_compact_reference_file
+
+  @ptc_text_mode_compact_reference @ptc_text_mode_compact_reference_file
+                                   |> File.read!()
+                                   |> PromptLoader.extract_content()
+
+  @doc """
+  Compact PTC-Lisp reference card for combined-mode system prompts.
+
+  Appended to the system prompt when `output: :text`, `ptc_transport:
+  :tool_call`, and `ptc_reference: :compact` (the default in combined
+  mode). Capped at ≤300 tokens. The static portion is loaded from
+  `priv/prompts/ptc_text_mode_compact_reference.md`; tool-inventory
+  entries are appended dynamically by `SystemPrompt`.
+  """
+  @spec ptc_text_mode_compact_reference() :: String.t()
+  def ptc_text_mode_compact_reference, do: @ptc_text_mode_compact_reference
+
+  # ============================================================================
   # Turn Feedback Templates
   # ============================================================================
 
@@ -240,6 +268,7 @@ defmodule PtcRunner.Prompts do
       :json_user,
       :json_error,
       :tool_calling_system,
+      :ptc_text_mode_compact_reference,
       :must_return_warning,
       :retry_feedback
     ]
@@ -268,6 +297,7 @@ defmodule PtcRunner.Prompts do
   def get(:json_user), do: json_user()
   def get(:json_error), do: json_error()
   def get(:tool_calling_system), do: tool_calling_system()
+  def get(:ptc_text_mode_compact_reference), do: ptc_text_mode_compact_reference()
   def get(:must_return_warning), do: must_return_warning()
   def get(:retry_feedback), do: retry_feedback()
   def get(_), do: nil

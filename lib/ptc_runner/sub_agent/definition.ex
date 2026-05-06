@@ -117,6 +117,20 @@ defmodule PtcRunner.SubAgent.Definition do
   @type ptc_transport :: :content | :tool_call
 
   @typedoc """
+  PTC-Lisp reference card mode for combined-mode (`output: :text,
+  ptc_transport: :tool_call`) system prompts.
+
+  - `:compact` — bounded reference card (≤300 tokens), default in
+    combined mode. Describes the core forms (`def`, `tool/`, `return`,
+    `println`) and the `full_result_cached: true` cache-reuse pattern.
+
+  v1 supports only `:compact`; `:full` is deferred (the validator raises
+  `ArgumentError` on `:full`). See Addendum #1 of
+  `Plans/text-mode-ptc-compute-tool.md`.
+  """
+  @type ptc_reference :: :compact
+
+  @typedoc """
   Output format options for truncation and display.
 
   Fields:
@@ -174,6 +188,7 @@ defmodule PtcRunner.SubAgent.Definition do
           thinking: boolean(),
           output: output_mode(),
           ptc_transport: ptc_transport(),
+          ptc_reference: ptc_reference(),
           max_tool_calls: pos_integer() | nil,
           pmap_max_concurrency: pos_integer(),
           memory_strategy: :strict | :rollback,
@@ -225,6 +240,7 @@ defmodule PtcRunner.SubAgent.Definition do
     max_tool_calls: nil,
     output: :ptc_lisp,
     ptc_transport: :content,
+    ptc_reference: :compact,
     memory_strategy: :strict,
     plan: [],
     progress_fn: nil,

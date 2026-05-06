@@ -35,23 +35,25 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
                    end
     end
 
-    test "rejects ptc_transport with output: :text (R2 — names both keys)" do
-      assert_raise ArgumentError,
-                   ~r/ptc_transport.*output: :text/,
-                   fn ->
-                     SubAgent.new(
-                       prompt: "Test",
-                       output: :text,
-                       ptc_transport: :tool_call
-                     )
-                   end
+    test "accepts ptc_transport: :tool_call with output: :text (combined mode, Tier 3e)" do
+      # Tier 3e cutoff: combined mode is now user-reachable. The R2 regression
+      # pin from Phase 1 was lifted by Plans/text-mode-ptc-compute-tool.md.
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      assert agent.output == :text
+      assert agent.ptc_transport == :tool_call
     end
 
-    test "rejects ptc_transport: :content with output: :text as well" do
-      # The combination is rejected regardless of which valid transport is chosen,
-      # because ptc_transport applies only to PTC-Lisp output.
+    test "rejects ptc_transport: :content with output: :text (Scope Discipline pin)" do
+      # The `:content` transport is meaningless in text mode and stays
+      # rejected; only `:tool_call` unlocks combined mode.
       assert_raise ArgumentError,
-                   ~r/ptc_transport.*output: :text/,
+                   ~r/ptc_transport: :content is not supported with output: :text/,
                    fn ->
                      SubAgent.new(
                        prompt: "Test",

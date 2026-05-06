@@ -495,4 +495,99 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       end
     end
   end
+
+  # Tier 3e: bisectable validator cutoff for combined mode.
+  describe "ptc_transport / output: :text gate (Tier 3e)" do
+    test "accepts output: :text with ptc_transport: :tool_call (combined mode)" do
+      agent =
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      assert agent.output == :text
+      assert agent.ptc_transport == :tool_call
+    end
+
+    test "still rejects output: :text with ptc_transport: :content" do
+      assert_raise ArgumentError,
+                   ~r/ptc_transport: :content is not supported with output: :text/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "test",
+                       output: :text,
+                       ptc_transport: :content
+                     )
+                   end
+    end
+  end
+
+  # Tier 3e: agent-level `ptc_reference:` option.
+  describe "ptc_reference validation (Tier 3e)" do
+    test "accepts :compact" do
+      agent =
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call,
+          ptc_reference: :compact
+        )
+
+      assert agent.ptc_reference == :compact
+    end
+
+    test "default in combined mode is :compact" do
+      agent =
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      assert agent.ptc_reference == :compact
+    end
+
+    test "rejects :full with deferred / Addendum #1 mention" do
+      assert_raise ArgumentError, ~r/ptc_reference: :full is deferred/, fn ->
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call,
+          ptc_reference: :full
+        )
+      end
+
+      assert_raise ArgumentError, ~r/Addendum #1/, fn ->
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call,
+          ptc_reference: :full
+        )
+      end
+    end
+
+    test "rejects unknown values, mentioning :compact as accepted" do
+      assert_raise ArgumentError, ~r/ptc_reference must be :compact/, fn ->
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call,
+          ptc_reference: :verbose
+        )
+      end
+    end
+
+    test "rejects strings (non-atom values)" do
+      assert_raise ArgumentError, ~r/ptc_reference must be :compact/, fn ->
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call,
+          ptc_reference: "compact"
+        )
+      end
+    end
+  end
 end
