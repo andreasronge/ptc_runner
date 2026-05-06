@@ -214,6 +214,146 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
     end
   end
 
+  describe "Scenario A: multi-step paginated workflow with 3+ intermediate executions" do
+    test "agent pages a stateless tool until exhausted then aggregates" do
+      # Stateless paginated app tool: 9 items split into 3 pages of 3.
+      # Cursor is the start index. next: -1 means no more pages.
+      # The agent must call this multiple times with progressing cursors and
+      # then aggregate. This exercises memory threading, *1/*2/*3 history,
+      # and journal/tool_cache/child_steps preservation across many real LLM
+      # round-trips — none of which is exercised by Scenarios 1-3.
+      items = for i <- 1..9, do: %{"id" => i, "value" => i * 10}
+
+      page_tool = {
+        fn args ->
+          cursor = args["cursor"]
+
+          if cursor >= length(items) do
+            %{"items" => [], "next" => -1}
+          else
+            page = Enum.slice(items, cursor, 3)
+            next_cursor = cursor + 3
+            next = if next_cursor >= length(items), do: -1, else: next_cursor
+            %{"items" => page, "next" => next}
+          end
+        end,
+        signature: "(cursor :int) -> {items :any, next :int}",
+        description:
+          "Fetch a page of items starting at cursor; returns the page items and the next cursor (-1 means no more pages)."
+      }
+
+      agent =
+        SubAgent.new(
+          prompt: """
+          You have a paginated tool (tool/page {:cursor int}) that returns
+          {:items [{:id int :value int}], :next int}. The :next field is -1
+          when there are no more pages.
+
+          Fetch the pages one at a time, EACH IN A SEPARATE TURN, so you can
+          confirm the next cursor before the next call. Across turns:
+
+            Turn 1: call (tool/page {:cursor 0}) and (println ...) the result.
+                    Bind the items to a memory var (e.g. (def items-1 ...)).
+            Turn 2: call (tool/page {:cursor <next from turn 1>}) and println.
+                    Bind to items-2.
+            Turn 3: call (tool/page {:cursor <next from turn 2>}) and println.
+                    Bind to items-3.
+            Turn 4: now that :next is -1, concat items-1/items-2/items-3,
+                    sum the :value field, and (return {:total <sum>}).
+
+          STRICT RULES:
+            - Exactly ONE (tool/page ...) call per program. Do NOT write a
+              recursive helper or loop that calls tool/page multiple times in
+              the same program. Each page must be its own turn so memory is
+              threaded across turns.
+            - Do NOT call (return ...) in the same turn as a tool call —
+              you must see the returned :next value before deciding the
+              next cursor.
+            - Do NOT hardcode the total. Verify by paging.
+          """,
+          ptc_transport: :tool_call,
+          signature: "() -> {total :int}",
+          tools: %{"page" => page_tool},
+          max_turns: 10
+        )
+
+      {:ok, step} =
+        SubAgent.run(agent,
+          llm: get_llm(),
+          collect_messages: true
+        )
+
+      calls = ptc_lisp_execute_calls(step.messages)
+
+      assert length(calls) >= 3,
+             "expected ≥3 intermediate executions for paginated workflow; got #{length(calls)}. " <>
+               "Messages: #{inspect(step.messages, limit: :infinity, printable_limit: :infinity)}"
+
+      ret = step.return
+      assert is_map(ret), "Expected map return; got #{inspect(ret)}"
+
+      total = ret[:total] || ret["total"]
+      assert total == 450, "Expected total=450 (sum 10+20+...+90); got #{inspect(total)}"
+    end
+  end
+
+  describe "Scenario B: (fail v) terminates loop with error from inside a real program" do
+    test "agent calls (fail ...) and returns {:error, step} with fail details" do
+      # Confirms end-to-end:
+      #   - The error tool-result JSON with reason: "fail" + result preview
+      #     reaches the model (R23) — covered deterministically but never seen
+      #     end-to-end with a real provider before this test.
+      #   - The loop terminates with {:error, step} and step.fail.reason == :failed
+      #     (per ptc_tool_call_runtime_test.exs lines 100-101 and 136-137).
+      #   - step.fail.message is `inspect/1` of the fail value (per
+      #     ptc_tool_call.ex:491: Step.error(:failed, inspect(fail_args), ...)).
+      users = [
+        %{"id" => 1, "name" => "Alice"},
+        %{"id" => 2, "name" => "Bob"}
+      ]
+
+      agent =
+        SubAgent.new(
+          prompt: """
+          Look up the user with :id equal to 999 in data/users. If a matching
+          user is found, return {:name <name>}. If no matching user is found,
+          call (fail {:reason :not_found :id 999}) to signal failure.
+          """,
+          ptc_transport: :tool_call,
+          signature: "(users [{id :int, name :string}]) -> {name :string}",
+          max_turns: 5
+        )
+
+      {:error, step} =
+        SubAgent.run(agent,
+          llm: get_llm(),
+          context: %{"users" => users},
+          collect_messages: true
+        )
+
+      # Loop terminated via (fail v) — reason atom is :failed for any
+      # user-supplied fail value (see ptc_tool_call.ex Step.error(:failed, ...)).
+      assert step.fail.reason == :failed,
+             "Expected step.fail.reason == :failed; got #{inspect(step.fail)}"
+
+      # The model used the execution tool rather than trying to fail directly.
+      calls = ptc_lisp_execute_calls(step.messages)
+
+      assert calls != [],
+             "Expected ≥1 ptc_lisp_execute call (model must use the tool to call fail); got 0. " <>
+               "Messages: #{inspect(step.messages, limit: :infinity, printable_limit: :infinity)}"
+
+      # The fail value is inspect/1-rendered into step.fail.message. The map
+      # carries `:reason :not_found`, so the inspected string must contain
+      # "not_found" regardless of map ordering or string-vs-atom key form.
+      assert is_binary(step.fail.message),
+             "Expected step.fail.message to be a string; got #{inspect(step.fail.message)}"
+
+      assert step.fail.message =~ "not_found",
+             "Expected step.fail.message to contain 'not_found'; got #{inspect(step.fail.message)}"
+    end
+  end
+
   # Scenario 4: see @moduledoc — covered exhaustively by the Phase 4
   # deterministic unit test suite. Real-provider replication is flaky-by-design.
 end
