@@ -217,7 +217,13 @@ budget, tool cache, and `pmap`/`pcalls` semantics identical across transports.
 `:tool_call` turns one PTC-Lisp program into a ReAct-style loop: the model can
 call `ptc_lisp_execute` zero or more times, then return a final answer
 directly. That extra round-tripping is a **tradeoff, not an upgrade** — pay
-for it deliberately.
+for it deliberately. On some capable models (e.g., recent Anthropic) it can
+also *reduce* pass rate by encouraging the model to fragment one-program work
+across turns. The right choice depends on **(model × workload)**, not model
+alone — see the [transport guide][transport-guide-empirical] for a small
+benchmark.
+
+[transport-guide-empirical]: ../docs/guides/subagent-ptc-transport.md#empirical-note-one-small-benchmark
 
 ### Behavior in `:tool_call` mode
 
