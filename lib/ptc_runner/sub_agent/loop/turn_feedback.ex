@@ -131,37 +131,103 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   Returns `{feedback_string, truncated?, new_progress_state}`.
 
   Only shows explicit println output - the LLM must be intentional about what it inspects.
+
+  This is a thin wrapper around `execution_feedback/3` that additionally appends
+  `append_turn_info/3` and `append_progress/4` output. Tool-call transport
+  (Phase 4 of the PTC-Lisp tool-call plan) reuses `execution_feedback/3`
+  directly so loop-control scaffolding (turn budgets, custom `progress_fn`
+  output) does not leak into the `ptc_lisp_execute` tool-result JSON.
   """
   @spec format(Definition.t(), map(), map()) :: {String.t(), boolean(), term()}
   def format(agent, state, lisp_step) do
+    execution = execution_feedback(agent, state, lisp_step)
+
+    feedback =
+      execution.feedback
+      |> append_turn_info(agent, state)
+
+    {feedback, new_progress_state} = append_progress(feedback, agent, state, lisp_step)
+
+    {feedback, execution.truncated, new_progress_state}
+  end
+
+  @doc """
+  Render the execution-feedback portion of a PTC-Lisp turn into a structured map.
+
+  This is the canonical execution-feedback renderer. `format/3` calls it and
+  then layers on `append_turn_info/3` and `append_progress/4` for content-mode
+  multi-turn agents. The upcoming `:tool_call` transport (Phase 4 of the
+  PTC-Lisp tool-call plan) reuses this function directly to populate the
+  `feedback` field of the `ptc_lisp_execute` tool-result JSON, ensuring loop
+  control scaffolding (turn budgets, `progress_fn` output) does not leak into
+  native tool results.
+
+  ## Fields
+
+  - `:feedback` — the LLM-facing feedback string. Contains only the execution
+    portion: result preview (`user=> ...`), printed `println` output, and
+    changed/new memory previews (`;; items = [...]`). Does **not** include
+    `append_turn_info` or `append_progress` output.
+  - `:prints` — the raw `lisp_step.prints` list (untruncated; truncation is
+    reflected in `feedback` and the top-level `truncated` flag).
+  - `:result` — preview string of `lisp_step.return` (or `nil` when no preview
+    is rendered, e.g. when `prints` is non-empty or for single-turn agents).
+  - `:memory.changed` — map of `name => preview` for memory bindings that are
+    new or whose value changed since the previous turn. String-keyed for
+    direct use in tool-result JSON.
+  - `:memory.stored_keys` — sorted list of all currently-stored memory binding
+    names (string-keyed). Fallback orientation hint when nothing changed or
+    previews were truncated.
+  - `:memory.truncated` — `true` if any memory preview was truncated.
+  - `:truncated` — `true` if any preview (prints, result, or memory) was
+    truncated.
+  """
+  @spec execution_feedback(Definition.t(), map(), map()) :: %{
+          feedback: String.t(),
+          prints: [String.t()],
+          result: String.t() | nil,
+          memory: %{
+            changed: %{String.t() => String.t()},
+            stored_keys: [String.t()],
+            truncated: boolean()
+          },
+          truncated: boolean()
+        }
+  def execution_feedback(agent, state, lisp_step) do
     max_chars = Keyword.get(agent.format_options, :feedback_max_chars, 512)
     preview_max = Keyword.get(agent.format_options, :preview_max_chars, 250)
 
-    {prints_output, truncated?} = format_prints(lisp_step.prints, max_chars)
+    {prints_output, prints_truncated?} = format_prints(lisp_step.prints, max_chars)
     result_preview = format_result_preview(prints_output, agent, lisp_step, preview_max)
-    stored_hint = format_stored_hint(agent, state, lisp_step, preview_max)
 
-    # Add truncation hint if needed
+    {stored_hint, memory_changed, memory_truncated?} =
+      build_memory_section(agent, state, lisp_step, preview_max)
+
     prints_with_hint =
-      if truncated? do
+      if prints_truncated? do
         prints_output <> "\n... (truncated, print specific fields instead)"
       else
         prints_output
       end
 
-    # Combine parts
     feedback =
       [result_preview, prints_with_hint, stored_hint]
       |> Enum.reject(&is_nil/1)
       |> Enum.join("\n\n")
 
-    # Add turn info for multi-turn agents
-    feedback = append_turn_info(feedback, agent, state)
+    truncated? = prints_truncated? or memory_truncated?
 
-    # Append progress via progress_fn (default: checklist from plan + summaries)
-    {feedback, new_progress_state} = append_progress(feedback, agent, state, lisp_step)
-
-    {feedback, truncated?, new_progress_state}
+    %{
+      feedback: feedback,
+      prints: lisp_step.prints || [],
+      result: result_preview,
+      memory: %{
+        changed: memory_changed,
+        stored_keys: stored_keys(lisp_step),
+        truncated: memory_truncated?
+      },
+      truncated: truncated?
+    }
   end
 
   @doc """
@@ -259,47 +325,66 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
   defp format_result_preview(_prints, _agent, _lisp_step, _preview_max), do: nil
 
-  # Show previews of new/changed def bindings
-  defp format_stored_hint(agent, state, lisp_step, preview_max)
+  # Returns `{stored_hint_text_or_nil, changed_previews_map, any_truncated?}`.
+  #
+  # `stored_hint_text_or_nil` is the human-readable hint string used in the
+  # `feedback` text. `changed_previews_map` is a string-keyed map of changed
+  # bindings to their EDN previews, surfaced as `memory.changed` in the
+  # structured return of `execution_feedback/3`. The two are computed together
+  # because they share the same `changed_vars` + `truncate_value` traversal.
+  defp build_memory_section(agent, state, lisp_step, preview_max)
        when agent.max_turns > 1 do
-    if map_size(lisp_step.memory) > 0 do
+    if is_map(lisp_step.memory) and map_size(lisp_step.memory) > 0 do
       prev_memory = state.memory || %{}
       changed = changed_vars(prev_memory, lisp_step.memory)
 
-      cond do
-        map_size(changed) > 0 ->
-          {previews, any_truncated?} =
-            changed
-            |> Enum.sort_by(fn {k, _} -> to_string(k) end)
-            |> Enum.map_reduce(false, fn {k, v}, trunc_acc ->
-              {text, was_truncated?} = truncate_value(v, preview_max)
-              {";; #{k} = #{text}", trunc_acc or was_truncated?}
-            end)
+      if map_size(changed) > 0 do
+        {previews_kv, any_truncated?} =
+          changed
+          |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+          |> Enum.map_reduce(false, fn {k, v}, trunc_acc ->
+            {text, was_truncated?} = truncate_value(v, preview_max)
+            {{to_string(k), text}, trunc_acc or was_truncated?}
+          end)
 
-          hint =
-            if any_truncated?,
-              do: "\n;; (truncated, use println on specific fields)",
-              else: ""
+        lines = Enum.map(previews_kv, fn {k, text} -> ";; #{k} = #{text}" end)
 
-          Enum.join(previews, "\n") <> hint
+        hint =
+          if any_truncated?,
+            do: "\n;; (truncated, use println on specific fields)",
+            else: ""
 
-        map_size(lisp_step.memory) > 0 ->
-          stored_symbols =
-            lisp_step.memory
-            |> Map.keys()
-            |> Enum.map(&to_string/1)
-            |> Enum.sort()
-            |> Enum.join(", ")
+        stored_hint_text = Enum.join(lines, "\n") <> hint
+        {stored_hint_text, Map.new(previews_kv), any_truncated?}
+      else
+        stored_symbols =
+          lisp_step.memory
+          |> Map.keys()
+          |> Enum.map(&to_string/1)
+          |> Enum.sort()
+          |> Enum.join(", ")
 
-          "Stored: #{stored_symbols}"
-
-        true ->
-          nil
+        {"Stored: #{stored_symbols}", %{}, false}
       end
+    else
+      {nil, %{}, false}
     end
   end
 
-  defp format_stored_hint(_agent, _state, _lisp_step, _preview_max), do: nil
+  defp build_memory_section(_agent, _state, _lisp_step, _preview_max), do: {nil, %{}, false}
+
+  defp stored_keys(lisp_step) do
+    case lisp_step.memory do
+      memory when is_map(memory) ->
+        memory
+        |> Map.keys()
+        |> Enum.map(&to_string/1)
+        |> Enum.sort()
+
+      _ ->
+        []
+    end
+  end
 
   defp truncate_prints(str, max_chars) when byte_size(str) > max_chars do
     {String.slice(str, 0, max_chars), true}
