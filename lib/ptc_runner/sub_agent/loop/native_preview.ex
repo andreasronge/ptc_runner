@@ -32,7 +32,31 @@ defmodule PtcRunner.SubAgent.Loop.NativePreview do
 
   alias PtcRunner.Lisp.Formatter
   alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.Temporal
   alias PtcRunner.Tool
+
+  # Known limitations deferred from v1 (will be surfaced in Tier 4 docs):
+  #
+  #   * `false` values in metadata previews collapse to "null" via
+  #     `||` short-circuit at `metadata_preview/1` and `list_of_maps_preview/2`
+  #     (the `Map.get(result, k) || fetch_by_atom(...)` pattern). A boolean
+  #     `false` value triggers the fallback path. Fix requires a
+  #     three-arg `Map.get/3` with a sentinel default; deferred for
+  #     scope discipline.
+  #   * Atom + string key collision in the same map silently overwrites
+  #     during `to_string/1` normalization in `metadata_preview/1`.
+  #   * `-0.0` collapses to integer `0` via the cache-key path
+  #     (`canonical_cache_key/2`); harmless for cache identity but
+  #     diverges from JSON's strict equality.
+  #   * NaN / Infinity floats: BEAM doesn't produce them from arithmetic,
+  #     but a foreign-source NIF could. They pass through unchanged in
+  #     the cache path; preview path may JSON-fail.
+  #   * Charlist (`[97, 98, 99]`) vs binary (`"abc"`) cache identity is
+  #     not unified — they hash to different keys.
+  #   * Decimal/DateTime values inside *cache key* args are not fully
+  #     canonicalized (the Tier 3.5 Fix 6 only addresses preview rows);
+  #     they reach `canonicalize/1`'s catch-all clause and pass through
+  #     unchanged.
 
   @type preview_status :: :ok | :fallback
 
@@ -251,7 +275,14 @@ defmodule PtcRunner.SubAgent.Loop.NativePreview do
   # ---------------------------------------------------------------------------
 
   defp rows_preview(result, limit) when is_list(result) do
-    rows = Enum.take(result, limit)
+    # Tier 3.5 Fix 6: normalize temporal structs (DateTime, Date, Time,
+    # NaiveDateTime) to ISO 8601 strings before they enter the preview
+    # map. Those structs have no Jason encoder and would otherwise crash
+    # the preview builder when `Jason.encode!/1` runs in
+    # `Loop.TextMode.run_and_cache/6`. Same treatment as the legacy
+    # tool-result encoding path.
+    raw_rows = Enum.take(result, limit)
+    rows = Temporal.walk(raw_rows)
     count = length(result)
 
     schema =
