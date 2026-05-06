@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     direct content as a final answer, or surface a paired protocol error.
   """
 
-  alias PtcRunner.{Lisp, Step, Turn}
+  alias PtcRunner.{Lisp, PtcToolProtocol, Step, Turn}
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.{BuiltinTools, Definition, KeyNormalizer}
 
@@ -47,10 +47,12 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
   @ptc_lisp_execute_name "ptc_lisp_execute"
 
-  # Canonical description string — single source of truth referenced by
-  # R7 and the Two Tool Layers section of the plan. Tests assert stable
-  # substrings against this constant; do not paraphrase elsewhere.
-  @ptc_lisp_execute_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation and tool orchestration. Call app tools as `(tool/name ...)` from inside the program — do not attempt to call app tools as native function calls; only `ptc_lisp_execute` is available natively."
+  # Canonical description string — single source of truth lives in
+  # `PtcRunner.PtcToolProtocol`, parameterized by capability profile.
+  # The v1 PTC `:tool_call` transport uses
+  # `:in_process_with_app_tools`, which is byte-for-byte locked to the
+  # historical wording (Addendum #10 of the text-mode plan). Tests
+  # assert stable substrings against the same source of truth.
 
   @doc """
   The reserved native tool name (`"ptc_lisp_execute"`).
@@ -59,13 +61,15 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   def tool_name, do: @ptc_lisp_execute_name
 
   @doc """
-  The canonical description string for the `ptc_lisp_execute` tool.
+  The canonical description string for the `ptc_lisp_execute` tool in
+  v1 PTC `:tool_call` mode.
 
-  This is the single source of truth — tests assert stable substrings
-  against this value. Do not paraphrase the guidance elsewhere.
+  Delegates to `PtcRunner.PtcToolProtocol.tool_description/1` with the
+  `:in_process_with_app_tools` profile. Tests assert stable substrings
+  against this value; do not paraphrase the guidance elsewhere.
   """
   @spec tool_description() :: String.t()
-  def tool_description, do: @ptc_lisp_execute_description
+  def tool_description, do: PtcToolProtocol.tool_description(:in_process_with_app_tools)
 
   @doc """
   Build the OpenAI-format tool schema for `ptc_lisp_execute`.
@@ -91,7 +95,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       "type" => "function",
       "function" => %{
         "name" => @ptc_lisp_execute_name,
-        "description" => @ptc_lisp_execute_description,
+        "description" => PtcToolProtocol.tool_description(:in_process_with_app_tools),
         "parameters" => %{
           "type" => "object",
           "properties" => %{
@@ -380,7 +384,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
          state
        ) do
     execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
-    tool_result_json = success_tool_result_json(lisp_step, execution)
+    tool_result_json = PtcToolProtocol.render_success(lisp_step, execution: execution)
 
     turn =
       Metrics.build_turn(
@@ -425,7 +429,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
          state
        ) do
     execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
-    tool_result_json = success_tool_result_json(lisp_step, execution)
+    tool_result_json = PtcToolProtocol.render_success(lisp_step, execution: execution)
 
     turn =
       Metrics.build_turn(
@@ -472,7 +476,12 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
          state
        ) do
     {fail_message, fail_value_preview} = fail_message_and_preview(fail_args)
-    tool_result_json = fail_tool_result_json(fail_message, fail_value_preview)
+
+    tool_result_json =
+      PtcToolProtocol.render_error(:fail, fail_message,
+        result: fail_value_preview,
+        feedback: fail_message
+      )
 
     turn =
       Metrics.build_turn(
@@ -521,7 +530,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     fail = lisp_step.fail
     reason_atom = classify_lisp_error(fail)
     message = fail.message
-    tool_result_json = execution_error_tool_result_json(reason_atom, message)
+    tool_result_json = PtcToolProtocol.render_error(reason_atom, message)
 
     turn =
       Metrics.build_turn(
@@ -566,7 +575,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     error_message = ReturnValidation.format_error_for_llm(agent, lisp_step.return, errors)
 
     tool_result_json =
-      execution_error_tool_result_json(:runtime_error, error_message)
+      PtcToolProtocol.render_error(:runtime_error, error_message)
 
     turn =
       Metrics.build_turn(
@@ -630,7 +639,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
     if agent.memory_strategy == :rollback do
       tool_result_json =
-        execution_error_tool_result_json(:memory_limit, error_msg <> " Last turn rolled back.")
+        PtcToolProtocol.render_error(:memory_limit, error_msg <> " Last turn rolled back.")
 
       new_state =
         build_continuation_state(
@@ -646,7 +655,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       {:continue, new_state, turn}
     else
       duration_ms = System.monotonic_time(:millisecond) - state.start_time
-      tool_result_json = execution_error_tool_result_json(:memory_limit, error_msg)
+      tool_result_json = PtcToolProtocol.render_error(:memory_limit, error_msg)
       error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
 
       final_messages =
@@ -1106,57 +1115,21 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   end
 
   # ----------------------------------------------------------------
-  # Tool-result JSON shapers (R22, R23)
+  # Tool-result JSON shapers
   # ----------------------------------------------------------------
-
-  @doc false
-  @spec success_tool_result_json(map(), map()) :: String.t()
-  def success_tool_result_json(lisp_step, execution) do
-    payload = %{
-      "status" => "ok",
-      "result" => execution.result,
-      "prints" => execution.prints,
-      "feedback" => execution.feedback,
-      "memory" => %{
-        "changed" => execution.memory.changed,
-        "stored_keys" => execution.memory.stored_keys,
-        "truncated" => execution.memory.truncated
-      },
-      "truncated" => execution.truncated
-    }
-
-    payload =
-      if is_nil(payload["result"]) and is_nil(lisp_step.return) do
-        Map.delete(payload, "result")
-      else
-        payload
-      end
-
-    Jason.encode!(payload)
-  end
-
-  @doc false
-  @spec fail_tool_result_json(String.t(), String.t()) :: String.t()
-  def fail_tool_result_json(message, value_preview) do
-    Jason.encode!(%{
-      "status" => "error",
-      "reason" => "fail",
-      "message" => message,
-      "result" => value_preview,
-      "feedback" => message
-    })
-  end
-
-  @doc false
-  @spec execution_error_tool_result_json(atom(), String.t()) :: String.t()
-  def execution_error_tool_result_json(reason, message) do
-    Jason.encode!(%{
-      "status" => "error",
-      "reason" => Atom.to_string(reason),
-      "message" => message,
-      "feedback" => message
-    })
-  end
+  #
+  # Success and execution-error rendering moved to
+  # `PtcRunner.PtcToolProtocol` (Tier 0 of the text-mode plan); call
+  # sites delegate to `PtcToolProtocol.render_success/2` and
+  # `PtcToolProtocol.render_error/3`.
+  #
+  # Protocol-error rendering stays local: protocol errors
+  # (`multiple_tool_calls`, `mixed_with_ptc_lisp_execute`,
+  # `unknown_tool`) are reasons specific to the v1 PTC `:tool_call`
+  # transport. They are *not* members of the shared
+  # `PtcToolProtocol.error_reason()` union — that union is reserved for
+  # in-program failure modes. Keeping this renderer local prevents the
+  # shared protocol surface from leaking transport-level concerns.
 
   @doc false
   @spec protocol_error_tool_result_json(atom(), String.t()) :: String.t()
