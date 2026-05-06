@@ -64,6 +64,12 @@ defmodule PtcRunner.Tool do
   - `description` - Optional description for LLM visibility
   - `type` - Tool type: `:native`, `:llm`, `:subagent`
   - `cache` - Enable result caching by `{tool_name, args}` (default: `false`)
+  - `expose` - Exposure layer for combined text/PTC mode: `:native | :ptc_lisp | :both`
+    (default: `nil`, resolved per-mode by `PtcRunner.SubAgent.Exposure`)
+  - `native_result` - Native preview metadata (keyword list or `nil`).
+    Only valid when `expose: :both` AND `cache: true`. See
+    `PtcRunner.SubAgent.Validator` for the validation contract and
+    `PtcRunner.SubAgent.Exposure` for resolution semantics.
 
   ## Result Caching
 
@@ -81,6 +87,35 @@ defmodule PtcRunner.Tool do
 
   In `pmap`, two parallel branches may both miss the cache and execute — last-write-wins
   on merge. Only successful results are cached; errors are never stored.
+
+  ## Exposure And Native Preview (combined text + PTC mode)
+
+  When an agent runs in combined mode (`output: :text, ptc_transport: :tool_call`),
+  each tool may declare how it surfaces to the LLM:
+
+      "search_logs" =>
+        {&MyApp.search_logs/1,
+         signature: "(query :string) -> [:any]",
+         description: "Search log events.",
+         expose: :both,
+         cache: true,
+         native_result: [preview: :metadata]}
+
+  Accepted `expose:` values: `:native`, `:ptc_lisp`, `:both`. Missing/`nil` is
+  accepted and resolved to a per-mode default by
+  `PtcRunner.SubAgent.Exposure.effective_expose/2`.
+
+  `native_result:` is a keyword list with optional fields:
+
+  - `preview:` — `:metadata` (default), `:rows`, or a 1-arity function
+    that receives the tool's full result and returns a JSON-encodable map.
+  - `limit:` — positive integer (default `20`); only consulted for
+    `preview: :rows`.
+
+  `native_result:` is rejected at agent construction unless the tool also
+  has `expose: :both` AND `cache: true`. Setting `expose: :both, cache: false`
+  (without `native_result:`) is legal — native calls return the actual result
+  and PTC-Lisp calls re-execute the function (no shared cache).
   """
 
   @type tool_format ::
@@ -89,16 +124,29 @@ defmodule PtcRunner.Tool do
           | {(map() -> term()), keyword()}
           | {(map() -> term()), :skip}
 
+  @type expose_layer :: :native | :ptc_lisp | :both
+
   @type t :: %__MODULE__{
           name: String.t(),
           function: (map() -> term()) | nil,
           signature: String.t() | nil,
           description: String.t() | nil,
           type: :native | :llm | :subagent,
-          cache: boolean()
+          cache: boolean(),
+          expose: expose_layer() | nil,
+          native_result: keyword() | nil
         }
 
-  defstruct [:name, :function, :signature, :description, :type, cache: false]
+  defstruct [
+    :name,
+    :function,
+    :signature,
+    :description,
+    :type,
+    :expose,
+    :native_result,
+    cache: false
+  ]
 
   alias PtcRunner.SubAgent.TypeExtractor
 
@@ -199,6 +247,11 @@ defmodule PtcRunner.Tool do
     signature = Keyword.get(options, :signature)
     description = Keyword.get(options, :description)
     cache = Keyword.get(options, :cache, false)
+    # Tier 1a: persist `expose:` and `native_result:` raw on the struct.
+    # Defaults are resolved later by `PtcRunner.SubAgent.Exposure` per the
+    # current agent mode; missing here means "use mode default."
+    expose = Keyword.get(options, :expose)
+    native_result = Keyword.get(options, :native_result)
 
     {:ok,
      %__MODULE__{
@@ -207,7 +260,9 @@ defmodule PtcRunner.Tool do
        signature: signature,
        description: description,
        type: :native,
-       cache: cache
+       cache: cache,
+       expose: expose,
+       native_result: native_result
      }}
   end
 

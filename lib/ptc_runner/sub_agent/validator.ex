@@ -62,6 +62,94 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_completion_mode!(opts)
     validate_self_tool_requires_signature!(opts)
     validate_compaction!(opts)
+    validate_tool_exposure_metadata!(opts)
+  end
+
+  # Tier 1a: validate per-tool `expose:` and `native_result:` metadata at
+  # agent construction. Pure data validation; defaults are resolved later
+  # by `PtcRunner.SubAgent.Exposure`.
+  defp validate_tool_exposure_metadata!(opts) do
+    case Keyword.fetch(opts, :tools) do
+      {:ok, tools} when is_map(tools) ->
+        Enum.each(tools, fn {name, format} ->
+          validate_tool_exposure_entry!(name, format)
+        end)
+
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  # Only the `{function, keyword_options}` shape can carry `expose:` or
+  # `native_result:`. Other shapes (bare function, `{f, sig_string}`,
+  # `{f, :skip}`, LLMTool, SubAgentTool, builtin atoms) cannot.
+  defp validate_tool_exposure_entry!(name, {function, options})
+       when is_function(function) and is_list(options) do
+    expose = Keyword.get(options, :expose)
+    cache = Keyword.get(options, :cache, false)
+    native_result = Keyword.get(options, :native_result)
+
+    validate_expose_value!(name, expose)
+    validate_native_result!(name, native_result, expose, cache)
+    :ok
+  end
+
+  defp validate_tool_exposure_entry!(_name, _format), do: :ok
+
+  defp validate_expose_value!(_name, nil), do: :ok
+  defp validate_expose_value!(_name, value) when value in [:native, :ptc_lisp, :both], do: :ok
+
+  defp validate_expose_value!(name, value) do
+    raise ArgumentError,
+          "tool #{inspect(name)}: invalid expose: #{inspect(value)} — accepted values are :native, :ptc_lisp, :both"
+  end
+
+  defp validate_native_result!(_name, nil, _expose, _cache), do: :ok
+
+  defp validate_native_result!(name, native_result, expose, cache) when is_list(native_result) do
+    unless expose == :both and cache == true do
+      raise ArgumentError,
+            "tool #{inspect(name)}: native_result: requires expose: :both AND cache: true (got expose: #{inspect(expose)}, cache: #{inspect(cache)})"
+    end
+
+    validate_native_result_fields!(name, native_result)
+    :ok
+  end
+
+  defp validate_native_result!(name, other, _expose, _cache) do
+    raise ArgumentError,
+          "tool #{inspect(name)}: native_result: must be a keyword list or nil, got #{inspect(other)}"
+  end
+
+  defp validate_native_result_fields!(name, native_result) do
+    preview = Keyword.get(native_result, :preview, :metadata)
+    limit = Keyword.get(native_result, :limit, 20)
+
+    validate_native_result_preview!(name, preview)
+    validate_native_result_limit!(name, limit)
+    :ok
+  end
+
+  defp validate_native_result_preview!(_name, preview) when preview in [:metadata, :rows], do: :ok
+
+  defp validate_native_result_preview!(_name, preview)
+       when is_function(preview, 1),
+       do: :ok
+
+  defp validate_native_result_preview!(name, preview) do
+    raise ArgumentError,
+          "tool #{inspect(name)}: native_result.preview: must be :metadata, :rows, or a 1-arity function, got #{inspect(preview)}"
+  end
+
+  defp validate_native_result_limit!(_name, limit)
+       when is_integer(limit) and limit > 0,
+       do: :ok
+
+  defp validate_native_result_limit!(name, limit) do
+    raise ArgumentError,
+          "tool #{inspect(name)}: native_result.limit: must be a positive integer, got #{inspect(limit)}"
   end
 
   defp validate_compaction!(opts) do
