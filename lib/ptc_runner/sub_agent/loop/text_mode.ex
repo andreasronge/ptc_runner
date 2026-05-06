@@ -1668,18 +1668,176 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # ============================================================
 
   defp handle_final_answer(content, agent, state) do
-    if Definition.text_return?(agent) do
-      # Fire on_chunk with full content for tool-variant final answer
-      if state.on_chunk, do: safe_on_chunk(state.on_chunk, content)
+    cond do
+      Definition.text_return?(agent) ->
+        # Fire on_chunk with full content for tool-variant final answer
+        if state.on_chunk, do: safe_on_chunk(state.on_chunk, content)
 
-      # Text return: raw string as step.return
-      {turn, step} = build_tool_text_success_step(content, state, agent)
-      {:stop, {:ok, step}, turn, state.turn_tokens}
-    else
-      # JSON return: parse and validate
-      json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
-      JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
+        # Text return: raw string as step.return
+        {turn, step} = build_tool_text_success_step(content, state, agent)
+        {:stop, {:ok, step}, turn, state.turn_tokens}
+
+      # Tier 3d — Final-Output Semantics matrix (combined mode only).
+      # The agent's final answer in combined mode is the LLM's final
+      # text response, optionally coerced by signature. `:any` is raw
+      # text; scalar types (`:int`/`:float`/`:bool`/`:datetime`) are
+      # parsed/coerced via `JsonHandler.atomize_value/2` and validated;
+      # `{:map, ...}` / `{:list, ...}` defer to JsonHandler's existing
+      # JSON-object / JSON-array path. See spec § "Final-Output
+      # Semantics" and § "Implementation Contract → Final-Output
+      # Semantics".
+      combined_mode_active?(state) ->
+        handle_final_answer_combined(content, agent, state)
+
+      true ->
+        # Pure text mode legacy path: JSON return: parse and validate.
+        json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
+        JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
     end
+  end
+
+  # Tier 3d — combined-mode final-text dispatch per the
+  # "Final-Output Semantics" matrix. Mirrors
+  # `Loop.PtcToolCall.process_direct_final_content/3` but builds a
+  # tool-variant success step (which already propagates combined-mode
+  # state — memory, journal, tool_cache, child_steps, summaries —
+  # through `build_tool_text_success_step/3`).
+  defp handle_final_answer_combined(content, agent, state) do
+    case agent.parsed_signature do
+      {:signature, _params, :any} ->
+        complete_combined_text(content, content, agent, state)
+
+      {:signature, _params, {:map, _}} ->
+        # Map/list deferral — JsonHandler already implements the
+        # parse-as-JSON + validate path for these signature shapes.
+        json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
+        JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
+
+      {:signature, _params, {:list, _}} ->
+        json_handler_opts = [all_tool_calls: Enum.reverse(state.all_tool_calls)]
+        JsonHandler.handle_json_answer(content, agent, state, json_handler_opts)
+
+      {:signature, _params, return_type} ->
+        # Scalar coercion: `:int` / `:float` / `:bool` / `:datetime` /
+        # `{:optional, _}` flow through here.
+        coerce_scalar_final(content, return_type, agent, state)
+
+      nil ->
+        # Defensive — `parsed_signature: nil` is already handled by
+        # `text_return?/1` at the top of `handle_final_answer/3`. Keep
+        # this branch as the no-coercion fallback so a future signature
+        # variant can't silently fall into the JsonHandler path.
+        complete_combined_text(content, content, agent, state)
+    end
+  end
+
+  defp coerce_scalar_final(content, return_type, agent, state) do
+    trimmed = String.trim(content)
+
+    case parse_for_type(trimmed, return_type) do
+      {:ok, parsed} ->
+        coerced = JsonHandler.atomize_value(parsed, return_type)
+
+        case JsonHandler.validate_return(agent, coerced) do
+          :ok ->
+            complete_combined_text(coerced, content, agent, state)
+
+          {:error, errors} ->
+            msg =
+              "Return validation failed: " <>
+                JsonHandler.format_validation_errors(errors)
+
+            combined_text_feedback_or_error(msg, content, agent, state)
+        end
+
+      {:error, message} ->
+        combined_text_feedback_or_error(message, content, agent, state)
+    end
+  end
+
+  # Mirror of `Loop.PtcToolCall.parse_for_type/2`. `:datetime` accepts
+  # both JSON-quoted ISO-8601 (`"\"2026-05-06T...\""`) and a bare
+  # ISO-8601 string. All other scalar types parse via `Jason.decode/1`.
+  defp parse_for_type(content, :datetime) do
+    case Jason.decode(content) do
+      {:ok, val} ->
+        {:ok, val}
+
+      {:error, _} ->
+        case DateTime.from_iso8601(content) do
+          {:ok, _dt, _offset} -> {:ok, content}
+          {:error, _} -> {:error, "Could not parse datetime from response: #{inspect(content)}"}
+        end
+    end
+  end
+
+  defp parse_for_type(content, {:optional, _inner}) do
+    case Jason.decode(content) do
+      {:ok, val} -> {:ok, val}
+      {:error, _} -> {:error, "Could not parse JSON from response."}
+    end
+  end
+
+  defp parse_for_type(content, _type) do
+    case Jason.decode(content) do
+      {:ok, val} -> {:ok, val}
+      {:error, _} -> {:error, "Could not parse JSON from response."}
+    end
+  end
+
+  # Build a coerced-or-raw success step for combined-mode final text.
+  # `value` is the coerced (or raw) return; `raw_content` is what the
+  # LLM actually emitted (used for the assistant message bookkeeping).
+  defp complete_combined_text(value, raw_content, agent, state) do
+    if state.on_chunk, do: safe_on_chunk(state.on_chunk, raw_content)
+
+    normalized_return = KeyNormalizer.normalize_keys(value)
+    {turn, step} = build_tool_text_success_step(raw_content, state, agent)
+    final_step = %{step | return: normalized_return}
+    {:stop, {:ok, final_step}, turn, state.turn_tokens}
+  end
+
+  # On parse / validation failure, feed back to the LLM if budget
+  # remains. If we're already at the max-turns boundary, terminate via
+  # the existing `:validation_error` error step path so the loop's
+  # error envelope stays consistent with pure JSON mode.
+  defp combined_text_feedback_or_error(message, raw_content, agent, state) do
+    if state.turn >= agent.max_turns do
+      {turn, step} =
+        build_tool_error_step(:validation_error, message, raw_content, state, agent)
+
+      {:stop, {:error, step}, turn, state.turn_tokens}
+    else
+      retry_combined_final(message, raw_content, state)
+    end
+  end
+
+  defp retry_combined_final(message, raw_content, state) do
+    feedback = "Error: #{message}. Please return a valid value matching the expected output."
+
+    turn =
+      Metrics.build_turn(state, raw_content, nil, %{error: message},
+        success?: false,
+        prints: [],
+        tool_calls: [],
+        memory: state.memory || %{}
+      )
+
+    new_state = %{
+      state
+      | turn: state.turn + 1,
+        messages:
+          state.messages ++
+            [
+              %{role: :assistant, content: raw_content},
+              %{role: :user, content: feedback}
+            ],
+        turns: [turn | state.turns],
+        remaining_turns: state.remaining_turns - 1,
+        turn_tokens: state.turn_tokens
+    }
+
+    {:continue, new_state, turn}
   end
 
   defp build_tool_text_success_step(text_content, state, agent) do
