@@ -638,6 +638,30 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         Map.put_new(tc, :id, "tc_#{state.total_tool_calls + idx + 1}")
       end)
 
+    # Tier 3c: classify the assistant turn against the six-row
+    # "Multi-Call Rule" precedence table (first match wins). Rows 1-2
+    # reject the entire turn with one paired protocol-error per
+    # `tool_call_id`; Rows 3-6 fall through to the existing dispatch
+    # path. Pure text mode is not subject to Rows 1-2 (no
+    # `ptc_lisp_execute` exposed) and keeps its legacy unknown-tool
+    # behavior; combined mode also handles Rows 5-6 unknown-tool
+    # protocol errors below in the per-call dispatch branch.
+    case classify_turn(tool_calls_with_ids, state) do
+      {:reject, reason, message} ->
+        recover_protocol_error_text(
+          tool_calls_with_ids,
+          assistant_content,
+          reason,
+          message,
+          state
+        )
+
+      :proceed ->
+        proceed_with_tool_calls(tool_calls_with_ids, assistant_content, agent, state)
+    end
+  end
+
+  defp proceed_with_tool_calls(tool_calls_with_ids, assistant_content, agent, state) do
     # Tier 3a (Addendum / Tier 3a description): `ptc_lisp_execute`
     # invocations are exempt from `agent.max_tool_calls` and MUST NOT
     # increment `state.total_tool_calls`. We tag each call with a
@@ -670,46 +694,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     # mode never enters the cache-write branch, so the threaded state is a
     # noop for v1 callers.
     {tool_results_rev, current_turn_calls, state_after_calls, fatal_step} =
-      Enum.reduce_while(calls_to_execute, {[], [], state, nil}, fn {tc, exempt?},
-                                                                   {results_acc, calls_acc, st,
-                                                                    _fatal} ->
-        tool_name = tc.name
-        tool_args = tc.args || %{}
-        tool_id = tc.id
-
-        cond do
-          exempt? ->
-            case dispatch_ptc_lisp_execute(tc, agent, st) do
-              {:ok, result_str, step_entry, st_next} ->
-                tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-
-                {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
-
-              {:fatal, error_step} ->
-                {:halt, {results_acc, calls_acc, st, error_step}}
-            end
-
-          Map.get(tc, :args_error) ->
-            error_msg = Map.get(tc, :args_error)
-            result_str = Jason.encode!(%{"error" => error_msg})
-
-            step_entry = %{
-              name: tool_name,
-              args: tool_args,
-              result: nil,
-              error: error_msg,
-              timestamp: DateTime.utc_now(),
-              duration_ms: 0
-            }
-
-            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
-
-          true ->
-            {result_str, step_entry, st_next} = execute_single_tool(tool_name, tool_args, st)
-            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
-        end
+      Enum.reduce_while(calls_to_execute, {[], [], state, nil}, fn entry, acc ->
+        dispatch_one_call(entry, agent, acc)
       end)
 
     if fatal_step do
@@ -796,6 +782,67 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     end
   end
 
+  # Per-call dispatch branch extracted from the `Enum.reduce_while/3`
+  # body in `proceed_with_tool_calls/4` to keep cyclomatic complexity
+  # under the credo gate. Returns the standard reduce-while tuple.
+  defp dispatch_one_call({tc, exempt?}, agent, {results_acc, calls_acc, st, _fatal}) do
+    tool_name = tc.name
+    tool_args = tc.args || %{}
+    tool_id = tc.id
+
+    cond do
+      exempt? ->
+        case dispatch_ptc_lisp_execute(tc, agent, st) do
+          {:ok, result_str, step_entry, st_next} ->
+            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
+
+          {:fatal, error_step} ->
+            {:halt, {results_acc, calls_acc, st, error_step}}
+        end
+
+      Map.get(tc, :args_error) ->
+        error_msg = Map.get(tc, :args_error)
+        result_str = Jason.encode!(%{"error" => error_msg})
+        step_entry = simple_step_entry(tool_name, tool_args, error_msg)
+        tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+
+      # Tier 3c — Multi-Call Rule Rows 5/6: in combined mode, an
+      # unknown native tool call (registered as `:ptc_lisp`-only or
+      # not registered at all — Addendum #9) returns one paired
+      # `unknown_tool` protocol-error per id while sibling valid
+      # calls still execute. Divergence from v1 PTC `:tool_call`:
+      # v1 rejects the entire turn on any unknown native tool; text
+      # mode is intentionally more permissive to preserve TextMode
+      # chat ergonomics. Pure text mode short-circuits via
+      # `combined_mode_active?/1` and keeps the legacy "Tool not
+      # found" envelope.
+      combined_mode_active?(st) and unknown_native_tool?(tc, agent, st) ->
+        message = unknown_tool_message(tool_name)
+        result_str = protocol_error_json(:unknown_tool, message)
+        step_entry = simple_step_entry(tool_name, tool_args, message)
+        tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+
+      true ->
+        {result_str, step_entry, st_next} = execute_single_tool(tool_name, tool_args, st)
+        tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
+    end
+  end
+
+  defp simple_step_entry(tool_name, tool_args, error_msg) do
+    %{
+      name: tool_name,
+      args: tool_args,
+      result: nil,
+      error: error_msg,
+      timestamp: DateTime.utc_now(),
+      duration_ms: 0
+    }
+  end
+
   # Split tagged calls so non-exempt calls stay within `remaining`
   # budget; exempt (`ptc_lisp_execute`) calls are always kept. Order
   # within `tagged_calls` is preserved.
@@ -824,6 +871,162 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # generic `tool not found` path.
   defp ptc_lisp_execute_call?(%{name: @ptc_lisp_execute_name}, %{combined_mode: true}), do: true
   defp ptc_lisp_execute_call?(_, _), do: false
+
+  # ============================================================
+  # Tier 3c — Multi-Call Rule classification
+  # ============================================================
+  #
+  # Six-row precedence table from "Multi-Call Rule" in
+  # `Plans/text-mode-ptc-compute-tool.md`. First match wins.
+  #
+  #   Row 1: ≥ 2 `ptc_lisp_execute` calls (any other calls present
+  #          or not) → reject all (`multiple_tool_calls`).
+  #   Row 2: exactly one `ptc_lisp_execute` + any other native call
+  #          (valid or unknown) → reject all
+  #          (`mixed_with_ptc_lisp_execute`).
+  #   Row 3: exactly one `ptc_lisp_execute` alone → execute the
+  #          program (existing Tier 3a path).
+  #   Row 4: native app-tool calls only — all valid → execute all.
+  #   Row 5: native app-tool calls only — mix of valid and unknown
+  #          → execute valid; pair `unknown_tool` per unknown id.
+  #   Row 6: native app-tool calls only — all unknown → pair
+  #          `unknown_tool` per id.
+  #
+  # This function only decides between Rows 1-2 (whole-turn reject)
+  # and "proceed" (Rows 3-6). The per-call branch in
+  # `proceed_with_tool_calls/4` handles Rows 5/6 unknown-tool pairing
+  # (combined mode only). Pure text mode never reaches Row 1/2 because
+  # `ptc_lisp_execute` is not registered — the call short-circuits to
+  # `:proceed` and the legacy "Tool not found" envelope is preserved
+  # by `dispatch_bare/4`.
+  @spec classify_turn([map()], map()) :: :proceed | {:reject, atom(), String.t()}
+  defp classify_turn(calls, state) do
+    ptc_count = Enum.count(calls, fn tc -> ptc_lisp_execute_call?(tc, state) end)
+    total = length(calls)
+
+    cond do
+      ptc_count >= 2 ->
+        {:reject, :multiple_tool_calls, multiple_tool_calls_message()}
+
+      ptc_count == 1 and total > 1 ->
+        {:reject, :mixed_with_ptc_lisp_execute, mixed_with_ptc_lisp_execute_message()}
+
+      true ->
+        :proceed
+    end
+  end
+
+  # Tier 3c — protocol-error JSON shape. Lives in `Loop.TextMode` per
+  # the spec ("Protocol-error rendering for `multiple_tool_calls`,
+  # `mixed_with_ptc_lisp_execute`, `unknown_tool` MUST live in
+  # `Loop.TextMode`, not in `PtcToolProtocol`."). NO `feedback` field
+  # — protocol errors are transport-level, not execution-level. This
+  # diverges intentionally from v1 PTC `:tool_call`'s
+  # `protocol_error_tool_result_json/2`, which emits `feedback`.
+  @spec protocol_error_json(atom(), String.t()) :: String.t()
+  defp protocol_error_json(reason, message) do
+    Jason.encode!(%{
+      "status" => "error",
+      "reason" => Atom.to_string(reason),
+      "message" => message
+    })
+  end
+
+  defp multiple_tool_calls_message,
+    do: "exactly one ptc_lisp_execute call per assistant turn"
+
+  defp mixed_with_ptc_lisp_execute_message,
+    do:
+      "ptc_lisp_execute is exclusive in its assistant turn; no other native tool calls may accompany it"
+
+  defp unknown_tool_message(name),
+    do: "Unknown native tool `#{name}`."
+
+  # Tier 3c — classify a non-`ptc_lisp_execute` native call as unknown
+  # for combined-mode Row 5/6 handling. A call is unknown when:
+  #   1. The tool is not registered (no entry in
+  #      `state.normalized_tools_map` after API-name resolution), OR
+  #   2. The tool is registered but its effective `expose:` is
+  #      `:ptc_lisp`-only (Addendum #9: a `:ptc_lisp`-only tool called
+  #      natively in combined mode returns `unknown_tool`, not a
+  #      different reason).
+  defp unknown_native_tool?(tc, agent, state) do
+    tool_name = tc.name
+    resolved_name = Map.get(state.api_name_map, tool_name, tool_name)
+
+    if Map.has_key?(state.normalized_tools_map, resolved_name) do
+      case state.tools_meta && Map.get(state.tools_meta, resolved_name) do
+        %Tool{} = tool ->
+          Exposure.effective_expose(tool, agent) == :ptc_lisp
+
+        _ ->
+          false
+      end
+    else
+      true
+    end
+  end
+
+  # Tier 3c — Rows 1/2 protocol-error recovery. Mirrors
+  # `Loop.PtcToolCall.recover_protocol_error/6`'s message-pairing
+  # structure (one `role: :tool` message per rejected `tool_call_id`,
+  # all carrying the same protocol-error JSON; assistant message
+  # preserves the original `tool_calls`; turn advances; loop
+  # continues). Differences from the v1 PTC version:
+  #   - Protocol-error JSON shape has NO `feedback` field (TextMode
+  #     concern, surface-specific).
+  #   - No follow-up `:user` feedback message — TextMode does not use
+  #     the `TurnFeedback` rolling-feedback mechanism for protocol
+  #     errors.
+  #   - Updates `remaining_turns` and `turn` only (mirrors what the
+  #     existing `handle_tool_calls/4` continuation does).
+  defp recover_protocol_error_text(rejected_calls, assistant_content, reason, message, state) do
+    json = protocol_error_json(reason, message)
+
+    tool_msgs =
+      Enum.map(rejected_calls, fn %{id: id} ->
+        %{role: :tool, tool_call_id: id, content: json}
+      end)
+
+    assistant_msg = %{
+      role: :assistant,
+      content: assistant_content || "",
+      tool_calls:
+        Enum.map(rejected_calls, fn tc ->
+          %{
+            id: tc.id,
+            type: "function",
+            function: %{
+              name: tc.name,
+              arguments: if(is_binary(tc.args), do: tc.args, else: Jason.encode!(tc.args || %{}))
+            }
+          }
+        end)
+    }
+
+    turn =
+      Metrics.build_turn(
+        state,
+        inspect(rejected_calls),
+        nil,
+        %{reason: reason, message: message},
+        success?: false,
+        prints: [],
+        tool_calls: [],
+        memory: state.memory
+      )
+
+    new_state = %{
+      state
+      | turn: state.turn + 1,
+        messages: state.messages ++ [assistant_msg | tool_msgs],
+        turns: [turn | state.turns],
+        remaining_turns: state.remaining_turns - 1,
+        turn_tokens: state.turn_tokens
+    }
+
+    {:continue, new_state, turn}
+  end
 
   # ============================================================
   # Tier 3a — ptc_lisp_execute dispatch (combined mode only)
