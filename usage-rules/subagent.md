@@ -263,9 +263,6 @@ agent = PtcRunner.SubAgent.new(
   tools:         %{"list_products" => fn _args -> MyApp.Products.list() end},
   ptc_transport: :tool_call
 )
-
-# … or as a runtime option on run/2.
-{:ok, step} = PtcRunner.SubAgent.run(agent, llm: my_llm, ptc_transport: :tool_call)
 ```
 
 ### Don't
