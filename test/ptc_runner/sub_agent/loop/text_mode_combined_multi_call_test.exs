@@ -449,6 +449,157 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Tier 3.5 Fix 4 — unknown_tool wins over args_error in combined mode
+  # ---------------------------------------------------------------------------
+
+  describe "Tier 3.5 Fix 4: unknown_tool precedence over args_error (combined mode)" do
+    # If the LLM calls an unregistered (or `:ptc_lisp`-only) native tool
+    # AND the args fail to parse, the legacy `:args_error` branch fired
+    # first and produced the legacy `%{"error" => ...}` envelope. The
+    # Multi-Call Rule mandates `unknown_tool` protocol-error JSON
+    # regardless of args-parsing state — the right error class for the
+    # actual problem (the tool isn't callable) wins over the wrong one.
+    test "unknown native tool with args_error → unknown_tool protocol error" do
+      # Construct a tool call with both `name: "ghost"` (unregistered)
+      # and `args_error` set, simulating a malformed-JSON args response
+      # from the LLM adapter. Two turns: first the unknown-tool call,
+      # second the LLM gives up.
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "ghost",
+                args: %{},
+                args_error: "Invalid JSON: Unexpected character"
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: %{}, max_turns: 5)
+      {:ok, step} = run_combined(agent, llm)
+
+      assert step.return == "done"
+
+      tool_msgs = tool_messages(step)
+      assert length(tool_msgs) == 1
+
+      payload = Jason.decode!(hd(tool_msgs).content)
+      assert payload["status"] == "error"
+      assert payload["reason"] == "unknown_tool"
+      # Tier 3c protocol-error JSON shape: status, reason, message, no feedback.
+      refute Map.has_key?(payload, "feedback")
+
+      assert universal_pairing_ok?(step)
+    end
+
+    test ":ptc_lisp-only tool with args_error → unknown_tool (precedence over args_error)" do
+      tools = %{
+        "ptc_only" =>
+          {fn _ -> %{"ok" => true} end, signature: "(v :int) -> :any", expose: :ptc_lisp}
+      }
+
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "ptc_only",
+                args: %{},
+                args_error: "Invalid JSON"
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: tools, max_turns: 5)
+      {:ok, step} = run_combined(agent, llm)
+
+      tool_msgs = tool_messages(step)
+      payload = Jason.decode!(hd(tool_msgs).content)
+      assert payload["reason"] == "unknown_tool"
+      refute Map.has_key?(payload, "feedback")
+    end
+
+    test "KNOWN tool with args_error in combined mode → still legacy args_error envelope" do
+      # The flip is only for unknown tools. Known tools with malformed
+      # args keep the existing args-error feedback path so the LLM gets
+      # a useful "fix your JSON" message.
+      tools = %{
+        "search" =>
+          {fn _ -> [] end, signature: "(q :string) -> [:any]", expose: :both, cache: false}
+      }
+
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "search",
+                args: %{},
+                args_error: "Invalid JSON: missing q"
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: tools, max_turns: 5)
+      {:ok, step} = run_combined(agent, llm)
+
+      tool_msgs = tool_messages(step)
+      payload = Jason.decode!(hd(tool_msgs).content)
+      # Legacy args_error path uses `%{"error" => msg}` envelope.
+      assert Map.has_key?(payload, "error")
+      assert payload["error"] =~ "Invalid JSON"
+    end
+
+    test "pure text mode unknown tool with args_error keeps legacy 'error' envelope" do
+      # Pure text mode short-circuits at `combined_mode_active?/1` and
+      # keeps legacy behavior — args_error wins (or "Tool not found" if
+      # args parse cleanly).
+      tools = %{
+        "alpha" => {fn _ -> %{"ok" => true} end, signature: "(q :string) -> :map"}
+      }
+
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{id: "c1", name: "ghost", args: %{}, args_error: "Invalid JSON"}
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: tools, max_turns: 5)
+      # NOT into_combined — pure text mode.
+      {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
+
+      tool_msgs = tool_messages(step)
+      assert length(tool_msgs) == 1
+      payload = Jason.decode!(hd(tool_msgs).content)
+      # Legacy envelope, NOT protocol-error JSON.
+      assert Map.has_key?(payload, "error")
+      refute Map.has_key?(payload, "reason")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Pure text mode unaffected
   # ---------------------------------------------------------------------------
 
