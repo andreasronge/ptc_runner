@@ -20,9 +20,11 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.SubAgent.Loop.{JsonHandler, LLMRetry, Metrics, ToolNormalizer}
+  alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.SubAgent.Loop.{JsonHandler, LLMRetry, Metrics, NativePreview, ToolNormalizer}
   alias PtcRunner.SubAgent.{PromptExpander, Signature, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
+  alias PtcRunner.Tool
 
   # ============================================================
   # Preview Prompt
@@ -342,16 +344,62 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         {ToolSchema.sanitize_name(name), name}
       end)
 
+    # Tier 2b: Tool struct lookup keyed by *original* (pre-sanitize) name.
+    # Carries `expose`/`cache`/`native_result` for the combined-mode native
+    # preview/cache decision in `execute_single_tool`.
+    tools_meta = build_tools_meta(effective_tools)
+
+    # Tier 2b / Addendum #15: combined-mode entry path initializes
+    # `tool_cache` to `%{}` so native preview seeding has somewhere to
+    # write. Pure text mode MUST leave it untouched (per the State
+    # struct default `nil`; `%{}` if Loop.run already set it from
+    # defaults). `state.tool_cache || %{}` is intentional — we never
+    # overwrite an already-initialized cache, only fill in nil.
+    combined? = combined_mode?(agent)
+
+    tool_cache =
+      if combined? do
+        state.tool_cache || %{}
+      else
+        state.tool_cache
+      end
+
     tc_state = %{
       state
       | tool_schemas: tool_schemas,
         normalized_tools_map: normalized_tools,
         api_name_map: api_name_map,
+        tools_meta: tools_meta,
+        tool_cache: tool_cache,
+        combined_mode: combined?,
         total_tool_calls: 0,
         all_tool_calls: []
     }
 
     tool_driver_loop(agent, llm, tc_state)
+  end
+
+  # Combined mode = `output: :text, ptc_transport: :tool_call`.
+  # Validator currently rejects this combo (Tier 3e flips the gate); the
+  # check exists here so the preview/cache machinery is reachable
+  # internally (tests that construct state directly) without a public
+  # escape hatch.
+  defp combined_mode?(%Definition{output: :text, ptc_transport: :tool_call}), do: true
+  defp combined_mode?(%Definition{}), do: false
+
+  # Build a `name => %PtcRunner.Tool{}` map from the agent's effective
+  # tools so the runtime can read `expose`/`cache`/`native_result` at
+  # dispatch time. Falls back silently for non-normalizable formats — a
+  # missing meta entry just means "treat as bare native tool" (no preview,
+  # no cache write) which matches the v1 behavior for any tool without
+  # `expose: :both, cache: true`.
+  defp build_tools_meta(tools) when is_map(tools) do
+    Map.new(tools, fn {name, format} ->
+      case Tool.new(name, format) do
+        {:ok, tool} -> {name, tool}
+        {:error, _} -> {name, nil}
+      end
+    end)
   end
 
   defp tool_driver_loop(agent, llm, state) do
@@ -498,16 +546,20 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         {tool_calls_with_ids, false}
       end
 
-    {tool_results, current_turn_calls} =
-      Enum.map_reduce(calls_to_execute, [], fn tc, acc ->
+    # Reduce instead of map_reduce so each tool call can update
+    # `state.tool_cache` (combined-mode native preview seeding). Pure text
+    # mode never enters the cache-write branch, so the threaded state is a
+    # noop for v1 callers.
+    {tool_results_rev, current_turn_calls, state_after_calls} =
+      Enum.reduce(calls_to_execute, {[], [], state}, fn tc, {results_acc, calls_acc, st} ->
         tool_name = tc.name
         tool_args = tc.args || %{}
         tool_id = tc.id
 
-        {result_str, step_entry} =
+        {result_str, step_entry, st_next} =
           case Map.get(tc, :args_error) do
             nil ->
-              execute_single_tool(tool_name, tool_args, state)
+              execute_single_tool(tool_name, tool_args, st)
 
             error_msg ->
               result_str = Jason.encode!(%{"error" => error_msg})
@@ -521,7 +573,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
                 duration_ms: 0
               }
 
-              {result_str, step_entry}
+              {result_str, step_entry, st}
           end
 
         tool_result_msg = %{
@@ -530,8 +582,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           content: result_str
         }
 
-        {tool_result_msg, [step_entry | acc]}
+        {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next}
       end)
+
+    tool_results = Enum.reverse(tool_results_rev)
 
     all_tool_calls = Enum.reverse(current_turn_calls) ++ state.all_tool_calls
 
@@ -581,7 +635,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       )
 
     new_state = %{
-      state
+      state_after_calls
       | turn: state.turn + 1,
         messages: state.messages ++ [assistant_msg | tool_results],
         turns: [turn | state.turns],
@@ -605,21 +659,35 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     # Resolve sanitized API name back to original tool name
     # e.g., LLM returns "grep_n" but tools map has "grep-n"
     resolved_name = Map.get(state.api_name_map, tool_name, tool_name)
+    tool_meta = state.tools_meta && Map.get(state.tools_meta, resolved_name)
 
-    {result_str, result, error} =
-      case Map.fetch(state.normalized_tools_map, resolved_name) do
-        {:ok, tool_fn} when is_function(tool_fn, 1) ->
-          invoke_tool(tool_fn, tool_name, tool_args)
-
-        {:ok, {tool_fn, _opts}} when is_function(tool_fn, 1) ->
-          invoke_tool(tool_fn, tool_name, tool_args)
-
-        _ ->
-          error_msg = "Tool '#{tool_name}' not found"
-          {Jason.encode!(%{"error" => error_msg}), nil, error_msg}
+    # Tier 2b: Combined-mode preview/cache. Only active when the agent is
+    # in combined mode AND the tool opts in via `expose: :both, cache: true`.
+    # Pure text mode and `cache: false`/`:native`-only tools fall through
+    # to the legacy bare-dispatch path below.
+    {result_str, result, error, state_next} =
+      if preview_and_cache?(tool_meta) and combined_mode_active?(state) do
+        execute_with_cache(tool_meta, tool_name, tool_args, state)
+      else
+        {rs, r, e} = dispatch_bare(resolved_name, tool_name, tool_args, state)
+        {rs, r, e, state}
       end
 
     duration_ms = System.monotonic_time(:millisecond) - start
+
+    # Tier 2b telemetry: every native tool-call event carries
+    # `exposure_layer: :native`. PTC-Lisp `(tool/...)` calls are tagged
+    # `:ptc_lisp` from a different emitter (Tier 3a). Pure-text mode also
+    # gets `:native` since native is the only layer present there — that
+    # keeps the field universal across modes.
+    Telemetry.emit([:tool, :call], %{duration_ms: duration_ms}, %{
+      agent_name: state.agent_name,
+      agent_id: state.agent_id,
+      tool_name: tool_name,
+      exposure_layer: :native,
+      cached: cached_for_telemetry(state, state_next, tool_meta),
+      error: error != nil
+    })
 
     step_entry = %{
       name: tool_name,
@@ -630,7 +698,108 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       duration_ms: duration_ms
     }
 
-    {result_str, step_entry}
+    {result_str, step_entry, state_next}
+  end
+
+  defp dispatch_bare(resolved_name, tool_name, tool_args, state) do
+    case Map.fetch(state.normalized_tools_map, resolved_name) do
+      {:ok, tool_fn} when is_function(tool_fn, 1) ->
+        invoke_tool(tool_fn, tool_name, tool_args)
+
+      {:ok, {tool_fn, _opts}} when is_function(tool_fn, 1) ->
+        invoke_tool(tool_fn, tool_name, tool_args)
+
+      _ ->
+        error_msg = "Tool '#{tool_name}' not found"
+        {Jason.encode!(%{"error" => error_msg}), nil, error_msg}
+    end
+  end
+
+  # Combined-mode preview/cache execution. On cache hit, returns the
+  # canonical preview without re-invoking the tool function. On miss,
+  # invokes the tool: success seeds the cache + returns preview JSON;
+  # failure (raise / `{:error, _}`) does NOT seed the cache and falls
+  # back to the legacy error JSON shape — same behavior native callers
+  # see today.
+  defp execute_with_cache(%Tool{} = tool, tool_name, tool_args, state) do
+    cache_key = KeyNormalizer.canonical_cache_key(tool.name, tool_args)
+    cache = state.tool_cache || %{}
+
+    case Map.fetch(cache, cache_key) do
+      {:ok, full_result} ->
+        # Cache hit: rebuild the same preview shape without re-running
+        # the tool function. The full result stays in cache for any
+        # subsequent PTC-Lisp `(tool/...)` consumer.
+        preview_map = preview_or_fallback(tool, full_result, tool_args)
+
+        {Jason.encode!(preview_map), full_result, nil, state}
+
+      :error ->
+        resolved_name = Map.get(state.api_name_map, tool_name, tool.name)
+
+        case Map.fetch(state.normalized_tools_map, resolved_name) do
+          {:ok, tool_fn} when is_function(tool_fn, 1) ->
+            run_and_cache(tool, tool_fn, tool_name, tool_args, cache_key, state)
+
+          {:ok, {tool_fn, _opts}} when is_function(tool_fn, 1) ->
+            run_and_cache(tool, tool_fn, tool_name, tool_args, cache_key, state)
+
+          _ ->
+            error_msg = "Tool '#{tool_name}' not found"
+            {Jason.encode!(%{"error" => error_msg}), nil, error_msg, state}
+        end
+    end
+  end
+
+  defp run_and_cache(tool, tool_fn, tool_name, tool_args, cache_key, state) do
+    {result_str, result, error} = invoke_tool(tool_fn, tool_name, tool_args)
+
+    if error != nil do
+      # Failure: do not seed cache. Edge case in plan: "{:error, _} and
+      # raises are failures and MUST NOT seed the cache."
+      {result_str, result, error, state}
+    else
+      # Success: unwrap `{:ok, value}` if present (Tool's existing
+      # success normalization treats both raw and `{:ok, v}` as
+      # successful partial values).
+      full_result = unwrap_ok(result)
+      new_cache = Map.put(state.tool_cache || %{}, cache_key, full_result)
+
+      preview_map = preview_or_fallback(tool, full_result, tool_args)
+
+      {Jason.encode!(preview_map), full_result, nil, %{state | tool_cache: new_cache}}
+    end
+  end
+
+  defp preview_or_fallback(tool, full_result, args) do
+    case NativePreview.build(tool, full_result, args) do
+      {:ok, preview_map} -> preview_map
+      {:fallback, preview_map} -> preview_map
+    end
+  end
+
+  defp unwrap_ok({:ok, value}), do: value
+  defp unwrap_ok(value), do: value
+
+  defp preview_and_cache?(%Tool{expose: :both, cache: true}), do: true
+  defp preview_and_cache?(_), do: false
+
+  # Active = the combined-mode entry path ran (run_tool_variant set the
+  # flag). Pure text mode has the flag unset even though `tool_cache`
+  # may already be a `%{}` from upstream `Loop.run` defaults — so we
+  # gate on the explicit flag, not on cache shape, per Addendum #15.
+  defp combined_mode_active?(%{combined_mode: true}), do: true
+  defp combined_mode_active?(_), do: false
+
+  defp cached_for_telemetry(state_before, state_after, tool_meta) do
+    cond do
+      not preview_and_cache?(tool_meta) -> false
+      not is_map(state_before.tool_cache) -> false
+      # If the cache is unchanged after the call AND a value already lived
+      # under the call's canonical key, this was a hit.
+      state_before.tool_cache == state_after.tool_cache -> true
+      true -> false
+    end
   end
 
   # Invoke a tool function and translate any raised exception into a structured
