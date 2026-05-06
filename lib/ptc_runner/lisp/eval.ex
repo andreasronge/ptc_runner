@@ -813,7 +813,11 @@ defmodule PtcRunner.Lisp.Eval do
   # Captures the error field if the tool raises an exception, records it, and throws a special
   # exception that includes the updated eval_ctx so the error can be properly reported.
   #
-  # When `cacheable?` is true, results are cached by `{tool_name, args_map}`.
+  # When `cacheable?` is true, results are cached by the canonical cache key
+  # produced by `KeyNormalizer.canonical_cache_key/2` so native app-tool
+  # calls and PTC-Lisp `(tool/...)` calls share the same cache entry whenever
+  # the call is semantically identical (atom/string keys, map ordering, and
+  # integer-equal floats all collapse to one canonical form).
   # Cache hits return immediately with `duration_ms: 0` and `cached: true`.
   # Only successful results are cached; errors are not stored.
   #
@@ -830,7 +834,7 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
-    cache_key = {tool_name, args_map}
+    cache_key = KeyNormalizer.canonical_cache_key(tool_name, args_map)
 
     # Check cache for hit (cached calls don't count against limit - already counted)
     if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do

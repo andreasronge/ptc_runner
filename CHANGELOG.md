@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `KeyNormalizer.canonical_cache_key/2` — deterministic, layer-agnostic
+  cache key for tool-result caching. Normalizes map keys to strings,
+  recurses through nested maps/lists/tuples, and collapses integer-equal
+  floats to integers so semantically identical calls share one cache
+  entry regardless of how the args arrived. PTC-Lisp's `(tool/...)` cache
+  path now keys via this function (`lib/ptc_runner/lisp/eval.ex`); native
+  app-tool calls (Tier 2b) will share the same key. See
+  `Plans/text-mode-ptc-compute-tool.md` "Canonical Cache Key —
+  Implementation Rule." This is a deliberate cache-compatibility
+  migration: equivalence classes are widened (atom/string keys converge,
+  map ordering stabilizes, `1` and `1.0` collapse). Value semantics are
+  preserved for ordinary callers; only old cache-miss quirks change.
+
 - `compaction:` option for pressure-triggered context compaction. Opt-in
   (default: `false`); only fires for multi-turn agents (`max_turns > 1`) once
   turn count or estimated token usage crosses the configured threshold. Phase 1
