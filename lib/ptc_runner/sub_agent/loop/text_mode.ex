@@ -16,15 +16,30 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   require Logger
 
+  alias PtcRunner.{Lisp, PtcToolProtocol}
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Prompts
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
+  alias PtcRunner.SubAgent.Exposure
   alias PtcRunner.SubAgent.KeyNormalizer
-  alias PtcRunner.SubAgent.Loop.{JsonHandler, LLMRetry, Metrics, NativePreview, ToolNormalizer}
+
+  alias PtcRunner.SubAgent.Loop.{
+    Budget,
+    JsonHandler,
+    LLMRetry,
+    Metrics,
+    NativePreview,
+    ToolNormalizer,
+    TurnFeedback
+  }
+
   alias PtcRunner.SubAgent.{PromptExpander, Signature, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
   alias PtcRunner.Tool
+
+  @ptc_lisp_execute_name "ptc_lisp_execute"
 
   # ============================================================
   # Preview Prompt
@@ -100,6 +115,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   def run(%Definition{} = agent, llm, state) do
     result =
       cond do
+        # Tier 3a: combined mode always goes through the tool variant
+        # because `ptc_lisp_execute` is always present in the request
+        # `tools` field, even when zero app tools are configured.
+        combined_mode?(agent) ->
+          run_tool_variant(agent, llm, state)
+
         has_tools?(agent) ->
           run_tool_variant(agent, llm, state)
 
@@ -334,7 +355,19 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp run_tool_variant(agent, llm, state) do
     effective_tools = BuiltinTools.effective_tools(agent)
-    tool_schemas = ToolSchema.to_tool_definitions(effective_tools)
+    combined? = combined_mode?(agent)
+
+    # Tier 3a: in combined mode, the LLM-visible request `tools` field
+    # is filtered to `:native | :both`-exposed app tools, then appended
+    # with `ptc_lisp_execute`. Pure text mode keeps the legacy behavior
+    # (every effective tool surfaces natively).
+    tool_schemas =
+      if combined? do
+        combined_mode_tool_schemas(effective_tools, agent)
+      else
+        ToolSchema.to_tool_definitions(effective_tools)
+      end
+
     normalized_tools = ToolNormalizer.normalize(effective_tools, state, agent)
 
     # Build reverse name map: sanitized API name → original tool name
@@ -355,7 +388,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     # struct default `nil`; `%{}` if Loop.run already set it from
     # defaults). `state.tool_cache || %{}` is intentional — we never
     # overwrite an already-initialized cache, only fill in nil.
-    combined? = combined_mode?(agent)
 
     tool_cache =
       if combined? do
@@ -377,6 +409,75 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     }
 
     tool_driver_loop(agent, llm, tc_state)
+  end
+
+  # Tier 3a: combined-mode tool schemas. Filter app tools by exposure
+  # (`:native` or `:both`) and append the `ptc_lisp_execute` entry whose
+  # description comes from the `:in_process_text_mode` capability
+  # profile. ToolSchema.to_tool_definitions/1 expects the original
+  # `effective_tools` map shape; we filter the *map* by expose-eligible
+  # names so the schemas renderer keeps its existing behavior. Tools
+  # exposed `:ptc_lisp` are intentionally absent from the native
+  # request — they remain reachable via `(tool/...)` inside programs.
+  defp combined_mode_tool_schemas(effective_tools, agent) do
+    allowed_names = combined_mode_native_tool_names(effective_tools, agent)
+
+    native_tools =
+      effective_tools
+      |> Enum.filter(fn {name, _} -> MapSet.member?(allowed_names, name) end)
+      |> Map.new()
+
+    ToolSchema.to_tool_definitions(native_tools) ++ [combined_mode_tool_schema()]
+  end
+
+  defp combined_mode_native_tool_names(effective_tools, agent) do
+    tools_meta = build_tools_meta(effective_tools)
+
+    effective_tools
+    |> Map.keys()
+    |> Enum.filter(fn name ->
+      case Map.get(tools_meta, name) do
+        %Tool{} = tool ->
+          Exposure.effective_expose(tool, agent) in [:native, :both]
+
+        _ ->
+          # Unnormalizable / non-Tool entries (rare in practice) keep
+          # legacy text-mode behavior — surface natively.
+          true
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  @doc false
+  # Tier 3a: TextMode-local variant of the `ptc_lisp_execute` schema.
+  # Same wire shape as `Loop.PtcToolCall.tool_schema/0` but the
+  # `description` is sourced from the `:in_process_text_mode`
+  # capability profile (Addendum #11 — one canonical string per
+  # profile, returned directly with no concatenation). We intentionally
+  # do not mutate `Loop.PtcToolCall.tool_schema/0`'s constant because
+  # that module owns the `:in_process_with_app_tools` profile.
+  @spec combined_mode_tool_schema() :: map()
+  def combined_mode_tool_schema do
+    %{
+      "type" => "function",
+      "function" => %{
+        "name" => @ptc_lisp_execute_name,
+        "description" => PtcToolProtocol.tool_description(:in_process_text_mode),
+        "parameters" => %{
+          "type" => "object",
+          "properties" => %{
+            "program" => %{
+              "type" => "string",
+              "description" =>
+                "PTC-Lisp source code. Must be non-empty. Call app tools as `(tool/name ...)` from inside the program."
+            }
+          },
+          "required" => ["program"],
+          "additionalProperties" => false
+        }
+      }
+    }
   end
 
   # Combined mode = `output: :text, ptc_transport: :tool_call`.
@@ -536,121 +637,605 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         Map.put_new(tc, :id, "tc_#{state.total_tool_calls + idx + 1}")
       end)
 
-    new_total = state.total_tool_calls + length(tool_calls_with_ids)
+    # Tier 3a (Addendum / Tier 3a description): `ptc_lisp_execute`
+    # invocations are exempt from `agent.max_tool_calls` and MUST NOT
+    # increment `state.total_tool_calls`. We tag each call with a
+    # boolean flag, then apply the budget check only to the non-exempt
+    # subset. Exempt calls always execute regardless of the budget.
+    tagged_calls =
+      Enum.map(tool_calls_with_ids, fn tc ->
+        {tc, ptc_lisp_execute_call?(tc, state)}
+      end)
 
-    {calls_to_execute, limit_exceeded} =
-      if agent.max_tool_calls && new_total > agent.max_tool_calls do
-        remaining = max(0, agent.max_tool_calls - state.total_tool_calls)
-        {Enum.take(tool_calls_with_ids, remaining), true}
-      else
-        {tool_calls_with_ids, false}
+    non_exempt_count = Enum.count(tagged_calls, fn {_, exempt?} -> not exempt? end)
+
+    {calls_to_execute, skipped_calls} =
+      cond do
+        is_nil(agent.max_tool_calls) ->
+          {tagged_calls, []}
+
+        state.total_tool_calls + non_exempt_count <= agent.max_tool_calls ->
+          {tagged_calls, []}
+
+        true ->
+          remaining = max(0, agent.max_tool_calls - state.total_tool_calls)
+          partition_with_budget(tagged_calls, remaining)
       end
+
+    limit_exceeded = skipped_calls != []
 
     # Reduce instead of map_reduce so each tool call can update
     # `state.tool_cache` (combined-mode native preview seeding). Pure text
     # mode never enters the cache-write branch, so the threaded state is a
     # noop for v1 callers.
-    {tool_results_rev, current_turn_calls, state_after_calls} =
-      Enum.reduce(calls_to_execute, {[], [], state}, fn tc, {results_acc, calls_acc, st} ->
+    {tool_results_rev, current_turn_calls, state_after_calls, fatal_step} =
+      Enum.reduce_while(calls_to_execute, {[], [], state, nil}, fn {tc, exempt?},
+                                                                   {results_acc, calls_acc, st,
+                                                                    _fatal} ->
         tool_name = tc.name
         tool_args = tc.args || %{}
         tool_id = tc.id
 
-        {result_str, step_entry, st_next} =
-          case Map.get(tc, :args_error) do
-            nil ->
-              execute_single_tool(tool_name, tool_args, st)
+        cond do
+          exempt? ->
+            case dispatch_ptc_lisp_execute(tc, agent, st) do
+              {:ok, result_str, step_entry, st_next} ->
+                tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
 
-            error_msg ->
-              result_str = Jason.encode!(%{"error" => error_msg})
+                {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
 
-              step_entry = %{
-                name: tool_name,
-                args: tool_args,
-                result: nil,
-                error: error_msg,
-                timestamp: DateTime.utc_now(),
-                duration_ms: 0
-              }
+              {:fatal, error_step} ->
+                {:halt, {results_acc, calls_acc, st, error_step}}
+            end
 
-              {result_str, step_entry, st}
-          end
+          Map.get(tc, :args_error) ->
+            error_msg = Map.get(tc, :args_error)
+            result_str = Jason.encode!(%{"error" => error_msg})
 
-        tool_result_msg = %{
-          role: :tool,
-          tool_call_id: tool_id,
-          content: result_str
-        }
+            step_entry = %{
+              name: tool_name,
+              args: tool_args,
+              result: nil,
+              error: error_msg,
+              timestamp: DateTime.utc_now(),
+              duration_ms: 0
+            }
 
-        {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next}
+            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+
+          true ->
+            {result_str, step_entry, st_next} = execute_single_tool(tool_name, tool_args, st)
+            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
+        end
       end)
 
-    tool_results = Enum.reverse(tool_results_rev)
+    if fatal_step do
+      duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-    all_tool_calls = Enum.reverse(current_turn_calls) ++ state.all_tool_calls
+      step_with_metrics = %{
+        fatal_step
+        | usage: Metrics.build_final_usage(state, duration_ms, 0),
+          turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+          messages: build_collected_messages(state, state.messages),
+          prompt: state.expanded_prompt,
+          original_prompt: state.original_prompt,
+          tools: state.normalized_tools
+      }
 
-    tool_results =
-      if limit_exceeded do
-        skipped = Enum.drop(tool_calls_with_ids, length(calls_to_execute))
+      {:stop, {:error, step_with_metrics}, nil, state.turn_tokens}
+    else
+      tool_results = Enum.reverse(tool_results_rev)
 
-        limit_msgs =
-          Enum.map(skipped, fn tc ->
+      all_tool_calls = Enum.reverse(current_turn_calls) ++ state.all_tool_calls
+
+      tool_results =
+        if limit_exceeded do
+          limit_msgs =
+            Enum.map(skipped_calls, fn {tc, _exempt?} ->
+              %{
+                role: :tool,
+                tool_call_id: tc.id,
+                content:
+                  Jason.encode!(%{
+                    "error" => "Tool call limit reached (max: #{agent.max_tool_calls})"
+                  })
+              }
+            end)
+
+          tool_results ++ limit_msgs
+        else
+          tool_results
+        end
+
+      assistant_msg = %{
+        role: :assistant,
+        content: assistant_content || "",
+        tool_calls:
+          Enum.map(tool_calls_with_ids, fn tc ->
             %{
-              role: :tool,
-              tool_call_id: tc.id,
-              content:
-                Jason.encode!(%{
-                  "error" => "Tool call limit reached (max: #{agent.max_tool_calls})"
-                })
+              id: tc.id,
+              type: "function",
+              function: %{
+                name: tc.name,
+                arguments:
+                  if(is_binary(tc.args), do: tc.args, else: Jason.encode!(tc.args || %{}))
+              }
             }
           end)
+      }
 
-        tool_results ++ limit_msgs
+      turn =
+        Metrics.build_turn(state, inspect(tool_calls_with_ids), nil, nil,
+          success?: true,
+          prints: [],
+          tool_calls: Enum.reverse(current_turn_calls),
+          memory: %{}
+        )
+
+      executed_non_exempt =
+        Enum.count(calls_to_execute, fn {_tc, exempt?} -> not exempt? end)
+
+      skipped_non_exempt =
+        Enum.count(skipped_calls, fn {_tc, exempt?} -> not exempt? end)
+
+      new_state = %{
+        state_after_calls
+        | turn: state.turn + 1,
+          messages: state.messages ++ [assistant_msg | tool_results],
+          turns: [turn | state.turns],
+          remaining_turns: state.remaining_turns - 1,
+          total_tool_calls: state.total_tool_calls + executed_non_exempt + skipped_non_exempt,
+          all_tool_calls: all_tool_calls,
+          turn_tokens: state.turn_tokens
+      }
+
+      {:continue, new_state, turn}
+    end
+  end
+
+  # Split tagged calls so non-exempt calls stay within `remaining`
+  # budget; exempt (`ptc_lisp_execute`) calls are always kept. Order
+  # within `tagged_calls` is preserved.
+  defp partition_with_budget(tagged_calls, remaining) do
+    {kept, skipped, _left} =
+      Enum.reduce(tagged_calls, {[], [], remaining}, fn {_tc, exempt?} = entry,
+                                                        {kept_acc, skipped_acc, budget} ->
+        cond do
+          exempt? ->
+            {[entry | kept_acc], skipped_acc, budget}
+
+          budget > 0 ->
+            {[entry | kept_acc], skipped_acc, budget - 1}
+
+          true ->
+            {kept_acc, [entry | skipped_acc], budget}
+        end
+      end)
+
+    {Enum.reverse(kept), Enum.reverse(skipped)}
+  end
+
+  # Tier 3a: classify a tool call. The `ptc_lisp_execute` exemption
+  # only applies in combined mode; in pure text mode the name is
+  # never registered, so an LLM that returns it falls through to the
+  # generic `tool not found` path.
+  defp ptc_lisp_execute_call?(%{name: @ptc_lisp_execute_name}, %{combined_mode: true}), do: true
+  defp ptc_lisp_execute_call?(_, _), do: false
+
+  # ============================================================
+  # Tier 3a — ptc_lisp_execute dispatch (combined mode only)
+  # ============================================================
+  #
+  # Mirrors `Loop.PtcToolCall.execute_program/5` for the in-process
+  # text-mode profile but with combined-mode semantics:
+  #
+  #   - `(return v)` and `(fail v)` produce *tool results*; they do
+  #     NOT terminate the run (Final-Output Semantics). The LLM
+  #     gets one more turn to respond if budget remains. Tier 3d
+  #     pins the budget edge cases.
+  #   - `turn_history` is NOT advanced here. Tier 3b refines this
+  #     per the combined-mode `turn_history` semantics; v1
+  #     content-mode behavior (only successful non-terminal program
+  #     executions advance) is the target.
+  #   - Memory-limit `:fatal` strategy aborts the run; `:rollback`
+  #     continues.
+  #   - `:args_error` paths render through `PtcToolProtocol.render_error/3`.
+
+  # Returns one of:
+  #   {:ok, result_json, step_entry, new_state}   — continue
+  #   {:fatal, error_step}                          — terminate run with error
+  defp dispatch_ptc_lisp_execute(call, agent, state) do
+    start = System.monotonic_time(:millisecond)
+
+    case extract_program(call) do
+      {:ok, program} ->
+        run_ptc_lisp_program(program, call, agent, state, start)
+
+      {:error, reason, message} ->
+        result_json = PtcToolProtocol.render_error(reason, message)
+        duration_ms = System.monotonic_time(:millisecond) - start
+        emit_ptc_lisp_telemetry(state, duration_ms, true)
+
+        step_entry = %{
+          name: @ptc_lisp_execute_name,
+          args: call.args || %{},
+          result: nil,
+          error: message,
+          timestamp: DateTime.utc_now(),
+          duration_ms: duration_ms
+        }
+
+        {:ok, result_json, step_entry, state}
+    end
+  end
+
+  defp run_ptc_lisp_program(program, call, agent, state, start) do
+    exec_context =
+      if state.last_fail do
+        Map.put(state.context, :fail, state.last_fail)
       else
-        tool_results
+        state.context
       end
 
-    assistant_msg = %{
-      role: :assistant,
-      content: assistant_content || "",
-      tool_calls:
-        Enum.map(tool_calls_with_ids, fn tc ->
-          %{
-            id: tc.id,
-            type: "function",
-            function: %{
-              name: tc.name,
-              arguments: if(is_binary(tc.args), do: tc.args, else: Jason.encode!(tc.args || %{}))
-            }
-          }
-        end)
-    }
+    # PTC-Lisp inventory — only `:both` / `:ptc_lisp`-exposed tools.
+    # Wrap with an additional telemetry decorator so `(tool/...)`
+    # calls inside programs emit `[:tool, :call]` events with
+    # `exposure_layer: :ptc_lisp` (Tier 3a telemetry requirement).
+    effective_tools = BuiltinTools.effective_tools(agent)
+    ptc_lisp_inventory = ptc_lisp_inventory(effective_tools, agent, state)
 
-    turn =
-      Metrics.build_turn(state, inspect(tool_calls_with_ids), nil, nil,
-        success?: true,
-        prints: [],
-        tool_calls: Enum.reverse(current_turn_calls),
-        memory: %{}
+    lisp_opts =
+      build_lisp_opts(agent, state, exec_context, ptc_lisp_inventory)
+
+    result = Lisp.run(program, lisp_opts)
+    duration_ms = System.monotonic_time(:millisecond) - start
+
+    case result do
+      {:ok, lisp_step} ->
+        handle_lisp_success(lisp_step, program, call, agent, state, duration_ms)
+
+      {:error, lisp_step} ->
+        handle_lisp_runtime_error(lisp_step, program, call, agent, state, duration_ms)
+    end
+  end
+
+  defp handle_lisp_success(
+         %{return: {:__ptc_return__, value}} = lisp_step,
+         program,
+         call,
+         agent,
+         state,
+         duration_ms
+       ) do
+    # Combined mode: `(return v)` produces a successful tool result
+    # but does NOT terminate the run. Loop continues so the LLM gets
+    # another turn (Final-Output Semantics). turn_history is NOT
+    # advanced (Tier 3b will pin formally; v1 content-mode parity).
+    unwrapped = %{lisp_step | return: KeyNormalizer.normalize_keys(value)}
+    execution = TurnFeedback.execution_feedback(agent, state, unwrapped)
+    result_json = PtcToolProtocol.render_success(unwrapped, execution: execution)
+
+    state_next =
+      thread_lisp_step_state(state, unwrapped, advance_turn_history: false)
+
+    emit_ptc_lisp_telemetry(state, duration_ms, false)
+
+    step_entry = ptc_lisp_step_entry(call, unwrapped, duration_ms, nil)
+    _ = program
+    {:ok, result_json, step_entry, state_next}
+  end
+
+  defp handle_lisp_success(
+         %{return: {:__ptc_fail__, fail_args}} = lisp_step,
+         program,
+         call,
+         agent,
+         state,
+         duration_ms
+       ) do
+    {fail_message, fail_value_preview} = fail_message_and_preview(fail_args)
+
+    result_json =
+      PtcToolProtocol.render_error(:fail, fail_message,
+        result: fail_value_preview,
+        feedback: fail_message
       )
 
-    new_state = %{
-      state_after_calls
-      | turn: state.turn + 1,
-        messages: state.messages ++ [assistant_msg | tool_results],
-        turns: [turn | state.turns],
-        remaining_turns: state.remaining_turns - 1,
-        total_tool_calls:
-          state.total_tool_calls + length(calls_to_execute) +
-            if(limit_exceeded,
-              do: length(tool_calls_with_ids) - length(calls_to_execute),
-              else: 0
-            ),
-        all_tool_calls: all_tool_calls,
-        turn_tokens: state.turn_tokens
+    state_next = thread_lisp_step_state(state, lisp_step, advance_turn_history: false)
+    emit_ptc_lisp_telemetry(state, duration_ms, true)
+
+    step_entry =
+      ptc_lisp_step_entry(call, lisp_step, duration_ms, fail_message)
+
+    _ = {program, agent}
+    {:ok, result_json, step_entry, state_next}
+  end
+
+  defp handle_lisp_success(lisp_step, program, call, agent, state, duration_ms) do
+    case check_memory_limit(lisp_step.memory, agent.memory_limit) do
+      {:ok, _size} ->
+        # Intermediate value — render success and continue. Tier 3b
+        # will re-introduce turn_history advance for this branch
+        # specifically; for now, mirror the conservative
+        # "no advance" rule documented in the Tier 3a brief.
+        execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
+        result_json = PtcToolProtocol.render_success(lisp_step, execution: execution)
+
+        state_next = thread_lisp_step_state(state, lisp_step, advance_turn_history: false)
+        emit_ptc_lisp_telemetry(state, duration_ms, false)
+
+        step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, nil)
+        _ = program
+        {:ok, result_json, step_entry, state_next}
+
+      {:error, :memory_limit_exceeded, actual_size} ->
+        handle_memory_limit_exceeded(
+          lisp_step,
+          actual_size,
+          program,
+          call,
+          agent,
+          state,
+          duration_ms
+        )
+    end
+  end
+
+  defp handle_lisp_runtime_error(lisp_step, program, call, _agent, state, duration_ms) do
+    fail = lisp_step.fail
+    reason_atom = classify_lisp_error(fail)
+    message = fail.message
+
+    result_json = PtcToolProtocol.render_error(reason_atom, message)
+
+    state_next =
+      thread_lisp_step_state(state, lisp_step,
+        advance_turn_history: false,
+        last_fail: fail,
+        last_return_error: message
+      )
+
+    emit_ptc_lisp_telemetry(state, duration_ms, true)
+    step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
+    _ = program
+    {:ok, result_json, step_entry, state_next}
+  end
+
+  defp handle_memory_limit_exceeded(
+         lisp_step,
+         actual_size,
+         _program,
+         call,
+         agent,
+         state,
+         duration_ms
+       ) do
+    error_msg =
+      "Memory limit exceeded (#{actual_size} bytes > #{agent.memory_limit} bytes)."
+
+    if agent.memory_strategy == :rollback do
+      result_json =
+        PtcToolProtocol.render_error(:memory_limit, error_msg <> " Last turn rolled back.")
+
+      # Rollback: do NOT propagate lisp_step's memory/turn_history.
+      emit_ptc_lisp_telemetry(state, duration_ms, true)
+      step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, error_msg)
+      {:ok, result_json, step_entry, state}
+    else
+      emit_ptc_lisp_telemetry(state, duration_ms, true)
+      error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
+      {:fatal, error_step}
+    end
+  end
+
+  defp thread_lisp_step_state(state, lisp_step, opts) do
+    base = %{
+      state
+      | memory: lisp_step.memory,
+        journal: lisp_step.journal,
+        tool_cache: lisp_step.tool_cache,
+        summaries: Map.merge(state.summaries, lisp_step.summaries),
+        child_steps: state.child_steps ++ lisp_step.child_steps
     }
 
-    {:continue, new_state, turn}
+    base =
+      case Keyword.fetch(opts, :last_fail) do
+        {:ok, value} -> %{base | last_fail: value}
+        :error -> base
+      end
+
+    base =
+      case Keyword.fetch(opts, :last_return_error) do
+        {:ok, value} -> %{base | last_return_error: value}
+        :error -> base
+      end
+
+    # Tier 3a: do not advance turn_history here. Tier 3b will refine.
+    case Keyword.get(opts, :advance_turn_history, false) do
+      false -> base
+      true -> base
+    end
+  end
+
+  defp ptc_lisp_step_entry(call, lisp_step, duration_ms, error) do
+    %{
+      name: @ptc_lisp_execute_name,
+      args: call.args || %{},
+      result: Map.get(lisp_step, :return),
+      error: error,
+      timestamp: DateTime.utc_now(),
+      duration_ms: duration_ms
+    }
+  end
+
+  defp emit_ptc_lisp_telemetry(state, duration_ms, error?) do
+    Telemetry.emit([:tool, :call], %{duration_ms: duration_ms}, %{
+      agent_name: state.agent_name,
+      agent_id: state.agent_id,
+      tool_name: @ptc_lisp_execute_name,
+      exposure_layer: :native,
+      cached: false,
+      error: error?
+    })
+  end
+
+  # Build the PTC-Lisp inventory map (name => function). Only
+  # `:both` and `:ptc_lisp`-exposed tools surface here; the analyzer
+  # rejects `(tool/foo ...)` calls for `:native`-only targets at
+  # parse time (Tier 1a). Each function is wrapped in an extra
+  # telemetry decorator so app-tool calls made from inside programs
+  # emit `[:tool, :call]` events with `exposure_layer: :ptc_lisp`.
+  defp ptc_lisp_inventory(effective_tools, agent, state) do
+    allowed_names =
+      effective_tools
+      |> Enum.filter(fn {name, _} ->
+        case build_tools_meta(effective_tools) |> Map.get(name) do
+          %Tool{} = tool -> Exposure.effective_expose(tool, agent) in [:ptc_lisp, :both]
+          _ -> false
+        end
+      end)
+      |> Enum.map(fn {name, _} -> name end)
+      |> MapSet.new()
+
+    filtered =
+      effective_tools
+      |> Enum.filter(fn {name, _} -> MapSet.member?(allowed_names, name) end)
+      |> Map.new()
+
+    filtered
+    |> ToolNormalizer.normalize(state, agent)
+    |> Map.new(fn
+      {name, func} when is_function(func, 1) ->
+        {name, wrap_ptc_lisp_telemetry(name, func, state)}
+
+      {name, {func, opts}} when is_function(func, 1) ->
+        {name, {wrap_ptc_lisp_telemetry(name, func, state), opts}}
+
+      other ->
+        other
+    end)
+  end
+
+  defp wrap_ptc_lisp_telemetry(name, func, state) do
+    agent_name = state.agent_name
+    agent_id = state.agent_id
+
+    fn args ->
+      start = System.monotonic_time(:millisecond)
+
+      try do
+        result = func.(args)
+        duration_ms = System.monotonic_time(:millisecond) - start
+
+        Telemetry.emit([:tool, :call], %{duration_ms: duration_ms}, %{
+          agent_name: agent_name,
+          agent_id: agent_id,
+          tool_name: name,
+          exposure_layer: :ptc_lisp,
+          cached: false,
+          error: false
+        })
+
+        result
+      rescue
+        e ->
+          duration_ms = System.monotonic_time(:millisecond) - start
+
+          Telemetry.emit([:tool, :call], %{duration_ms: duration_ms}, %{
+            agent_name: agent_name,
+            agent_id: agent_id,
+            tool_name: name,
+            exposure_layer: :ptc_lisp,
+            cached: false,
+            error: true
+          })
+
+          reraise e, __STACKTRACE__
+      end
+    end
+  end
+
+  defp build_lisp_opts(agent, state, exec_context, ptc_lisp_inventory) do
+    [
+      context: exec_context,
+      memory: state.memory || %{},
+      tools: ptc_lisp_inventory,
+      turn_history: state.turn_history,
+      float_precision: agent.float_precision,
+      max_print_length: Keyword.get(agent.format_options, :max_print_length),
+      timeout: agent.timeout,
+      pmap_timeout: agent.pmap_timeout,
+      pmap_max_concurrency: agent.pmap_max_concurrency,
+      budget: Budget.build_introspection_map(agent, state),
+      trace_context: state.trace_context,
+      journal: state.journal,
+      tool_cache: state.tool_cache || %{}
+    ]
+    |> maybe_put(:max_heap, state.max_heap)
+    |> maybe_put(:max_tool_calls, agent.max_tool_calls)
+  end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp memory_size(memory) when is_map(memory), do: :erlang.external_size(memory)
+
+  defp check_memory_limit(memory, limit) when is_integer(limit) do
+    size = memory_size(memory)
+    if size > limit, do: {:error, :memory_limit_exceeded, size}, else: {:ok, size}
+  end
+
+  defp check_memory_limit(_memory, nil), do: {:ok, 0}
+
+  # Mirrors `Loop.PtcToolCall.classify_lisp_error/1`.
+  defp classify_lisp_error(%{reason: reason})
+       when reason in [:parse_error, :timeout, :memory_limit] do
+    reason
+  end
+
+  defp classify_lisp_error(%{reason: reason}) when is_atom(reason) do
+    reason_str = Atom.to_string(reason)
+
+    cond do
+      String.contains?(reason_str, "parse") -> :parse_error
+      String.contains?(reason_str, "timeout") -> :timeout
+      String.contains?(reason_str, "memory") -> :memory_limit
+      true -> :runtime_error
+    end
+  end
+
+  defp fail_message_and_preview(fail_args) do
+    {preview, _truncated} = Format.to_clojure(fail_args, limit: 50)
+    {inspect(fail_args), preview}
+  end
+
+  defp extract_program(%{args_error: error_msg}) when is_binary(error_msg) do
+    {:error, :args_error, "Invalid tool arguments: #{error_msg}"}
+  end
+
+  defp extract_program(%{args: args}) when is_map(args) do
+    program = Map.get(args, "program") || Map.get(args, :program)
+    validate_program(program)
+  end
+
+  defp extract_program(_), do: validate_program(nil)
+
+  defp validate_program(nil),
+    do: {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
+
+  defp validate_program(program) when not is_binary(program),
+    do:
+      {:error, :args_error,
+       "ptc_lisp_execute `program` must be a string, got #{inspect(program)}."}
+
+  defp validate_program(program) when is_binary(program) do
+    if String.trim(program) == "" do
+      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
+    else
+      {:ok, program}
+    end
   end
 
   defp execute_single_tool(tool_name, tool_args, state) do
@@ -885,16 +1470,22 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         success?: true,
         prints: [],
         tool_calls: Enum.reverse(state.all_tool_calls),
-        memory: %{}
+        memory: state.memory || %{}
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
     final_messages = state.messages ++ [%{role: :assistant, content: text_content}]
 
+    # Tier 3a: propagate combined-mode `ptc_lisp_execute` state on the
+    # final step so callers can introspect memory/journal/tool_cache/
+    # child_steps after the run terminates. Pure text mode never
+    # accumulates these (tool_cache stays nil; memory stays nil), so
+    # the field defaults match the legacy contract.
     step = %Step{
       return: text_content,
       fail: nil,
-      memory: %{},
+      memory: state.memory || %{},
+      journal: state.journal,
       usage: Metrics.build_final_usage(state, duration_ms, 0),
       turns:
         Metrics.apply_trace_filter(
@@ -908,7 +1499,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       original_prompt: state.original_prompt,
       tools: state.normalized_tools,
       prints: [],
-      tool_calls: Enum.reverse(state.all_tool_calls)
+      tool_calls: Enum.reverse(state.all_tool_calls),
+      tool_cache: state.tool_cache || %{},
+      child_steps: state.child_steps,
+      summaries: state.summaries
     }
 
     {turn, step}
