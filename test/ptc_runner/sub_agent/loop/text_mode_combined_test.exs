@@ -486,20 +486,86 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Validator gating (Tier 2b invariant — MUST stay rejected until 3e)
+  # Validator gating (Tier 3e: combined mode now user-reachable;
+  # `output: :text, ptc_transport: :content` remains rejected per
+  # Scope Discipline.)
   # ---------------------------------------------------------------------------
 
-  describe "validator gating (Tier 2b invariant)" do
-    test "SubAgent.new/1 rejects output: :text + ptc_transport: :tool_call" do
+  describe "validator gating (Tier 3e cutoff)" do
+    test "SubAgent.new/1 ACCEPTS output: :text + ptc_transport: :tool_call" do
+      agent =
+        SubAgent.new(
+          prompt: "test",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      assert agent.output == :text
+      assert agent.ptc_transport == :tool_call
+    end
+
+    test "SubAgent.new/1 still rejects output: :text + ptc_transport: :content" do
       assert_raise ArgumentError,
-                   ~r/ptc_transport cannot be set with output: :text/,
+                   ~r/ptc_transport: :content is not supported with output: :text/,
                    fn ->
                      SubAgent.new(
                        prompt: "test",
                        output: :text,
-                       ptc_transport: :tool_call
+                       ptc_transport: :content
                      )
                    end
+    end
+
+    test "end-to-end: real SubAgent.new/1 in combined mode dispatches ptc_lisp_execute" do
+      # Built via the real public API — no `into_combined/1`. This is the
+      # bisectable cutoff: combined mode is now user-reachable.
+      rows = [%{"id" => 1}, %{"id" => 2}, %{"id" => 3}]
+      {tool_fn, _counter} = counting_tool(rows)
+
+      tools = %{
+        "search" =>
+          {tool_fn,
+           signature: "(q :string) -> [:any]",
+           expose: :both,
+           cache: true,
+           native_result: [preview: :metadata]}
+      }
+
+      llm =
+        tool_calling_llm([
+          # Turn 1: model invokes ptc_lisp_execute with a small program
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "ptc_lisp_execute",
+                args: %{
+                  "program" => "(count (tool/search {:q \"q\"}))"
+                }
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          # Turn 2: model returns the final text answer directly
+          %{content: "found 3 rows", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "find rows",
+          output: :text,
+          ptc_transport: :tool_call,
+          tools: tools,
+          max_turns: 5
+        )
+
+      assert agent.ptc_transport == :tool_call
+      assert agent.ptc_reference == :compact
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == "found 3 rows"
     end
   end
 

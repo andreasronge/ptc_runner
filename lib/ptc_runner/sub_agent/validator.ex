@@ -53,6 +53,7 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_builtin_tools!(opts)
     validate_output!(opts)
     validate_ptc_transport!(opts)
+    validate_ptc_reference!(opts)
     validate_reserved_tool_names!(opts)
     validate_thinking!(opts)
     validate_memory_strategy!(opts)
@@ -394,14 +395,43 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  defp validate_ptc_transport_compatibility!(_transport, opts) do
-    case Keyword.fetch(opts, :output) do
-      {:ok, :text} ->
+  # Tier 3e bisectable cutoff: combined mode (`output: :text,
+  # ptc_transport: :tool_call`) is now user-reachable. The
+  # `output: :text, ptc_transport: :content` combination remains
+  # rejected per Scope Discipline.
+  defp validate_ptc_transport_compatibility!(transport, opts) do
+    case {Keyword.fetch(opts, :output), transport} do
+      {{:ok, :text}, :tool_call} ->
+        :ok
+
+      {{:ok, :text}, :content} ->
         raise ArgumentError,
-              "ptc_transport cannot be set with output: :text — ptc_transport applies only to output: :ptc_lisp"
+              "ptc_transport: :content is not supported with output: :text — " <>
+                "use ptc_transport: :tool_call for combined mode, or omit ptc_transport"
 
       _ ->
         :ok
+    end
+  end
+
+  # Tier 3e: agent-level `ptc_reference:` option for combined-mode prompts.
+  # v1 accepts only `:compact` per Addendum #1 of
+  # Plans/text-mode-ptc-compute-tool.md; `:full` MUST raise.
+  defp validate_ptc_reference!(opts) do
+    case Keyword.fetch(opts, :ptc_reference) do
+      :error ->
+        :ok
+
+      {:ok, :compact} ->
+        :ok
+
+      {:ok, :full} ->
+        raise ArgumentError,
+              "ptc_reference: :full is deferred (v1 supports :compact only); see Addendum #1 of Plans/text-mode-ptc-compute-tool.md"
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "ptc_reference must be :compact, got #{inspect(other)}"
     end
   end
 

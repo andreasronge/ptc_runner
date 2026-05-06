@@ -49,11 +49,14 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   require Logger
 
   alias PtcRunner.Lisp.LanguageSpec
+  alias PtcRunner.Prompts
   alias PtcRunner.SubAgent.BuiltinTools
+  alias PtcRunner.SubAgent.Exposure
   alias PtcRunner.SubAgent.Namespace
   alias PtcRunner.SubAgent.PromptExpander
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.SystemPrompt.Output
+  alias PtcRunner.Tool
 
   @output_format """
   <output_format>
@@ -183,9 +186,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     {language_ref, output_fmt} = resolve_static_sections(agent, resolution_context)
 
+    ptc_reference_card = combined_mode_reference_card(agent)
+
     base_prompt =
-      [language_ref, output_fmt]
-      |> Enum.reject(&(&1 == ""))
+      [language_ref, output_fmt, ptc_reference_card]
+      |> Enum.reject(&(is_nil(&1) or &1 == ""))
       |> Enum.join("\n\n")
 
     # Apply customization (prefix/suffix) but not string/function overrides
@@ -458,6 +463,8 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     mission = expand_prompt(agent.prompt, context)
 
+    ptc_reference_card = combined_mode_reference_card(agent)
+
     # Combine all sections
     # language_ref contains role, rules, and language reference from priv/prompts/
     [
@@ -466,6 +473,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       expected_output,
       llm_query_instructions,
       output_fmt,
+      ptc_reference_card,
       "<mission>\n#{mission}\n</mission>"
     ]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
@@ -598,5 +606,75 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
       {:ok, sig} -> sig
       {:error, _reason} -> nil
     end
+  end
+
+  # Tier 3e: combined-mode (`output: :text, ptc_transport: :tool_call`)
+  # PTC-Lisp reference card. Returns the static compact card from
+  # priv/prompts/ plus a dynamically rendered tool-inventory section
+  # for tools whose effective `expose:` is `:ptc_lisp` or `:both`.
+  #
+  # Per Addendum #19: included even when zero PTC-callable tools exist
+  # — the static portion documents `ptc_lisp_execute` itself, which is
+  # always callable.
+  #
+  # Returns `nil` for non-combined-mode agents so the caller filters it
+  # out of the section list.
+  defp combined_mode_reference_card(%{output: :text, ptc_transport: :tool_call} = agent) do
+    case agent.ptc_reference do
+      :compact ->
+        static = Prompts.ptc_text_mode_compact_reference()
+        inventory = combined_mode_tool_inventory(agent)
+
+        case inventory do
+          "" -> static
+          rendered -> static <> "\n\n" <> rendered
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp combined_mode_reference_card(_agent), do: nil
+
+  # Render a one-line PTC entry per tool exposed to PTC-Lisp (effective
+  # expose ∈ {:ptc_lisp, :both}). Per the plan's "Tool-inventory rule",
+  # this section MUST NOT duplicate native tool schemas (those live in
+  # the LLM request's `tools` field for `:both` tools); it carries only
+  # the in-program call shape so the LLM knows the tool is reachable
+  # via `(tool/name ...)`.
+  defp combined_mode_tool_inventory(agent) do
+    tools = BuiltinTools.effective_tools(agent)
+
+    tool_structs =
+      tools
+      |> Enum.flat_map(fn {name, format} ->
+        case Tool.new(to_string(name), format) do
+          {:ok, tool} -> [tool]
+          {:error, _} -> []
+        end
+      end)
+
+    ptc_callable =
+      Exposure.filter_by_expose(tool_structs, agent, [:ptc_lisp, :both])
+      |> Enum.sort_by(& &1.name)
+
+    case ptc_callable do
+      [] ->
+        ""
+
+      ts ->
+        entries = Enum.map_join(ts, "\n", &render_tool_entry/1)
+
+        "<ptc_tools>\n" <>
+          "Tools callable from inside `ptc_lisp_execute` as `(tool/name {...})`:\n" <>
+          entries <> "\n</ptc_tools>"
+    end
+  end
+
+  defp render_tool_entry(%Tool{name: name, signature: sig, description: desc}) do
+    base = "- `(tool/#{name} {...})`"
+    base = if sig in [nil, ""], do: base, else: base <> " — `#{sig}`"
+    if desc in [nil, ""], do: base, else: base <> " — #{desc}"
   end
 end

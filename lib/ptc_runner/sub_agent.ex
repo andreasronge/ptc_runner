@@ -115,6 +115,7 @@ defmodule PtcRunner.SubAgent do
   - `max_depth` - Positive integer for maximum recursion depth in nested agents (default: 3)
   - `turn_budget` - Positive integer for total turn budget across retries (default: 20)
   - `output` - Output mode: `:ptc_lisp` (default) or `:text`
+  - `ptc_reference` - Combined-mode reference card: `:compact` (default; only valid value in v1)
   - `thinking` - Boolean enabling thinking section in output format (default: false)
   - `llm_query` - Boolean enabling LLM query mode (default: false)
   - `builtin_tools` - List of builtin tool families to enable (default: []). Available: `:grep` (adds grep and grep-n tools)
@@ -268,6 +269,7 @@ defmodule PtcRunner.SubAgent do
         :float_precision,
         :output,
         :ptc_transport,
+        :ptc_reference,
         :memory_strategy,
         :max_tool_calls,
         :plan,
@@ -304,6 +306,7 @@ defmodule PtcRunner.SubAgent do
         :float_precision,
         :output,
         :ptc_transport,
+        :ptc_reference,
         :memory_strategy,
         :max_tool_calls,
         :plan,
