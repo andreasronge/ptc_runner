@@ -801,27 +801,27 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             {:halt, {results_acc, calls_acc, st, error_step}}
         end
 
-      Map.get(tc, :args_error) ->
-        error_msg = Map.get(tc, :args_error)
-        result_str = Jason.encode!(%{"error" => error_msg})
-        step_entry = simple_step_entry(tool_name, tool_args, error_msg)
-        tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
-
-      # Tier 3c — Multi-Call Rule Rows 5/6: in combined mode, an
-      # unknown native tool call (registered as `:ptc_lisp`-only or
-      # not registered at all — Addendum #9) returns one paired
-      # `unknown_tool` protocol-error per id while sibling valid
-      # calls still execute. Divergence from v1 PTC `:tool_call`:
-      # v1 rejects the entire turn on any unknown native tool; text
-      # mode is intentionally more permissive to preserve TextMode
-      # chat ergonomics. Pure text mode short-circuits via
-      # `combined_mode_active?/1` and keeps the legacy "Tool not
-      # found" envelope.
+      # Tier 3.5 Fix 4: unknown_tool wins over args_error in combined
+      # mode. Without this swap, an unregistered or `:ptc_lisp`-only
+      # tool with malformed args fell into the args_error branch and
+      # produced the legacy `%{"error" => ...}` envelope — wrong error
+      # class for the actual problem. Tier 3c — Multi-Call Rule Rows
+      # 5/6 already handle valid-args unknown tools; this branch
+      # subsumes the args_error case for the same predicate.
+      #
+      # Pure text mode keeps the legacy ordering (args_error first)
+      # because `combined_mode_active?/1` short-circuits the predicate.
       combined_mode_active?(st) and unknown_native_tool?(tc, agent, st) ->
         message = unknown_tool_message(tool_name)
         result_str = protocol_error_json(:unknown_tool, message)
         step_entry = simple_step_entry(tool_name, tool_args, message)
+        tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+
+      Map.get(tc, :args_error) ->
+        error_msg = Map.get(tc, :args_error)
+        result_str = Jason.encode!(%{"error" => error_msg})
+        step_entry = simple_step_entry(tool_name, tool_args, error_msg)
         tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
         {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
 
