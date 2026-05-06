@@ -34,8 +34,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   alias PtcRunner.SubAgent.Loop
 
   alias PtcRunner.SubAgent.Loop.{
-    Budget,
     JsonHandler,
+    LispOpts,
     Metrics,
     ResponseHandler,
     ReturnValidation,
@@ -1027,27 +1027,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   end
 
   defp build_lisp_opts(agent, state, exec_context, all_tools) do
-    [
-      context: exec_context,
-      memory: state.memory,
-      tools: all_tools,
-      turn_history: state.turn_history,
-      float_precision: agent.float_precision,
-      max_print_length: Keyword.get(agent.format_options, :max_print_length),
-      timeout: agent.timeout,
-      pmap_timeout: agent.pmap_timeout,
-      pmap_max_concurrency: agent.pmap_max_concurrency,
-      budget: Budget.build_introspection_map(agent, state),
-      trace_context: state.trace_context,
-      journal: state.journal,
-      tool_cache: state.tool_cache
-    ]
-    |> maybe_put(:max_heap, state.max_heap)
-    |> maybe_put(:max_tool_calls, agent.max_tool_calls)
+    LispOpts.build(agent, state, exec_context, all_tools)
   end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp decrement_work(state) do
     if state.work_turns_remaining > 0,

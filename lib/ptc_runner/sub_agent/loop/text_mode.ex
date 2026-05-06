@@ -26,8 +26,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.SubAgent.KeyNormalizer
 
   alias PtcRunner.SubAgent.Loop.{
-    Budget,
     JsonHandler,
+    LispOpts,
     LLMRetry,
     Metrics,
     NativePreview,
@@ -1375,28 +1375,16 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     end
   end
 
+  # Combined mode wants `memory` and `tool_cache` to default to `%{}`
+  # rather than `nil`; normalize the state before delegating to the
+  # shared builder so the per-transport default doesn't fork the
+  # builder itself (see `Loop.LispOpts`).
   defp build_lisp_opts(agent, state, exec_context, ptc_lisp_inventory) do
-    [
-      context: exec_context,
-      memory: state.memory || %{},
-      tools: ptc_lisp_inventory,
-      turn_history: state.turn_history,
-      float_precision: agent.float_precision,
-      max_print_length: Keyword.get(agent.format_options, :max_print_length),
-      timeout: agent.timeout,
-      pmap_timeout: agent.pmap_timeout,
-      pmap_max_concurrency: agent.pmap_max_concurrency,
-      budget: Budget.build_introspection_map(agent, state),
-      trace_context: state.trace_context,
-      journal: state.journal,
-      tool_cache: state.tool_cache || %{}
-    ]
-    |> maybe_put(:max_heap, state.max_heap)
-    |> maybe_put(:max_tool_calls, agent.max_tool_calls)
+    state
+    |> Map.update!(:memory, &(&1 || %{}))
+    |> Map.update!(:tool_cache, &(&1 || %{}))
+    |> then(&LispOpts.build(agent, &1, exec_context, ptc_lisp_inventory))
   end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp memory_size(memory) when is_map(memory), do: :erlang.external_size(memory)
 

@@ -67,6 +67,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   alias PtcRunner.SubAgent.Loop.{
     Budget,
+    LispOpts,
     LLMRetry,
     Metrics,
     PtcToolCall,
@@ -782,24 +783,7 @@ defmodule PtcRunner.SubAgent.Loop do
           {:stop, {:ok | :error, Step.t()}, Turn.t(), map() | nil}
           | {:continue, State.t(), Turn.t()}
   defp execute_code_with_tools(code, response, agent, state, exec_context, all_tools) do
-    lisp_opts =
-      [
-        context: exec_context,
-        memory: state.memory,
-        tools: all_tools,
-        turn_history: state.turn_history,
-        float_precision: agent.float_precision,
-        max_print_length: Keyword.get(agent.format_options, :max_print_length),
-        timeout: agent.timeout,
-        pmap_timeout: agent.pmap_timeout,
-        pmap_max_concurrency: agent.pmap_max_concurrency,
-        budget: Budget.build_introspection_map(agent, state),
-        trace_context: state.trace_context,
-        journal: state.journal,
-        tool_cache: state.tool_cache
-      ]
-      |> maybe_add_max_heap(state.max_heap)
-      |> maybe_add_max_tool_calls(agent.max_tool_calls)
+    lisp_opts = LispOpts.build(agent, state, exec_context, all_tools)
 
     case Lisp.run(code, lisp_opts) do
       {:ok, lisp_step} ->
@@ -1232,15 +1216,6 @@ defmodule PtcRunner.SubAgent.Loop do
   end
 
   defp check_memory_limit(_memory, nil), do: {:ok, 0}
-
-  # Add max_heap to opts if provided (nil means use Lisp.run default)
-  defp maybe_add_max_heap(opts, nil), do: opts
-  defp maybe_add_max_heap(opts, max_heap), do: Keyword.put(opts, :max_heap, max_heap)
-
-  defp maybe_add_max_tool_calls(opts, nil), do: opts
-
-  defp maybe_add_max_tool_calls(opts, max_tool_calls),
-    do: Keyword.put(opts, :max_tool_calls, max_tool_calls)
 
   # Calculate mission deadline from timeout in milliseconds
   defp calculate_mission_deadline(nil), do: nil
