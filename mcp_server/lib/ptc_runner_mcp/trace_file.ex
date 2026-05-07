@@ -180,37 +180,72 @@ defmodule PtcRunnerMcp.TraceFile do
   end
 
   defp run_with_trace(opts, request_id, trace_dir, pending_path, fun) do
-    result =
-      try do
-        {:ok, envelope, _path} = PtcRunner.TraceLog.with_trace(fun, opts)
-        envelope
-      rescue
-        error ->
-          # `with_trace/2` failed at file open; degrade to bare call.
-          Log.log(:error, "trace_open_failed", %{
-            request_id: request_id,
-            trace_dir: trace_dir,
-            reason: Exception.message(error)
-          })
+    # Split trace setup from fun execution so a raise inside fun
+    # cannot trigger a fallback that re-runs fun (which would execute
+    # side-effecting work twice). Codex review of 212266d.
+    case start_trace_safely(opts, request_id, trace_dir) do
+      {:ok, collector} ->
+        # Setup OK — run fun inside the active collector. Any raise
+        # propagates after we close the collector and rename the file.
+        try do
+          result = fun.()
+          _ = PtcRunner.TraceLog.stop(collector)
+          rename_to_final(trace_dir, request_id, pending_path, result)
+          result
+        catch
+          kind, reason ->
+            stack = __STACKTRACE__
 
-          fun.()
-      catch
-        kind, reason ->
-          # Any other failure inside the trace wrapper. Same fallback.
-          Log.log(:error, "trace_wrapper_failed", %{
-            request_id: request_id,
-            trace_dir: trace_dir,
-            kind: inspect(kind),
-            reason: inspect(reason)
-          })
+            try do
+              PtcRunner.TraceLog.stop(collector)
+            catch
+              _, _ -> :ok
+            end
 
-          fun.()
-      end
+            # Best-effort rename to *-error so the failed trace is
+            # discoverable; we don't have an envelope to introspect, so
+            # tag conservatively.
+            rename_pending_to_error(trace_dir, request_id, pending_path)
 
-    # Rename pending file to its status-tagged final name. Best-effort.
-    rename_to_final(trace_dir, request_id, pending_path, result)
+            :erlang.raise(kind, reason, stack)
+        end
 
-    result
+      :error ->
+        # File-open / setup failure already logged. Fall back to a
+        # bare call (one execution).
+        fun.()
+    end
+  end
+
+  defp start_trace_safely(opts, request_id, trace_dir) do
+    {:ok, PtcRunner.TraceLog.start(opts) |> elem(1)}
+  rescue
+    error ->
+      Log.log(:error, "trace_open_failed", %{
+        request_id: request_id,
+        trace_dir: trace_dir,
+        reason: Exception.message(error)
+      })
+
+      :error
+  catch
+    kind, reason ->
+      Log.log(:error, "trace_open_failed", %{
+        request_id: request_id,
+        trace_dir: trace_dir,
+        kind: inspect(kind),
+        reason: inspect(reason)
+      })
+
+      :error
+  end
+
+  defp rename_pending_to_error(trace_dir, _request_id, pending_path) do
+    final = Path.join(trace_dir, "#{Path.basename(pending_path, "-pending.jsonl")}-error.jsonl")
+    _ = File.rename(pending_path, final)
+    :ok
+  rescue
+    _ -> :ok
   end
 
   defp build_pending_path(trace_dir, request_id) do
