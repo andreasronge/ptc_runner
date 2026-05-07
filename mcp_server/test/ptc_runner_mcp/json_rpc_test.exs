@@ -144,6 +144,28 @@ defmodule PtcRunnerMcp.JsonRpcTest do
     end
   end
 
+  describe "notification semantics (no `id` member)" do
+    test "tools/list sent without id is treated as notification → no reply" do
+      frame = %{"jsonrpc" => "2.0", "method" => "tools/list"}
+      assert {:noreply, :continue} = JsonRpc.dispatch({:ok, frame})
+    end
+
+    test "unknown method without id is treated as notification → no reply" do
+      frame = %{"jsonrpc" => "2.0", "method" => "no/such/method"}
+      assert {:noreply, :continue} = JsonRpc.dispatch({:ok, frame})
+    end
+
+    test "tools/call without id is treated as notification → no reply" do
+      frame = %{
+        "jsonrpc" => "2.0",
+        "method" => "tools/call",
+        "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => "(+ 1 2)"}}
+      }
+
+      assert {:noreply, :continue} = JsonRpc.dispatch({:ok, frame})
+    end
+  end
+
   describe "unknown methods and protocol errors" do
     test "foo/bar returns -32601 Method not found" do
       frame = %{"jsonrpc" => "2.0", "id" => 6, "method" => "foo/bar"}

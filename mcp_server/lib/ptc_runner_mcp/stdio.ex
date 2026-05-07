@@ -38,6 +38,10 @@ defmodule PtcRunnerMcp.Stdio do
               max_frame_bytes: 8 * 1024 * 1024,
               # When true, ignore further input and exit on EOF.
               draining: false,
+              # When true, drop all remaining bytes — set after `exit`
+              # notification so any frames buffered behind it are not
+              # dispatched (avoids replies after the client said exit).
+              exited: false,
               # When true, run the read loop. Tests set this to false
               # and feed bytes directly via Stdio.feed/2.
               auto_read: true,
@@ -144,6 +148,11 @@ defmodule PtcRunnerMcp.Stdio do
   # (§ 6.2: "first line of defense against allocation-bomb requests").
   defp feed_bytes(state, <<>>), do: state
 
+  # After an `exit` notification, drop any remaining buffered bytes so
+  # we never dispatch (and reply to) a frame that arrived in the same
+  # read chunk as `exit`.
+  defp feed_bytes(%State{exited: true} = state, _bytes), do: state
+
   defp feed_bytes(%State{dropping: true} = state, <<@newline, rest::binary>>) do
     # Oversized line ended. Emit one parse-error and resume.
     state = handle_oversized(state)
@@ -237,7 +246,7 @@ defmodule PtcRunnerMcp.Stdio do
       System.stop(0)
     end
 
-    state
+    %{state | exited: true}
   end
 
   defp notify_observer(%State{observer: nil}, _), do: :ok
