@@ -45,7 +45,12 @@ defmodule PtcRunner.Lisp.Eval.Context do
     pmap_calls: [],
     tool_cache: %{},
     tools_meta: %{},
-    locals: MapSet.new()
+    locals: MapSet.new(),
+    # When true, accessing `data/<key>` for a key that was not provided
+    # in the context raises a runtime error naming the binding instead
+    # of returning `nil`. Off by default (preserves existing in-process
+    # behaviour); MCP requests pass `strict_data: true` per § 9.3.
+    strict_data: false
   ]
 
   @typedoc """
@@ -131,7 +136,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
           tool_cache: map(),
-          tools_meta: %{String.t() => %{cache: boolean()}}
+          tools_meta: %{String.t() => %{cache: boolean()}},
+          strict_data: boolean()
         }
 
   @doc """
@@ -182,6 +188,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
+      strict_data: Keyword.get(opts, :strict_data, false),
       prints: [],
       tool_calls: [],
       pmap_calls: []

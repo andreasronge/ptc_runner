@@ -84,7 +84,10 @@ defmodule PtcRunnerMcp.Sandbox do
       caller: :mcp,
       memory: %{},
       tool_cache: %{},
-      context: context
+      context: context,
+      # § 9.3: a `data/<key>` reference for an absent key must produce
+      # a runtime_error naming the binding, not silently return nil.
+      strict_data: true
       # No :signature passed to Lisp.run/2 — MCP performs signature
       # validation post-hoc via `PtcToolProtocol.validate_return/2` so
       # parse errors are caught before permit acquisition (§ 9.4) and

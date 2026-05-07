@@ -193,6 +193,21 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Data access: data/input → ctx[:input]
+  #
+  # When `strict_data: true` (set by the MCP request handler per § 9.3),
+  # accessing a key that was not supplied raises a runtime error naming
+  # the binding. In permissive mode (the default for in-process callers)
+  # the lookup returns `nil` for unknown keys.
+  defp do_eval({:data, key}, %EvalContext{ctx: ctx, strict_data: true} = eval_ctx) do
+    if data_key_present?(ctx, key) do
+      {:ok, flex_get(ctx, key), eval_ctx}
+    else
+      raise PtcRunner.Lisp.ExecutionError,
+        reason: :runtime_error,
+        message: "data/#{key} is not bound: the `context` object did not provide a `#{key}` key"
+    end
+  end
+
   defp do_eval({:data, key}, %EvalContext{ctx: ctx} = eval_ctx) do
     {:ok, flex_get(ctx, key), eval_ctx}
   end
@@ -1023,6 +1038,34 @@ defmodule PtcRunner.Lisp.Eval do
     raise ExecutionError,
       reason: :type_error,
       message: "(#{form}) #{arg_name} must be a string, got #{inspect(value, limit: 3)}"
+  end
+
+  # ============================================================
+  # Strict-data lookup helpers (used by `do_eval({:data, key}, ...)`)
+  # ============================================================
+
+  # `data/<key>` is bound when either the binary or atom form of the
+  # key is present in `ctx`. Mirrors `flex_get`'s atom/binary-tolerant
+  # access so strict mode does not reject keys that flex_get would
+  # successfully resolve.
+  defp data_key_present?(ctx, key) when is_map(ctx) and is_atom(key) do
+    Map.has_key?(ctx, key) or Map.has_key?(ctx, Atom.to_string(key))
+  end
+
+  defp data_key_present?(ctx, key) when is_map(ctx) and is_binary(key) do
+    Map.has_key?(ctx, key) or
+      case key_to_existing_atom(key) do
+        {:ok, atom} -> Map.has_key?(ctx, atom)
+        :error -> false
+      end
+  end
+
+  defp data_key_present?(_ctx, _key), do: false
+
+  defp key_to_existing_atom(bin) do
+    {:ok, String.to_existing_atom(bin)}
+  rescue
+    ArgumentError -> :error
   end
 
   # ============================================================
