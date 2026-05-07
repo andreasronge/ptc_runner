@@ -21,7 +21,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   are equivalent at this layer. Phase 4 expands them.
   """
 
-  alias PtcRunnerMcp.{Lifecycle, Log, Tools}
+  alias PtcRunnerMcp.{Lifecycle, Log, Tools, TraceFile, TracePayload, Version}
 
   @typedoc "Lifecycle directive returned alongside any dispatch result."
   @type lifecycle :: :continue | :drain | :exit
@@ -138,7 +138,7 @@ defmodule PtcRunnerMcp.JsonRpc do
       tool: Map.get(params, "name")
     })
 
-    envelope = Tools.call(params)
+    envelope = traced_tools_call(id, params)
 
     Log.log(:info, "tools_call_stop", %{
       request_id: id,
@@ -150,6 +150,111 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   defp handle_tools_call(id, _) do
     {:reply, error_reply(id, -32_602, "Invalid params"), :continue}
+  end
+
+  # Wrap the `Tools.call/1` invocation in:
+  #
+  #   1. `PtcRunnerMcp.TraceFile.with_traced_call/4` — opens a JSONL
+  #      trace file under `--trace-dir` (no-op when tracing is off).
+  #   2. `:telemetry.span([:ptc_runner_mcp, :call], ...)` — emits the
+  #      MCP-level start/stop/exception events from § 6.7. These events
+  #      fire whether or not tracing is enabled (they're useful for any
+  #      subscriber).
+  #
+  # `:telemetry.span` is INSIDE the trace wrapper so the events land in
+  # the active collector; the Lisp execute span (already inside
+  # `Lisp.run/2`) lands too.
+  defp traced_tools_call(request_id, params) do
+    payload_level = PtcRunnerMcp.TraceConfig.trace_payloads()
+    args = extract_arguments(params)
+    program = Map.get(args, "program")
+
+    query =
+      if is_binary(program) do
+        TracePayload.redact_program(program, payload_level)
+      end
+
+    query_str =
+      case query do
+        nil -> ""
+        s when is_binary(s) -> s
+        other -> Jason.encode!(other)
+      end
+
+    TraceFile.with_traced_call(request_id, query_str, [], fn ->
+      span_meta = call_start_meta(request_id, params, args)
+
+      :telemetry.span([:ptc_runner_mcp, :call], span_meta, fn ->
+        envelope = Tools.call(params)
+        stop_meta = call_stop_meta(span_meta, envelope)
+        {envelope, stop_meta}
+      end)
+    end)
+  end
+
+  # The `tools/call` outer params shape:
+  #   %{"name" => "...", "arguments" => %{...}}
+  # Tracing reads `program` / `context` / `signature` from the inner
+  # arguments map (NOT the outer params).
+  defp extract_arguments(%{"arguments" => args}) when is_map(args), do: args
+  defp extract_arguments(_), do: %{}
+
+  defp call_start_meta(request_id, params, args) do
+    program = Map.get(args, "program")
+    context = Map.get(args, "context")
+
+    program_bytes = if is_binary(program), do: byte_size(program), else: 0
+
+    context_bytes =
+      case context do
+        m when is_map(m) ->
+          case Jason.encode(m) do
+            {:ok, json} -> byte_size(json)
+            _ -> 0
+          end
+
+        _ ->
+          0
+      end
+
+    %{
+      request_id: to_string(request_id || ""),
+      tool_name: Map.get(params, "name"),
+      program: if(is_binary(program), do: program, else: nil),
+      program_bytes: program_bytes,
+      context: if(is_map(context), do: context, else: nil),
+      context_bytes: context_bytes,
+      signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
+      protocol_version: Version.negotiated()
+    }
+  end
+
+  defp call_stop_meta(start_meta, envelope) do
+    is_error = Map.get(envelope, "isError", false) == true
+    sc = Map.get(envelope, "structuredContent", %{})
+
+    {status, reason} =
+      case sc do
+        %{"status" => "ok"} -> {:ok, nil}
+        %{"status" => "error", "reason" => r} -> {:error, r}
+        _ -> {if(is_error, do: :error, else: :ok), nil}
+      end
+
+    base = %{
+      request_id: start_meta.request_id,
+      tool_name: start_meta.tool_name,
+      protocol_version: start_meta.protocol_version,
+      status: status,
+      is_error: is_error,
+      validated_present?: Map.has_key?(sc, "validated"),
+      validated: Map.get(sc, "validated"),
+      prints: Map.get(sc, "prints")
+    }
+
+    case reason do
+      nil -> base
+      r -> Map.put(base, :reason, r)
+    end
   end
 
   # ----------------------------------------------------------------

@@ -36,6 +36,10 @@ defmodule PtcRunnerMcp.Version do
   @doc """
   Pick the server's reply `protocolVersion` for a given client request.
 
+  Stashes the negotiated version in `:persistent_term` as a side effect
+  so downstream code (e.g. per-call telemetry under § 6.7) can read
+  the most recently negotiated revision via `negotiated/0`.
+
   ## Examples
 
       iex> PtcRunnerMcp.Version.negotiate("2025-11-25")
@@ -51,8 +55,25 @@ defmodule PtcRunnerMcp.Version do
       "2025-11-25"
   """
   @spec negotiate(term()) :: String.t()
-  def negotiate(version) when version in @supported, do: version
-  def negotiate(_), do: @primary
+  def negotiate(version) do
+    chosen =
+      case version do
+        v when v in @supported -> v
+        _ -> @primary
+      end
+
+    :persistent_term.put({__MODULE__, :negotiated}, chosen)
+    chosen
+  end
+
+  @doc """
+  Most recently negotiated protocol version (defaults to `primary/0`
+  before any `initialize` request lands).
+  """
+  @spec negotiated() :: String.t()
+  def negotiated do
+    :persistent_term.get({__MODULE__, :negotiated}, @primary)
+  end
 
   @doc "The package version (`mix.exs` `@version`)."
   @spec package_version() :: String.t()

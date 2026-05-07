@@ -11,6 +11,9 @@ defmodule PtcRunnerMcp.Application do
     * `--max-context-bytes <int>` / `PTC_RUNNER_MCP_MAX_CONTEXT_BYTES`
     * `--max-concurrent-calls <int>` / `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS`
     * `--log-level <debug|info|warn|error>` / `PTC_RUNNER_MCP_LOG_LEVEL`
+    * `--trace-dir <path>` / `PTC_RUNNER_MCP_TRACE_DIR`
+    * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
+    * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
 
   In test environments (`Mix.env() == :test`) the supervision tree is
   empty — tests start `PtcRunnerMcp.Stdio` directly with their own IO
@@ -19,7 +22,7 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Limits, Log}
+  alias PtcRunnerMcp.{ConcurrencyGate, Limits, Log, TraceConfig, TraceHandler}
 
   @impl Application
   def start(_type, _args) do
@@ -27,6 +30,7 @@ defmodule PtcRunnerMcp.Application do
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
     apply_limits(args)
+    apply_trace_config(args)
 
     # Eagerly initialize the concurrency-gate atomics ref so that
     # concurrent first acquires cannot race on lazy persistent_term
@@ -52,7 +56,10 @@ defmodule PtcRunnerMcp.Application do
           max_program_bytes: :integer,
           max_context_bytes: :integer,
           max_concurrent_calls: :integer,
-          log_level: :string
+          log_level: :string,
+          trace_dir: :string,
+          trace_payloads: :string,
+          trace_max_files: :integer
         ]
       )
 
@@ -94,6 +101,70 @@ defmodule PtcRunnerMcp.Application do
     }
 
     Limits.set(overrides)
+  end
+
+  # Per § 6.6 / § 6.9 / § 6.10: parse trace flags, store in
+  # `TraceConfig`, and attach the telemetry handler ONLY when
+  # `--trace-dir` is set.
+  defp apply_trace_config(args) do
+    trace_dir =
+      case env_or(args, :trace_dir, "PTC_RUNNER_MCP_TRACE_DIR", nil) do
+        nil -> nil
+        "" -> nil
+        v when is_binary(v) -> v
+      end
+
+    payloads = parse_trace_payloads(args)
+
+    max_files =
+      read_int(
+        args,
+        :trace_max_files,
+        "PTC_RUNNER_MCP_TRACE_MAX_FILES",
+        TraceConfig.defaults().trace_max_files
+      )
+
+    TraceConfig.set(%{
+      trace_dir: trace_dir,
+      trace_payloads: payloads,
+      trace_max_files: max_files
+    })
+
+    if is_nil(trace_dir) do
+      # Tracing disabled: ensure no stale handler is attached (relevant
+      # for hot-restarts in tests / development reloads).
+      TraceHandler.detach()
+    else
+      TraceHandler.attach()
+    end
+
+    :ok
+  end
+
+  defp parse_trace_payloads(args) do
+    raw = env_or(args, :trace_payloads, "PTC_RUNNER_MCP_TRACE_PAYLOADS", nil)
+
+    case raw do
+      nil ->
+        TraceConfig.defaults().trace_payloads
+
+      "" ->
+        TraceConfig.defaults().trace_payloads
+
+      value ->
+        case TraceConfig.parse_payloads(value) do
+          {:ok, level} ->
+            level
+
+          :error ->
+            Log.log(:warn, "trace_payloads_invalid", %{
+              value: to_string(value),
+              fallback: "summary"
+            })
+
+            :summary
+        end
+    end
   end
 
   defp read_int(args, key, env_name, default) do
