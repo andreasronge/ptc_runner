@@ -15,5 +15,17 @@ end
 exclusions = [:skip, :e2e, :clojure]
 
 # Run clojure conformance tests: mix test --include clojure
-ExUnit.configure(exclude: exclusions)
+#
+# `max_cases` defaults to `System.schedulers_online() * 2`, which on a
+# 10-core machine schedules 20 tests in parallel. Tests that spawn a
+# `PtcRunner.Sandbox.execute/3` child (1 s wall-clock cap) can be
+# starved of scheduler time under that load, surfacing as flaky
+# `{:error, ...}` returns from `Lisp.run/2` calls that should always
+# succeed. Capping at `schedulers_online()` halves the contention while
+# preserving parallelism.
+ExUnit.configure(
+  exclude: exclusions,
+  max_cases: System.schedulers_online()
+)
+
 ExUnit.start()

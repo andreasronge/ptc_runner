@@ -1,8 +1,16 @@
 defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
   @moduledoc """
   Integration tests for on_chunk streaming in text-only mode.
+
+  `async: false` because three tests here mutate
+  `Application.put_env(:ptc_runner, :llm_adapter, ...)` which is global.
+  Under `async: true` a concurrent test can clobber the adapter
+  registration mid-run, dropping through to a real HTTP call against
+  the placeholder `ollama:test-model` model and surfacing as a flaky
+  404 LLM error. Disabling parallel execution per ExUnit's contract is
+  cheaper than threading the adapter through every internal call site.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.SubAgent
 

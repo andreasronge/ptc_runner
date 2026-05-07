@@ -1,5 +1,9 @@
 defmodule PtcRunner.TraceLog.EventTest do
-  use ExUnit.Case, async: true
+  # async: false because tests mutate
+  # `Application.put_env(:ptc_runner, :trace_max_*, ...)` which is global
+  # config. Under async: true a concurrent test can clobber the value
+  # mid-run.
+  use ExUnit.Case, async: false
 
   alias PtcRunner.TraceLog.Event
 
