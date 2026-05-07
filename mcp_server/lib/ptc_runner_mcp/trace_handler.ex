@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.TraceHandler do
 
   require Logger
 
-  alias PtcRunnerMcp.{TraceConfig, TracePayload}
+  alias PtcRunnerMcp.TraceConfig
 
   @handler_id "ptc-runner-mcp-trace-handler"
 
@@ -134,26 +134,13 @@ defmodule PtcRunnerMcp.TraceHandler do
     |> Map.new()
   end
 
-  # Per § 6.9: `program` redacted per policy.
-  defp redact_field(:program, value, level) when is_binary(value) do
-    TracePayload.redact_program(value, level)
-  end
-
-  # Per § 6.9: `context` redacted per policy.
-  defp redact_field(:context, value, level) when is_map(value) do
-    TracePayload.redact_context(value, level)
-  end
-
-  # Per § 6.9: `validated` redacted per policy.
-  defp redact_field(:validated, value, level) do
-    TracePayload.redact_validated(value, level)
-  end
-
-  # Per § 6.9: `prints` redacted per policy.
-  defp redact_field(:prints, value, level) when is_list(value) do
-    TracePayload.redact_prints(value, level)
-  end
-
+  # § 6.7 telemetry metadata is byte-counts + presence flags only; the
+  # raw `program`/`context`/`validated`/`prints` payloads never reach
+  # telemetry (codex review of 212266d). The redacted program preview
+  # lives on the trace.start header's `query` field. If those fields
+  # ever appear in metadata again (e.g. a future event source), the
+  # catch-all clause below sanitizes them generically — but this is a
+  # belt-and-suspenders defense, not the primary redaction site.
   # Stacktraces are operator-debug data; sanitize via Exception formatter
   # without recursive sanitize (which can't handle stacktrace tuples).
   defp redact_field(:stacktrace, value, _level) when is_list(value) do

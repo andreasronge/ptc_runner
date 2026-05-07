@@ -217,12 +217,15 @@ defmodule PtcRunnerMcp.JsonRpc do
           0
       end
 
+    # § 6.7 telemetry table: only counts and presence flags. Raw
+    # `program` / `context` MUST NOT appear in telemetry metadata —
+    # any third-party subscriber would bypass `--trace-payloads`.
+    # The redacted program preview lives on the trace.start header's
+    # `query` field, not here.
     %{
       request_id: to_string(request_id || ""),
       tool_name: Map.get(params, "name"),
-      program: if(is_binary(program), do: program, else: nil),
       program_bytes: program_bytes,
-      context: if(is_map(context), do: context, else: nil),
       context_bytes: context_bytes,
       signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
       protocol_version: Version.negotiated()
@@ -240,15 +243,17 @@ defmodule PtcRunnerMcp.JsonRpc do
         _ -> {if(is_error, do: :error, else: :ok), nil}
       end
 
+    # § 6.7 telemetry table: only `validated_present?` (boolean), not
+    # the full `validated` value or `prints`. Same payload-policy
+    # bypass concern as call_start_meta — third-party subscribers
+    # MUST NOT receive raw user content via telemetry.
     base = %{
       request_id: start_meta.request_id,
       tool_name: start_meta.tool_name,
       protocol_version: start_meta.protocol_version,
       status: status,
       is_error: is_error,
-      validated_present?: Map.has_key?(sc, "validated"),
-      validated: Map.get(sc, "validated"),
-      prints: Map.get(sc, "prints")
+      validated_present?: Map.has_key?(sc, "validated")
     }
 
     case reason do

@@ -240,64 +240,90 @@ defmodule PtcRunnerMcp.TracingTest do
   end
 
   describe "--trace-payloads policy" do
-    test "summary (default): program is sha256+preview+bytes, NOT full source" do
+    # Per § 6.6 / § 6.7, the redacted program preview lives on the
+    # `trace.start` header's `query` field — NOT in `call.start`
+    # telemetry metadata. Telemetry metadata is byte-counts +
+    # presence flags only (so third-party telemetry subscribers
+    # cannot bypass the payload policy). Codex review of 212266d.
+
+    test "summary (default): query is sha256+preview+bytes (JSON-encoded map)" do
       with_trace_dir([payloads: :summary], fn dir ->
         _ = dispatch_call(1, %{"program" => @program_ok})
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
-        program = start["metadata"]["program"]
+        header = Enum.find(events, &(&1["event"] == "trace.start"))
+        program = Jason.decode!(header["query"])
 
         assert is_map(program)
         assert Map.has_key?(program, "sha256")
         assert Map.has_key?(program, "preview")
         assert Map.has_key?(program, "bytes")
         assert program["bytes"] == byte_size(@program_ok)
-        # The preview is the full short program here.
         assert program["preview"] == @program_ok
       end)
     end
 
-    test "full: program is the verbatim source" do
+    test "full: query is the verbatim program source" do
       with_trace_dir([payloads: :full], fn dir ->
         _ = dispatch_call(1, %{"program" => @program_ok})
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
-        assert start["metadata"]["program"] == @program_ok
+        header = Enum.find(events, &(&1["event"] == "trace.start"))
+        assert header["query"] == @program_ok
       end)
     end
 
-    test "none: program is sha256+bytes only (no preview)" do
+    test "none: query is sha256+bytes only (no preview)" do
       with_trace_dir([payloads: :none], fn dir ->
         _ = dispatch_call(1, %{"program" => @program_ok})
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
-        program = start["metadata"]["program"]
+        header = Enum.find(events, &(&1["event"] == "trace.start"))
+        program = Jason.decode!(header["query"])
 
         assert Map.keys(program) |> Enum.sort() == ["bytes", "sha256"]
         refute Map.has_key?(program, "preview")
       end)
     end
 
-    test "summary redacts context to per-key type+count" do
-      with_trace_dir([payloads: :summary], fn dir ->
-        ctx = %{"items" => [1, 2, 3, 4, 5], "name" => "alice"}
+    test "telemetry metadata never carries raw program/context (payload-policy bypass guard)" do
+      # Even at --trace-payloads full, the `call.start` event metadata
+      # must contain only byte-counts + presence flags. The full program
+      # lives on the trace.start header's `query`, not here.
+      with_trace_dir([payloads: :full], fn dir ->
+        ctx = %{"items" => [1, 2, 3], "name" => "alice"}
         _ = dispatch_call(1, %{"program" => "(count data/items)", "context" => ctx})
 
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
         start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
-        ctx_meta = start["metadata"]["context"]
+        meta = start["metadata"]
 
-        assert ctx_meta["items"]["type"] == "array"
-        assert ctx_meta["items"]["count"] == 5
-        assert ctx_meta["name"]["type"] == "string"
+        refute Map.has_key?(meta, "program")
+        refute Map.has_key?(meta, "context")
+        assert meta["program_bytes"] == byte_size("(count data/items)")
+        # context_bytes is the JSON-encoded byte size of the context map.
+        assert is_integer(meta["context_bytes"])
+        assert meta["context_bytes"] > 0
+      end)
+    end
+
+    test "telemetry metadata never carries raw validated/prints (stop event)" do
+      with_trace_dir([payloads: :full], fn dir ->
+        _ = dispatch_call(1, %{"program" => @program_ok})
+        [file] = wait_for_files(dir, 1)
+        events = read_jsonl(Path.join(dir, file))
+
+        stop = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.stop"))
+        meta = stop["metadata"]
+
+        refute Map.has_key?(meta, "validated")
+        refute Map.has_key?(meta, "prints")
+        assert is_boolean(meta["validated_present?"])
       end)
     end
   end
