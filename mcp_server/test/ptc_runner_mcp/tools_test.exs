@@ -30,9 +30,9 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert Map.has_key?(schema["properties"], "signature")
     end
 
-    test "outputSchema is omitted in Phase 1" do
+    test "outputSchema is advertised verbatim from § 10.4 (Phase 3)" do
       %{"tools" => [tool]} = Tools.list()
-      refute Map.has_key?(tool, "outputSchema")
+      assert tool["outputSchema"] == Tools.output_schema()
     end
   end
 

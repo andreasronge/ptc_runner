@@ -8,10 +8,22 @@ defmodule PtcRunnerMcp.Tools do
   `PtcRunner.PtcToolProtocol`, followed by exactly two newlines, then
   the package-owned authoring card (§ 8.4).
 
-  Phase 2 wires real `Lisp.run/2` execution through
-  `PtcRunnerMcp.Sandbox` and enforces `:max_program_bytes` and
-  `:max_concurrent_calls` (§ 11). `context` and `signature` arguments
-  are still ignored in Phase 2 and land in Phase 3.
+  Phase 2 wired real `Lisp.run/2` execution through
+  `PtcRunnerMcp.Sandbox` and enforced `:max_program_bytes` and
+  `:max_concurrent_calls` (§ 11). Phase 3 wires the remaining two
+  arguments per § 9.3 / § 9.4:
+
+    * `context` — JSON object whose keys land as `data/<key>` bindings
+      inside the program. Validated for shape, key syntax, and
+      encoded byte size before a concurrency permit is acquired.
+    * `signature` — PTC signature string, parsed via
+      `PtcToolProtocol.parse_signature/1` and used for return-value
+      validation only. Parse failure is `args_error`; mismatch
+      between the parsed signature and the program's return is
+      `validation_error`.
+
+  Both validations short-circuit before `ConcurrencyGate.try_acquire/1`
+  so a malformed argument never consumes a permit.
   """
 
   alias PtcRunner.PtcToolProtocol
@@ -27,6 +39,64 @@ defmodule PtcRunnerMcp.Tools do
   @priv_path Path.expand(Path.join([__DIR__, "..", "..", "priv", "mcp_authoring_card.md"]))
   @external_resource @priv_path
   @authoring_card File.read!(@priv_path)
+
+  # Verbatim § 10.4 outputSchema. `oneOf` discriminated by `status`.
+  # `result` is intentionally NOT in the success branch's `required`
+  # list — `render_success/2` elides it for programs whose final
+  # expression and `lisp_step.return` are both nil (§ 7.4 D2).
+  @output_schema %{
+    "type" => "object",
+    "oneOf" => [
+      %{
+        "type" => "object",
+        "required" => ["status", "prints", "feedback", "memory", "truncated"],
+        "properties" => %{
+          "status" => %{"const" => "ok"},
+          "result" => %{"type" => "string"},
+          "prints" => %{"type" => "array", "items" => %{"type" => "string"}},
+          "feedback" => %{"type" => "string"},
+          "memory" => %{
+            "type" => "object",
+            "required" => ["changed", "stored_keys", "truncated"],
+            "properties" => %{
+              "changed" => %{
+                "type" => "object",
+                "additionalProperties" => %{"type" => "string"}
+              },
+              "stored_keys" => %{"type" => "array", "items" => %{"type" => "string"}},
+              "truncated" => %{"type" => "boolean"}
+            }
+          },
+          "truncated" => %{"type" => "boolean"},
+          "validated" => %{}
+        }
+      },
+      %{
+        "type" => "object",
+        "required" => ["status", "reason", "message", "feedback"],
+        "properties" => %{
+          "status" => %{"const" => "error"},
+          "reason" => %{
+            "type" => "string",
+            "enum" => [
+              "parse_error",
+              "runtime_error",
+              "timeout",
+              "memory_limit",
+              "args_error",
+              "fail",
+              "validation_error",
+              "busy",
+              "unknown_tool"
+            ]
+          },
+          "message" => %{"type" => "string"},
+          "feedback" => %{"type" => "string"},
+          "result" => %{"type" => "string"}
+        }
+      }
+    ]
+  }
 
   @doc """
   The verbatim authoring-card markdown shipped at
@@ -49,6 +119,16 @@ defmodule PtcRunnerMcp.Tools do
     PtcToolProtocol.tool_description(:mcp_no_tools) <> "\n\n" <> authoring_card()
   end
 
+  @doc """
+  The verbatim § 10.4 `outputSchema` advertised in `tools/list`.
+
+  Returned as a plain map (Jason-encodable). Tests assert byte-for-byte
+  equality against the spec literal so any drift is caught at compile
+  time of the test suite.
+  """
+  @spec output_schema() :: map()
+  def output_schema, do: @output_schema
+
   @doc "The single tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
@@ -56,6 +136,7 @@ defmodule PtcRunnerMcp.Tools do
       "name" => @tool_name,
       "description" => advertised_description(),
       "inputSchema" => input_schema(),
+      "outputSchema" => @output_schema,
       "annotations" => %{
         "readOnlyHint" => true,
         "destructiveHint" => false,
@@ -72,17 +153,15 @@ defmodule PtcRunnerMcp.Tools do
   @doc """
   Handle a `tools/call` request.
 
-  For `name: "ptc_lisp_execute"`, validates the `program` argument per
-  § 9.2 (must be a non-empty string, ≤ `:max_program_bytes`),
-  acquires a permit from `PtcRunnerMcp.ConcurrencyGate`, and runs the
-  program through `PtcRunnerMcp.Sandbox.execute/1`. When the cap is
-  exceeded the call returns `:busy` synchronously (no queueing).
+  For `name: "ptc_lisp_execute"`, validates `program` (§ 9.2),
+  `context` (§ 9.3), and `signature` (§ 9.4) before acquiring a
+  concurrency permit. All argument-shape failures emit `args_error`
+  without consuming a permit. The permit is held only while the
+  underlying `Lisp.run/2` is in flight and is released even on
+  validation error after execution.
 
   For any other name, returns an `unknown_tool` envelope per § 7.4
   D1 (NOT JSON-RPC `-32601`).
-
-  `context` and `signature` arguments are accepted at the schema
-  level but ignored in Phase 2 — Phase 3 wires their semantics.
   """
   @spec call(map()) :: map()
   def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
@@ -95,20 +174,20 @@ defmodule PtcRunnerMcp.Tools do
   def call(_), do: Envelope.unknown_tool("")
 
   # ----------------------------------------------------------------
-  # ptc_lisp_execute pipeline (§ 9.2 validation, § 11 semaphore)
+  # ptc_lisp_execute pipeline
   # ----------------------------------------------------------------
 
   defp handle_execute(args) do
-    case validate_program(args) do
-      {:ok, program} ->
-        run_with_gate(program)
-
-      {:error, message} ->
-        Envelope.render_error(:args_error, message)
+    with {:ok, program} <- validate_program(args),
+         {:ok, context} <- validate_context(args),
+         {:ok, parsed_signature} <- validate_signature(args) do
+      run_with_gate(program, context, parsed_signature)
+    else
+      {:error, message} -> Envelope.render_error(:args_error, message)
     end
   end
 
-  defp run_with_gate(program) do
+  defp run_with_gate(program, context, parsed_signature) do
     cap = Limits.max_concurrent_calls()
 
     # NOTE on serial dispatch (Phase 2 limitation, deferred to Phase 4):
@@ -126,7 +205,7 @@ defmodule PtcRunnerMcp.Tools do
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do
-          Sandbox.execute(program)
+          Sandbox.execute(program, context, parsed_signature)
         after
           ConcurrencyGate.release()
         end
@@ -165,6 +244,91 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
+  # § 9.3: validate `context` shape, key syntax, and encoded byte size.
+  # On success returns the same map (Jason already gave us binaries,
+  # integers, floats, lists, maps — exactly what `Lisp.run/2`'s
+  # `:context` opt expects).
+  defp validate_context(args) do
+    case Map.fetch(args, "context") do
+      :error ->
+        {:ok, %{}}
+
+      {:ok, nil} ->
+        {:ok, %{}}
+
+      {:ok, value} when not is_map(value) or is_struct(value) ->
+        {:error, "argument `context` must be a JSON object, got #{type_label(value)}"}
+
+      {:ok, value} ->
+        with :ok <- check_context_size(value),
+             :ok <- check_context_keys(value) do
+          {:ok, value}
+        end
+    end
+  end
+
+  defp check_context_size(map) do
+    case Jason.encode(map) do
+      {:ok, encoded} ->
+        size = byte_size(encoded)
+        cap = Limits.max_context_bytes()
+
+        if size > cap do
+          {:error,
+           "argument `context` exceeds max_context_bytes (" <>
+             Integer.to_string(size) <> " > " <> Integer.to_string(cap) <> ")"}
+        else
+          :ok
+        end
+
+      {:error, reason} ->
+        {:error, "argument `context` is not JSON-encodable: #{inspect(reason)}"}
+    end
+  end
+
+  defp check_context_keys(map) do
+    Enum.reduce_while(map, :ok, fn {k, _v}, _acc ->
+      cond do
+        not is_binary(k) ->
+          {:halt, {:error, "argument `context` keys must be strings (got: #{inspect(k)})"}}
+
+        k == "" ->
+          {:halt, {:error, "argument `context` keys must be non-empty"}}
+
+        String.contains?(k, "/") ->
+          {:halt,
+           {:error,
+            "argument `context` keys may not contain `/` (would shadow PTC-Lisp namespace): #{inspect(k)}"}}
+
+        true ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  # § 9.4: validate that `signature`, when present, is a string and
+  # parses cleanly. Parse failure short-circuits BEFORE permit
+  # acquisition.
+  defp validate_signature(args) do
+    case Map.fetch(args, "signature") do
+      :error ->
+        {:ok, nil}
+
+      {:ok, nil} ->
+        {:ok, nil}
+
+      {:ok, value} when not is_binary(value) ->
+        {:error, "argument `signature` must be a string, got #{type_label(value)}"}
+
+      {:ok, value} ->
+        case PtcToolProtocol.parse_signature(value) do
+          {:ok, parsed} -> {:ok, parsed}
+          {:error, reason} -> {:error, "argument `signature` is malformed: #{reason}"}
+        end
+    end
+  end
+
+  defp type_label(v) when is_struct(v), do: "struct"
   defp type_label(v) when is_map(v), do: "object"
   defp type_label(v) when is_list(v), do: "array"
   defp type_label(v) when is_integer(v), do: "integer"

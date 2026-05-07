@@ -8,6 +8,7 @@ defmodule PtcRunnerMcp.Application do
 
     * `--max-frame-bytes <int>` / `PTC_RUNNER_MCP_MAX_FRAME_BYTES`
     * `--max-program-bytes <int>` / `PTC_RUNNER_MCP_MAX_PROGRAM_BYTES`
+    * `--max-context-bytes <int>` / `PTC_RUNNER_MCP_MAX_CONTEXT_BYTES`
     * `--max-concurrent-calls <int>` / `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS`
     * `--log-level <debug|info|warn|error>` / `PTC_RUNNER_MCP_LOG_LEVEL`
 
@@ -49,6 +50,7 @@ defmodule PtcRunnerMcp.Application do
         strict: [
           max_frame_bytes: :integer,
           max_program_bytes: :integer,
+          max_context_bytes: :integer,
           max_concurrent_calls: :integer,
           log_level: :string
         ]
@@ -74,6 +76,13 @@ defmodule PtcRunnerMcp.Application do
           :max_program_bytes,
           "PTC_RUNNER_MCP_MAX_PROGRAM_BYTES",
           defaults.max_program_bytes
+        ),
+      max_context_bytes:
+        read_int(
+          args,
+          :max_context_bytes,
+          "PTC_RUNNER_MCP_MAX_CONTEXT_BYTES",
+          defaults.max_context_bytes
         ),
       max_concurrent_calls:
         read_int(

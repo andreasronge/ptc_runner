@@ -180,8 +180,15 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   # Validation
   # ============================================================
 
-  @doc "Validate return value against signature."
-  @spec validate_return(Definition.t(), term()) :: :ok | {:error, list()}
+  @doc """
+  Validate return value against signature.
+
+  Accepts any map carrying a `:parsed_signature` key (typically a
+  `Definition.t()`, but `:ptc_runner_mcp` and other out-of-tree
+  callers pass a bare `%{parsed_signature: parsed}` map — the
+  function only consults that one field).
+  """
+  @spec validate_return(map(), term()) :: :ok | {:error, list()}
   def validate_return(%{parsed_signature: nil}, _value), do: :ok
   def validate_return(%{parsed_signature: {:signature, _, :any}}, _value), do: :ok
 
