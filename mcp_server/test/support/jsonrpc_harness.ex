@@ -30,8 +30,20 @@ defmodule PtcRunnerMcp.Test.JsonRpcHarness do
   @doc "Stop the harness."
   @spec stop(map()) :: :ok
   def stop(%{stdio: stdio, io: io}) do
-    if Process.alive?(stdio), do: GenServer.stop(stdio, :normal, 1_000)
-    if Process.alive?(io), do: StringIO.close(io)
+    safe_stop(stdio, fn -> GenServer.stop(stdio, :normal, 1_000) end)
+    safe_stop(io, fn -> StringIO.close(io) end)
+    :ok
+  end
+
+  defp safe_stop(pid, fun) do
+    if Process.alive?(pid) do
+      try do
+        fun.()
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
     :ok
   end
 
