@@ -116,6 +116,23 @@ defmodule PtcRunnerMcp.StdioTest do
     assert second["id"] == "b"
   end
 
+  test "exit notification halts dispatch of trailing frames in the same chunk", %{harness: h} do
+    # Buffered scenario: client sends `exit` followed by another request
+    # in the same read chunk. Server must not dispatch (or reply to)
+    # the trailing frame.
+    bytes =
+      Jason.encode!(%{"jsonrpc" => "2.0", "method" => "exit"}) <>
+        "\n" <>
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 99, "method" => "tools/list"}) <>
+        "\n"
+
+    replies = JsonRpcHarness.roundtrip(bytes, h)
+
+    # No reply for `exit` (notification); no reply for the trailing
+    # `tools/list` because the loop is `:exited`.
+    assert replies == []
+  end
+
   test "stdout reply lines are valid JSON, one per line", %{harness: h} do
     [reply] =
       JsonRpcHarness.roundtrip(

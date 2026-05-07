@@ -60,39 +60,43 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp handle(%{"jsonrpc" => "2.0", "method" => method} = frame) do
     id = Map.get(frame, "id")
     params = Map.get(frame, "params")
+    notification? = not Map.has_key?(frame, "id")
 
-    case method do
-      "initialize" ->
-        Log.log(:info, "initialize", %{request_id: id})
-        {:reply, success_reply(id, Lifecycle.initialize_reply(params)), :continue}
+    result =
+      case method do
+        "initialize" ->
+          Log.log(:info, "initialize", %{request_id: id})
+          {:reply, success_reply(id, Lifecycle.initialize_reply(params)), :continue}
 
-      "notifications/initialized" ->
-        Lifecycle.on_initialized()
-        {:noreply, :continue}
+        "notifications/initialized" ->
+          Lifecycle.on_initialized()
+          {:noreply, :continue}
 
-      "shutdown" ->
-        Log.log(:info, "shutdown", %{request_id: id})
-        {:reply, success_reply(id, nil), :drain}
+        "shutdown" ->
+          Log.log(:info, "shutdown", %{request_id: id})
+          {:reply, success_reply(id, nil), :drain}
 
-      "exit" ->
-        Log.log(:info, "exit")
-        {:noreply, :exit}
+        "exit" ->
+          Log.log(:info, "exit")
+          {:noreply, :exit}
 
-      "notifications/cancelled" ->
-        Lifecycle.on_cancelled(params || %{})
-        {:noreply, :continue}
+        "notifications/cancelled" ->
+          Lifecycle.on_cancelled(params || %{})
+          {:noreply, :continue}
 
-      "tools/list" ->
-        Log.log(:debug, "tools_list", %{request_id: id})
-        {:reply, success_reply(id, Tools.list()), :continue}
+        "tools/list" ->
+          Log.log(:debug, "tools_list", %{request_id: id})
+          {:reply, success_reply(id, Tools.list()), :continue}
 
-      "tools/call" ->
-        handle_tools_call(id, params)
+        "tools/call" ->
+          handle_tools_call(id, params)
 
-      _ ->
-        Log.log(:warn, "method_not_found", %{request_id: id, method: method})
-        {:reply, error_reply(id, -32_601, "Method not found"), :continue}
-    end
+        _ ->
+          Log.log(:warn, "method_not_found", %{request_id: id, method: method})
+          {:reply, error_reply(id, -32_601, "Method not found"), :continue}
+      end
+
+    suppress_reply_if_notification(result, notification?)
   rescue
     error ->
       stack = __STACKTRACE__
@@ -117,6 +121,16 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp handle(_other) do
     {:reply, error_reply(nil, -32_600, "Invalid Request"), :continue}
   end
+
+  # JSON-RPC 2.0 § 4.1: a Notification is a Request without an `id` member;
+  # the Server MUST NOT reply to it. Drop any handler-built reply when the
+  # incoming frame is a notification, but preserve the lifecycle directive
+  # so legitimate notifications (e.g. `exit`) still take effect.
+  defp suppress_reply_if_notification({:reply, _frame, lifecycle}, true) do
+    {:noreply, lifecycle}
+  end
+
+  defp suppress_reply_if_notification(other, _), do: other
 
   defp handle_tools_call(id, params) when is_map(params) do
     Log.log(:info, "tools_call_start", %{
