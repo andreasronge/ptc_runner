@@ -68,20 +68,43 @@ defmodule PtcRunnerMcp.ToolsTest do
     end
   end
 
-  describe "call/1 stub" do
-    test "ptc_lisp_execute returns the Phase 1 stub envelope" do
-      env = Tools.call(%{"name" => "ptc_lisp_execute"})
+  describe "call/1 — argument validation (§ 9.2)" do
+    test "missing program returns args_error" do
+      env = Tools.call(%{"name" => "ptc_lisp_execute", "arguments" => %{}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
-      assert sc["status"] == "error"
-      assert sc["reason"] == "runtime_error"
-      assert sc["message"] == "phase 1 stub"
-      assert sc["feedback"] =~ "phase 1 stub"
+      assert sc["reason"] == "args_error"
+      assert sc["message"] =~ "program"
+    end
 
-      [block] = env["content"]
-      assert block["type"] == "text"
-      assert Jason.decode!(block["text"]) == sc
+    test "missing arguments object treated as empty (program required)" do
+      env = Tools.call(%{"name" => "ptc_lisp_execute"})
+
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+    end
+
+    test "non-string program returns args_error" do
+      env =
+        Tools.call(%{
+          "name" => "ptc_lisp_execute",
+          "arguments" => %{"program" => 42}
+        })
+
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+    end
+
+    test "whitespace-only program returns args_error" do
+      env =
+        Tools.call(%{
+          "name" => "ptc_lisp_execute",
+          "arguments" => %{"program" => "   \n\t  "}
+        })
+
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
     end
 
     test "unknown tool name returns the unknown_tool envelope (NOT JSON-RPC -32601)" do
@@ -92,6 +115,25 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert sc["status"] == "error"
       assert sc["reason"] == "unknown_tool"
       assert sc["message"] =~ "nope"
+
+      [block] = env["content"]
+      assert block["type"] == "text"
+      assert Jason.decode!(block["text"]) == sc
+    end
+  end
+
+  describe "call/1 — successful PTC-Lisp execution" do
+    test "(+ 1 2) returns isError=false with EDN-rendered result" do
+      env =
+        Tools.call(%{
+          "name" => "ptc_lisp_execute",
+          "arguments" => %{"program" => "(+ 1 2)"}
+        })
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+      assert sc["status"] == "ok"
+      assert sc["result"] == "user=> 3"
 
       [block] = env["content"]
       assert block["type"] == "text"

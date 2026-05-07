@@ -8,12 +8,14 @@ defmodule PtcRunnerMcp.Tools do
   `PtcRunner.PtcToolProtocol`, followed by exactly two newlines, then
   the package-owned authoring card (§ 8.4).
 
-  Phase 1's `tools/call` is a stub — see `PtcRunnerMcp.Envelope`. Real
-  `Lisp.run/2` wiring lands in Phase 2.
+  Phase 2 wires real `Lisp.run/2` execution through
+  `PtcRunnerMcp.Sandbox` and enforces `:max_program_bytes` and
+  `:max_concurrent_calls` (§ 11). `context` and `signature` arguments
+  are still ignored in Phase 2 and land in Phase 3.
   """
 
   alias PtcRunner.PtcToolProtocol
-  alias PtcRunnerMcp.Envelope
+  alias PtcRunnerMcp.{ConcurrencyGate, Envelope, Limits, Sandbox}
 
   @tool_name "ptc_lisp_execute"
 
@@ -70,15 +72,94 @@ defmodule PtcRunnerMcp.Tools do
   @doc """
   Handle a `tools/call` request.
 
-  Phase 1 stub: any call to `ptc_lisp_execute` returns a fixed
-  `runtime_error` envelope (`"phase 1 stub"`). Any other tool name
-  returns an `unknown_tool` envelope per § 7.4 D1 (NOT JSON-RPC
-  `-32601`).
+  For `name: "ptc_lisp_execute"`, validates the `program` argument per
+  § 9.2 (must be a non-empty string, ≤ `:max_program_bytes`),
+  acquires a permit from `PtcRunnerMcp.ConcurrencyGate`, and runs the
+  program through `PtcRunnerMcp.Sandbox.execute/1`. When the cap is
+  exceeded the call returns `:busy` synchronously (no queueing).
+
+  For any other name, returns an `unknown_tool` envelope per § 7.4
+  D1 (NOT JSON-RPC `-32601`).
+
+  `context` and `signature` arguments are accepted at the schema
+  level but ignored in Phase 2 — Phase 3 wires their semantics.
   """
   @spec call(map()) :: map()
-  def call(%{"name" => @tool_name}), do: Envelope.phase_1_stub()
+  def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
+    handle_execute(args)
+  end
+
+  def call(%{"name" => @tool_name}), do: handle_execute(%{})
+
   def call(%{"name" => name}) when is_binary(name), do: Envelope.unknown_tool(name)
   def call(_), do: Envelope.unknown_tool("")
+
+  # ----------------------------------------------------------------
+  # ptc_lisp_execute pipeline (§ 9.2 validation, § 11 semaphore)
+  # ----------------------------------------------------------------
+
+  defp handle_execute(args) do
+    case validate_program(args) do
+      {:ok, program} ->
+        run_with_gate(program)
+
+      {:error, message} ->
+        Envelope.render_error(:args_error, message)
+    end
+  end
+
+  defp run_with_gate(program) do
+    cap = Limits.max_concurrent_calls()
+
+    case ConcurrencyGate.try_acquire(cap) do
+      :ok ->
+        try do
+          Sandbox.execute(program)
+        after
+          ConcurrencyGate.release()
+        end
+
+      :full ->
+        Envelope.busy(cap)
+    end
+  end
+
+  # § 9.2: missing → not a string → empty after trim → too large.
+  defp validate_program(args) do
+    case Map.fetch(args, "program") do
+      :error ->
+        {:error, "argument `program` is required"}
+
+      {:ok, value} when not is_binary(value) ->
+        {:error, "argument `program` must be a string, got #{type_label(value)}"}
+
+      {:ok, value} ->
+        trimmed = String.trim(value)
+
+        cond do
+          trimmed == "" ->
+            {:error, "argument `program` must be a non-empty string"}
+
+          byte_size(value) > Limits.max_program_bytes() ->
+            {:error,
+             "argument `program` exceeds max_program_bytes (" <>
+               Integer.to_string(byte_size(value)) <>
+               " > " <>
+               Integer.to_string(Limits.max_program_bytes()) <> ")"}
+
+          true ->
+            {:ok, value}
+        end
+    end
+  end
+
+  defp type_label(v) when is_map(v), do: "object"
+  defp type_label(v) when is_list(v), do: "array"
+  defp type_label(v) when is_integer(v), do: "integer"
+  defp type_label(v) when is_float(v), do: "number"
+  defp type_label(v) when is_boolean(v), do: "boolean"
+  defp type_label(nil), do: "null"
+  defp type_label(_), do: "unknown"
 
   defp input_schema do
     %{

@@ -7,6 +7,8 @@ defmodule PtcRunnerMcp.Application do
   and environment variables are read once at boot:
 
     * `--max-frame-bytes <int>` / `PTC_RUNNER_MCP_MAX_FRAME_BYTES`
+    * `--max-program-bytes <int>` / `PTC_RUNNER_MCP_MAX_PROGRAM_BYTES`
+    * `--max-concurrent-calls <int>` / `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS`
     * `--log-level <debug|info|warn|error>` / `PTC_RUNNER_MCP_LOG_LEVEL`
 
   In test environments (`Mix.env() == :test`) the supervision tree is
@@ -41,6 +43,8 @@ defmodule PtcRunnerMcp.Application do
       OptionParser.parse(argv,
         strict: [
           max_frame_bytes: :integer,
+          max_program_bytes: :integer,
+          max_concurrent_calls: :integer,
           log_level: :string
         ]
       )
@@ -49,22 +53,52 @@ defmodule PtcRunnerMcp.Application do
   end
 
   defp apply_limits(args) do
-    max_frame =
-      case env_or(args, :max_frame_bytes, "PTC_RUNNER_MCP_MAX_FRAME_BYTES", nil) do
-        nil ->
-          Limits.defaults().max_frame_bytes
+    defaults = Limits.defaults()
 
-        n when is_integer(n) ->
-          n
+    overrides = %{
+      max_frame_bytes:
+        read_int(
+          args,
+          :max_frame_bytes,
+          "PTC_RUNNER_MCP_MAX_FRAME_BYTES",
+          defaults.max_frame_bytes
+        ),
+      max_program_bytes:
+        read_int(
+          args,
+          :max_program_bytes,
+          "PTC_RUNNER_MCP_MAX_PROGRAM_BYTES",
+          defaults.max_program_bytes
+        ),
+      max_concurrent_calls:
+        read_int(
+          args,
+          :max_concurrent_calls,
+          "PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS",
+          defaults.max_concurrent_calls
+        )
+    }
 
-        bin when is_binary(bin) ->
-          case Integer.parse(bin) do
-            {n, _} -> n
-            :error -> Limits.defaults().max_frame_bytes
-          end
-      end
+    Limits.set(overrides)
+  end
 
-    Limits.set(%{max_frame_bytes: max_frame})
+  defp read_int(args, key, env_name, default) do
+    case env_or(args, key, env_name, nil) do
+      nil ->
+        default
+
+      n when is_integer(n) and n > 0 ->
+        n
+
+      bin when is_binary(bin) ->
+        case Integer.parse(bin) do
+          {n, _} when n > 0 -> n
+          _ -> default
+        end
+
+      _ ->
+        default
+    end
   end
 
   defp env_or(args, key, env_name, default) do

@@ -11,56 +11,134 @@ defmodule PtcRunnerMcp.Envelope do
     * `"content"` — a single-element array carrying the same payload
       as a `"text"` block, mirroring `structuredContent`.
 
-  Phase 1 ships the envelope shape only; the success and error
-  payloads inside it are stubbed (`tools/call` returns a fixed
-  `runtime_error` envelope) until Phase 2 wires `Lisp.run/2`. Unknown
-  tool names return an `unknown_tool` error per the D1 deviation
-  (§ 7.4).
+  Phase 2 wires real `Lisp.run/2` results into the envelope. This
+  module also owns `render_error/3` — the single entry point all MCP
+  error rendering goes through. For the seven shared reasons it
+  delegates to `PtcRunner.PtcToolProtocol.render_error/3`; for the
+  two MCP-only reasons (`:busy`, `:unknown_tool`) it constructs the
+  R23 payload locally per § 10.3.
+
+  Per § 10.3, `:busy` and `:unknown_tool` are NOT in the shared
+  `error_reason()` enum. `PtcRunner.PtcToolProtocol.render_error/3`
+  is intentionally NOT widened to accept them; this package owns
+  their rendering.
   """
 
-  @phase_1_stub_message "phase 1 stub"
-  @phase_1_stub_feedback "phase 1 stub — execution wiring lands in phase 2"
+  alias PtcRunner.PtcToolProtocol
+
+  @shared_reasons [
+    :parse_error,
+    :runtime_error,
+    :timeout,
+    :memory_limit,
+    :args_error,
+    :fail,
+    :validation_error
+  ]
 
   @typedoc "MCP tool result envelope, ready for JSON-RPC serialization."
   @type t :: %{
           required(String.t()) => boolean() | map() | [map()]
         }
 
-  @doc """
-  Build the Phase 1 stubbed `tools/call` envelope for the
-  `ptc_lisp_execute` tool.
-
-  Returns a fixed R23 `runtime_error` payload wrapped in the MCP
-  envelope. Phase 2 replaces this with real `Lisp.run/2` wiring.
-  """
-  @spec phase_1_stub() :: t()
-  def phase_1_stub do
-    payload = %{
-      "status" => "error",
-      "reason" => "runtime_error",
-      "message" => @phase_1_stub_message,
-      "feedback" => @phase_1_stub_feedback
-    }
-
-    error_envelope(payload)
-  end
+  @typedoc "Reasons accepted by `render_error/3`."
+  @type reason ::
+          :parse_error
+          | :runtime_error
+          | :timeout
+          | :memory_limit
+          | :args_error
+          | :fail
+          | :validation_error
+          | :busy
+          | :unknown_tool
 
   @doc """
   Build the `unknown_tool` envelope for any `tools/call` whose
   `params.name` is not `"ptc_lisp_execute"`.
 
   Per § 7.4 D1, unknown tool names are surfaced as a tool result, not
-  as JSON-RPC `-32602`.
+  as JSON-RPC `-32602`. Delegates to `render_error/3` so all error
+  rendering goes through one entry point.
   """
   @spec unknown_tool(String.t()) :: t()
   def unknown_tool(name) when is_binary(name) do
+    render_error(:unknown_tool, "unknown tool: #{name}", tool_name: name)
+  end
+
+  @doc """
+  Build a `busy` envelope when `:max_concurrent_calls` is exceeded.
+
+  Convenience wrapper around `render_error(:busy, ...)`.
+  """
+  @spec busy(pos_integer()) :: t()
+  def busy(cap) when is_integer(cap) and cap > 0 do
+    render_error(:busy, "server busy: #{cap} concurrent calls in flight", cap: cap)
+  end
+
+  @doc """
+  Render an error tool-result envelope for any reason emitted by MCP v1.
+
+  ## Reasons
+
+    * Seven shared reasons (`:parse_error`, `:runtime_error`,
+      `:timeout`, `:memory_limit`, `:args_error`, `:fail`,
+      `:validation_error`) — delegated to
+      `PtcRunner.PtcToolProtocol.render_error/3` and wrapped in the
+      MCP envelope. Forwards `:result` and `:feedback` opts.
+    * `:busy` — constructed locally with an MCP-owned feedback string.
+      Accepts `:cap` for the in-flight cap.
+    * `:unknown_tool` — constructed locally with an MCP-owned feedback
+      string. Accepts `:tool_name` for the offending name.
+
+  Both `:busy` and `:unknown_tool` produce R23 payloads with `status`,
+  `reason`, `message`, and `feedback` only — never a `result` field
+  (§ 10.3).
+  """
+  @spec render_error(reason(), String.t(), keyword()) :: t()
+  def render_error(reason, message, opts \\ [])
+
+  def render_error(reason, message, opts) when reason in @shared_reasons and is_binary(message) do
+    json = PtcToolProtocol.render_error(reason, message, opts)
+    error_envelope(Jason.decode!(json))
+  end
+
+  def render_error(:busy, message, opts) when is_binary(message) do
+    cap = Keyword.get(opts, :cap)
+
+    feedback =
+      Keyword.get(opts, :feedback) ||
+        "The MCP server is at its concurrent-call cap" <>
+          if(is_integer(cap), do: " (#{cap})", else: "") <>
+          ". The previous call has not finished. Wait briefly and retry the same `tools/call`."
+
+    payload = %{
+      "status" => "error",
+      "reason" => "busy",
+      "message" => message,
+      "feedback" => feedback
+    }
+
+    error_envelope(payload)
+  end
+
+  def render_error(:unknown_tool, message, opts) when is_binary(message) do
+    name = Keyword.get(opts, :tool_name)
+
+    feedback =
+      Keyword.get(opts, :feedback) ||
+        "The MCP server exposes exactly one tool: `ptc_lisp_execute`." <>
+          if is_binary(name) and name != "" do
+            " The requested tool `#{name}` is not registered."
+          else
+            " The requested tool name was missing or empty."
+          end
+
     payload = %{
       "status" => "error",
       "reason" => "unknown_tool",
-      "message" => "unknown tool: #{name}",
-      "feedback" =>
-        "The MCP server exposes exactly one tool: `ptc_lisp_execute`. " <>
-          "The requested tool `#{name}` is not registered."
+      "message" => message,
+      "feedback" => feedback
     }
 
     error_envelope(payload)

@@ -4,6 +4,8 @@ defmodule PtcRunner.PtcToolProtocolTest do
   alias PtcRunner.PtcToolProtocol
   alias PtcRunner.SubAgent.Loop.PtcToolCall
 
+  doctest PtcRunner.PtcToolProtocol
+
   # ================================================================
   # tool_description/1 — capability profiles
   # ================================================================
@@ -285,6 +287,58 @@ defmodule PtcRunner.PtcToolProtocolTest do
         json = PtcToolProtocol.render_error(reason, "msg-#{reason}", opts)
         assert Jason.decode!(json)["feedback"] == "msg-#{reason}"
       end
+    end
+  end
+
+  # ================================================================
+  # render_success_from_step/2 — § 13.1 high-level wrapper
+  # ================================================================
+
+  describe "render_success_from_step/2 — round-trip from Lisp.run/2" do
+    test "renders `(+ 1 2)` as status:ok with EDN-rendered result preview" do
+      {:ok, step} = PtcToolProtocol.lisp_run("(+ 1 2)")
+      decoded = step |> PtcToolProtocol.render_success_from_step() |> Jason.decode!()
+
+      assert decoded["status"] == "ok"
+      assert decoded["result"] == "user=> 3"
+      assert decoded["prints"] == []
+      assert is_binary(decoded["feedback"])
+      assert decoded["truncated"] == false
+
+      memory = decoded["memory"]
+      assert memory["stored_keys"] == []
+      assert memory["truncated"] == false
+    end
+
+    test "drops `result` when program returns nil (println-only)" do
+      {:ok, step} = PtcToolProtocol.lisp_run("(println \"hi\")")
+      decoded = step |> PtcToolProtocol.render_success_from_step() |> Jason.decode!()
+
+      assert decoded["status"] == "ok"
+      refute Map.has_key?(decoded, "result")
+      assert decoded["prints"] == ["hi"]
+    end
+
+    test "forwards :validated opt into the rendered payload" do
+      {:ok, step} = PtcToolProtocol.lisp_run("(+ 1 2)")
+
+      decoded =
+        step
+        |> PtcToolProtocol.render_success_from_step(validated: %{"count" => 3})
+        |> Jason.decode!()
+
+      assert decoded["validated"] == %{"count" => 3}
+    end
+
+    test "ignores unknown opts (Addendum #12)" do
+      {:ok, step} = PtcToolProtocol.lisp_run("(+ 1 2)")
+
+      decoded =
+        step
+        |> PtcToolProtocol.render_success_from_step(future_field: :whatever)
+        |> Jason.decode!()
+
+      assert decoded["status"] == "ok"
     end
   end
 
