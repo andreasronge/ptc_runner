@@ -18,7 +18,7 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
-  alias PtcRunnerMcp.{Limits, Log}
+  alias PtcRunnerMcp.{ConcurrencyGate, Limits, Log}
 
   @impl Application
   def start(_type, _args) do
@@ -26,6 +26,11 @@ defmodule PtcRunnerMcp.Application do
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
     apply_limits(args)
+
+    # Eagerly initialize the concurrency-gate atomics ref so that
+    # concurrent first acquires cannot race on lazy persistent_term
+    # creation (codex review of Phase 2).
+    :ok = ConcurrencyGate.init()
 
     children = stdio_children(args)
 

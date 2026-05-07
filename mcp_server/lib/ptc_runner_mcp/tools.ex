@@ -111,6 +111,18 @@ defmodule PtcRunnerMcp.Tools do
   defp run_with_gate(program) do
     cap = Limits.max_concurrent_calls()
 
+    # NOTE on serial dispatch (Phase 2 limitation, deferred to Phase 4):
+    # The stdio reader calls `Sandbox.execute/1` synchronously inside
+    # the dispatch loop. Per spec § 6.3 parallel dispatch is "MAY" and
+    # serial is conformant — but it also means concurrent `tools/call`
+    # frames from a single stdio stream queue at the reader level
+    # rather than reaching this gate concurrently. So `:busy` is
+    # unreachable via stdio in Phase 2; it only fires when callers
+    # invoke this module directly from multiple processes (covered by
+    # `concurrency_gate_test`). Phase 4 introduces per-call worker
+    # processes (required for `notifications/cancelled`), at which
+    # point this gate fires for real on stdio over-cap requests.
+    # See codex review of commit 4ff939f.
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do
