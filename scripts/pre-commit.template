@@ -1,101 +1,143 @@
 #!/bin/bash
 
+# Pre-commit hook: runs gates per top-level Mix project.
+# Projects: ".", "mcp_server", "ptc_viewer". Non-existent dirs are skipped.
+# Per spec Plans/ptc-runner-mcp-server.md §5.3 and §20.5.
+
 set -e
 
 echo "🔍 Running pre-commit checks..."
 
-# Track time
 START_TIME=$(date +%s)
 
-# Get all staged files
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+PROJECTS=("." "mcp_server" "ptc_viewer")
 
-# Detect what types of files changed
-HAS_ELIXIR_FILES=$(echo "$STAGED_FILES" | grep -E '\.(ex|exs)$' || true)
-HAS_CONFIG_FILES=$(echo "$STAGED_FILES" | grep -E '^config/.*\.exs$' || true)
-HAS_MIX_FILES=$(echo "$STAGED_FILES" | grep -E '^mix\.(exs|lock)$' || true)
-HAS_DELETED_MODULES=$(git diff --cached --diff-filter=D --name-only | grep -E '\.(ex|exs)$' || true)
+ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
+ALL_RENAMED=$(git diff --cached --diff-filter=R --name-only)
 
-# Determine if tests should run
-SHOULD_RUN_TESTS=false
-SKIP_REASON=""
-
-if [ -n "$HAS_ELIXIR_FILES" ] || [ -n "$HAS_CONFIG_FILES" ] || [ -n "$HAS_MIX_FILES" ]; then
-  SHOULD_RUN_TESTS=true
-else
-  SKIP_REASON="No Elixir/config/mix files changed"
-fi
-
-# Handle deleted modules - need clean build
-if [ -n "$HAS_DELETED_MODULES" ]; then
-  echo "  ⚠️  Detected deleted Elixir modules - cleaning build..."
-  echo "$HAS_DELETED_MODULES" | sed 's/^/    - /'
-  mix clean --deps > /dev/null 2>&1
-  mix deps.compile > /dev/null 2>&1
-  echo "  ✅ Clean build completed"
-fi
-
-# 1. Format check (only if Elixir files changed)
-if [ -n "$HAS_ELIXIR_FILES" ]; then
-  echo "  ⏳ Checking code formatting..."
-  if ! mix format --check-formatted > /dev/null 2>&1; then
-    echo "  ❌ Code not formatted. Run: mix format"
-    exit 1
+# Filter staged paths to those owned by a given project.
+# Root project ".": everything except mcp_server/ and ptc_viewer/.
+project_filter() {
+  local proj="$1" input="$2"
+  if [ "$proj" = "." ]; then
+    echo "$input" | grep -v -E '^(mcp_server|ptc_viewer)/' || true
+  else
+    echo "$input" | grep -E "^${proj}/" || true
   fi
-  echo "  ✅ Code formatted"
-else
-  echo "  ⏭️  Skipping format check (no Elixir files)"
-fi
+}
 
-# 2. Compilation check (only if Elixir/config/mix files changed)
-if [ "$SHOULD_RUN_TESTS" = true ]; then
-  echo "  ⏳ Compiling with warnings as errors..."
-  if ! mix compile --warnings-as-errors > /dev/null 2>&1; then
-    echo "  ❌ Compilation failed or warnings present"
-    echo "  Run: mix compile"
-    exit 1
+# True if the project's mix.exs declares the given dep atom (e.g. credo, dialyxir).
+project_has_dep() {
+  local proj="$1" dep="$2"
+  grep -qE "\\{:${dep}," "${proj}/mix.exs" 2>/dev/null
+}
+
+run_project_gates() {
+  local proj="$1"
+  local label
+
+  if [ "$proj" = "." ]; then
+    label="root (:ptc_runner)"
+  else
+    label="$proj/"
+    [ -d "$proj" ] || return 0
   fi
-  echo "  ✅ Compilation successful"
-else
-  echo "  ⏭️  Skipping compilation ($SKIP_REASON)"
-fi
 
-# 3. Credo check (only if Elixir files changed)
-if [ -n "$HAS_ELIXIR_FILES" ]; then
-  echo "  ⏳ Running Credo..."
-  if ! mix credo --strict > /dev/null 2>&1; then
-    echo "  ❌ Credo issues found. Run: mix credo --strict"
-    exit 1
+  local staged deleted renamed
+  staged=$(project_filter "$proj" "$ALL_STAGED")
+  deleted=$(project_filter "$proj" "$ALL_DELETED")
+  renamed=$(project_filter "$proj" "$ALL_RENAMED")
+
+  local has_elixir has_config has_mix has_deleted has_renamed
+  has_elixir=$(echo "$staged" | grep -E '\.(ex|exs)$' || true)
+  has_config=$(echo "$staged" | grep -E '(^|/)config/.*\.exs$' || true)
+  has_mix=$(echo "$staged" | grep -E '(^|/)mix\.(exs|lock)$' || true)
+  has_deleted=$(echo "$deleted" | grep -E '\.(ex|exs)$' || true)
+  has_renamed=$(echo "$renamed" | grep -E '\.(ex|exs)$' || true)
+
+  if [ -z "$has_elixir" ] && [ -z "$has_config" ] && [ -z "$has_mix" ] \
+     && [ -z "$has_deleted" ] && [ -z "$has_renamed" ]; then
+    return 0
   fi
-  echo "  ✅ Credo passed"
-else
-  echo "  ⏭️  Skipping Credo (no Elixir files)"
-fi
 
-# 4. Run tests (only if code could affect behavior)
-if [ "$SHOULD_RUN_TESTS" = true ]; then
-  # Check for changed test files to run them specifically
-  changed_test_files=$(echo "$STAGED_FILES" | grep "^test/.*_test\.exs$" || true)
+  echo ""
+  echo "📦 Project: $label"
 
-  if [ -n "$changed_test_files" ]; then
-    echo "  ⏳ Running tests for changed files..."
-    for file in $changed_test_files; do
-      echo "    Testing: $file"
-      if ! mix test "$file" > /dev/null 2>&1; then
-        echo "    ❌ Tests failed for $file"
-        echo "    Run: mix test $file"
+  pushd "$proj" > /dev/null
+
+  if [ -n "$has_deleted" ] || [ -n "$has_renamed" ]; then
+    echo "  ⚠️  Detected deleted/renamed Elixir modules — cleaning build..."
+    mix clean --deps > /dev/null 2>&1 || true
+    mix deps.compile > /dev/null 2>&1 || true
+  fi
+
+  if [ -n "$has_elixir" ]; then
+    echo "  ⏳ Checking format..."
+    if ! mix format --check-formatted > /dev/null 2>&1; then
+      echo "  ❌ Code not formatted in $label. Run: (cd $proj && mix format)"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Format OK"
+  fi
+
+  if [ -n "$has_elixir" ] || [ -n "$has_config" ] || [ -n "$has_mix" ]; then
+    echo "  ⏳ Compiling --warnings-as-errors..."
+    if ! mix compile --warnings-as-errors > /dev/null 2>&1; then
+      echo "  ❌ Compilation failed in $label. Run: (cd $proj && mix compile)"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Compile OK"
+  fi
+
+  popd > /dev/null
+
+  if [ -n "$has_elixir" ]; then
+    if project_has_dep "$proj" "credo"; then
+      pushd "$proj" > /dev/null
+      echo "  ⏳ Running Credo..."
+      if ! mix credo --strict > /dev/null 2>&1; then
+        echo "  ❌ Credo issues in $label. Run: (cd $proj && mix credo --strict)"
+        popd > /dev/null
+        exit 1
+      fi
+      echo "  ✅ Credo OK"
+      popd > /dev/null
+    else
+      echo "  ⏭️  Credo not declared in $label/mix.exs"
+    fi
+  fi
+
+  # Scoped test run for changed test files (per project).
+  local changed_tests
+  if [ "$proj" = "." ]; then
+    changed_tests=$(echo "$staged" | grep -E '^test/.*_test\.exs$' || true)
+  else
+    changed_tests=$(echo "$staged" | grep -E "^${proj}/test/.*_test\.exs$" \
+                      | sed "s|^${proj}/||" || true)
+  fi
+
+  if [ -n "$changed_tests" ]; then
+    pushd "$proj" > /dev/null
+    echo "  ⏳ Running scoped tests..."
+    for f in $changed_tests; do
+      if ! mix test "$f" --exclude clojure > /dev/null 2>&1; then
+        echo "  ❌ Tests failed for $f in $label"
+        popd > /dev/null
         exit 1
       fi
     done
-    echo "  ✅ Changed tests pass"
-  else
-    echo "  ℹ️  No test files changed (run 'mix test' before push)"
+    echo "  ✅ Scoped tests pass"
+    popd > /dev/null
   fi
-else
-  echo "  ⏭️  Skipping tests ($SKIP_REASON)"
-fi
+}
 
-# Calculate elapsed time
+for proj in "${PROJECTS[@]}"; do
+  run_project_gates "$proj"
+done
+
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
@@ -103,7 +145,6 @@ echo ""
 echo "✅ All pre-commit checks passed in ${ELAPSED}s"
 echo ""
 
-# Ensure <10s
 if [ $ELAPSED -gt 10 ]; then
   echo "⚠️  Warning: Pre-commit took ${ELAPSED}s (target: <10s)"
 fi
