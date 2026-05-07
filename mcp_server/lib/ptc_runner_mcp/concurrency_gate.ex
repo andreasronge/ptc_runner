@@ -33,6 +33,27 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
   @key {__MODULE__, :ref}
 
   @doc """
+  Initialize the underlying atomics ref. Idempotent. Called once at
+  application start (`PtcRunnerMcp.Application.start/2`) so that
+  concurrent first callers cannot race on lazy initialization.
+
+  Calling `init/0` more than once is a no-op — the existing ref is
+  preserved so any in-flight permits remain accounted for.
+  """
+  @spec init() :: :ok
+  def init do
+    case :persistent_term.get(@key, :undefined) do
+      :undefined ->
+        ref = :atomics.new(1, signed: true)
+        :persistent_term.put(@key, ref)
+        :ok
+
+      _existing ->
+        :ok
+    end
+  end
+
+  @doc """
   Try to acquire one permit using the configured cap.
 
   Returns `:ok` when a permit is granted (caller must call `release/0`
@@ -83,11 +104,15 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
   end
 
   defp ref do
+    # `init/0` is called from Application.start/2 so the term is
+    # always present. The fallback here is defensive: it covers test
+    # processes that bypass the OTP supervisor (e.g., direct
+    # ConcurrencyGate.reset/0 in setup blocks before init/0 has run
+    # in this BEAM instance).
     case :persistent_term.get(@key, :undefined) do
       :undefined ->
-        ref = :atomics.new(1, signed: true)
-        :persistent_term.put(@key, ref)
-        ref
+        :ok = init()
+        :persistent_term.get(@key)
 
       ref ->
         ref
