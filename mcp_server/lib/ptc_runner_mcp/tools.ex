@@ -162,46 +162,99 @@ defmodule PtcRunnerMcp.Tools do
 
   For any other name, returns an `unknown_tool` envelope per § 7.4
   D1 (NOT JSON-RPC `-32601`).
+
+  ## Gate ownership
+
+  Phase 4 moves `tools/call` execution into per-call worker processes
+  spawned by `PtcRunnerMcp.Stdio` (§ 6.3, § 11). The serial-dispatch
+  comment that lived here in Phase 2 is gone: the stdio reader now
+  acquires the concurrency permit synchronously *before* spawning the
+  worker, and releases it when the worker exits (normally or via
+  `notifications/cancelled`). `Tools.call/1` keeps the legacy permit
+  acquire/release for direct in-process callers (and tests); the
+  worker path uses `call_validated/3` to skip the gate (the stdio
+  reader owns it). See `Stdio.handle_async_call/3`.
   """
   @spec call(map()) :: map()
   def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
-    handle_execute(args)
+    handle_execute_with_gate(args)
   end
 
-  def call(%{"name" => @tool_name}), do: handle_execute(%{})
+  def call(%{"name" => @tool_name}), do: handle_execute_with_gate(%{})
 
   def call(%{"name" => name}) when is_binary(name), do: Envelope.unknown_tool(name)
   def call(_), do: Envelope.unknown_tool("")
 
-  # ----------------------------------------------------------------
-  # ptc_lisp_execute pipeline
-  # ----------------------------------------------------------------
+  @doc """
+  Validate the inner `arguments` map for `tools/call name:
+  "ptc_lisp_execute"`.
 
-  defp handle_execute(args) do
+  Returns `{:ok, program, context, parsed_signature}` when all three
+  argument-shape checks pass, or `{:error, envelope}` with the
+  rendered `args_error` envelope when any fails. Used by
+  `PtcRunnerMcp.Stdio` to short-circuit malformed requests *before*
+  acquiring a concurrency permit (§ 9 / § 11).
+  """
+  @spec validate(map()) ::
+          {:ok, String.t(), map(), Sandbox.parsed_signature()} | {:error, map()}
+  def validate(args) when is_map(args) do
     with {:ok, program} <- validate_program(args),
          {:ok, context} <- validate_context(args),
          {:ok, parsed_signature} <- validate_signature(args) do
-      run_with_gate(program, context, parsed_signature)
+      {:ok, program, context, parsed_signature}
     else
-      {:error, message} -> Envelope.render_error(:args_error, message)
+      {:error, message} -> {:error, Envelope.render_error(:args_error, message)}
+    end
+  end
+
+  @doc """
+  Run an already-validated `tools/call` invocation WITHOUT acquiring a
+  concurrency permit.
+
+  Used by the per-call worker spawned in `PtcRunnerMcp.Stdio`: stdio
+  acquires the permit before spawning, and releases it when the worker
+  exits. `Sandbox.execute/3` is invoked with `link: true` so a worker
+  killed by `notifications/cancelled` takes its sandbox child with it
+  via the link signal (rather than letting the orphaned sandbox
+  process run until its own heap/timeout limit).
+  """
+  @spec call_validated(String.t(), map(), Sandbox.parsed_signature()) :: map()
+  def call_validated(program, context, parsed_signature)
+      when is_binary(program) and is_map(context) do
+    Sandbox.execute(program, context, parsed_signature, link: true)
+  end
+
+  @doc """
+  Acquire-then-execute for in-process callers. Returns `:busy`
+  envelope if `:max_concurrent_calls` is exceeded.
+
+  Stdio does NOT use this — it owns the gate itself. This entry
+  point exists for tests and any direct in-VM caller that wants
+  end-to-end semantics in one shot.
+  """
+  @spec call_with_gate(map()) :: map()
+  def call_with_gate(args) when is_map(args) do
+    handle_execute_with_gate(args)
+  end
+
+  defp handle_execute_with_gate(args) do
+    case validate(args) do
+      {:ok, program, context, parsed_signature} ->
+        run_with_gate(program, context, parsed_signature)
+
+      {:error, envelope} ->
+        envelope
     end
   end
 
   defp run_with_gate(program, context, parsed_signature) do
     cap = Limits.max_concurrent_calls()
 
-    # NOTE on serial dispatch (Phase 2 limitation, deferred to Phase 4):
-    # The stdio reader calls `Sandbox.execute/1` synchronously inside
-    # the dispatch loop. Per spec § 6.3 parallel dispatch is "MAY" and
-    # serial is conformant — but it also means concurrent `tools/call`
-    # frames from a single stdio stream queue at the reader level
-    # rather than reaching this gate concurrently. So `:busy` is
-    # unreachable via stdio in Phase 2; it only fires when callers
-    # invoke this module directly from multiple processes (covered by
-    # `concurrency_gate_test`). Phase 4 introduces per-call worker
-    # processes (required for `notifications/cancelled`), at which
-    # point this gate fires for real on stdio over-cap requests.
-    # See codex review of commit 4ff939f.
+    # Phase 4: this entry point is for direct in-process callers and
+    # tests. The MCP stdio reader does NOT call this — it owns the
+    # gate itself (acquire before spawn, release on worker DOWN) so a
+    # worker killed by `notifications/cancelled` cannot leak permits
+    # via a skipped `try/after` cleanup. See `Stdio.handle_async_call/3`.
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do

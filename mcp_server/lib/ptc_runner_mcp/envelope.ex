@@ -52,6 +52,7 @@ defmodule PtcRunnerMcp.Envelope do
           | :validation_error
           | :busy
           | :unknown_tool
+          | :shutting_down
 
   @doc """
   Build the `unknown_tool` envelope for any `tools/call` whose
@@ -74,6 +75,21 @@ defmodule PtcRunnerMcp.Envelope do
   @spec busy(pos_integer()) :: t()
   def busy(cap) when is_integer(cap) and cap > 0 do
     render_error(:busy, "server busy: #{cap} concurrent calls in flight", cap: cap)
+  end
+
+  @doc """
+  Build a `shutting_down` envelope for `tools/call` arriving after a
+  `shutdown` request was accepted (§ 6.4 row 2).
+
+  This is an MCP-only reason — it lives in `:ptc_runner_mcp` and is
+  intentionally NOT added to `PtcRunner.PtcToolProtocol.error_reason()`.
+  """
+  @spec shutting_down() :: t()
+  def shutting_down do
+    render_error(
+      :shutting_down,
+      "server is draining after shutdown; new tool calls are rejected"
+    )
   end
 
   @doc """
@@ -137,6 +153,23 @@ defmodule PtcRunnerMcp.Envelope do
     payload = %{
       "status" => "error",
       "reason" => "unknown_tool",
+      "message" => message,
+      "feedback" => feedback
+    }
+
+    error_envelope(payload)
+  end
+
+  def render_error(:shutting_down, message, opts) when is_binary(message) do
+    feedback =
+      Keyword.get(opts, :feedback) ||
+        "The MCP server received a `shutdown` request and is no " <>
+          "longer accepting new tool calls. Open a fresh server " <>
+          "process to retry."
+
+    payload = %{
+      "status" => "error",
+      "reason" => "shutting_down",
       "message" => message,
       "feedback" => feedback
     }

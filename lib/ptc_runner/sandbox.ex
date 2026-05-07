@@ -74,6 +74,14 @@ defmodule PtcRunner.Sandbox do
     timeout = Keyword.get(opts, :timeout, default_timeout)
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     eval_fn = Keyword.fetch!(opts, :eval_fn)
+    # When `link: true`, the spawned sandbox process is linked to the
+    # caller in addition to monitored. Used by the MCP server's
+    # per-call worker (Phase 4): if the worker is killed (e.g. by
+    # `notifications/cancelled`), the link signal propagates and the
+    # sandbox child terminates promptly rather than running orphaned
+    # until its own heap/timeout limit fires. Default `false` preserves
+    # the legacy behavior used by SubAgent and text-mode callers.
+    link? = Keyword.get(opts, :link, false)
 
     # Capture trace context for propagation into sandbox process
     trace_ctx = TraceContext.capture()
@@ -82,6 +90,19 @@ defmodule PtcRunner.Sandbox do
     start_time = System.monotonic_time(:millisecond)
 
     parent = self()
+
+    spawn_opts =
+      [{:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}, :monitor] ++
+        if link?, do: [:link], else: []
+
+    # When linking, the parent must trap exits so that an abnormal
+    # child termination (heap_kill, eval_fn raise, etc.) is delivered
+    # as a `{:EXIT, _, _}` message — already handled by the existing
+    # `{:DOWN, ...}` monitor clause — instead of taking the parent
+    # down via the link. We restore the prior trap-exit flag before
+    # returning so this is invisible to non-linking callers.
+    prior_trap_exit =
+      if link?, do: Process.flag(:trap_exit, true), else: nil
 
     {pid, ref} =
       Process.spawn(
@@ -95,42 +116,57 @@ defmodule PtcRunner.Sandbox do
           memory = get_process_memory()
           send(parent, {:result, result, memory})
         end,
-        [:monitor, {:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}]
+        spawn_opts
       )
 
-    # Wait for result with timeout
-    receive do
-      {:result, result, memory} ->
-        end_time = System.monotonic_time(:millisecond)
-        duration = end_time - start_time
+    try do
+      # Wait for result with timeout
+      receive do
+        {:result, result, memory} ->
+          end_time = System.monotonic_time(:millisecond)
+          duration = end_time - start_time
 
-        Process.demonitor(ref, [:flush])
+          Process.demonitor(ref, [:flush])
 
-        case result do
-          {:ok, value, eval_memory} ->
-            {:ok, value, %{duration_ms: duration, memory_bytes: memory}, eval_memory}
+          case result do
+            {:ok, value, eval_memory} ->
+              {:ok, value, %{duration_ms: duration, memory_bytes: memory}, eval_memory}
 
-          {:error, reason, eval_ctx} ->
-            # Error with eval_ctx (e.g., from tool execution error with recorded tool_calls)
-            # Return as a 4-tuple success with error tagged in the value
-            {:ok, {:error_with_ctx, reason}, %{duration_ms: duration, memory_bytes: memory},
-             eval_ctx}
+            {:error, reason, eval_ctx} ->
+              # Error with eval_ctx (e.g., from tool execution error with recorded tool_calls)
+              # Return as a 4-tuple success with error tagged in the value
+              {:ok, {:error_with_ctx, reason}, %{duration_ms: duration, memory_bytes: memory},
+               eval_ctx}
 
-          {:error, reason} ->
-            {:error, reason}
+            {:error, reason} ->
+              {:error, reason}
+          end
+
+        {:DOWN, ^ref, :process, ^pid, :killed} ->
+          {:error, {:memory_exceeded, max_heap * 8}}
+
+        {:DOWN, ^ref, :process, ^pid, reason} ->
+          {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
+      after
+        timeout ->
+          # Kill the process if it times out
+          Process.demonitor(ref, [:flush])
+          Process.exit(pid, :kill)
+          {:error, {:timeout, timeout}}
+      end
+    after
+      if link? do
+        # Flush any link-derived `{:EXIT, pid, _}` message left in the
+        # mailbox so it doesn't surface to the caller (the monitor
+        # clause already accounted for the same termination event).
+        receive do
+          {:EXIT, ^pid, _} -> :ok
+        after
+          0 -> :ok
         end
 
-      {:DOWN, ^ref, :process, ^pid, :killed} ->
-        {:error, {:memory_exceeded, max_heap * 8}}
-
-      {:DOWN, ^ref, :process, ^pid, reason} ->
-        {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
-    after
-      timeout ->
-        # Kill the process if it times out
-        Process.demonitor(ref, [:flush])
-        Process.exit(pid, :kill)
-        {:error, {:timeout, timeout}}
+        Process.flag(:trap_exit, prior_trap_exit)
+      end
     end
   end
 

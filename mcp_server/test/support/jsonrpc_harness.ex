@@ -51,6 +51,11 @@ defmodule PtcRunnerMcp.Test.JsonRpcHarness do
   Encode a JSON-RPC request map (or pass-through binary), feed it to
   the stdio loop, and return the list of decoded reply frames written
   during dispatch.
+
+  Phase 4: `tools/call` runs in a per-call worker, so the reply is
+  written *after* `Stdio.feed/2` returns. Drain pending observer
+  `{Stdio, :replied, frame}` messages with a short timeout so we
+  capture async replies, then read whatever the StringIO buffer has.
   """
   @spec roundtrip(map() | binary(), map()) :: [map()]
   def roundtrip(input, %{stdio: stdio, io: io}) do
@@ -63,12 +68,44 @@ defmodule PtcRunnerMcp.Test.JsonRpcHarness do
     # Drop anything left in the output buffer so we only see this
     # round-trip's replies.
     _ = StringIO.flush(io)
+    _ = drain_replied_messages()
 
     :ok = Stdio.feed(stdio, bytes)
+
+    # Wait for at least one async reply (or no-reply timeout) — we use
+    # the observer's `:replied` notification to know when an async
+    # worker's envelope has been written. Synchronous replies (for
+    # `initialize`, `tools/list`, etc.) are also notified, so this is
+    # uniform for all paths.
+    _ = wait_for_reply(150)
 
     io
     |> StringIO.flush()
     |> String.split("\n", trim: true)
     |> Enum.map(&Jason.decode!/1)
+  end
+
+  @doc """
+  Wait up to `timeout_ms` for a `{Stdio, :replied, frame}` observer
+  message. Returns `:ok` if one arrived, `:timeout` otherwise. Used
+  to synchronize on async tools/call replies before reading StringIO.
+  """
+  @spec wait_for_reply(non_neg_integer()) :: :ok | :timeout
+  def wait_for_reply(timeout_ms) do
+    receive do
+      {Stdio, :replied, _frame} -> :ok
+    after
+      timeout_ms -> :timeout
+    end
+  end
+
+  @doc "Drain any `{Stdio, :replied, ...}` messages left in the mailbox."
+  @spec drain_replied_messages() :: :ok
+  def drain_replied_messages do
+    receive do
+      {Stdio, :replied, _} -> drain_replied_messages()
+    after
+      0 -> :ok
+    end
   end
 end
