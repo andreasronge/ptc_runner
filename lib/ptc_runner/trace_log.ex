@@ -268,4 +268,53 @@ defmodule PtcRunner.TraceLog do
   end
 
   def join(_, _), do: :ok
+
+  @doc """
+  Writes a serialized event map to the innermost active collector in the
+  calling process's collector stack.
+
+  Used by call sites that need to emit a custom JSONL line from outside
+  the SubAgent telemetry path (e.g., the MCP server recording per-call
+  outcomes). The event map is forwarded as-is to
+  `PtcRunner.TraceLog.Collector.write_event/2`, which assigns a `seq`,
+  encodes via `PtcRunner.TraceLog.Event.encode/1`, and appends a JSONL
+  line.
+
+  Returns `:ok` if a collector was active and the event was queued for
+  writing, or `:no_collector` if no `with_trace/2` / `start/1` scope is
+  active in this process.
+
+  This function never raises. Errors during forwarding are swallowed
+  (writes are async casts; encoding failures degrade gracefully).
+
+  ## Examples
+
+      TraceLog.with_trace(fn ->
+        TraceLog.write_to_active(%{
+          "event" => "mcp.call.stop",
+          "trace_id" => "abc",
+          "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
+          "data" => %{"reason" => "ok"}
+        })
+      end)
+  """
+  @spec write_to_active(map()) :: :ok | :no_collector
+  def write_to_active(event_map) when is_map(event_map) do
+    case TraceContext.current_collector() do
+      nil ->
+        :no_collector
+
+      collector ->
+        try do
+          Collector.write_event(collector, event_map)
+          :ok
+        catch
+          _, _ -> :ok
+        end
+    end
+  rescue
+    _ -> :no_collector
+  end
+
+  def write_to_active(_), do: :no_collector
 end
