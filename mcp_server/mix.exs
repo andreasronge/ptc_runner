@@ -45,7 +45,14 @@ defmodule PtcRunnerMcp.MixProject do
   def application do
     [
       mod: {PtcRunnerMcp.Application, []},
-      extra_applications: [:logger]
+      # `:crypto` is required by `PtcRunnerMcp.TracePayload.sha256_hex/1`,
+      # which `JsonRpc.traced_tools_call/3` calls unconditionally on every
+      # `tools/call`. In dev/test `:crypto` is loaded by default, but a
+      # Mix release boot script only loads applications listed here, so
+      # without this entry the release would raise
+      # `:crypto.hash/2 is undefined` for every tool call. Caught by
+      # Phase 6a integration tests against the release artifact.
+      extra_applications: [:logger, :crypto]
     ]
   end
 

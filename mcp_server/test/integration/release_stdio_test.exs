@@ -182,33 +182,14 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
   end
 
   describe "tools/call success path (R22)" do
-    @tag :skip
-    @tag bug: "phase5-crypto-missing-from-release"
+    # Bug "phase5-crypto-missing-from-release" was Phase 6a's diagnosis:
+    # the Mix release boot script did not load `:crypto`, so
+    # `TracePayload.sha256_hex/1` raised `:crypto.hash/2 is undefined`
+    # for every tool call with a `program` argument. Fixed by adding
+    # `:crypto` to `extra_applications` in `mcp_server/mix.exs`. The
+    # @tag :skip was removed once the fix landed; this test now verifies
+    # the release end-to-end success path.
     test "(+ 1 2) returns isError:false with result \"user=> 3\"" do
-      # SKIPPED: release artifact lacks `:crypto`, so
-      # `PtcRunnerMcp.TracePayload.sha256_hex/1` raises
-      # `:crypto.hash/2 is undefined` inside the per-call worker for
-      # any `tools/call` whose `arguments.program` is set. No reply
-      # is emitted, the worker dies, the call hangs from the client's
-      # perspective. Phase 5 production-code bug — out of scope for
-      # Phase 6a (test-only) per § 20.5 risk 2 / Phase 6 scope guards.
-      #
-      # Reproduces with:
-      #
-      #     {
-      #       echo '<initialize>'
-      #       echo '<notifications/initialized>'
-      #       echo '<tools/call (+ 1 2)>'
-      #       echo '<exit>'
-      #     } | _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start
-      #
-      # stderr shows
-      #   {"event":"worker_raise","message":"function :crypto.hash/2
-      #    is undefined (module :crypto is not available)", ...}
-      #
-      # Fix would land in `mcp_server/lib/ptc_runner_mcp/...` (e.g.
-      # add `:crypto` to release `applications`, or guard
-      # `redact_program/2` behind `--trace-dir != nil`).
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
