@@ -17,17 +17,35 @@ defmodule PtcRunnerMcp.JsonRpc do
       `tools/call` work.
     * `:exit` — `exit` notification received; the caller terminates.
 
-  Phase 1 has no concept of in-flight calls, so `:drain` and `:exit`
-  are equivalent at this layer. Phase 4 expands them.
+  Phase 4 introduces three new outcomes:
+
+    * `{:async_call, request_id, work_fn, lifecycle}` — `tools/call`
+      that has passed argument validation and is ready to execute in
+      a per-call worker. The caller (`PtcRunnerMcp.Stdio`) acquires
+      a concurrency permit, spawns the worker to run `work_fn.()`,
+      and writes the resulting envelope wrapped in `success_reply/2`.
+      Permit ownership stays with the caller (release-on-DOWN).
+    * `{:cancel, request_id, lifecycle}` — `notifications/cancelled`
+      with a `requestId`. The caller looks up the worker pid in its
+      in-flight table; hits kill it (no reply emitted), misses are
+      silently ignored (§ 6.4 row 4).
+    * `{:reply_drain, frame, lifecycle}` — `tools/call` rejected
+      because the server is in `:drain` state (§ 6.4 row 2). The
+      caller writes the rejection envelope as a normal reply but
+      stays in drain.
   """
 
-  alias PtcRunnerMcp.{Lifecycle, Log, Tools, TraceFile, TracePayload, Version}
+  alias PtcRunnerMcp.{Envelope, Lifecycle, Log, Tools, TraceFile, TracePayload, Version}
 
   @typedoc "Lifecycle directive returned alongside any dispatch result."
   @type lifecycle :: :continue | :drain | :exit
 
   @typedoc "Dispatch outcome."
-  @type result :: {:reply, map(), lifecycle()} | {:noreply, lifecycle()}
+  @type result ::
+          {:reply, map(), lifecycle()}
+          | {:noreply, lifecycle()}
+          | {:async_call, term(), (-> map()), lifecycle()}
+          | {:cancel, term(), lifecycle()}
 
   @doc """
   Dispatch a single decoded JSON value (or a parse-error tag).
@@ -38,16 +56,18 @@ defmodule PtcRunnerMcp.JsonRpc do
     * `{:error, :parse_error}` — the line wasn't valid JSON or
       exceeded `max_frame_bytes`.
   """
-  @spec dispatch({:ok, term()} | {:error, :parse_error}) :: result()
-  def dispatch({:error, :parse_error}) do
+  @spec dispatch({:ok, term()} | {:error, :parse_error}, keyword()) :: result()
+  def dispatch(input, opts \\ [])
+
+  def dispatch({:error, :parse_error}, _opts) do
     {:reply, parse_error_reply(), :continue}
   end
 
-  def dispatch({:ok, frame}) when is_map(frame) do
-    handle(frame)
+  def dispatch({:ok, frame}, opts) when is_map(frame) do
+    handle(frame, opts)
   end
 
-  def dispatch({:ok, _other}) do
+  def dispatch({:ok, _other}, _opts) do
     # JSON-RPC 2.0 batch requests (arrays) and bare JSON values are
     # invalid for this server.
     {:reply, error_reply(nil, -32_600, "Invalid Request"), :continue}
@@ -57,10 +77,11 @@ defmodule PtcRunnerMcp.JsonRpc do
   # Per-method handling
   # ----------------------------------------------------------------
 
-  defp handle(%{"jsonrpc" => "2.0", "method" => method} = frame) do
+  defp handle(%{"jsonrpc" => "2.0", "method" => method} = frame, opts) do
     id = Map.get(frame, "id")
     params = Map.get(frame, "params")
     notification? = not Map.has_key?(frame, "id")
+    draining? = Keyword.get(opts, :draining, false)
 
     result =
       case method do
@@ -81,15 +102,14 @@ defmodule PtcRunnerMcp.JsonRpc do
           {:noreply, :exit}
 
         "notifications/cancelled" ->
-          Lifecycle.on_cancelled(params || %{})
-          {:noreply, :continue}
+          handle_cancelled(params)
 
         "tools/list" ->
           Log.log(:debug, "tools_list", %{request_id: id})
           {:reply, success_reply(id, Tools.list()), :continue}
 
         "tools/call" ->
-          handle_tools_call(id, params)
+          handle_tools_call(id, params, draining?)
 
         _ ->
           Log.log(:warn, "method_not_found", %{request_id: id, method: method})
@@ -118,8 +138,25 @@ defmodule PtcRunnerMcp.JsonRpc do
       end
   end
 
-  defp handle(_other) do
+  defp handle(_other, _opts) do
     {:reply, error_reply(nil, -32_600, "Invalid Request"), :continue}
+  end
+
+  # § 6.4 row 3: `notifications/cancelled` for an in-flight requestId
+  # signals stdio to kill that worker and emit no response. § 6.4
+  # row 4: missing/unknown ids are silently ignored. The lookup
+  # against the in-flight table happens in `Stdio.handle_cast/2` —
+  # we just package the requestId here.
+  defp handle_cancelled(%{"requestId" => req_id}) when not is_nil(req_id) do
+    Log.log(:debug, "notifications_cancelled", %{request_id: req_id})
+    Lifecycle.on_cancelled(%{"requestId" => req_id})
+    {:cancel, req_id, :continue}
+  end
+
+  defp handle_cancelled(params) do
+    # Missing or null requestId: silent ignore per § 6.4 row 4.
+    Lifecycle.on_cancelled(params || %{})
+    {:noreply, :continue}
   end
 
   # JSON-RPC 2.0 § 4.1: a Notification is a Request without an `id` member;
@@ -130,26 +167,83 @@ defmodule PtcRunnerMcp.JsonRpc do
     {:noreply, lifecycle}
   end
 
+  # `tools/call` sent as a notification is malformed but tolerated:
+  # no reply, no worker spawn — discard the work_fn.
+  defp suppress_reply_if_notification({:async_call, _id, _work_fn, lifecycle}, true) do
+    {:noreply, lifecycle}
+  end
+
   defp suppress_reply_if_notification(other, _), do: other
 
-  defp handle_tools_call(id, params) when is_map(params) do
+  defp handle_tools_call(id, params, draining?) when is_map(params) do
     Log.log(:info, "tools_call_start", %{
       request_id: id,
       tool: Map.get(params, "name")
     })
 
-    envelope = traced_tools_call(id, params)
+    cond do
+      draining? ->
+        # § 6.4 row 2: after `shutdown`, reject new tools/call requests.
+        # We surface this as an MCP-only `shutting_down` envelope (parallel
+        # to `:busy` and `:unknown_tool`) rather than widening
+        # `PtcToolProtocol.error_reason()` or returning a transport-level
+        # `-32600` (which would conflate transport vs application errors).
+        envelope = Envelope.shutting_down()
 
-    Log.log(:info, "tools_call_stop", %{
-      request_id: id,
-      is_error: Map.get(envelope, "isError")
-    })
+        Log.log(:info, "tools_call_rejected_shutting_down", %{request_id: id})
 
-    {:reply, success_reply(id, envelope), :continue}
+        {:reply, success_reply(id, envelope), :drain}
+
+      Map.get(params, "name") != "ptc_lisp_execute" ->
+        # Unknown tool: handled synchronously (no Lisp execution, no
+        # gate). We still trace + emit `[:ptc_runner_mcp, :call, :*]`
+        # so subscribers see the call regardless of outcome.
+        envelope = traced_tools_call(id, params, fn -> Tools.call(params) end)
+
+        Log.log(:info, "tools_call_stop", %{
+          request_id: id,
+          is_error: Map.get(envelope, "isError")
+        })
+
+        {:reply, success_reply(id, envelope), :continue}
+
+      true ->
+        async_tools_call(id, params)
+    end
   end
 
-  defp handle_tools_call(id, _) do
+  defp handle_tools_call(id, _, _draining?) do
     {:reply, error_reply(id, -32_602, "Invalid params"), :continue}
+  end
+
+  # Validate the inner `arguments` synchronously, then return either:
+  #
+  #   * `{:reply, ..., :continue}` — args_error envelope, no worker spawn.
+  #   * `{:async_call, request_id, work_fn, :continue}` — work_fn closes
+  #     over the validated tuple and the raw params (for tracing
+  #     metadata). Stdio acquires the permit, spawns a worker that
+  #     runs work_fn(), and replies with the resulting envelope.
+  defp async_tools_call(id, params) do
+    args = extract_arguments(params)
+
+    case Tools.validate(args) do
+      {:error, args_error_envelope} ->
+        Log.log(:info, "tools_call_stop", %{
+          request_id: id,
+          is_error: true
+        })
+
+        {:reply, success_reply(id, args_error_envelope), :continue}
+
+      {:ok, program, context, parsed_signature} ->
+        work_fn = fn ->
+          traced_tools_call(id, params, fn ->
+            Tools.call_validated(program, context, parsed_signature)
+          end)
+        end
+
+        {:async_call, id, work_fn, :continue}
+    end
   end
 
   # Wrap the `Tools.call/1` invocation in:
@@ -164,7 +258,18 @@ defmodule PtcRunnerMcp.JsonRpc do
   # `:telemetry.span` is INSIDE the trace wrapper so the events land in
   # the active collector; the Lisp execute span (already inside
   # `Lisp.run/2`) lands too.
-  defp traced_tools_call(request_id, params) do
+  @doc """
+  Wrap the actual tools-call execution (`run_fn`) in tracing and
+  telemetry. Public for `Stdio` workers; called inside the worker
+  process so the per-process trace collector and the
+  `[:ptc_runner_mcp, :call, :*]` span both land on the right pid.
+
+  `run_fn` is a 0-arity function that returns the MCP envelope. In
+  Phase 4 it's `fn -> Tools.call_validated(program, ctx, sig) end`;
+  the gate is owned by `Stdio` outside this wrap.
+  """
+  @spec traced_tools_call(term(), map(), (-> map())) :: map()
+  def traced_tools_call(request_id, params, run_fn) when is_function(run_fn, 0) do
     payload_level = PtcRunnerMcp.TraceConfig.trace_payloads()
     args = extract_arguments(params)
     program = Map.get(args, "program")
@@ -185,7 +290,7 @@ defmodule PtcRunnerMcp.JsonRpc do
       span_meta = call_start_meta(request_id, params, args)
 
       :telemetry.span([:ptc_runner_mcp, :call], span_meta, fn ->
-        envelope = Tools.call(params)
+        envelope = run_fn.()
         stop_meta = call_stop_meta(span_meta, envelope)
         {envelope, stop_meta}
       end)

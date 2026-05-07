@@ -59,8 +59,18 @@ defmodule PtcRunnerMcp.TracingTest do
       "params" => %{"name" => "ptc_lisp_execute", "arguments" => args}
     }
 
-    {:reply, reply, _} = JsonRpc.dispatch({:ok, frame})
-    reply
+    # Phase 4: tools/call dispatch is async. To keep tracing tests
+    # synchronous, invoke the work_fn inline (the Stdio path runs it
+    # in a per-call worker; the work_fn closes over tracing wraps so
+    # both sync and async invocation yield the same trace artifacts).
+    case JsonRpc.dispatch({:ok, frame}) do
+      {:async_call, ^id, work_fn, _} ->
+        envelope = work_fn.()
+        %{"jsonrpc" => "2.0", "id" => id, "result" => envelope}
+
+      {:reply, reply, _} ->
+        reply
+    end
   end
 
   defp read_jsonl(path) do

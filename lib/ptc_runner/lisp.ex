@@ -231,6 +231,11 @@ defmodule PtcRunner.Lisp do
     tool_cache = Keyword.get(opts, :tool_cache, %{})
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
     strict_data = Keyword.get(opts, :strict_data, false)
+    # Phase 4: when `link: true`, the sandbox child is spawned linked to
+    # the caller (in addition to monitored). MCP server uses this so a
+    # cancelled call's worker, when killed, takes the sandbox child
+    # with it. Default `false` preserves the legacy behavior.
+    link_sandbox = Keyword.get(opts, :link, false)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -268,7 +273,8 @@ defmodule PtcRunner.Lisp do
         tool_cache: tool_cache,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
-        strict_data: strict_data
+        strict_data: strict_data,
+        link: link_sandbox
       }
 
       execute_program(source, opts)
@@ -398,7 +404,8 @@ defmodule PtcRunner.Lisp do
       sandbox_opts = [
         timeout: timeout,
         max_heap: max_heap,
-        eval_fn: eval_fn
+        eval_fn: eval_fn,
+        link: Map.get(opts, :link, false)
       ]
 
       case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do

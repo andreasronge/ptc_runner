@@ -53,10 +53,10 @@ defmodule PtcRunnerMcp.Sandbox do
     * `parsed_signature` — either `nil` (no signature supplied) or a
       term returned by `PtcToolProtocol.parse_signature/1`.
   """
-  @spec execute(String.t(), map(), parsed_signature()) :: Envelope.t()
-  def execute(program, context \\ %{}, parsed_signature \\ nil)
-      when is_binary(program) and is_map(context) do
-    case PtcToolProtocol.lisp_run(program, lisp_run_opts(context)) do
+  @spec execute(String.t(), map(), parsed_signature(), keyword()) :: Envelope.t()
+  def execute(program, context \\ %{}, parsed_signature \\ nil, opts \\ [])
+      when is_binary(program) and is_map(context) and is_list(opts) do
+    case PtcToolProtocol.lisp_run(program, lisp_run_opts(context, opts)) do
       {:ok, %PtcRunner.Step{return: {:__ptc_fail__, fail_args}} = step} ->
         render_fail(step, fail_args)
 
@@ -79,8 +79,8 @@ defmodule PtcRunnerMcp.Sandbox do
   # Lisp.run/2 opts (§ 11 invariants)
   # ----------------------------------------------------------------
 
-  defp lisp_run_opts(context) do
-    [
+  defp lisp_run_opts(context, opts) do
+    base = [
       caller: :mcp,
       memory: %{},
       tool_cache: %{},
@@ -94,6 +94,18 @@ defmodule PtcRunnerMcp.Sandbox do
       # validation errors render through the MCP `validation_error`
       # path with `to_json_value/1` for the `validated` field (§ 13).
     ]
+
+    # Phase 4: when called from a per-call worker (Stdio), `link: true`
+    # tells the inner `PtcRunner.Sandbox` to spawn its child linked
+    # to this process. A `notifications/cancelled` that kills the
+    # worker then propagates the link signal to the sandbox child,
+    # so a 5-second runaway program dies promptly instead of running
+    # orphaned until its own heap/timeout limit fires (§ 6.4).
+    if Keyword.get(opts, :link, false) do
+      Keyword.put(base, :link, true)
+    else
+      base
+    end
   end
 
   # ----------------------------------------------------------------
