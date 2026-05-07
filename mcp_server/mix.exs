@@ -1,0 +1,72 @@
+defmodule PtcRunnerMcp.MixProject do
+  use Mix.Project
+
+  @version "0.1.0"
+  @source_url "https://github.com/andreasronge/ptc_runner"
+
+  def project do
+    [
+      app: :ptc_runner_mcp,
+      version: @version,
+      elixir: "~> 1.15",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      deps: deps(),
+      package: package(),
+      aliases: aliases(),
+      description: "MCP server exposing PtcRunner's PTC-Lisp sandbox over stdio JSON-RPC.",
+      source_url: @source_url,
+      dialyzer: [
+        plt_core_path: "priv/plts",
+        plt_file: {:no_warn, "priv/plts/project.plt"},
+        plt_add_apps: [:ex_unit, :mix]
+      ]
+    ]
+  end
+
+  def application do
+    [
+      mod: {PtcRunnerMcp.Application, []},
+      extra_applications: [:logger]
+    ]
+  end
+
+  def cli do
+    [preferred_envs: [precommit: :test]]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    [
+      # Path dep for in-tree dev; replaced by hex range when published.
+      {:ptc_runner, path: "..", override: true},
+      {:jason, "~> 1.4"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
+    ]
+  end
+
+  defp package do
+    [
+      maintainers: ["Andreas Ronge"],
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib priv mix.exs README.md LICENSE CHANGELOG.md)
+    ]
+  end
+
+  defp aliases do
+    [
+      precommit: [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "credo --strict",
+        "dialyzer",
+        "test"
+      ],
+      "mcp.start": ["run --no-halt"],
+      "mcp.run": ["run --no-halt"]
+    ]
+  end
+end
