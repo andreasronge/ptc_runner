@@ -1,35 +1,72 @@
 #!/bin/bash
 
+# Pre-push hook: runs full test suite + dialyzer per top-level Mix project.
+# Projects: ".", "mcp_server", "ptc_viewer". Non-existent dirs are skipped.
+# Per spec Plans/ptc-runner-mcp-server.md §5.3 and §20.5.
+
 set -e
 
 echo "🔍 Running pre-push checks..."
 
-# Track time
 START_TIME=$(date +%s)
 
-# 1. Run full test suite
-echo "  ⏳ Running full test suite..."
-if ! mix test --exclude clojure 2>&1; then
-  echo "  ❌ Tests failed. Run: mix test"
-  exit 1
-fi
-echo "  ✅ Tests passed"
+PROJECTS=("." "mcp_server" "ptc_viewer")
 
-# 2. Run dialyzer
-echo "  ⏳ Running dialyzer (this may take a moment)..."
-DIALYZER_OUTPUT=$(mix dialyzer 2>&1)
-DIALYZER_EXIT=$?
+project_has_dep() {
+  local proj="$1" dep="$2"
+  grep -qE "\\{:${dep}," "${proj}/mix.exs" 2>/dev/null
+}
 
-if [ $DIALYZER_EXIT -ne 0 ]; then
-  echo "  ❌ Dialyzer found errors:"
-  echo "$DIALYZER_OUTPUT"
+run_project_gates() {
+  local proj="$1"
+  local label
+
+  if [ "$proj" = "." ]; then
+    label="root (:ptc_runner)"
+  else
+    label="$proj/"
+    [ -d "$proj" ] || return 0
+  fi
+
   echo ""
-  echo "  Run: mix dialyzer"
-  exit 1
-fi
-echo "  ✅ Dialyzer passed"
+  echo "📦 Project: $label"
 
-# Calculate elapsed time
+  pushd "$proj" > /dev/null
+
+  echo "  ⏳ Running full test suite..."
+  if ! mix test --exclude clojure 2>&1; then
+    echo "  ❌ Tests failed in $label. Run: (cd $proj && mix test)"
+    popd > /dev/null
+    exit 1
+  fi
+  echo "  ✅ Tests passed"
+
+  if project_has_dep "$proj" "dialyxir"; then
+    echo "  ⏳ Running dialyzer (this may take a moment)..."
+    DIALYZER_OUTPUT=$(mix dialyzer 2>&1) || DIALYZER_EXIT=$?
+    DIALYZER_EXIT=${DIALYZER_EXIT:-0}
+
+    if [ "$DIALYZER_EXIT" -ne 0 ]; then
+      echo "  ❌ Dialyzer found errors in $label:"
+      echo "$DIALYZER_OUTPUT"
+      echo ""
+      echo "  Run: (cd $proj && mix dialyzer)"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Dialyzer passed"
+    unset DIALYZER_EXIT
+  else
+    echo "  ⏭️  Dialyzer not declared in $label/mix.exs"
+  fi
+
+  popd > /dev/null
+}
+
+for proj in "${PROJECTS[@]}"; do
+  run_project_gates "$proj"
+done
+
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 
