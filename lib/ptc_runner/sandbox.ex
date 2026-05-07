@@ -149,16 +149,22 @@ defmodule PtcRunner.Sandbox do
           {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
       after
         timeout ->
-          # Kill the process if it times out
+          # Timeout path: kill the child WITHOUT letting its link signal
+          # race with the trap_exit restore (codex review of 0fe4c78).
+          # `Process.unlink/1` atomically discards any pending exit
+          # signal from `pid` on the link, so the EXIT message cannot
+          # reach our mailbox after we restore the prior `trap_exit`.
           Process.demonitor(ref, [:flush])
+          if link?, do: Process.unlink(pid)
           Process.exit(pid, :kill)
           {:error, {:timeout, timeout}}
       end
     after
       if link? do
-        # Flush any link-derived `{:EXIT, pid, _}` message left in the
-        # mailbox so it doesn't surface to the caller (the monitor
-        # clause already accounted for the same termination event).
+        # Defense-in-depth: even with `unlink/1` above, we may have
+        # been linked but not yet killed (success / DOWN paths). Flush
+        # any straggler `{:EXIT, pid, _}` signal that may have arrived
+        # before we restore `trap_exit`.
         receive do
           {:EXIT, ^pid, _} -> :ok
         after

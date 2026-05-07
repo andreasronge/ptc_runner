@@ -87,7 +87,12 @@ defmodule PtcRunnerMcp.Tools do
               "fail",
               "validation_error",
               "busy",
-              "unknown_tool"
+              "unknown_tool",
+              # MCP-only reason emitted by the drain path after `shutdown`.
+              # Codex review of 0fe4c78: clients validating tool results
+              # against the advertised schema would otherwise reject the
+              # server's own shutdown-drain reply.
+              "shutting_down"
             ]
           },
           "message" => %{"type" => "string"},

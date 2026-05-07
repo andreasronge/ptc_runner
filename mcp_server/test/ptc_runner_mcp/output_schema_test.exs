@@ -60,7 +60,8 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
                   "fail",
                   "validation_error",
                   "busy",
-                  "unknown_tool"
+                  "unknown_tool",
+                  "shutting_down"
                 ]
               },
               "message" => %{"type" => "string"},
@@ -91,7 +92,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
 
       Enum.each(
         ~w(parse_error runtime_error timeout memory_limit args_error fail
-           validation_error busy unknown_tool),
+           validation_error busy unknown_tool shutting_down),
         fn reason -> assert reason in enum end
       )
     end
