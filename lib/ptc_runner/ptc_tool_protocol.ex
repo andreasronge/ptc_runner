@@ -49,6 +49,7 @@ defmodule PtcRunner.PtcToolProtocol do
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.JsonHandler
   alias PtcRunner.SubAgent.Loop.TurnFeedback
+  alias PtcRunner.SubAgent.Signature
 
   # ----------------------------------------------------------------
   # Capability-profile description constants
@@ -321,4 +322,187 @@ defmodule PtcRunner.PtcToolProtocol do
   """
   @spec validate_return(map(), term()) :: :ok | {:error, list()}
   def validate_return(definition, value), do: JsonHandler.validate_return(definition, value)
+
+  @doc """
+  Parse a PTC signature string for use by out-of-tree callers.
+
+  Thin wrapper over `PtcRunner.SubAgent.Signature.parse/1`. Per § 13.1
+  of `Plans/ptc-runner-mcp-server.md`, `:ptc_runner_mcp` consumes
+  signatures exclusively through this function so the parser can
+  later move out of the `SubAgent` namespace without breaking the MCP
+  package.
+
+  ## Examples
+
+      iex> PtcRunner.PtcToolProtocol.parse_signature("() -> {count :int}")
+      {:ok, {:signature, [], {:map, [{"count", :int}]}}}
+
+      iex> {:error, _reason} = PtcRunner.PtcToolProtocol.parse_signature("not a signature")
+  """
+  @spec parse_signature(String.t()) ::
+          {:ok, Signature.signature()} | {:error, String.t()}
+  def parse_signature(signature_string) when is_binary(signature_string) do
+    Signature.parse(signature_string)
+  end
+
+  # ----------------------------------------------------------------
+  # JSON normalization for `validated` (§ 13)
+  # ----------------------------------------------------------------
+
+  @doc """
+  Convert a typed Elixir term into a JSON-encodable value.
+
+  Used by surfaces that surface signature-validated return values as
+  structured JSON (currently only the MCP server's `validated` field;
+  see § 13 of `Plans/ptc-runner-mcp-server.md`). This is the inverse
+  direction of `atomize_value/2`, which goes JSON → typed Elixir.
+
+  ## Conversion rules
+
+  | Elixir term | JSON form |
+  |---|---|
+  | Integer | number |
+  | Float | number |
+  | Binary (string) | string |
+  | Boolean | boolean |
+  | `nil` | null |
+  | Map with binary or atom keys | object with string keys |
+  | List | array |
+  | Atom (non-key) | string (`:foo` → `"foo"`, no leading colon) |
+  | Tuple | array |
+  | `%DateTime{}` | ISO-8601 string |
+  | `%Date{}`, `%Time{}` | ISO-8601 string |
+  | Anything else | `{:error, "non-JSON-encodable value at <path>"}` |
+
+  Errors propagate the path to the offending sub-value. Map-key path
+  segments are dot-joined; list/tuple indices use `[<index>]`.
+
+  ## Examples
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value(42)
+      {:ok, 42}
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value(1.5)
+      {:ok, 1.5}
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value(:foo)
+      {:ok, "foo"}
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value({1, :ok, "a"})
+      {:ok, [1, "ok", "a"]}
+
+      iex> {:ok, dt, _} = DateTime.from_iso8601("2026-05-07T12:00:00Z")
+      iex> PtcRunner.PtcToolProtocol.to_json_value(dt)
+      {:ok, "2026-05-07T12:00:00Z"}
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value(%{count: 2, items: [:a, :b]})
+      {:ok, %{"count" => 2, "items" => ["a", "b"]}}
+
+      iex> PtcRunner.PtcToolProtocol.to_json_value(%{rows: [%{ts: make_ref()}]})
+      {:error, "non-JSON-encodable value at rows[0].ts"}
+  """
+  @spec to_json_value(term()) :: {:ok, term()} | {:error, String.t()}
+  def to_json_value(value) do
+    case do_to_json(value, []) do
+      {:ok, encoded} -> {:ok, encoded}
+      {:error, path} -> {:error, "non-JSON-encodable value at #{render_path(path)}"}
+    end
+  end
+
+  # Scalars that pass through unchanged.
+  defp do_to_json(value, _path) when is_integer(value), do: {:ok, value}
+  defp do_to_json(value, _path) when is_float(value), do: {:ok, value}
+  defp do_to_json(value, _path) when is_binary(value), do: {:ok, value}
+  defp do_to_json(value, _path) when is_boolean(value), do: {:ok, value}
+  defp do_to_json(nil, _path), do: {:ok, nil}
+
+  # Date/Time structs as ISO-8601 strings.
+  defp do_to_json(%DateTime{} = dt, _path), do: {:ok, DateTime.to_iso8601(dt)}
+  defp do_to_json(%Date{} = d, _path), do: {:ok, Date.to_iso8601(d)}
+  defp do_to_json(%Time{} = t, _path), do: {:ok, Time.to_iso8601(t)}
+
+  # Atoms that aren't already covered (true/false/nil handled above) →
+  # stringify without the leading colon.
+  defp do_to_json(value, _path) when is_atom(value), do: {:ok, Atom.to_string(value)}
+
+  # Maps: stringify keys, recursively encode values. Reject struct types
+  # we did not whitelist above.
+  defp do_to_json(%_struct{} = value, path), do: {:error, build_path(path, struct_tag(value))}
+
+  defp do_to_json(value, path) when is_map(value) do
+    value
+    |> Enum.reduce_while({:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      with {:ok, key_str} <- map_key_to_string(k, path),
+           {:ok, encoded_v} <- do_to_json(v, [key_str | path]) do
+        {:cont, {:ok, Map.put(acc, key_str, encoded_v)}}
+      else
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  # Lists: encode elements, propagate path with `[index]`.
+  defp do_to_json(value, path) when is_list(value) do
+    value
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {elem, idx}, {:ok, acc} ->
+      case do_to_json(elem, [{:index, idx} | path]) do
+        {:ok, encoded} -> {:cont, {:ok, [encoded | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      err -> err
+    end
+  end
+
+  # Tuples: encode as JSON array.
+  defp do_to_json(value, path) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {elem, idx}, {:ok, acc} ->
+      case do_to_json(elem, [{:index, idx} | path]) do
+        {:ok, encoded} -> {:cont, {:ok, [encoded | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      err -> err
+    end
+  end
+
+  # Anything else (PIDs, references, functions, ports, unknown structs).
+  defp do_to_json(_other, path), do: {:error, path}
+
+  defp map_key_to_string(k, _path) when is_binary(k), do: {:ok, k}
+  defp map_key_to_string(k, _path) when is_atom(k), do: {:ok, Atom.to_string(k)}
+  defp map_key_to_string(k, _path) when is_integer(k), do: {:ok, Integer.to_string(k)}
+  defp map_key_to_string(_k, path), do: {:error, path}
+
+  defp struct_tag(%mod{}), do: "<#{inspect(mod)}>"
+
+  # Build a path string for an unencodable map value at `key`.
+  defp build_path(path, key) do
+    [key | path]
+  end
+
+  # Render a reverse-order path (top-of-stack is most-recent segment) as
+  # a human-readable string. Map keys join with `.`; list/tuple indices
+  # use `[N]` and attach to the previous segment.
+  defp render_path(reverse_path) do
+    reverse_path
+    |> Enum.reverse()
+    |> Enum.reduce("", fn
+      {:index, i}, acc -> acc <> "[" <> Integer.to_string(i) <> "]"
+      key, "" -> to_string(key)
+      key, acc -> acc <> "." <> to_string(key)
+    end)
+    |> case do
+      "" -> "<root>"
+      s -> s
+    end
+  end
 end

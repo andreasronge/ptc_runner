@@ -60,6 +60,10 @@ defmodule PtcRunnerMcp.Limits do
   @spec max_program_bytes() :: pos_integer()
   def max_program_bytes, do: get().max_program_bytes
 
+  @doc "Convenience: read `:max_context_bytes` (per § 11)."
+  @spec max_context_bytes() :: pos_integer()
+  def max_context_bytes, do: get().max_context_bytes
+
   @doc "Convenience: read `:max_concurrent_calls` (per § 11)."
   @spec max_concurrent_calls() :: pos_integer()
   def max_concurrent_calls, do: get().max_concurrent_calls
