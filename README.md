@@ -16,6 +16,9 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 > that exposes the PTC-Lisp sandbox over stdio JSON-RPC. The README
 > there has ready-to-paste `claude_desktop_config.json`,
 > `cline_mcp_settings.json`, and Cursor `mcp.json` snippets.
+> For the conceptual overview (when to use it, comparison with
+> Python / JS execution servers, security model), see
+> [`docs/mcp-server.md`](docs/mcp-server.md).
 
 ## Quick Start
 
@@ -246,6 +249,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
+- **[MCP Getting Started](docs/guides/mcp-getting-started.md)** - Using `ptc_runner_mcp` from any MCP client (overview: [`docs/mcp-server.md`](docs/mcp-server.md))
 
 ### Reference
 
