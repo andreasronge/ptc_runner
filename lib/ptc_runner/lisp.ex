@@ -58,6 +58,25 @@ defmodule PtcRunner.Lisp do
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
     - `:trace_context` - Trace context for nested agent tracing (default: nil)
+    - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
+      `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
+      instrumentation: attached to `[:ptc_runner, :lisp, :execute, *]`
+      events and otherwise discarded. Out-of-set values raise
+      `ArgumentError`.
+
+  ## Telemetry
+
+  `run/2` is wrapped in `:telemetry.span/3` and emits the following events:
+
+  - `[:ptc_runner, :lisp, :execute, :start]` — measurements
+    `monotonic_time`, `system_time`; metadata `caller`, `program_bytes`,
+    `signature_supplied?`.
+  - `[:ptc_runner, :lisp, :execute, :stop]` — measurements `duration`,
+    `monotonic_time`, `result_bytes`, `prints_count`; metadata `caller`,
+    `program_bytes`, `signature_supplied?`.
+  - `[:ptc_runner, :lisp, :execute, :exception]` — measurements `duration`,
+    `monotonic_time`; metadata `caller`, `program_bytes`,
+    `signature_supplied?`, `kind`, `reason`, `stacktrace`.
 
   ## Return Value
 
@@ -128,9 +147,71 @@ defmodule PtcRunner.Lisp do
 
   See `PtcRunner.Lisp.DataKeys` for the static analysis implementation.
   """
+  @valid_callers [:in_process_v1, :text_mode, :mcp]
+
   @spec run(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
+    caller = validate_caller!(Keyword.get(opts, :caller, :in_process_v1))
+    # Strip :caller from opts: it's pure instrumentation and must not
+    # affect execution semantics or be re-read by downstream code.
+    inner_opts = Keyword.delete(opts, :caller)
+    signature_supplied? = not is_nil(Keyword.get(inner_opts, :signature))
+    program_bytes = if is_binary(source), do: byte_size(source), else: 0
+
+    start_meta = %{
+      caller: caller,
+      program_bytes: program_bytes,
+      signature_supplied?: signature_supplied?
+    }
+
+    :telemetry.span([:ptc_runner, :lisp, :execute], start_meta, fn ->
+      result = do_run(source, inner_opts)
+      {result_bytes, prints_count} = telemetry_result_stats(result)
+
+      stop_meta = %{
+        caller: caller,
+        program_bytes: program_bytes,
+        signature_supplied?: signature_supplied?
+      }
+
+      {result, %{result_bytes: result_bytes, prints_count: prints_count}, stop_meta}
+    end)
+  end
+
+  # Closed atom set for :caller telemetry tag. Validated at entry to
+  # `run/2` so out-of-set values fail fast and don't reach instrumentation.
+  defp validate_caller!(caller) when caller in @valid_callers, do: caller
+
+  defp validate_caller!(other) do
+    raise ArgumentError,
+          "invalid :caller option #{inspect(other)}; expected one of " <>
+            inspect(@valid_callers)
+  end
+
+  # Compute telemetry stop measurements from the run result.
+  defp telemetry_result_stats({tag, %Step{} = step}) when tag in [:ok, :error] do
+    bytes = safe_term_bytes(Map.get(step, :return))
+    prints = safe_length(Map.get(step, :prints))
+    {bytes, prints}
+  end
+
+  defp telemetry_result_stats(_other), do: {0, 0}
+
+  defp safe_term_bytes(nil), do: 0
+
+  defp safe_term_bytes(term) do
+    :erlang.external_size(term)
+  rescue
+    _ -> 0
+  end
+
+  defp safe_length(nil), do: 0
+  defp safe_length(list) when is_list(list), do: length(list)
+  defp safe_length(_), do: 0
+
+  @spec do_run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
+  defp do_run(source, opts) do
     ctx = Keyword.get(opts, :context, %{})
     memory = Keyword.get(opts, :memory, %{})
     raw_tools = Keyword.get(opts, :tools, %{})
