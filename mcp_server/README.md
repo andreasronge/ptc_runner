@@ -28,7 +28,12 @@ The server has no LLM. The MCP client's LLM does the reasoning;
 PtcRunner is invoked only when deterministic computation is
 useful.
 
-> See [`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md)
+> See [`docs/mcp-server.md`](../docs/mcp-server.md) for the conceptual
+> overview (when to use it, comparison with Python / JS execution
+> servers, security model, architecture diagram), and
+> [`docs/guides/mcp-getting-started.md`](../docs/guides/mcp-getting-started.md)
+> for a short walkthrough. See
+> [`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md)
 > for the full v1 specification, and
 > [the PtcRunner HexDocs](https://hexdocs.pm/ptc_runner) for the
 > PTC-Lisp language reference.
