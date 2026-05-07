@@ -96,15 +96,22 @@ defmodule PtcRunnerMcp.JsonRpc do
   rescue
     error ->
       stack = __STACKTRACE__
+      id = Map.get(frame, "id")
 
       Log.log(:error, "handler_crash", %{
-        request_id: Map.get(frame, "id"),
+        request_id: id,
         kind: error.__struct__ |> inspect(),
         message: Exception.message(error),
         stacktrace: Exception.format_stacktrace(stack)
       })
 
-      {:reply, error_reply(Map.get(frame, "id"), -32_603, "Internal error"), :continue}
+      # Notifications (no `id` member, per JSON-RPC 2.0) must NEVER
+      # receive a reply, including error replies on internal crashes.
+      if Map.has_key?(frame, "id") do
+        {:reply, error_reply(id, -32_603, "Internal error"), :continue}
+      else
+        {:noreply, :continue}
+      end
   end
 
   defp handle(_other) do
