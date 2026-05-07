@@ -412,9 +412,15 @@ defmodule PtcRunnerMcp.Stdio do
         # Workers still running — schedule grace-period kill, but DON'T
         # `System.stop` yet. `:async_reply`/`:DOWN` handlers will check
         # `exit_pending` and finalize once `in_flight` empties.
+        #
+        # CRITICAL: also set `exited: true` so `feed_bytes/2` halts
+        # dispatch of any frames buffered behind `exit` in the same
+        # stdin chunk (codex review of 0fe4c78). Phase 1's invariant
+        # "no work after exit" must hold even when in-flight workers
+        # are still completing.
         ref = make_ref()
         Process.send_after(self(), {:exit_grace_elapsed, ref}, @exit_grace_ms)
-        %{state | exit_pending: true}
+        %{state | exit_pending: true, exited: true}
     end
   end
 
@@ -439,6 +445,31 @@ defmodule PtcRunnerMcp.Stdio do
   @spec handle_async_call(State.t(), term(), (-> map())) :: State.t()
   def handle_async_call(%State{} = state, request_id, work_fn)
       when is_function(work_fn, 0) do
+    if Map.has_key?(state.in_flight, request_id) do
+      # JSON-RPC 2.0 § 4: a client MUST use unique ids for outstanding
+      # requests. A duplicate id while the previous one is still in
+      # flight would otherwise overwrite the in-flight entry, leaking
+      # both a permit and a reply (codex review of 0fe4c78). Reject
+      # the duplicate at -32600 without acquiring a permit.
+      Log.log(:warn, "duplicate_request_id", %{request_id: request_id})
+
+      reply = %{
+        "jsonrpc" => "2.0",
+        "id" => request_id,
+        "error" => %{
+          "code" => -32_600,
+          "message" => "Invalid Request: id #{inspect(request_id)} is already in flight"
+        }
+      }
+
+      write_reply(state, reply)
+      state
+    else
+      try_acquire_and_spawn(state, request_id, work_fn)
+    end
+  end
+
+  defp try_acquire_and_spawn(state, request_id, work_fn) do
     cap = Limits.max_concurrent_calls()
 
     case ConcurrencyGate.try_acquire(cap) do

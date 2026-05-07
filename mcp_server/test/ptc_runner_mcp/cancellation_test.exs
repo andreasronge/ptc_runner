@@ -285,6 +285,53 @@ defmodule PtcRunnerMcp.CancellationTest do
       Process.demonitor(stdio_ref, [:flush])
     end
 
+    test "exit halts dispatch of frames buffered after it, even with in-flight workers", %{
+      harness: h
+    } do
+      # Codex P1 regression (review of 0fe4c78): when `exit` arrives
+      # while a slow call is in flight, the server enters drain mode but
+      # MUST still halt dispatch of frames buffered behind `exit` in the
+      # same chunk. Otherwise it could spawn new workers (or answer
+      # `tools/list`) AFTER the client said exit.
+      _ = JsonRpcHarness.drain_replied_messages()
+
+      slow_program = """
+      ((fn ack [m n] \
+      (cond (= m 0) (+ n 1) \
+      (= n 0) (ack (- m 1) 1) \
+      :else (ack (- m 1) (ack m (- n 1))))) 3 8)
+      """
+
+      bytes =
+        tools_call_frame(800, String.trim(slow_program)) <>
+          Jason.encode!(%{"jsonrpc" => "2.0", "method" => "exit"}) <>
+          "\n" <>
+          Jason.encode!(%{"jsonrpc" => "2.0", "id" => 801, "method" => "tools/list"}) <>
+          "\n" <>
+          tools_call_frame(802, "(+ 1 2)")
+
+      :ok = Stdio.feed(h.stdio, bytes)
+
+      # Wait long enough for the slow call to either complete or be
+      # killed by exit-grace; in either case, the trailing tools/list
+      # and tools/call MUST NOT have been dispatched.
+      Process.sleep(200)
+
+      replies =
+        h.io
+        |> StringIO.flush()
+        |> String.split("\n", trim: true)
+        |> Enum.map(&Jason.decode!/1)
+
+      reply_ids = Enum.map(replies, & &1["id"])
+
+      refute 801 in reply_ids,
+             "tools/list buffered after exit must not be dispatched: got reply ids #{inspect(reply_ids)}"
+
+      refute 802 in reply_ids,
+             "tools/call buffered after exit must not be dispatched: got reply ids #{inspect(reply_ids)}"
+    end
+
     test "in-flight calls from BEFORE shutdown complete normally", %{harness: h} do
       _ = JsonRpcHarness.drain_replied_messages()
 
