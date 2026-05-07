@@ -1,5 +1,10 @@
 defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
-  use ExUnit.Case, async: true
+  # async: false because one test mutates the global logger primary
+  # level (`:logger.set_primary_config(:level, :warning)`) to assert on
+  # captured warn lines. Under async: true, concurrent tests' log
+  # captures or level resets can race the assertion, leaving the
+  # captured log empty. Module-level serial run is the cheap fix.
+  use ExUnit.Case, async: false
 
   alias PtcRunner.SubAgent
   import PtcRunner.TestSupport.SubAgentTestHelpers, only: [tool_calling_llm: 1]

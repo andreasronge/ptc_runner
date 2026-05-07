@@ -233,13 +233,6 @@ defmodule PtcRunner.Lisp.OptionsTest do
       assert {:ok, %{return: 5, memory: %{}}} =
                Lisp.run("(+ 2 3)", timeout: 5000)
     end
-
-    test "timeout option is accepted without error" do
-      # Just verify that timeout option doesn't cause errors
-      # Actual timeout behavior is hard to test without expensive computations
-      assert {:ok, %{return: 3, memory: %{}}} =
-               Lisp.run("(+ 1 2)", timeout: 100)
-    end
   end
 
   describe "sandbox - memory limits" do

@@ -1,5 +1,8 @@
 defmodule PtcRunner.LLMTest do
-  use ExUnit.Case, async: true
+  # async: false because tests mutate `Application.put_env(:ptc_runner,
+  # :llm_adapter, ...)` which is global. Under async: true a concurrent
+  # test can clobber the adapter mid-run.
+  use ExUnit.Case, async: false
 
   defmodule MockAdapter do
     @behaviour PtcRunner.LLM

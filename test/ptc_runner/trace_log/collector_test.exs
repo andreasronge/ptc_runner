@@ -1,5 +1,9 @@
 defmodule PtcRunner.TraceLog.CollectorTest do
-  use ExUnit.Case, async: true
+  # async: false: tests both attach a global `:logger` handler and rely
+  # on tight `assert_receive` timings around spawn/kill behaviour.
+  # Under async: true heavy parallel load steals scheduler time and
+  # surfaces as 1-in-N flakes.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
@@ -335,7 +339,14 @@ defmodule PtcRunner.TraceLog.CollectorTest do
             # Simulate long-running work that exceeds the timeout
             Process.sleep(:infinity)
           end,
-          timeout: 50,
+          # 200 ms (up from 50 ms) gives the spawned task enough scheduler
+          # time under heavy parallel test load to reach the `send/2`
+          # call before getting killed; `:infinity` sleep still
+          # guarantees the kill fires at the timeout. Without this the
+          # task can be killed before the spawn lands, the
+          # `{:collector, _}` message never arrives, and `assert_receive`
+          # below times out — surfaces as a 1-in-N flake.
+          timeout: 200,
           on_timeout: :kill_task
         )
         |> Enum.to_list()
@@ -343,10 +354,12 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       # Task was killed
       assert [{:exit, :timeout}] = results
 
-      # Get the collector PID and wait for it to shut down cleanly
-      assert_receive {:collector, collector}
+      # Get the collector PID and wait for it to shut down cleanly.
+      # Default `assert_receive` timeout of 100 ms is too tight under
+      # heavy parallel-suite load; 5 s is plenty.
+      assert_receive {:collector, collector}, 5_000
       ref = Process.monitor(collector)
-      assert_receive {:DOWN, ^ref, :process, ^collector, :normal}, 1000
+      assert_receive {:DOWN, ^ref, :process, ^collector, :normal}, 5_000
 
       # Trace file should contain valid data (trace.start + trace.stop)
       content = File.read!(path)

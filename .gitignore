@@ -58,3 +58,13 @@ blog/.jekyll-cache/
 
 # Claude Code worktrees.
 .claude/worktrees/
+
+# Generated benchmark / demo outputs (recreated on every run; codex
+# review flagged these as repo-bloat candidates).
+demo/tmp/
+demo/traces/
+
+# Claude Code session state.
+.claude/scheduled_tasks.lock
+.context/
+MEMORY/
