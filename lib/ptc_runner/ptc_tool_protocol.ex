@@ -479,7 +479,10 @@ defmodule PtcRunner.PtcToolProtocol do
 
   defp map_key_to_string(k, _path) when is_binary(k), do: {:ok, k}
   defp map_key_to_string(k, _path) when is_atom(k), do: {:ok, Atom.to_string(k)}
-  defp map_key_to_string(k, _path) when is_integer(k), do: {:ok, Integer.to_string(k)}
+  # § 13: only binary or atom keys are encodable. Integer keys are
+  # rejected (rather than stringified) because stringifying can collide
+  # with an existing string key — `%{1 => "a", "1" => "b"}` would lose
+  # data on the round-trip. Surface as `validation_error`.
   defp map_key_to_string(_k, path), do: {:error, path}
 
   defp struct_tag(%mod{}), do: "<#{inspect(mod)}>"

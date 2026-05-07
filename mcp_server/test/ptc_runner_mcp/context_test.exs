@@ -130,7 +130,21 @@ defmodule PtcRunnerMcp.ContextTest do
       assert env["structuredContent"]["result"] == "user=> 42"
     end
 
-    test "data/missing used in an arithmetic op surfaces runtime_error" do
+    test "bare data/missing reference returns runtime_error naming the binding" do
+      # § 9.3 contract + codex review of f2a9e2e: with strict_data: true
+      # threaded through `:ptc_runner`, accessing an unbound `data/<key>`
+      # raises before any downstream operation can mask the cause.
+      env = call(%{"program" => "data/missing"})
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "runtime_error"
+
+      assert sc["message"] =~ "missing",
+             "message must name the missing binding: #{inspect(sc["message"])}"
+    end
+
+    test "data/missing inside an arithmetic op also names the binding (strict_data on)" do
       env =
         call(%{
           "program" => "(+ data/missing 1)",
@@ -140,10 +154,9 @@ defmodule PtcRunnerMcp.ContextTest do
       assert env["isError"] == true
       sc = env["structuredContent"]
       assert sc["reason"] == "runtime_error"
-      # Current `:ptc_runner` runtime surfaces this as a type error
-      # whose message references `nil` (the result of the missing
-      # lookup) rather than the binding name. Tracked as a finding.
-      assert sc["message"] =~ "nil" or sc["message"] =~ "missing"
+      # Strict mode raises at the data/ lookup itself, before the `+`
+      # runs against nil — so the message names `missing`, not `nil`.
+      assert sc["message"] =~ "missing"
     end
 
     test "JSON map keys remain strings inside the program (no atom creation)" do

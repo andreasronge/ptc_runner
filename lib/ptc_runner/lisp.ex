@@ -230,6 +230,7 @@ defmodule PtcRunner.Lisp do
     journal = Keyword.get(opts, :journal)
     tool_cache = Keyword.get(opts, :tool_cache, %{})
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
+    strict_data = Keyword.get(opts, :strict_data, false)
 
     # Normalize tools to Tool structs
     with {:ok, normalized_tools} <- normalize_tools(raw_tools),
@@ -266,7 +267,8 @@ defmodule PtcRunner.Lisp do
         journal: journal,
         tool_cache: tool_cache,
         tools_meta: tools_meta,
-        max_tool_calls: max_tool_calls
+        max_tool_calls: max_tool_calls,
+        strict_data: strict_data
       }
 
       execute_program(source, opts)
@@ -335,7 +337,8 @@ defmodule PtcRunner.Lisp do
       journal: journal,
       tool_cache: tool_cache,
       tools_meta: tools_meta,
-      max_tool_calls: max_tool_calls
+      max_tool_calls: max_tool_calls,
+      strict_data: strict_data
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -361,7 +364,8 @@ defmodule PtcRunner.Lisp do
           journal: journal,
           tool_cache: tool_cache,
           tools_meta: tools_meta,
-          max_tool_calls: max_tool_calls
+          max_tool_calls: max_tool_calls,
+          strict_data: strict_data
         ]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 

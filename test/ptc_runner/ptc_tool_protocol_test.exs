@@ -364,4 +364,22 @@ defmodule PtcRunner.PtcToolProtocolTest do
       assert PtcToolProtocol.validate_return(%{parsed_signature: nil}, "anything") == :ok
     end
   end
+
+  describe "to_json_value/1 — codex review fixes" do
+    test "rejects integer map keys (would silently collide with string equivalents)" do
+      # %{1 => "a", "1" => "b"} is the collision case — without rejection
+      # both keys would map to "1" and one would overwrite the other.
+      assert {:error, msg} = PtcToolProtocol.to_json_value(%{1 => "a", "1" => "b"})
+      assert is_binary(msg)
+    end
+
+    test "rejects a single integer-keyed map (not just collision case)" do
+      assert {:error, _} = PtcToolProtocol.to_json_value(%{42 => "value"})
+    end
+
+    test "still accepts atom and binary keys" do
+      assert {:ok, %{"a" => 1, "b" => 2}} =
+               PtcToolProtocol.to_json_value(%{:a => 1, "b" => 2})
+    end
+  end
 end
