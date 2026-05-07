@@ -41,7 +41,11 @@ run_project_gates() {
   fi
   echo "  ✅ Tests passed"
 
-  if project_has_dep "$proj" "dialyxir"; then
+  # CWD is the project dir (we are inside `pushd "$proj"`), so check
+  # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
+  # resolve to `mcp_server/mcp_server/mix.exs` and silently skip
+  # dialyzer for non-root projects.
+  if project_has_dep "." "dialyxir"; then
     echo "  ⏳ Running dialyzer (this may take a moment)..."
     DIALYZER_OUTPUT=$(mix dialyzer 2>&1) || DIALYZER_EXIT=$?
     DIALYZER_EXIT=${DIALYZER_EXIT:-0}
@@ -57,7 +61,7 @@ run_project_gates() {
     echo "  ✅ Dialyzer passed"
     unset DIALYZER_EXIT
   else
-    echo "  ⏭️  Dialyzer not declared in $label/mix.exs"
+    echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
   fi
 
   popd > /dev/null

@@ -106,7 +106,7 @@ run_project_gates() {
       echo "  ✅ Credo OK"
       popd > /dev/null
     else
-      echo "  ⏭️  Credo not declared in $label/mix.exs"
+      echo "  ⏭️  Credo not declared in ${label}mix.exs"
     fi
   fi
 
