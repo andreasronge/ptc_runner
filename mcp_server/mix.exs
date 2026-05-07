@@ -13,12 +13,31 @@ defmodule PtcRunnerMcp.MixProject do
       deps: deps(),
       package: package(),
       aliases: aliases(),
+      releases: releases(),
       description: "MCP server exposing PtcRunner's PTC-Lisp sandbox over stdio JSON-RPC.",
       source_url: @source_url,
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/project.plt"},
         plt_add_apps: [:ex_unit, :mix]
+      ]
+    ]
+  end
+
+  # Mix release configuration — see Plans/ptc-runner-mcp-server.md § 15
+  # Phase 5. Produces a runnable artifact at
+  # `_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp`. The release
+  # bundles the path-dep `:ptc_runner` library and the OTP app starts
+  # `PtcRunnerMcp.Application` (already wired via `application/0`).
+  defp releases do
+    [
+      ptc_runner_mcp: [
+        include_executables_for: [:unix, :windows],
+        applications: [
+          ptc_runner: :permanent,
+          ptc_runner_mcp: :permanent
+        ],
+        strip_beams: true
       ]
     ]
   end

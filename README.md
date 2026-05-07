@@ -11,6 +11,12 @@
 
 Build LLM agents that write and execute programs. SubAgents combine the reasoning power of LLMs with the computational precision of a sandboxed interpreter.
 
+> **Using an MCP client (Claude Desktop, Cursor, Cline, Claude Code)?**
+> See [`mcp_server/`](mcp_server/) for `ptc_runner_mcp`, an MCP server
+> that exposes the PTC-Lisp sandbox over stdio JSON-RPC. The README
+> there has ready-to-paste `claude_desktop_config.json`,
+> `cline_mcp_settings.json`, and Cursor `mcp.json` snippets.
+
 ## Quick Start
 
 ```elixir
