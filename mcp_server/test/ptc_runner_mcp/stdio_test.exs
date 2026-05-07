@@ -25,7 +25,7 @@ defmodule PtcRunnerMcp.StdioTest do
     assert reply["result"]["protocolVersion"] == "2025-11-25"
   end
 
-  test "tools/call ptc_lisp_execute returns Phase 1 stub", %{harness: h} do
+  test "tools/call ptc_lisp_execute (+ 1 2) returns success envelope", %{harness: h} do
     [reply] =
       JsonRpcHarness.roundtrip(
         %{
@@ -41,9 +41,9 @@ defmodule PtcRunnerMcp.StdioTest do
       )
 
     env = reply["result"]
-    assert env["isError"] == true
-    assert env["structuredContent"]["reason"] == "runtime_error"
-    assert env["structuredContent"]["message"] == "phase 1 stub"
+    assert env["isError"] == false
+    assert env["structuredContent"]["status"] == "ok"
+    assert env["structuredContent"]["result"] == "user=> 3"
   end
 
   test "unknown tool name returns unknown_tool tool result", %{harness: h} do

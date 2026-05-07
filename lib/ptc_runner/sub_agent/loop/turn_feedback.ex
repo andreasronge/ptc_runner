@@ -188,7 +188,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   - `:truncated` — `true` if any preview (prints, result, or memory) was
     truncated.
   """
-  @spec execution_feedback(Definition.t(), map(), map()) :: %{
+  @spec execution_feedback(Definition.t() | map(), map(), map()) :: %{
           feedback: String.t(),
           prints: [String.t()],
           result: String.t() | nil,

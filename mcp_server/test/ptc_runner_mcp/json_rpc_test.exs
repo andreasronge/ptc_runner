@@ -84,7 +84,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
   end
 
   describe "tools/call" do
-    test "ptc_lisp_execute returns the stub envelope (isError=true, runtime_error)" do
+    test "ptc_lisp_execute (+ 1 2) returns success envelope (isError=false)" do
       frame = %{
         "jsonrpc" => "2.0",
         "id" => 3,
@@ -95,9 +95,9 @@ defmodule PtcRunnerMcp.JsonRpcTest do
       {:reply, reply, :continue} = JsonRpc.dispatch({:ok, frame})
       assert reply["id"] == 3
       env = reply["result"]
-      assert env["isError"] == true
-      assert env["structuredContent"]["reason"] == "runtime_error"
-      assert env["structuredContent"]["message"] == "phase 1 stub"
+      assert env["isError"] == false
+      assert env["structuredContent"]["status"] == "ok"
+      assert env["structuredContent"]["result"] == "user=> 3"
     end
 
     test "unknown tool name returns unknown_tool tool result, NOT -32601 (D1 deviation)" do

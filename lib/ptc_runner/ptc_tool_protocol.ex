@@ -46,7 +46,9 @@ defmodule PtcRunner.PtcToolProtocol do
   """
 
   alias PtcRunner.Lisp
+  alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.JsonHandler
+  alias PtcRunner.SubAgent.Loop.TurnFeedback
 
   # ----------------------------------------------------------------
   # Capability-profile description constants
@@ -177,6 +179,67 @@ defmodule PtcRunner.PtcToolProtocol do
       end
 
     Jason.encode!(payload)
+  end
+
+  @doc """
+  Render a successful `ptc_lisp_execute` invocation directly from a `Lisp.run/2` result.
+
+  High-level convenience wrapper over `render_success/2`. Builds the
+  `:execution` map internally via
+  `PtcRunner.SubAgent.Loop.TurnFeedback.execution_feedback/3` so callers
+  outside `:ptc_runner` (e.g. `:ptc_runner_mcp`) never have to reach
+  into `TurnFeedback` themselves. Per § 13.1 of
+  `Plans/ptc-runner-mcp-server.md`, this is the only canonical way for
+  out-of-tree callers to render an R22 success payload.
+
+  ## Required input shape
+
+  `lisp_step` is a `PtcRunner.Step.t()` (the success-branch result of
+  `PtcRunner.Lisp.run/2`). Only the structured fields the renderer
+  consults — `:return`, `:prints`, `:memory` — need to be populated.
+
+  ## Recognized opts
+
+    * `:validated` — JSON-encodable value forwarded into
+      `render_success/2` and surfaced as the top-level `"validated"`
+      field. Only meaningful when the caller validated the program's
+      return value against a signature.
+
+  Unknown opts are silently ignored, matching `render_success/2`.
+
+  ## Example
+
+      iex> {:ok, step} = PtcRunner.Lisp.run("(+ 1 2)")
+      iex> json = PtcRunner.PtcToolProtocol.render_success_from_step(step)
+      iex> %{"status" => "ok", "result" => "user=> 3"} = Jason.decode!(json)
+      iex> json |> Jason.decode!() |> Map.fetch!("status")
+      "ok"
+  """
+  @spec render_success_from_step(map(), keyword()) :: String.t()
+  def render_success_from_step(lisp_step, opts \\ []) do
+    agent = mcp_render_agent()
+    state = %{memory: %{}}
+    execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+    forwarded_opts = [{:execution, execution} | Keyword.take(opts, [:validated])]
+    render_success(lisp_step, forwarded_opts)
+  end
+
+  # Synthetic minimum agent for `render_success_from_step/2`.
+  #
+  # `TurnFeedback.execution_feedback/3` reads `agent.format_options`
+  # and `agent.max_turns` only. We use the default format options and
+  # pin `max_turns: 1`, which makes the human-feedback string apply
+  # the single-shot suppression rules (no result-preview line, no
+  # "Stored:" hint when nothing changed). The structured `:result`
+  # and `:memory.changed` fields are populated unconditionally per
+  # `execution_feedback/3`'s contract, so this mirrors the MCP v1
+  # request semantics: each call is single-shot and stateless.
+  defp mcp_render_agent do
+    %Definition{
+      format_options: Definition.default_format_options(),
+      max_turns: 1
+    }
   end
 
   @doc """
