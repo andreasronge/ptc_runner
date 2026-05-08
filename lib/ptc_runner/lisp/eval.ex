@@ -183,9 +183,7 @@ defmodule PtcRunner.Lisp.Eval do
             Env.builtins_by_category(:interop)
             |> Enum.map_join(", ", &to_string/1)
 
-          {:error,
-           {:unbound_var,
-            "Unknown method '#{name_str}'. Supported interop methods: #{available}. Use (.method obj) syntax."}}
+          {:error, {:unsupported_method, name_str, available}}
         else
           {:error, {:unbound_var, name}}
         end

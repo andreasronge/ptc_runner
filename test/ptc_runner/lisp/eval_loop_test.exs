@@ -72,6 +72,27 @@ defmodule PtcRunner.Lisp.EvalLoopTest do
       # Default is 1000, so it should fail when x reaches 1000
       assert {:error, %{fail: %{reason: :loop_limit_exceeded}}} = Lisp.run(code)
     end
+
+    # Issue #884: format_error had no clause for :loop_limit_exceeded so
+    # the message fell through to inspect/2 and rendered the raw Elixir
+    # tuple `{:loop_limit_exceeded, 1000}`. LLMs / human users shouldn't
+    # see internal tuple representation in error messages, and the message
+    # should suggest a recovery path (reduce / map over a finite seq).
+    test "loop_limit_exceeded error has friendly message, not raw tuple" do
+      code = "(loop [x 0] (recur (inc x)))"
+      assert {:error, %{fail: %{message: msg}}} = Lisp.run(code)
+
+      refute msg =~ "{:loop_limit_exceeded",
+             "raw Elixir tuple leaked into user-visible message: #{inspect(msg)}"
+
+      assert msg =~ ~r/loop iteration limit/i,
+             "message should clearly state the cause: #{inspect(msg)}"
+
+      assert msg =~ "1000", "message should include the limit number: #{inspect(msg)}"
+
+      assert msg =~ ~r/reduce|map|finite/i,
+             "message should hint at a recovery path: #{inspect(msg)}"
+    end
   end
 
   describe "tail position validation" do
