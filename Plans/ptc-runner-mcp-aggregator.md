@@ -113,6 +113,19 @@ Conflating the two is a specification bug; lazy spawn means
 drive descriptions, schemas, limits, and annotations regardless of
 runtime upstream health.
 
+**Per-name serialization.** `ensure_started/1` **MUST** be serialized
+per upstream name by the `Upstream.Registry` GenServer. Concurrent
+`(tool/mcp-call ...)` invocations from `pmap` branches that target the
+same not-yet-started upstream **MUST** observe exactly one spawn
+attempt; the second arrival waits on the first's result and either
+sees `:ok` (and proceeds) or sees the same
+`{:error, :upstream_unavailable, detail}` (and returns `nil` per
+§7.1). Calls targeting *different* upstreams proceed in parallel.
+Implementation note: a single `GenServer.call(Registry, {:ensure_started,
+name})` per branch satisfies both properties — the GenServer's serial
+mailbox is the per-name lock, and Erlang's natural per-name dispatch
+across `:counters`-protected entries gives concurrency across names.
+
 ### 4.2 Component map
 
 ```text
@@ -206,6 +219,36 @@ error pointing at the offending entry.
 Multi-hop cycles across separate PtcRunner processes are unsafeguarded;
 programs that loop will eventually hit
 `max_upstream_calls_per_program` or `program_timeout`.
+
+### 5.4 Test fake-upstream registration
+
+`Upstream.Fake` instances **MUST NOT** be registrable via the JSON
+config file. A `"fake": "ModName"` field (or any equivalent) would
+pollute production config with test-only behavior and create a path
+where a misconfigured deploy silently bypasses real upstreams.
+
+The `Upstream.Registry` GenServer **MUST** instead expose a direct
+test API:
+
+```elixir
+# Either: bootstrap fakes at start
+Upstream.Registry.start_link(
+  upstreams: [%{name: "fake-x", impl: PtcRunnerMcp.Upstream.Fake, config: %{...}}]
+)
+
+# Or: install a fake at runtime (test setup only)
+Upstream.Registry.put_fake("fake-x", impl_or_config)
+```
+
+Production `Application.start/2` **MUST NOT** call `put_fake/2` and
+**MUST NOT** read fake configuration from `Application.get_env/3`. The
+production Registry reads exclusively from the JSON config resolved
+per §5.1.
+
+Tests MAY use either the constructor option or `put_fake/2`. The
+constructor form is preferred when the fake set is known up front;
+`put_fake/2` is the seam for tests that mutate the upstream set
+mid-test (e.g., simulating a newly-configured upstream).
 
 ## 6. Interfaces
 
@@ -315,10 +358,40 @@ Invariants:
 The MCP request handler is also the collector. Per `tools/call` request,
 the worker process:
 
-1. Generates `collector_ref = make_ref()` at request start.
+1. Constructs a `call_context` map at request start:
+
+   ```elixir
+   call_context = %{
+     collector_pid: self(),
+     collector_ref: make_ref(),
+     call_counter: :counters.new(1, []),
+     max_calls: Limits.max_upstream_calls_per_program(),
+     call_timeout_ms: Limits.upstream_call_timeout_ms(),
+     max_response_bytes: Limits.max_upstream_response_bytes()
+   }
+   ```
+
 2. Registers `tool/mcp-call` in the tools registry passed to
-   `Sandbox.execute/4`. The registration captures
-   `{collector_pid, collector_ref}` where `collector_pid = self()`.
+   `Sandbox.execute/4`. The registration **MUST** capture the entire
+   `call_context` in the closure — not the process dictionary, not
+   ETS. `:counters` is concurrency-safe (`pmap` children incrementing
+   in parallel never lose a count) and shares the worker's lifetime.
+   The closure pseudocode:
+
+   ```elixir
+   fn args ->
+     n = :counters.add(call_context.call_counter, 1, 1)
+     if :counters.get(call_context.call_counter, 1) > call_context.max_calls do
+       record_and_return_nil(call_context, args, :cap_exhausted, 0)
+     else
+       dispatch_upstream_call(call_context, args)
+     end
+   end
+   ```
+
+   Process dictionary is forbidden because `pmap` spawns child
+   processes with empty dictionaries; ETS is forbidden because its
+   lifetime exceeds the call and would require teardown bookkeeping.
 3. The tool's executor, after each upstream call completes (success,
    error, timeout, or detach-on-cancel), sends:
 
@@ -436,6 +509,18 @@ truthy and continue. Programs that care can compare `(= result
 :json-null)`. The invariant `nil` ⇒ "this call did not succeed" is
 preserved.
 
+**Depth: top-level only.** The `:json-null` rewrite **MUST** apply
+exclusively to the top-level value of an `{:ok, json}` upstream
+response. Nested JSON `null`s inside maps or arrays — `{"a": null}`,
+`[1, null, 3]` — remain Elixir `nil`. Once execution is inside a
+successful payload, `nil` is just data; the only ambiguity worth
+resolving is "did the call succeed" vs "did the call return null,"
+and that ambiguity exists only at the top level.
+
+Implementation rule for the executor: after `Upstream.call/4` returns
+`{:ok, value}`, if `value === nil`, substitute `:json-null` before
+handing the result back to the program. Do not walk the value.
+
 ### 7.4 Unknown-tool classification
 
 Programmer-fault `no tool '<tool>' in upstream '<server>'` is raised
@@ -547,6 +632,21 @@ and `error` **MUST** be present iff `status: "error"`.
 
 Ordering: completion order, per §6.4.
 
+**`duration_ms` for non-call entries.** `duration_ms` **MUST** be a
+non-negative integer (never `null`):
+
+| Origin | `duration_ms` value |
+|---|---|
+| Successful upstream call | wall-clock `tools/call` duration |
+| `upstream_error`, `timeout`, `response_too_large` | wall-clock `tools/call` duration up to the failure |
+| `upstream_unavailable` from a failed `ensure_started/1` | wall-clock duration of the spawn + `initialize` + `notifications/initialized` + `tools/list` attempt |
+| `upstream_unavailable` during recovery/backoff window with no attempt made | `0` |
+| `cap_exhausted` | `0` |
+
+The honest semantics are "time spent attempting the operation,"
+including ensure-started overhead the caller paid for. Calls rejected
+without any attempt (cap, recovery window) report `0`.
+
 ### 8.6 Cancellation propagation
 
 When the outer `tools/call` is cancelled via `notifications/cancelled`
@@ -562,16 +662,36 @@ or the worker is killed for any other reason:
 
 ## 9. Resource Limits
 
-| Limit | Default (v1) | Default (aggregator) | Configurable | On exceed |
+| Limit | Default (v1) | Default (aggregator) | CLI flag | Env var |
 |---|---:|---:|---|---|
-| `program_timeout` | 1 s | 10 s | flag / env | tool result `timeout` |
-| `program_memory_limit` | 10 MB | 100 MB | flag / env | tool result `memory_limit` |
-| `upstream_call_timeout` | n/a | 5 s | flag / env | nil + `timeout` |
-| `max_upstream_response_bytes` | n/a | 2 MB | flag / env | nil + `response_too_large` |
-| `max_upstream_calls_per_program` | n/a | 50 | flag / env | nil + `cap_exhausted` |
+| `program_timeout` | 1 s | 10 s | `--program-timeout-ms` | `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS` |
+| `program_memory_limit` | 10 MB | 100 MB | `--program-memory-limit-bytes` | `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES` |
+| `upstream_call_timeout` | n/a | 5 s | `--upstream-call-timeout-ms` | `PTC_RUNNER_MCP_UPSTREAM_CALL_TIMEOUT_MS` |
+| `max_upstream_response_bytes` | n/a | 2 MB | `--max-upstream-response-bytes` | `PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES` |
+| `max_upstream_calls_per_program` | n/a | 50 | `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` |
 
-Aggregator-mode defaults apply iff `configured_aggregator_mode?/0` is
-true. Plain MCP v1 remains fast and small by default.
+| Limit | On exceed |
+|---|---|
+| `program_timeout` | tool result `timeout` |
+| `program_memory_limit` | tool result `memory_limit` |
+| `upstream_call_timeout` | nil + `timeout` |
+| `max_upstream_response_bytes` | nil + `response_too_large` |
+| `max_upstream_calls_per_program` | nil + `cap_exhausted` |
+
+**Precedence (highest first):**
+
+1. CLI flag (e.g., `--program-timeout-ms 5000`).
+2. Environment variable (e.g., `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS=5000`).
+3. **Mode default** — aggregator default when
+   `configured_aggregator_mode?/0` is true *and* no explicit value
+   was provided; otherwise the v1 default.
+
+Aggregator defaults **MUST NOT** override an explicit flag or env var.
+A user who configures aggregator mode but sets `--program-timeout-ms
+1000` gets 1 s, not the 10 s aggregator default.
+
+Plain MCP v1 (no upstreams configured) remains fast and small by
+default.
 
 `max_upstream_response_bytes` **MUST** be enforced outside the
 sandbox, before JSON-decoding the response into BEAM terms. A
@@ -631,9 +751,11 @@ profile needs canonical-string-level catalog injection.
 
 ### 11.2 Tools registry plumbing
 
-`PtcRunnerMcp.Sandbox.execute/4` **MUST** accept a `tools:` option
-(default `[]`) and forward it to `PtcToolProtocol.lisp_run/2`. The MCP
-request handler **MUST** thread the option through.
+`PtcRunnerMcp.Sandbox.execute/4` already takes an `opts` keyword (it
+currently carries `:link`). Phase 0 **MUST** add `:tools` (default
+`[]`) to that same `opts` keyword and forward it to
+`PtcToolProtocol.lisp_run/2`. **Do not introduce a fifth positional
+argument.** The MCP request handler **MUST** thread the option through.
 
 In MCP v1, the handler always passes `tools: []`. In aggregator mode,
 the handler builds a registry containing the `mcp-call` virtual tool
@@ -672,9 +794,40 @@ fixed.
 
 ### 11.6 Configurable program limits, defaults unchanged
 
-v1 plumbs `--program-timeout` and `--program-memory-limit` flags with
-the existing 1 s / 10 MB defaults. Aggregator mode (Phase 1a)
-overrides the defaults when `configured_aggregator_mode?/0` is true.
+v1 plumbs `--program-timeout-ms` and `--program-memory-limit-bytes`
+flags (and their env-var equivalents per §9) with the existing 1 s /
+10 MB defaults. Aggregator mode (Phase 1a) overrides the defaults
+when `configured_aggregator_mode?/0` is true *and* no explicit value
+was provided.
+
+Phase 0 **MUST** wire only the v1 flags
+(`--program-timeout-ms`, `--program-memory-limit-bytes`) and their env
+vars; the aggregator-only limits (`--upstream-call-timeout-ms`,
+`--max-upstream-response-bytes`, `--max-upstream-calls-per-program`)
+land in Phase 1a where they are actually consumed.
+
+### 11.7 Codex review gates
+
+Each phase **MUST** pass an independent `codex review` check on its
+diff before merge. The gate is a hard fail/pass; do not proceed to the
+next phase on a failing review without resolving the findings.
+
+| Gate | Trigger | Reviewer asks |
+|---|---|---|
+| Phase 0 | Pre-merge of the v1 seams diff | Are the seams option-preserving? Does `tools/list` byte-equal v1? Does telemetry now carry `profile: :mcp_no_tools`? Are flag/env names exactly as §11.6 specifies? |
+| Phase 1a | Pre-merge of `Upstream.Fake` + integration | Is the `:counters`-based per-program cap correct under `pmap`? Is `ensure_started/1` actually serialized per name? Is `:json-null` rewrite top-level only? Are non-call `duration_ms` values per §8.5? Does cancellation detach without slot leaks? Aggregator annotations per §8.2? |
+| Phase 1b | Pre-merge of `Upstream.Stdio` | Handshake order (`initialize` → `notifications/initialized` → `tools/list`)? Pre-decode size enforcement? Subprocess crash → supervisor restart with backoff? Behaviour conformance suite passing on both Fake and Stdio? |
+| Phase 2 | Pre-merge of swap + live integration | Real upstream test passes; full file content does not appear in MCP response; cancellation detaches real in-flight upstream requests. |
+
+Invocation (from the repo root):
+
+```
+/codex review
+```
+
+The reviewer is intentionally not given the spec; it works from the
+diff and the codebase only, providing an independent read on whether
+the implementation matches what a careful engineer would expect.
 
 ## 12. Implementation Phases
 
@@ -726,7 +879,19 @@ Scope:
 - Emit `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry (§10) with
   default-off payload capture.
 - Cancellation: detach in-flight upstream calls owned by a dying
-  worker; drop late responses; no slot leaks (§8.6).
+  worker; drop late responses; no slot leaks (§8.6). For
+  `Upstream.Fake`, "detach-equivalent" semantics are sufficient:
+  fake calls run in spawned tasks/processes with caller refs; when
+  the worker dies, the registry/connection drops ownership and any
+  late fake reply is ignored. **Fake call functions need not be
+  forcibly killed in Phase 1a.** The invariants that **MUST** hold:
+  no slot leak, no stale `upstream_calls` entry written, and no
+  effect on a subsequent request (the unique `collector_ref` check
+  in §6.4 step 4 enforces the last point).
+- Registry serialization: per §4.1, `Upstream.Registry` **MUST**
+  serialize `ensure_started/1` per upstream name. Concurrent `pmap`
+  branches targeting the same not-yet-started upstream observe
+  exactly one spawn attempt; subsequent waiters reuse its result.
 
 DoD:
 
@@ -998,3 +1163,203 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (impl-prep): Pinned the implementation contract for
+  Phase 0/1a so a subagent can execute without further questions.
+  Added: per-name serialization of `ensure_started/1` by
+  `Upstream.Registry` (§4.1); test-only fake registration via the
+  Registry API — JSON `"fake"` field forbidden (§5.4); explicit
+  `call_context` map with closure-captured `:counters.new(1, [])`
+  for the per-program cap (§6.4); top-level-only `:json-null` rewrite
+  with no value walking (§7.3); pinned `duration_ms` values for
+  non-call entries — measured for `ensure_started` failures, `0` for
+  cap and recovery-window rejections (§8.5); pinned CLI-flag and
+  env-var names with explicit precedence (CLI > env > mode default)
+  and a "no override of explicit values" rule (§9, §11.6); reaffirmed
+  `:tools` lives in the existing `Sandbox.execute/4` opts keyword,
+  not a new positional (§11.2); added §11.7 codex-review gates per
+  phase; spelled out Phase 1a Fake cancellation as detach-equivalent
+  with no requirement to kill the fake function (§12.2); added §18
+  pasteable subagent briefs.
+
+## 18. Subagent Implementation Notes
+
+This section exists so each phase can be handed to an Engineer
+subagent as a single self-contained brief. Each block lists files
+to touch, the behavioral contract, the verification commands, and
+the codex gate. Subagents **MUST** treat the linked sections as
+authoritative; this section does not redefine semantics.
+
+### 18.1 Phase 0 brief
+
+**Goal:** land MCP v1 seams (no behavior change, no upstream
+machinery).
+
+**Files to modify:**
+
+- `mcp_server/lib/ptc_runner_mcp/tools.ex` — refactor
+  `advertised_description/0` to `advertised_description(profile,
+  opts \\ [])` per §11.1; route `tool_entry/0` through it. Make
+  `outputSchema` profile-selectable (§11.4); for `:mcp_no_tools`,
+  return the existing schema unchanged.
+- `mcp_server/lib/ptc_runner_mcp/sandbox.ex` — accept `:tools` in
+  the existing opts keyword (default `[]`) and forward to
+  `PtcToolProtocol.lisp_run/2` via `lisp_run_opts/2` (§11.2). Do
+  **not** add a fifth positional arg.
+- `mcp_server/lib/ptc_runner_mcp/limits.ex` — add
+  `program_timeout_ms` and `program_memory_limit_bytes` storage
+  (defaults: 1000 / 10 \* 1024 \* 1024), readable via convenience
+  getters.
+- The MCP startup path (CLI parser / `Application.start/2`) — wire
+  `--program-timeout-ms` / `--program-memory-limit-bytes` flags and
+  the matching env vars into `Limits.set/1`. Precedence per §9.
+- The MCP request handler (in `tools.ex` or wherever the
+  structured payload is built) — make the construction visibly
+  two-step per §11.3: build v1 payload via
+  `PtcToolProtocol.render_success/2` / `render_error/3`, then wrap
+  via `Envelope.success/1` / `Envelope.error_envelope/1`. No
+  decoration in Phase 0.
+- Telemetry call sites that currently emit `caller: :mcp` — also
+  emit `profile: :mcp_no_tools` in the metadata map (§11.5). Do
+  **not** widen `caller:`.
+
+**Files to add:** none. Phase 0 is purely additive within existing
+modules.
+
+**DoD (verbatim §12.1):**
+
+- Existing MCP `tools/list` and `ptc_lisp_execute` calls remain
+  byte-for-byte unchanged.
+- `Sandbox.execute(..., tools: [])` behaves identically to current
+  MCP execution.
+- Telemetry emits `caller: :mcp, profile: :mcp_no_tools`.
+- `tool_entry/0` sources `outputSchema` and description via
+  profile-aware functions (with v1 profile values).
+
+**Verify:**
+
+```
+cd mcp_server && mix format --check-formatted && mix compile --warnings-as-errors && mix test
+```
+
+Plus a snapshot test: assert
+`Tools.advertised_description(:mcp_no_tools, catalog: nil)` equals
+the string the existing `advertised_description/0` returns
+pre-refactor (capture the string in a fixture before editing).
+
+**Codex gate:** §11.7 row "Phase 0".
+
+### 18.2 Phase 1a brief
+
+**Goal:** integration surface against `Upstream.Fake` — collector,
+envelope decoration, error model, limits, telemetry, cancellation.
+No stdio.
+
+**Files to add:**
+
+- `mcp_server/lib/ptc_runner_mcp/upstream.ex` — behaviour per §6.3.
+- `mcp_server/lib/ptc_runner_mcp/upstream/fake.ex` — in-process
+  impl. Configurable `call/4` returning `{:ok, json}` /
+  `{:error, reason, detail}` per test setup.
+- `mcp_server/lib/ptc_runner_mcp/upstream/registry.ex` — GenServer
+  routing `name -> {impl, pid}`. **Serializes `ensure_started/1`
+  per name** (§4.1). Test API: `put_fake/2` and an `upstreams:`
+  start option (§5.4). **No JSON pollution.**
+- `mcp_server/lib/ptc_runner_mcp/upstream/supervisor.ex` —
+  `one_for_one` over Connection processes; exponential backoff cap
+  30 s on restart.
+- `mcp_server/lib/ptc_runner_mcp/upstream_calls.ex` — collector
+  helpers per §6.4.
+- A `tool/mcp-call` virtual-tool builder — closure capturing the
+  `call_context` from §6.4 (`:counters.new(1, [])`, collector ref,
+  limits). Lives wherever the request handler builds the tools
+  registry.
+
+**Files to modify:**
+
+- `tools.ex` — when `configured_aggregator_mode?/0` is true:
+  switch description, annotations (§8.2: `destructiveHint: true`),
+  and `outputSchema` (§8.4) to the aggregator profile; build the
+  `mcp-call` tools registry and pass it through `Sandbox.execute`'s
+  `:tools` opt.
+- The MCP request handler — between `PtcToolProtocol.render_*` and
+  `Envelope.*`, drain `{:upstream_call_recorded, ^ref, entry}`
+  messages (§6.4 step 4) and decorate the structured payload with
+  `upstream_calls` (§8.3). Drain only on normal completion or a
+  caught Lisp/runtime error producing an envelope; cancellation /
+  worker crash skips the drain (§6.4).
+- `application.ex` — start the new `Upstream.Supervisor` /
+  `Upstream.Registry` only when `configured_aggregator_mode?/0` is
+  true.
+- `limits.ex` — add `upstream_call_timeout_ms`,
+  `max_upstream_response_bytes`, `max_upstream_calls_per_program`
+  with their flags/env vars per §9. Aggregator-mode defaults apply
+  only when no explicit value was provided.
+- Telemetry — emit `[:ptc_runner_mcp, :upstream, :call, :*]` per
+  §10. **Default-off payload capture:** raw upstream args / results
+  **MUST NOT** appear in default metadata.
+
+**Behavioral musts:**
+
+- §7 error split exactly as written (world vs programmer fault).
+- §7.4 unknown-tool rule (cache-prove only, lazy-spawn-friendly).
+- `:json-null` substitution **top-level only** (§7.3): if and only
+  if the upstream's `{:ok, value}` has `value === nil`, return
+  `:json-null` to the program. Do not recurse.
+- Per-program cap via `:counters` captured in the closure, not
+  process dictionary, not ETS (§6.4).
+- `duration_ms` values per §8.5 table for every entry kind.
+- Aggregator tool annotations per §8.2 (driven by
+  `configured_aggregator_mode?/0`, **not** `started_upstreams/0`).
+- Cancellation: detach in-flight fakes; no slot leaks; no stale
+  `upstream_calls`. Killing the fake function itself is **not**
+  required in Phase 1a (§12.2).
+
+**DoD (verbatim §12.2):**
+
+- A PTC-Lisp program calling `(tool/mcp-call {...})` runs E2E
+  through the MCP server using `Upstream.Fake`; the calling client
+  sees a v1 payload decorated with `upstream_calls`.
+- All §13.2 tests pass.
+- `tools/list` (description, annotations, `outputSchema`) matches
+  §8 in aggregator mode.
+- `:mcp_no_tools` mode produces output byte-for-byte identical to
+  Phase 0.
+
+**Verify:**
+
+```
+cd mcp_server && mix format --check-formatted && mix compile --warnings-as-errors && mix test
+```
+
+**Codex gate:** §11.7 row "Phase 1a".
+
+### 18.3 Phase 1b brief
+
+**Goal:** `Upstream.Stdio` against the same behaviour, validated
+against `MockServer`. Scope per §12.3; verify per §13.3.
+
+**Codex gate:** §11.7 row "Phase 1b".
+
+### 18.4 Phase 2 brief
+
+**Goal:** swap Fake → Stdio at Registry level for production; live
+integration tests against ≥ 2 real upstream MCP servers. Scope per
+§12.4; verify per §13.4. Collect §14 decision-point inputs.
+
+**Codex gate:** §11.7 row "Phase 2".
+
+### 18.5 General subagent rules
+
+- **Stay inside the spec.** If the spec is ambiguous, stop and ask;
+  do not invent semantics.
+- **Tests first for new behavior.** Per
+  `docs/guidelines/testing-guidelines.md`, write a failing
+  integration test before fixing or implementing a behavior the
+  spec mandates.
+- **`mix precommit` before push.** Format + compile + credo +
+  dialyzer + test must all pass.
+- **Backward compatibility is not a goal** (per `CLAUDE.md`).
+  Delete superseded code rather than deprecate.
+- **No analyzer/parser changes in v1.** The spec is calibrated to
+  avoid them; if the implementation seems to need one, that is a
+  signal to re-read the spec, not to add the change.
