@@ -1,9 +1,12 @@
 defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
-  # async: false because one test mutates the global logger primary
-  # level (`:logger.set_primary_config(:level, :warning)`) to assert on
-  # captured warn lines. Under async: true, concurrent tests' log
-  # captures or level resets can race the assertion, leaving the
-  # captured log empty. Module-level serial run is the cheap fix.
+  # async: false because one test must lift the OTP primary logger
+  # level (set to :critical in test_helper.exs to silence sandbox crash
+  # reports) to capture an application-emitted warning. ExUnit's
+  # `capture_log :level` opt only filters at the handler, not the
+  # primary level — messages below the primary level never reach any
+  # handler. The cheaper-than-a-private-handler-per-test fix is to
+  # serialize this module so concurrent tests' captures and level
+  # resets cannot race.
   use ExUnit.Case, async: false
 
   alias PtcRunner.SubAgent
@@ -330,7 +333,8 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
 
       # test_helper.exs sets the OTP primary log level to :critical to silence
       # sandbox crash reports. Lift it for this test so we can verify the
-      # developer-facing warning lands; restore on exit.
+      # developer-facing warning lands; restore on exit. Module is
+      # `async: false` so this global mutation can't race other tests.
       previous = :logger.get_primary_config()
       :logger.set_primary_config(:level, :warning)
       on_exit(fn -> :logger.set_primary_config(:level, previous.level) end)
