@@ -131,7 +131,7 @@ defmodule PtcRunner.PtcToolProtocolTest do
       assert decoded["result"] == "x"
     end
 
-    test "memory.{changed,stored_keys,truncated} are surfaced verbatim" do
+    test "memory.{changed,stored_keys,truncated} are surfaced verbatim by default" do
       json =
         PtcToolProtocol.render_success(
           lisp_step(1),
@@ -149,6 +149,27 @@ defmodule PtcRunner.PtcToolProtocolTest do
                "stored_keys" => ["a", "b"],
                "truncated" => true
              }
+    end
+
+    # Issue #879: include_memory: false opt drops the memory key entirely.
+    # render_success_from_step/2 (the one-shot wrapper used by the MCP
+    # server) sets this to false because state never persists across calls.
+    test "include_memory: false opt drops the memory key (issue #879)" do
+      json =
+        PtcToolProtocol.render_success(
+          lisp_step(1),
+          execution:
+            execution_map(%{
+              result: 1,
+              memory: %{changed: true, stored_keys: ["a"], truncated: false}
+            }),
+          include_memory: false
+        )
+
+      decoded = Jason.decode!(json)
+
+      refute Map.has_key?(decoded, "memory"),
+             "include_memory: false should omit memory key: #{inspect(decoded)}"
     end
 
     test "top-level truncated is surfaced verbatim" do
@@ -305,9 +326,10 @@ defmodule PtcRunner.PtcToolProtocolTest do
       assert is_binary(decoded["feedback"])
       assert decoded["truncated"] == false
 
-      memory = decoded["memory"]
-      assert memory["stored_keys"] == []
-      assert memory["truncated"] == false
+      # Issue #879: render_success_from_step is the canonical one-shot
+      # wrapper. State never persists across calls, so memory is omitted.
+      refute Map.has_key?(decoded, "memory"),
+             "render_success_from_step should omit memory: #{inspect(decoded)}"
     end
 
     test "drops `result` when program returns nil (println-only)" do

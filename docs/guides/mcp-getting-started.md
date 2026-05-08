@@ -63,7 +63,6 @@ in the standard MCP `tools/call` envelope:
       "result": "user=> 3",
       "prints": [],
       "feedback": "...",
-      "memory": { "changed": {}, "stored_keys": [], "truncated": false },
       "truncated": false
     },
     "content": [
@@ -77,6 +76,11 @@ The `result` field (`"user=> 3"`) is an LLM-facing preview — an
 EDN/Clojure rendering of the program's final expression, not a
 programmatic value. To get a typed value back, supply a `signature`
 (step 4 below).
+
+Note: each MCP `tools/call` is one-shot — `defn`'d names do NOT
+persist into the next call. The response intentionally omits any
+`memory` field so callers don't infer state from a single program's
+local definitions (issue #879).
 
 The `content[0].text` block carries the same JSON as a string, for
 clients that read content blocks instead of `structuredContent`.
@@ -164,7 +168,6 @@ Successful response:
     "validated": { "total": 42, "count": 3 },
     "prints": [],
     "feedback": "...",
-    "memory": { "changed": {}, "stored_keys": [], "truncated": false },
     "truncated": false
   }
 }

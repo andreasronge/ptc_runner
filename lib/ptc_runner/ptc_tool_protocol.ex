@@ -118,9 +118,11 @@ defmodule PtcRunner.PtcToolProtocol do
   @doc """
   Render a successful `ptc_lisp_execute` invocation as JSON.
 
-  Preserves the v1 success payload shape exactly: `status`, optional
-  `result`, `prints`, `feedback`, `memory.{changed,stored_keys,truncated}`,
-  and top-level `truncated`.
+  Success payload shape: `status`, optional `result`, `prints`,
+  `feedback`, top-level `truncated`, and (when `include_memory: true`,
+  the default) `memory.{changed,stored_keys,truncated}`. One-shot
+  callers omit memory by passing `include_memory: false` or by going
+  through `render_success_from_step/2` which sets it for them.
 
   ## Required input shape
 
@@ -139,6 +141,11 @@ defmodule PtcRunner.PtcToolProtocol do
     * `:validated` — JSON-encodable value. When present, included as
       a top-level `"validated"` field. Used by MCP v1 to surface
       schema-validated return values.
+    * `:include_memory` — boolean (default `true`). When `false`, the
+      `"memory"` key is omitted entirely from the payload. One-shot
+      callers (MCP server) set this to `false` because state never
+      persists across calls (issue #879). Multi-turn `SubAgent` loops
+      keep the default since `defn`'d names DO persist across turns.
 
   Unknown opts are ignored (Addendum #12).
 
@@ -152,19 +159,26 @@ defmodule PtcRunner.PtcToolProtocol do
   @spec render_success(map(), keyword()) :: String.t()
   def render_success(lisp_step, opts \\ []) do
     execution = Keyword.fetch!(opts, :execution)
+    include_memory = Keyword.get(opts, :include_memory, true)
 
     payload = %{
       "status" => "ok",
       "result" => execution.result,
       "prints" => execution.prints,
       "feedback" => execution.feedback,
-      "memory" => %{
-        "changed" => execution.memory.changed,
-        "stored_keys" => execution.memory.stored_keys,
-        "truncated" => execution.memory.truncated
-      },
       "truncated" => execution.truncated
     }
+
+    payload =
+      if include_memory do
+        Map.put(payload, "memory", %{
+          "changed" => execution.memory.changed,
+          "stored_keys" => execution.memory.stored_keys,
+          "truncated" => execution.memory.truncated
+        })
+      else
+        payload
+      end
 
     payload =
       if is_nil(payload["result"]) and is_nil(Map.get(lisp_step, :return)) do
@@ -208,6 +222,15 @@ defmodule PtcRunner.PtcToolProtocol do
 
   Unknown opts are silently ignored, matching `render_success/2`.
 
+  ## One-shot semantics — no `memory` field
+
+  This wrapper is the canonical path for one-shot callers (MCP server,
+  text-mode rendering of single programs). One-shot calls never see
+  state across invocations, so the response omits the `memory` field
+  entirely (issue #879). Multi-turn callers — `SubAgent` loops where
+  `defn`'d names persist across turns — should call `render_success/2`
+  directly with the default `include_memory: true`.
+
   ## Example
 
       iex> {:ok, step} = PtcRunner.Lisp.run("(+ 1 2)")
@@ -222,7 +245,9 @@ defmodule PtcRunner.PtcToolProtocol do
     state = %{memory: %{}}
     execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
 
-    forwarded_opts = [{:execution, execution} | Keyword.take(opts, [:validated])]
+    forwarded_opts =
+      [{:execution, execution}, {:include_memory, false} | Keyword.take(opts, [:validated])]
+
     render_success(lisp_step, forwarded_opts)
   end
 
