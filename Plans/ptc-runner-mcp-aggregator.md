@@ -1315,6 +1315,24 @@ Honest weaknesses:
   concern (narrower queries, sequential `map`).
 - Schema-to-PTC-Lisp signature mapping for upstream tools: not in v1;
   upstream schemas are passed through as opaque description text.
+- Phase 1b polish (Phase 2 follow-ups): codex review of the
+  Phase 1b commit found three non-blocking concerns landed as known
+  issues:
+  1. `Upstream.Supervisor` restarts only `DynamicSupervisor` if it
+     hits its restart intensity, leaving `Registry` with no children
+     bootstrapped. Fix: tie Registry's lifecycle to the
+     DynamicSupervisor's, e.g., `:rest_for_one` so a DynamicSupervisor
+     restart cascades.
+  2. `Upstream.Stdio.init/1`'s pre-handshake receive loop watches the
+     Port pid but not the parent (Connection) pid. If shutdown
+     happens while the upstream is hung mid-handshake and exceeds the
+     Connection child's 5 s shutdown window, the supervisor escalates
+     to `:kill` instead of `:shutdown`. Functional impact: noisy
+     shutdown, not data corruption — bounded by handshake_timeout_ms.
+  3. `Registry`'s standalone-test fallback assumes
+     `DynamicSupervisor.start_child/2` returns `{:error, _}` when the
+     supervisor is missing, but it actually exits `:noproc`. Wrap in
+     `try/rescue` so the documented isolated-Registry test path works.
 - Decomposed cold-start telemetry: §10 telemetry currently emits a
   single `duration` measurement on the upstream-call span.
   `upstream_calls[].duration_ms` includes ensure-started overhead per
@@ -1350,6 +1368,18 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (post-phase1b): Phase 1b shipped as `eaaccdc` after six
+  codex review rounds. New components: `Upstream.Connection` (per-name
+  GenServer owning ensure_started, monitor, cached_tools, backoff),
+  `Upstream.Stdio` (subprocess via Port + MCP handshake), MockServer
+  test fixture, behaviour conformance suite parameterized over both
+  Fake and Stdio. `Upstream.Registry` reduced to a routing table;
+  Connections registered via `:via` with stdlib `Registry` so
+  supervisor restarts route correctly without pid-cache invalidation.
+  Cross-name concurrency confirmed end-to-end: two cold upstreams
+  with 200 ms init complete in ~300 ms wall-clock (sum would have
+  been ~400 ms). Three non-blocking codex findings landed as Phase 2
+  follow-ups in §16.
 - 2026-05-08 (phase1b-prep): Promoted the Phase 1b "cross-name
   parallelism" follow-up from §16 (open question) into core
   architecture: added §4.4 specifying per-name `Upstream.Connection`
