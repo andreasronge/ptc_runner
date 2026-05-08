@@ -367,8 +367,10 @@ program completes; ordering is not preserved.
 
 | Event | Server behavior |
 |---|---|
-| stdin EOF | Cancel all in-flight sandboxes; emit no further responses; exit 0. |
+| stdin EOF (no `exit` drain in progress) | Cancel all in-flight sandboxes; emit no further responses; exit 0. |
+| stdin EOF (during `exit` drain) | Defer to row 2 — the grace-period drain finishes first. File-backed clients (and `Port`-driven test runners) hit EOF the moment after writing the `exit` frame; tearing down here would race the in-flight reply. |
 | `shutdown` request (if sent) | Reply `null`; transition to drain; on subsequent `exit` notification, exit 0. |
+| `exit` notification (workers in flight) | Set `exit_pending`; schedule a 2 s grace timer; once `in_flight` drains, reply-then-stop and cancel the timer. If grace elapses, force-kill workers and stop. |
 | `notifications/cancelled` for in-flight ID | Kill the sandbox process; emit no response for that ID. |
 | `notifications/cancelled` for unknown/already-completed ID | Ignore silently. |
 | Unhandled BEAM crash in request handler | Log to stderr; emit `-32603 Internal error` referencing the request ID; continue serving. |
