@@ -27,7 +27,17 @@ defmodule PtcRunnerMcp.Tools do
   """
 
   alias PtcRunner.PtcToolProtocol
-  alias PtcRunnerMcp.{ConcurrencyGate, Envelope, Limits, Sandbox}
+
+  alias PtcRunnerMcp.{
+    AggregatorTools,
+    ConcurrencyGate,
+    Envelope,
+    Limits,
+    Sandbox,
+    UpstreamCalls
+  }
+
+  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "ptc_lisp_execute"
 
@@ -39,6 +49,30 @@ defmodule PtcRunnerMcp.Tools do
   @priv_path Path.expand(Path.join([__DIR__, "..", "..", "priv", "mcp_authoring_card.md"]))
   @external_resource @priv_path
   @authoring_card File.read!(@priv_path)
+
+  # Phase 1a §8.1: aggregator mode advertises a different authoring
+  # card describing `(tool/mcp-call ...)`, the `nil` failure convention,
+  # the `:json-null` sentinel, and the `upstream_calls` envelope field.
+  @aggregator_priv_path Path.expand(
+                          Path.join([
+                            __DIR__,
+                            "..",
+                            "..",
+                            "priv",
+                            "mcp_aggregator_authoring_card.md"
+                          ])
+                        )
+  @external_resource @aggregator_priv_path
+  @aggregator_authoring_card File.read!(@aggregator_priv_path)
+
+  # Aggregator-mode capability statement. Adapted from the v1
+  # `:mcp_no_tools` description so the aggregator advertisement stays
+  # consistent in tone but accurately reflects the new capability:
+  # "this server can call configured upstream MCP tools from inside
+  # the sandbox." Per §8.1 the description is one constant + the
+  # authoring card; per §11.1 the catalog injection seam (Phase 3)
+  # is the `opts` keyword.
+  @mcp_aggregator_description ~s|Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, and orchestration over configured upstream MCP servers. Call upstream tools as `(tool/mcp-call {:server "<name>" :tool "<tool>" :args {...}})` from inside the program. World-fault failures (timeout, oversize, upstream error, cap, unavailable) return `nil` and are recorded in `upstream_calls` on the response envelope. Each invocation of `ptc_lisp_execute` is independent — there is no memory of prior calls.|
 
   # § 10.4 outputSchema. `oneOf` discriminated by `status`.
   # `result` is intentionally NOT in the success branch's `required`
@@ -95,6 +129,45 @@ defmodule PtcRunnerMcp.Tools do
     ]
   }
 
+  # Phase 1a §8.4: the aggregator-mode `outputSchema` extends the v1
+  # schema with an optional `upstream_calls` array. Strict
+  # `structuredContent` validators that don't know about the new
+  # field would otherwise reject responses that include it.
+  @upstream_calls_schema %{
+    "type" => "array",
+    "items" => %{
+      "type" => "object",
+      "required" => ["server", "tool", "status", "duration_ms"],
+      "properties" => %{
+        "server" => %{"type" => "string"},
+        "tool" => %{"type" => "string"},
+        "status" => %{"type" => "string", "enum" => ["ok", "error"]},
+        "duration_ms" => %{"type" => "integer", "minimum" => 0},
+        "reason" => %{
+          "type" => "string",
+          "enum" => [
+            "upstream_unavailable",
+            "upstream_error",
+            "timeout",
+            "response_too_large",
+            "cap_exhausted"
+          ]
+        },
+        "error" => %{"type" => "string"}
+      }
+    }
+  }
+
+  @aggregator_output_schema %{
+    "type" => "object",
+    "oneOf" =>
+      Enum.map(@output_schema["oneOf"], fn branch ->
+        Map.update!(branch, "properties", fn props ->
+          Map.put(props, "upstream_calls", @upstream_calls_schema)
+        end)
+      end)
+  }
+
   @doc """
   The verbatim authoring-card markdown shipped at
   `mcp_server/priv/mcp_authoring_card.md`.
@@ -127,6 +200,30 @@ defmodule PtcRunnerMcp.Tools do
     PtcToolProtocol.tool_description(:mcp_no_tools) <> "\n\n" <> authoring_card()
   end
 
+  # Phase 1a §8.1: aggregator description = capability statement +
+  # aggregator authoring card. The `:catalog` opt is the seam Phase 3
+  # will use to inject an inline upstream catalog; for Phases 1a-2,
+  # `catalog: nil` is acceptable per §8.1.
+  def advertised_description(:mcp_aggregator, opts) do
+    catalog = Keyword.get(opts, :catalog)
+
+    base = @mcp_aggregator_description <> "\n\n" <> aggregator_authoring_card()
+
+    case catalog do
+      nil -> base
+      "" -> base
+      str when is_binary(str) -> base <> "\n\n" <> str
+    end
+  end
+
+  @doc """
+  The verbatim aggregator-mode authoring-card markdown shipped at
+  `mcp_server/priv/mcp_aggregator_authoring_card.md`. Read at compile
+  time via `@external_resource`.
+  """
+  @spec aggregator_authoring_card() :: String.t()
+  def aggregator_authoring_card, do: @aggregator_authoring_card
+
   @doc """
   Backward-compatible alias for `advertised_description(:mcp_no_tools, [])`.
 
@@ -149,6 +246,7 @@ defmodule PtcRunnerMcp.Tools do
   """
   @spec output_schema_for(profile :: atom()) :: map()
   def output_schema_for(:mcp_no_tools), do: @output_schema
+  def output_schema_for(:mcp_aggregator), do: @aggregator_output_schema
 
   @doc """
   Backward-compatible alias for `output_schema_for(:mcp_no_tools)`.
@@ -160,20 +258,73 @@ defmodule PtcRunnerMcp.Tools do
   @spec output_schema() :: map()
   def output_schema, do: output_schema_for(:mcp_no_tools)
 
+  @doc """
+  Returns `true` iff the MCP server is operating in aggregator mode.
+
+  Per `Plans/ptc-runner-mcp-aggregator.md` §4.1, this predicate is
+  static and config-derived: aggregator mode is active when at least
+  one upstream entry was loaded at startup. The predicate drives:
+
+    * profile selection (description, annotations, `outputSchema`),
+    * sandbox default limits (§9 / §11.6 aggregator overrides),
+    * telemetry `profile:` metadata (`:mcp_aggregator` vs `:mcp_no_tools`).
+
+  Crucially this is **not** the same as `Upstream.Registry.started_upstreams/0`
+  — a misconfigured run with zero healthy upstreams still advertises
+  the aggregator surface (§4.1, §8.2 last paragraph).
+  """
+  @spec configured_aggregator_mode?() :: boolean()
+  def configured_aggregator_mode? do
+    case Process.whereis(UpstreamRegistry) do
+      nil ->
+        false
+
+      pid when is_pid(pid) ->
+        try do
+          UpstreamRegistry.configured_count() > 0
+        catch
+          :exit, _ -> false
+        end
+    end
+  end
+
+  defp current_profile do
+    if configured_aggregator_mode?(), do: :mcp_aggregator, else: :mcp_no_tools
+  end
+
+  defp annotations_for(:mcp_no_tools) do
+    %{
+      "readOnlyHint" => true,
+      "destructiveHint" => false,
+      "idempotentHint" => true,
+      "openWorldHint" => false
+    }
+  end
+
+  # Phase 1a §8.2: in aggregator mode the static contract is "this
+  # server can call upstream MCP tools." `destructiveHint: true` is
+  # the conservative worst-case advertisement; `false` would falsely
+  # claim safety when configured upstreams may delete or mutate.
+  defp annotations_for(:mcp_aggregator) do
+    %{
+      "readOnlyHint" => false,
+      "destructiveHint" => true,
+      "idempotentHint" => false,
+      "openWorldHint" => true
+    }
+  end
+
   @doc "The single tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
+    profile = current_profile()
+
     %{
       "name" => @tool_name,
-      "description" => advertised_description(:mcp_no_tools, catalog: nil),
+      "description" => advertised_description(profile, catalog: nil),
       "inputSchema" => input_schema(),
-      "outputSchema" => output_schema_for(:mcp_no_tools),
-      "annotations" => %{
-        "readOnlyHint" => true,
-        "destructiveHint" => false,
-        "idempotentHint" => true,
-        "openWorldHint" => false
-      }
+      "outputSchema" => output_schema_for(profile),
+      "annotations" => annotations_for(profile)
     }
   end
 
@@ -255,12 +406,18 @@ defmodule PtcRunnerMcp.Tools do
   `Envelope.success/1` or `Envelope.error_envelope/1`. Phase 1a
   inserts the `upstream_calls` decoration between the two steps.
   """
-  @spec call_validated(String.t(), map(), Sandbox.parsed_signature()) :: map()
-  def call_validated(program, context, parsed_signature)
-      when is_binary(program) and is_map(context) do
-    program
-    |> Sandbox.execute(context, parsed_signature, link: true)
-    |> wrap_sandbox_result()
+  @spec call_validated(String.t(), map(), Sandbox.parsed_signature(), keyword()) :: map()
+  def call_validated(program, context, parsed_signature, opts \\ [])
+      when is_binary(program) and is_map(context) and is_list(opts) do
+    request_id = Keyword.get(opts, :request_id)
+
+    execute_with_aggregator(
+      program,
+      context,
+      parsed_signature,
+      [link: true],
+      request_id: request_id
+    )
   end
 
   @doc """
@@ -297,9 +454,9 @@ defmodule PtcRunnerMcp.Tools do
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do
-          program
-          |> Sandbox.execute(context, parsed_signature)
-          |> wrap_sandbox_result()
+          # In-process / test callers don't carry a JSON-RPC
+          # request id; telemetry metadata gets `request_id: nil`.
+          execute_with_aggregator(program, context, parsed_signature, [], request_id: nil)
         after
           ConcurrencyGate.release()
         end
@@ -307,6 +464,74 @@ defmodule PtcRunnerMcp.Tools do
       :full ->
         Envelope.busy(cap)
     end
+  end
+
+  # Phase 1a §11.3 + §6.4 decoration seam.
+  #
+  # In `:mcp_no_tools` mode, this is the same single-step Sandbox.execute
+  # → wrap_sandbox_result pipeline as Phase 0 — `:tools` defaults to
+  # `[]` and no upstream_calls drain happens.
+  #
+  # In aggregator mode, the request handler:
+  #   1. Builds a fresh `call_context` (unique ref + :counters cap).
+  #   2. Registers the `mcp-call` virtual tool whose closure captures
+  #      that context.
+  #   3. Runs `Sandbox.execute(..., tools: %{"mcp-call" => closure},
+  #      profile: :mcp_aggregator)`.
+  #   4. On normal completion or caught Lisp/runtime error producing
+  #      an envelope, drains the worker's mailbox for
+  #      `{:upstream_call_recorded, ref, entry}` messages, decorates
+  #      the v1 payload with `upstream_calls`, and only then wraps
+  #      via `Envelope.success/1` or `Envelope.error_envelope/1`.
+  #      Cancellation / worker crash skips the drain (§6.4 last
+  #      paragraph) — this code path simply isn't reached.
+  defp execute_with_aggregator(program, context, parsed_signature, sandbox_opts, exec_opts) do
+    if configured_aggregator_mode?() do
+      request_id = Keyword.get(exec_opts, :request_id)
+
+      call_context =
+        UpstreamCalls.new_call_context(
+          collector_pid: self(),
+          collector_ref: make_ref(),
+          max_calls: Limits.max_upstream_calls_per_program(),
+          call_timeout_ms: Limits.upstream_call_timeout_ms(),
+          max_response_bytes: Limits.max_upstream_response_bytes()
+        )
+
+      # Thread `request_id` into the closure so
+      # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry metadata
+      # carries the originating MCP request id. Operators correlating
+      # upstream call failures back to the parent `tools/call` use
+      # this as the join key.
+      tools = AggregatorTools.build(call_context, request_id: request_id)
+
+      sandbox_result =
+        Sandbox.execute(
+          program,
+          context,
+          parsed_signature,
+          [tools: tools, profile: :mcp_aggregator] ++ sandbox_opts
+        )
+
+      entries = UpstreamCalls.drain(call_context.collector_ref)
+      decorate_and_wrap(sandbox_result, entries)
+    else
+      program
+      |> Sandbox.execute(context, parsed_signature, sandbox_opts)
+      |> wrap_sandbox_result()
+    end
+  end
+
+  defp decorate_and_wrap({:ok, payload}, entries) when is_map(payload) do
+    payload
+    |> UpstreamCalls.decorate(entries)
+    |> Envelope.success()
+  end
+
+  defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
+    payload
+    |> UpstreamCalls.decorate(entries)
+    |> Envelope.error_envelope()
   end
 
   # Phase 0 §11.3 decoration seam: `Sandbox.execute/4` returns the
