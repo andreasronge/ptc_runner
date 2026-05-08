@@ -113,18 +113,55 @@ Conflating the two is a specification bug; lazy spawn means
 drive descriptions, schemas, limits, and annotations regardless of
 runtime upstream health.
 
-**Per-name serialization.** `ensure_started/1` **MUST** be serialized
-per upstream name by the `Upstream.Registry` GenServer. Concurrent
+**Per-name serialization with leader/follower handoff.**
+`ensure_started/1` **MUST** be serialized per upstream name. Concurrent
 `(tool/mcp-call ...)` invocations from `pmap` branches that target the
-same not-yet-started upstream **MUST** observe exactly one spawn
-attempt; the second arrival waits on the first's result and either
-sees `:ok` (and proceeds) or sees the same
-`{:error, :upstream_unavailable, detail}` (and returns `nil` per
-§7.1). Calls targeting *different* upstreams proceed in parallel.
-Implementation note: a single `GenServer.call(Registry, {:ensure_started,
-name})` per branch satisfies both properties — the GenServer's serial
-mailbox is the per-name lock, and Erlang's natural per-name dispatch
-across `:counters`-protected entries gives concurrency across names.
+same not-yet-started upstream **MUST** observe exactly **one** spawn
+attempt; followers wait for the leader's result and either see `:ok`
+(and proceed) or see the same `{:error, :upstream_unavailable,
+detail}` (and return `nil` per §7.1). Calls targeting *different*
+upstreams proceed in parallel.
+
+The current implementation uses a per-program ETS lock owned by the
+request worker:
+
+- The first caller wins `:ets.insert_new(table, {{:ensure_lock, name},
+  self()})` and becomes the **leader**. The leader runs
+  `Registry.ensure_started/2`, then `:ets.insert(table, {{:ensure_result,
+  name}, result})` to publish the outcome.
+- Every other caller (the **followers**) `await` on the result row,
+  polling with bounded `receive after 1` — the wait is bounded by
+  `upstream_call_timeout_ms`.
+- On worker exit, the ETS table is auto-deleted, taking the lock and
+  result rows with it. Cancellation cleans up "for free."
+
+**Why not just GenServer mailbox.** An earlier draft suggested a single
+`GenServer.call(Registry, {:ensure_started, name})` would be enough —
+the GenServer's serial mailbox would be the per-name lock. That works
+for "exactly one spawn attempt within one program," but only if the
+GenServer caches the per-program failure result. Caching that in the
+GenServer means the GenServer carries per-program state keyed by
+`collector_ref`, with eviction tied to worker `:DOWN`. The ETS-in-the-
+worker approach gives the same property without crossing the
+"registry stateless about per-program facts" line.
+
+**Cross-name concurrency caveat (Phase 1b follow-up).** The current
+`Upstream.Registry` GenServer runs `attempt_start/3` *inside its
+single `handle_call`*, so a slow cold start for one upstream blocks
+`ensure_started` for every other upstream. With Phase 1a's
+`Upstream.Fake` (in-process, fast) this is benign. Phase 1b ships
+`Upstream.Stdio`, where a slow subprocess spawn becomes a real
+concern; the cold-start work **MUST** be moved out of the Registry's
+serial mailbox at that point — either per-name worker processes, or a
+caller-process-spawn pattern with per-name locks. See §16.
+
+**Per-program failure cache.** The same per-worker ETS table holds
+`{{:failure, name}, {reason, detail}}` rows. The aggregator-tools
+closure consults it before calling `ensure_started`; a hit replays
+the cached failure and records a fresh `upstream_unavailable` entry
+without re-attempting. This implements §7.1 row 1's "no automatic
+retry within a single program" rule. The next program's worker has a
+fresh table and a fresh attempt.
 
 ### 4.2 Component map
 
@@ -374,14 +411,13 @@ the worker process:
 2. Registers `tool/mcp-call` in the tools registry passed to
    `Sandbox.execute/4`. The registration **MUST** capture the entire
    `call_context` in the closure — not the process dictionary, not
-   ETS. `:counters` is concurrency-safe (`pmap` children incrementing
-   in parallel never lose a count) and shares the worker's lifetime.
-   The closure pseudocode:
+   ETS-as-the-counter. `:atomics` is concurrency-safe and shares the
+   worker's lifetime. The closure pseudocode:
 
    ```elixir
    fn args ->
-     n = :counters.add(call_context.call_counter, 1, 1)
-     if :counters.get(call_context.call_counter, 1) > call_context.max_calls do
+     slot = :atomics.add_get(call_context.call_counter, 1, 1)
+     if slot > call_context.max_calls do
        record_and_return_nil(call_context, args, :cap_exhausted, 0)
      else
        dispatch_upstream_call(call_context, args)
@@ -389,9 +425,25 @@ the worker process:
    end
    ```
 
+   `:atomics.add_get/3` returns the post-increment value atomically;
+   each caller observes a unique slot number, so cap rejection is
+   precise. `:counters` is **not** acceptable here: `:counters.add/3`
+   returns `:ok`, not the new value, so a `bump-then-get` pair races
+   under concurrent `pmap` and can reject calls that should have
+   succeeded (e.g., with cap=1 and 2 concurrent callers, both bump to
+   2 and both reads see `2 > 1`, rejecting both). An earlier draft of
+   this section showed a `:counters` pseudocode; that draft was
+   incorrect and has been replaced.
+
+   The new context field type is `:atomics.atomics_ref()` initialized
+   via `:atomics.new(1, signed: false)`.
+
    Process dictionary is forbidden because `pmap` spawns child
-   processes with empty dictionaries; ETS is forbidden because its
-   lifetime exceeds the call and would require teardown bookkeeping.
+   processes with empty dictionaries. A *separate* per-program ETS
+   table owned by the worker (used for the leader/follower
+   `ensure_started` lock and the per-program failure cache; see
+   below) is allowed because (a) it is not the cap counter, and (b)
+   it auto-evicts on worker death.
 3. The tool's executor, after each upstream call completes (success,
    error, timeout, or detach-on-cancel), sends:
 
@@ -1136,6 +1188,24 @@ Honest weaknesses:
   concern (narrower queries, sequential `map`).
 - Schema-to-PTC-Lisp signature mapping for upstream tools: not in v1;
   upstream schemas are passed through as opaque description text.
+- Cross-name parallelism in `ensure_started/1` (Phase 1b): Phase 1a's
+  Registry GenServer runs `attempt_start/3` inside its `handle_call`,
+  so cold starts for different upstreams are globally serialized.
+  Benign with `Upstream.Fake` (no slow spawn); becomes a real concern
+  with `Upstream.Stdio` (subprocess spawn + handshake can be slow).
+  Phase 1b **MUST** move the cold-start work out of the GenServer
+  mailbox — per-name worker processes, or caller-process spawn with
+  per-name locks. The Phase 1a TODO marker lives at
+  `mcp_server/lib/ptc_runner_mcp/upstream/registry.ex` above the
+  `attempt_start/3` call site.
+- Decomposed cold-start telemetry: §10 telemetry currently emits a
+  single `duration` measurement on the upstream-call span.
+  `upstream_calls[].duration_ms` includes ensure-started overhead per
+  §8.5, but the telemetry layer does not split `ensure_duration` and
+  `call_duration` into separate metadata fields. If operators want to
+  attribute cold-start cost vs steady-state cost, add the split in
+  Phase 1b or as a follow-up (cheap to add — both values already
+  exist in the closure's local scope).
 
 ## 17. Document History
 
@@ -1163,6 +1233,19 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (post-phase1a): Patched §6.4 to reflect what Phase 1a
+  actually implements after codex review hardening: replaced the
+  incorrect `:counters` cap pseudocode with `:atomics.add_get/3` (the
+  only primitive that gives a unique slot atomically; `:counters`
+  cannot satisfy the cap-correctness invariant under concurrent
+  `pmap`). Documented the per-program ETS table that holds the
+  leader/follower `ensure_started` lock and the per-program failure
+  cache — both auto-evict on worker exit. Promoted the Phase 1b
+  cross-name parallelism gap (Registry GenServer running
+  `attempt_start/3` inside its mailbox) to §16 with explicit Phase 1b
+  requirement. Added §16 entry for decomposed telemetry as a future
+  follow-up. Phase 1a integration tests on `Upstream.Fake` validate
+  every behavioral rule the spec asserts.
 - 2026-05-08 (impl-prep): Pinned the implementation contract for
   Phase 0/1a so a subagent can execute without further questions.
   Added: per-name serialization of `ensure_started/1` by
