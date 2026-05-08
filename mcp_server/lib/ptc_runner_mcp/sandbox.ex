@@ -154,6 +154,14 @@ defmodule PtcRunnerMcp.Sandbox do
     #     an aggregator-mode handler.
     tools = Keyword.get(opts, :tools, [])
 
+    # Phase 1a (`Plans/ptc-runner-mcp-aggregator.md` §10 / §11.5): the
+    # aggregator request handler passes `profile: :mcp_aggregator` so
+    # the inner `[:ptc_runner, :lisp, :execute, *]` telemetry span and
+    # any in-process consumer can distinguish v1 from aggregator runs.
+    # `caller: :mcp` stays fixed (§10 last paragraph) — the aggregator
+    # distinction lives entirely in `:profile`.
+    profile = Keyword.get(opts, :profile, :mcp_no_tools)
+
     # Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.6 / §9):
     # forward the configured program-level limits into Lisp.run/2.
     # Without this, `--program-timeout-ms` and
@@ -180,7 +188,7 @@ defmodule PtcRunnerMcp.Sandbox do
 
     base = [
       caller: :mcp,
-      profile: :mcp_no_tools,
+      profile: profile,
       memory: %{},
       tools: tools,
       tool_cache: %{},

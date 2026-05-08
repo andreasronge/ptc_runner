@@ -238,7 +238,12 @@ defmodule PtcRunnerMcp.JsonRpc do
       {:ok, program, context, parsed_signature} ->
         work_fn = fn ->
           traced_tools_call(id, params, fn ->
-            Tools.call_validated(program, context, parsed_signature)
+            # Phase 1a §10: thread the JSON-RPC request id into
+            # `Tools.call_validated/4` so the
+            # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
+            # metadata can correlate upstream calls back to the
+            # parent `tools/call` request.
+            Tools.call_validated(program, context, parsed_signature, request_id: id)
           end)
         end
 
