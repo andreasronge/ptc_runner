@@ -267,6 +267,12 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   Indices are grapheme-based (matches `.indexOf` / `.length` semantics).
   """
   def dot_substring(s, start) when is_binary(s) and is_integer(start) do
+    len = String.length(s)
+
+    if start < 0 or start > len do
+      raise ".substring: start index #{start} out of range for string of length #{len}"
+    end
+
     String.slice(s, start..-1//1)
   end
 
@@ -280,7 +286,21 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   def dot_substring(s, start, stop)
       when is_binary(s) and is_integer(start) and is_integer(stop) do
-    String.slice(s, start, max(stop - start, 0))
+    len = String.length(s)
+
+    cond do
+      start < 0 ->
+        raise ".substring: start index #{start} out of range for string of length #{len}"
+
+      stop > len ->
+        raise ".substring: end index #{stop} out of range for string of length #{len}"
+
+      start > stop ->
+        raise ".substring: start index #{start} out of range (greater than end index #{stop})"
+
+      true ->
+        String.slice(s, start, stop - start)
+    end
   end
 
   def dot_substring(s, _start, _stop) when not is_binary(s) do

@@ -27,7 +27,7 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
 | `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
 | `.length` | Method | `(.length s)` | Return the grapheme count of a string | Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics. |
-| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). |
+| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf. |
 | `.toLowerCase` | Method | `(.toLowerCase s)` | Convert string to lower case |  |
 | `.toUpperCase` | Method | `(.toUpperCase s)` | Convert string to upper case |  |
 
