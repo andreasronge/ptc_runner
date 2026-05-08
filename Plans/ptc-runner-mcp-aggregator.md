@@ -1124,10 +1124,18 @@ Phase 2 lands as **three PR-sized chunks** in order. Don't bundle.
 
 #### 12.4.1 — Phase 1b follow-up polish
 
-Resolve the three non-blocking codex findings landed during Phase 1b
-before introducing real-process integration tests. These touch
-lifecycle/error paths; doing them first prevents any new flakiness in
-12.4.2 from masking real-upstream issues.
+Resolve two of the three non-blocking codex findings landed during
+Phase 1b before introducing real-process integration tests. These
+touch lifecycle/error paths; doing them first prevents any new
+flakiness in 12.4.2 from masking real-upstream issues.
+
+The third finding — Stdio shutdown propagation during a hung
+handshake — turned out to require an architectural change
+(`Connection.ensure_started` becomes async so the Connection process
+can `receive` the supervisor's `:shutdown` while waiting on the
+handshake). That is Phase 1b/connection architecture work, not Phase
+2.1 polish, and is re-deferred to its own hardening phase. The
+residual shutdown limitation lives in §16.
 
 Scope:
 
@@ -1137,13 +1145,6 @@ Scope:
   exhaust DynamicSupervisor restart intensity by crashing a
   Connection in a loop; assert Registry is also restarted and child
   Connections are bootstrapped on the new Registry.
-- `Upstream.Stdio.init/1` parent-EXIT watch: extend the pre-handshake
-  receive loop to watch the parent (Connection) pid in addition to
-  the Port pid, so a supervisor `:shutdown` mid-handshake propagates
-  cleanly inside the Connection child's 5 s shutdown budget. Test:
-  MockServer with a slow `initialize` reply; supervisor `:shutdown`
-  while Stdio is in handshake; assert exit reason `:shutdown`, not
-  `:killed`, and within 1 s.
 - `Registry` standalone fallback: `try/rescue` `:noproc` around
   `DynamicSupervisor.start_child/2` so the documented
   isolated-Registry test path works without the surrounding
@@ -1425,6 +1426,19 @@ Honest weaknesses:
   concern (narrower queries, sequential `map`).
 - Schema-to-PTC-Lisp signature mapping for upstream tools: not in v1;
   upstream schemas are passed through as opaque description text.
+- Residual shutdown limitation (Phase 1b/2.1 follow-up):
+  if `Connection` is blocked in synchronous `Stdio.start_link/2`
+  during a hung `initialize`, supervisor shutdown may escalate to
+  `:kill` because the supervisor's `:shutdown` signal sits in
+  Connection's mailbox until the synchronous call returns. A naive
+  parent-EXIT clause inside Stdio doesn't help: it only fires after
+  Connection has already been killed. Proper fix is async/non-blocking
+  `ensure_started` or `proc_lib`-style startup handshake so Connection
+  can `receive` the supervisor signal while waiting on Stdio. Real-
+  world impact: shutdown hygiene and log noise during graceful
+  shutdown of an upstream that's stuck in `initialize`. Not a data
+  correctness issue. Promote to its own hardening phase if the
+  scenario shows up outside shutdown.
 - Decomposed cold-start telemetry: §10 telemetry currently emits a
   single `duration` measurement on the upstream-call span.
   `upstream_calls[].duration_ms` includes ensure-started overhead per
@@ -1460,6 +1474,16 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (phase2.1-scope-cut): Reduced §12.4.1 from three findings
+  to two. The Stdio shutdown propagation finding was implemented via
+  a parent-EXIT clause inside `wait_for_id/3`, but codex correctly
+  observed the clause runs *after* Connection has been killed —
+  Connection is itself blocked in synchronous `Stdio.start_link/2`,
+  so the supervisor's `:shutdown` sits in Connection's mailbox until
+  escalation. Shipping that as "fixed" would create false confidence.
+  The proper fix is async `Connection.ensure_started`, which is
+  Phase 1b architectural work and out of Phase 2.1 polish scope. Re-
+  deferred to a hardening phase; tracked in §16.
 - 2026-05-08 (phase2-prep): Restructured §12.4 into three PR-sized
   chunks: §12.4.1 Phase 1b follow-up polish (the three §16 codex
   findings, now in scope and removed from §16), §12.4.2 one opt-in
