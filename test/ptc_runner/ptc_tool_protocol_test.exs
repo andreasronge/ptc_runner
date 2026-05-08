@@ -73,6 +73,7 @@ defmodule PtcRunner.PtcToolProtocolTest do
         stored_keys: [],
         truncated: false
       },
+      visible_truncated: false,
       truncated: false
     }
 
@@ -170,6 +171,51 @@ defmodule PtcRunner.PtcToolProtocolTest do
 
       refute Map.has_key?(decoded, "memory"),
              "include_memory: false should omit memory key: #{inspect(decoded)}"
+    end
+
+    # Codex review of ece7f13: when memory is hidden but a hidden memory
+    # preview was clipped, the top-level `truncated` flag would still
+    # read `true`, misleading callers into thinking their visible output
+    # was incomplete. Renderer must use :visible_truncated when memory
+    # is hidden.
+    test "include_memory: false uses visible_truncated, not memory's truncated" do
+      json =
+        PtcToolProtocol.render_success(
+          lisp_step(1),
+          execution: %{
+            result: 1,
+            prints: [],
+            feedback: "",
+            memory: %{changed: false, stored_keys: [], truncated: true},
+            visible_truncated: false,
+            truncated: true
+          },
+          include_memory: false
+        )
+
+      decoded = Jason.decode!(json)
+
+      assert decoded["truncated"] == false,
+             "top-level truncated should reflect only visible fields when memory is hidden: " <>
+               inspect(decoded)
+    end
+
+    test "include_memory: false still reports truncated=true when prints/result were truncated" do
+      json =
+        PtcToolProtocol.render_success(
+          lisp_step(1),
+          execution: %{
+            result: 1,
+            prints: [],
+            feedback: "",
+            memory: %{changed: false, stored_keys: [], truncated: false},
+            visible_truncated: true,
+            truncated: true
+          },
+          include_memory: false
+        )
+
+      assert Jason.decode!(json)["truncated"] == true
     end
 
     test "top-level truncated is surfaced verbatim" do

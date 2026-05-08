@@ -161,12 +161,24 @@ defmodule PtcRunner.PtcToolProtocol do
     execution = Keyword.fetch!(opts, :execution)
     include_memory = Keyword.get(opts, :include_memory, true)
 
+    # When memory is hidden, the top-level `truncated` flag must reflect
+    # only what the caller can see (prints + result). Otherwise a
+    # one-shot caller could get `truncated: true` purely because a hidden
+    # memory preview was clipped, making them think their visible output
+    # is incomplete (codex review of ece7f13).
+    truncated_flag =
+      if include_memory do
+        execution.truncated
+      else
+        Map.get(execution, :visible_truncated, execution.truncated)
+      end
+
     payload = %{
       "status" => "ok",
       "result" => execution.result,
       "prints" => execution.prints,
       "feedback" => execution.feedback,
-      "truncated" => execution.truncated
+      "truncated" => truncated_flag
     }
 
     payload =
