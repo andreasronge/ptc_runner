@@ -4,11 +4,19 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
 
   Per `Plans/ptc-runner-mcp-aggregator.md` §4.2 / §4.3 / §4.4:
 
-    * `:one_for_one` over per-name `Upstream.Connection` workers.
-      Each Connection owns one impl (Fake or Stdio) and serializes
-      `ensure_started/1` for ITS name; cross-name cold starts run
-      concurrently because each Connection has its own mailbox
-      (§4.4).
+    * `:rest_for_one` strategy with the inner `DynamicSupervisor`
+      listed BEFORE the routing `Registry`. Connections are
+      `:one_for_one` children of the inner DynamicSupervisor, so a
+      single Connection crash does NOT cascade to siblings. But when
+      the inner DynamicSupervisor exhausts its OWN restart-intensity
+      budget (e.g. a Connection child crashing in a tight loop),
+      `:rest_for_one` restarts the Registry too — the Registry
+      then re-bootstraps configured Connection children against
+      the fresh DynamicSupervisor. Codex review of `eaaccdc`
+      (§16, Phase 1b polish #1) flagged that the previous
+      `:one_for_one` outer strategy left Registry alive with stale
+      state pointing at the dead DynamicSupervisor; every routed
+      lookup after the cascade returned nil.
     * Children are lazy-spawned at the IMPL level: a Connection is
       started up-front in `:not_started` state; the impl
       subprocess / Fake instance starts on the first
@@ -60,6 +68,12 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
       {Upstream.Registry, [upstreams: upstreams]}
     ]
 
-    Supervisor.init(children, strategy: :one_for_one, max_restarts: 5, max_seconds: 30)
+    # `:rest_for_one` so a DynamicSupervisor restart-intensity
+    # exhaustion cascades to Registry; Registry's `init/1` then
+    # re-bootstraps configured Connection children clean against
+    # the fresh DynamicSupervisor (§4.4 / §12.4.1 finding #1).
+    # Order matters: DynamicSupervisor MUST be listed before
+    # Registry above so Registry is what `:rest_for_one` restarts.
+    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 5, max_seconds: 30)
   end
 end
