@@ -42,6 +42,8 @@ Always run `mix precommit` before `git push`. If it fails, fix all issues before
 - `docs/` - Specifications and guidelines
 - `demo/` - LLM integration testing and benchmarks (see `demo/README.md` for CLI options)
 - `priv/prompts/` - LLM prompt templates (compile-time; recompile after changes)
+- `mcp_server/` - Sibling Mix project (`ptc_runner_mcp` on Hex): stdio MCP server exposing `ptc_lisp_execute` to MCP clients
+- `ptc_viewer/` - Sibling Mix project: web-based trace viewer for SubAgent / planner runs (`mix ptc.viewer`)
 
 ## Architecture
 
