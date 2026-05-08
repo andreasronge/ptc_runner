@@ -226,16 +226,45 @@ defmodule PtcRunnerMcp.CancellationTest do
       :ok = Stdio.feed(stdio, tools_call_frame(500, long_running_program()))
       wait_until(fn -> Stdio.in_flight_count(stdio) == 1 end, 500)
 
-      # Now ask the genserver to read from the empty StringIO. Because
-      # there's nothing left, the next `IO.binread/2` returns `:eof`
-      # and the cancel-all-then-stop path runs.
-      send(stdio, :read)
+      # Synthesize EOF directly. With `auto_read: false`, no reader
+      # process exists, so we deliver the message stdio expects to
+      # receive from a real reader on `IO.binread/2 :eof`. Same
+      # observable behaviour as the live path: cancel all in-flight
+      # workers and stop normally.
+      send(stdio, {:stdin_line, :eof})
 
       assert_receive {Stdio, {:exited, :eof}}, 2_000
       assert_receive {:DOWN, ^ref, :process, ^stdio, :normal}, 2_000
 
       # Permit was released as part of cancel_all_workers/2.
       assert ConcurrencyGate.in_flight() == 0
+
+      StringIO.close(io)
+    end
+
+    test "live reader on an empty StringIO triggers the EOF path without manual send" do
+      # Companion to the test above. With `auto_read: true`, the
+      # dedicated reader process is the one that calls `IO.binread/2`
+      # and sends `{:stdin_line, :eof}`. This confirms the live read
+      # path delivers EOF correctly — i.e. the `spawn_monitor` reader
+      # actually wires up to the GenServer's mailbox in production.
+      ConcurrencyGate.reset()
+      Limits.set(Limits.defaults())
+
+      {:ok, io} = StringIO.open(<<>>, capture_prompt: false)
+
+      {:ok, stdio} =
+        Stdio.start_link(
+          io: io,
+          observer: self(),
+          auto_read: true,
+          name: :"stdio_eof_live_reader_#{System.unique_integer([:positive])}"
+        )
+
+      ref = Process.monitor(stdio)
+
+      assert_receive {Stdio, {:exited, :eof}}, 2_000
+      assert_receive {:DOWN, ^ref, :process, ^stdio, :normal}, 2_000
 
       StringIO.close(io)
     end

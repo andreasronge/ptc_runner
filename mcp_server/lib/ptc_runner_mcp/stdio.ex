@@ -52,7 +52,9 @@ defmodule PtcRunnerMcp.Stdio do
             observer: pid() | nil,
             in_flight: %{optional(term()) => %{pid: pid(), ref: reference()}},
             workers: %{optional(pid()) => term()},
-            exit_pending: boolean()
+            exit_pending: boolean(),
+            reader: {pid(), reference()} | nil,
+            exit_grace_ref: reference() | nil
           }
 
     defstruct io: :stdio,
@@ -83,7 +85,17 @@ defmodule PtcRunnerMcp.Stdio do
               workers: %{},
               # Set after `exit` notification arrives; once `in_flight`
               # is empty (or grace period elapses) we stop.
-              exit_pending: false
+              exit_pending: false,
+              # `{pid, monitor_ref}` of the dedicated stdin reader spawned
+              # by `init/1` when `auto_read: true`. `nil` when reading is
+              # driven externally (tests using `feed/2`).
+              reader: nil,
+              # Reference of the in-flight `Process.send_after/3` grace
+              # timer scheduled in `apply_lifecycle(:exit)`. We cancel it
+              # in `maybe_finalize_exit/1` once `in_flight` empties so
+              # `:exit_grace_elapsed` doesn't leak into the mailbox after
+              # a clean drain (Codex review of streaming-stdio fix).
+              exit_grace_ref: nil
   end
 
   @doc """
@@ -122,41 +134,100 @@ defmodule PtcRunnerMcp.Stdio do
       auto_read: Keyword.get(opts, :auto_read, true)
     }
 
-    if state.auto_read, do: send(self(), :read)
+    # Run the blocking `IO.binread/2` in a dedicated reader process
+    # rather than this GenServer. If we read inline, `IO.binread`
+    # blocks the GenServer's receive loop, so worker `:async_reply`
+    # messages sit unread in the mailbox until the next stdin line
+    # arrives — that hangs every `tools/call` reply for streaming
+    # clients (which only write one frame and wait). The reader
+    # forwards each line as `{:stdin_line, {:data, line}}` and exits
+    # `:normal` after sending `{:stdin_line, :eof}`. `spawn_monitor`
+    # (no link) matches the worker pattern: a reader crash cannot
+    # take stdio down — the `:DOWN` is converted to a synthetic
+    # `{:stdin_line, {:error, reason}}` so the existing read-error
+    # path runs.
+    state =
+      if state.auto_read do
+        io = state.io
+        parent = self()
+        {pid, ref} = spawn_monitor(fn -> reader_loop(io, parent) end)
+        %{state | reader: {pid, ref}}
+      else
+        state
+      end
+
     {:ok, state}
   end
 
-  @impl GenServer
-  def handle_info(:read, %State{io: io} = state) do
-    case IO.binread(io, 4096) do
+  # `IO.binread(io, :line)` returns each line **with** its trailing
+  # `\n`, which `process_chunk/2` then walks byte-by-byte to flush
+  # `state.buffer`. If the underlying device is ever switched to a
+  # mode that strips the LF, the line walker will silently buffer
+  # without dispatching — keep this contract in sync.
+  defp reader_loop(io, parent) do
+    case IO.binread(io, :line) do
       :eof ->
-        Log.log(:info, "stdin_eof")
-        # § 6.4 row 1: cancel all in-flight workers, no further replies.
-        state = cancel_all_workers(state, :stdin_eof)
-        notify_observer(state, {:exited, :eof})
-
-        if state.observer == nil do
-          System.stop(0)
-        end
-
-        {:stop, :normal, state}
+        send(parent, {:stdin_line, :eof})
 
       {:error, reason} ->
-        Log.log(:error, "stdin_read_error", %{reason: inspect(reason)})
-        state = cancel_all_workers(state, {:read_error, reason})
-        notify_observer(state, {:exited, {:error, reason}})
-
-        if state.observer == nil do
-          System.stop(0)
-        end
-
-        {:stop, :normal, state}
+        send(parent, {:stdin_line, {:error, reason}})
 
       data when is_binary(data) ->
-        new_state = process_chunk(state, data)
-        send(self(), :read)
-        {:noreply, new_state}
+        send(parent, {:stdin_line, {:data, data}})
+        reader_loop(io, parent)
     end
+  end
+
+  @impl GenServer
+  def handle_info({:stdin_line, :eof}, %State{exit_pending: true} = state) do
+    # An `exit` notification is already draining in-flight workers
+    # under a grace period (§ 6.4 row 2). Don't tear them down on EOF
+    # too — the file-backed temp-file integration runner always hits
+    # EOF the moment after writing the `exit` frame. The drain logic
+    # will stop us cleanly via `maybe_finalize_exit/1` (or
+    # `:exit_grace_elapsed` as a safety net).
+    #
+    # Invariant: when `exit_pending: true`, a live grace timer MUST
+    # exist — that's the only forward-progress guarantee once we
+    # ignore EOF. Any future change that cancels the timer without
+    # also clearing `exit_pending` would hang the server here.
+    true = is_reference(state.exit_grace_ref)
+    Log.log(:debug, "stdin_eof_during_exit_drain")
+    {:noreply, state}
+  end
+
+  # Anything buffered in `state.buffer` at this point is an
+  # unterminated partial line: silently drop it. § 6.4 row 1's
+  # invariant ("no further responses on EOF") means we wouldn't reply
+  # to it anyway, parse-error or otherwise.
+
+  def handle_info({:stdin_line, :eof}, state) do
+    Log.log(:info, "stdin_eof")
+    # § 6.4 row 1: cancel all in-flight workers, no further replies.
+    state = cancel_all_workers(state, :stdin_eof)
+    notify_observer(state, {:exited, :eof})
+
+    if state.observer == nil do
+      System.stop(0)
+    end
+
+    {:stop, :normal, state}
+  end
+
+  def handle_info({:stdin_line, {:error, reason}}, state) do
+    Log.log(:error, "stdin_read_error", %{reason: inspect(reason)})
+    state = cancel_all_workers(state, {:read_error, reason})
+    notify_observer(state, {:exited, {:error, reason}})
+
+    if state.observer == nil do
+      System.stop(0)
+    end
+
+    {:stop, :normal, state}
+  end
+
+  def handle_info({:stdin_line, {:data, data}}, state) do
+    {:noreply, process_chunk(state, data)}
   end
 
   # Worker reply: write the success_reply, demonitor, release permit,
@@ -185,6 +256,31 @@ defmodule PtcRunnerMcp.Stdio do
     end
   end
 
+  # `:DOWN` from either the dedicated stdin reader or a per-call
+  # worker. Reader DOWN gets dispatched first (it's the rarer case
+  # and a one-shot identity check), then we fall through to the
+  # worker dispatch table.
+  @impl GenServer
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %State{reader: {_, ref}} = state)
+      when is_reference(ref) do
+    state = %{state | reader: nil}
+
+    case reason do
+      :normal ->
+        # Reader exited cleanly after sending `{:stdin_line, :eof}` /
+        # `{:stdin_line, {:error, _}}`. The corresponding handler
+        # already ran (or is queued). Nothing else to do.
+        {:noreply, state}
+
+      _crash ->
+        # Reader crashed mid-`IO.binread`. Synthesize a read error so
+        # the existing shutdown path runs — same observable behavior
+        # as the OTP IO server returning `{:error, reason}`.
+        send(self(), {:stdin_line, {:error, reason}})
+        {:noreply, state}
+    end
+  end
+
   # Worker DOWN: the worker process exited. Either:
   #   * we already removed it via :async_reply (impossible — we
   #     demonitor with :flush on that path) — covered by `:error` arm.
@@ -192,7 +288,6 @@ defmodule PtcRunnerMcp.Stdio do
   #     internal error if it never sent {:async_reply}).
   #   * the worker was killed via `notifications/cancelled` (release
   #     permit, NO reply per § 6.4 row 3).
-  @impl GenServer
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
     case Map.fetch(state.workers, pid) do
       {:ok, request_id} ->
@@ -246,6 +341,21 @@ defmodule PtcRunnerMcp.Stdio do
   end
 
   def handle_info({:exit_grace_elapsed, _ref}, state), do: {:noreply, state}
+
+  # On clean stop, the reader (if any) is still parked in
+  # `IO.binread/2`. In production the BEAM is `System.stop`'d so the
+  # whole VM exits and the reader dies with it. In tests we stop the
+  # GenServer normally — without a `Process.exit/2` here the reader
+  # would leak until its underlying `:io` device closes (often never,
+  # for `StringIO`).
+  @impl GenServer
+  def terminate(_reason, %State{reader: {pid, ref}}) do
+    Process.demonitor(ref, [:flush])
+    Process.exit(pid, :kill)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   # ----------------------------------------------------------------
   # Public test entry: feed a chunk of bytes and run dispatch inline.
@@ -418,9 +528,8 @@ defmodule PtcRunnerMcp.Stdio do
         # stdin chunk (codex review of 0fe4c78). Phase 1's invariant
         # "no work after exit" must hold even when in-flight workers
         # are still completing.
-        ref = make_ref()
-        Process.send_after(self(), {:exit_grace_elapsed, ref}, @exit_grace_ms)
-        %{state | exit_pending: true, exited: true}
+        ref = Process.send_after(self(), {:exit_grace_elapsed, make_ref()}, @exit_grace_ms)
+        %{state | exit_pending: true, exited: true, exit_grace_ref: ref}
     end
   end
 
@@ -592,11 +701,14 @@ defmodule PtcRunnerMcp.Stdio do
 
   # If we're in `exit_pending` (saw `exit` with workers in flight)
   # and `in_flight` is now empty, finalize exit: notify observer,
-  # System.stop in production.
+  # System.stop in production. Cancel the grace-period timer so a
+  # late `:exit_grace_elapsed` doesn't land in the mailbox after a
+  # clean drain.
   defp maybe_finalize_exit(%State{exit_pending: true, in_flight: m} = state)
        when map_size(m) == 0 do
     Log.log(:info, "exit_drained", %{})
     notify_observer(state, {:exited, :exit_method})
+    state = cancel_exit_grace_timer(state)
 
     if state.observer == nil do
       System.stop(0)
@@ -606,6 +718,28 @@ defmodule PtcRunnerMcp.Stdio do
   end
 
   defp maybe_finalize_exit(state), do: state
+
+  defp cancel_exit_grace_timer(%State{exit_grace_ref: nil} = state), do: state
+
+  defp cancel_exit_grace_timer(%State{exit_grace_ref: ref} = state) when is_reference(ref) do
+    # `Process.cancel_timer/1` returns `false` if the message has
+    # already been delivered. Flush it from the mailbox so the
+    # catch-all clause at `handle_info({:exit_grace_elapsed, _}, …)`
+    # never sees a stale reference after we've finalized.
+    case Process.cancel_timer(ref) do
+      false ->
+        receive do
+          {:exit_grace_elapsed, _ref} -> :ok
+        after
+          0 -> :ok
+        end
+
+      _ms ->
+        :ok
+    end
+
+    %{state | exit_grace_ref: nil}
+  end
 
   # ----------------------------------------------------------------
   # JSON-RPC reply construction (kept here so JsonRpc stays pure).
