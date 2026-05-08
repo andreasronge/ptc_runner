@@ -89,13 +89,42 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     test "hint on unknown method call" do
       assert {:error, step} = Lisp.run("(.toString data/date)", context: %{date: "2024-01-01"})
       msg = step.fail.message
-      assert msg =~ "Unknown method"
+      assert msg =~ "Unsupported method"
       assert msg =~ "Supported interop methods:"
       assert msg =~ ".getTime"
       assert msg =~ ".indexOf"
       assert msg =~ ".lastIndexOf"
       assert msg =~ ".toLowerCase"
       assert msg =~ ".toUpperCase"
+    end
+
+    # Issue #878: the error used to be wrapped in :unbound_var with a
+    # pre-formatted message, then run through format_closure_error which
+    # treated the message as a variable name and tried to suggest replacing
+    # underscores with hyphens. That produced (a) the wrong "undefined
+    # variable:" prefix, (b) duplicated text inside a "(try: ...)" block,
+    # and (c) an irrelevant hyphenation hint.
+    test "unsupported method error: no 'undefined variable' prefix, no duplicated text, no hyphen hint" do
+      assert {:error, step} = Lisp.run("(.unknownMethod \"hello\")")
+      msg = step.fail.message
+
+      refute msg =~ "undefined variable",
+             "method-call error should not be framed as an undefined variable: #{inspect(msg)}"
+
+      refute msg =~ "Hint: Use hyphens",
+             "method names don't have underscores; hyphen hint is irrelevant: #{inspect(msg)}"
+
+      refute msg =~ "(try:",
+             "duplicated text inside (try: ...) block: #{inspect(msg)}"
+
+      # The supported-list should appear exactly once.
+      occurrences = msg |> String.split("Supported interop methods:") |> length() |> Kernel.-(1)
+      assert occurrences == 1, "expected 'Supported interop methods:' once, got #{occurrences}"
+    end
+
+    test "unsupported method error: reason atom is :unsupported_method (not :unbound_var)" do
+      assert {:error, step} = Lisp.run("(.unknownMethod \"hello\")")
+      assert step.fail.reason == :unsupported_method
     end
 
     test "Runtime error on nil in .getTime (raised exception)" do

@@ -562,6 +562,21 @@ defmodule PtcRunner.Lisp do
 
   def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
   def format_error({:arity_error, msg}), do: "arity error: #{msg}"
+
+  # Issue #878: dedicated formatter for unsupported interop methods.
+  # Avoids the `:unbound_var` path which would treat the message as a
+  # variable name and append an irrelevant hyphen-suggestion hint.
+  def format_error({:unsupported_method, name, available}) do
+    "Unsupported method '#{name}'. Supported interop methods: #{available}. Use (.method obj) syntax."
+  end
+
+  # Issue #884: friendly message for the loop iteration cap (DIV-01).
+  # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, 1000}
+  # leaks to the LLM via the generic inspect-based fallback.
+  def format_error({:loop_limit_exceeded, n}) do
+    "Loop iteration limit exceeded (#{n} iterations). Use reduce/map over a finite sequence instead, or split work across smaller loops."
+  end
+
   # Handle tool errors
   def format_error({:unknown_tool, name, []}), do: "Unknown tool: #{name}. No tools available."
 
