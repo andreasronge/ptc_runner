@@ -246,6 +246,56 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   @doc """
+  Simulates .length method on strings.
+  Returns grapheme count (matches Java's `length()` for the BMP and the
+  PTC-Lisp `count` builtin). Delegates to `String.length/1`.
+  """
+  def dot_length(s) when is_binary(s) do
+    String.length(s)
+  end
+
+  def dot_length(s) do
+    raise ".length: expected string, got #{type_name(s)}"
+  end
+
+  @doc """
+  Simulates .substring method on strings.
+
+  - `(.substring s start)` returns the suffix from grapheme index `start`.
+  - `(.substring s start end)` returns graphemes in `[start, end)`.
+
+  Indices are grapheme-based (matches `.indexOf` / `.length` semantics).
+  """
+  def dot_substring(s, start) when is_binary(s) and is_integer(start) do
+    String.slice(s, start..-1//1)
+  end
+
+  def dot_substring(s, _start) when not is_binary(s) do
+    raise ".substring: expected string, got #{type_name(s)}"
+  end
+
+  def dot_substring(_s, start) do
+    raise ".substring: expected integer start, got #{type_name(start)}"
+  end
+
+  def dot_substring(s, start, stop)
+      when is_binary(s) and is_integer(start) and is_integer(stop) do
+    String.slice(s, start, max(stop - start, 0))
+  end
+
+  def dot_substring(s, _start, _stop) when not is_binary(s) do
+    raise ".substring: expected string, got #{type_name(s)}"
+  end
+
+  def dot_substring(_s, start, _stop) when not is_integer(start) do
+    raise ".substring: expected integer start, got #{type_name(start)}"
+  end
+
+  def dot_substring(_s, _start, stop) do
+    raise ".substring: expected integer end, got #{type_name(stop)}"
+  end
+
+  @doc """
   Simulates .toUpperCase method on strings.
   Delegates to `String.upcase/1`.
   """

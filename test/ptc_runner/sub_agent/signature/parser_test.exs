@@ -20,6 +20,15 @@ defmodule PtcRunner.SubAgent.Signature.ParserTest do
       assert {:ok, {:signature, [], :bool}} = Parser.parse(":bool")
     end
 
+    test "parses :boolean as alias for :bool" do
+      assert {:ok, {:signature, [], :bool}} = Parser.parse(":boolean")
+    end
+
+    test "parses :boolean inside map field" do
+      assert {:ok, {:signature, [], {:map, [{"ok", :bool}]}}} =
+               Parser.parse("{ok :boolean}")
+    end
+
     test "parses :keyword" do
       assert {:ok, {:signature, [], :keyword}} = Parser.parse(":keyword")
     end

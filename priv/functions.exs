@@ -129,6 +129,40 @@
       divergences: nil
     },
     %{
+      name: ".length",
+      description: "Return the grapheme count of a string",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.length s)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Returns grapheme count (not byte length), matching `count` on a string and `.indexOf` index semantics.",
+      see_also: ["count"],
+      clojure_var: ".length",
+      divergences: nil
+    },
+    %{
+      name: ".substring",
+      description: "Extract a substring by grapheme index",
+      binding: :multi_arity,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.substring s start)", "(.substring s start end)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end).",
+      see_also: [".indexOf", ".length"],
+      clojure_var: ".substring",
+      divergences: nil
+    },
+    %{
       name: ".toUpperCase",
       description: "Convert string to upper case",
       binding: :normal,
@@ -7856,6 +7890,24 @@
       description: "Convert string to upper case",
       signatures: ["(.toUpperCase s)"],
       notes: ""
+    },
+    %{
+      name: ".length",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Return the grapheme count of a string",
+      signatures: ["(.length s)"],
+      notes:
+        "Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics."
+    },
+    %{
+      name: ".substring",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Extract a substring by grapheme index",
+      signatures: ["(.substring s start)", "(.substring s start end)"],
+      notes:
+        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end)."
     }
   ]
 }
