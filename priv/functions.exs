@@ -3336,10 +3336,12 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Negative start returns \"\" (signal value, not whole string). Out-of-bounds end truncates. (subs s 0 100) on a short string returns the full string — the \"first N chars\" idiom is preserved.",
+      see_also: [".substring", ".indexOf", "count"],
       clojure_var: "subs",
-      divergences: nil
+      divergences:
+        "DIV-22: returns signal values (\"\") instead of raising on out-of-range indices. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "subvec",

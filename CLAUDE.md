@@ -86,7 +86,7 @@ Programs execute in isolated BEAM processes with timeout (1s) and memory limits 
 - No `String.to_atom/1` on user input (memory leak)
 - Predicates end in `?` (not `is_` prefix)
 - `mix deps.clean --all` rarely needed - avoid it
-- When working with PTC-Lisp, check Clojure conformance
+- When working with PTC-Lisp, check Clojure conformance — but note that PTC-Lisp deliberately diverges from Clojure in several places to be safer for LLM-generated sandboxed code (no try/catch means raising = crash with no recovery, so we prefer signal values like `nil`/`""`/`false` for Clojure-named functions where Clojure would raise). Java-named methods (`.substring`, `.indexOf`) follow Java semantics and *do* raise. See [docs/clojure-conformance-gaps.md](docs/clojure-conformance-gaps.md) for the full DIV-* list and rationale.
 - When working with LLM integrations, verify model IDs are current and check .env overrides
 
 ### Code Quality

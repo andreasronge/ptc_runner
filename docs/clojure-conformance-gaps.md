@@ -476,6 +476,34 @@ PTC-Lisp's `str` converts nil to `""` (not `"nil"` or `"null"`), and `format %s`
 
 **Rationale:** Consistency with `(str nil)` → `""`, which is already an established PTC-Lisp convention.
 
+### DIV-22: `subs` returns signal values instead of raising on out-of-range indices
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Issue #886, follow-up to codex review of c45bdbc |
+
+```clojure
+;; Clojure
+(subs "abcdef" -1)                              ;=> StringIndexOutOfBoundsException
+(subs "abc" 10)                                 ;=> StringIndexOutOfBoundsException
+(let [s "abcdef"] (subs s (.indexOf s "xyz"))) ;=> StringIndexOutOfBoundsException
+
+;; PTC-Lisp
+(subs "abcdef" -1)                              ;=> ""
+(subs "abc" 10)                                 ;=> ""
+(let [s "abcdef"] (subs s (.indexOf s "xyz"))) ;=> ""  (the canonical idiom, clean signal)
+(subs "abc" 1 10)                               ;=> "bc"   (end > length truncates)
+(subs "abc" 0 100)                              ;=> "abc"  ("first N chars" idiom preserved)
+```
+
+**Rationale:** No exception handling (DIV-10). Clojure's `subs` raises on out-of-range, but in PTC-Lisp raising means the program crashes with no recovery path. We return signal values (empty string) so callers can guard with `(when (seq result) ...)`.
+
+The negative-start rule specifically kills the `(.indexOf s needle) → -1 → subs` trap, where `.indexOf` misses and feeds -1 into `subs`. Pre-fix, `subs` clamped -1 to 0 and silently returned the *whole string* — wrong-but-plausible output that propagated downstream. Post-fix, the negative start short-circuits to `""`.
+
+**Asymmetry with `.substring` is principled:** Java-named methods (`.substring`, `.indexOf`, `.length`) follow Java semantics and raise on out-of-range (see a44b75c for the `.substring` fix). The dot-prefix signals "Java idiom expected." Clojure-named functions (`subs`, `parse-long`, `get`) follow the safer-for-sandbox pattern. The naming convention tells the LLM which contract applies.
+
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 
 | Field | Value |

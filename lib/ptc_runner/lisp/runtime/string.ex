@@ -63,18 +63,30 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (subs "hello" 1) returns "ello"
   - (subs "hello" 1 3) returns "el"
   - (subs "hello" 0 0) returns ""
-  - Out of bounds returns truncated result
-  - Negative indices are clamped to 0
+  - Out of bounds (start > length, end > length) returns truncated result
+  - Negative start returns "" (signal value — see clojure-conformance-gaps.md DIV-22)
+
+  Diverges from Clojure, which raises StringIndexOutOfBoundsException on
+  out-of-range. PTC-Lisp prefers signal values (empty string, nil, false) over
+  raising for Clojure-named functions because there's no try/catch. The negative
+  start → "" rule kills the (.indexOf s "miss") → -1 → subs trap that would
+  otherwise silently return the whole string.
   """
   def subs(s, start) when is_binary(s) and is_integer(start) do
-    start = max(0, start)
-    String.slice(s, start..-1//1)
+    if start < 0 do
+      ""
+    else
+      String.slice(s, start..-1//1)
+    end
   end
 
   def subs(s, start, end_idx) when is_binary(s) and is_integer(start) and is_integer(end_idx) do
-    start = max(0, start)
-    len = max(0, end_idx - start)
-    String.slice(s, start, len)
+    if start < 0 do
+      ""
+    else
+      len = max(0, end_idx - start)
+      String.slice(s, start, len)
+    end
   end
 
   @doc """
