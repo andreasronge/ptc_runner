@@ -10,10 +10,20 @@ defmodule PtcRunnerMcp.Application do
     * `--max-program-bytes <int>` / `PTC_RUNNER_MCP_MAX_PROGRAM_BYTES`
     * `--max-context-bytes <int>` / `PTC_RUNNER_MCP_MAX_CONTEXT_BYTES`
     * `--max-concurrent-calls <int>` / `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS`
+    * `--program-timeout-ms <int>` / `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS`
+    * `--program-memory-limit-bytes <int>` / `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES`
     * `--log-level <debug|info|warn|error>` / `PTC_RUNNER_MCP_LOG_LEVEL`
     * `--trace-dir <path>` / `PTC_RUNNER_MCP_TRACE_DIR`
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
     * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
+
+  Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
+  the program-level limit flags with v1 defaults (1 s / 10 MB).
+  Aggregator-only limits (`--upstream-call-timeout-ms`,
+  `--max-upstream-response-bytes`, `--max-upstream-calls-per-program`)
+  land in Phase 1a where they are actually consumed.
+
+  Precedence (highest first): CLI flag, environment variable, default.
 
   In test environments (`Mix.env() == :test`) the supervision tree is
   empty — tests start `PtcRunnerMcp.Stdio` directly with their own IO
@@ -56,6 +66,8 @@ defmodule PtcRunnerMcp.Application do
           max_program_bytes: :integer,
           max_context_bytes: :integer,
           max_concurrent_calls: :integer,
+          program_timeout_ms: :integer,
+          program_memory_limit_bytes: :integer,
           log_level: :string,
           trace_dir: :string,
           trace_payloads: :string,
@@ -66,7 +78,13 @@ defmodule PtcRunnerMcp.Application do
     Map.new(opts)
   end
 
-  defp apply_limits(args) do
+  # Public-but-undocumented seam used by `Application.start/2` and by
+  # the Phase 0 unit-test suite to verify CLI > env > default
+  # precedence per `Plans/ptc-runner-mcp-aggregator.md` §9. Returns
+  # `:ok` from `Limits.set/1`.
+  @doc false
+  @spec apply_limits(map()) :: :ok
+  def apply_limits(args) do
     defaults = Limits.defaults()
 
     overrides = %{
@@ -97,6 +115,20 @@ defmodule PtcRunnerMcp.Application do
           :max_concurrent_calls,
           "PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS",
           defaults.max_concurrent_calls
+        ),
+      program_timeout_ms:
+        read_int(
+          args,
+          :program_timeout_ms,
+          "PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS",
+          defaults.program_timeout_ms
+        ),
+      program_memory_limit_bytes:
+        read_int(
+          args,
+          :program_memory_limit_bytes,
+          "PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES",
+          defaults.program_memory_limit_bytes
         )
     }
 

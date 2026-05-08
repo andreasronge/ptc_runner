@@ -106,34 +106,68 @@ defmodule PtcRunnerMcp.Tools do
   def authoring_card, do: @authoring_card
 
   @doc """
-  The advertised `description` field for the `ptc_lisp_execute` tool.
+  The advertised `description` field for the `ptc_lisp_execute` tool,
+  by capability profile.
 
-  Composed per § 8.4 as
-  `tool_description(:mcp_no_tools) <> "\\n\\n" <> authoring_card()`.
+  Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.1) refactors the
+  former `advertised_description/0` into a profile-aware builder.
+  For `:mcp_no_tools`, the output is byte-for-byte identical to v1:
+
+      tool_description(:mcp_no_tools) <> "\\n\\n" <> authoring_card()
+
+  The `opts` keyword is the seam aggregator mode will use to inject
+  runtime catalog text in Phase 3 (`catalog: catalog_string_or_nil`).
+  Phase 0 accepts and ignores `:catalog`; future profiles
+  (`:mcp_aggregator`) consume it.
   """
-  @spec advertised_description() :: String.t()
-  def advertised_description do
+  @spec advertised_description(profile :: atom(), opts :: keyword()) :: String.t()
+  def advertised_description(profile, opts \\ [])
+
+  def advertised_description(:mcp_no_tools, _opts) do
     PtcToolProtocol.tool_description(:mcp_no_tools) <> "\n\n" <> authoring_card()
   end
 
   @doc """
-  The verbatim § 10.4 `outputSchema` advertised in `tools/list`.
+  Backward-compatible alias for `advertised_description(:mcp_no_tools, [])`.
 
-  Returned as a plain map (Jason-encodable). Tests assert byte-for-byte
-  equality against the spec literal so any drift is caught at compile
-  time of the test suite.
+  Existing call sites (and test suites) use the 0-arity form; Phase 0
+  preserves it as a thin wrapper so the v1 MCP profile reads
+  identically before and after the §11.1 refactor.
+  """
+  @spec advertised_description() :: String.t()
+  def advertised_description, do: advertised_description(:mcp_no_tools, catalog: nil)
+
+  @doc """
+  The advertised `outputSchema` for the `ptc_lisp_execute` tool, by
+  capability profile.
+
+  Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.4) makes the
+  schema profile-selectable. For `:mcp_no_tools`, the schema is the
+  v1 § 10.4 literal. The aggregator profile (Phase 1a) extends it
+  with an optional `upstream_calls` array so strict
+  `structuredContent` validators do not reject the new field.
+  """
+  @spec output_schema_for(profile :: atom()) :: map()
+  def output_schema_for(:mcp_no_tools), do: @output_schema
+
+  @doc """
+  Backward-compatible alias for `output_schema_for(:mcp_no_tools)`.
+
+  Existing call sites and tests reference the 0-arity form; Phase 0
+  routes it through the profile-aware builder so v1 output is
+  unchanged byte-for-byte.
   """
   @spec output_schema() :: map()
-  def output_schema, do: @output_schema
+  def output_schema, do: output_schema_for(:mcp_no_tools)
 
   @doc "The single tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
     %{
       "name" => @tool_name,
-      "description" => advertised_description(),
+      "description" => advertised_description(:mcp_no_tools, catalog: nil),
       "inputSchema" => input_schema(),
-      "outputSchema" => @output_schema,
+      "outputSchema" => output_schema_for(:mcp_no_tools),
       "annotations" => %{
         "readOnlyHint" => true,
         "destructiveHint" => false,
@@ -210,15 +244,23 @@ defmodule PtcRunnerMcp.Tools do
 
   Used by the per-call worker spawned in `PtcRunnerMcp.Stdio`: stdio
   acquires the permit before spawning, and releases it when the worker
-  exits. `Sandbox.execute/3` is invoked with `link: true` so a worker
+  exits. `Sandbox.execute/4` is invoked with `link: true` so a worker
   killed by `notifications/cancelled` takes its sandbox child with it
   via the link signal (rather than letting the orphaned sandbox
   process run until its own heap/timeout limit).
+
+  Per `Plans/ptc-runner-mcp-aggregator.md` §11.3, this function is
+  the **MCP request handler decoration point**: it receives the
+  unwrapped `{kind, payload}` from `Sandbox.execute/4` and wraps via
+  `Envelope.success/1` or `Envelope.error_envelope/1`. Phase 1a
+  inserts the `upstream_calls` decoration between the two steps.
   """
   @spec call_validated(String.t(), map(), Sandbox.parsed_signature()) :: map()
   def call_validated(program, context, parsed_signature)
       when is_binary(program) and is_map(context) do
-    Sandbox.execute(program, context, parsed_signature, link: true)
+    program
+    |> Sandbox.execute(context, parsed_signature, link: true)
+    |> wrap_sandbox_result()
   end
 
   @doc """
@@ -255,7 +297,9 @@ defmodule PtcRunnerMcp.Tools do
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do
-          Sandbox.execute(program, context, parsed_signature)
+          program
+          |> Sandbox.execute(context, parsed_signature)
+          |> wrap_sandbox_result()
         after
           ConcurrencyGate.release()
         end
@@ -264,6 +308,21 @@ defmodule PtcRunnerMcp.Tools do
         Envelope.busy(cap)
     end
   end
+
+  # Phase 0 §11.3 decoration seam: `Sandbox.execute/4` returns the
+  # **unwrapped** v1 structured payload as `{:ok | :error, payload}`.
+  # The MCP request handler — `call_validated/3` and `run_with_gate/3`
+  # above — wraps it here. Phase 1a will insert
+  #
+  #     payload = decorate_with_upstream_calls(payload, drain(...))
+  #
+  # between `Sandbox.execute` and this wrap. Keeping the wrap in one
+  # place means Phase 1a touches a single function rather than
+  # scattering decoration through Sandbox renderers.
+  defp wrap_sandbox_result({:ok, payload}) when is_map(payload), do: Envelope.success(payload)
+
+  defp wrap_sandbox_result({:error, payload}) when is_map(payload),
+    do: Envelope.error_envelope(payload)
 
   # § 9.2: missing → not a string → empty after trim → too large.
   defp validate_program(args) do

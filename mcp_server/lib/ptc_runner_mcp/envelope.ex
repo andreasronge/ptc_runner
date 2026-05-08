@@ -112,14 +112,35 @@ defmodule PtcRunnerMcp.Envelope do
   (§ 10.3).
   """
   @spec render_error(reason(), String.t(), keyword()) :: t()
-  def render_error(reason, message, opts \\ [])
-
-  def render_error(reason, message, opts) when reason in @shared_reasons and is_binary(message) do
-    json = PtcToolProtocol.render_error(reason, message, opts)
-    error_envelope(Jason.decode!(json))
+  def render_error(reason, message, opts \\ []) do
+    reason
+    |> render_error_payload(message, opts)
+    |> error_envelope()
   end
 
-  def render_error(:busy, message, opts) when is_binary(message) do
+  @doc """
+  Render the **unwrapped** R23 structured payload for any reason.
+
+  Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.3) seam: the
+  request handler builds the v1 payload, may decorate it with
+  `upstream_calls` (Phase 1a), and only then wraps it via
+  `error_envelope/1`. Returning the bare map keeps the wrap step
+  cleanly separable from the construction step.
+
+  Same reason set and option semantics as `render_error/3`; this is
+  exactly the function `render_error/3` delegates to.
+  """
+  @spec render_error_payload(reason(), String.t(), keyword()) :: map()
+  def render_error_payload(reason, message, opts \\ [])
+
+  def render_error_payload(reason, message, opts)
+      when reason in @shared_reasons and is_binary(message) do
+    reason
+    |> PtcToolProtocol.render_error(message, opts)
+    |> Jason.decode!()
+  end
+
+  def render_error_payload(:busy, message, opts) when is_binary(message) do
     cap = Keyword.get(opts, :cap)
 
     feedback =
@@ -128,17 +149,15 @@ defmodule PtcRunnerMcp.Envelope do
           if(is_integer(cap), do: " (#{cap})", else: "") <>
           ". The previous call has not finished. Wait briefly and retry the same `tools/call`."
 
-    payload = %{
+    %{
       "status" => "error",
       "reason" => "busy",
       "message" => message,
       "feedback" => feedback
     }
-
-    error_envelope(payload)
   end
 
-  def render_error(:unknown_tool, message, opts) when is_binary(message) do
+  def render_error_payload(:unknown_tool, message, opts) when is_binary(message) do
     name = Keyword.get(opts, :tool_name)
 
     feedback =
@@ -150,31 +169,27 @@ defmodule PtcRunnerMcp.Envelope do
             " The requested tool name was missing or empty."
           end
 
-    payload = %{
+    %{
       "status" => "error",
       "reason" => "unknown_tool",
       "message" => message,
       "feedback" => feedback
     }
-
-    error_envelope(payload)
   end
 
-  def render_error(:shutting_down, message, opts) when is_binary(message) do
+  def render_error_payload(:shutting_down, message, opts) when is_binary(message) do
     feedback =
       Keyword.get(opts, :feedback) ||
         "The MCP server received a `shutdown` request and is no " <>
           "longer accepting new tool calls. Open a fresh server " <>
           "process to retry."
 
-    payload = %{
+    %{
       "status" => "error",
       "reason" => "shutting_down",
       "message" => message,
       "feedback" => feedback
     }
-
-    error_envelope(payload)
   end
 
   @doc "Wrap any structured payload as a successful MCP tool result."
