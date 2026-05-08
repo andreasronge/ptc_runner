@@ -312,7 +312,9 @@ defmodule PtcRunnerMcp.Application do
   # module name (`PtcRunnerMcp.Upstream.Stdio`); calling
   # `ensure_started/1` against such an entry will fail with
   # `:upstream_unavailable` until Phase 1b lands the Stdio impl.
-  defp load_upstreams_config(args) do
+  @doc false
+  @spec load_upstreams_config(map()) :: [%{name: String.t(), impl: module(), config: map()}]
+  def load_upstreams_config(args) do
     path =
       env_or(args, :upstreams_config, "PTC_RUNNER_MCP_UPSTREAMS", nil) ||
         xdg_default_path()
@@ -348,13 +350,35 @@ defmodule PtcRunnerMcp.Application do
         []
 
       {:ok, %{"upstreams" => map}} when is_map(map) ->
-        Enum.map(map, fn {name, config} ->
-          %{
-            name: name,
-            impl: PtcRunnerMcp.Upstream.Stdio,
-            config: resolve_env_placeholders(config)
-          }
-        end)
+        entries =
+          Enum.map(map, fn {name, config} ->
+            %{
+              name: name,
+              impl: PtcRunnerMcp.Upstream.Stdio,
+              # Normalize at the boundary: Jason returns string-keyed
+              # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
+              # use atom-keyed shapes (`:command`, `:args`, `:env`,
+              # `:cd`). Doing the conversion HERE means every layer
+              # below this point — Registry, Connection, Stdio,
+              # Upstream behaviour conformance — sees one canonical
+              # shape. Leaking string keys into Stdio caused a [P1]
+              # codex finding (`config[:args]` silently `nil`,
+              # subprocess launched with no args).
+              config:
+                config
+                |> resolve_env_placeholders()
+                |> normalize_stdio_config()
+            }
+          end)
+
+        # §5.3 self-as-upstream rejection. Fail fast — the server
+        # MUST NOT start with a config that would recursively spawn
+        # itself. Codex review of `fe72ff6` flagged that without
+        # this guard, a misconfigured deploy hits the recursion at
+        # the Stdio impl level (now actually wired in Phase 1b).
+        :ok = reject_self_as_upstream!(entries, path)
+
+        entries
 
       {:ok, _other} ->
         Log.log(:warn, "upstreams_config_invalid", %{
@@ -399,6 +423,136 @@ defmodule PtcRunnerMcp.Application do
   end
 
   defp resolve_env_placeholders(value), do: value
+
+  # Convert a string-keyed map (Jason output) to the atom-keyed
+  # shape `Upstream.Stdio` (and the owning `Upstream.Connection`)
+  # expects. Whitelisted keys only — anything not recognized is
+  # dropped on the floor with a warning, so a typo in the JSON file
+  # (e.g. `"command_": "..."`) is loud rather than silently
+  # launching the wrong subprocess.
+  #
+  # The whitelist is the union of every config key consumed by an
+  # upstream-config reader. Codex review of `0f6c1cd` flagged that
+  # `:handshake_timeout_ms` was missing — slow-handshake upstreams
+  # that explicitly bumped the timeout had it silently dropped.
+  # The full audit:
+  #
+  #   * `Upstream.Stdio` reads: :command, :args, :env, :cd,
+  #     :handshake_timeout_ms.
+  #   * `Upstream.Connection` (which owns the upstream impl)
+  #     reads: :backoff_initial_ms, :backoff_max_ms.
+  #
+  # NOTE: `:env` values stay string-keyed maps. Env-var names are
+  # external strings, not internal atoms; converting them with
+  # `String.to_atom/1` would also be a memory leak per CLAUDE.md.
+  @stdio_config_keys ~w(command args env cd handshake_timeout_ms backoff_initial_ms backoff_max_ms)
+  @stdio_config_atoms %{
+    "command" => :command,
+    "args" => :args,
+    "env" => :env,
+    "cd" => :cd,
+    "handshake_timeout_ms" => :handshake_timeout_ms,
+    "backoff_initial_ms" => :backoff_initial_ms,
+    "backoff_max_ms" => :backoff_max_ms
+  }
+
+  @doc false
+  @spec normalize_stdio_config(map()) :: map()
+  def normalize_stdio_config(config) when is_map(config) do
+    {known, unknown} =
+      Enum.split_with(config, fn {k, _} -> k in @stdio_config_keys end)
+
+    if unknown != [] do
+      Log.log(:warn, "upstreams_config_unknown_keys", %{
+        keys: Enum.map(unknown, fn {k, _} -> k end)
+      })
+    end
+
+    Map.new(known, fn {k, v} -> {Map.fetch!(@stdio_config_atoms, k), v} end)
+  end
+
+  # §5.3 self-as-upstream rejection. The MCP server MUST refuse to
+  # start when it is configured as an upstream of itself, by command
+  # path match. This guard fires at config-load time so misconfigured
+  # deploys fail loudly before the supervisor tree comes up.
+  #
+  # Heuristic ("command path match"): we resolve each entry's
+  # `:command` to an absolute filesystem path (via `System.find_executable/1`
+  # for bare names, `Path.expand/1` for paths). We then reject the
+  # entry if EITHER:
+  #
+  #   1. The resolved absolute path equals the absolute path of the
+  #      currently-running release executable (when one exists,
+  #      detected via the `RELEASE_ROOT` env var that releases set).
+  #   2. The basename of the resolved command equals the configured
+  #      release name `ptc_runner_mcp` — catches a misconfigured
+  #      copy of the same release executable installed elsewhere.
+  #
+  # Limit acknowledged in spec: "Multi-hop cycles across separate
+  # PtcRunner processes are unsafeguarded." Programs that loop will
+  # eventually hit `max_upstream_calls_per_program` or `program_timeout`.
+  @release_basename "ptc_runner_mcp"
+
+  @doc false
+  @spec reject_self_as_upstream!([map()], String.t()) :: :ok
+  def reject_self_as_upstream!(entries, source_path) when is_list(entries) do
+    Enum.each(entries, fn %{name: name, config: config} ->
+      command = Map.get(config, :command)
+
+      if is_binary(command) and command != "" and self_command?(command) do
+        raise """
+        upstreams_config: self-as-upstream rejected (§5.3).
+
+        Entry "#{name}" configures command "#{command}" which resolves
+        to the currently-running PtcRunner release. Recursive
+        self-spawn would either hang on the handshake or run away.
+
+        Source: #{source_path}
+        """
+      end
+    end)
+
+    :ok
+  end
+
+  defp self_command?(command) do
+    resolved = resolve_command_path(command)
+
+    cond do
+      is_nil(resolved) ->
+        false
+
+      Path.basename(resolved) == @release_basename ->
+        true
+
+      true ->
+        case release_executable_path() do
+          nil -> false
+          path -> Path.expand(resolved) == Path.expand(path)
+        end
+    end
+  end
+
+  defp resolve_command_path(command) do
+    if String.contains?(command, "/") do
+      Path.expand(command)
+    else
+      System.find_executable(command)
+    end
+  end
+
+  defp release_executable_path do
+    case System.get_env("RELEASE_ROOT") do
+      nil ->
+        nil
+
+      "" ->
+        nil
+
+      root ->
+        Path.join([root, "bin", @release_basename])
+    end
+  end
 
   defp xdg_default_path do
     case System.get_env("HOME") do

@@ -62,27 +62,22 @@ defmodule PtcRunnerMcp.Upstream.Fake do
   @impl Upstream
   @spec start_link(Upstream.server_name(), map()) :: GenServer.on_start()
   def start_link(name, config) when is_binary(name) and is_map(config) do
-    # When the configured `:init_result` is an error, GenServer.init/1
-    # returns `{:stop, reason}`. With a plain `start_link`, that exit
-    # propagates to the *caller* (registry / test process) — not what
-    # we want; the caller must observe `{:error, reason}` cleanly.
-    # Briefly enable trap_exit around the link so the exit signal
-    # arrives as a message we discard, and the `start_link/3` return
-    # value is the canonical `{:error, reason}` tuple.
+    # Briefly enable trap_exit around the inner `GenServer.start_link/3`
+    # so that an `init/1` returning `{:stop, _}` produces a clean
+    # `{:error, _}` return value rather than an EXIT signal that
+    # would crash the caller. Restoring `parent_trap` afterwards
+    # leaves the caller's trap-exit setting unchanged.
+    #
+    # No mailbox-drain receive: `:proc_lib.start_link` internalizes
+    # the init-failure link signal under trap_exit, so the caller's
+    # mailbox is clean by the time `start_link/3` returns. The
+    # earlier catch-all `{:EXIT, _, _}` drain (mirroring Stdio's
+    # original pattern) silently consumed unrelated exit messages —
+    # see codex review of `46b4466` [P2] #3.
     parent_trap = Process.flag(:trap_exit, true)
 
     try do
-      result = GenServer.start_link(__MODULE__, {name, config}, name: via(name))
-
-      # Drain any `{:EXIT, _, _}` from a stop-on-init failure so it
-      # doesn't pollute the caller's mailbox.
-      receive do
-        {:EXIT, _, _} -> :ok
-      after
-        0 -> :ok
-      end
-
-      result
+      GenServer.start_link(__MODULE__, {name, config}, name: via(name))
     after
       Process.flag(:trap_exit, parent_trap)
     end

@@ -13,13 +13,53 @@ PtcRunnerMcp.Log.set_level(:error)
 
 # Phase 1a aggregator: the in-process `Upstream.Fake` registers each
 # fake GenServer under `{:via, Registry, {PtcRunnerMcp.Upstream.Fake.Names, name}}`.
-# Production aggregator-mode startup spins this up via
+# Phase 1b adds:
+#   * `PtcRunnerMcp.Upstream.Stdio.Names` — global `Registry` for
+#     stdio impl GenServers.
+#   * `PtcRunnerMcp.Upstream.Connection.Names` — global `Registry`
+#     keyed by `{routing_id, upstream_name}` for Connection lookup
+#     (codex review of `46b4466` [P2] #2 — Connection pids must
+#     resolve via `:via` registration so DynamicSupervisor restarts
+#     are observable to the routing layer without pid caching).
+#   * `PtcRunnerMcp.Upstream.DynamicSupervisor` for Connection
+#     workers.
+#
+# Production aggregator-mode startup spins all three up via
 # `Upstream.Supervisor.init/1`; tests bypass the supervisor (each
 # test starts its own `Upstream.Registry` GenServer with a unique
-# name) so we start the names Registry once here, globally.
+# name) so we start them once here, globally.
 case Process.whereis(PtcRunnerMcp.Upstream.Fake.Names) do
   nil ->
     {:ok, _} = Registry.start_link(keys: :unique, name: PtcRunnerMcp.Upstream.Fake.Names)
+
+  _pid ->
+    :ok
+end
+
+case Process.whereis(PtcRunnerMcp.Upstream.Stdio.Names) do
+  nil ->
+    {:ok, _} = Registry.start_link(keys: :unique, name: PtcRunnerMcp.Upstream.Stdio.Names)
+
+  _pid ->
+    :ok
+end
+
+case Process.whereis(PtcRunnerMcp.Upstream.Connection.Names) do
+  nil ->
+    {:ok, _} =
+      Registry.start_link(keys: :unique, name: PtcRunnerMcp.Upstream.Connection.Names)
+
+  _pid ->
+    :ok
+end
+
+case Process.whereis(PtcRunnerMcp.Upstream.DynamicSupervisor) do
+  nil ->
+    {:ok, _} =
+      DynamicSupervisor.start_link(
+        name: PtcRunnerMcp.Upstream.DynamicSupervisor,
+        strategy: :one_for_one
+      )
 
   _pid ->
     :ok
