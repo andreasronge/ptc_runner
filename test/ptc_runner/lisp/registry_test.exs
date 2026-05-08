@@ -193,6 +193,8 @@ defmodule PtcRunner.Lisp.RegistryTest do
       "defn" => "DIV-01",
       "loop" => "DIV-01",
       "recur" => "DIV-01",
+      # DIV-02: no lazy sequences — (range) zero-arity is rejected
+      "range" => "DIV-02",
       # DIV-18: parse-long / parse-double return nil instead of raising
       "parse-long" => "DIV-18",
       "parse-double" => "DIV-18",
