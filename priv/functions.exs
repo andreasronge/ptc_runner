@@ -157,7 +157,7 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end).",
+        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException): start < 0, start > length, end > length, or start > end. Notably, (.substring s -1) raises rather than silently returning the last grapheme — important when chaining .indexOf, which returns -1 on miss.",
       see_also: [".indexOf", ".length"],
       clojure_var: ".substring",
       divergences: nil
@@ -7907,7 +7907,7 @@
       description: "Extract a substring by grapheme index",
       signatures: ["(.substring s start)", "(.substring s start end)"],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end)."
+        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf."
     }
   ]
 }

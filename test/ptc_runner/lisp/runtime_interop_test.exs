@@ -313,6 +313,64 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert {:error, step} = Lisp.run("(.substring 123 0 1)")
       assert step.fail.message =~ ".substring: expected string"
     end
+
+    # Bounds-checking regression tests (Java StringIndexOutOfBoundsException semantics).
+    # The .indexOf -> .substring chain is the canonical Java idiom; .indexOf returns
+    # -1 on miss. Without bounds checking, (.substring s -1) silently returns the
+    # last grapheme via Elixir's negative-index semantics — a quiet wrong answer.
+    test "single-arg form: negative start raises (would silently return last grapheme)" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abcdef" -1)|)
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
+
+    test "single-arg form: start beyond length raises" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abc" 10)|)
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
+
+    test "single-arg form: start == length returns empty string (Java semantics)" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "abc" 3)|)
+      assert step.return == ""
+    end
+
+    test "two-arg form: negative start raises" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abcdef" -1 3)|)
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
+
+    test "two-arg form: end > length raises" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abc" 0 10)|)
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
+
+    test "two-arg form: start > end raises (would silently return empty)" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abcdef" 4 2)|)
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
+
+    test "two-arg form: start == end returns empty string (Java semantics)" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "abc" 1 1)|)
+      assert step.return == ""
+    end
+
+    test "two-arg form: end == length returns suffix (Java semantics)" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "abc" 1 3)|)
+      assert step.return == "bc"
+    end
+
+    # The trap that motivated the bounds checks: indexOf miss feeding substring.
+    test "indexOf miss feeding single-arg substring raises (does not silently return suffix)" do
+      assert {:error, step} =
+               Lisp.run(~s|(let [s "abcdef"] (.substring s (.indexOf s "xyz")))|)
+
+      assert step.fail.message =~ ".substring"
+      assert step.fail.message =~ "out of range"
+    end
   end
 
   describe ".toLowerCase" do
