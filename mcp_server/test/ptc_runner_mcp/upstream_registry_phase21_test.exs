@@ -30,6 +30,13 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
 
   defp unique_atom(prefix), do: :"#{prefix}-#{System.unique_integer([:positive])}"
 
+  # Per-test unique upstream name. `Fake.Names` is a process-wide
+  # named Registry shared across the whole VM; literal names race
+  # other test files using the same literal under ExUnit `max_cases`
+  # parallelism. See the longer rationale in
+  # `upstream_registry_phase1a_test.exs`.
+  defp unique_name(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
   defp start_isolated_registry!(supervisor_name) do
     name = unique_atom("phase21-reg")
 
@@ -64,7 +71,7 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
       assert Process.whereis(missing_sup) == nil
 
       # Discriminator 1: put_fake/3 returns :ok (does NOT exit).
-      assert :ok = UpstreamRegistry.put_fake("alpha", %{}, registry)
+      assert :ok = UpstreamRegistry.put_fake(unique_name("alpha"), %{}, registry)
     end
 
     test "after put_fake/3 the upstream is observable end-to-end" do
@@ -76,26 +83,27 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
       # table inconsistent.
       missing_sup = unique_atom("phase21-missing-dynsup")
       registry = start_isolated_registry!(missing_sup)
+      beta = unique_name("beta")
 
-      :ok = UpstreamRegistry.put_fake("beta", %{}, registry)
+      :ok = UpstreamRegistry.put_fake(beta, %{}, registry)
 
       # Connection pid is live and reachable through the routing layer.
-      conn_pid = UpstreamRegistry.connection_for("beta", registry)
+      conn_pid = UpstreamRegistry.connection_for(beta, registry)
       assert is_pid(conn_pid)
       assert Process.alive?(conn_pid)
 
       # configured?/2 sees it.
-      assert UpstreamRegistry.configured?("beta", registry)
+      assert UpstreamRegistry.configured?(beta, registry)
       assert UpstreamRegistry.configured_count(registry) == 1
 
       # ensure_started/2 succeeds — the Fake impl spins up under
       # the fallback-spawned Connection.
       assert {:ok, %{duration_ms: _}} =
-               UpstreamRegistry.ensure_started("beta", registry)
+               UpstreamRegistry.ensure_started(beta, registry)
 
       # And the Registry's view of the live set picks it up.
       started = UpstreamRegistry.started_upstreams(registry)
-      assert MapSet.member?(started, "beta")
+      assert MapSet.member?(started, beta)
     end
 
     test "bootstrap via :upstreams option also tolerates missing supervisor" do
@@ -105,6 +113,7 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
       # starts, and `start_link/1` returns an error.
       missing_sup = unique_atom("phase21-missing-dynsup-boot")
       name = unique_atom("phase21-reg-boot")
+      gamma = unique_name("gamma")
       assert Process.whereis(missing_sup) == nil
 
       assert {:ok, pid} =
@@ -112,7 +121,7 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
                  name: name,
                  connection_supervisor: missing_sup,
                  upstreams: [
-                   %{name: "gamma", impl: PtcRunnerMcp.Upstream.Fake, config: %{}}
+                   %{name: gamma, impl: PtcRunnerMcp.Upstream.Fake, config: %{}}
                  ]
                )
 
@@ -124,8 +133,8 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase21Test do
         end
       end)
 
-      assert UpstreamRegistry.configured?("gamma", name)
-      assert is_pid(UpstreamRegistry.connection_for("gamma", name))
+      assert UpstreamRegistry.configured?(gamma, name)
+      assert is_pid(UpstreamRegistry.connection_for(gamma, name))
     end
   end
 end

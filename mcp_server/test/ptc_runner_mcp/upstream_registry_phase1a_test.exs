@@ -31,6 +31,17 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
     {:ok, registry: name}
   end
 
+  # Per-test unique upstream name. The Fake's `Fake.Names` is a
+  # process-wide named Registry shared across the whole VM, so any
+  # test that uses a literal name (e.g. "beta") races every other
+  # test using the same literal under ExUnit `max_cases` parallelism:
+  # one test's `Fake.stop/1` (or `Process.exit/2`) unregisters the
+  # name out from under another test's `Elixir.Registry.lookup/2`,
+  # producing a `MatchError` on `[{pid, _}]` patterns. Each test
+  # generates its own family of unique names instead — the colliding
+  # `Fake.Names` slots are now disjoint per test.
+  defp unique(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
   defp stop_quietly(name) do
     case Process.whereis(name) do
       nil -> :ok
@@ -51,12 +62,13 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
 
   describe "configured?/2" do
     test "false for unknown name", %{registry: r} do
-      refute Registry.configured?("nope", r)
+      refute Registry.configured?(unique("nope"), r)
     end
 
     test "true after put_fake/3", %{registry: r} do
-      :ok = Registry.put_fake("alpha", %{}, r)
-      assert Registry.configured?("alpha", r)
+      alpha = unique("alpha")
+      :ok = Registry.put_fake(alpha, %{}, r)
+      assert Registry.configured?(alpha, r)
     end
   end
 
@@ -64,8 +76,8 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
     test "tracks bootstrap upstreams", %{registry: r} do
       assert Registry.configured_count(r) == 0
 
-      :ok = Registry.put_fake("a", %{}, r)
-      :ok = Registry.put_fake("b", %{}, r)
+      :ok = Registry.put_fake(unique("a"), %{}, r)
+      :ok = Registry.put_fake(unique("b"), %{}, r)
 
       assert Registry.configured_count(r) == 2
     end
@@ -73,57 +85,65 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
 
   describe "ensure_started/2 happy path" do
     test "first call spawns; second call short-circuits", %{registry: r} do
+      alpha = unique("alpha")
+
       :ok =
         Registry.put_fake(
-          "alpha",
+          alpha,
           tools_config(%{"echo" => fn args, _ -> {:ok, args} end}),
           r
         )
 
-      assert {:ok, %{duration_ms: d1}} = Registry.ensure_started("alpha", r)
+      assert {:ok, %{duration_ms: d1}} = Registry.ensure_started(alpha, r)
       assert d1 >= 0
 
-      assert {:ok, %{duration_ms: 0}} = Registry.ensure_started("alpha", r)
-      assert MapSet.member?(Registry.started_upstreams(r), "alpha")
+      assert {:ok, %{duration_ms: 0}} = Registry.ensure_started(alpha, r)
+      assert MapSet.member?(Registry.started_upstreams(r), alpha)
     end
 
     test "different upstreams start independently", %{registry: r} do
-      :ok = Registry.put_fake("a", tools_config(%{"x" => fn _, _ -> {:ok, 1} end}), r)
-      :ok = Registry.put_fake("b", tools_config(%{"y" => fn _, _ -> {:ok, 2} end}), r)
+      a = unique("a")
+      b = unique("b")
+      :ok = Registry.put_fake(a, tools_config(%{"x" => fn _, _ -> {:ok, 1} end}), r)
+      :ok = Registry.put_fake(b, tools_config(%{"y" => fn _, _ -> {:ok, 2} end}), r)
 
-      assert {:ok, _} = Registry.ensure_started("a", r)
-      assert {:ok, _} = Registry.ensure_started("b", r)
+      assert {:ok, _} = Registry.ensure_started(a, r)
+      assert {:ok, _} = Registry.ensure_started(b, r)
 
       started = Registry.started_upstreams(r)
-      assert MapSet.member?(started, "a")
-      assert MapSet.member?(started, "b")
+      assert MapSet.member?(started, a)
+      assert MapSet.member?(started, b)
     end
 
     test "started_upstreams reflects start order", %{registry: r} do
-      :ok = Registry.put_fake("a", %{}, r)
-      :ok = Registry.put_fake("b", %{}, r)
+      a = unique("a")
+      b = unique("b")
+      :ok = Registry.put_fake(a, %{}, r)
+      :ok = Registry.put_fake(b, %{}, r)
 
       # Before any start, no upstreams are started even though both
       # are configured.
       assert MapSet.size(Registry.started_upstreams(r)) == 0
       assert Registry.configured_count(r) == 2
 
-      assert {:ok, _} = Registry.ensure_started("a", r)
-      assert MapSet.equal?(Registry.started_upstreams(r), MapSet.new(["a"]))
+      assert {:ok, _} = Registry.ensure_started(a, r)
+      assert MapSet.equal?(Registry.started_upstreams(r), MapSet.new([a]))
     end
   end
 
   describe "ensure_started/2 failure path" do
     test "init failure surfaces as :upstream_unavailable", %{registry: r} do
+      broken = unique("broken")
+
       :ok =
         Registry.put_fake(
-          "broken",
+          broken,
           %{init_result: {:error, :upstream_unavailable, "boom"}},
           r
         )
 
       assert {:error, :upstream_unavailable, detail, %{duration_ms: _}} =
-               Registry.ensure_started("broken", r)
+               Registry.ensure_started(broken, r)
 
       assert detail == "boom"
     end
@@ -143,9 +163,11 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # non-cached) wall-clock duration, proving each one ran the
       # `attempt_start` path. Pre-fix the second call returned the
       # cached failure with `duration_ms: 0` from the short-circuit.
+      broken = unique("broken")
+
       :ok =
         Registry.put_fake(
-          "broken",
+          broken,
           %{init_result: {:error, :upstream_unavailable, "down"}},
           r
         )
@@ -153,7 +175,7 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # First call: fresh attempt → `duration_ms` reflects the
       # attempt wall-clock (≥ 0, typically a few ms).
       assert {:error, :upstream_unavailable, "down", %{duration_ms: d1}} =
-               Registry.ensure_started("broken", r)
+               Registry.ensure_started(broken, r)
 
       assert is_integer(d1) and d1 >= 0
 
@@ -163,12 +185,12 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # the registry runs `attempt_start` again — same outcome,
       # but a fresh wall-clock measurement.
       assert {:error, :upstream_unavailable, "down", %{duration_ms: _d2}} =
-               Registry.ensure_started("broken", r)
+               Registry.ensure_started(broken, r)
 
       # The strongest assertion: the registry entry has no
       # `last_failure` field at all. Pre-fix it had
       # `last_failure: {:upstream_unavailable, "down"}`.
-      entry = Registry.lookup("broken", r)
+      entry = Registry.lookup(broken, r)
       refute Map.has_key?(entry, :last_failure)
 
       # And the entry is `:not_started` — ready for another fresh
@@ -186,30 +208,32 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # effect of installing a new entry); post-fix it passes for
       # the right reason — the registry never cached the failure
       # in the first place.
+      transient = unique("transient")
+
       :ok =
         Registry.put_fake(
-          "transient",
+          transient,
           %{init_result: {:error, :upstream_unavailable, "transient failure"}},
           r
         )
 
       assert {:error, :upstream_unavailable, "transient failure", _} =
-               Registry.ensure_started("transient", r)
+               Registry.ensure_started(transient, r)
 
       :ok =
         Registry.put_fake(
-          "transient",
+          transient,
           tools_config(%{"ping" => fn _, _ -> {:ok, "pong"} end}),
           r
         )
 
-      assert {:ok, _} = Registry.ensure_started("transient", r)
-      assert "transient" in Registry.started_upstreams(r)
+      assert {:ok, _} = Registry.ensure_started(transient, r)
+      assert transient in Registry.started_upstreams(r)
     end
 
     test "unknown name returns :upstream_unavailable", %{registry: r} do
       assert {:error, :upstream_unavailable, detail, %{duration_ms: 0}} =
-               Registry.ensure_started("never-configured", r)
+               Registry.ensure_started(unique("never-configured"), r)
 
       assert detail =~ "not configured"
     end
@@ -232,9 +256,11 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # §4.1, two concurrent callers for the same not-yet-started
       # upstream MUST both observe exactly one spawn (the second
       # waits on the first's result).
+      shared = unique("shared")
+
       :ok =
         Registry.put_fake(
-          "shared",
+          shared,
           %{
             tools: %{
               "ping" =>
@@ -256,7 +282,7 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       tasks =
         for _ <- 1..8 do
           Task.async(fn ->
-            Registry.ensure_started("shared", r)
+            Registry.ensure_started(shared, r)
           end)
         end
 
@@ -271,11 +297,11 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
 
       # Started exactly once: the registry's per-name lock means
       # only the first call's `attempt_start` ran.
-      assert MapSet.member?(Registry.started_upstreams(r), "shared")
+      assert MapSet.member?(Registry.started_upstreams(r), shared)
 
       # Sanity: the underlying Fake GenServer is alive and
       # responsive — the 8 ensure_started calls did not double-start.
-      assert {:ok, _} = Fake.list_tools("shared")
+      assert {:ok, _} = Fake.list_tools(shared)
     end
 
     test "concurrent callers for same failing upstream all see :upstream_unavailable",
@@ -289,16 +315,18 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
       # branches from running N spawn attempts lives at the
       # AggregatorTools layer (the `call_context.failure_cache`),
       # which is exercised by the integration tests.
+      broken = unique("broken")
+
       :ok =
         Registry.put_fake(
-          "broken",
+          broken,
           %{init_result: {:error, :upstream_unavailable, "first attempt failure"}},
           r
         )
 
       tasks =
         for _ <- 1..8 do
-          Task.async(fn -> Registry.ensure_started("broken", r) end)
+          Task.async(fn -> Registry.ensure_started(broken, r) end)
         end
 
       results = Task.await_many(tasks, 5_000)
@@ -312,64 +340,70 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
 
   describe "cached_tools/2 (§7.4)" do
     test "returns nil before ensure_started", %{registry: r} do
+      alpha = unique("alpha")
+
       :ok =
         Registry.put_fake(
-          "alpha",
+          alpha,
           tools_config(%{"echo" => fn args, _ -> {:ok, args} end}),
           r
         )
 
-      assert Registry.cached_tools("alpha", r) == nil
+      assert Registry.cached_tools(alpha, r) == nil
     end
 
     test "returns the configured schemas after a successful ensure_started", %{registry: r} do
+      alpha = unique("alpha")
+
       :ok =
         Registry.put_fake(
-          "alpha",
+          alpha,
           tools_config(%{"echo" => fn args, _ -> {:ok, args} end}),
           r
         )
 
-      {:ok, _} = Registry.ensure_started("alpha", r)
-      tools = Registry.cached_tools("alpha", r)
+      {:ok, _} = Registry.ensure_started(alpha, r)
+      tools = Registry.cached_tools(alpha, r)
       assert is_list(tools)
       assert Enum.any?(tools, fn t -> Map.get(t, :name) == "echo" end)
     end
 
     test "still nil for unknown upstream", %{registry: r} do
-      assert Registry.cached_tools("never-configured", r) == nil
+      assert Registry.cached_tools(unique("never-configured"), r) == nil
     end
   end
 
   describe "put_fake/3 (§5.4)" do
     test "replaces an existing entry", %{registry: r} do
-      :ok = Registry.put_fake("a", tools_config(%{"v1" => fn _, _ -> {:ok, "old"} end}), r)
-      {:ok, _} = Registry.ensure_started("a", r)
-      assert "v1" == hd(Registry.cached_tools("a", r)).name
+      a = unique("a")
+      :ok = Registry.put_fake(a, tools_config(%{"v1" => fn _, _ -> {:ok, "old"} end}), r)
+      {:ok, _} = Registry.ensure_started(a, r)
+      assert "v1" == hd(Registry.cached_tools(a, r)).name
 
       # Replace the impl. The previously-running Fake should be
       # stopped and the new config installed; ensure_started will
       # re-spawn against the new tools.
-      :ok = Registry.put_fake("a", tools_config(%{"v2" => fn _, _ -> {:ok, "new"} end}), r)
+      :ok = Registry.put_fake(a, tools_config(%{"v2" => fn _, _ -> {:ok, "new"} end}), r)
 
       # cached_tools is nil now (status reset to :not_started).
-      assert Registry.cached_tools("a", r) == nil
+      assert Registry.cached_tools(a, r) == nil
 
-      {:ok, _} = Registry.ensure_started("a", r)
-      assert "v2" == hd(Registry.cached_tools("a", r)).name
+      {:ok, _} = Registry.ensure_started(a, r)
+      assert "v2" == hd(Registry.cached_tools(a, r)).name
     end
   end
 
   describe "lookup/2" do
     test "returns the routing entry for a configured upstream", %{registry: r} do
-      :ok = Registry.put_fake("alpha", %{}, r)
-      entry = Registry.lookup("alpha", r)
+      alpha = unique("alpha")
+      :ok = Registry.put_fake(alpha, %{}, r)
+      entry = Registry.lookup(alpha, r)
       assert entry.impl == Fake
       assert entry.status == :not_started
     end
 
     test "returns nil for unknown name", %{registry: r} do
-      assert Registry.lookup("missing", r) == nil
+      assert Registry.lookup(unique("missing"), r) == nil
     end
   end
 
@@ -387,66 +421,70 @@ defmodule PtcRunnerMcp.UpstreamRegistryPhase1aTest do
 
   describe "crash invalidation (§4.3 third bullet)" do
     test "Fake.stop/1 removes the upstream from started_upstreams", %{registry: r} do
+      alpha = unique("alpha")
+
       :ok =
         Registry.put_fake(
-          "alpha",
+          alpha,
           tools_config(%{"echo" => fn args, _ -> {:ok, args} end}),
           r
         )
 
-      {:ok, _} = Registry.ensure_started("alpha", r)
-      assert "alpha" in Registry.started_upstreams(r)
-      assert is_list(Registry.cached_tools("alpha", r))
+      {:ok, _} = Registry.ensure_started(alpha, r)
+      assert alpha in Registry.started_upstreams(r)
+      assert is_list(Registry.cached_tools(alpha, r))
 
       # Capture the underlying Fake pid via lookup. This is the pid
       # the registry monitors; we monitor it from the test to
       # synchronize on its death.
       [{fake_pid, _}] =
-        Elixir.Registry.lookup(PtcRunnerMcp.Upstream.Fake.Names, "alpha")
+        Elixir.Registry.lookup(PtcRunnerMcp.Upstream.Fake.Names, alpha)
 
       monitor = Process.monitor(fake_pid)
 
-      :ok = Fake.stop("alpha")
+      :ok = Fake.stop(alpha)
 
       # Synchronize: the Fake must have died before the registry's
       # `:DOWN` handler fires. `assert_receive` with a generous
       # timeout is the deterministic wait; we never `Process.sleep`.
       assert_receive {:DOWN, ^monitor, :process, ^fake_pid, _}, 1_000
-      :ok = wait_for_invalidation(r, "alpha")
+      :ok = wait_for_invalidation(r, alpha)
 
-      # Pre-fix this would still return `MapSet.new(["alpha"])`
+      # Pre-fix this would still return `MapSet.new([alpha])`
       # with the stale `cached_tools` populated.
-      refute "alpha" in Registry.started_upstreams(r)
-      assert Registry.cached_tools("alpha", r) == nil
+      refute alpha in Registry.started_upstreams(r)
+      assert Registry.cached_tools(alpha, r) == nil
 
       # The next `ensure_started/2` re-attempts a fresh spawn —
       # the entry is `:not_started`, not poisoned by any cached
       # failure (per fix #1).
-      assert {:ok, _} = Registry.ensure_started("alpha", r)
-      assert "alpha" in Registry.started_upstreams(r)
+      assert {:ok, _} = Registry.ensure_started(alpha, r)
+      assert alpha in Registry.started_upstreams(r)
     end
 
     test "forcible kill of the underlying upstream invalidates the entry", %{registry: r} do
+      beta = unique("beta")
+
       :ok =
         Registry.put_fake(
-          "beta",
+          beta,
           tools_config(%{"echo" => fn args, _ -> {:ok, args} end}),
           r
         )
 
-      {:ok, _} = Registry.ensure_started("beta", r)
+      {:ok, _} = Registry.ensure_started(beta, r)
 
       [{fake_pid, _}] =
-        Elixir.Registry.lookup(PtcRunnerMcp.Upstream.Fake.Names, "beta")
+        Elixir.Registry.lookup(PtcRunnerMcp.Upstream.Fake.Names, beta)
 
       monitor = Process.monitor(fake_pid)
       Process.exit(fake_pid, :kill)
 
       assert_receive {:DOWN, ^monitor, :process, ^fake_pid, :killed}, 1_000
-      :ok = wait_for_invalidation(r, "beta")
+      :ok = wait_for_invalidation(r, beta)
 
-      refute "beta" in Registry.started_upstreams(r)
-      assert Registry.cached_tools("beta", r) == nil
+      refute beta in Registry.started_upstreams(r)
+      assert Registry.cached_tools(beta, r) == nil
     end
   end
 end
