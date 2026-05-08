@@ -103,10 +103,12 @@ The implementation **MUST** distinguish two predicates:
   description, advertised `outputSchema`, tool annotations, sandbox
   default limits, telemetry `profile:` metadata.
 - **`started_upstreams/0 :: MapSet.t(String.t())`** — runtime set of
-  upstream names that have completed `start_link/2` and `tools/list`
-  successfully at least once. Mutated as lazy spawns succeed and as
-  upstreams crash/recover. Used for: programmer-fault classification of
-  unknown tools (§7.4) and diagnostics.
+  upstream names that are **currently healthy** with a valid cached
+  `tools/list` (per the §2 definition). The set grows when
+  `ensure_started/1` succeeds and shrinks when an upstream crashes
+  or is otherwise no longer healthy; it does **not** record historical
+  health. Used for: programmer-fault classification of unknown tools
+  (§7.4) and diagnostics.
 
 Conflating the two is a specification bug; lazy spawn means
 `started_upstreams` is empty at startup. The static predicate **MUST**
@@ -171,13 +173,23 @@ mcp_server/lib/ptc_runner_mcp/
   upstream/
     fake.ex                    # in-process impl (Phase 1a)
     stdio.ex                   # subprocess impl (Phase 1b)
-    registry.ex                # name -> {impl, pid} routing
+    connection.ex              # per-name worker (Phase 1b — see §4.4)
+    registry.ex                # routing/config/status table
     supervisor.ex              # one_for_one over Connection processes
   tools.ex                     # advertised_description/2, tool_entry/0
   envelope.ex                  # success/error wrapping, structured payload
   upstream_calls.ex            # collector helpers (§6.4)
   application.ex               # supervision tree, predicates
 ```
+
+**Phase 1a vs Phase 1b shape.** In Phase 1a the Registry is both a
+routing table and the GenServer that runs `attempt_start/3` inside
+its own `handle_call`. That works for `Upstream.Fake` (no slow spawn)
+but globally serializes cold starts across upstream names — slow
+start of upstream A blocks `ensure_started` for upstream B. Phase 1b
+splits these responsibilities (§4.4) so different names can cold-start
+concurrently. The split is part of the Stdio foundation, not a
+separate refactor.
 
 ### 4.3 Connection lifecycle
 
@@ -209,6 +221,69 @@ Additional rules:
 - On graceful PtcRunner shutdown, all upstream processes **MUST** be
   terminated cleanly via stdin EOF (Stdio impl) or `stop/1` callback
   (Fake impl).
+
+### 4.4 Connection workers (Phase 1b)
+
+Phase 1b splits the Phase 1a Registry into two layers so that cold
+starts for different upstream names proceed concurrently. The split
+**MUST** land as the first Phase 1b change, before `Upstream.Stdio`,
+so Stdio never ships with global cold-start serialization.
+
+```
+Registry
+  routing/config/status table
+  name -> {connection_pid, config, status_snapshot}
+
+Connection(name)              # one GenServer per configured upstream
+  serializes ensure_started for THIS name
+  owns pid / monitor / cached_tools / backoff
+  runs Upstream.Stdio subprocess lifecycle (or Upstream.Fake in tests)
+```
+
+**Responsibilities:**
+
+| Component | Owns | Does not own |
+|---|---|---|
+| `Upstream.Registry` | Configured-upstreams table; status snapshots; per-name pid lookup; `started_upstreams/0` view; `put_fake/2` test API | `start_link`, `tools/list`, monitors, backoff, restart |
+| `Upstream.Connection` | `ensure_started/1` for its name; `Upstream.call/4` dispatch; `pid`/monitor; cached `tools/list`; restart backoff; subprocess lifecycle | Cross-name routing; configured-upstreams catalog |
+| `Upstream.Supervisor` | One Connection child per configured name; `:one_for_one`; max-restart caps | Per-name lifecycle decisions |
+
+**Concurrency invariants:**
+
+- `ensure_started` for upstream A and `ensure_started` for upstream B
+  **MUST** run concurrently when both are cold. The Phase 1a "global
+  serialization through one Registry mailbox" anti-pattern is
+  forbidden in Phase 1b.
+- `ensure_started` for upstream A from two `pmap` branches **MUST**
+  observe exactly one spawn attempt — Connection(A)'s mailbox is the
+  per-name lock.
+- `Upstream.call/4` dispatches in parallel across Connections; each
+  Connection may serialize its own `tools/call` traffic if the
+  underlying impl requires it (Stdio does, Fake doesn't).
+
+**Failure-cache placement.** The per-program ETS leader/follower
+lock and per-program failure cache (§4.1, §6.4) **stay in
+`AggregatorTools`** — they encode "did this program already attempt
+this upstream," which is per-program state and orthogonal to the
+per-name Connection worker. Connections are oblivious to
+`collector_ref`.
+
+**Lifecycle interplay (§4.3):**
+
+- Lazy spawn: `Upstream.Supervisor` starts each `Connection(name)`
+  at MCP-server startup with status `:not_started`. The subprocess /
+  Fake is NOT started until the first `ensure_started/1` call.
+- Crash: when the underlying upstream process dies, the Connection
+  receives `:DOWN`, transitions to `:not_started`, clears
+  `cached_tools`, and arms its backoff window. `started_upstreams/0`
+  immediately reflects the loss.
+- Recovery: subsequent `ensure_started/1` calls during the backoff
+  window return `{:error, :upstream_unavailable, "in recovery"}`
+  without attempting a new spawn. After the backoff expires, the
+  next call attempts a fresh spawn.
+- Shutdown: the supervisor terminates each Connection in turn; each
+  Connection runs the impl-specific shutdown (stdin EOF for Stdio,
+  `stop/1` for Fake).
 
 ## 5. Configuration
 
@@ -956,35 +1031,87 @@ DoD:
   matches §8 in aggregator mode.
 - `:mcp_no_tools` mode produces output byte-for-byte identical to v1.
 
-### 12.3 Phase 1b — Stdio implementation
+### 12.3 Phase 1b — Connection workers + Stdio
 
-This phase implements `PtcRunnerMcp.Upstream.Stdio` against the same
-behaviour, validating MCP client protocol mechanics in isolation.
+This phase ships two coupled changes: (1) the Connection-worker
+split (§4.4) so different upstreams cold-start concurrently, and
+(2) `Upstream.Stdio` against the same behaviour. **The split lands
+first, before Stdio.** Stdio MUST NOT ship while cold starts are
+globally serialized.
 
-Scope:
+Scope, in order:
 
-- Spawn one configured upstream subprocess via `Port`.
-- JSON-RPC framing/codec — reuse `PtcRunnerMcp.JsonRpc` helpers where
-  they fall out naturally; do **not** block on a JSON-RPC refactor.
+**12.3.1 Connection-worker refactor (foundation).**
+
+- Add `PtcRunnerMcp.Upstream.Connection` GenServer (one per configured
+  upstream name). It owns: `ensure_started/1` for its name,
+  `Upstream.call/4` dispatch, `pid`/monitor, cached `tools/list`,
+  per-name backoff window. Per §4.4.
+- Reduce `PtcRunnerMcp.Upstream.Registry` to a routing/config/status
+  table: `name -> {connection_pid, config, status_snapshot}`. It no
+  longer runs `attempt_start/3` itself; it forwards `ensure_started`
+  to the named Connection.
+- `Upstream.Supervisor` starts one `Connection(name)` per configured
+  upstream at MCP-server startup with status `:not_started`. Lazy
+  spawn of the underlying impl happens on first call as today.
+- Move the Phase 1a `:DOWN` invalidation, monitor management, and
+  cached-tools handling **into** Connection. Registry observes
+  status via Connection's snapshots.
+- **Keep** `AggregatorTools`'s per-program ETS leader/follower lock
+  and per-program failure cache unchanged. They prevent duplicate
+  same-name attempts within one program; they are orthogonal to
+  per-name Connections.
+- Remove the §16 "cross-name parallelism" open question entry once
+  this lands.
+
+**12.3.2 `Upstream.Stdio`.**
+
+- Spawn one configured upstream subprocess via `Port`, owned by the
+  Connection for that name.
+- JSON-RPC framing/codec — reuse `PtcRunnerMcp.JsonRpc` helpers
+  where they fall out naturally; do **not** block on a JSON-RPC
+  refactor.
 - MCP handshake: `initialize`, `notifications/initialized`,
-  `tools/list`. The `notifications/initialized` step is normative; some
-  upstreams reject calls until they receive it.
+  `tools/list`. The `notifications/initialized` step is normative;
+  some upstreams reject calls until they receive it.
 - `tools/call` request/response correlation by JSON-RPC id.
 - Per-call timeout and `max_response_bytes` enforcement (latter
   pre-decode where the wire format permits).
-- Subprocess crash detection and supervisor-mediated restart with
-  exponential backoff (cap 30 s).
+- Subprocess crash detection (Connection sees `:DOWN` from the Port);
+  supervisor-mediated Connection restart with exponential backoff
+  (cap 30 s).
 - Clean shutdown via stdin EOF.
 - A `MockServer` test fixture that speaks MCP for unit tests.
 
+**12.3.3 Cross-name concurrency test (mandatory DoD).**
+
+- Two cold upstreams (Fake or MockServer-Stdio) configured with
+  delayed `start_link` / `tools/list` (e.g., 200 ms each). Issue two
+  concurrent `(tool/mcp-call ...)` calls, one per upstream, via
+  `pmap`.
+- Assert wall-clock completion time is roughly `max(delays)`, **not**
+  `sum(delays)`. Use a generous tolerance window (e.g., assert
+  `< 1.5 × max(delays)`) so the test is deterministic without
+  drifting under load.
+- This test would have failed in Phase 1a — exactly the regression
+  the refactor prevents.
+
 DoD:
 
+- Connection-worker split is in place; Registry's `handle_call` no
+  longer runs `attempt_start/3`.
+- Cross-name concurrency test (12.3.3) passes deterministically
+  under the 10-seed flake loop.
 - Mock upstream initialize → notifications/initialized → list → call
   happy path passes.
 - Timeout, oversized response, JSON-RPC error, subprocess crash, and
   shutdown paths each have a test.
 - `Upstream.Stdio` passes the same suite of behaviour conformance
-  tests as `Upstream.Fake`.
+  tests as `Upstream.Fake` (a shared `behaviour_conformance_test.exs`
+  parameterized over both impls).
+- All Phase 1a tests still pass against the refactored Registry +
+  Connection layout (no behavior regression on `Upstream.Fake`).
+- §16 cross-name parallelism entry removed.
 
 ### 12.4 Phase 2 — Swap and integrate
 
@@ -1188,16 +1315,6 @@ Honest weaknesses:
   concern (narrower queries, sequential `map`).
 - Schema-to-PTC-Lisp signature mapping for upstream tools: not in v1;
   upstream schemas are passed through as opaque description text.
-- Cross-name parallelism in `ensure_started/1` (Phase 1b): Phase 1a's
-  Registry GenServer runs `attempt_start/3` inside its `handle_call`,
-  so cold starts for different upstreams are globally serialized.
-  Benign with `Upstream.Fake` (no slow spawn); becomes a real concern
-  with `Upstream.Stdio` (subprocess spawn + handshake can be slow).
-  Phase 1b **MUST** move the cold-start work out of the GenServer
-  mailbox — per-name worker processes, or caller-process spawn with
-  per-name locks. The Phase 1a TODO marker lives at
-  `mcp_server/lib/ptc_runner_mcp/upstream/registry.ex` above the
-  `attempt_start/3` call site.
 - Decomposed cold-start telemetry: §10 telemetry currently emits a
   single `duration` measurement on the upstream-call span.
   `upstream_calls[].duration_ms` includes ensure-started overhead per
@@ -1233,6 +1350,18 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (phase1b-prep): Promoted the Phase 1b "cross-name
+  parallelism" follow-up from §16 (open question) into core
+  architecture: added §4.4 specifying per-name `Upstream.Connection`
+  workers with the Registry reduced to a routing/config/status table.
+  Rewrote §12.3 to put the Connection-worker split first
+  (foundation), Stdio second (built on top), with a mandatory
+  cross-name concurrency DoD test (§12.3.3) — two cold upstreams,
+  concurrent calls complete in roughly `max(delay)` not `sum(delay)`.
+  Fixed §4.1's residual "succeeded at least once" wording so it
+  matches the §2 "currently healthy" definition. Removed the now-
+  obsolete §16 cross-name parallelism entry; the work it captured is
+  now Phase 1b scope.
 - 2026-05-08 (post-phase1a): Patched §6.4 to reflect what Phase 1a
   actually implements after codex review hardening: replaced the
   incorrect `:counters` cap pseudocode with `:atomics.add_get/3` (the
