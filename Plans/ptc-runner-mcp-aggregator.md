@@ -1113,25 +1113,135 @@ DoD:
   Connection layout (no behavior regression on `Upstream.Fake`).
 - §16 cross-name parallelism entry removed.
 
-### 12.4 Phase 2 — Swap and integrate
+### 12.4 Phase 2 — Real-upstream validation
+
+Phase 2 answers two questions: *does the aggregator work against real
+MCP servers* and *is the value proposition measurable?* Phase 0/1a/1b
+already shipped the architecture; Phase 2 is narrow validation work,
+not new feature development.
+
+Phase 2 lands as **three PR-sized chunks** in order. Don't bundle.
+
+#### 12.4.1 — Phase 1b follow-up polish
+
+Resolve the three non-blocking codex findings landed during Phase 1b
+before introducing real-process integration tests. These touch
+lifecycle/error paths; doing them first prevents any new flakiness in
+12.4.2 from masking real-upstream issues.
 
 Scope:
 
-- The MCP server selects between `Upstream.Fake` (in tests) and
-  `Upstream.Stdio` (in production) at the `Registry` level, based on
-  config or test setup.
-- Live integration tests against at least two real upstream MCP
-  servers (e.g., `@modelcontextprotocol/server-filesystem` plus one
-  other).
-- No shape changes to the integration surface; the swap is mechanical
-  if both impls honor the behaviour contract.
+- `Upstream.Supervisor` cascade: tie `Registry`'s lifecycle to the
+  `DynamicSupervisor` so a DynamicSupervisor restart-intensity
+  exhaustion re-bootstraps Registry (e.g., `:rest_for_one`). Test:
+  exhaust DynamicSupervisor restart intensity by crashing a
+  Connection in a loop; assert Registry is also restarted and child
+  Connections are bootstrapped on the new Registry.
+- `Upstream.Stdio.init/1` parent-EXIT watch: extend the pre-handshake
+  receive loop to watch the parent (Connection) pid in addition to
+  the Port pid, so a supervisor `:shutdown` mid-handshake propagates
+  cleanly inside the Connection child's 5 s shutdown budget. Test:
+  MockServer with a slow `initialize` reply; supervisor `:shutdown`
+  while Stdio is in handshake; assert exit reason `:shutdown`, not
+  `:killed`, and within 1 s.
+- `Registry` standalone fallback: `try/rescue` `:noproc` around
+  `DynamicSupervisor.start_child/2` so the documented
+  isolated-Registry test path works without the surrounding
+  `Upstream.Supervisor`.
 
 DoD:
 
-- Real-upstream end-to-end test: a PTC-Lisp program reads a file via
-  filesystem-mcp, transforms the result, returns the transformed
-  value. The full file content does not appear in the MCP response.
-- Phase 2 decision-point inputs (§14) are collected.
+- All three fixes land; each has a discriminating regression test.
+- 10-seed flake loop on touched files green.
+- Both full suites green; `mix credo --strict` and `mix dialyzer`
+  clean.
+- §16's "Phase 1b polish" entry removed.
+
+This is a polish chunk — keep it small. If a finding turns out to
+require an architectural change, stop and discuss; don't expand
+Phase 2 scope.
+
+#### 12.4.2 — Real-upstream filesystem MCP integration test
+
+One opt-in integration test against `@modelcontextprotocol/server-
+filesystem`. Gated on `MCP_REAL_UPSTREAM=1` so default CI stays
+deterministic and doesn't depend on `npx` / Node availability.
+
+Scope:
+
+- New `mcp_server/test/integration/real_filesystem_test.exs` (or
+  similar). Tagged `:real_upstream`; excluded by default. Run via
+  `MCP_REAL_UPSTREAM=1 mix test --include real_upstream`.
+- Test bootstrap: temp directory with one small known file. Spawn
+  filesystem-mcp via real `Upstream.Stdio` configured against the
+  temp dir.
+- PTC-Lisp program that calls `(tool/mcp-call {:server "fs" :tool
+  "read_text_file" :args {:path "<tmp>/known.txt"}})`, transforms
+  the result (e.g., line count), returns the transform.
+
+Assertions:
+
+- Program completes successfully end-to-end through real Stdio.
+- The returned `validated`/`result` field contains only the
+  transformed value, **not** the raw file content.
+- `upstream_calls` array contains exactly one `status: "ok"` entry
+  for `fs.read_text_file`.
+- The full file content does not appear anywhere in the response
+  envelope (search `Jason.encode!(envelope)` for the file-content
+  literal).
+- A failure path: `(tool/mcp-call {... :tool "nonexistent_tool" ...})`
+  raises programmer-fault per §7.4 (tool absent from cached
+  `tools/list`); `upstream_calls` records nothing because the raise
+  short-circuits before dispatch.
+
+Choose carefully if/when adding a second real upstream: prefer
+another local/mockable MCP server (memory, time, etc.) over
+GitHub/Linear/anything credentialed. Credentialed upstreams turn
+Phase 2 into credential + network reliability work, which is not
+what we need to validate now.
+
+DoD:
+
+- Test passes deterministically when run with `MCP_REAL_UPSTREAM=1`.
+- Test is excluded from default `mix test`.
+- README or test moduledoc documents how to run it (npx +
+  filesystem-mcp install, env var, expected wall-clock).
+
+#### 12.4.3 — Decision-point mini-benchmark
+
+One representative workflow run two ways, with §14 inputs measured.
+
+Scope:
+
+- Pick one workflow (suggestion: cross-server filter — read N items
+  from one upstream, narrow with a predicate, return count). Run it:
+  - **Naive multi-call**: each upstream tool exposed natively;
+    calling LLM orchestrates by issuing N separate `tools/call`s.
+    Approximate this with a fixture or scripted client; do not
+    require a real LLM in the loop unless you want to.
+  - **Aggregator**: single `ptc_lisp_execute` call; PTC-Lisp program
+    composes the upstream calls.
+- Measure §14 fields:
+  1. Token comparison (input + output for the calling LLM/client).
+  2. Program success rate (deterministic for fixture; record).
+  3. Latency: sequential vs `pmap`.
+  4. Failure clarity (synthetic upstream failure: does
+     `upstream_calls` give the calling client enough to act?).
+  5. `nil` ergonomics (force one upstream to return JSON `null`;
+     check the program handles `:json-null` correctly).
+
+DoD:
+
+- A small reproducible benchmark script in
+  `mcp_server/bench/aggregator_vs_native.exs` (or similar).
+- A short results writeup in
+  `Plans/phase2-decision-point-results.md` with the §14 numbers and
+  one paragraph of interpretation.
+- §14 decision is recorded: continue to Phase 3, revisit deferred
+  features (§3), or pause.
+
+This chunk is intentionally narrow. The point is to gather signal
+on whether to continue, not to ship a comprehensive benchmark suite.
 
 ### 12.5 Phase 3 — Config ergonomics + catalog (post-decision)
 
@@ -1315,24 +1425,6 @@ Honest weaknesses:
   concern (narrower queries, sequential `map`).
 - Schema-to-PTC-Lisp signature mapping for upstream tools: not in v1;
   upstream schemas are passed through as opaque description text.
-- Phase 1b polish (Phase 2 follow-ups): codex review of the
-  Phase 1b commit found three non-blocking concerns landed as known
-  issues:
-  1. `Upstream.Supervisor` restarts only `DynamicSupervisor` if it
-     hits its restart intensity, leaving `Registry` with no children
-     bootstrapped. Fix: tie Registry's lifecycle to the
-     DynamicSupervisor's, e.g., `:rest_for_one` so a DynamicSupervisor
-     restart cascades.
-  2. `Upstream.Stdio.init/1`'s pre-handshake receive loop watches the
-     Port pid but not the parent (Connection) pid. If shutdown
-     happens while the upstream is hung mid-handshake and exceeds the
-     Connection child's 5 s shutdown window, the supervisor escalates
-     to `:kill` instead of `:shutdown`. Functional impact: noisy
-     shutdown, not data corruption — bounded by handshake_timeout_ms.
-  3. `Registry`'s standalone-test fallback assumes
-     `DynamicSupervisor.start_child/2` returns `{:error, _}` when the
-     supervisor is missing, but it actually exits `:noproc`. Wrap in
-     `try/rescue` so the documented isolated-Registry test path works.
 - Decomposed cold-start telemetry: §10 telemetry currently emits a
   single `duration` measurement on the upstream-call span.
   `upstream_calls[].duration_ms` includes ensure-started overhead per
@@ -1368,6 +1460,14 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-08 (phase2-prep): Restructured §12.4 into three PR-sized
+  chunks: §12.4.1 Phase 1b follow-up polish (the three §16 codex
+  findings, now in scope and removed from §16), §12.4.2 one opt-in
+  real-upstream filesystem-MCP integration test gated on
+  `MCP_REAL_UPSTREAM=1`, §12.4.3 decision-point mini-benchmark
+  comparing aggregator vs naive multi-call against §14's fields.
+  Phase 2 is narrow validation work, not new feature development —
+  the architecture from 0/1a/1b is what we're validating.
 - 2026-05-08 (post-phase1b): Phase 1b shipped as `eaaccdc` after six
   codex review rounds. New components: `Upstream.Connection` (per-name
   GenServer owning ensure_started, monitor, cached_tools, backoff),
