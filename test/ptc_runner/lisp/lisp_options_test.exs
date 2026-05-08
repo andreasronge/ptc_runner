@@ -143,6 +143,28 @@ defmodule PtcRunner.Lisp.OptionsTest do
                Lisp.run(source, signature: "{name :string, age :int?}")
     end
 
+    test "hyphenated signature field name matches hyphenated result key" do
+      source = "{:user-id 42 :is-active true}"
+
+      assert {:ok, %{return: return}} =
+               Lisp.run(source, signature: "{user-id :int, is-active :bool}")
+
+      assert Map.get(return, :"user-id") == 42
+      assert Map.get(return, :"is-active") == true
+    end
+
+    test "hyphenated signature field matches underscored result key" do
+      source = "{:user_id 42}"
+
+      assert {:ok, _} = Lisp.run(source, signature: "{user-id :int}")
+    end
+
+    test "underscored signature field matches hyphenated result key" do
+      source = "{:user-id 42}"
+
+      assert {:ok, _} = Lisp.run(source, signature: "{user_id :int}")
+    end
+
     test "validation error includes path to failed field" do
       source = "{:user {:id \"not an int\"}}"
 

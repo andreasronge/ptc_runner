@@ -231,15 +231,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     {:ok, result, eval_ctx}
   rescue
-    ArithmeticError ->
+    e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
       if Enum.all?(args, &is_number/1) do
-        # Check for division by zero specifically
+        # Check for division by zero specifically. Either the inner function
+        # raised with a "division by zero" message (Math.divide / Math.quot /
+        # Math.remainder / Math.mod) or any divisor in the tail is integer 0.
         msg =
-          if fun2 == (&Kernel.//2) and Enum.any?(tl(args), &(&1 == 0)) do
-            "division by zero"
-          else
-            "bad argument in arithmetic expression"
+          cond do
+            String.contains?(Exception.message(e), "division by zero") ->
+              "division by zero"
+
+            Enum.any?(tl(args), &(&1 === 0)) ->
+              "division by zero"
+
+            true ->
+              "bad argument in arithmetic expression"
           end
 
         {:error, {:arithmetic_error, msg}}

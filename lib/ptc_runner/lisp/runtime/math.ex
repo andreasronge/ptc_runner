@@ -97,7 +97,9 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def divide(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> :nan
-      x == 0 and y == 0 -> :nan
+      # Clojure conformance: integer 0 divisor raises, regardless of x.
+      # `(/ 1.0 0.0)` keeps IEEE 754 ##Inf; only an integer 0 divisor errors.
+      is_integer(y) and y == 0 -> raise ArithmeticError, "division by zero"
       y == 0 -> divide_by_zero(x)
       SpecialValues.infinite?(x) and SpecialValues.infinite?(y) -> :nan
       SpecialValues.infinite?(x) -> divide_infinite_by_number(x, y)

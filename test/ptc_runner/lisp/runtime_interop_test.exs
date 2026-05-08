@@ -266,6 +266,55 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     end
   end
 
+  describe ".length" do
+    test "returns grapheme count of a string" do
+      assert {:ok, step} = Lisp.run(~s|(.length "hello")|)
+      assert step.return == 5
+    end
+
+    test "returns 0 for empty string" do
+      assert {:ok, step} = Lisp.run(~s|(.length "")|)
+      assert step.return == 0
+    end
+
+    test "counts graphemes, not bytes (unicode)" do
+      assert {:ok, step} = Lisp.run(~s|(.length "über")|)
+      assert step.return == 4
+    end
+
+    test "error on non-string" do
+      assert {:error, step} = Lisp.run("(.length 123)")
+      assert step.fail.message =~ ".length: expected string, got integer"
+    end
+  end
+
+  describe ".substring" do
+    test "single-arg form returns suffix from start index" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "hello world" 6)|)
+      assert step.return == "world"
+    end
+
+    test "two-arg form returns range [start, end)" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "hello world" 0 5)|)
+      assert step.return == "hello"
+    end
+
+    test "two-arg form with mid-range" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "abcdef" 1 4)|)
+      assert step.return == "bcd"
+    end
+
+    test "uses grapheme indices, not bytes" do
+      assert {:ok, step} = Lisp.run(~s|(.substring "über" 1 3)|)
+      assert step.return == "be"
+    end
+
+    test "error on non-string receiver" do
+      assert {:error, step} = Lisp.run("(.substring 123 0 1)")
+      assert step.fail.message =~ ".substring: expected string"
+    end
+  end
+
   describe ".toLowerCase" do
     test "converts string to lower case" do
       assert {:ok, step} = Lisp.run(~s|(.toLowerCase "Hello World")|)

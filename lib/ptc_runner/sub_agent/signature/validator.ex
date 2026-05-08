@@ -145,26 +145,42 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end)
   end
 
-  # Try both atom and string keys, normalizing hyphens to underscores for lookup
+  # Try several key forms so signature field names match regardless of which
+  # convention the data uses (Clojure-style `:user-id`, JSON-style `"user-id"`,
+  # or normalized `:user_id` / `"user_id"`). PTC-Lisp keyword-keyed maps reach
+  # the validator with hyphenated atom keys; Elixir-side tools typically use
+  # underscored atom or string keys.
   defp get_field(data, field_name) when is_map(data) do
-    # Normalize field name (hyphen -> underscore) to match normalized return value keys
-    normalized_name = KeyNormalizer.normalize_key(field_name)
+    normalized = KeyNormalizer.normalize_key(field_name)
 
-    case try_existing_atom_key(data, normalized_name) do
-      {:ok, _} = result ->
-        result
+    candidates =
+      Enum.uniq([
+        normalized,
+        field_name,
+        hyphenate(normalized)
+      ])
 
-      :missing ->
-        if Map.has_key?(data, normalized_name) do
-          {:ok, Map.get(data, normalized_name)}
-        else
-          :missing
-        end
-    end
+    Enum.reduce_while(candidates, :missing, fn key, _acc ->
+      case try_key(data, key) do
+        {:ok, _} = result -> {:halt, result}
+        :missing -> {:cont, :missing}
+      end
+    end)
   end
 
   defp get_field(_data, _field_name) do
     :missing
+  end
+
+  # Look up a string key by trying it both as a string and as an existing atom.
+  defp try_key(data, key) when is_binary(key) do
+    case try_existing_atom_key(data, key) do
+      {:ok, _} = result ->
+        result
+
+      :missing ->
+        if Map.has_key?(data, key), do: {:ok, Map.get(data, key)}, else: :missing
+    end
   end
 
   defp try_existing_atom_key(data, field_name) do
@@ -173,6 +189,8 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   rescue
     ArgumentError -> :missing
   end
+
+  defp hyphenate(name) when is_binary(name), do: String.replace(name, "_", "-")
 
   # ============================================================
   # Helpers

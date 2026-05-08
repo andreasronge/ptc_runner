@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-14 interop entries across 6 classes.
+16 interop entries across 6 classes.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
 
@@ -26,6 +26,8 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `.contains` | Method | `(.contains s substr)` | Returns true if string contains substring |  |
 | `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
 | `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
+| `.length` | Method | `(.length s)` | Return the grapheme count of a string | Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics. |
+| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). |
 | `.toLowerCase` | Method | `(.toLowerCase s)` | Convert string to lower case |  |
 | `.toUpperCase` | Method | `(.toUpperCase s)` | Convert string to upper case |  |
 

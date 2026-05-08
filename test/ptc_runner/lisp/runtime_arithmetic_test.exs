@@ -113,6 +113,36 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  # Clojure conformance: `(/ 1 0)` throws ArithmeticException on the JVM,
+  # but `(/ 1.0 0.0)` returns ##Inf per IEEE 754. PTC-Lisp must match.
+  describe "/ - division by zero (Clojure conformance)" do
+    test "integer / integer raises division by zero" do
+      assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ 10 0)")
+      assert message =~ "division by zero"
+    end
+
+    test "negative integer / 0 raises division by zero" do
+      assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ -5 0)")
+      assert message =~ "division by zero"
+    end
+
+    test "0 / 0 raises division by zero" do
+      assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ 0 0)")
+      assert message =~ "division by zero"
+    end
+
+    test "float / float keeps IEEE 754 ##Inf" do
+      assert_lisp("(/ 1.0 0.0)", :infinity)
+      assert_lisp("(/ -1.0 0.0)", :negative_infinity)
+      assert_lisp("(/ 0.0 0.0)", :nan)
+    end
+
+    test "mixed-mode / 0 raises (any operand integer with integer 0 divisor)" do
+      assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ 1.5 0)")
+      assert message =~ "division by zero"
+    end
+  end
+
   describe "quot - integer division (truncates toward zero)" do
     test "positive integers" do
       assert_lisp("(quot 7 2)", 3)

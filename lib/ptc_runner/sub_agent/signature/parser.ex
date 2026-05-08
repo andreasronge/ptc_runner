@@ -48,6 +48,8 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
       string("string"),
       string("int"),
       string("float"),
+      # `boolean` listed before `bool` so the longer prefix matches first.
+      string("boolean") |> replace("bool"),
       string("bool"),
       string("keyword"),
       string("map"),
@@ -182,7 +184,7 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
     parsec(:signature) |> eos()
   )
 
-  @valid_types ~w(string int float bool keyword map any datetime)
+  @valid_types ~w(string int float bool boolean keyword map any datetime)
 
   @doc """
   Parse a signature string into AST.
