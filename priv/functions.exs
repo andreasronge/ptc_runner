@@ -272,7 +272,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "<",
-      divergences: nil
+      divergences:
+        "DIV-03: strictly 2-arity; chained comparisons like (< 1 2 3) are rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "<=",
@@ -288,7 +289,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "<=",
-      divergences: nil
+      divergences:
+        "DIV-03: strictly 2-arity; chained comparisons like (<= 1 2 3) are rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "=",
@@ -304,7 +306,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "=",
-      divergences: nil
+      divergences:
+        "DIV-03: strictly 2-arity; chained equality like (= 1 1 1) is rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: ">",
@@ -320,7 +323,8 @@
       notes: nil,
       see_also: [],
       clojure_var: ">",
-      divergences: nil
+      divergences:
+        "DIV-03: strictly 2-arity; chained comparisons like (> 3 2 1) are rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: ">=",
@@ -336,7 +340,8 @@
       notes: nil,
       see_also: [],
       clojure_var: ">=",
-      divergences: nil
+      divergences:
+        "DIV-03: strictly 2-arity; chained comparisons like (>= 3 2 1) are rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "NEGATIVE_INFINITY",
@@ -833,7 +838,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "decimal?",
-      divergences: nil
+      divergences:
+        "DIV-20: always returns false; BEAM has no BigDecimal type. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "dedupe",
@@ -1121,7 +1127,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "even?",
-      divergences: nil
+      divergences:
+        "GAP-S08: accepts whole-number floats (returns true/false) instead of raising IllegalArgumentException. Non-whole floats and non-numbers return false. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "every-pred",
@@ -1413,7 +1420,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "format",
-      divergences: nil
+      divergences:
+        "DIV-21: renders nil as \"\" (not \"null\"), consistent with (str nil) → \"\". See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "frequencies",
@@ -2378,7 +2386,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "odd?",
-      divergences: nil
+      divergences:
+        "GAP-S08: accepts whole-number floats (returns true/false) instead of raising IllegalArgumentException. Non-whole floats and non-numbers return false. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "parse",
@@ -2410,7 +2419,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "parse-double",
-      divergences: nil
+      divergences:
+        "DIV-18: returns nil on non-string input instead of raising IllegalArgumentException. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "parse-int",
@@ -2442,7 +2452,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "parse-long",
-      divergences: nil
+      divergences:
+        "DIV-18: returns nil on non-string input instead of raising IllegalArgumentException. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "partial",
@@ -2715,7 +2726,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "ratio?",
-      divergences: nil
+      divergences:
+        "DIV-20: always returns false; BEAM has no ratio type. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "rational?",
@@ -2731,7 +2743,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "rational?",
-      divergences: nil
+      divergences:
+        "DIV-20: returns true only for integers (BEAM has no ratio type, so the only BEAM rationals are integers). See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "re-find",
@@ -3405,7 +3418,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "symbol?",
-      divergences: nil
+      divergences:
+        "DIV-19: always returns false; PTC-Lisp has no symbol type — keywords cover all identifier needs. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "take",
@@ -4032,7 +4046,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "defn",
-      divergences: nil
+      divergences:
+        "DIV-01: self-recursion is subject to the iteration cap (default 1000, configurable up to 10000). DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "defonce",
@@ -4160,7 +4175,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "if-let",
-      divergences: nil
+      divergences:
+        "DIV-14: only single-symbol bindings supported, no destructuring. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "if-not",
@@ -4241,7 +4257,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "loop",
-      divergences: nil
+      divergences:
+        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "none-of",
@@ -4321,7 +4338,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "recur",
-      divergences: nil
+      divergences:
+        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "return",
@@ -4465,7 +4483,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "when-let",
-      divergences: nil
+      divergences:
+        "DIV-14: only single-symbol bindings supported, no destructuring. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "when-not",

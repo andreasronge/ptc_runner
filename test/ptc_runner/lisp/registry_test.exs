@@ -173,6 +173,71 @@ defmodule PtcRunner.Lisp.RegistryTest do
     end
   end
 
+  describe "divergences metadata" do
+    # Every function listed in docs/clojure-conformance-gaps.md as a DIV-*
+    # (intentional Clojure divergence) or as a fixed-with-divergence GAP
+    # must have its registry entry's :divergences field populated. This
+    # keeps the structured metadata in sync with the prose doc — without
+    # this test, divergences silently bit-rot to nil.
+    @divergent_functions %{
+      # DIV-03: comparison operators are strictly 2-arity
+      "<" => "DIV-03",
+      "<=" => "DIV-03",
+      "=" => "DIV-03",
+      ">" => "DIV-03",
+      ">=" => "DIV-03",
+      # DIV-14: if-let / when-let only support single symbol bindings
+      "if-let" => "DIV-14",
+      "when-let" => "DIV-14",
+      # DIV-01: iteration cap on loop / recur / defn (self-recursion)
+      "defn" => "DIV-01",
+      "loop" => "DIV-01",
+      "recur" => "DIV-01",
+      # DIV-18: parse-long / parse-double return nil instead of raising
+      "parse-long" => "DIV-18",
+      "parse-double" => "DIV-18",
+      # DIV-19: symbol? always returns false
+      "symbol?" => "DIV-19",
+      # DIV-20: decimal? / ratio? always false; rational? = integers only
+      "decimal?" => "DIV-20",
+      "ratio?" => "DIV-20",
+      "rational?" => "DIV-20",
+      # DIV-21: format renders nil as ""
+      "format" => "DIV-21",
+      # DIV-22: subs returns "" on out-of-range
+      "subs" => "DIV-22",
+      # GAP-S08: even? / odd? handle floats gracefully (intentional divergence)
+      "even?" => "GAP-S08",
+      "odd?" => "GAP-S08"
+    }
+
+    test "every documented divergent function has a non-nil divergences field" do
+      missing =
+        for {name, expected_ref} <- @divergent_functions,
+            entry = Registry.doc(name),
+            entry == nil or is_nil(entry[:divergences]) or
+              not String.contains?(entry[:divergences], expected_ref) do
+          {name, expected_ref}
+        end
+
+      assert missing == [],
+             "registry entries missing :divergences (or wrong DIV-XX ref):\n" <>
+               Enum.map_join(missing, "\n", fn {name, ref} ->
+                 "  - #{name} expected #{ref}"
+               end)
+    end
+
+    test "divergences strings reference the conformance doc" do
+      for {name, _ref} <- @divergent_functions do
+        entry = Registry.doc(name)
+        assert entry, "missing entry for #{name}"
+
+        assert entry[:divergences] =~ "clojure-conformance-gaps.md",
+               "#{name} divergences should link to docs/clojure-conformance-gaps.md, got: #{inspect(entry[:divergences])}"
+      end
+    end
+  end
+
   defp binding_type({:normal, _}), do: :normal
   defp binding_type({:variadic, _, _}), do: :variadic
   defp binding_type({:variadic_nonempty, _, _}), do: :variadic_nonempty
