@@ -1,8 +1,21 @@
 defmodule PtcRunnerMcp.Sandbox do
   @moduledoc """
   Thin adapter that drives `PtcRunner.PtcToolProtocol.lisp_run/2` with
-  the Phase 2/3 invariants (§ 11) and renders the result into the MCP
-  envelope.
+  the Phase 2/3 invariants (§ 11) and **builds the v1 structured
+  payload** for the MCP request handler.
+
+  Per `Plans/ptc-runner-mcp-aggregator.md` §11.3, the MCP request
+  handler — not this module — owns the `success/error_envelope`
+  wrap. This separation gives Phase 1a a clean place to insert
+  `upstream_calls` decoration between "build payload" (here) and
+  "wrap envelope" (in `PtcRunnerMcp.Tools`):
+
+      {kind, payload} = Sandbox.execute(program, ctx, sig, opts)
+      # Phase 1a: payload = decorate_with_upstream_calls(payload, drained)
+      case kind do
+        :ok    -> Envelope.success(payload)
+        :error -> Envelope.error_envelope(payload)
+      end
 
   Per `Plans/ptc-runner-mcp-server.md` § 11, every `tools/call` must:
 
@@ -12,9 +25,16 @@ defmodule PtcRunnerMcp.Sandbox do
       internals
     * tag the call with `caller: :mcp` for telemetry
 
-  Result rendering goes through `PtcToolProtocol.render_success_from_step/2`
-  (§ 13.1) for success and `PtcToolProtocol.render_error/3` for the
-  shared reasons; `:fail` carries a `result` preview per § 10.5.
+  Payload construction:
+
+    * Success goes through
+      `PtcToolProtocol.render_success_from_step/2` (§ 13.1).
+    * Shared-reason errors go through
+      `PtcRunnerMcp.Envelope.render_error_payload/3`, which
+      delegates to `PtcToolProtocol.render_error/3` for the seven
+      shared reasons and constructs MCP-only payloads (`:busy`,
+      `:unknown_tool`, `:shutting_down`) locally.
+    * `:fail` carries a `result` preview per § 10.5.
 
   Phase 3 wires `context` (§ 9.3) and `signature` (§ 9.4):
 
@@ -34,17 +54,60 @@ defmodule PtcRunnerMcp.Sandbox do
 
   alias PtcRunner.Lisp.Format
   alias PtcRunner.PtcToolProtocol
-  alias PtcRunnerMcp.Envelope
+  alias PtcRunnerMcp.{Envelope, Limits}
+
+  @typedoc """
+  Outcome of a single `tools/call` PTC-Lisp execution.
+
+  The first element discriminates success vs. error and tells the
+  request handler which envelope wrapper to use
+  (`Envelope.success/1` for `:ok`, `Envelope.error_envelope/1` for
+  `:error`). The second element is the **unwrapped** v1 R22/R23
+  structured payload (string-keyed map, JSON-encodable).
+  """
+  @type result :: {:ok | :error, map()}
+
+  # Word size of the running BEAM in bytes. 8 on 64-bit (the only
+  # supported target — see CLAUDE.md "Tech Stack: OTP 28"). Cached
+  # at compile time because the value cannot change for a given
+  # release. Used to convert
+  # `Limits.program_memory_limit_bytes/0` (bytes, the user-facing
+  # unit per `Plans/ptc-runner-mcp-aggregator.md` §9) into the BEAM
+  # words `Lisp.run/2`'s `:max_heap` opt expects (see
+  # `lib/ptc_runner/sandbox.ex` "Max Heap (~10 MB = 1,250,000 words)").
+  @bytes_per_word :erlang.system_info(:wordsize)
+
+  # BEAM's minimum accepted `max_heap_size` (in words) — empirically
+  # 233 on OTP 28; values below are rejected by `spawn_opt` with
+  # `ArgumentError: invalid spawn option`. The forwarder must clamp
+  # to this floor so a sub-word byte count from `Limits` (e.g.,
+  # `program_memory_limit_bytes: 4` → 0 words on 64-bit) does not
+  # either silently disable the cap (the BEAM's `0` semantics) or
+  # crash the spawn outright (sizes 1..232). Operators who configure
+  # a tiny byte count get the tightest cap the runtime will accept,
+  # which trips on virtually any allocation — preserving "tight cap
+  # → tight enforcement" semantics.
+  @min_max_heap_words 233
 
   @typedoc "Already-parsed signature term, or `nil` when no signature was supplied."
   @type parsed_signature :: term() | nil
 
   @doc """
-  Run a validated PTC-Lisp `program` and return an MCP envelope.
+  Run a validated PTC-Lisp `program` and return the **unwrapped**
+  result for the MCP request handler to wrap.
 
-  All three arguments are pre-validated by the caller (see
-  `PtcRunnerMcp.Tools.call/1`); this function does not re-check shape
-  or size:
+  Returns `{:ok, structured_payload}` for a successful program (with
+  optional signature `validated` field) and `{:error, structured_payload}`
+  for any failure mode (`:fail`, `:timeout`, `:memory_limit`,
+  `:parse_error`, `:runtime_error`, `:validation_error`). The handler
+  is expected to wrap with `PtcRunnerMcp.Envelope.success/1` or
+  `PtcRunnerMcp.Envelope.error_envelope/1` per the kind discriminator
+  — see this module's `@moduledoc` for the §11.3 decoration-seam
+  rationale.
+
+  All three positional arguments are pre-validated by the caller
+  (see `PtcRunnerMcp.Tools.call/1`); this function does not re-check
+  shape or size:
 
     * `program` — non-empty PTC-Lisp source string within
       `:max_program_bytes`.
@@ -53,7 +116,7 @@ defmodule PtcRunnerMcp.Sandbox do
     * `parsed_signature` — either `nil` (no signature supplied) or a
       term returned by `PtcToolProtocol.parse_signature/1`.
   """
-  @spec execute(String.t(), map(), parsed_signature(), keyword()) :: Envelope.t()
+  @spec execute(String.t(), map(), parsed_signature(), keyword()) :: result()
   def execute(program, context \\ %{}, parsed_signature \\ nil, opts \\ [])
       when is_binary(program) and is_map(context) and is_list(opts) do
     case PtcToolProtocol.lisp_run(program, lisp_run_opts(context, opts)) do
@@ -80,11 +143,50 @@ defmodule PtcRunnerMcp.Sandbox do
   # ----------------------------------------------------------------
 
   defp lisp_run_opts(context, opts) do
+    # Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.2 / §11.5):
+    #   * `:tools` is the new aggregator seam. An empty list (the only
+    #     Phase 0 value) leaves Lisp.run/2's behavior unchanged versus
+    #     v1, where no tools were registered. Phase 1a will populate
+    #     it with the `mcp-call` virtual-tool registry.
+    #   * `:profile` is a pure-instrumentation tag attached to the
+    #     `[:ptc_runner, :lisp, :execute, *]` span. v1 always passes
+    #     `:mcp_no_tools`; Phase 1a flips it to `:mcp_aggregator` from
+    #     an aggregator-mode handler.
+    tools = Keyword.get(opts, :tools, [])
+
+    # Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.6 / §9):
+    # forward the configured program-level limits into Lisp.run/2.
+    # Without this, `--program-timeout-ms` and
+    # `--program-memory-limit-bytes` (and their env-var equivalents)
+    # are persisted in `Limits` but never consumed — the PTC-Lisp
+    # sandbox would silently use its own hard-coded defaults.
+    # `:max_heap` is in BEAM words (see lib/ptc_runner/sandbox.ex);
+    # the Limits getter is in bytes per the user-facing flag/env
+    # name, so we convert here.
+    #
+    # `max(@min_max_heap_words, ...)`: see the module-level constant
+    # for the rationale — a sub-word byte count rounds to 0 words
+    # ("no limit" in the BEAM), and the BEAM's `spawn_opt` rejects
+    # any positive value below 233. Clamping to the runtime floor
+    # preserves "tiny byte count → tight cap" semantics without
+    # crashing the spawn.
+    timeout_ms = Limits.program_timeout_ms()
+
+    max_heap_words =
+      max(
+        @min_max_heap_words,
+        div(Limits.program_memory_limit_bytes(), @bytes_per_word)
+      )
+
     base = [
       caller: :mcp,
+      profile: :mcp_no_tools,
       memory: %{},
+      tools: tools,
       tool_cache: %{},
       context: context,
+      timeout: timeout_ms,
+      max_heap: max_heap_words,
       # § 9.3: a `data/<key>` reference for an absent key must produce
       # a runtime_error naming the binding, not silently return nil.
       strict_data: true
@@ -109,18 +211,27 @@ defmodule PtcRunnerMcp.Sandbox do
   end
 
   # ----------------------------------------------------------------
-  # Renderers
+  # Renderers — produce {:ok | :error, payload} tuples
   # ----------------------------------------------------------------
+  #
+  # Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.3) keeps the
+  # structured-payload construction inside `Sandbox.execute/4` and
+  # leaves the envelope wrap to the request handler. In Phase 1a the
+  # handler will insert `upstream_calls` decoration between the two
+  # — returning unwrapped `{kind, payload}` tuples gives the handler
+  # a clean slot to augment before wrapping. `PtcRunnerMcp.Envelope`
+  # and `PtcRunner.PtcToolProtocol` MUST NOT gain new options for
+  # `upstream_calls` in Phase 0 (§11.3 last sentence); the
+  # decoration lives in the request handler only.
 
   # No signature: emit R22 success without a `validated` field.
   defp render_success_with_signature(step, nil) do
-    json = PtcToolProtocol.render_success_from_step(step, [])
-    Envelope.success(Jason.decode!(json))
+    {:ok, build_v1_success_payload(step, [])}
   end
 
   # Signature supplied: validate the typed return value, then either
   # surface the structured `validated` field on success or emit a
-  # `validation_error` envelope on mismatch.
+  # `validation_error` payload on mismatch.
   defp render_success_with_signature(step, parsed_signature) do
     typed = atomize(step.return, parsed_signature)
     definition = %{parsed_signature: parsed_signature}
@@ -129,8 +240,7 @@ defmodule PtcRunnerMcp.Sandbox do
       :ok ->
         case PtcToolProtocol.to_json_value(typed) do
           {:ok, encoded} ->
-            json = PtcToolProtocol.render_success_from_step(step, validated: encoded)
-            Envelope.success(Jason.decode!(json))
+            {:ok, build_v1_success_payload(step, validated: encoded)}
 
           {:error, reason} ->
             # The signature matched but the typed value contained a
@@ -138,12 +248,28 @@ defmodule PtcRunnerMcp.Sandbox do
             # to validation_error with a path-pointing message — the
             # LLM authored a program whose typed shape is fine but
             # whose contents aren't representable on the wire.
-            Envelope.render_error(:validation_error, "validated value: #{reason}")
+            error_payload(:validation_error, "validated value: #{reason}")
         end
 
       {:error, errors} when is_list(errors) ->
-        Envelope.render_error(:validation_error, format_validation_errors(errors))
+        error_payload(:validation_error, format_validation_errors(errors))
     end
+  end
+
+  # Build the v1 R22 success payload (string-keyed map) — this is the
+  # "build" step of the §11.3 two-step seam. Phase 1a's request
+  # handler may augment this map with `upstream_calls` before wrapping.
+  defp build_v1_success_payload(step, render_opts) do
+    step
+    |> PtcToolProtocol.render_success_from_step(render_opts)
+    |> Jason.decode!()
+  end
+
+  # Build a v1 R23 error payload (string-keyed map) for the shared and
+  # MCP-only reasons.  Mirrors `build_v1_success_payload/2` for the
+  # error path; the request handler wraps with `error_envelope/1`.
+  defp error_payload(reason, message, opts \\ []) do
+    {:error, Envelope.render_error_payload(reason, message, opts)}
   end
 
   # Atomize the program's raw return value to the type-shape implied by
@@ -172,11 +298,11 @@ defmodule PtcRunnerMcp.Sandbox do
     {preview, _truncated} = Format.to_clojure(fail_args, limit: 50)
     message = inspect(fail_args)
 
-    Envelope.render_error(:fail, message, result: preview, feedback: message)
+    error_payload(:fail, message, result: preview, feedback: message)
   end
 
   defp render_runtime_error(%{reason: reason, message: message}) do
-    Envelope.render_error(classify(reason), message)
+    error_payload(classify(reason), message)
   end
 
   # Map `Step.fail.reason` (closed atom set per `lib/ptc_runner/step.ex`

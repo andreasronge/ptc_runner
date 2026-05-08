@@ -78,6 +78,37 @@ defmodule PtcRunner.LispTelemetryTest do
                       %{caller: :text_mode}}
     end
 
+    test ":profile defaults to nil and propagates to :start and :stop (Phase 0 §11.5)" do
+      assert {:ok, _} = Lisp.run("(+ 1 2)")
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{profile: nil}}
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _, %{profile: nil}}
+    end
+
+    test ":profile :mcp_no_tools propagates (Phase 0 §11.5)" do
+      assert {:ok, _} = Lisp.run("(+ 1 2)", caller: :mcp, profile: :mcp_no_tools)
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
+                      %{caller: :mcp, profile: :mcp_no_tools}}
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _,
+                      %{caller: :mcp, profile: :mcp_no_tools}}
+    end
+
+    test "out-of-set :profile raises ArgumentError (closed set)" do
+      assert_raise ArgumentError, fn ->
+        Lisp.run("(+ 1 2)", profile: :bogus)
+      end
+    end
+
+    test ":profile accepts :mcp_aggregator, :in_process_v1, :text_mode" do
+      for prof <- [:mcp_aggregator, :in_process_v1, :text_mode] do
+        assert {:ok, _} = Lisp.run("(+ 1 2)", profile: prof)
+        assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{profile: ^prof}}
+      end
+    end
+
     test "out-of-set :caller raises ArgumentError naming the bad atom and the closed set" do
       assert_raise ArgumentError, fn -> Lisp.run("(+ 1 2)", caller: :bogus) end
 
