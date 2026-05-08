@@ -325,27 +325,44 @@ defmodule PtcRunnerMcp.Upstream.Registry do
       owner: owner
     }
 
-    case DynamicSupervisor.start_child(sup, {Connection, args}) do
+    # `DynamicSupervisor.start_child/2` is a `GenServer.call/3`; if
+    # the named supervisor is missing it does NOT return
+    # `{:error, _}` — it exits with `:noproc`. Codex review of
+    # `eaaccdc` flagged that the original `case` here matched only on
+    # `{:error, _}` and so the documented standalone-Registry test
+    # path (§5.4: a test that drives `put_fake/2` against a Registry
+    # without the surrounding `Upstream.Supervisor`) crashed instead
+    # of falling through. Catch the `:exit, :noproc` and route to the
+    # plain-`start_link` fallback the original code intended.
+    try do
+      case DynamicSupervisor.start_child(sup, {Connection, args}) do
+        {:ok, _pid} = ok ->
+          ok
+
+        {:error, {:already_started, pid}} ->
+          {:ok, pid}
+
+        {:error, reason} ->
+          start_connection_fallback(args, reason)
+      end
+    catch
+      :exit, {:noproc, _} ->
+        start_connection_fallback(args, :noproc)
+    end
+  end
+
+  defp start_connection_fallback(args, reason) do
+    # If the supervisor is missing (or returned an error we can
+    # recover from), fall back to a plain `start_link`. Tests that
+    # exercise `put_fake/2` against an isolated Registry rely on this.
+    case Connection.start_link(args) do
       {:ok, _pid} = ok ->
         ok
 
-      {:error, {:already_started, pid}} ->
-        {:ok, pid}
-
-      {:error, reason} ->
-        # If the supervisor is missing (e.g. a test that started the
-        # Registry without the surrounding Upstream.Supervisor),
-        # fall back to a plain `start_link`. Tests that exercise
-        # `put_fake/2` against an isolated Registry rely on this.
-        case Connection.start_link(args) do
-          {:ok, _pid} = ok ->
-            ok
-
-          err ->
-            # Surface the original supervisor reason so
-            # misconfigurations are diagnosable without test-path noise.
-            {:error, {:start_failed, reason, err}}
-        end
+      err ->
+        # Surface the original supervisor reason so
+        # misconfigurations are diagnosable without test-path noise.
+        {:error, {:start_failed, reason, err}}
     end
   end
 
