@@ -1,16 +1,8 @@
 defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
   @moduledoc """
   Integration tests for on_chunk streaming in text-only mode.
-
-  `async: false` because three tests here mutate
-  `Application.put_env(:ptc_runner, :llm_adapter, ...)` which is global.
-  Under `async: true` a concurrent test can clobber the adapter
-  registration mid-run, dropping through to a real HTTP call against
-  the placeholder `ollama:test-model` model and surfacing as a flaky
-  404 LLM error. Disabling parallel execution per ExUnit's contract is
-  cheaper than threading the adapter through every internal call site.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
 
@@ -45,17 +37,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
 
   describe "on_chunk with text-only SubAgent" do
     test "chunks are received during streaming" do
-      prev = Application.get_env(:ptc_runner, :llm_adapter)
-      Application.put_env(:ptc_runner, :llm_adapter, StreamingMockAdapter)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:ptc_runner, :llm_adapter, prev),
-          else: Application.delete_env(:ptc_runner, :llm_adapter)
-      end)
-
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("ollama:test-model")
+      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: StreamingMockAdapter)
 
       test_pid = self()
       on_chunk = fn %{delta: text} -> send(test_pid, {:chunk, text}) end
@@ -68,17 +51,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
     end
 
     test "graceful degradation: on_chunk fires once when adapter has no stream/2" do
-      prev = Application.get_env(:ptc_runner, :llm_adapter)
-      Application.put_env(:ptc_runner, :llm_adapter, NonStreamingMockAdapter)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:ptc_runner, :llm_adapter, prev),
-          else: Application.delete_env(:ptc_runner, :llm_adapter)
-      end)
-
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("ollama:test-model")
+      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: NonStreamingMockAdapter)
 
       test_pid = self()
       on_chunk = fn %{delta: text} -> send(test_pid, {:chunk, text}) end
@@ -114,17 +88,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
     end
 
     test "on_chunk exception in text-only mode does not crash the loop" do
-      prev = Application.get_env(:ptc_runner, :llm_adapter)
-      Application.put_env(:ptc_runner, :llm_adapter, NonStreamingMockAdapter)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:ptc_runner, :llm_adapter, prev),
-          else: Application.delete_env(:ptc_runner, :llm_adapter)
-      end)
-
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("ollama:test-model")
+      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: NonStreamingMockAdapter)
 
       on_chunk = fn _chunk -> raise "socket closed" end
 
@@ -153,17 +118,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStreamingTest do
     end
 
     test "works without on_chunk (default behavior unchanged)" do
-      prev = Application.get_env(:ptc_runner, :llm_adapter)
-      Application.put_env(:ptc_runner, :llm_adapter, StreamingMockAdapter)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:ptc_runner, :llm_adapter, prev),
-          else: Application.delete_env(:ptc_runner, :llm_adapter)
-      end)
-
       agent = SubAgent.new(prompt: "Say hello", output: :text)
-      llm = PtcRunner.LLM.callback("ollama:test-model")
+      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: StreamingMockAdapter)
 
       # No on_chunk — should work exactly as before (call/2 path)
       {:ok, step} = SubAgent.Loop.run(agent, llm: llm)

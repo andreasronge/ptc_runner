@@ -129,6 +129,11 @@ defmodule PtcRunner.LLM do
   ## Options
 
   - `:cache` - Enable prompt caching (default: false)
+  - `:adapter` - Override the LLM adapter module for this callback only.
+    When omitted, falls back to the globally configured adapter via
+    `adapter!/0` (read at callback-construction time, not per-call). Tests
+    SHOULD pass `:adapter` directly so they can run async without
+    racing global `Application.put_env(:ptc_runner, :llm_adapter, …)`.
 
   ## Examples
 
@@ -141,10 +146,14 @@ defmodule PtcRunner.LLM do
 
       # Using full model ID (passes through)
       llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
+
+      # Inject a specific adapter (e.g. in tests)
+      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: MyMockAdapter)
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
   def callback(model, opts \\ []) do
-    adapter = adapter!()
+    {adapter_override, opts} = Keyword.pop(opts, :adapter)
+    adapter = adapter_override || adapter!()
     model = PtcRunner.LLM.Registry.resolve!(model)
     merged_opts = Map.new(opts)
 
