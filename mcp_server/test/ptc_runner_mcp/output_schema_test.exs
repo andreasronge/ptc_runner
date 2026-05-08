@@ -22,24 +22,12 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
         "oneOf" => [
           %{
             "type" => "object",
-            "required" => ["status", "prints", "feedback", "memory", "truncated"],
+            "required" => ["status", "prints", "feedback", "truncated"],
             "properties" => %{
               "status" => %{"const" => "ok"},
               "result" => %{"type" => "string"},
               "prints" => %{"type" => "array", "items" => %{"type" => "string"}},
               "feedback" => %{"type" => "string"},
-              "memory" => %{
-                "type" => "object",
-                "required" => ["changed", "stored_keys", "truncated"],
-                "properties" => %{
-                  "changed" => %{
-                    "type" => "object",
-                    "additionalProperties" => %{"type" => "string"}
-                  },
-                  "stored_keys" => %{"type" => "array", "items" => %{"type" => "string"}},
-                  "truncated" => %{"type" => "boolean"}
-                }
-              },
               "truncated" => %{"type" => "boolean"},
               "validated" => %{}
             }
@@ -82,8 +70,17 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
       assert "status" in success_branch["required"]
       assert "prints" in success_branch["required"]
       assert "feedback" in success_branch["required"]
-      assert "memory" in success_branch["required"]
       assert "truncated" in success_branch["required"]
+    end
+
+    # Issue #879: each MCP call is one-shot — state never persists across
+    # calls — so the response must not surface memory.changed/stored_keys
+    # which misled LLMs into thinking they could rely on persistence.
+    test "memory is NOT in the success-branch schema (issue #879)" do
+      [success_branch, _error_branch] = Tools.output_schema()["oneOf"]
+
+      refute "memory" in success_branch["required"]
+      refute Map.has_key?(success_branch["properties"], "memory")
     end
 
     test "error branch enum lists every reason the server emits" do
@@ -113,6 +110,23 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
       Enum.each(success_branch["required"], fn key ->
         assert Map.has_key?(sc, key), "expected R22 to have key #{inspect(key)}: #{inspect(sc)}"
       end)
+    end
+
+    # Issue #879: confirm the actual response payload omits memory, not
+    # just that the schema does. Use a defn'd name to make the regression
+    # vivid — pre-fix this would have surfaced sum-tree in stored_keys.
+    test "an R22 success payload does NOT include the memory field (issue #879)" do
+      env =
+        Tools.call(%{
+          "name" => "ptc_lisp_execute",
+          "arguments" => %{"program" => "(defn sum-tree [t] (reduce + t)) (sum-tree [1 2 3])"}
+        })
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+
+      refute Map.has_key?(sc, "memory"),
+             "MCP one-shot response leaked memory field: #{inspect(sc)}"
     end
 
     test "an R23 error payload has all error-branch required keys" do

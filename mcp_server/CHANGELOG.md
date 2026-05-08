@@ -7,6 +7,23 @@ See `Plans/ptc-runner-mcp-server.md` § 7.3 for the versioning
 policy that governs MCP `protocolVersion` floor and primary
 revisions.
 
+## Unreleased
+
+### Breaking changes
+
+- `outputSchema` no longer includes the `memory` field on success
+  responses, and `tools/call` responses no longer surface
+  `memory.{changed, stored_keys, truncated}`. Each MCP call is
+  one-shot — `defn`'d names never persist across calls — so the
+  field misled callers into expecting state. Clients that read
+  `structuredContent["memory"]` should remove that path. Issue #879.
+
+### Documentation
+
+- `tools/list` describes the optional `signature` argument as
+  accepting both `() -> {...}` and the bare-type shorthand `{...}`.
+  Issue #882.
+
 ## 0.1.0 — 2026-05-07
 
 Initial release. Implements Phases 0.5 → 5 of the v1

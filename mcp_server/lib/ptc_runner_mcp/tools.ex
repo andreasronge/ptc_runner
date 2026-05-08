@@ -40,33 +40,25 @@ defmodule PtcRunnerMcp.Tools do
   @external_resource @priv_path
   @authoring_card File.read!(@priv_path)
 
-  # Verbatim § 10.4 outputSchema. `oneOf` discriminated by `status`.
+  # § 10.4 outputSchema. `oneOf` discriminated by `status`.
   # `result` is intentionally NOT in the success branch's `required`
   # list — `render_success/2` elides it for programs whose final
   # expression and `lisp_step.return` are both nil (§ 7.4 D2).
+  # `memory` was removed in issue #879: each MCP call is one-shot, so
+  # surfacing memory.changed/stored_keys misled LLMs into thinking
+  # state would persist. The renderer now omits the field entirely
+  # for one-shot callers (`render_success_from_step/2`).
   @output_schema %{
     "type" => "object",
     "oneOf" => [
       %{
         "type" => "object",
-        "required" => ["status", "prints", "feedback", "memory", "truncated"],
+        "required" => ["status", "prints", "feedback", "truncated"],
         "properties" => %{
           "status" => %{"const" => "ok"},
           "result" => %{"type" => "string"},
           "prints" => %{"type" => "array", "items" => %{"type" => "string"}},
           "feedback" => %{"type" => "string"},
-          "memory" => %{
-            "type" => "object",
-            "required" => ["changed", "stored_keys", "truncated"],
-            "properties" => %{
-              "changed" => %{
-                "type" => "object",
-                "additionalProperties" => %{"type" => "string"}
-              },
-              "stored_keys" => %{"type" => "array", "items" => %{"type" => "string"}},
-              "truncated" => %{"type" => "boolean"}
-            }
-          },
           "truncated" => %{"type" => "boolean"},
           "validated" => %{}
         }
@@ -413,7 +405,9 @@ defmodule PtcRunnerMcp.Tools do
         "signature" => %{
           "type" => "string",
           "description" =>
-            "Optional PTC signature for return validation, e.g. '() -> {count :int}'."
+            "Optional PTC signature for return validation, e.g. '() -> {count :int}'. " <>
+              "The '() ->' prefix is shorthand-optional — a bare type like '{count :int}' " <>
+              "is equivalent and accepted. See docs/signature-syntax.md."
         }
       },
       "required" => ["program"]
