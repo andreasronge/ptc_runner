@@ -1669,6 +1669,33 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run(~S|(subs "hello" 10)|)
       assert result == ""
     end
+
+    # See clojure-conformance-gaps.md DIV-22. Negative start used to clamp to 0
+    # and silently return the whole string, which produced wrong-but-plausible
+    # output when chaining (.indexOf s "miss") -> -1 -> subs. We now treat
+    # negative starts as "before the string" and return "" — a clean signal
+    # the caller can guard with (when (seq result) ...).
+    test "negative start returns empty string (not whole string)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "abcdef" -1)|)
+      assert result == ""
+    end
+
+    test ".indexOf miss feeding subs returns empty string (the canonical trap)" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(let [s "abcdef"] (subs s (.indexOf s "xyz")))|)
+
+      assert result == ""
+    end
+
+    test "negative start in 3-arg form returns empty string" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "abcdef" -1 3)|)
+      assert result == ""
+    end
+
+    test "(subs s 0 large-n) still truncates (first-N-chars idiom preserved)" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(subs "abc" 0 100)|)
+      assert result == "abc"
+    end
   end
 
   describe "join" do
