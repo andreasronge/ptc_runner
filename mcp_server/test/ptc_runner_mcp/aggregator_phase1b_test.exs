@@ -63,9 +63,17 @@ defmodule PtcRunnerMcp.AggregatorPhase1bTest do
       # the serial pre-fix path is ≥ 600ms (50%+ outside the bound).
       delay_ms = 300
 
+      # Per-test unique names. `Fake.Names` is process-wide; this
+      # async: false test still runs concurrently with async: true
+      # tests that hit the same Registry, so literal "alpha"/"beta"
+      # races their `Fake.Names` lookups. See longer rationale in
+      # `upstream_registry_phase1a_test.exs`.
+      alpha = "alpha-#{System.unique_integer([:positive])}"
+      beta = "beta-#{System.unique_integer([:positive])}"
+
       :ok =
         Registry.put_fake(
-          "alpha",
+          alpha,
           %{
             init_delay_ms: delay_ms,
             tools: %{
@@ -78,7 +86,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1bTest do
 
       :ok =
         Registry.put_fake(
-          "beta",
+          beta,
           %{
             init_delay_ms: delay_ms,
             tools: %{
@@ -92,13 +100,13 @@ defmodule PtcRunnerMcp.AggregatorPhase1bTest do
       # The program issues two concurrent (tool/mcp-call ...) calls
       # via pmap, one per upstream. Each cold-starts its own
       # Connection's Fake (200 ms). Pre-Phase-1b: the Registry's
-      # serial `handle_call` runs `attempt_start/3` for "alpha"
-      # then "beta", so wall-clock ≈ 400 ms. Phase 1b: Connection
+      # serial `handle_call` runs `attempt_start/3` for the two
+      # names, so wall-clock ≈ 400 ms. Phase 1b: Connection
       # mailboxes are independent — wall-clock ≈ 200 ms.
       program = """
       (pmap (fn [server]
               (tool/mcp-call {:server server :tool "ping" :args {}}))
-            ["alpha" "beta"])
+            [#{Jason.encode!(alpha)} #{Jason.encode!(beta)}])
       """
 
       started = System.monotonic_time(:millisecond)

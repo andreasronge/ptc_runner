@@ -5,7 +5,13 @@
 # `MIX_ENV=prod mix release --overwrite` to have run first. They are
 # excluded from the default `mix test` run; opt in with
 # `mix test --only integration` or `--include integration`.
-ExUnit.start(exclude: [:integration])
+#
+# Phase 2.2 (`Plans/ptc-runner-mcp-aggregator.md` §12.4.2) adds
+# `:real_upstream` for tests that spawn an actual upstream MCP server
+# subprocess (e.g. `@modelcontextprotocol/server-filesystem` via
+# `npx`). Excluded by default; opt in with
+# `MCP_REAL_UPSTREAM=1 mix test --include real_upstream`.
+ExUnit.start(exclude: [:integration, :real_upstream])
 
 # Default tests to a quiet logger; individual tests that exercise
 # stderr emission can `PtcRunnerMcp.Log.set_level/1` themselves.
