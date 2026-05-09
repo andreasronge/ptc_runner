@@ -1439,6 +1439,14 @@ Honest weaknesses:
   shutdown of an upstream that's stuck in `initialize`. Not a data
   correctness issue. Promote to its own hardening phase if the
   scenario shows up outside shutdown.
+- Phase 3 catalog `false`-const corner case: `Catalog.render_type/1`
+  uses `cond` with truthiness checks to detect `:enum` / `:const`
+  constraints, so a schema `{"const": false}` skips the const branch
+  and renders as the primitive type (`boolean`) instead of
+  `const<false>`. Fix is one line — `Map.has_key?` instead of
+  truthiness. Real-world impact is narrow (most boolean consts in MCP
+  tool schemas are omitted rather than set to `false`), but the
+  affected tools would advertise the wrong catalog label.
 - Real-upstream test path-escaping (Phase 2.2 follow-up): the
   `real_filesystem_test` interpolates the temp directory path
   directly into a PTC-Lisp source string. On macOS/Linux with sane
@@ -1497,6 +1505,23 @@ Honest weaknesses:
   behavior with real MCP clients) deferred to Phase 3 alongside
   catalog rollout. Recommendation in the writeup: continue to
   Phase 3.
+- 2026-05-09 (phase3-shipped): Phase 3 merged as `d93c88f` after
+  three codex review rounds. Inline upstream catalog rendered into
+  `ptc_lisp_execute`'s description per §12.5 format, frozen at boot
+  via `:persistent_term` (one-shot write after eager-start completes;
+  guarantees deterministic catalog text for the lifetime of the MCP
+  process per §12.5's "rebuilt only on PtcRunner restart" rule).
+  Eager-start at boot is a documented deviation from §4.3 lazy-spawn,
+  required by the catalog contract; failed-at-boot upstreams render
+  `(unavailable at startup)` and re-attempt on first call. Catalog
+  type renderer handles `enum<type>` / `enum` (heterogeneous) /
+  `const<json-value>` per §12.5; one corner case (false const) logged
+  in §16. Tightened `tool/mcp-call` runtime errors to include
+  `<server>.<tool>` identification per §7.2. Added
+  `docs/aggregator-mode.md` reference (config, programs, error
+  table). All §14 decision-point fields except #6 (real-client
+  envelope acceptance) were measured in Phase 2.3; #6 will surface
+  naturally as users adopt the aggregator with real Claude clients.
 - 2026-05-09 (phase2.2-shipped): Phase 2.2 merged as `bbfaada` after
   four codex review rounds. Single opt-in real-upstream integration
   test against `@modelcontextprotocol/server-filesystem@2026.1.14`,
