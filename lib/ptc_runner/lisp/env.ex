@@ -68,7 +68,13 @@ defmodule PtcRunner.Lisp.Env do
     :System => :interop,
     :"java.time.LocalDate" => :interop,
     :LocalDate => :interop,
-    :Double => :interop
+    :Double => :interop,
+    # JSON / MCP namespaces — Plans/json-support.md §4.4 step 1.
+    # `mcp/` is forward-compat for Phase B (mcp/text, mcp/json) and
+    # is intentionally listed here so Phase B doesn't have to re-touch
+    # the analyzer allowlist or the unknown-namespace error message.
+    :json => :json,
+    :mcp => :mcp
   }
 
   @doc """
@@ -391,6 +397,12 @@ defmodule PtcRunner.Lisp.Env do
       {:"parse-long", {:normal, &Runtime.parse_long/1}},
       {:"parse-int", {:normal, &Runtime.parse_long/1}},
       {:"parse-double", {:normal, &Runtime.parse_double/1}},
+
+      # ============================================================
+      # JSON builtins (Plans/json-support.md §4)
+      # ============================================================
+      {:"json/parse-string", {:normal, &Runtime.Json.parse_string/1}},
+      {:"json/generate-string", {:normal, &Runtime.Json.generate_string/1}},
 
       # ============================================================
       # Regex operations

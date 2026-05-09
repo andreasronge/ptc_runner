@@ -504,6 +504,62 @@ The negative-start rule specifically kills the `(.indexOf s needle) → -1 → s
 
 **Asymmetry with `.substring` is principled:** Java-named methods (`.substring`, `.indexOf`, `.length`) follow Java semantics and raise on out-of-range (see a44b75c for the `.substring` fix). The dot-prefix signals "Java idiom expected." Clojure-named functions (`subs`, `parse-long`, `get`) follow the safer-for-sandbox pattern. The naming convention tells the LLM which contract applies.
 
+### DIV-23: `json/parse-string` returns `nil` on invalid input
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | `Plans/json-support.md` §4.1 / §4.4 |
+
+```clojure
+;; Cheshire / Jason.decode!
+(cheshire.core/parse-string "not json")   ;=> JsonParseException
+(cheshire.core/parse-string nil)          ;=> NullPointerException
+
+;; PTC-Lisp
+(json/parse-string "not json")            ;=> nil
+(json/parse-string nil)                   ;=> nil
+(json/parse-string 42)                    ;=> nil   (non-binary)
+(json/parse-string "null")                ;=> nil   (real JSON null — collides with parse-error signal; see OQ-1)
+```
+
+**Rationale:** No exception handling in the sandbox (DIV-10) means raising = unrecoverable program crash. `json/parse-string` returns `nil` on any failure (invalid JSON, `nil` input, non-binary input) so callers can guard with `(when result ...)` or thread through `(some->)`. Map keys are decoded as **strings** (not atoms) to match PTC-Lisp's tool-boundary convention and avoid atom memory leaks on untrusted input.
+
+The `nil` return for both real JSON `null` and parse failure is a known ambiguity (OQ-1 in the plan). Programs that need to distinguish should guard on `(empty? s)` / shape *before* calling, or use the upcoming `mcp/json` helper (Phase B) where structured-content propagation preserves `:json-null`.
+
+### DIV-24: `json/generate-string` returns `nil` on non-encodable input
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | `Plans/json-support.md` §4.2 / §4.4 |
+
+```clojure
+;; Vanilla Jason.encode/1 silently coerces non-boolean atoms to JSON strings:
+;;   Jason.encode!(:fs)        ;=> "\"fs\""        (lossy auto-stringification)
+;;   Jason.encode!(%{a: 1})    ;=> "{\"a\":1}"     (atom key silently stringified)
+
+;; PTC-Lisp deliberately rejects them up-front, returning nil:
+(json/generate-string :fs)                  ;=> nil      (non-boolean atom value)
+(json/generate-string {:server "fs"})       ;=> nil      (atom key)
+(json/generate-string {"server" :fs})       ;=> nil      (atom value)
+(json/generate-string {1 "a"})              ;=> "{\"1\":\"a\"}"   (integer keys allowed; carve-out, no round-trip)
+(json/generate-string POSITIVE_INFINITY)    ;=> nil      (special-float carve-out)
+(json/generate-string {:tuple [{:ok 1}]})   ;=> nil      (any tuple, anywhere)
+
+;; Programs that want strings on the wire convert explicitly:
+(json/generate-string {"server" (name :fs)})
+;=> "{\"server\":\"fs\"}"
+```
+
+**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special floats (`POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, `NaN` — which resolve to atoms `:infinity` / `:negative_infinity` / `:nan`) are also rejected because they aren't valid JSON scalars.
+
+Map-key validation is **stricter** than value validation: JSON only accepts string keys. Once stringified, atom and float keys preserve no type signal across a round-trip and would break the §4.3 round-trip property, so they are rejected at the key position even when acceptable as values. Integer keys are allowed (Jason's default stringifies them) but **do not round-trip** — `{1 "a"}` parses back as `%{"1" => "a"}`.
+
+The asymmetry with `parse-string` (returns `nil` on bad *input*) is the same DIV-* signal-value pattern: failures are observable as `nil` and the caller decides how to react.
+
 ### GAP-S08: `even?`/`odd?` handle floats gracefully
 
 | Field | Value |

@@ -133,6 +133,8 @@ defmodule PtcRunner.Lisp.Registry do
   def category_name(:math), do: "Math"
   def category_name(:interop), do: "Interop"
   def category_name(:core), do: "Core"
+  def category_name(:json), do: "JSON"
+  def category_name(:mcp), do: "MCP"
 
   @doc """
   Looks up documentation for a function by exact name.

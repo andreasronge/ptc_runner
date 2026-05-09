@@ -1749,6 +1749,42 @@
       divergences: nil
     },
     %{
+      name: "json/generate-string",
+      description: "Encode a value as a JSON string; nil on non-encodable input.",
+      binding: :normal,
+      category: :json,
+      dispatch: :env,
+      signatures: ["(json/generate-string v)"],
+      since: nil,
+      section: "JSON",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Pre-validates the value tree before invoking Jason.encode/1. Atoms outside true/false/nil, atom-keyed maps, tuples, PIDs, references, and functions all produce nil rather than being silently coerced.",
+      see_also: ["json/parse-string"],
+      clojure_var: "cheshire.core/generate-string",
+      divergences:
+        "DIV-24: returns nil on non-encodable input (atoms outside true/false/nil, atom keys, tuples, PIDs) rather than silently auto-stringifying. See docs/clojure-conformance-gaps.md."
+    },
+    %{
+      name: "json/parse-string",
+      description: "Parse a JSON string into a value; nil on failure.",
+      binding: :normal,
+      category: :json,
+      dispatch: :env,
+      signatures: ["(json/parse-string s)"],
+      since: nil,
+      section: "JSON",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Map keys decode as strings (no atom keys). Returns nil on invalid JSON, nil input, or non-binary input — never raises (DIV-23).",
+      see_also: ["json/generate-string"],
+      clojure_var: "cheshire.core/parse-string",
+      divergences:
+        "DIV-23: returns nil on invalid/non-binary input instead of raising. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
+    },
+    %{
       name: "keep",
       description: "Non-nil results of (f item). false is kept.",
       binding: :normal,

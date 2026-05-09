@@ -83,7 +83,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
         assert entry.dispatch in [:env, :analyze],
                "Entry '#{entry.name}' has invalid dispatch: #{inspect(entry.dispatch)}"
 
-        assert entry.category in [:core, :string, :set, :regex, :math, :interop],
+        assert entry.category in [:core, :string, :set, :regex, :math, :interop, :json, :mcp],
                "Entry '#{entry.name}' has invalid category"
 
         assert is_list(entry.signatures), "Entry '#{entry.name}' missing signatures"
