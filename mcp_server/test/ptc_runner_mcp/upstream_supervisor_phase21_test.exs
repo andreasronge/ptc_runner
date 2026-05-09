@@ -286,30 +286,6 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
     end
   end
 
-  defp await_connection!(upstream, reg_name, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_await_connection(upstream, reg_name, deadline)
-  end
-
-  defp do_await_connection(upstream, reg_name, deadline) do
-    case UpstreamRegistry.connection_for(upstream, reg_name) do
-      pid when is_pid(pid) ->
-        pid
-
-      _ ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          flunk("Connection for #{upstream} never reappeared after Registry restart")
-        else
-          receive do
-          after
-            10 -> :ok
-          end
-
-          do_await_connection(upstream, reg_name, deadline)
-        end
-    end
-  end
-
   # Atomically poll for a Connection that simultaneously satisfies
   # all four conditions:
   #   (a) Registry resolves the upstream to a pid,
