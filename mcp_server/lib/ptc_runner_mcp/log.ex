@@ -18,7 +18,18 @@ defmodule PtcRunnerMcp.Log do
 
   Levels: `:debug`, `:info`, `:warn`, `:error`. Lower-priority levels
   are dropped silently.
+
+  ## Redaction
+
+  Every formatted log line is passed through
+  `PtcRunnerMcp.Credentials.Redactor.scrub/1` before being emitted to
+  stderr (per `Plans/http-transport-credentials.md` §7.5.1). The
+  scrub is safe when `Credentials` has not been started — it returns
+  the formatted line unchanged if the redaction-set ETS table is
+  absent.
   """
+
+  alias PtcRunnerMcp.Credentials.Redactor
 
   @levels %{debug: 0, info: 1, warn: 2, error: 3}
   @default_level :info
@@ -101,7 +112,10 @@ defmodule PtcRunnerMcp.Log do
           })
       end
 
-    IO.puts(:stderr, line)
+    # Redact AFTER JSON encoding so we scrub whatever ends up on disk/
+    # console — not the structured fields. Any registered binding
+    # plaintext that snuck into a log field becomes `[REDACTED]` here.
+    IO.puts(:stderr, Redactor.scrub(line))
     :ok
   end
 

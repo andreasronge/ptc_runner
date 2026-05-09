@@ -32,7 +32,7 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Limits, Log, TraceConfig, TraceHandler}
+  alias PtcRunnerMcp.{ConcurrencyGate, Credentials, Limits, Log, TraceConfig, TraceHandler}
 
   @impl Application
   def start(_type, _args) do
@@ -40,7 +40,7 @@ defmodule PtcRunnerMcp.Application do
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
 
-    upstreams = load_upstreams_config(args)
+    %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
 
@@ -49,10 +49,44 @@ defmodule PtcRunnerMcp.Application do
     # creation (codex review of Phase 2).
     :ok = ConcurrencyGate.init()
 
-    children = aggregator_children(upstreams) ++ stdio_children(args)
+    # In `:test` the application supervisor is empty — tests construct
+    # `Credentials` / `Stdio` / `Upstream.Supervisor` instances under
+    # unique names. Returning an empty child list keeps the named ETS
+    # redaction table free for test-owned `Credentials` instances.
+    children =
+      if attach_stdio?() do
+        build_children(upstreams, bindings, args)
+      else
+        []
+      end
 
-    opts = [strategy: :one_for_one, name: PtcRunnerMcp.Supervisor]
+    # `:rest_for_one` per `Plans/http-transport-credentials.md` §7.1.
+    # `Credentials` is the first child; if it crashes we want every
+    # later child (HTTP upstream impls in Phase 2/3) restarted so
+    # they re-handshake against the freshly-rebuilt redaction set.
+    opts = [strategy: :rest_for_one, name: PtcRunnerMcp.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Compose the production supervisor child list. Public-but-undocumented
+  # seam so tests can inspect ordering without running `start/2`.
+  # Order matters for `:rest_for_one`: `Credentials` MUST come before
+  # `Upstream.Supervisor` per §7.1.
+  #
+  # `Credentials` is the FIRST child. Per §7.1 it is started whenever
+  # the parsed config has a `credentials:` block OR any HTTP upstream;
+  # Phase 1 simplifies by starting it unconditionally so the supervisor-
+  # ordering invariant holds even for stdio-only configs (`bindings:
+  # %{}` is harmless). This also guarantees the named ETS redaction
+  # table is alive before any worker tries to read it via
+  # `Credentials.Redactor.scrub/1`.
+  @doc false
+  @spec build_children([map()], %{String.t() => Credentials.Binding.t()}, map()) ::
+          [Supervisor.child_spec() | {module(), term()}]
+  def build_children(upstreams, bindings, args) do
+    [{Credentials, [bindings: bindings]}] ++
+      aggregator_children(upstreams) ++
+      stdio_children(args)
   end
 
   # ----------------------------------------------------------------
@@ -312,24 +346,42 @@ defmodule PtcRunnerMcp.Application do
   # module name (`PtcRunnerMcp.Upstream.Stdio`); calling
   # `ensure_started/1` against such an entry will fail with
   # `:upstream_unavailable` until Phase 1b lands the Stdio impl.
+  #
+  # Returns just the upstreams list. Callers that need the parsed
+  # `credentials:` block use `load_aggregator_config/1` instead.
   @doc false
   @spec load_upstreams_config(map()) :: [%{name: String.t(), impl: module(), config: map()}]
   def load_upstreams_config(args) do
+    load_aggregator_config(args).upstreams
+  end
+
+  # Aggregator-shaped loader per `Plans/http-transport-credentials.md`
+  # §7.1: returns `%{upstreams: entries, credentials: bindings}` where
+  # `bindings` is the parsed `credentials:` block (a `%{name => Binding}`
+  # map; empty when the block is absent). The cross-reference validator
+  # (§5.5 #1) runs here before this function returns so `start/2`
+  # never sees a config that points at an unknown binding.
+  @doc false
+  @spec load_aggregator_config(map()) :: %{
+          upstreams: [%{name: String.t(), impl: module(), config: map()}],
+          credentials: %{String.t() => Credentials.Binding.t()}
+        }
+  def load_aggregator_config(args) do
     path =
       env_or(args, :upstreams_config, "PTC_RUNNER_MCP_UPSTREAMS", nil) ||
         xdg_default_path()
 
     case path do
       nil ->
-        []
+        %{upstreams: [], credentials: %{}}
 
       path when is_binary(path) ->
         case File.read(path) do
           {:ok, body} ->
-            parse_upstreams_body(body, path)
+            parse_aggregator_body(body, path)
 
           {:error, :enoent} ->
-            []
+            %{upstreams: [], credentials: %{}}
 
           {:error, reason} ->
             Log.log(:warn, "upstreams_config_read_failed", %{
@@ -337,48 +389,20 @@ defmodule PtcRunnerMcp.Application do
               reason: to_string(:file.format_error(reason))
             })
 
-            []
+            %{upstreams: [], credentials: %{}}
         end
     end
   end
 
-  defp parse_upstreams_body("", _path), do: []
+  defp parse_aggregator_body("", _path), do: %{upstreams: [], credentials: %{}}
 
-  defp parse_upstreams_body(body, path) do
+  defp parse_aggregator_body(body, path) do
     case Jason.decode(body) do
-      {:ok, %{"upstreams" => map}} when is_map(map) and map_size(map) == 0 ->
-        []
-
-      {:ok, %{"upstreams" => map}} when is_map(map) ->
-        entries =
-          Enum.map(map, fn {name, config} ->
-            %{
-              name: name,
-              impl: PtcRunnerMcp.Upstream.Stdio,
-              # Normalize at the boundary: Jason returns string-keyed
-              # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
-              # use atom-keyed shapes (`:command`, `:args`, `:env`,
-              # `:cd`). Doing the conversion HERE means every layer
-              # below this point — Registry, Connection, Stdio,
-              # Upstream behaviour conformance — sees one canonical
-              # shape. Leaking string keys into Stdio caused a [P1]
-              # codex finding (`config[:args]` silently `nil`,
-              # subprocess launched with no args).
-              config:
-                config
-                |> resolve_env_placeholders()
-                |> normalize_stdio_config()
-            }
-          end)
-
-        # §5.3 self-as-upstream rejection. Fail fast — the server
-        # MUST NOT start with a config that would recursively spawn
-        # itself. Codex review of `fe72ff6` flagged that without
-        # this guard, a misconfigured deploy hits the recursion at
-        # the Stdio impl level (now actually wired in Phase 1b).
-        :ok = reject_self_as_upstream!(entries, path)
-
-        entries
+      {:ok, %{"upstreams" => map} = decoded} when is_map(map) ->
+        bindings = parse_credentials_block!(decoded, path)
+        entries = parse_upstream_entries(map, path)
+        :ok = validate_auth_binding_refs!(map, bindings, path)
+        %{upstreams: entries, credentials: bindings}
 
       {:ok, _other} ->
         Log.log(:warn, "upstreams_config_invalid", %{
@@ -386,7 +410,7 @@ defmodule PtcRunnerMcp.Application do
           reason: "missing top-level :upstreams key"
         })
 
-        []
+        %{upstreams: [], credentials: %{}}
 
       {:error, reason} ->
         Log.log(:warn, "upstreams_config_invalid", %{
@@ -394,19 +418,159 @@ defmodule PtcRunnerMcp.Application do
           reason: inspect(reason, limit: 50)
         })
 
-        []
+        %{upstreams: [], credentials: %{}}
     end
   end
 
-  defp resolve_env_placeholders(config) when is_map(config) do
-    Map.new(config, fn {k, v} -> {k, resolve_env_placeholders(v)} end)
+  defp parse_upstream_entries(map, _path) when map_size(map) == 0, do: []
+
+  defp parse_upstream_entries(map, path) do
+    entries =
+      Enum.map(map, fn {name, config} ->
+        %{
+          name: name,
+          impl: PtcRunnerMcp.Upstream.Stdio,
+          # Normalize at the boundary: Jason returns string-keyed
+          # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
+          # use atom-keyed shapes (`:command`, `:args`, `:env`,
+          # `:cd`). Doing the conversion HERE means every layer
+          # below this point — Registry, Connection, Stdio,
+          # Upstream behaviour conformance — sees one canonical
+          # shape. Leaking string keys into Stdio caused a [P1]
+          # codex finding (`config[:args]` silently `nil`,
+          # subprocess launched with no args).
+          config: normalize_stdio_config_with_env_resolution(config)
+        }
+      end)
+
+    # §5.3 self-as-upstream rejection. Fail fast — the server
+    # MUST NOT start with a config that would recursively spawn
+    # itself. Codex review of `fe72ff6` flagged that without
+    # this guard, a misconfigured deploy hits the recursion at
+    # the Stdio impl level (now actually wired in Phase 1b).
+    :ok = reject_self_as_upstream!(entries, path)
+
+    entries
   end
 
-  defp resolve_env_placeholders(list) when is_list(list) do
-    Enum.map(list, &resolve_env_placeholders/1)
+  # Parse the optional top-level `credentials:` block.
+  # Raises with a clear message on shape errors per §5.5 #1 / #11.
+  @spec parse_credentials_block!(map(), String.t()) ::
+          %{String.t() => Credentials.Binding.t()}
+  defp parse_credentials_block!(decoded, path) do
+    raw = Map.get(decoded, "credentials")
+
+    case Credentials.Binding.parse_block(raw) do
+      {:ok, bindings} ->
+        warn_about_literal_bindings(bindings, path, Mix.env())
+        bindings
+
+      {:error, reason, detail} ->
+        raise """
+        upstreams_config: credentials: block is invalid (#{reason}).
+
+        #{detail}
+
+        Source: #{path}
+        """
+    end
   end
 
-  defp resolve_env_placeholders(value) when is_binary(value) do
+  # §5.4.1 / §5.5 #4: literal bindings outside MIX_ENV: :test emit a
+  # Logger.warning at config-load time. Shipping a literal secret in a
+  # config file is a known footgun. Suppressed in :test because tests
+  # use literals heavily for fixture purposes. Warning includes the
+  # binding name but never the value. `env` is passed explicitly so
+  # tests can exercise both branches.
+  @doc false
+  @spec warn_about_literal_bindings(
+          %{String.t() => Credentials.Binding.t()},
+          String.t(),
+          atom()
+        ) :: :ok
+  def warn_about_literal_bindings(bindings, path, env)
+      when is_map(bindings) do
+    if env != :test do
+      for {name, %Credentials.Binding{source: :literal}} <- bindings do
+        Log.log(:warn, "credentials_literal_binding", %{
+          binding: name,
+          source: path,
+          hint: "literal bindings ship the secret in the config file; prefer env or file source"
+        })
+      end
+    end
+
+    :ok
+  end
+
+  # §5.5 #1 cross-reference validator. For each upstream entry's
+  # `auth:` list, every emitter's `binding:` MUST appear in the
+  # parsed `credentials:` block. Stdio configs in Phase 1 carry no
+  # `auth:` block (HTTP-only field), so this is a no-op for v1
+  # configs — but the hook is in place so Phase 3 / future HTTP
+  # entries fail loudly at config-load.
+  @doc false
+  @spec validate_auth_binding_refs!(
+          %{String.t() => map()},
+          %{String.t() => Credentials.Binding.t()},
+          String.t()
+        ) :: :ok
+  def validate_auth_binding_refs!(upstreams, bindings, source_path)
+      when is_map(upstreams) and is_map(bindings) do
+    for {name, entry} <- upstreams,
+        is_map(entry),
+        auth_list = Map.get(entry, "auth"),
+        is_list(auth_list),
+        emitter <- auth_list,
+        is_map(emitter),
+        binding_ref = Map.get(emitter, "binding"),
+        is_binary(binding_ref) do
+      unless Map.has_key?(bindings, binding_ref) do
+        raise """
+        upstreams_config: upstream '#{name}' references unknown credentials \
+        binding '#{binding_ref}'.
+
+        Define this binding under the top-level `credentials:` block, or
+        remove the auth emitter that references it.
+
+        Known bindings: #{inspect(Map.keys(bindings))}
+        Source: #{source_path}
+        """
+      end
+    end
+
+    :ok
+  end
+
+  # §5.2 / §5.5 #6: the legacy `${VAR}` placeholder resolver applies
+  # ONLY to stdio `env` map values. `credentials:` and (Phase 2's)
+  # `static_headers:` / `url` / `auth` fields are parsed literally.
+  # Narrowing keeps `${VAR}` from accidentally expanding inside future
+  # HTTP config keys where the resulting plaintext would land in
+  # logs / `inspect/1` of upstream config.
+  defp normalize_stdio_config_with_env_resolution(config) when is_map(config) do
+    config
+    |> resolve_stdio_env_placeholders()
+    |> normalize_stdio_config()
+  end
+
+  # Resolve `${VAR}` only inside the `env` sub-map of a stdio upstream
+  # entry. Nothing else in the config is touched. Pre-narrowing the
+  # resolver was recursive over the whole entry which would, in Phase
+  # 2, expand `${VAR}` inside `static_headers:` and `url` — exactly
+  # the leak path the credentials registry exists to close (§5.3,
+  # §14.2).
+  defp resolve_stdio_env_placeholders(config) when is_map(config) do
+    case Map.fetch(config, "env") do
+      {:ok, env_map} when is_map(env_map) ->
+        Map.put(config, "env", Map.new(env_map, fn {k, v} -> {k, expand_placeholder(v)} end))
+
+      _ ->
+        config
+    end
+  end
+
+  defp expand_placeholder(value) when is_binary(value) do
     case Regex.run(~r/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/, value) do
       [_, var] ->
         case System.get_env(var) do
@@ -422,7 +586,7 @@ defmodule PtcRunnerMcp.Application do
     end
   end
 
-  defp resolve_env_placeholders(value), do: value
+  defp expand_placeholder(value), do: value
 
   # Convert a string-keyed map (Jason output) to the atom-keyed
   # shape `Upstream.Stdio` (and the owning `Upstream.Connection`)

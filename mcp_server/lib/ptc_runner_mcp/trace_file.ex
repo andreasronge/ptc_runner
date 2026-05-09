@@ -16,6 +16,7 @@ defmodule PtcRunnerMcp.TraceFile do
 
   require Logger
 
+  alias PtcRunnerMcp.Credentials.Redactor
   alias PtcRunnerMcp.{Log, TraceConfig}
 
   @doc """
@@ -159,15 +160,25 @@ defmodule PtcRunnerMcp.TraceFile do
 
         pending_path = build_pending_path(trace_dir, request_id)
 
+        # Per `Plans/http-transport-credentials.md` §7.5.1, every
+        # JSONL trace record's encoded JSON is scrub/1-ed before
+        # write. `PtcRunner.TraceLog` (in the parent library) does
+        # the JSON encoding itself, so we scrub at the *boundary*
+        # values we hand to it: the `:query` (already redacted by
+        # TracePayload, but a defense-in-depth pass through the
+        # plaintext binding redactor catches any binding values
+        # that were embedded in a `:full`-mode program preview)
+        # and any string entries the caller passed in `header_opts`.
         opts =
           header_opts
+          |> scrub_header_opts()
           |> Keyword.merge(
             path: pending_path,
             trace_kind: "mcp_call",
             producer: "ptc_runner_mcp",
             trace_label: to_string(request_id || ""),
             model: nil,
-            query: query
+            query: scrub_value(query)
           )
 
         run_with_trace(opts, request_id, trace_dir, pending_path, fun)
@@ -286,6 +297,32 @@ defmodule PtcRunnerMcp.TraceFile do
         :ok
     end
   end
+
+  # ----------------------------------------------------------------
+  # Redaction helpers (§7.5.1)
+  # ----------------------------------------------------------------
+
+  # Scrub every string value in `header_opts`. Non-string values
+  # (atoms, numbers, nested maps from `:meta`) are walked recursively
+  # so a binding plaintext nested under `:meta` is still caught.
+  defp scrub_header_opts(opts) when is_list(opts) do
+    Enum.map(opts, fn
+      {k, v} -> {k, scrub_value(v)}
+      other -> other
+    end)
+  end
+
+  defp scrub_value(value) when is_binary(value), do: Redactor.scrub(value)
+
+  defp scrub_value(value) when is_list(value) do
+    Enum.map(value, &scrub_value/1)
+  end
+
+  defp scrub_value(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} -> {k, scrub_value(v)} end)
+  end
+
+  defp scrub_value(value), do: value
 
   # ----------------------------------------------------------------
   # File listing helpers

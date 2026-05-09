@@ -42,6 +42,8 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   entries even if process reuse is ever introduced.
   """
 
+  alias PtcRunnerMcp.Credentials.Redactor
+
   @typedoc "An entry recorded for a single `(tool/mcp-call ...)` invocation."
   @type entry :: %{required(String.t()) => term()}
 
@@ -273,13 +275,19 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   def error_entry(server, tool, reason, detail, duration_ms)
       when is_binary(server) and is_binary(tool) and is_atom(reason) and is_binary(detail) and
              is_integer(duration_ms) and duration_ms >= 0 do
+    # Per `Plans/http-transport-credentials.md` §7.5.1: scrub the
+    # `error` field (and `args_truncated` when added in a later
+    # phase) at record-construction time, BEFORE the entry reaches
+    # the structured response payload. A failed upstream call's
+    # `detail` is the most likely place for a half-leaked secret
+    # ("Bearer abcd…" prefix in a transport error message).
     %{
       "server" => server,
       "tool" => tool,
       "status" => "error",
       "duration_ms" => duration_ms,
       "reason" => Atom.to_string(reason),
-      "error" => detail
+      "error" => Redactor.scrub(detail)
     }
   end
 
