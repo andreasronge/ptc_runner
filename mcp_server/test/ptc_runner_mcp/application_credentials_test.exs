@@ -734,7 +734,10 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       assert cfg.pool_size == 4
       assert cfg.backoff_initial_ms == 100
       assert cfg.backoff_max_ms == 30_000
+      # Phase 3B: `:auth_raw` is gone — every parsed HTTP entry now
+      # carries an `auth: []` (empty list when no `auth:` configured).
       refute Map.has_key?(cfg, :auth_raw)
+      assert cfg.auth == []
     end
 
     test "explicit transport: stdio is parsed as Stdio (same as absent)",
@@ -901,8 +904,8 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       %{upstreams: [entry]} = Application.load_aggregator_config(args)
 
       assert entry.impl == PtcRunnerMcp.Upstream.Http
-      # `auth_raw` carries the unparsed list through to Phase 3.
-      assert entry.config.auth_raw == [%{"scheme" => "bearer", "binding" => "tok"}]
+      # Phase 3B: parsed emitter list (atom-keyed, atom scheme).
+      assert entry.config.auth == [%{scheme: :bearer, binding: "tok", header: nil}]
     end
 
     test "bad URL scheme (file://) raises", %{tmp_dir: tmp_dir} do
@@ -1246,7 +1249,10 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
 
       assert by_name["remote"].impl == PtcRunnerMcp.Upstream.Http
       assert by_name["remote"].config.url == "https://example.test"
-      assert by_name["remote"].config.auth_raw == [%{"scheme" => "bearer", "binding" => "tok"}]
+
+      assert by_name["remote"].config.auth == [
+               %{scheme: :bearer, binding: "tok", header: nil}
+             ]
 
       assert by_name["fs"].impl == PtcRunnerMcp.Upstream.Stdio
       assert by_name["fs"].config[:command] == "echo"
@@ -1309,6 +1315,420 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
         end)
 
       refute log =~ "credentials_literal_binding"
+    end
+  end
+
+  # ---- 10. transport: http auth: emitter parser (Phase 3B, §5.3.1, §5.5 ##7, 8) ----
+
+  describe "transport: http auth: emitter parser" do
+    # Helper: write a config with a single `remote` HTTP upstream that
+    # references one literal binding `tok`, and an arbitrary `auth:`
+    # raw value (passed through verbatim to the JSON encoder). Keeps
+    # each test focused on the emitter shape under test.
+    defp write_auth_config(tmp_dir, auth_raw, extra_remote_fields) do
+      remote =
+        Map.merge(
+          %{
+            "transport" => "http",
+            "url" => "https://example.test",
+            "auth" => auth_raw
+          },
+          extra_remote_fields
+        )
+
+      write_config(
+        tmp_dir,
+        Jason.encode!(%{
+          "credentials" => %{
+            "tok" => %{"source" => "literal", "value" => "v-aaaaaa"},
+            "tok2" => %{"source" => "literal", "value" => "v-bbbbbb"}
+          },
+          "upstreams" => %{"remote" => remote}
+        })
+      )
+    end
+
+    defp load_auth_config!(tmp_dir, auth_raw), do: load_auth_config!(tmp_dir, auth_raw, %{})
+
+    defp load_auth_config!(tmp_dir, auth_raw, extra) do
+      cfg_path = write_auth_config(tmp_dir, auth_raw, extra)
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      entry
+    end
+
+    defp expect_auth_raise!(tmp_dir, auth_raw), do: expect_auth_raise!(tmp_dir, auth_raw, %{})
+
+    defp expect_auth_raise!(tmp_dir, auth_raw, extra) do
+      cfg_path = write_auth_config(tmp_dir, auth_raw, extra)
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      Exception.message(err)
+    end
+
+    # 1. Bearer emitter parses.
+    test "bearer emitter parses to atom-keyed map", %{tmp_dir: tmp_dir} do
+      entry = load_auth_config!(tmp_dir, [%{"scheme" => "bearer", "binding" => "tok"}])
+
+      assert entry.config.auth == [
+               %{scheme: :bearer, binding: "tok", header: nil}
+             ]
+    end
+
+    # 2. Basic emitter parses.
+    test "basic emitter parses to atom-keyed map", %{tmp_dir: tmp_dir} do
+      entry = load_auth_config!(tmp_dir, [%{"scheme" => "basic", "binding" => "tok"}])
+
+      assert entry.config.auth == [
+               %{scheme: :basic, binding: "tok", header: nil}
+             ]
+    end
+
+    # 3. Custom-header emitter parses; header field is preserved
+    #    verbatim (NOT lowercased — the runtime layer in
+    #    Credentials.apply_emitter/2 lowercases on emit).
+    test "custom_header emitter parses preserving header case", %{tmp_dir: tmp_dir} do
+      entry =
+        load_auth_config!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "X-Foo"}]
+        )
+
+      assert entry.config.auth == [
+               %{scheme: :custom_header, binding: "tok", header: "X-Foo"}
+             ]
+    end
+
+    # 4. Multi-emitter list preserves input order.
+    test "multi-emitter list preserves order", %{tmp_dir: tmp_dir} do
+      entry =
+        load_auth_config!(
+          tmp_dir,
+          [
+            %{"scheme" => "custom_header", "binding" => "tok", "header" => "X-Foo"},
+            %{"scheme" => "bearer", "binding" => "tok2"}
+          ]
+        )
+
+      assert entry.config.auth == [
+               %{scheme: :custom_header, binding: "tok", header: "X-Foo"},
+               %{scheme: :bearer, binding: "tok2", header: nil}
+             ]
+    end
+
+    # 5. Unknown scheme raises with the offending value.
+    test "unknown scheme raises with the offending value", %{tmp_dir: tmp_dir} do
+      msg = expect_auth_raise!(tmp_dir, [%{"scheme" => "oauth2", "binding" => "tok"}])
+      assert msg =~ "oauth2"
+      assert msg =~ "unknown"
+    end
+
+    # 6. Bearer with `header:` field set raises.
+    test "bearer with header: field set raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "bearer", "binding" => "tok", "header" => "X-Foo"}]
+        )
+
+      assert msg =~ "bearer"
+      assert msg =~ "header"
+    end
+
+    # 7. Basic with `header:` field set raises.
+    test "basic with header: field set raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "basic", "binding" => "tok", "header" => "X-Foo"}]
+        )
+
+      assert msg =~ "basic"
+      assert msg =~ "header"
+    end
+
+    # 8. custom_header without `header:` raises.
+    test "custom_header without header: raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(tmp_dir, [%{"scheme" => "custom_header", "binding" => "tok"}])
+
+      assert msg =~ "custom_header"
+      assert msg =~ "header"
+    end
+
+    # 9. custom_header with header: "Authorization" raises.
+    test "custom_header with header: Authorization raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "Authorization"}]
+        )
+
+      assert msg =~ "Authorization"
+      assert msg =~ ~s(bearer) or msg =~ ~s(basic)
+    end
+
+    # 9b. Case-insensitive: lowercased "authorization" also rejected.
+    test "custom_header with header: authorization (lowercase) raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "authorization"}]
+        )
+
+      assert msg =~ "Authorization" or msg =~ "authorization"
+    end
+
+    # 10. custom_header with header in static_headers denylist (Cookie).
+    test "custom_header with header: Cookie (denylist) raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "Cookie"}]
+        )
+
+      assert msg =~ "denylist"
+      assert msg =~ "Cookie"
+    end
+
+    # 10b. Same denylist applies to MCP-Protocol-Version (protocol-controlled).
+    test "custom_header with header: MCP-Protocol-Version (denylist) raises",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [
+            %{
+              "scheme" => "custom_header",
+              "binding" => "tok",
+              "header" => "MCP-Protocol-Version"
+            }
+          ]
+        )
+
+      assert msg =~ "denylist"
+    end
+
+    # 11. RFC 7230 grammar: header with embedded space rejected.
+    test "custom_header with header containing space raises", %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "X Bad"}]
+        )
+
+      assert msg =~ "RFC 7230"
+      assert msg =~ "X Bad"
+    end
+
+    # 12. Unknown keys in emitter (typo: "sceme") raise.
+    test "unknown emitter key (typo 'sceme') raises", %{tmp_dir: tmp_dir} do
+      # NOTE: we still include a valid `scheme:` so the Phase 1
+      # cross-reference validator doesn't trip on a missing-binding
+      # path before the emitter parser runs. The point is the typo
+      # `sceme:` MUST be flagged loudly.
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [
+            %{
+              "scheme" => "bearer",
+              "binding" => "tok",
+              "sceme" => "bearer"
+            }
+          ]
+        )
+
+      assert msg =~ "unknown"
+      assert msg =~ "sceme"
+    end
+
+    # 13. Duplicate Authorization across two bearer emitters.
+    test "duplicate Authorization across two bearer emitters raises",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [
+            %{"scheme" => "bearer", "binding" => "tok"},
+            %{"scheme" => "bearer", "binding" => "tok2"}
+          ]
+        )
+
+      assert msg =~ "duplicate"
+      assert msg =~ "authorization"
+    end
+
+    # 13b. bearer + basic ALSO collides (both produce Authorization).
+    test "bearer + basic emitters both produce Authorization → raises",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [
+            %{"scheme" => "bearer", "binding" => "tok"},
+            %{"scheme" => "basic", "binding" => "tok2"}
+          ]
+        )
+
+      assert msg =~ "duplicate"
+      assert msg =~ "authorization"
+    end
+
+    # 14. Two custom_header emitters with same header (case-insensitive).
+    test "two custom_header emitters with same header (case-insensitive) raise",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [
+            %{"scheme" => "custom_header", "binding" => "tok", "header" => "X-Foo"},
+            %{"scheme" => "custom_header", "binding" => "tok2", "header" => "x-foo"}
+          ]
+        )
+
+      assert msg =~ "duplicate"
+      assert msg =~ "x-foo"
+    end
+
+    # 15. Bearer + custom_header X-Foo loads cleanly (different headers).
+    test "bearer + custom_header with different name loads cleanly",
+         %{tmp_dir: tmp_dir} do
+      entry =
+        load_auth_config!(
+          tmp_dir,
+          [
+            %{"scheme" => "bearer", "binding" => "tok"},
+            %{"scheme" => "custom_header", "binding" => "tok2", "header" => "X-Foo"}
+          ]
+        )
+
+      assert entry.config.auth == [
+               %{scheme: :bearer, binding: "tok", header: nil},
+               %{scheme: :custom_header, binding: "tok2", header: "X-Foo"}
+             ]
+    end
+
+    # 16. Cross-list collision: static_headers + custom_header same name.
+    test "static_headers X-Foo + custom_header X-Foo → cross-list collision raises",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "X-Foo"}],
+          %{"static_headers" => %{"X-Foo" => "bar"}}
+        )
+
+      assert msg =~ "x-foo"
+      assert msg =~ "auth"
+      assert msg =~ "static_headers"
+    end
+
+    # 16b. Cross-list collision is case-insensitive.
+    test "cross-list collision is case-insensitive (X-Foo vs x-foo)",
+         %{tmp_dir: tmp_dir} do
+      msg =
+        expect_auth_raise!(
+          tmp_dir,
+          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "x-foo"}],
+          %{"static_headers" => %{"X-Foo" => "bar"}}
+        )
+
+      assert msg =~ "x-foo"
+    end
+
+    # 17. Empty `auth: []` loads with `auth: []` in output config.
+    test "empty auth: [] loads with auth: [] in output config", %{tmp_dir: tmp_dir} do
+      entry = load_auth_config!(tmp_dir, [])
+      assert entry.config.auth == []
+    end
+
+    # 18. Absent `auth:` loads with `auth: []` in output config.
+    test "absent auth key loads with auth: [] in output config", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{"transport" => "http", "url" => "https://example.test"}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert entry.config.auth == []
+    end
+
+    # 19. `null` auth loads with `auth: []`.
+    test "null auth loads with auth: [] in output config", %{tmp_dir: tmp_dir} do
+      entry = load_auth_config!(tmp_dir, nil)
+      assert entry.config.auth == []
+    end
+
+    # 20. Phase 1 cross-reference still fires (re-verify): the
+    #     cross-reference walker reads the RAW string-keyed input
+    #     before the Phase 3B parser runs, so an unknown binding
+    #     surfaces with both upstream + binding names. This is
+    #     belt-and-suspenders coverage of the §5.5 #1 path against
+    #     the Phase 3B insertion point.
+    test "Phase 1 cross-reference (unknown binding) still fires before parser",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "known" => %{"source" => "literal", "value" => "v-aaaaaa"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "bearer", "binding" => "missing"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "remote"
+      assert msg =~ "missing"
+    end
+
+    # ---- non-list / shape errors -------------------------------------------
+
+    test "auth: as a non-list (object) raises", %{tmp_dir: tmp_dir} do
+      msg = expect_auth_raise!(tmp_dir, %{"scheme" => "bearer", "binding" => "tok"})
+      assert msg =~ "list"
+    end
+
+    test "auth: emitter that is not an object raises", %{tmp_dir: tmp_dir} do
+      msg = expect_auth_raise!(tmp_dir, ["bearer:tok"])
+      assert msg =~ "object"
+    end
+
+    test "auth: emitter missing scheme raises", %{tmp_dir: tmp_dir} do
+      msg = expect_auth_raise!(tmp_dir, [%{"binding" => "tok"}])
+      assert msg =~ "scheme"
+      assert msg =~ "missing"
+    end
+
+    test "auth: emitter with empty-string binding raises", %{tmp_dir: tmp_dir} do
+      msg = expect_auth_raise!(tmp_dir, [%{"scheme" => "bearer", "binding" => ""}])
+      assert msg =~ "binding"
     end
   end
 end
