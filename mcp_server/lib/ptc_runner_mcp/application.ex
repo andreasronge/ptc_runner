@@ -402,6 +402,12 @@ defmodule PtcRunnerMcp.Application do
         bindings = parse_credentials_block!(decoded, path)
         entries = parse_upstream_entries(map, path)
         :ok = validate_auth_binding_refs!(map, bindings, path)
+        # §4.5: HTTP upstreams require `:req` to be loaded. Phase 1
+        # configs are stdio-only and `transport:` is absent on every
+        # entry, so this check is a no-op for v1 deployments. Phase 2E
+        # adds full `transport: "http"` parsing (URL / proxy / insecure
+        # gates); 2A only checks dep presence.
+        :ok = check_http_deps!(map, path)
         %{upstreams: entries, credentials: bindings}
 
       {:ok, _other} ->
@@ -427,20 +433,7 @@ defmodule PtcRunnerMcp.Application do
   defp parse_upstream_entries(map, path) do
     entries =
       Enum.map(map, fn {name, config} ->
-        %{
-          name: name,
-          impl: PtcRunnerMcp.Upstream.Stdio,
-          # Normalize at the boundary: Jason returns string-keyed
-          # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
-          # use atom-keyed shapes (`:command`, `:args`, `:env`,
-          # `:cd`). Doing the conversion HERE means every layer
-          # below this point — Registry, Connection, Stdio,
-          # Upstream behaviour conformance — sees one canonical
-          # shape. Leaking string keys into Stdio caused a [P1]
-          # codex finding (`config[:args]` silently `nil`,
-          # subprocess launched with no args).
-          config: normalize_stdio_config_with_env_resolution(config)
-        }
+        parse_upstream_entry(name, config, path)
       end)
 
     # §5.3 self-as-upstream rejection. Fail fast — the server
@@ -452,6 +445,383 @@ defmodule PtcRunnerMcp.Application do
 
     entries
   end
+
+  # Phase 2E: dispatch on the `transport:` field. Stdio is the default
+  # (transport absent → stdio, preserving Phase 1 behavior). HTTP routes
+  # through `parse_http_upstream/3`. Any other value is a loud raise so
+  # operators get a clear error rather than a silent stdio fallback.
+  defp parse_upstream_entry(name, config, path) when is_map(config) do
+    case Map.get(config, "transport") do
+      nil ->
+        stdio_entry(name, config)
+
+      "stdio" ->
+        stdio_entry(name, config)
+
+      "http" ->
+        parse_http_upstream(name, config, path)
+
+      other ->
+        raise """
+        upstreams_config: upstream '#{name}' has unknown transport '#{inspect(other)}'.
+
+        Supported transports: "stdio" (default if absent), "http".
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp stdio_entry(name, config) do
+    %{
+      name: name,
+      impl: PtcRunnerMcp.Upstream.Stdio,
+      # Normalize at the boundary: Jason returns string-keyed
+      # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
+      # use atom-keyed shapes (`:command`, `:args`, `:env`,
+      # `:cd`). Doing the conversion HERE means every layer
+      # below this point — Registry, Connection, Stdio,
+      # Upstream behaviour conformance — sees one canonical
+      # shape. Leaking string keys into Stdio caused a [P1]
+      # codex finding (`config[:args]` silently `nil`,
+      # subprocess launched with no args).
+      config: normalize_stdio_config_with_env_resolution(config)
+    }
+  end
+
+  # ----------------------------------------------------------------
+  # Phase 2E: HTTP upstream parsing (§5.3, §5.5)
+  # ----------------------------------------------------------------
+
+  # RFC 7230 token grammar — used for both `static_headers:` keys and
+  # `custom_header` emitter `header:` fields.
+  @rfc7230_token_regex ~r/^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/
+
+  # Case-insensitive denylist for `static_headers:` (per §5.3.2). Stored
+  # lowercase; checks lowercase the input before lookup.
+  @static_headers_denylist ~w(authorization proxy-authorization cookie set-cookie x-api-key)
+
+  # HTTP defaults from §5.3.
+  @http_default_handshake_timeout_ms 10_000
+  @http_default_request_timeout_ms 30_000
+  @http_default_max_response_bytes 2_097_152
+  @http_default_connect_timeout_ms 5_000
+  @http_default_pool_size 4
+  @http_default_backoff_initial_ms 100
+  @http_default_backoff_max_ms 30_000
+
+  @doc false
+  @spec parse_http_upstream(String.t(), map(), String.t()) :: %{
+          name: String.t(),
+          impl: module(),
+          config: map()
+        }
+  def parse_http_upstream(name, config, path) when is_map(config) do
+    allow_insecure_http = bool_field!(config, "allow_insecure_http", false, name, path)
+    allow_insecure_auth = bool_field!(config, "allow_insecure_auth", false, name, path)
+
+    url = http_url!(name, config, allow_insecure_http, path)
+    static_headers = http_static_headers!(name, config, path)
+    proxy = http_proxy!(name, config, path)
+
+    handshake_timeout_ms =
+      pos_int_field!(
+        config,
+        "handshake_timeout_ms",
+        @http_default_handshake_timeout_ms,
+        name,
+        path
+      )
+
+    request_timeout_ms =
+      pos_int_field!(config, "request_timeout_ms", @http_default_request_timeout_ms, name, path)
+
+    max_response_bytes =
+      pos_int_field!(config, "max_response_bytes", @http_default_max_response_bytes, name, path)
+
+    connect_timeout_ms =
+      pos_int_field!(config, "connect_timeout_ms", @http_default_connect_timeout_ms, name, path)
+
+    pool_size = pos_int_field!(config, "pool_size", @http_default_pool_size, name, path)
+
+    backoff_initial_ms =
+      pos_int_field!(config, "backoff_initial_ms", @http_default_backoff_initial_ms, name, path)
+
+    backoff_max_ms =
+      pos_int_field!(config, "backoff_max_ms", @http_default_backoff_max_ms, name, path)
+
+    auth_raw = Map.get(config, "auth")
+
+    # §3 / §5.5 #2: insecure-auth gate. `allow_insecure_http: true` plus
+    # any auth emitters requires the operator to ALSO set
+    # `allow_insecure_auth: true` — two explicit opt-ins.
+    :ok =
+      check_insecure_auth_gate!(name, allow_insecure_http, allow_insecure_auth, auth_raw, path)
+
+    base_config = %{
+      url: url,
+      static_headers: static_headers,
+      proxy: proxy,
+      handshake_timeout_ms: handshake_timeout_ms,
+      request_timeout_ms: request_timeout_ms,
+      connect_timeout_ms: connect_timeout_ms,
+      max_response_bytes: max_response_bytes,
+      pool_size: pool_size,
+      backoff_initial_ms: backoff_initial_ms,
+      backoff_max_ms: backoff_max_ms
+    }
+
+    # Phase 2 does NOT parse the `auth:` block into emitter structs
+    # (Phase 3 owns that). When present, we pass it through under
+    # `:auth_raw` so Phase 3 can pick it up from the same shape — and
+    # so the cross-reference validator (which reads from the raw
+    # string-keyed map BEFORE this function runs) is unaffected.
+    out_config =
+      if is_nil(auth_raw),
+        do: base_config,
+        else: Map.put(base_config, :auth_raw, auth_raw)
+
+    %{
+      name: name,
+      impl: PtcRunnerMcp.Upstream.Http,
+      config: out_config
+    }
+  end
+
+  defp http_url!(name, config, allow_insecure_http, path) do
+    raw = Map.get(config, "url")
+
+    if not is_binary(raw) or raw == "" do
+      raise """
+      upstreams_config: upstream '#{name}' is transport: "http" but `url:` is missing or empty.
+
+      Source: #{path}
+      """
+    else
+      case URI.new(raw) do
+        {:ok, %URI{scheme: scheme, host: host}}
+        when is_binary(scheme) and is_binary(host) and host != "" ->
+          validate_url_scheme!(name, raw, scheme, allow_insecure_http, path)
+          raw
+
+        _ ->
+          raise """
+          upstreams_config: upstream '#{name}' has malformed `url:` value: #{inspect(raw)}.
+
+          URL must parse cleanly via URI.new/1 and have a host.
+
+          Source: #{path}
+          """
+      end
+    end
+  end
+
+  defp validate_url_scheme!(_name, _raw, "https", _allow_insecure_http, _path), do: :ok
+
+  defp validate_url_scheme!(_name, _raw, "http", true, _path), do: :ok
+
+  defp validate_url_scheme!(name, raw, "http", false, path) do
+    raise """
+    upstreams_config: upstream '#{name}' uses http:// URL '#{raw}' without `allow_insecure_http: true`.
+
+    Plaintext HTTP requires an explicit opt-in. Set `"allow_insecure_http": true`
+    on this upstream entry, or switch the URL to https://.
+
+    Source: #{path}
+    """
+  end
+
+  defp validate_url_scheme!(name, raw, scheme, _allow_insecure_http, path) do
+    raise """
+    upstreams_config: upstream '#{name}' has unsupported URL scheme '#{scheme}://' \
+    in '#{raw}'.
+
+    Only http:// and https:// are supported.
+
+    Source: #{path}
+    """
+  end
+
+  defp http_static_headers!(_name, %{"static_headers" => nil}, _path), do: []
+
+  defp http_static_headers!(name, %{"static_headers" => headers}, path) when is_map(headers) do
+    headers
+    |> Enum.reduce({[], MapSet.new()}, fn {key, value}, {acc, seen} ->
+      validate_static_header!(name, key, value, path)
+
+      lower = String.downcase(key)
+
+      if MapSet.member?(seen, lower) do
+        raise """
+        upstreams_config: upstream '#{name}' has duplicate static header '#{lower}' \
+        (after case-folding).
+
+        HTTP allows duplicate header names but Streamable HTTP servers treat them
+        inconsistently; rejecting at config-load is unambiguous.
+
+        Source: #{path}
+        """
+      end
+
+      {[{lower, value} | acc], MapSet.put(seen, lower)}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp http_static_headers!(name, %{"static_headers" => other}, path) do
+    raise """
+    upstreams_config: upstream '#{name}' `static_headers:` must be an object, got: \
+    #{inspect(other)}.
+
+    Source: #{path}
+    """
+  end
+
+  defp http_static_headers!(_name, _config, _path), do: []
+
+  defp validate_static_header!(name, key, value, path) do
+    cond do
+      not is_binary(key) ->
+        raise """
+        upstreams_config: upstream '#{name}' static_headers: header name must be a string, \
+        got: #{inspect(key)}.
+
+        Source: #{path}
+        """
+
+      not Regex.match?(@rfc7230_token_regex, key) ->
+        raise """
+        upstreams_config: upstream '#{name}' static_headers: header name '#{key}' violates \
+        RFC 7230 token grammar.
+
+        Allowed characters: A-Z a-z 0-9 ! # $ % & ' * + - . ^ _ ` | ~
+
+        Source: #{path}
+        """
+
+      String.downcase(key) in @static_headers_denylist ->
+        raise """
+        upstreams_config: upstream '#{name}' static_headers: header name '#{key}' is in \
+        the sensitive-name denylist (case-insensitive).
+
+        Use the `auth:` block for `Authorization`-class headers; static_headers is for
+        non-secret headers only.
+
+        Source: #{path}
+        """
+
+      not is_binary(value) ->
+        raise """
+        upstreams_config: upstream '#{name}' static_headers['#{key}']: value must be a string, \
+        got: #{inspect(value)}.
+
+        Source: #{path}
+        """
+
+      true ->
+        :ok
+    end
+  end
+
+  defp http_proxy!(_name, %{"proxy" => nil}, _path), do: nil
+
+  defp http_proxy!(name, %{"proxy" => proxy}, path) when is_binary(proxy) do
+    case URI.new(proxy) do
+      {:ok, %URI{scheme: scheme, host: host, port: port, userinfo: userinfo}}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" and is_integer(port) ->
+        if userinfo not in [nil, ""] do
+          raise """
+          upstreams_config: upstream '#{name}' proxy URL '#{proxy}' contains user:pass@ \
+          syntax.
+
+          v1 does not support proxy auth (per §5.3.3). Configure proxy auth via OS-level
+          mechanisms (e.g., a local unauthenticated SOCKS proxy) and point `proxy:` at
+          the unauthenticated endpoint.
+
+          Source: #{path}
+          """
+        end
+
+        proxy
+
+      _ ->
+        raise """
+        upstreams_config: upstream '#{name}' has malformed `proxy:` value: #{inspect(proxy)}.
+
+        Proxy must be of the form http://host:port or https://host:port.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp http_proxy!(name, %{"proxy" => other}, path) do
+    raise """
+    upstreams_config: upstream '#{name}' `proxy:` must be a string or null, got: \
+    #{inspect(other)}.
+
+    Source: #{path}
+    """
+  end
+
+  defp http_proxy!(_name, _config, _path), do: nil
+
+  defp pos_int_field!(config, key, default, name, path) do
+    case Map.fetch(config, key) do
+      :error ->
+        default
+
+      {:ok, n} when is_integer(n) and n > 0 ->
+        n
+
+      {:ok, other} ->
+        raise """
+        upstreams_config: upstream '#{name}' field '#{key}' must be a positive integer, got: \
+        #{inspect(other)}.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp bool_field!(config, key, default, name, path) do
+    case Map.fetch(config, key) do
+      :error ->
+        default
+
+      {:ok, v} when is_boolean(v) ->
+        v
+
+      {:ok, other} ->
+        raise """
+        upstreams_config: upstream '#{name}' field '#{key}' must be a boolean, got: \
+        #{inspect(other)}.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  # §3 non-goal "two explicit opt-ins": when the URL is plaintext AND
+  # the entry carries auth emitters, the operator must opt in twice.
+  # Empty / absent / null `auth:` and HTTPS URLs both bypass this check.
+  defp check_insecure_auth_gate!(name, true, false, auth_raw, path)
+       when is_list(auth_raw) and auth_raw != [] do
+    raise """
+    upstreams_config: upstream '#{name}' has `allow_insecure_http: true` and a non-empty \
+    `auth:` list, but `allow_insecure_auth:` is not set.
+
+    Sending credentials over plaintext HTTP requires TWO explicit opt-ins (§3): set
+    `"allow_insecure_auth": true` on the upstream entry to confirm. Production deployments
+    should use https:// and remove both flags.
+
+    Source: #{path}
+    """
+  end
+
+  defp check_insecure_auth_gate!(_name, _allow_insecure_http, _allow_insecure_auth, _auth, _path),
+    do: :ok
 
   # Parse the optional top-level `credentials:` block.
   # Raises with a clear message on shape errors per §5.5 #1 / #11.
@@ -545,6 +915,45 @@ defmodule PtcRunnerMcp.Application do
 
         {:ok, %Credentials.Binding{} = binding} ->
           check_scheme_hint_compat!(name, emitter, binding, source_path)
+      end
+    end
+
+    :ok
+  end
+
+  # §4.5 dep-presence check. If any upstream entry declares
+  # `transport: "http"` (a raw string at this point — full HTTP config
+  # parsing lands in Phase 2E), `:req` MUST be loaded. The check uses
+  # `Code.ensure_loaded?/1` so that an absent `:req` (Mix dep marked
+  # `optional: true`) does not crash compile-time module references.
+  #
+  # `loaded?` is injected so the test suite can simulate `:req` being
+  # absent without unloading the application — defaults to a real
+  # `Code.ensure_loaded?/1` probe.
+  @doc false
+  @spec check_http_deps!(%{String.t() => map()}, String.t()) :: :ok
+  def check_http_deps!(upstreams, source_path)
+      when is_map(upstreams) and is_binary(source_path) do
+    check_http_deps!(upstreams, source_path, &Code.ensure_loaded?/1)
+  end
+
+  @doc false
+  @spec check_http_deps!(
+          %{String.t() => map()},
+          String.t(),
+          (module() -> boolean())
+        ) :: :ok
+  def check_http_deps!(upstreams, source_path, loaded?)
+      when is_map(upstreams) and is_binary(source_path) and is_function(loaded?, 1) do
+    for {name, entry} <- upstreams,
+        is_map(entry),
+        Map.get(entry, "transport") == "http" do
+      unless loaded?.(Req) do
+        raise """
+        upstreams_config: upstream '#{name}' uses HTTP transport but :req is not available.
+        Add `{:req, "~> 0.5"}` to your deps in mix.exs and run `mix deps.get`.
+        Source: #{source_path}
+        """
       end
     end
 

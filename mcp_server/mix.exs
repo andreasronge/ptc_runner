@@ -68,6 +68,18 @@ defmodule PtcRunnerMcp.MixProject do
       # Path dep for in-tree dev; replaced by hex range when published.
       {:ptc_runner, path: "..", override: true},
       {:jason, "~> 1.4"},
+      # `Plans/http-transport-credentials.md` §4.5: `:req` is the HTTP
+      # client used by `Upstream.Http`. Marked `optional: true` so
+      # consumers that only use stdio upstreams need not pull it in.
+      # `Application.load_aggregator_config/1` raises at config load
+      # if any upstream entry declares `transport: "http"` and `:req`
+      # is not loaded.
+      {:req, "~> 0.5", optional: true},
+      # Phase 2F (`Plans/http-transport-credentials.md` §13.2): the
+      # local HTTP fixture is a Plug served by Bandit. Test/dev only;
+      # never shipped in the release.
+      {:bandit, "~> 1.5", only: [:dev, :test]},
+      {:plug, "~> 1.16", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
