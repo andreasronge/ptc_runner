@@ -214,6 +214,7 @@ ptc_runner_mcp eval "..."  # run an expression in a one-shot VM
 ## Links
 
 - Full spec: [`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md)
+- Aggregator mode (calls configured upstream MCP servers from inside the sandbox): [`docs/aggregator-mode.md`](../docs/aggregator-mode.md)
 - PTC-Lisp language reference: <https://hexdocs.pm/ptc_runner>
 - PtcRunner repo: <https://github.com/andreasronge/ptc_runner>
 - Model Context Protocol: <https://modelcontextprotocol.io/>

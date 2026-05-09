@@ -90,13 +90,21 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
     cond do
       not is_binary(server) or server == "" ->
+        # No identification available — we don't have a valid server
+        # name yet, so the message can't carry one. The catalog the
+        # LLM sees in the tool description includes every configured
+        # upstream name, so this is the recover-by-reading-the-catalog
+        # path.
         raise_programmer_fault(
           "tool/mcp-call requires :server (string), got #{inspect_short(server)}"
         )
 
       not is_binary(tool) or tool == "" ->
+        # §7.2: include the upstream name so the LLM can correlate
+        # the error to a specific server entry in the catalog without
+        # re-reading the program.
         raise_programmer_fault(
-          "tool/mcp-call requires :tool (string), got #{inspect_short(tool)}"
+          "tool/mcp-call on upstream '#{server}' requires :tool (string), got #{inspect_short(tool)}"
         )
 
       is_nil(call_args) ->
@@ -106,8 +114,12 @@ defmodule PtcRunnerMcp.AggregatorTools do
         {server, tool, %{}}
 
       not is_map(call_args) ->
+        # §7.2: include `<server>.<tool>` so the LLM knows which call
+        # site is wrong without consulting `upstream_calls` (which
+        # never gets populated for programmer-fault failures that
+        # short-circuit before any upstream call is attempted).
         raise_programmer_fault(
-          "tool/mcp-call requires :args (map), got #{inspect_short(call_args)}"
+          "tool '#{server}.#{tool}' rejected args: :args must be a map, got #{inspect_short(call_args)}"
         )
 
       true ->
