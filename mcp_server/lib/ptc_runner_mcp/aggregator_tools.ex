@@ -426,11 +426,27 @@ defmodule PtcRunnerMcp.AggregatorTools do
             {:world_fault, :upstream_error, detail}
 
           :ok ->
+            # Pipeline ordering (Plans/json-support.md §6.4 — single
+            # source of truth):
+            #
+            #   classify_value (above) → auto-decode → §7.3 :json-null
+            #
+            # Auto-decode runs HERE — after classify_value short-
+            # circuits world-faults (so `isError: true` envelopes never
+            # reach this branch and never trigger a spurious
+            # `:auto_decode` telemetry event), and BEFORE the §7.3
+            # top-level `:json-null` rewrite (so promotion operates on
+            # the upstream's original map, not on a `:json-null`
+            # keyword). The maybe_auto_decode/3 helper preserves the
+            # original `content[]` and only adds `structuredContent`
+            # when all four §6.1 preconditions hold.
+            promoted = maybe_auto_decode(value, server, tool)
+
             # §7.3: `:json-null` rewrite is **top-level only**. If the
             # successful payload is itself JSON null, hand back the
             # keyword sentinel so `nil` retains its "this call did not
             # succeed" meaning. Nested nils are unchanged.
-            rewritten = if is_nil(value), do: :"json-null", else: value
+            rewritten = if is_nil(promoted), do: :"json-null", else: promoted
 
             entry = UpstreamCalls.success_entry(server, tool, total_duration)
             UpstreamCalls.record(call_context, entry)
@@ -496,6 +512,156 @@ defmodule PtcRunnerMcp.AggregatorTools do
   # Everything else is a plain success.
   defp classify_value(%{"isError" => true}), do: :upstream_error
   defp classify_value(_), do: :ok
+
+  # Plans/json-support.md §6 auto-decode promotion. Pure shape
+  # inspector + telemetry emitter — adds `structuredContent` to a
+  # well-formed JSON-as-text upstream envelope and leaves everything
+  # else untouched. Telemetry fires per §7's per-outcome table:
+  #
+  #   :promoted          — all four §6.1 conditions held; envelope
+  #                        gets `structuredContent` added (with the
+  #                        decoded-bare-nil → :"json-null" §6.4
+  #                        sub-field substitution).
+  #   :already_structured — `structuredContent` was already present
+  #                        and non-nil; promotion skipped.
+  #   :decode_failed     — mimeType matched but `Jason.decode/1`
+  #                        rejected the text; envelope passes through
+  #                        unchanged. Per §6.4 / §8: NO `upstream_calls`
+  #                        entry is added — the side-channel is
+  #                        reserved for world-faults, not soft decode
+  #                        misses.
+  #
+  # No telemetry event is emitted when the envelope is not a map,
+  # has no first text-content item, or has a non-matching mimeType
+  # (§7 last paragraph: "the volume would dwarf the signal").
+  defp maybe_auto_decode(value, server, tool) when is_map(value) do
+    case extract_first_text_item(value) do
+      {:ok, text, mime_type} ->
+        cond do
+          not json_mime?(mime_type) ->
+            value
+
+          structured_content_present?(value) ->
+            emit_auto_decode_telemetry(:already_structured, server, tool, mime_type, %{
+              decoded_bytes: 0
+            })
+
+            value
+
+          true ->
+            attempt_decode(value, text, server, tool, mime_type)
+        end
+
+      :no_text_item ->
+        value
+    end
+  end
+
+  defp maybe_auto_decode(value, _server, _tool), do: value
+
+  # Returns `{:ok, text, mime_type}` when the upstream envelope's
+  # `content[0]` is a text item (`type == "text"` and `text` is a
+  # binary; `mimeType` may be nil/absent and is checked against the
+  # JSON-mime allowlist by `json_mime?/1`). Returns `:no_text_item`
+  # otherwise — including for empty content lists, non-list content
+  # values, and non-text first items (e.g. image / resource items
+  # that happen to carry `mimeType: "application/json"`).
+  defp extract_first_text_item(%{"content" => [first | _]}) when is_map(first) do
+    case first do
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        {:ok, text, Map.get(first, "mimeType")}
+
+      _ ->
+        :no_text_item
+    end
+  end
+
+  defp extract_first_text_item(_), do: :no_text_item
+
+  # §6.1 condition 3: exact `application/json` OR any string ending
+  # in `+json` (RFC 6839 structured suffix — covers
+  # `application/ld+json`, `application/vnd.foo+json`, etc.). The
+  # suffix check is intentionally permissive: any binary ending in
+  # `+json` qualifies, no slash-before requirement, per §6.1's
+  # exact wording "any string ending in `+json`".
+  defp json_mime?("application/json"), do: true
+  defp json_mime?(mime) when is_binary(mime), do: String.ends_with?(mime, "+json")
+  defp json_mime?(_), do: false
+
+  # §6.1 condition 1: "absent or nil" — both treat as eligible for
+  # promotion. A non-nil `structuredContent` already supplied by the
+  # upstream wins and is never overridden.
+  defp structured_content_present?(value) do
+    case Map.fetch(value, "structuredContent") do
+      {:ok, nil} -> false
+      {:ok, _} -> true
+      :error -> false
+    end
+  end
+
+  # §6.4: `Jason.decode/1` MUST NOT raise. Wrap explicitly — the
+  # return tuple is the entire surface. On `{:error, _}` the result
+  # passes through unchanged AND no `upstream_calls` entry is added
+  # (§6.4 / §8 side-channel invariant lock-in). The `:decode_failed`
+  # telemetry event is the only operator-visible signal.
+  defp attempt_decode(value, text, server, tool, mime_type) do
+    case Jason.decode(text) do
+      {:ok, decoded} ->
+        # §6.4 sub-field rule: a decoded bare `nil` (the JSON literal
+        # `"null"`) is substituted with `:"json-null"` so the field
+        # is distinguishable from "absent". The substitution applies
+        # ONLY to bare `nil` — `false`, `0`, `""`, `[]` are
+        # legitimate JSON payloads and promote verbatim per the
+        # post-§5.2 carve-out (commit 6852ca4).
+        sub_value = if is_nil(decoded), do: :"json-null", else: decoded
+        promoted = Map.put(value, "structuredContent", sub_value)
+
+        emit_auto_decode_telemetry(
+          :promoted,
+          server,
+          tool,
+          mime_type,
+          promoted_measurements(decoded)
+        )
+
+        promoted
+
+      {:error, _reason} ->
+        emit_auto_decode_telemetry(:decode_failed, server, tool, mime_type, %{
+          decoded_bytes: 0,
+          text_bytes: byte_size(text)
+        })
+
+        value
+    end
+  end
+
+  # Per §7's measurement table, `:promoted` reports the byte size of
+  # `Jason.encode!(value)` on the promoted value. Best-effort: a
+  # round-trip encode failure (e.g. an exotic decoded structure that
+  # can't re-serialize cleanly — vanishingly rare for Jason output)
+  # suppresses the field but does NOT suppress the event itself.
+  defp promoted_measurements(decoded) do
+    case Jason.encode(decoded) do
+      {:ok, encoded} -> %{decoded_bytes: byte_size(encoded)}
+      {:error, _} -> %{}
+    end
+  end
+
+  defp emit_auto_decode_telemetry(outcome, server, tool, mime_type, measurements) do
+    metadata = %{
+      server: server,
+      tool: tool,
+      mime_type: mime_type,
+      outcome: outcome
+    }
+
+    :telemetry.execute(
+      [:ptc_runner_mcp, :upstream, :auto_decode, :stop],
+      measurements,
+      metadata
+    )
+  end
 
   # Extract a human-readable detail from an upstream's `isError: true`
   # envelope. The MCP convention is

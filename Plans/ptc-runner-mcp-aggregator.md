@@ -1448,15 +1448,17 @@ Honest weaknesses:
   shutdown of an upstream that's stuck in `initialize`. Not a data
   correctness issue. Promote to its own hardening phase if the
   scenario shows up outside shutdown.
-- **Low: PTC-Lisp has no JSON decoder for upstream string payloads.**
-  Some upstreams (e.g., `mem.read_graph` from
-  `@modelcontextprotocol/server-memory`) embed JSON as a string
-  inside `content[0].text` rather than using `structuredContent`.
-  Programs that need to consume the embedded JSON fall back to
-  string/regex parsing, which is brittle to upstream formatting
-  changes. Options: add a `(json/parse ...)` builtin to
-  `PtcRunner.Lisp`, or auto-decode when an upstream's content
-  payload is JSON-shaped. Low priority; LLMs work around it.
+- **Resolved (2026-05-09): JSON decoder + auto-decode shipped.**
+  Originally: "PTC-Lisp has no JSON decoder for upstream string
+  payloads." Resolved across three phases of `Plans/json-support.md`:
+  Phase A added `(json/parse-string ...)` / `(json/generate-string ...)`,
+  Phase B added `(mcp/text r)` / `(mcp/json r)` unwrap helpers, and
+  Phase C added aggregator auto-decode — when an upstream `tools/call`
+  envelope's `content[0]` is a text item with mimeType
+  `application/json` (or any `+json` suffix), the aggregator decodes
+  the text and additively populates `structuredContent` so downstream
+  programs can read typed values without manual string parsing. Auto-
+  decode added — see `Plans/json-support.md` §6.
 - Phase 3 catalog `false`-const corner case: `Catalog.render_type/1`
   uses `cond` with truthiness checks to detect `:enum` / `:const`
   constraints, so a schema `{"const": false}` skips the const branch
