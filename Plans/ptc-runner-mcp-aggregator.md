@@ -1448,36 +1448,6 @@ Honest weaknesses:
   shutdown of an upstream that's stuck in `initialize`. Not a data
   correctness issue. Promote to its own hardening phase if the
   scenario shows up outside shutdown.
-- **High: Latin1 encoding crash on non-ASCII / large payloads
-  (Phase 4 hardening).** `PtcRunnerMcp.Stdio`'s public-facing port is
-  in default text/Latin1 mode, so any byte outside Latin1 — UTF-8
-  punctuation in program source (e.g., em-dashes), or a large
-  upstream response that gets mirrored back through the program's
-  return value — crashes the entire server with
-  `{:no_translation, :unicode, :latin1}` **before** the
-  `max_upstream_response_bytes` guard can fire. Availability bug:
-  any upstream emitting a >~stdin-buffer response can take down the
-  MCP server. Fix: switch the public Stdio port to `:binary` mode and
-  enforce the size cap on the raw byte stream pre-decode (mirrors how
-  Phase 1b's `Upstream.Stdio` already handles upstream responses).
-  Same fix likely covers the em-dash-in-source crash observed during
-  Phase 3 probing. Resolve before any broader public release.
-- **Medium: `isError: true` upstream envelopes not normalized to
-  `nil` (spec compliance).** When an upstream's `tools/call` returns
-  successfully but with `isError: true` (filesystem-MCP for ENOENT,
-  most upstreams for tool-level failures), the JSON-RPC call itself
-  succeeded, so `upstream_calls` records `status: "ok"`. The §7.1
-  contract — *world-fault → nil, programmer-fault → raise* — implies
-  tool-level errors should be a third bucket. Programs using the
-  documented `(remove nil? results)` / `(when result ...)` idiom
-  silently propagate error envelopes as data. Resolution options:
-  (a) normalize MCP `isError: true` to `nil` and record
-  `upstream_error` in `upstream_calls` (preserves the documented
-  idiom — preferred); (b) add a `:json-error` sentinel parallel to
-  `:json-null` (more accurate but new analyzer surface); (c) document
-  the gap and require programs to inspect `(get result "isError")`
-  (cheapest but defeats the spec promise). Pick (a) in the same
-  hardening phase that fixes the Latin1 issue.
 - **Low: PTC-Lisp has no JSON decoder for upstream string payloads.**
   Some upstreams (e.g., `mem.read_graph` from
   `@modelcontextprotocol/server-memory`) embed JSON as a string
@@ -1553,6 +1523,26 @@ Honest weaknesses:
   behavior with real MCP clients) deferred to Phase 3 alongside
   catalog rollout. Recommendation in the writeup: continue to
   Phase 3.
+- 2026-05-09 (phase4-hardening): Phase 4 hardening shipped as
+  `e1c151f` after two codex review rounds. Resolves the two real
+  bugs surfaced by the real-client probe sweep:
+  (1) `PtcRunnerMcp.Stdio` public-facing port now opens in `:binary`
+  mode with raw-byte `max_frame_bytes` enforcement before any UTF-8
+  decode — eliminates the `{:no_translation, :unicode, :latin1}`
+  availability crash on non-ASCII source bytes or large response
+  payloads;
+  (2) `aggregator_tools.invoke_call/6` now classifies upstream
+  responses BEFORE the §7.3 `:json-null` rewrite — a map containing
+  `"isError" => true` becomes `nil` plus an `upstream_error` entry
+  in `upstream_calls`, with the human-readable detail extracted
+  from `content[0].text` and codepoint-truncated to 500 chars
+  (codepoint slice avoids invalid-UTF-8 boundary cuts that would
+  trip `Jason.encode!/1` on the outgoing envelope — caught by codex
+  in round 2 of the hardening review). §7.1's `upstream_error` row
+  was widened to cover both JSON-RPC errors and `isError: true`
+  with parity rationale documented inline. README's "known limits
+  (Phase 4 hardening)" block removed. Live-aggregator probe
+  re-verification confirms both fixes hold end-to-end.
 - 2026-05-09 (real-client probes): Hand-driven probe sweep against a
   live aggregator (filesystem-MCP + memory-MCP) via `claude -p`
   surfaced two real bugs and one ergonomic gap, all logged in §16:
