@@ -248,10 +248,24 @@ defmodule PtcRunnerMcp.CancellationTest do
       # and sends `{:stdin_line, :eof}`. This confirms the live read
       # path delivers EOF correctly — i.e. the `spawn_monitor` reader
       # actually wires up to the GenServer's mailbox in production.
+      #
+      # We use `:trap_exit` + the synchronous `start_link` link rather
+      # than `Process.monitor/1` to assert the exit reason. The race
+      # window we're closing: with `auto_read: true` against an empty
+      # StringIO, the reader hits EOF essentially the moment Stdio's
+      # init returns — Stdio can complete its `:normal` exit before a
+      # post-hoc `Process.monitor/1` call lands, in which case the
+      # monitor would fire with `:noproc` instead of `:normal` and
+      # the test would flake under parallel-test load. The link from
+      # `start_link/1` is established synchronously inside the
+      # `start_link` call, so trapping exits and asserting the
+      # `{:EXIT, ^stdio, :normal}` message is race-free.
       ConcurrencyGate.reset()
       Limits.set(Limits.defaults())
 
       {:ok, io} = StringIO.open(<<>>, capture_prompt: false)
+
+      Process.flag(:trap_exit, true)
 
       {:ok, stdio} =
         Stdio.start_link(
@@ -261,10 +275,8 @@ defmodule PtcRunnerMcp.CancellationTest do
           name: :"stdio_eof_live_reader_#{System.unique_integer([:positive])}"
         )
 
-      ref = Process.monitor(stdio)
-
       assert_receive {Stdio, {:exited, :eof}}, 2_000
-      assert_receive {:DOWN, ^ref, :process, ^stdio, :normal}, 2_000
+      assert_receive {:EXIT, ^stdio, :normal}, 2_000
 
       StringIO.close(io)
     end
