@@ -313,29 +313,6 @@ Programs that don't care about the distinction can write
 `(remove nil? results)` to discard world-faults and `(when result
 ...)` to skip individual `nil`s.
 
-### Known limits (Phase 4 hardening)
-
-Two real bugs surfaced during real-client probing; tracked in
-[`Plans/ptc-runner-mcp-aggregator.md`](../Plans/ptc-runner-mcp-aggregator.md)
-§16:
-
-- The public-facing stdio port runs in Latin1 mode and crashes on
-  non-ASCII bytes (UTF-8 punctuation in a program, large upstream
-  responses being mirrored back through the program's return).
-  Symptom: `MCP error -32000: Connection closed`. Workaround: keep
-  program source ASCII-only; transform large upstream payloads
-  inside the sandbox rather than returning them verbatim.
-- An upstream `tools/call` that succeeds with `isError: true`
-  (e.g., filesystem-MCP for a missing file) is recorded as
-  `status: "ok"` in `upstream_calls` and the program receives the
-  error envelope as a non-`nil` value. The documented `(remove
-  nil? ...)` idiom won't filter these out. Workaround: explicitly
-  inspect `(get result "isError")` for tool-call results that can
-  fail at the application level.
-
-Both fixes are tracked for a hardening pass before broader public
-release.
-
 ## Tracing for power users
 
 Setting `--trace-dir /tmp/ptc-traces` writes one JSONL file per

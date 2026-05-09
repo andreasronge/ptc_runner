@@ -134,6 +134,20 @@ defmodule PtcRunnerMcp.Stdio do
       auto_read: Keyword.get(opts, :auto_read, true)
     }
 
+    # Phase 4 hardening (Plans/ptc-runner-mcp-aggregator.md §16
+    # entry 1): put the IO device into raw-byte (`encoding: :latin1`)
+    # mode BEFORE any read. The OTP IO server's default
+    # `encoding: :unicode` rejects bytes outside Latin1 with
+    # `{:error, {:no_translation, :unicode, :latin1}}`, so any UTF-8
+    # punctuation in the program source — or a large upstream
+    # response getting mirrored back through the program's return —
+    # crashed the entire MCP server before `max_frame_bytes` could
+    # fire. `encoding: :latin1` makes the IO server treat the input
+    # as opaque bytes; `feed_bytes/2` then enforces the cap byte-by-
+    # byte over the raw stream, exactly as the spec requires.
+    # Mirrors how `Upstream.Stdio` opens its Port with `:binary`.
+    :ok = configure_io_for_binary(state.io)
+
     # Run the blocking `IO.binread/2` in a dedicated reader process
     # rather than this GenServer. If we read inline, `IO.binread`
     # blocks the GenServer's receive loop, so worker `:async_reply`
@@ -157,6 +171,49 @@ defmodule PtcRunnerMcp.Stdio do
       end
 
     {:ok, state}
+  end
+
+  # Switch the IO device into raw-byte mode. Three invocation
+  # paths are supported:
+  #
+  #   * `:stdio` / `:standard_io` — the production path. The atom
+  #     `:stdio` is an Elixir convention; `:io.setopts/2` rejects
+  #     it with `{:error, :arguments}` (the OTP `:io` module
+  #     accepts only registered names or pids). We resolve to the
+  #     calling process's group leader pid, which IS the
+  #     underlying OTP IO server for `:standard_io`. This was the
+  #     critical missed step in the first cut of this fix:
+  #     `setopts(:stdio, ...)` silently returned an error and the
+  #     stdin pipe stayed in `:unicode` mode, still aborting on
+  #     non-Latin1 bytes.
+  #   * any pid — test path (`StringIO` and friends). Some devices
+  #     (notably `StringIO`) reject `setopts` with `{:error,
+  #     :enotsup}`; we tolerate that so the test harness keeps
+  #     working unmodified (StringIO is already binary-safe at
+  #     the byte layer).
+  #   * any other term — best-effort attempt; failures are
+  #     swallowed.
+  #
+  # `encoding: :latin1` makes the IO server pass bytes through
+  # without UTF-8 validation. We still write replies via
+  # `IO.binwrite/2` (raw bytes, regardless of encoding) so the
+  # reply path is symmetric.
+  @doc false
+  @spec configure_io_for_binary(term()) :: :ok
+  def configure_io_for_binary(io) do
+    target =
+      case io do
+        :stdio -> Process.group_leader()
+        :standard_io -> Process.group_leader()
+        other -> other
+      end
+
+    _ = :io.setopts(target, [{:binary, true}, {:encoding, :latin1}])
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   # `IO.binread(io, :line)` returns each line **with** its trailing
@@ -488,8 +545,15 @@ defmodule PtcRunnerMcp.Stdio do
   end
 
   defp write_reply(%State{io: io, observer: observer} = _state, frame) do
+    # `Jason.encode!/1` produces a binary of UTF-8 bytes (raw, regardless
+    # of `:ensure_ascii`). `IO.binwrite/2` emits those bytes verbatim;
+    # `IO.write/2` would funnel them through the IO server's encoding
+    # path, which under `encoding: :latin1` (Phase 4 hardening — see
+    # `configure_io_for_binary/1`) escapes non-Latin1 codepoints to
+    # `\x{...}` and corrupts the JSON. Using `binwrite` keeps the wire
+    # bytes identical to what `Jason.encode!/1` returned.
     line = Jason.encode!(frame) <> "\n"
-    IO.write(io, line)
+    IO.binwrite(io, line)
     if observer, do: send(observer, {__MODULE__, :replied, frame})
     :ok
   end

@@ -400,15 +400,42 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
     case result do
       {:ok, value} ->
-        # §7.3: `:json-null` rewrite is **top-level only**. If the
-        # successful payload is itself JSON null, hand back the
-        # keyword sentinel so `nil` retains its "this call did not
-        # succeed" meaning. Nested nils are unchanged.
-        rewritten = if is_nil(value), do: :"json-null", else: value
+        # Phase 4 hardening (Plans/ptc-runner-mcp-aggregator.md §16
+        # entry 2): an upstream `tools/call` that returns
+        # `{:ok, %{"isError" => true, ...}}` is a *tool-level* error
+        # — the JSON-RPC call itself succeeded, but the upstream
+        # signaled application failure inside the result envelope.
+        # Per §7.1 this is a world-fault: programs see `nil`, and
+        # `upstream_calls` records `status: "error"`,
+        # `reason: "upstream_error"`. The detail is extracted from
+        # `content[0].text` when shaped that way (the MCP convention
+        # for human-readable error messages); otherwise we inspect
+        # the value as a fallback.
+        #
+        # The check runs BEFORE the §7.3 `:json-null` rewrite so
+        # top-level JSON null is unaffected (a bare `nil` value is
+        # not a map and never matches the `isError` branch).
+        case classify_value(value) do
+          :upstream_error ->
+            detail = extract_is_error_detail(value)
 
-        entry = UpstreamCalls.success_entry(server, tool, total_duration)
-        UpstreamCalls.record(call_context, entry)
-        {:ok, rewritten}
+            entry =
+              UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration)
+
+            UpstreamCalls.record(call_context, entry)
+            {:world_fault, :upstream_error, detail}
+
+          :ok ->
+            # §7.3: `:json-null` rewrite is **top-level only**. If the
+            # successful payload is itself JSON null, hand back the
+            # keyword sentinel so `nil` retains its "this call did not
+            # succeed" meaning. Nested nils are unchanged.
+            rewritten = if is_nil(value), do: :"json-null", else: value
+
+            entry = UpstreamCalls.success_entry(server, tool, total_duration)
+            UpstreamCalls.record(call_context, entry)
+            {:ok, rewritten}
+        end
 
       {:error, reason, detail}
       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
@@ -445,6 +472,64 @@ defmodule PtcRunnerMcp.AggregatorTools do
   # ----------------------------------------------------------------
   # Helpers
   # ----------------------------------------------------------------
+
+  # Cap on the extracted error detail string. Upstream MCP servers
+  # can put arbitrarily long text inside `content[0].text` (stack
+  # traces, full file dumps, etc.). 500 codepoints is enough for a
+  # human-readable diagnostic in `upstream_calls[].error` without
+  # bloating the response envelope.
+  #
+  # The cap is in **codepoints, not bytes**. A byte-aligned cap
+  # (`<<head::binary-size(500), _::binary>>`) can slice through a
+  # multi-byte UTF-8 codepoint mid-encoding (e.g., a Chinese stack
+  # trace, or 600× `é` = 1200 bytes), producing an invalid UTF-8
+  # binary. That binary is then stored in `upstream_calls[].error`
+  # and crashes `Jason.encode!/1` when the response envelope is
+  # built — i.e., the same encoding-family failure Phase 4 was
+  # supposed to harden against. `String.slice/3` always cuts on
+  # codepoint boundaries and returns a valid UTF-8 string.
+  @is_error_detail_cap 500
+
+  # Phase 4 hardening: classify a successful upstream payload. A
+  # map whose `"isError"` key is `true` is a tool-level failure
+  # (§16 entry 2 / amended §7.1) and surfaces as a world-fault.
+  # Everything else is a plain success.
+  defp classify_value(%{"isError" => true}), do: :upstream_error
+  defp classify_value(_), do: :ok
+
+  # Extract a human-readable detail from an upstream's `isError: true`
+  # envelope. The MCP convention is
+  #
+  #     %{"content" => [%{"type" => "text", "text" => "<msg>"}, ...],
+  #       "isError" => true}
+  #
+  # so `content[0].text` is the human-readable error. If the upstream
+  # uses a different shape (no content list, non-text first item,
+  # etc.) we fall back to `inspect/2` so the LLM still sees something
+  # diagnostic. The result is capped at `@is_error_detail_cap`
+  # codepoints (see the constant's docstring for why codepoints,
+  # not bytes).
+  defp extract_is_error_detail(%{"content" => [%{"text" => text} | _]}) when is_binary(text) do
+    cap_detail(text)
+  end
+
+  defp extract_is_error_detail(value) do
+    cap_detail("upstream isError envelope: #{inspect(value, limit: 50, printable_limit: 200)}")
+  end
+
+  defp cap_detail(text) when is_binary(text) do
+    # `String.length/1` counts codepoints; `String.slice/3` cuts on
+    # codepoint boundaries. Always-valid UTF-8 out, regardless of
+    # input script. We compare on `String.length` (not `byte_size`)
+    # so a mostly-ASCII string under the cap stays unmodified, and
+    # a multi-byte string above the cap is trimmed to exactly
+    # `@is_error_detail_cap` codepoints + a single ellipsis.
+    if String.length(text) > @is_error_detail_cap do
+      String.slice(text, 0, @is_error_detail_cap) <> "…"
+    else
+      text
+    end
+  end
 
   defp tool_name_of(%{name: n}) when is_binary(n), do: n
   defp tool_name_of(%{"name" => n}) when is_binary(n), do: n
