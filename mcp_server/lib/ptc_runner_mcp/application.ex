@@ -499,7 +499,18 @@ defmodule PtcRunnerMcp.Application do
 
   # Case-insensitive denylist for `static_headers:` (per §5.3.2). Stored
   # lowercase; checks lowercase the input before lookup.
-  @static_headers_denylist ~w(authorization proxy-authorization cookie set-cookie x-api-key)
+  #
+  # Two categories:
+  #   * Auth-sensitive (must go through the `auth:` block):
+  #     `authorization`, `proxy-authorization`, `cookie`, `set-cookie`,
+  #     `x-api-key`.
+  #   * Protocol-controlled (impl owns these per §6.1.1 / §6.3 — a
+  #     static config value would override the negotiated value):
+  #     `mcp-protocol-version`, `mcp-session-id`, `user-agent`.
+  @static_headers_denylist ~w(
+    authorization proxy-authorization cookie set-cookie x-api-key
+    mcp-protocol-version mcp-session-id user-agent
+  )
 
   # HTTP defaults from §5.3.
   @http_default_handshake_timeout_ms 10_000

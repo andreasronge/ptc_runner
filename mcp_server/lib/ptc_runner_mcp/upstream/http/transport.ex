@@ -11,14 +11,19 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
     * `200 OK` + `text/event-stream`                 → delegate to
       `PtcRunnerMcp.Upstream.Http.SseDecoder.decode_stream/2`
     * `202` empty body                               → `:ok`
-    * `401`/`403`                                    → `:upstream_unavailable, "auth_failed"`
-    * `404`                                          → `:upstream_unavailable, "http 404"`
-                                                       (caller / `Session.session_lost?/2`
-                                                       interprets 404+held-session-id
-                                                       as session-loss)
-    * `429`                                          → `:upstream_unavailable, "rate_limited"`
-    * other 4xx + JSON-RPC error                     → `:upstream_error, formatted`
-    * other 4xx not JSON-RPC                         → `:upstream_unavailable, "http <s>"`
+    * any 4xx + JSON-RPC error body                  → `:upstream_error, formatted`
+                                                       (world-fault — §6.4 / §8.1; checked
+                                                       FIRST for ALL 4xx, including 401/
+                                                       403/404/429 — codex P1 fix for
+                                                       commit `76f68de` that special-cased
+                                                       404 before the JSON-RPC branch)
+    * `401`/`403` plain                              → `:upstream_unavailable, "auth_failed"`
+    * `404` plain                                    → `:upstream_unavailable, "http 404"`
+                                                       (caller `Upstream.Http` interprets
+                                                       this plus a held session id as the
+                                                       §6.3 session-loss signal)
+    * `429` plain                                    → `:upstream_unavailable, "rate_limited"`
+    * other 4xx plain                                → `:upstream_unavailable, "http <s>"`
     * 5xx                                            → `:upstream_unavailable, "http <s>"`
     * TLS / network / connect-timeout                → `:upstream_unavailable, ...`
     * read timeout                                   → `:timeout, "http read timeout"`
@@ -361,18 +366,6 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
 
   defp do_map_response(202, _headers, _body, _jsonrpc_id, _max), do: :ok
 
-  defp do_map_response(401, _headers, _body, _jsonrpc_id, _max),
-    do: {:error, :upstream_unavailable, "auth_failed"}
-
-  defp do_map_response(403, _headers, _body, _jsonrpc_id, _max),
-    do: {:error, :upstream_unavailable, "auth_failed"}
-
-  defp do_map_response(429, _headers, _body, _jsonrpc_id, _max),
-    do: {:error, :upstream_unavailable, "rate_limited"}
-
-  defp do_map_response(404, _headers, _body, _jsonrpc_id, _max),
-    do: {:error, :upstream_unavailable, "http 404"}
-
   defp do_map_response(200, headers, body, jsonrpc_id, max_bytes) do
     case content_type(headers) do
       :json ->
@@ -389,9 +382,17 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
 
   defp do_map_response(status, _headers, body, _jsonrpc_id, _max)
        when status >= 400 and status < 500 do
+    # Check for a JSON-RPC error body FIRST (codex P1 fix for `76f68de`):
+    # any 4xx — including 401, 403, 404, 429 — that carries a JSON-RPC
+    # error body classifies as `:upstream_error` (world-fault) per
+    # §6.4 / §8.1. Plain 4xx without a JSON-RPC body falls through to
+    # the status-specific defaults below.
     case decode_jsonrpc_error(body) do
-      {:ok, formatted} -> {:error, :upstream_error, formatted}
-      :not_jsonrpc -> {:error, :upstream_unavailable, "http #{status}"}
+      {:ok, formatted} ->
+        {:error, :upstream_error, formatted}
+
+      :not_jsonrpc ->
+        plain_4xx(status)
     end
   end
 
@@ -405,6 +406,15 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
     # violation. Treat as unavailable.
     {:error, :upstream_unavailable, "http #{status}"}
   end
+
+  # Status-specific defaults for plain 4xx (no JSON-RPC error body).
+  # `Upstream.Http.call/4` interprets `"http 404"` plus a held
+  # session id as the §6.3 session-loss signal.
+  defp plain_4xx(401), do: {:error, :upstream_unavailable, "auth_failed"}
+  defp plain_4xx(403), do: {:error, :upstream_unavailable, "auth_failed"}
+  defp plain_4xx(404), do: {:error, :upstream_unavailable, "http 404"}
+  defp plain_4xx(429), do: {:error, :upstream_unavailable, "rate_limited"}
+  defp plain_4xx(status), do: {:error, :upstream_unavailable, "http #{status}"}
 
   # ----------------------------------------------------------------
   # 200 handling — JSON
@@ -475,11 +485,15 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   # JSON-RPC error formatting
   # ----------------------------------------------------------------
 
-  # Returns `{:ok, formatted}` if `body` parses as a JSON-RPC error
-  # object, else `:not_jsonrpc`. Used by the 4xx-with-body branch.
+  # Returns `{:ok, formatted}` if `body` parses as a proper JSON-RPC
+  # error envelope (must carry `"jsonrpc": "2.0"` per the JSON-RPC
+  # 2.0 spec), else `:not_jsonrpc`. Used by the 4xx-with-body branch
+  # so a server that returns an arbitrary `{"error": "..."}` shape on
+  # auth failure (e.g. an OAuth-style error body) is NOT misclassified
+  # as a JSON-RPC protocol error.
   defp decode_jsonrpc_error(body) do
     case Jason.decode(body) do
-      {:ok, %{"error" => err}} -> {:ok, format_jsonrpc_error(err)}
+      {:ok, %{"jsonrpc" => "2.0", "error" => err}} -> {:ok, format_jsonrpc_error(err)}
       _ -> :not_jsonrpc
     end
   end
@@ -605,14 +619,18 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   # Misc
   # ----------------------------------------------------------------
 
+  # `User-Agent` is impl-controlled (§6 / codex P1 fix for `76f68de`).
+  # Strip any caller-supplied `User-Agent` (case-insensitive) and
+  # always append our own. The config loader's `static_headers`
+  # denylist rejects `user-agent` at load time; this enforces the
+  # invariant on the wire path too.
   defp ensure_user_agent(headers) do
-    if Enum.any?(headers, fn {k, _} ->
-         is_binary(k) and String.downcase(k) == "user-agent"
-       end) do
-      headers
-    else
-      headers ++ [{"user-agent", user_agent()}]
-    end
+    headers
+    |> Enum.reject(fn
+      {k, _} when is_binary(k) -> String.downcase(k) == "user-agent"
+      _ -> false
+    end)
+    |> Kernel.++([{"user-agent", user_agent()}])
   end
 
   defp user_agent do

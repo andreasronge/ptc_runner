@@ -104,6 +104,62 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       |> send_resp(400, "Bad Request")
     end
 
+    # 404 + JSON-RPC error body — codex P1 fix for `76f68de`: must
+    # classify as `:upstream_error`, NOT `:upstream_unavailable, "http 404"`.
+    # Pre-fix, `do_map_response/5` special-cased every 404 before the
+    # 4xx-with-jsonrpc-body branch could fire.
+    defp handle(:not_found_404_with_jsonrpc, conn, _opts) do
+      body =
+        Jason.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "error" => %{"code" => -32_601, "message" => "method not found"}
+        })
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(404, body)
+    end
+
+    # 401 + JSON-RPC error body — also classifies as :upstream_error
+    # (any 4xx + JSON-RPC body, by the same world-fault rule).
+    defp handle(:auth_401_with_jsonrpc, conn, _opts) do
+      body =
+        Jason.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "error" => %{"code" => -32_600, "message" => "invalid request"}
+        })
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(401, body)
+    end
+
+    # 401 + an `{"error": "..."}` body that is NOT a JSON-RPC envelope
+    # (no `"jsonrpc": "2.0"` field). MUST classify as `:upstream_unavailable,
+    # "auth_failed"` — the JSON-RPC matcher requires the protocol marker.
+    defp handle(:auth_401_with_oauth_body, conn, _opts) do
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(401, ~s({"error":"unauthorized","error_description":"bad token"}))
+    end
+
+    # User-Agent reflection — the test reads back what the server saw
+    # via the controller's `:received` message, plus we send 200 with
+    # an empty result so the call completes cleanly.
+    defp handle(:reflect_user_agent, conn, opts) do
+      ctrl = Keyword.fetch!(opts, :controller)
+      ua = Plug.Conn.get_req_header(conn, "user-agent")
+      send(ctrl, {:user_agent, ua})
+
+      body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "result" => %{}})
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, body)
+    end
+
     defp handle(:server_error_503, conn, _opts) do
       send_resp(conn, 503, "")
     end
@@ -259,4 +315,91 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
              "expected :upstream_unavailable, got: #{inspect(result)}"
     end
   end
+
+  # ─────── codex P1 #3 regression: 4xx + JSON-RPC body precedence ───────
+  #
+  # Pre-fix: `do_map_response/5` special-cased every 404 BEFORE the
+  # 4xx-with-jsonrpc-body branch could fire. So a 404 carrying a
+  # JSON-RPC error envelope was misclassified as `:upstream_unavailable,
+  # "http 404"` (which the impl can interpret as session-loss). Post-fix:
+  # any 4xx with a proper JSON-RPC envelope (carrying `"jsonrpc": "2.0"`)
+  # is a world-fault `:upstream_error`.
+  describe "4xx + JSON-RPC body precedence (codex P1 #3 for `76f68de`)" do
+    test "404 with JSON-RPC error body → :upstream_error (NOT \"http 404\")" do
+      %{url: url} = start_fixture(:not_found_404_with_jsonrpc)
+
+      assert {:error, :upstream_error, detail} = Transport.post(post_opts(url))
+      assert detail =~ "method not found"
+    end
+
+    test "404 plain body still surfaces as :upstream_unavailable, \"http 404\"" do
+      # This pins that the session-loss path (`Upstream.Http`'s 404 +
+      # held-session-id check) is preserved for the non-JSON-RPC case.
+      %{url: url} = start_fixture(:not_found_404)
+      assert {:error, :upstream_unavailable, "http 404"} = Transport.post(post_opts(url))
+    end
+
+    test "401 with JSON-RPC error body → :upstream_error" do
+      %{url: url} = start_fixture(:auth_401_with_jsonrpc)
+
+      assert {:error, :upstream_error, detail} = Transport.post(post_opts(url))
+      assert detail =~ "invalid request"
+    end
+
+    test "401 with OAuth-style {error: ...} body (no jsonrpc field) → auth_failed" do
+      # Defence against false positives — an OAuth-style error response
+      # carrying `{"error": "..."}` is NOT a JSON-RPC envelope and MUST
+      # NOT be misclassified as a JSON-RPC protocol error.
+      %{url: url} = start_fixture(:auth_401_with_oauth_body)
+
+      assert {:error, :upstream_unavailable, "auth_failed"} = Transport.post(post_opts(url))
+    end
+  end
+
+  # ─────── codex P1 #2 regression: User-Agent is impl-controlled ───────
+  describe "User-Agent override (codex P1 #2 for `76f68de`)" do
+    test "caller-supplied User-Agent is stripped; impl always wins" do
+      %{url: url} = start_fixture(:reflect_user_agent)
+
+      opts =
+        post_opts(url,
+          headers: [
+            {"content-type", "application/json"},
+            {"accept", "application/json"},
+            {"user-agent", "evil-override/1.0"}
+          ]
+        )
+
+      assert :ok = match_post_result(Transport.post(opts))
+
+      assert_receive {:user_agent, ua_list}, 2_000
+      assert [ua] = ua_list
+      assert ua =~ "ptc-runner-mcp/"
+      refute ua =~ "evil-override"
+    end
+
+    test "case-insensitive — `User-Agent` (mixed case) also stripped" do
+      %{url: url} = start_fixture(:reflect_user_agent)
+
+      opts =
+        post_opts(url,
+          headers: [
+            {"content-type", "application/json"},
+            {"accept", "application/json"},
+            {"User-Agent", "Evil/2.0"}
+          ]
+        )
+
+      assert :ok = match_post_result(Transport.post(opts))
+      assert_receive {:user_agent, [ua]}, 2_000
+      assert ua =~ "ptc-runner-mcp/"
+      refute ua =~ "Evil"
+    end
+  end
+
+  # Helper: collapse `Transport.post/1` happy-path / 200-empty-result
+  # to `:ok` for tests that only care that the call completed.
+  defp match_post_result({:ok, _}), do: :ok
+  defp match_post_result(:ok), do: :ok
+  defp match_post_result(other), do: {:bad, other}
 end
