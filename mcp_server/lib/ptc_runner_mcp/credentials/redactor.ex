@@ -95,7 +95,12 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
   end
 
   def scrub_deep(value) when is_map(value) and not is_struct(value) do
-    Map.new(value, fn {k, v} -> {k, scrub_deep(v)} end)
+    # Scrub both keys and values: map keys can be binaries (e.g. JSON
+    # field names that originate from upstream-controlled data), and
+    # JSON encoders serialize them verbatim. A secret embedded in a
+    # key must redact too, otherwise scrub_deep does not honor the
+    # spec's "every binary leaf" guarantee.
+    Map.new(value, fn {k, v} -> {scrub_deep(k), scrub_deep(v)} end)
   end
 
   def scrub_deep({a, b}), do: {scrub_deep(a), scrub_deep(b)}
