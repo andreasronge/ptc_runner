@@ -274,6 +274,96 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       assert msg =~ "missing", "expected binding name in error, got: #{msg}"
     end
 
+    # codex-43640bd [P1] #2: §5.5 #7 first bullet — emitter scheme
+    # MUST be compatible with binding scheme_hint at config load.
+    test "scheme_mismatch: bearer binding consumed by basic emitter is rejected",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{
+                "source" => "literal",
+                "value" => "v-aaaa",
+                "scheme_hint" => "bearer"
+              }
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "basic", "binding" => "tok"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "scheme_hint", "expected scheme_hint mention, got: #{msg}"
+      assert msg =~ "bearer", "expected hint name, got: #{msg}"
+      assert msg =~ "basic", "expected emitter scheme, got: #{msg}"
+    end
+
+    test "scheme_hint :raw feeds any scheme (no rejection)", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "any" => %{
+                "source" => "literal",
+                "value" => "v-aaaa",
+                "scheme_hint" => "raw"
+              }
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [
+                  %{"scheme" => "bearer", "binding" => "any"},
+                  %{"scheme" => "custom_header", "header" => "x-tok", "binding" => "any"}
+                ]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      result = Application.load_aggregator_config(args)
+      assert Map.has_key?(result.credentials, "any")
+    end
+
+    test "absent scheme_hint defaults to :raw and feeds any scheme", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "any" => %{"source" => "literal", "value" => "v-aaaa"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "bearer", "binding" => "any"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{credentials: _} = Application.load_aggregator_config(args)
+    end
+
     test "auth: with valid binding does not raise", %{tmp_dir: tmp_dir} do
       cfg_path =
         write_config(

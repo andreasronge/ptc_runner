@@ -462,7 +462,12 @@ defmodule PtcRunnerMcp.Application do
 
     case Credentials.Binding.parse_block(raw) do
       {:ok, bindings} ->
-        warn_about_literal_bindings(bindings, path, Mix.env())
+        # Use the same release-safe Mix.env() check as `in_test?/0`
+        # below — `:mix` is not part of the release applications, so
+        # an unguarded `Mix.env()` crashes a production release on
+        # config load. See codex-review of 43640bd [P1] #3.
+        env = if in_test?(), do: :test, else: :prod
+        warn_about_literal_bindings(bindings, path, env)
         bindings
 
       {:error, reason, detail} ->
@@ -525,22 +530,70 @@ defmodule PtcRunnerMcp.Application do
         is_map(emitter),
         binding_ref = Map.get(emitter, "binding"),
         is_binary(binding_ref) do
-      unless Map.has_key?(bindings, binding_ref) do
-        raise """
-        upstreams_config: upstream '#{name}' references unknown credentials \
-        binding '#{binding_ref}'.
+      case Map.fetch(bindings, binding_ref) do
+        :error ->
+          raise """
+          upstreams_config: upstream '#{name}' references unknown credentials \
+          binding '#{binding_ref}'.
 
-        Define this binding under the top-level `credentials:` block, or
-        remove the auth emitter that references it.
+          Define this binding under the top-level `credentials:` block, or
+          remove the auth emitter that references it.
 
-        Known bindings: #{inspect(Map.keys(bindings))}
-        Source: #{source_path}
-        """
+          Known bindings: #{inspect(Map.keys(bindings))}
+          Source: #{source_path}
+          """
+
+        {:ok, %Credentials.Binding{} = binding} ->
+          check_scheme_hint_compat!(name, emitter, binding, source_path)
       end
     end
 
     :ok
   end
+
+  # §5.5 #7 first bullet: an emitter's `scheme` MUST be compatible
+  # with the referenced binding's `scheme_hint`. `:bearer` only feeds
+  # bearer emitters, `:basic` only feeds basic emitters, `:raw` (or
+  # absent → :raw via Binding.parse defaults) feeds any. Mismatch is
+  # a loud config-load error so operators catch "used the wrong
+  # binding" mistakes before any HTTP request goes out (Phase 3).
+  defp check_scheme_hint_compat!(upstream_name, emitter, binding, source_path) do
+    scheme_str = Map.get(emitter, "scheme")
+    hint = binding.scheme_hint || :raw
+
+    cond do
+      not is_binary(scheme_str) ->
+        # The emitter has no scheme field, or it's not a string. Phase 1
+        # only validates references; full emitter shape parsing lands in
+        # Phase 3. Skip the compat check — the bad shape is Phase 3's
+        # to reject.
+        :ok
+
+      hint == :raw ->
+        # :raw bindings feed any scheme. No mismatch possible.
+        :ok
+
+      scheme_compatible_with_hint?(scheme_str, hint) ->
+        :ok
+
+      true ->
+        raise """
+        upstreams_config: upstream '#{upstream_name}' auth emitter '#{scheme_str}' \
+        is incompatible with binding '#{binding.name}' (scheme_hint: #{hint}).
+
+        A '#{hint}' binding can only feed a '#{hint}' emitter. Remove the
+        scheme_hint from the binding (defaults to :raw, which feeds any
+        scheme), or pick a binding whose scheme_hint matches.
+
+        Source: #{source_path}
+        """
+    end
+  end
+
+  defp scheme_compatible_with_hint?("bearer", :bearer), do: true
+  defp scheme_compatible_with_hint?("basic", :basic), do: true
+  defp scheme_compatible_with_hint?("custom_header", :raw), do: true
+  defp scheme_compatible_with_hint?(_scheme, _hint), do: false
 
   # §5.2 / §5.5 #6: the legacy `${VAR}` placeholder resolver applies
   # ONLY to stdio `env` map values. `credentials:` and (Phase 2's)
