@@ -118,6 +118,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   defp section_order("Math Functions"), do: 12
   defp section_order("Interop"), do: 13
   defp section_order("JSON"), do: 14
+  defp section_order("MCP"), do: 15
   defp section_order(_), do: 99
 
   defp render_section({section, entries}) do

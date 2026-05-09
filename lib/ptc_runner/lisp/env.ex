@@ -405,6 +405,12 @@ defmodule PtcRunner.Lisp.Env do
       {:"json/generate-string", {:normal, &Runtime.Json.generate_string/1}},
 
       # ============================================================
+      # MCP unwrap helpers (Plans/json-support.md §5)
+      # ============================================================
+      {:"mcp/text", {:normal, &Runtime.Mcp.text/1}},
+      {:"mcp/json", {:normal, &Runtime.Mcp.json/1}},
+
+      # ============================================================
       # Regex operations
       # ============================================================
       {:"re-pattern", {:normal, &Runtime.re_pattern/1}},

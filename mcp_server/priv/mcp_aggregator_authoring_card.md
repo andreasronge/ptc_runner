@@ -36,6 +36,12 @@ If an upstream legitimately returns JSON `null` as a successful payload (top-lev
 
 Programs that don't care about the distinction can treat `:json-null` as truthy and continue. Programs that care can compare `(= result :json-null)`.
 
+## JSON helpers
+
+- `(json/parse-string s)`, `(json/generate-string v)` — Cheshire-style; return `nil` on failure (no raise; map keys parse as strings).
+- `(mcp/text r)` — `r["content"][0]["text"]` or `nil`.
+- `(mcp/json r)` — `r["structuredContent"]` if set, else `(json/parse-string (mcp/text r))`. Use for typed JSON results.
+
 ## Response envelope
 
 Each call to `ptc_lisp_execute` returns a structured payload that may include an `upstream_calls` array — one entry per `(tool/mcp-call ...)` invocation, in completion order, recording `server`, `tool`, `status`, `duration_ms`, and (on error) `reason` and `error`. The field is omitted when no upstream calls were made.

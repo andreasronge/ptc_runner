@@ -27,6 +27,7 @@ No other Java interop is supported.
 
 <json>
 - `(json/parse-string s)`, `(json/generate-string v)` — Cheshire-style; `nil` on failure (no raise; map keys parse as strings).
+- `(mcp/text r)`, `(mcp/json r)` — extract MCP `content[0].text` / parse it. `mcp/json` prefers `r["structuredContent"]`.
 </json>
 
 <!-- PTC_PROMPT_END -->

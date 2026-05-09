@@ -7,6 +7,7 @@ PTC-Lisp is a deterministic, sandboxed subset of Clojure with a small Java-inter
 - **`context` keys are bound under the `data/` namespace.** Pass `{"records": [...]}`, reference as `data/records` inside the program. There is no `context` binding.
 - **`signature`** is a return-type schema, e.g. `() -> {count :int}` or `() -> [{name :string, score :int}]`. Supplying it makes the response carry a structured `validated` JSON value — the only path for a caller to receive programmatic data. Without it, the response only contains an LLM-readable preview.
 - **`(fail v)`** terminates with an error value when you want to surface a domain failure to the caller.
+- **JSON**: `(json/parse-string s)` / `(json/generate-string v)` are available; `nil` on failure.
 
 ## Restrictions
 
