@@ -77,6 +77,54 @@ re-reviewed; 1× `[P1]` and 2× `[P2]` issues. All addressed:
   is part of the work and recommends the `test` alias path with a
   `Mix.Tasks.Compile.MockEscript` module as the default.
 
+**Revision 4 (2026-05-09, post-execution + codex consult):**
+Phase 2 hit a wall during execution and the plan needed a structural
+reframe. Codex consulted on what to do next; this revision encodes
+the response. Changes:
+- **Old Phase 2 (async-flips) RETIRED.** Hypothesis was falsified
+  during execution: of 25 default-path sync files, only 1 was safely
+  flippable. Three other candidates exposed real failure modes
+  under load (`stdio_test.exs` harness timeout, `stdio_lifecycle_test.exs`
+  monitor race, `stdio_latin1_test.exs` aggravated the phase21
+  flake). The other 21 files mutate `Application.put_env`, global
+  registries, `:persistent_term`, or telemetry — sync for real
+  reasons. The Phase 2 attempt is preserved in a stash; not
+  shipping. Codex: "documentation debt masquerading as progress."
+- **Old Phase 4 (subprocess fixture pooling) SHELVED.** Phase 2's
+  lessons demonstrated the suite has real global-state sensitivity;
+  pooling is invasive and likely to create hidden state coupling.
+  Shelved unless Phase 3 measurements prove subprocess startup
+  dominates and pooling is the only credible fix. Codex agreed.
+- **New Phase 2: parallel subproject checks.** The current hook
+  loops sequentially over root / `mcp_server` / `ptc_viewer`. Codex
+  flagged this as "probably the next thing to measure" — if the
+  three subprojects don't contend on build artifacts, parallel
+  execution could shave ~10–15 s off code-touching pushes for free.
+  Lower risk and higher leverage than the retired Phase 2.
+- **Phase 3 conditional on re-profiling.** Original baseline (53 s)
+  may not describe the decision problem after Phase 1 + new
+  Phase 2 land. Re-profile code-touching pushes before deciding
+  whether `mix run`-via-`Port.open` elimination is still worth it.
+- **Pre-existing flake escalated.** Phase 2's investigation
+  surfaced a flake in `upstream_supervisor_phase21_test.exs`
+  "DynSup restart-intensity cascade" that exists on `main`
+  (~1/8 runs on seed=24). Bit two of three recent pushes. Being
+  fixed on a separate branch (`fix/phase21-cascade-flake`) and a
+  separate PR; not part of this perf plan, but blocking confidence
+  in any timing measurement until it lands.
+
+## Status post-execution (2026-05-09)
+
+| Phase | Status | Notes |
+|---|---|---|
+| 0 | ✅ Shipped | Commit `7cdca33`. |
+| 1 | ✅ Shipped | Commits `144ef7a` (base) + `58cd523` (codex-fixup). PR #887. |
+| Old 2 (async-flips) | ❌ Retired | Hypothesis falsified. Stashed, not shipped. |
+| New 2 (parallel subprojects) | 🔜 Pending | Spec below. |
+| 3 (mix-via-port) | ⏸ Conditional | Re-profile after new Phase 2 first. |
+| Old 4 (pooling) | 🗄 Shelved | Phase 2 lessons make this not worth the risk. |
+| Side: phase21 flake | 🔧 In flight | Separate branch + PR. |
+
 ## Goal
 
 Reduce `git push origin main` wallclock from the current ~53 s while
@@ -118,21 +166,25 @@ Two structural facts drive the plan:
    directory (held by process 58521)" — tail-latency cliff inside the
    suite.
 
-## Sequencing rationale
+## Sequencing rationale (post-Revision 4)
 
-Phases run smallest-leverage-loss-on-failure first:
+Phases run smallest-leverage-loss-on-failure first. Old Phase 2 and
+old Phase 4 are retired/shelved per Revision 4; they remain in the
+doc below for archival reference.
 
-| # | Phase | Why this order |
-|---|---|---|
-| 0 | Drop unused test helpers | Pure cleanup unrelated to perf, but codex flagged it. Trivial. |
-| 1 | Conservative hook tracking + docs-only gate | Highest leverage for the recent docs-heavy commit pattern, low test-coverage risk *if* implemented conservatively. |
-| 2 | Flip safe `async: false` files in `mcp_server/test/` | Real perf win, low architectural risk if isolation is documented per file. |
-| 3 | Eliminate `mix run`-via-`Port.open` from default test paths | Removes lock-contention cliff. Surgical refactor. |
-| 4 | Pool upstream subprocess fixtures | Highest architectural risk — runs last so failure here is contained. |
+| # | Phase | Status | Why this order |
+|---|---|---|---|
+| 0 | Drop unused test helpers | ✅ Shipped | Pure cleanup. Trivial. |
+| 1 | Tracked hook + docs-only short-circuit | ✅ Shipped | Highest leverage for docs-heavy pushes. Conservative implementation kept test-coverage risk low. |
+| 2 (new) | Parallel subproject checks | Pending | Sequential per-project loop is the next obvious bottleneck once docs-only is solved. Cheap, structural. |
+| 3 | Eliminate `mix run`-via-`Port.open` | Conditional | Re-profile after new Phase 2 ships before deciding. |
+| Old 2 | Flip async:false files | Retired | Hypothesis falsified. See §"Old Phase 2 (RETIRED)" below. |
+| Old 4 | Pool subprocess fixtures | Shelved | Phase 2 lessons make this not worth the risk. See §"Old Phase 4 (SHELVED)" below. |
 
-Phase 0 is trivial and goes in without codex review. Phases 1–4 each
-get codex review before the next phase starts. Failed codex review →
-fixup commit on the same phase, re-review, repeat until pass.
+Phase 0 is trivial and went in without codex review. Phases 1, new
+2, and 3 each get codex review before the next phase starts. Failed
+codex review → fixup commit on the same phase, re-review, repeat
+until pass.
 
 ## Phase 0 — Drop unused test helpers
 
@@ -302,7 +354,127 @@ allow-list-based docs-only gate can drop pure-docs pushes from
 **Estimated impact:** ~50 s saved on docs-only pushes. Non-docs
 pushes unchanged.
 
-## Phase 2 — Flip safe `async: false` files in `mcp_server/test/`
+## Phase 2 (new) — Parallel subproject checks
+
+**Hypothesis:** the current hook loops sequentially over the three
+Mix subprojects (`.`, `mcp_server`, `ptc_viewer`), running
+`mix test` then `mix dialyzer` for each. Running them concurrently
+should shave wallclock from any push that doesn't take the
+docs-only short-circuit, which is now the common case for code
+changes. Codex flagged this as "probably the next thing to measure"
+after Phase 1.
+
+### What the current hook does
+
+In `.githooks/pre-push`, after the docs-only short-circuit:
+
+```
+for proj in . mcp_server ptc_viewer; do
+  pushd "$proj"
+  mix test --exclude clojure || exit 1
+  mix dialyzer || exit 1
+  popd
+done
+```
+
+Sequential. Total ~32 s across the three subprojects in the current
+baseline (8.7 + 23.3 + 0.1 for tests; 11.9 + 3.6 + 0 for dialyzer;
+plus shell + mix-startup overhead).
+
+### Approach
+
+1. **Measure first.** Before touching anything, run each project's
+   `mix test` and `mix dialyzer` concurrently in a scratch script and
+   measure wallclock vs sequential. If concurrent isn't actually
+   faster (e.g., they contend on the same `_build` symlink, hex
+   cache, or telemetry handlers), abort the phase before code lands.
+   Specifically watch for:
+   - `_build` lock contention between projects (each project has its
+     own `_build/dev` and `_build/test` directories — should be
+     fine, but verify with `lsof` or `fs_usage` while running).
+   - Hex cache contention (`mix deps.compile` writes to
+     `~/.hex/` — only an issue on a fresh clone, irrelevant once
+     deps are compiled).
+   - Telemetry / logger contention if processes write to the same
+     stderr/stdout (the hook captures combined output).
+2. **If measured win is ≥5 s on the test+dialyzer-bound path**,
+   refactor the hook to launch the three subproject loops as
+   background jobs and `wait` for all to finish. Capture each
+   project's output to a per-project temp file; on failure, dump the
+   relevant project's output and exit non-zero. On success, print
+   each project's `✅` summary in order.
+3. **Output ordering matters.** Sequential output is currently
+   readable — interleaved bg-job output is not. Buffer per-project
+   output to temp files; print them in deterministic order after all
+   jobs finish.
+4. **Failure semantics.** First failure cancels the others (or lets
+   them finish; pick one and document). Sequential's behavior is
+   "first failure aborts the rest"; concurrent's natural behavior
+   is "all run to completion, then report all failures." Pick "all
+   finish, report all failures" — strictly more useful for the
+   developer fixing things.
+5. **Update `.githooks/README.md`** with the new behavior + any
+   per-project temp-file paths a developer might want to inspect.
+
+### Acceptance
+
+- **Concurrent wallclock vs sequential, code-only push:** ≥5 s
+  drop. Measured before/after on the same machine, ideally same
+  load. Document the measurement.
+- **Output ordering preserved:** developer sees per-project
+  `✅`/`❌` summaries in the same order as today.
+- **Multi-failure case works:** if both root and `mcp_server` fail,
+  both failure outputs are printed (not just the first).
+- **No false greens:** the hook still correctly exits non-zero on
+  any subproject failure.
+- **No race condition between concurrent `mix dialyzer` runs.** If
+  one is detected (PLT corruption, lock errors), the phase aborts
+  and the hook stays sequential.
+- **Worktree environment doc updated:** if the new flow needs any
+  new dependency (`mktemp`, `wait`, `xargs -P`), document any
+  unusual portability gotchas.
+
+### Risk
+
+- **PLT contention** — three concurrent `mix dialyzer` runs may
+  fight over the dialyxir PLT cache. Mitigation: per-project
+  `_build` already gives each its own PLT; verify before
+  refactoring.
+- **Output interleaving** — debug-level test logs from one project
+  could swamp another. Mitigation: per-project temp files +
+  deterministic ordering at the end.
+- **Failure-mode regression** — if first-failure-wins behavior
+  matters to anyone, "all-run + report-all" is a behavior change.
+  Document it in the commit body.
+- **Test-port contention** — the three subprojects might fight over
+  ports / paths if any tests bind to fixed addresses. Phase 2's
+  hypothesis-test step exists specifically to surface this.
+
+### Estimated impact
+
+If the test+dialyzer paths can run in parallel: code-touching push
+wallclock drops from ~53 s to ~30–35 s. If only the test runs can
+parallelize but dialyzer can't (PLT contention): smaller win,
+maybe 5–8 s. If neither parallelizes cleanly: phase aborts before
+landing.
+
+This phase is the "measure twice, cut once" phase — the design
+*depends* on the measurement step actually showing a win.
+
+## Old Phase 2 (RETIRED) — Flip safe `async: false` files in `mcp_server/test/`
+
+> **Status: RETIRED** (per Revision 4). Hypothesis falsified during
+> execution: of 25 default-path sync files, only 1 was safely
+> flippable (`cancellation_phase1a_test.exs`). Three other plausible
+> candidates exposed real failure modes under load. The other 21
+> files mutate `Application.put_env`, global registries,
+> `:persistent_term`, or telemetry — sync for real reasons. The
+> Phase 2 attempt is preserved in a stash; not shipping. Codex
+> consult: "documentation debt masquerading as progress."
+>
+> Section preserved below for archival reference.
+
+
 
 **Hypothesis:** A material fraction of the 25 default-path sync
 files in `mcp_server/test/` are sync defensively, not because the
@@ -367,7 +539,21 @@ file that flakes flips back with the failure mode recorded.
 
 **Estimated impact:** mcp_server suite from 23 s → ~15–17 s.
 
-## Phase 3 — Eliminate `mix`-via-`Port.open` from default test paths
+## Phase 3 (CONDITIONAL) — Eliminate `mix`-via-`Port.open` from default test paths
+
+> **Status: CONDITIONAL** (per Revision 4). Re-profile after the
+> new Phase 2 (parallel subprojects) lands. Original Phase 3
+> rationale ("removes the lock-contention cliff") still holds for
+> code-touching pushes, but the absolute wallclock left to attack
+> may be small enough that the implementation cost (compile-time
+> escript build + mix.exs alias) isn't justified. Codex consult:
+> "Do it only after measuring how much wallclock is actually
+> attributable to those subprocesses under the current hook."
+>
+> The original spec is preserved as-is below; the *go/no-go*
+> decision is gated on re-profiling.
+
+
 
 **Hypothesis:** `mcp_server` mock-server tests open ports with
 `command: "mix"` and `args: ["run", "--no-start", "--no-compile",
@@ -470,7 +656,19 @@ done.
 **Estimated impact:** mcp_server suite from ~15–17 s → ~13–15 s,
 plus removal of the lock-contention tail-latency cliff.
 
-## Phase 4 — Pool upstream subprocess fixtures (architectural)
+## Old Phase 4 (SHELVED) — Pool upstream subprocess fixtures (architectural)
+
+> **Status: SHELVED** (per Revision 4). Old Phase 2's lessons
+> demonstrated the suite has real global-state sensitivity (only
+> 1/25 sync files was safely flippable; 3 candidates exposed real
+> races under load). Pooling fixtures is invasive and likely to
+> create hidden state coupling. Codex consult: "Keep it shelved
+> unless Phase 3 measurements prove subprocess startup dominates and
+> pooling is the only remaining credible fix."
+>
+> Section preserved below for archival reference.
+
+
 
 **Highest risk; runs last so failure is contained.**
 
