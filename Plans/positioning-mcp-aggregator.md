@@ -2,15 +2,28 @@
 
 ## Purpose
 
-This document captures defensible positioning for the future
-PtcRunner-MCP-Aggregator (`Plans/ptc-runner-mcp-aggregator.md`) against
-the existing MCP orchestration landscape. It is a reference for future
-README sections, docs, blog posts, talks, and PR descriptions when the
-feature ships.
+This document captures defensible positioning for PtcRunner-MCP-Aggregator
+(`Plans/ptc-runner-mcp-aggregator.md`) against the existing MCP
+orchestration landscape, and tracks **feature signals** that fall out of
+peer comparison — items the aggregator might want to add as the
+"Code Mode" peer group matures. It is a reference for future README
+sections, docs, blog posts, talks, and PR descriptions, and a feeder for
+roadmap discussions.
 
-It is **not** a plan. It does not specify implementation. Claims here are
-pitched at a level that reasonable readers can verify against the cited
-sources or against a working aggregator.
+It is **not** an implementation plan. Claims here are pitched at a level
+that reasonable readers can verify against the cited sources or against
+a working aggregator. Roadmap items in §"Feature signals" are
+candidates, not commitments.
+
+**Revision note (2026-05):** the original doc compared only against
+agent frameworks (mcp-agent, LangGraph, OpenAI Agents SDK). The closer
+peer category turned out to be **"Code Mode" MCP servers** — Cloudflare
+Code Mode, MCPProxy's `code_execution`, mcpfy, and the pattern in
+Anthropic's "Code execution with MCP" engineering post. Those peers
+match the aggregator's shape ("one MCP server, sandbox executes LLM-
+written code, code calls upstream MCP tools") and shrink the defensible
+differentiator set. This revision adds them, retires claims they
+neutralize, and seeds a feature-signal section.
 
 ## What it is (one line)
 
@@ -39,11 +52,40 @@ The major shapes today:
 | Tool routers / gateways (semantic retrieval) | n/a — selection pattern | n/a | Selection layer |
 | **PtcRunner-MCP-Aggregator** | **The caller's LLM, on the fly, in PTC-Lisp** | **No** — execution performs upstream MCP calls as code, with no planner/model in the loop | **Programmatic tool-calling primitive** |
 
-None of the systems above are primarily "one MCP server that exposes a
-sandboxed language to call upstream MCP tools." The layer distinction is
-real.
+None of the **agent-framework** systems above is primarily "one MCP
+server that exposes a sandboxed language to call upstream MCP tools."
+The layer distinction is real for that group. A different peer category
+— Code Mode MCP servers — *does* match that shape and is covered next.
+
+## The closer peers: Code Mode MCP servers
+
+The Code Mode pattern (after Cloudflare's October 2025 post) is the
+direct peer group: a single MCP server advertises a code-execution tool;
+the LLM writes a small program; the program calls upstream MCP tools via
+a sandbox-internal primitive; intermediate JSON never enters the LLM's
+context.
+
+| System | Sandbox language | Sandbox runtime | Upstream-call primitive | Catalog discovery | Schema-validated return | Hosting |
+|---|---|---|---|---|---|---|
+| [Cloudflare Code Mode](https://blog.cloudflare.com/code-mode/) | TypeScript | V8 isolates (Workers) | Typed RPC bindings generated from upstream MCP schemas | Inline typed API with doc comments | None standard | Practical only on Cloudflare Workers |
+| [MCPProxy `code_execution`](https://github.com/orgs/modelcontextprotocol/discussions/627) | JavaScript (ES5.1+) | Restricted JS VM, no Node modules | `call_tool(serverName, toolName, args)` | Server allowlist + system-prompt | None | Self-host |
+| [Anthropic "Code execution with MCP"](https://www.anthropic.com/engineering/code-execution-with-mcp) | Pattern (TS examples) | Operator's choice | Tool defs as files in a sandboxed FS | Filesystem-of-tool-defs, lazy reads | None standard | Pattern, not a packaged server |
+| [mcpfy](https://mcpfy.ai/blog/mcp-code-execution-launch/) | JS/TS | Hosted sandbox | Hosted upstreams | Hosted catalog | None | Hosted SaaS |
+| `hermes-agent` (NousResearch) | Python | Restricted runtime | Inside an agent loop | Internal | None | Agent framework, not a standalone MCP server |
+| **`ptc_runner_mcp` aggregator** | PTC-Lisp (Clojure subset) | BEAM process — no I/O *by construction* | `(tool/mcp-call {:server … :tool … :args …})` | Inline catalog in `tools/list` description | First-class `signature` + structured `upstream_calls` audit | Self-host single Mix release |
+
+This is the comparison the project should be measured against. Several
+of the original "defensible differentiators" below are shared with this
+group rather than unique to PtcRunner; the next section splits them
+explicitly.
 
 ## Defensible differentiators
+
+The differentiators below now split into two groups: claims that hold
+against **agent frameworks** (mcp-agent, LangGraph, OpenAI Agents SDK)
+and the narrower set that holds against **Code Mode peers**.
+
+### Against agent frameworks
 
 **1. One LLM turn writes the program; execution has no internal LLM calls.**
 
@@ -52,53 +94,92 @@ reading the final result. The defensible claim is narrower: execution
 does not run a planner LLM between tool calls. mcp-agent's planner agent,
 LangGraph nodes that invoke models, and the OpenAI Agents SDK's agent
 loops all add internal LLM round-trips during a workflow. The aggregator
-adds none.
+adds none. *(Shared with all Code Mode peers — not a differentiator
+inside that group.)*
 
 **2. Deterministic composition over nondeterministic external tools.**
 
 The PTC-Lisp program is deterministic given inputs. Upstream MCP tools
 themselves may hit live APIs, stateful browser sessions, rate limits, or
-auth scopes — that part is nondeterministic. The accurate claim is
-"deterministic composition over nondeterministic external tools," not
-"fully deterministic workflow."
+auth scopes — that part is nondeterministic. Given the same upstream
+tool outputs, the program runs identically every time. No LLM-judgment
+variance in the orchestration step. *(Shared with all Code Mode peers.)*
 
-What this buys you: given the same upstream tool outputs, the program
-runs identically every time. No LLM-judgment variance in the
-orchestration step.
-
-**3. Sandboxing as a structural property.**
-
-Aggregator mode does not give generated code arbitrary filesystem,
-network, or process access. External effects happen only through
-configured upstream MCP tools and runtime-enforced budgets (timeouts,
-memory limits, max upstream calls per program, max upstream response
-bytes). That is a meaningfully smaller blast radius than running
-LLM-generated Python or letting agents shell out.
-
-This matters for daemon-shaped multi-tenant deployment and for
-safety-conscious users who don't want to give an LLM-controlled agent
-unlimited compute.
-
-**4. Cross-language MCP-native.**
+**3. Cross-language MCP-native.**
 
 mcp-agent, OpenAI Agents SDK, and LangGraph are Python ecosystems —
 adoption requires writing Python and running a Python process. The
 aggregator is invokable from any MCP client: Claude Desktop, Cursor,
-Cline, Claude Code, plus custom MCP clients in any language. The MCP
-protocol normalizes adoption. None of the Python frameworks have this
-property because they *are* the framework, not an MCP server you can drop
-into existing setups.
+Cline, Claude Code, plus custom MCP clients in any language. *(Shared
+with the other Code Mode MCP servers; specifically not shared with the
+"pattern" implementations or with `hermes-agent`.)*
 
-**5. LLM-written, not developer-written, orchestration.**
+**4. LLM-written, not developer-written, orchestration.**
 
 Custom Python orchestrators hand-code workflows like `research_company()`.
 mcp-agent's multi-agent definitions are written by the developer.
-LangGraph's graph nodes are too. The LLM picks pre-written workflows from
-a menu.
+LangGraph's graph nodes are too. The aggregator inverts this: zero
+deployment overhead, the LLM composes a one-off PTC-Lisp program per
+task. *(Shared with all Code Mode peers.)*
 
-The aggregator inverts this: zero deployment overhead, the LLM composes a
-one-off PTC-Lisp program for each new task. No code release for new
-workflows. Trade-off captured under "honest weaknesses" below.
+### Against Code Mode peers
+
+The Code Mode pattern shares the core idea. What separates PtcRunner
+aggregator inside that category:
+
+**A. Signature-validated returns.**
+
+`signature` is a first-class field on `ptc_lisp_execute`. The runtime
+validates the program's return value against the schema, coerces where
+unambiguous, and surfaces a structured `validation_error` on mismatch
+that the LLM can self-correct from. Cloudflare Code Mode, MCPProxy,
+mcpfy, and the Anthropic pattern all return raw JS values or
+`console.log` output without schema validation. This is genuinely unique
+in the peer set and matters for programmatic clients consuming results.
+
+**B. Structured `upstream_calls` audit trail.**
+
+Every `tool/mcp-call` is recorded on the response with server, tool,
+args (truncated), outcome, and reason. JS Code Mode peers surface call
+metadata only via logs or exceptions, with no standardized shape.
+Useful for trust, debugging, billing attribution, and policy auditing.
+
+**C. Three-class failure model.**
+
+`tool/mcp-call` returns *value | nil | runtime-error envelope*, where
+`nil` means world-fault (timeout, oversize response, cap exhausted —
+reason recorded in `upstream_calls`) and the envelope means
+programmer-fault (unknown server / tool / unencodable args). Programs
+write `(remove nil? results)` to discard transient failures while still
+crashing on programming errors. JS Code Mode peers collapse both into
+exceptions, putting the burden of distinguishing them on the LLM. This
+is structurally different and arguably better for LLM self-correction.
+
+**D. `pmap` as a first-class form.**
+
+`(pmap #(tool/mcp-call …) xs)` is one short expression and the language
+encourages it. JS Code Mode peers need `Promise.all(xs.map(…))` — same
+outcome, more code, easier to forget. The README's ~3× wall-clock
+speedup claim for parallel cross-server workflows leans on this
+ergonomic pull.
+
+**E. "Language without I/O" sandbox vs. JS-with-restrictions.**
+
+Cloudflare's V8 isolates and MCPProxy's restricted JS VM are
+general-purpose interpreters with the dangerous APIs removed. PTC-Lisp
+has no `eval`, no FFI, no network primitives, no file primitives — the
+language doesn't *contain* the dangerous operations to remove. Smaller
+attack surface, simpler static analysis, no isolate-escape CVE class.
+Different threat model, not strictly "better"; Cloudflare's V8 is far
+more battle-tested than PTC-Lisp.
+
+**F. Self-hostable single binary, no cloud dependency.**
+
+Cloudflare Code Mode is practical only on Workers. mcpfy is hosted SaaS.
+PtcRunner ships as a single Mix release with BEAM bundled and works
+fully offline behind a corporate firewall. MCPProxy shares this property
+but is prototype-grade. For air-gapped or vendor-averse deployment, the
+field shrinks to PtcRunner and MCPProxy.
 
 ## Plausible (but not yet proven) claim
 
@@ -138,24 +219,46 @@ These are different jobs.
 
 **3. Ecosystem maturity.**
 
-mcp-agent and LangGraph have production usage, observability tools,
-debugging affordances. The aggregator is greenfield. The first six months
-will surface edge cases the mature systems already handled.
+mcp-agent, LangGraph, and Cloudflare Code Mode all have production
+usage and observability tools. Cloudflare specifically has Workers-grade
+tail/logs/metrics out of the box — PtcRunner's `--trace-dir` JSONL is
+solid for self-host but not in the same league. The aggregator is
+greenfield; the first six months will surface edge cases the mature
+systems already handled.
 
 **4. Tool catalog token cost.**
 
 Embedding the upstream catalog inline in the `ptc_lisp_execute`
-description costs tokens on every request. Progressive discovery and
-semantic retrieval handle this better at scale (200+ tools). The
-aggregator works fine for typical configs (3–10 servers, 30–50 tools);
-larger setups would benefit from a router upstream of it.
+description costs tokens on every request. Anthropic's filesystem-of-
+tool-defs pattern (lazy, on-demand reads) and Cloudflare's typed-API
+generation handle this better at scale (200+ tools). The aggregator
+works fine for typical configs (3–10 servers, 30–50 tools); larger
+setups would benefit from a router upstream of it, or from adopting one
+of the discovery patterns described in §"Feature signals."
 
 **5. Language familiarity.**
 
-Developers know Python. Few know Clojure-ish PTC-Lisp. If a generated
-program needs human review or debugging, there is a learning curve. (This
-matters less for end-users — they don't read the code, just see the
-result.)
+Developers know TypeScript and Python. Few know Clojure-ish PTC-Lisp.
+Cloudflare Code Mode and MCPProxy generate TS/JS, which most reviewers
+can read. If a generated PTC-Lisp program needs human review or
+debugging, there is a learning curve. (Matters less for end-users —
+they don't read the code, just see the result.)
+
+**6. Stdio-only upstreams in v1.**
+
+PtcRunner aggregator only supports stdio-launched subprocess upstreams.
+Cloudflare Code Mode supports any MCP transport (stdio, SSE, streamable
+HTTP). Remote MCP servers are excluded from PtcRunner aggregator until
+a transport abstraction lands. See §"Feature signals."
+
+**7. Credential-binding model is weaker than Cloudflare's.**
+
+Cloudflare Code Mode hides API keys behind already-authorized binding
+objects — the sandboxed code literally cannot read the secret. PtcRunner
+resolves `${VAR}` placeholders into the upstream subprocess env at
+startup; the PTC-Lisp program never sees them, but a misbehaving
+upstream that echoes its env back through a tool call could leak. The
+guarantee is functionally similar but structurally weaker.
 
 ## Composition story (works with, not against)
 
@@ -190,24 +293,41 @@ is small enough.
 
 ## When to pick what
 
-Two questions a deployer should ask:
+Three questions a deployer should ask, in order:
 
-**1. Do I want orchestration logic written by an LLM on the fly, or by a
-developer once?**
+**1. Do I want orchestration logic written by an LLM on the fly, or by
+a developer once?**
 
-- LLM, on the fly → PtcRunner-aggregator.
+- LLM, on the fly → any Code Mode peer (PtcRunner aggregator, Cloudflare
+  Code Mode, MCPProxy, mcpfy).
 - Developer, once → mcp-agent / LangGraph / custom Python orchestrator.
 
 **2. Do I want zero internal LLM calls during execution, or am I OK
 paying for a planner agent?**
 
-- Zero internal calls → PtcRunner-aggregator.
+- Zero internal calls → any Code Mode peer.
 - OK with planner reasoning → mcp-agent / Agents SDK / LangGraph.
 
-For ad-hoc, exploratory, end-user-facing scenarios, those tradeoffs lean
-toward the aggregator. For production workflows with known structure,
-they lean toward the existing frameworks. Both are valid, and they
-compose.
+**3. Inside the Code Mode group, what tradeoffs do I want?**
+
+- **Cloudflare Code Mode** — best ecosystem, typed TS bindings, hidden
+  credentials, but cloud-only and no schema-validated returns.
+- **MCPProxy** — self-hostable JS sandbox, simple `call_tool` primitive,
+  prototype-grade.
+- **PtcRunner aggregator** — typed return signatures, structured audit
+  trail, three-class failure model, BEAM "language without I/O" sandbox,
+  self-hostable single binary, but PTC-Lisp learning curve and
+  stdio-only upstreams.
+- **mcpfy** — hosted SaaS take.
+- **Anthropic pattern** — DIY; pick this if you want full control and
+  are willing to build it.
+
+For ad-hoc, exploratory, end-user-facing scenarios with self-host /
+offline constraints, those tradeoffs lean toward PtcRunner. For
+production workflows with known structure, they lean toward the
+existing frameworks. For teams already on Cloudflare Workers, Code Mode
+is the path of least resistance. Code Mode peers and agent frameworks
+compose at different layers.
 
 ## Sequencing note
 
@@ -233,17 +353,130 @@ already in place.
 
 Either order works; pick based on which user demand is louder.
 
+## Feature signals from peer comparison
+
+These are roadmap candidates that fall directly out of comparing
+PtcRunner aggregator against the Code Mode peer set. They are *not*
+commitments — each one needs its own scoping doc, design discussion,
+and prioritization. They are listed roughly in order of expected impact.
+
+### High-impact
+
+**1. Typed catalog generation (Cloudflare-style).**
+
+Today the aggregator inlines a free-form catalog into the
+`ptc_lisp_execute` tool description. Cloudflare generates a typed TS
+API from upstream MCP schemas and gives the LLM autocomplete-shaped
+guidance. PtcRunner equivalent: convert each upstream tool's JSON Schema
+into a PTC-Lisp signature spec inlined into the catalog, so the LLM
+sees `:server "github" :tool "get_pr" :args {:number :int}` shapes
+natively. Likely improves first-try program correctness; should be
+benchmarkable against the current free-form catalog.
+
+**2. Lazy / filesystem-style catalog discovery (Anthropic pattern).**
+
+Inline catalogs blow up past ~50 tools. Expose upstream catalogs as a
+PTC-Lisp-callable directory of definitions — e.g. `(catalog/list-servers)`,
+`(catalog/list-tools "github")`, `(catalog/describe-tool "github"
+"get_pr")` — so the LLM reads schemas on demand instead of paying the
+catalog tax on every request. Required for credible large-fleet (200+
+tool) deployments.
+
+**3. HTTP / SSE / Streamable HTTP upstream transport.**
+
+Stdio-only locks PtcRunner out of remote MCP servers (Cloudflare-hosted,
+GitHub's MCP server, organization-internal HTTP MCPs). Adding a
+transport abstraction with stdio + SSE + streamable HTTP brings parity
+with Cloudflare Code Mode on this dimension. Probably the single biggest
+adoption blocker for self-host users.
+
+**4. Credential-binding model (Cloudflare-style).**
+
+Today `${VAR}` placeholders pass secrets into upstream subprocess env at
+startup. Cloudflare's bindings hide the secret behind an already-
+authorized client. PtcRunner equivalent: a binding registry where the
+program references `:server "github"` and the runtime injects auth
+out-of-band, so a misbehaving upstream that echoes env back cannot leak
+the raw token. Important for multi-tenant / shared-deployment stories.
+
+### Medium-impact
+
+**5. OTel / structured trace export.**
+
+`--trace-dir` writes JSONL files. Exporting OpenTelemetry spans for the
+program lifecycle and each `tool/mcp-call` would slot into existing
+observability stacks and close some of the maturity gap with Cloudflare
+Workers' native tooling.
+
+**6. Per-upstream allowlist / quarantine.**
+
+MCPProxy has a quarantine system — programs can be restricted to a
+subset of configured upstreams per call, not just per-server-config.
+Useful for least-privilege multi-tenant deployments where a single
+aggregator process serves multiple trust domains.
+
+**7. Streaming results back to the client.**
+
+`ptc_lisp_execute` is request/response. Long-running aggregator programs
+(scraping, large fan-out) would benefit from streaming partial results
+or progress events. Cloudflare Workers' streaming response semantics
+are the obvious reference.
+
+### Lower-impact / speculative
+
+**8. Cached `tools/list` for upstreams.**
+
+OpenAI Agents SDK caches upstream tool listings. PtcRunner currently
+re-asks each upstream on its `tools/list` invalidation cycle. Caching
+plus invalidation hooks is straightforward and might shave catalog-load
+latency.
+
+**9. Eval suite comparing PTC-Lisp to TS Code Mode generation success.**
+
+Currently the "smaller surface than Python/TS → easier to generate
+correctly" claim is structural, not measured. A R32-style benchmark
+across the same workflows generated as PTC-Lisp vs. as Cloudflare-style
+TS would either upgrade this from "plausible" to "demonstrated" or
+revise it. Worth running before making the structural claim louder
+externally.
+
+**10. Multi-turn aggregator programs with model judgment.**
+
+The biggest "honest weakness" is workflows needing the model to think
+between calls. A future mode could let `ptc_lisp_execute` be invoked
+multi-turn within one session — preserving program state across calls,
+letting the model inject judgment between phases. Risks blurring the
+"deterministic primitive" identity; needs careful scoping.
+
+### Explicit non-goals
+
+For clarity on what *not* to chase:
+
+- **Becoming an agent framework.** mcp-agent / LangGraph already do
+  this. PtcRunner aggregator's identity is the deterministic primitive.
+- **Becoming a gateway.** MetaMCP / Microsoft mcp-gateway / Kong already
+  do this. PtcRunner aggregator does *not* advertise upstream tools as
+  flat siblings — it advertises one tool that calls upstreams.
+- **Hosted SaaS.** mcpfy and Cloudflare Code Mode cover that segment.
+  PtcRunner's value is self-host / single-binary / offline.
+
 ## Bottom-line claims (defensible, for docs)
 
-1. PtcRunner-MCP-Aggregator is a **programmatic tool-calling primitive**,
-   not an agent framework.
+1. PtcRunner-MCP-Aggregator is a **programmatic tool-calling primitive**
+   in the **Code Mode** category, not an agent framework or a gateway.
 2. It **composes with** mcp-agent / LangGraph / OpenAI Agents SDK rather
-   than replacing them.
-3. Its core advantage: **one LLM-authored sandboxed program can call
-   many upstream MCP tools while keeping intermediate data out of LLM
-   context.**
-4. Its honest weakness: **workflows that require model judgment between
-   tool calls.**
+   than replacing them, and is one of several Code Mode peers (Cloudflare
+   Code Mode, MCPProxy, mcpfy, Anthropic pattern) rather than a unique
+   instance of the pattern.
+3. Its differentiators inside the Code Mode group are **schema-validated
+   returns**, a **structured `upstream_calls` audit trail**, a
+   **three-class failure model**, **`pmap` ergonomics**, a **BEAM
+   "language without I/O" sandbox**, and **self-hostable single-binary
+   deployment with no cloud dependency**.
+4. Its honest weaknesses are **workflows that require model judgment
+   between tool calls**, **stdio-only upstreams in v1**, **catalog
+   token cost at scale**, **credential binding weaker than Cloudflare's**,
+   and **PTC-Lisp learning curve for human reviewers**.
 
 Anything stronger than these four claims needs supporting data before it
 goes into a README or talk.
@@ -252,10 +485,23 @@ goes into a README or talk.
 
 Primary documentation for the systems compared in this brief:
 
+**Agent frameworks:**
 - mcp-agent: https://docs.mcp-agent.com/mcp-agent-sdk/mcp/overview
 - OpenAI Agents SDK + MCP: https://openai.github.io/openai-agents-python/mcp/
 - LangChain / LangGraph + MCP: https://docs.langchain.com/oss/python/langchain/mcp
 
-If the comparison table or claims drift from these sources as those
+**Code Mode peers (closer peer group):**
+- Cloudflare Code Mode: https://blog.cloudflare.com/code-mode/
+- Anthropic "Code execution with MCP": https://www.anthropic.com/engineering/code-execution-with-mcp
+- MCPProxy `code_execution` discussion: https://github.com/orgs/modelcontextprotocol/discussions/627
+- OpenSandbox + Code Mode walkthrough: https://dev.to/thangchung/mcp-programmatic-tool-calling-code-mode-with-opensandbox-4n3n
+- mcpfy MCP Code Execution: https://mcpfy.ai/blog/mcp-code-execution-launch/
+
+**Aggregator / gateway landscape (out of scope for this doc but useful for cross-reference):**
+- MCP Aggregation, Gateway, and Proxy ecosystem survey (Q1 2026):
+  https://www.heyitworks.tech/blog/mcp-aggregation-gateway-proxy-tools-q1-2026
+- Awesome MCP gateways (curated list): https://github.com/e2b-dev/awesome-mcp-gateways
+
+If the comparison tables or claims drift from these sources as those
 projects evolve, update this document — do not let drift accumulate
 silently into PtcRunner's positioning materials.
