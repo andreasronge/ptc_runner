@@ -160,15 +160,13 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
       # exits with `:shutdown`, then the outer supervisor
       # restarts it under :rest_for_one, which also restarts the
       # Registry.
-      # Attempt cap: 30. The DynSup's restart budget is `max_restarts: 2
-      # / max_seconds: 60`, so 3 abnormal exits inside the 60s window
-      # trip it. Each iteration takes at most ~60ms (50ms wait branch
-      # + monitor handling), so 30 attempts ≈ 1.8s wall-clock — well
-      # inside the 60s window with plenty of headroom for parallel-test
-      # scheduling jitter. Pre-bump (cap=12) flaked under load when
-      # several iterations consecutively hit the "Registry hasn't yet
-      # re-registered" wait branch.
-      crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, 30)
+      #
+      # Iteration is bounded by a wall-clock deadline (well under
+      # the DynSup's 60s `max_seconds` window) and counts only
+      # *real* abnormal kills issued. See `crash_until_dynsup_dies!`
+      # for the race-tolerance details (already-dead-pid lookups,
+      # transient `:noproc` from the Registry during the cascade).
+      crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, 5_000)
 
       # 1. DynamicSupervisor restarted (pid changed).
       assert_receive {:DOWN, ^dynsup_ref, :process, ^dynsup_pid_before, _}, 5_000
@@ -219,46 +217,133 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
   # ----------------------------------------------------------------
 
   # Repeatedly kill the configured upstream's Connection until the
-  # DynamicSupervisor exhausts its restart intensity and exits. Each
+  # DynamicSupervisor exhausts its restart intensity and exits, or
+  # until the wall-clock deadline `timeout_ms` elapses. Each
   # iteration waits for the per-Connection :DOWN before issuing the
   # next kill (no Process.sleep). The DynSup's :DOWN, when it
   # arrives, is also received here — we re-send it to ourselves so
   # the main test body can match on its monitor ref via
   # assert_receive.
-  defp crash_until_dynsup_dies!(_reg_name, _upstream, _dynsup_ref, 0) do
-    flunk("DynamicSupervisor restart-intensity not exhausted after attempts")
+  #
+  # ## Race tolerance
+  #
+  # The discriminating signal is "the DynSup's restart budget gets
+  # tripped, the cascade fires, the test body's `assert_receive
+  # {:DOWN, dynsup_ref, ...}` then matches". For that we need
+  # exactly 3 *real* abnormal exits of the Connection child
+  # observed by the DynSup. Two races used to consume iterations
+  # without producing real kills:
+  #
+  #   1. **Already-dead pid lookup.** `Connection.whereis` resolves
+  #      via a `:via` Registry whose unregister is event-driven on
+  #      the Connection's `:DOWN`. Between the Connection process
+  #      dying and the `:via` Registry observing the DOWN, the
+  #      lookup returns the *dead* pid. `Process.exit(dead, :kill)`
+  #      is a no-op and `Process.monitor(dead)` synthesizes a
+  #      `:noproc` `:DOWN` immediately. With the previous
+  #      iteration-counter design this looked like a successful
+  #      kill, decremented the budget, and the loop ran out before
+  #      hitting 3 *real* kills.
+  #
+  #   2. **`:noproc` raise from `connection_for`.** Once the cascade
+  #      fires, the named Registry process is gone for ~ms. A
+  #      `GenServer.call/3` to that name raises `:noproc`. The
+  #      previous design did not catch it, so the test crashed
+  #      with an `(EXIT) no process` instead of completing the
+  #      cascade-discrimination assertions.
+  #
+  # The current loop:
+  #
+  #   * uses a wall-clock `deadline_ms` (default 5s — well inside
+  #     the DynSup's 60s `max_seconds` window),
+  #   * catches `:noproc` from `connection_for` (treats it like
+  #     a transient nil),
+  #   * skips lookups that return an already-dead pid without
+  #     consuming budget (the DOWN `:noproc` reason marks them
+  #     as not-a-real-kill),
+  #   * counts only abnormal `:killed` exits as real kills,
+  #   * stops as soon as the DynSup `:DOWN` arrives mid-loop.
+  defp crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, timeout_ms) do
+    deadline_mono = System.monotonic_time(:millisecond) + timeout_ms
+    do_crash_until_dynsup_dies(reg_name, upstream, dynsup_ref, deadline_mono, 0)
   end
 
-  defp crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, attempts_left) do
-    case UpstreamRegistry.connection_for(upstream, reg_name) do
-      nil ->
-        # Connection slot is empty — either it's between restarts,
-        # or the DynSup just died and the cascade is in progress.
-        # Wait briefly for either re-register or the DynSup DOWN.
-        receive do
-          {:DOWN, ^dynsup_ref, :process, _, _} = msg ->
-            send(self(), msg)
-            :ok
-        after
-          50 -> crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, attempts_left - 1)
+  defp do_crash_until_dynsup_dies(reg_name, upstream, dynsup_ref, deadline_mono, real_kills) do
+    if System.monotonic_time(:millisecond) >= deadline_mono do
+      flunk(
+        "DynamicSupervisor restart-intensity not exhausted within deadline " <>
+          "(real_kills=#{real_kills})"
+      )
+    else
+      lookup =
+        try do
+          {:ok, UpstreamRegistry.connection_for(upstream, reg_name)}
+        catch
+          # Registry is restarting under the cascade — its named
+          # process is momentarily `:noproc`. Treat as a transient
+          # "no connection" and retry without consuming budget.
+          :exit, {:noproc, _} -> {:ok, nil}
+          :exit, {:normal, _} -> {:ok, nil}
+          :exit, {:shutdown, _} -> {:ok, nil}
         end
 
-      pid when is_pid(pid) ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
+      case lookup do
+        {:ok, nil} ->
+          # No live Connection right now — either between restarts
+          # or the cascade is in progress. Wait briefly for
+          # re-register or for the DynSup DOWN.
+          receive do
+            {:DOWN, ^dynsup_ref, :process, _, _} = msg ->
+              send(self(), msg)
+              :ok
+          after
+            25 ->
+              do_crash_until_dynsup_dies(
+                reg_name,
+                upstream,
+                dynsup_ref,
+                deadline_mono,
+                real_kills
+              )
+          end
 
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} ->
-            crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, attempts_left - 1)
+        {:ok, pid} when is_pid(pid) ->
+          ref = Process.monitor(pid)
+          Process.exit(pid, :kill)
 
-          {:DOWN, ^dynsup_ref, :process, _, _} = msg ->
-            # DynSup died first (or simultaneously) — re-queue the
-            # message for the main test body and stop crashing.
-            send(self(), msg)
-            :ok
-        after
-          2_000 -> flunk("Connection #{inspect(pid)} did not die after :kill")
-        end
+          receive do
+            {:DOWN, ^ref, :process, ^pid, :noproc} ->
+              # The lookup returned a dead pid (the `:via` Registry
+              # had not yet processed the previous Connection's
+              # exit). No real abnormal exit was observed by the
+              # DynSup — do NOT count this toward `real_kills`.
+              do_crash_until_dynsup_dies(
+                reg_name,
+                upstream,
+                dynsup_ref,
+                deadline_mono,
+                real_kills
+              )
+
+            {:DOWN, ^ref, :process, ^pid, _reason} ->
+              # Real abnormal exit observed by the DynSup.
+              do_crash_until_dynsup_dies(
+                reg_name,
+                upstream,
+                dynsup_ref,
+                deadline_mono,
+                real_kills + 1
+              )
+
+            {:DOWN, ^dynsup_ref, :process, _, _} = msg ->
+              # DynSup died first (or simultaneously) — re-queue
+              # for the main test body and stop crashing.
+              send(self(), msg)
+              :ok
+          after
+            2_000 -> flunk("Connection #{inspect(pid)} did not die after :kill")
+          end
+      end
     end
   end
 
