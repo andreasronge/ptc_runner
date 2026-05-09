@@ -383,56 +383,156 @@ plus shell + mix-startup overhead).
 
 ### Approach
 
-1. **Measure first.** Before touching anything, run each project's
-   `mix test` and `mix dialyzer` concurrently in a scratch script and
-   measure wallclock vs sequential. If concurrent isn't actually
-   faster (e.g., they contend on the same `_build` symlink, hex
-   cache, or telemetry handlers), abort the phase before code lands.
-   Specifically watch for:
-   - `_build` lock contention between projects (each project has its
-     own `_build/dev` and `_build/test` directories — should be
-     fine, but verify with `lsof` or `fs_usage` while running).
-   - Hex cache contention (`mix deps.compile` writes to
-     `~/.hex/` — only an issue on a fresh clone, irrelevant once
-     deps are compiled).
-   - Telemetry / logger contention if processes write to the same
-     stderr/stdout (the hook captures combined output).
-2. **If measured win is ≥5 s on the test+dialyzer-bound path**,
-   refactor the hook to launch the three subproject loops as
-   background jobs and `wait` for all to finish. Capture each
-   project's output to a per-project temp file; on failure, dump the
-   relevant project's output and exit non-zero. On success, print
-   each project's `✅` summary in order.
-3. **Output ordering matters.** Sequential output is currently
-   readable — interleaved bg-job output is not. Buffer per-project
-   output to temp files; print them in deterministic order after all
-   jobs finish.
-4. **Failure semantics.** First failure cancels the others (or lets
-   them finish; pick one and document). Sequential's behavior is
-   "first failure aborts the rest"; concurrent's natural behavior
-   is "all run to completion, then report all failures." Pick "all
-   finish, report all failures" — strictly more useful for the
-   developer fixing things.
-5. **Update `.githooks/README.md`** with the new behavior + any
-   per-project temp-file paths a developer might want to inspect.
+1. **Measure first, with a precisely specified harness.** Before
+   touching the hook, write a scratch script that exactly mirrors the
+   intended runtime shape:
+
+   ```
+   for proj in . mcp_server ptc_viewer; do
+     ( cd "$proj" && mix test --exclude clojure && mix dialyzer ) &
+   done
+   wait
+   ```
+
+   Three background jobs, each doing test-then-dialyzer
+   sequentially **inside** the project. Not six fully-concurrent
+   commands. Compare against the current sequential loop on the
+   *same* machine, *same* load profile.
+
+   Required preconditions for the measurement to be meaningful:
+   - **Warm deps and PLT** for all three projects (`mix deps.compile`
+     and `mix dialyzer --plt` run once per project before timing).
+   - **Clean worktree** (no uncommitted changes touching tests,
+     no stale `_build` partial-compile state).
+   - **Phase21 flake fixed or excluded** from the timing test runs
+     (`fix/phase21-cascade-flake` PR must land first, or the timing
+     runs use `--exclude phase21_flake_tag`). Otherwise sporadic
+     test failures contaminate the measurement.
+   - **Quiet machine** — no other heavy tasks running during
+     timing. Use `time` repeatedly (≥5 runs each side) and report
+     median + p95.
+
+   If concurrent isn't faster on this harness, abort the phase
+   *before* refactoring the hook. Watch for these contention
+   sources during measurement:
+   - `_build` lock contention between projects (each has its own
+     `_build/{dev,test}` — should be fine; verify with `lsof` or
+     `fs_usage` while running).
+   - Hex cache contention (`~/.hex/` — only on fresh clones).
+   - CPU / scheduler saturation: 3 concurrent BEAM VMs can starve
+     each other on small machines. Median win on a 20-core box
+     might disappear on an 8-core box.
+   - Shared `System.tmp_dir!()` filename collisions if any tests
+     hardcode a path that collides across subprojects.
+   - Tests that mutate OS env via `System.put_env/2` — concurrent
+     mutation across BEAM VMs is fine (separate processes), but
+     concurrent mutation *within* the same VM (e.g., async tests
+     in the same project) was already a hazard. Confirm none cross
+     the VM boundary.
+   - Path-dep compile effects: if any of the three projects
+     `path:` to another at build time, parallel `mix test` may
+     trigger redundant or conflicting compile of the shared
+     source.
+
+2. **Decide whether to land based on a multi-criterion threshold,**
+   not a rigid ≥5 s rule:
+   - **Statistically repeatable positive median win** across the
+     ≥5 timing runs. Single-shot wins don't count.
+   - **No p95 regression.** If concurrent is faster on average
+     but tail-latency increases (e.g., one project occasionally
+     gets starved), the developer experience degrades.
+   - **Either** ≥5 s median improvement, **or** trivial
+     implementation (a 5-line refactor) with a stable smaller win.
+   - **No new flakes** introduced — concurrent execution must not
+     reveal a race that didn't exist sequentially.
+
+   If all four hold: land. Otherwise abort and document the
+   negative result so a future revision doesn't re-attempt this
+   phase blindly.
+
+3. **Refactor the hook to launch the three subproject loops as
+   background jobs and `wait` for all to finish.** Capture each
+   project's output to a per-project temp file via `mktemp`; clean
+   up on exit via `trap`.
+
+4. **Output semantics — decided.** The current hook streams full
+   command output as it runs. The new flow can't preserve that
+   without interleaving across projects. Choice (and rationale):
+   - **On failure:** dump the failing project's full captured
+     output, then any other failed projects' output, in
+     project-list order. Match the current hook's failure
+     verbosity.
+   - **On success:** print only each project's `✅` summary lines
+     (the same `Tests passed`, `Dialyzer passed` lines the
+     sequential hook prints), in project-list order. Drop the
+     verbose interleaved test output that's currently emitted.
+   - **`PRE_PUSH_VERBOSE=1` env var** opts back into full output
+     for debugging (dumps each project's full log even on success).
+
+   The success-path log loss is the actual behavior change; flag
+   it explicitly in the commit body and the README.
+
+5. **Failure semantics — decided.** Pick "all-finish + report-all"
+   over "first-failure-aborts-rest." Rationale: the developer
+   fixing pre-push failures benefits more from seeing every
+   project's failure in one cycle than from saving 10–20 s when
+   the hook would have aborted early. Document the trade in the
+   commit body. The exception: if a project's test run produces
+   destructive side effects (writing to shared dirs, mutating
+   OS-level state), abort early. None of the three projects do
+   this currently; verify before relying on it.
+
+6. **Match the current hook's project-list and dialyzer-skip
+   semantics exactly.** The new hook must:
+   - Process the same project list (`.`, `mcp_server`,
+     `ptc_viewer`) in the same order.
+   - Skip dialyzer for any project without `:dialyxir` declared
+     (matches the current `project_has_dep` check).
+   - Honor `FORCE_FULL_PRE_PUSH=1` and the docs-only short-circuit
+     from Phase 1 (no regression on the docs-only path —
+     verify by running the four Phase 1 acceptance cases against
+     the new hook).
+   - Exit non-zero on any project failure (preserve the existing
+     contract).
+
+7. **Update `.githooks/README.md`** with the new behavior, the
+   `PRE_PUSH_VERBOSE=1` opt-in, and any per-project temp-file
+   paths a developer might want to inspect during a failure.
 
 ### Acceptance
 
-- **Concurrent wallclock vs sequential, code-only push:** ≥5 s
-  drop. Measured before/after on the same machine, ideally same
-  load. Document the measurement.
-- **Output ordering preserved:** developer sees per-project
-  `✅`/`❌` summaries in the same order as today.
+- **Multi-criterion landing threshold (per Approach #2):**
+  - Statistically repeatable positive median win across ≥5 timing
+    runs each (sequential and concurrent).
+  - No p95 regression.
+  - Either ≥5 s median improvement, or trivial implementation
+    with a stable smaller win.
+  - No new flakes introduced.
+- **Output semantics — explicit:**
+  - On failure: full captured output of every failed project,
+    project-list order.
+  - On success: per-project `✅` summary lines only, project-list
+    order. Verbose stream available via `PRE_PUSH_VERBOSE=1`.
 - **Multi-failure case works:** if both root and `mcp_server` fail,
   both failure outputs are printed (not just the first).
 - **No false greens:** the hook still correctly exits non-zero on
   any subproject failure.
 - **No race condition between concurrent `mix dialyzer` runs.** If
   one is detected (PLT corruption, lock errors), the phase aborts
-  and the hook stays sequential.
+  and the hook stays sequential. Verify by 25 consecutive runs of
+  the new hook on a code-touching commit; any PLT lock error or
+  inconsistent dialyzer result reverts the phase.
+- **Project-list and dialyzer-skip semantics match the current
+  hook exactly.** Verify by inspecting each project's output: if
+  a project lacks `:dialyxir`, it must show `⏭️ Dialyzer not
+  declared`, identical to today.
+- **Phase 1 acceptance cases pass unchanged.** Re-run the four
+  Phase 1 acceptance cases (docs-only, source-touch, dirty-tree,
+  `FORCE_FULL_PRE_PUSH=1`) against the new hook. None should
+  regress.
 - **Worktree environment doc updated:** if the new flow needs any
-  new dependency (`mktemp`, `wait`, `xargs -P`), document any
-  unusual portability gotchas.
+  new dependency (`mktemp`, `wait`, `trap`), document any unusual
+  portability gotchas (e.g., bash 3.2 on stock macOS).
 
 ### Risk
 
@@ -440,15 +540,43 @@ plus shell + mix-startup overhead).
   fight over the dialyxir PLT cache. Mitigation: per-project
   `_build` already gives each its own PLT; verify before
   refactoring.
-- **Output interleaving** — debug-level test logs from one project
-  could swamp another. Mitigation: per-project temp files +
-  deterministic ordering at the end.
-- **Failure-mode regression** — if first-failure-wins behavior
-  matters to anyone, "all-run + report-all" is a behavior change.
-  Document it in the commit body.
-- **Test-port contention** — the three subprojects might fight over
-  ports / paths if any tests bind to fixed addresses. Phase 2's
-  hypothesis-test step exists specifically to surface this.
+- **CPU / scheduler saturation** — three concurrent BEAM VMs can
+  starve each other on small machines. A median win on a
+  20-core dev box might vanish on an 8-core CI machine or a
+  contention-heavy laptop. Mitigation: measurement step runs on
+  the typical target hardware before landing.
+- **Output interleaving** — addressed by capturing per-project
+  output to temp files and printing in deterministic order at the
+  end. Verbose-on-success path requires `PRE_PUSH_VERBOSE=1`.
+- **Loss of warning visibility on success** — current hook
+  streams full output; new hook hides it on green. A regression
+  in warning volume would be invisible until someone explicitly
+  ran `PRE_PUSH_VERBOSE=1`. Document the trade in the commit body.
+- **Failure-mode regression** — `all-run + report-all` is a
+  behavior change vs `first-failure-aborts`. Document it in the
+  commit body and README.
+- **Shared `System.tmp_dir!()` collisions** — if any tests
+  hardcode tmp paths that collide across subprojects, parallel
+  runs might race. Each project's tests today appear to use
+  per-test unique tmp dirs; verify by `rg -n 'tmp_dir!()'`
+  before refactoring.
+- **`System.put_env` cross-VM mutation** — irrelevant across BEAM
+  VM boundaries (separate processes), but worth confirming none
+  of the projects' tests assume cross-VM env state.
+- **Path-dep compile cross-talk** — if any of the three projects
+  declares another via `path:` and depends on its compiled
+  artifacts, parallel `mix test` may trigger redundant or
+  conflicting compile. Verify by inspecting each `mix.exs`'s
+  `deps` list before refactoring.
+- **Test-port contention** — the three subprojects might fight
+  over fixed-port bindings if any tests use `Bandit` /
+  `Cowboy` / similar with hardcoded ports. Phase 2's measurement
+  step surfaces this before code lands.
+- **Phase21 flake confounds the measurement.** Until the
+  separate `fix/phase21-cascade-flake` PR lands or the test is
+  tagged out of the timing runs, sporadic failures will skew
+  median + p95 numbers. Sequence the measurement step *after*
+  the flake fix.
 
 ### Estimated impact
 
@@ -549,6 +677,14 @@ file that flakes flips back with the failure mode recorded.
 > escript build + mix.exs alias) isn't justified. Codex consult:
 > "Do it only after measuring how much wallclock is actually
 > attributable to those subprocesses under the current hook."
+>
+> **Retirement criteria:** if post-Phase-2 re-profiling shows
+> that `mix run`-via-`Port.open` accounts for **<10% of remaining
+> pre-push wallclock** on code-touching pushes, or the lock-
+> contention warning ("Waiting for lock on the build directory")
+> doesn't appear across 25 consecutive `mix test` runs of
+> `mcp_server`, retire Phase 3 with a recorded rationale. If
+> ≥10% and the warning fires, ship Phase 3 as specified below.
 >
 > The original spec is preserved as-is below; the *go/no-go*
 > decision is gated on re-profiling.
