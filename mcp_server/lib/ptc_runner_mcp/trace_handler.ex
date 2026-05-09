@@ -28,6 +28,8 @@ defmodule PtcRunnerMcp.TraceHandler do
 
   require Logger
 
+  alias PtcRunnerMcp.Credentials.Redactor
+
   alias PtcRunnerMcp.TraceConfig
 
   @handler_id "ptc-runner-mcp-trace-handler"
@@ -79,7 +81,16 @@ defmodule PtcRunnerMcp.TraceHandler do
   def handle_event(event, measurements, metadata, _config) do
     level = TraceConfig.trace_payloads()
     event_map = build_event_map(event, measurements, metadata, level)
-    _ = PtcRunner.TraceLog.write_to_active(event_map)
+    # `PtcRunner.TraceLog.write_to_active/1` lives in the parent
+    # `:ptc_runner` library and cannot call `Redactor.scrub/1`. We
+    # scrub every binary leaf of the event tree here, before the
+    # collector encodes it to JSONL. Per
+    # `Plans/http-transport-credentials.md` §7.5.1, every JSONL record
+    # must pass through `Redactor.scrub/1` before write — the
+    # `TraceFile.with_traced_call/4` hook only covers the trace-start
+    # header opts, not per-event metadata/reason payloads.
+    redacted = Redactor.scrub_deep(event_map)
+    _ = PtcRunner.TraceLog.write_to_active(redacted)
     :ok
   rescue
     error ->

@@ -75,6 +75,32 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
     scrub(IO.iodata_to_binary(value))
   end
 
+  @doc """
+  Recursively walk a map / list / scalar tree and apply `scrub/1` to
+  every binary leaf. Non-binary leaves (atoms, numbers, booleans,
+  `nil`, structs) pass through unchanged.
+
+  Used by the `TraceHandler` telemetry callback (and any other call
+  site that produces a structured event whose values will be
+  JSON-encoded *outside* the redactor's reach — for example,
+  `PtcRunner.TraceLog.write_to_active/1`, which lives in the parent
+  `:ptc_runner` library and has no `:ptc_runner_mcp` dependency, so
+  cannot call the redactor itself).
+  """
+  @spec scrub_deep(term()) :: term()
+  def scrub_deep(value) when is_binary(value), do: scrub(value)
+
+  def scrub_deep(value) when is_list(value) do
+    Enum.map(value, &scrub_deep/1)
+  end
+
+  def scrub_deep(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} -> {k, scrub_deep(v)} end)
+  end
+
+  def scrub_deep({a, b}), do: {scrub_deep(a), scrub_deep(b)}
+  def scrub_deep(value), do: value
+
   # Read the redaction-set ETS table once. Returns a list of
   # plaintext binaries sorted longest-first (so a longer match wins
   # over a shorter substring of itself).
