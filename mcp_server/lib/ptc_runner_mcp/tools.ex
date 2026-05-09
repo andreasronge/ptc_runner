@@ -37,6 +37,7 @@ defmodule PtcRunnerMcp.Tools do
     UpstreamCalls
   }
 
+  alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "ptc_lisp_execute"
@@ -321,11 +322,36 @@ defmodule PtcRunnerMcp.Tools do
 
     %{
       "name" => @tool_name,
-      "description" => advertised_description(profile, catalog: nil),
+      "description" => advertised_description(profile, catalog: catalog_for(profile)),
       "inputSchema" => input_schema(),
       "outputSchema" => output_schema_for(profile),
       "annotations" => annotations_for(profile)
     }
+  end
+
+  # §12.5: read the FROZEN catalog from `:persistent_term`. The
+  # Phase 0 `:mcp_no_tools` fixture is byte-equal-protected by
+  # `tools_phase0_test.exs` — that profile MUST keep `catalog: nil`
+  # so the v1 tool_entry snapshot is unchanged.
+  #
+  # The catalog string is rendered ONCE at boot (in
+  # `Upstream.Supervisor.start_link/1` after `eager_start_upstreams/1`)
+  # and stored via `Catalog.freeze/1`. This satisfies §12.5's
+  # "rebuilt only on PtcRunner restart" contract: post-boot upstream
+  # crashes, recoveries, and `put_fake/2` calls do NOT change the
+  # catalog text the calling LLM sees.
+  #
+  # `Catalog.frozen/0` returns `""` when no catalog has been frozen
+  # (non-aggregator mode, or a boot path where the supervisor was
+  # never started). `advertised_description/2` already maps `""` to
+  # "no catalog block", so the description still renders cleanly.
+  defp catalog_for(:mcp_no_tools), do: nil
+
+  defp catalog_for(:mcp_aggregator) do
+    case UpstreamCatalog.frozen() do
+      "" -> nil
+      str when is_binary(str) -> str
+    end
   end
 
   @doc "Handle a `tools/list` request. Always returns the single advertised tool."

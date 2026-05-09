@@ -1,0 +1,227 @@
+defmodule PtcRunnerMcp.ToolsPhase3Test do
+  @moduledoc """
+  Phase 3 tests for `Tools.tool_entry/0` description in aggregator
+  mode.
+
+  Spec: `Plans/ptc-runner-mcp-aggregator.md` §12.5.
+
+  Cases:
+
+    * `:mcp_no_tools` byte-for-byte matches the v1 fixture (no
+      regression — Phase 3 MUST NOT touch the v1 advertisement).
+    * `:mcp_aggregator` description includes the FROZEN catalog
+      string. The catalog is computed once at boot and stored in
+      `:persistent_term` via `Catalog.freeze/1`; `tool_entry/0`
+      reads it via `Catalog.frozen/0`. Tests prime the freeze
+      manually because they don't run the full
+      `Upstream.Supervisor.start_link/1` boot path.
+    * §12.5 freeze invariant: catalog text is stable across
+      post-boot upstream lifecycle changes. The "kill an upstream
+      after freeze, re-read tool_entry" test exists to prove the
+      freeze defends against drift.
+  """
+  use ExUnit.Case, async: false
+
+  alias PtcRunnerMcp.Tools
+  alias PtcRunnerMcp.Upstream.Catalog
+  alias PtcRunnerMcp.Upstream.Connection
+  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
+
+  @registry_name PtcRunnerMcp.Upstream.Registry
+  @fixture_path Path.expand("../fixtures/tool_entry_v1.json", __DIR__)
+
+  setup do
+    stop_existing_registry()
+    Catalog.clear_frozen()
+
+    on_exit(fn ->
+      stop_existing_registry()
+      Catalog.clear_frozen()
+    end)
+
+    :ok
+  end
+
+  describe ":mcp_no_tools regression (Phase 0 fixture)" do
+    test "tool_entry/0 byte-equals the v1 fixture when no upstream Registry is running" do
+      # No Registry running → `configured_aggregator_mode?/0` is false →
+      # `:mcp_no_tools` profile → catalog: nil → v1 fixture exact match.
+      fixture = Jason.decode!(File.read!(@fixture_path))
+      assert Tools.tool_entry() == fixture
+    end
+  end
+
+  describe ":mcp_aggregator description with frozen catalog (§12.5)" do
+    test "includes the frozen catalog block as a trailing paragraph" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", fake_tools_config(), @registry_name)
+
+      pid = UpstreamRegistry.connection_for("alpha", @registry_name)
+      assert is_pid(pid)
+      {:ok, _} = Connection.ensure_started(pid)
+
+      # Production boot freezes the catalog after eager-start; tests
+      # do the same explicitly because they bypass the full supervisor.
+      :ok = Catalog.freeze(Catalog.render(@registry_name))
+
+      entry = Tools.tool_entry()
+      description = entry["description"]
+
+      assert is_binary(description)
+      assert description =~ "alpha:"
+      assert description =~ "ping(msg: string) - Ping the upstream"
+
+      assert String.trim_trailing(description)
+             |> String.ends_with?("alpha:\n  ping(msg: string) - Ping the upstream")
+    end
+
+    test "aggregator-mode tool_entry uses the aggregator outputSchema/annotations" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, @registry_name)
+      :ok = Catalog.freeze("")
+
+      entry = Tools.tool_entry()
+
+      schemas = entry["outputSchema"]["oneOf"]
+      assert Enum.any?(schemas, &Map.has_key?(&1["properties"], "upstream_calls"))
+
+      ann = entry["annotations"]
+      assert ann["readOnlyHint"] == false
+      assert ann["destructiveHint"] == true
+      assert ann["openWorldHint"] == true
+    end
+
+    test "no upstream catalog block when Registry has zero upstreams" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+
+      # configured_count == 0 → :mcp_no_tools profile → fixture match.
+      entry = Tools.tool_entry()
+      fixture = Jason.decode!(File.read!(@fixture_path))
+      assert entry == fixture
+    end
+
+    test "frozen catalog with not-yet-started upstream renders the unavailable placeholder" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      # put_fake creates the Connection but does NOT start it.
+      # The "frozen at boot" snapshot captures cached_tools=nil for this
+      # case — the eager-start branch failed and we still froze.
+      :ok = UpstreamRegistry.put_fake("beta", %{tools: %{}}, @registry_name)
+      :ok = Catalog.freeze(Catalog.render(@registry_name))
+
+      entry = Tools.tool_entry()
+      description = entry["description"]
+
+      assert description =~ "beta:\n  (unavailable at startup)"
+    end
+  end
+
+  describe "freeze invariant (§12.5 'rebuilt only on PtcRunner restart')" do
+    test "tool_entry description is stable when an upstream crashes post-boot" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", fake_tools_config(), @registry_name)
+      :ok = UpstreamRegistry.put_fake("beta", fake_tools_config(), @registry_name)
+
+      pid_a = UpstreamRegistry.connection_for("alpha", @registry_name)
+      pid_b = UpstreamRegistry.connection_for("beta", @registry_name)
+      {:ok, _} = Connection.ensure_started(pid_a)
+      {:ok, _} = Connection.ensure_started(pid_b)
+
+      :ok = Catalog.freeze(Catalog.render(@registry_name))
+
+      snapshot = Tools.tool_entry()["description"]
+      assert snapshot =~ "alpha:"
+      assert snapshot =~ "beta:"
+
+      # Kill the underlying impl pid for `beta`. Pre-fix: the live
+      # `Catalog.render` path would observe `cached_tools = nil` for
+      # beta and the description would flip to `(unavailable at
+      # startup)`. Post-fix: the frozen string is unchanged.
+      %{pid: impl_pid} = Connection.snapshot(pid_b)
+      assert is_pid(impl_pid)
+      ref = Process.monitor(impl_pid)
+      Process.exit(impl_pid, :kill)
+
+      receive do
+        {:DOWN, ^ref, :process, ^impl_pid, _reason} -> :ok
+      after
+        2_000 -> flunk("impl process did not die")
+      end
+
+      # Wait for the Connection to observe the :DOWN and transition
+      # to :not_started. We poll the snapshot bounded by 1s — no
+      # Process.sleep, just `receive after` per CLAUDE.md.
+      :ok = wait_until_not_started(pid_b, 1_000)
+
+      # Sanity check: a LIVE re-render WOULD differ from the snapshot.
+      # (This is not a regression — it confirms the freeze is what's
+      # protecting us. If `Catalog.render` happened to be stable for
+      # this test setup, the snapshot-equality assertion below would
+      # be tautological.)
+      live_after_kill = Catalog.render(@registry_name)
+      assert live_after_kill =~ "beta:\n  (unavailable at startup)"
+
+      # Frozen description is byte-equal to the pre-kill snapshot.
+      assert Tools.tool_entry()["description"] == snapshot
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # Helpers
+  # ----------------------------------------------------------------
+
+  defp fake_tools_config do
+    %{
+      tools: %{
+        "ping" =>
+          {%{
+             name: "ping",
+             input_schema: %{
+               "type" => "object",
+               "properties" => %{"msg" => %{"type" => "string"}},
+               "required" => ["msg"]
+             },
+             description: "Ping the upstream"
+           }, fn _, _ -> {:ok, "pong"} end}
+      }
+    }
+  end
+
+  defp wait_until_not_started(pid, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_until_not_started(pid, deadline)
+  end
+
+  defp do_wait_until_not_started(pid, deadline) do
+    if Connection.started?(pid) do
+      now = System.monotonic_time(:millisecond)
+
+      if now >= deadline do
+        flunk("Connection still :started after deadline")
+      else
+        receive do
+        after
+          5 -> do_wait_until_not_started(pid, deadline)
+        end
+      end
+    else
+      :ok
+    end
+  end
+
+  defp stop_existing_registry do
+    case Process.whereis(@registry_name) do
+      nil ->
+        :ok
+
+      pid ->
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :ok
+        after
+          1_000 -> :ok
+        end
+    end
+  end
+end
