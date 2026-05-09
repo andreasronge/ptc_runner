@@ -273,6 +273,65 @@ an inline catalog of every tool advertised by every configured
 upstream — that's what the LLM uses to know which `(tool/mcp-call
 ...)` shapes are valid.
 
+### What the LLM sees
+
+Even with N upstreams configured, the client's `tools/list` returns
+**exactly one tool**, `ptc_lisp_execute`. Upstream tools are not
+re-advertised individually — they're folded into that tool's
+`description` field as a compact, deterministic catalog rendered
+once at server boot from each upstream's own `tools/list` response
+(cached in `:persistent_term`; rebuilt only on PtcRunner restart).
+
+The `description` string concatenates three sections:
+
+1. A one-paragraph capability statement.
+2. The aggregator authoring card (calling convention, `nil` /
+   `:json-null` semantics, sandbox restrictions).
+3. The **upstream catalog** — one block per upstream, in the shape:
+
+   ```
+   <server>:
+     <tool>(<arg>: <type>, <optional>: <type>?) - <description, ≤80 chars>
+   ```
+
+Catalog rendering rules (from `Upstream.Catalog`):
+
+- Required args first in schema order; optional args alphabetically with a trailing `?`.
+- Complex types collapse to bare names — `array`, `object`. Item shapes are not shown.
+- `enum` constraints render as `enum<string>` (or bare `enum` for heterogeneous values); `const` as `const<"value">`.
+- Descriptions are whitespace-collapsed and hard-truncated at 80 codepoints with `...`.
+- Upstreams that failed to start at boot render as `(unavailable at startup)`.
+
+Example slice from a config with the official `server-filesystem`
+and `server-memory` upstreams:
+
+```
+fs:
+  read_text_file(path: string, head: number?, tail: number?) - Read the complete contents of a file from the file system as text. Handles va...
+  write_file(path: string, content: string) - Create a new file or completely overwrite an existing file with new content. ...
+  list_directory_with_sizes(path: string, sortBy: enum<string>?) - Get a detailed listing of all files and directories in a specified path, incl...
+  search_files(path: string, pattern: string, excludePatterns: array?) - Recursively search for files and directories matching a pattern. The patterns...
+
+mem:
+  read_graph() - Read the entire knowledge graph
+  search_nodes(query: string) - Search for nodes in the knowledge graph based on a query
+  open_nodes(names: array) - Open specific nodes in the knowledge graph by their names
+```
+
+For a 2-upstream / 23-tool config the full `description` is around
+6 KB (~1,500 tokens) — that's the entire upstream API surface the
+LLM has to work from. It then writes calls like:
+
+```clojure
+(tool/mcp-call {:server "fs" :tool "read_text_file"
+                :args {:path "/tmp/notes.txt" :head 20}})
+```
+
+At call time, `:server` and `:tool` are validated against the
+same cached `tools/list` data — unknown server / tool on a healthy
+upstream raises a programmer-fault `runtime_error` so the LLM can
+self-correct against the catalog it was given.
+
 ### Aggregator-mode flags
 
 These come into effect when at least one upstream is configured.
