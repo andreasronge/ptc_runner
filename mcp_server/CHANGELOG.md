@@ -9,6 +9,20 @@ revisions.
 
 ## Unreleased
 
+### Added
+
+- `mcp/text` and `mcp/json` are part of the base PTC-Lisp surface
+  (`:ptc_runner`'s `Env.initial/0`) and are available unconditionally
+  in both default and aggregator modes. `(mcp/text r)` returns
+  `r["content"][0]["text"]` or `nil`. `(mcp/json r)` returns
+  `r["structuredContent"]` when present (preserving the `:json-null`
+  sentinel as a valid sub-field value), otherwise falls back to
+  `(json/parse-string (mcp/text r))`. Both helpers are pure shape
+  inspectors and never raise. Aggregator and default authoring cards
+  list the helpers; non-aggregator clients can still use them, they
+  just return `nil` against unrelated map shapes. See
+  `Plans/json-support.md` §5.
+
 ### Breaking changes
 
 - `outputSchema` no longer includes the `memory` field on success

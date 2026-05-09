@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PTC-Lisp MCP unwrap helpers** — `(mcp/text r)` and `(mcp/json r)`
+  are now available unconditionally in every PTC-Lisp run. `mcp/text`
+  returns `r["content"][0]["text"]` (the well-known MCP envelope
+  shape) or `nil` for any non-conforming input — including the
+  `:json-null` sentinel, content[0] items whose `"type"` is not
+  exactly `"text"`, and missing/non-binary `"text"` fields. `mcp/json`
+  is the "give me the typed JSON of this result" helper: it
+  consults `r["structuredContent"]` first (preserving the `:json-null`
+  sub-field sentinel via short-circuit, per Plans/json-support.md
+  §6.2), then falls back to `(json/parse-string (mcp/text r))`. Both
+  helpers are pure shape inspectors with no MCP-protocol dependency,
+  follow the DIV-* convention, and **never raise**. The §1
+  motivating use case — replacing the brittle `re-find` regex split
+  workaround for upstreams returning JSON-as-text in
+  `content[0].text` — is now `(mcp/json (tool/mcp-call ...))`. See
+  `Plans/json-support.md` §5.
+
 - **PTC-Lisp JSON builtins** — `(json/parse-string s)` and
   `(json/generate-string v)` are now available unconditionally in every
   PTC-Lisp run (default mode and aggregator mode alike). Cheshire-shaped
