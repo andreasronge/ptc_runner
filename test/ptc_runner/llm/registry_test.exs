@@ -177,6 +177,11 @@ defmodule PtcRunner.LLM.RegistryTest do
 
   describe "DefaultRegistry behaviour implementation" do
     test "DefaultRegistry implements all callbacks" do
+      # Force load — every other test in this file uses the Registry behaviour,
+      # so DefaultRegistry's .beam may be unloaded when this test runs first
+      # under an unlucky async seed, making function_exported?/3 return false.
+      Code.ensure_loaded!(DefaultRegistry)
+
       assert function_exported?(DefaultRegistry, :resolve, 1)
       assert function_exported?(DefaultRegistry, :resolve!, 1)
       assert function_exported?(DefaultRegistry, :default_model, 0)
