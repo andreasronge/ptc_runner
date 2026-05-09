@@ -1,0 +1,327 @@
+#!/bin/bash
+# Pre-push hook — tracked under .githooks/ so it lives with the repo.
+#
+# Behavior:
+#   1. Docs-only short-circuit: if every file in the *combined* set
+#      (committed-diff against the remote + dirty worktree) matches the
+#      strict allow-list below, skip the test/dialyzer gate and exit 0.
+#   2. Otherwise: run `mix test --exclude clojure` and `mix dialyzer`
+#      for each top-level Mix project (".", "mcp_server", "ptc_viewer"),
+#      preserving the existing pre-push behavior.
+#
+# Override:
+#   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
+#   the docs-only check would have allowed a skip.
+#
+# Stdin contract (githooks(5)):
+#   <local-ref> <local-sha> <remote-ref> <remote-sha>\n  (one per ref)
+#
+# See Plans/pre-push-perf.md §"Phase 1" for design rationale, including
+# the allow-list / deny-list and the worktree-clean requirement.
+
+set -e
+
+# ----------------------------------------------------------------------
+# Step 1: Docs-only short-circuit (unless FORCE_FULL_PRE_PUSH=1).
+# ----------------------------------------------------------------------
+
+# Read stdin once. Pre-push hooks get ref tuples on stdin; if we don't
+# capture before invoking python we'd lose them. An empty stdin (e.g.
+# manual invocation with no piped input) is treated as "no committed
+# changes" and falls through to the dirty-worktree check.
+REFS_INPUT="$(cat || true)"
+
+if [ -z "${FORCE_FULL_PRE_PUSH:-}" ]; then
+  SHORT_CIRCUIT_RESULT=0
+  # Write the python helper to a temp file so its stdin stays free
+  # for the pushed-ref tuples. Piping the heredoc into `python3 -`
+  # would consume stdin with the script itself.
+  PY_TMP="$(mktemp -t pre-push-docs-only.XXXXXX.py)"
+  trap 'rm -f "$PY_TMP"' EXIT
+  cat > "$PY_TMP" <<'PYEOF'
+import os
+import re
+import subprocess
+import sys
+
+# Exit codes returned to the bash wrapper:
+#   0 → docs-only, skip the full gate.
+#   2 → not docs-only (or empty), run the full gate.
+#   1 → unexpected error; fail-safe by running the full gate.
+SKIP = 0
+RUN_FULL = 2
+
+# Strict allow-list (exact regexes against repo-relative paths).
+ALLOW_PATTERNS = [
+    re.compile(r"^Plans/.*\.md$"),
+    re.compile(r"^CHANGELOG\.md$"),
+    re.compile(r"^LICENSES/MIT\.txt$"),
+    re.compile(r"^\.gitignore$"),
+    re.compile(r"^\.githooks/README\.md$"),
+]
+
+
+def is_allowed(path):
+    return any(p.match(path) for p in ALLOW_PATTERNS)
+
+
+def run(args, **kwargs):
+    """Run a git command, returning (stdout_bytes, returncode)."""
+    proc = subprocess.run(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **kwargs,
+    )
+    return proc.stdout, proc.returncode
+
+
+def committed_paths(local_sha, remote_sha):
+    """Return the set of file paths changed in commits being pushed.
+
+    Handles the all-zeros remote-sha case (first push of a new branch)
+    by falling back to `origin/main..local_sha`. If `origin/main` does
+    not exist either, fall back to listing every commit reachable from
+    local_sha — conservative, but correct (we'd rather over-include and
+    run the full gate than under-include and skip it).
+    """
+    paths = set()
+
+    if set(remote_sha) == {"0"}:
+        # First push of this branch.
+        for base in ("origin/main", "origin/HEAD"):
+            _, rc = run(["git", "rev-parse", "--verify", base])
+            if rc == 0:
+                rev_range = f"{base}..{local_sha}"
+                break
+        else:
+            # No suitable upstream; fall back to all commits reachable.
+            rev_range = local_sha
+    else:
+        rev_range = f"{remote_sha}..{local_sha}"
+
+    out, rc = run(["git", "rev-list", rev_range])
+    if rc != 0:
+        # Range invalid (e.g., remote-sha not present locally). Be
+        # conservative: force full gate.
+        return None
+
+    commits = [c for c in out.decode().split("\n") if c]
+    if not commits:
+        return paths
+
+    # Use diff-tree per commit. Cheap and deterministic; avoids issues
+    # with merge commits and `--combined`.
+    for c in commits:
+        out, rc = run(
+            ["git", "diff-tree", "-r", "--name-only", "--no-commit-id", c]
+        )
+        if rc != 0:
+            return None
+        for line in out.decode().split("\n"):
+            line = line.strip()
+            if line:
+                paths.add(line)
+
+    return paths
+
+
+def dirty_paths():
+    """Return the set of dirty paths in the worktree, rename-aware.
+
+    Uses porcelain v1 with NUL delimiters so paths with spaces, quotes,
+    and renames are parsed safely. Both old and new paths of a rename
+    enter the dirty set — a rename `Plans/a.md → README.md` cannot
+    evade the deny by appearing only as a "new" path.
+    """
+    out, rc = run(
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=normal",
+        ]
+    )
+    if rc != 0:
+        return None
+
+    # Split on NUL, drop trailing empty.
+    fields = out.split(b"\x00")
+    if fields and fields[-1] == b"":
+        fields = fields[:-1]
+
+    paths = set()
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        if not entry:
+            i += 1
+            continue
+        if len(entry) < 3:
+            i += 1
+            continue
+        status = entry[:2].decode()
+        path = entry[3:].decode()
+        # Porcelain v1 puts index status in column 0 and worktree
+        # status in column 1. Renames/copies can appear in either
+        # column ("R " staged, " R" unstaged-detected, "RR" both).
+        # When either column is R/C, the next NUL-record holds the
+        # *old* path.
+        if status[0] in "RC" or status[1] in "RC":
+            paths.add(path)  # new path
+            if i + 1 < len(fields):
+                paths.add(fields[i + 1].decode())  # old path
+            i += 2
+        else:
+            paths.add(path)
+            i += 1
+
+    return paths
+
+
+def main():
+    refs_input = sys.stdin.read()
+
+    committed = set()
+    if refs_input.strip():
+        for line in refs_input.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 4:
+                # Malformed input — fail safe.
+                return RUN_FULL
+            _local_ref, local_sha, _remote_ref, remote_sha = parts
+            # Deletion: local_sha all zeros, nothing to push.
+            if set(local_sha) == {"0"}:
+                continue
+            paths = committed_paths(local_sha, remote_sha)
+            if paths is None:
+                return RUN_FULL
+            committed |= paths
+
+    dirty = dirty_paths()
+    if dirty is None:
+        return RUN_FULL
+
+    combined = committed | dirty
+
+    # Empty combined set → nothing to push *and* clean worktree.
+    # That can happen on a re-push of an already-pushed sha. Treat as
+    # docs-only-eligible: there's literally nothing to test.
+    non_allowed = [p for p in combined if not is_allowed(p)]
+
+    if non_allowed:
+        return RUN_FULL
+
+    return SKIP
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:  # noqa: BLE001
+        # Anything unexpected → fail safe (run the full gate).
+        sys.stderr.write(f"pre-push docs-only check errored: {e}\n")
+        sys.exit(RUN_FULL)
+PYEOF
+
+  set +e
+  printf '%s' "$REFS_INPUT" | /usr/bin/env python3 "$PY_TMP"
+  SHORT_CIRCUIT_RESULT=$?
+  set -e
+  rm -f "$PY_TMP"
+  trap - EXIT
+
+  case "$SHORT_CIRCUIT_RESULT" in
+    0)
+      echo "📝 Docs-only push, skipping test/dialyzer gate (override: FORCE_FULL_PRE_PUSH=1)"
+      exit 0
+      ;;
+    2)
+      : # Fall through to the full gate.
+      ;;
+    *)
+      # Unexpected python failure — fail safe by running the full gate.
+      echo "⚠️  Docs-only check failed unexpectedly (exit=$SHORT_CIRCUIT_RESULT); running full gate."
+      ;;
+  esac
+fi
+
+# ----------------------------------------------------------------------
+# Step 2: Existing per-project test + dialyzer gate (unchanged behavior).
+# ----------------------------------------------------------------------
+
+echo "🔍 Running pre-push checks..."
+
+START_TIME=$(date +%s)
+
+PROJECTS=("." "mcp_server" "ptc_viewer")
+
+project_has_dep() {
+  local proj="$1" dep="$2"
+  grep -qE "\\{:${dep}," "${proj}/mix.exs" 2>/dev/null
+}
+
+run_project_gates() {
+  local proj="$1"
+  local label
+
+  if [ "$proj" = "." ]; then
+    label="root (:ptc_runner)"
+  else
+    label="$proj/"
+    [ -d "$proj" ] || return 0
+  fi
+
+  echo ""
+  echo "📦 Project: $label"
+
+  pushd "$proj" > /dev/null
+
+  echo "  ⏳ Running full test suite..."
+  if ! mix test --exclude clojure 2>&1; then
+    echo "  ❌ Tests failed in $label. Run: (cd $proj && mix test)"
+    popd > /dev/null
+    exit 1
+  fi
+  echo "  ✅ Tests passed"
+
+  # CWD is the project dir (we are inside `pushd "$proj"`), so check
+  # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
+  # resolve to `mcp_server/mcp_server/mix.exs` and silently skip
+  # dialyzer for non-root projects.
+  if project_has_dep "." "dialyxir"; then
+    echo "  ⏳ Running dialyzer (this may take a moment)..."
+    DIALYZER_OUTPUT=$(mix dialyzer 2>&1) || DIALYZER_EXIT=$?
+    DIALYZER_EXIT=${DIALYZER_EXIT:-0}
+
+    if [ "$DIALYZER_EXIT" -ne 0 ]; then
+      echo "  ❌ Dialyzer found errors in $label:"
+      echo "$DIALYZER_OUTPUT"
+      echo ""
+      echo "  Run: (cd $proj && mix dialyzer)"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Dialyzer passed"
+    unset DIALYZER_EXIT
+  else
+    echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
+  fi
+
+  popd > /dev/null
+}
+
+for proj in "${PROJECTS[@]}"; do
+  run_project_gates "$proj"
+done
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+
+echo ""
+echo "✅ All pre-push checks passed in ${ELAPSED}s"
+echo ""
