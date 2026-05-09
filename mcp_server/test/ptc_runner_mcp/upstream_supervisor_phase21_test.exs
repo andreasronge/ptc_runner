@@ -160,7 +160,15 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
       # exits with `:shutdown`, then the outer supervisor
       # restarts it under :rest_for_one, which also restarts the
       # Registry.
-      crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, 12)
+      # Attempt cap: 30. The DynSup's restart budget is `max_restarts: 2
+      # / max_seconds: 60`, so 3 abnormal exits inside the 60s window
+      # trip it. Each iteration takes at most ~60ms (50ms wait branch
+      # + monitor handling), so 30 attempts ≈ 1.8s wall-clock — well
+      # inside the 60s window with plenty of headroom for parallel-test
+      # scheduling jitter. Pre-bump (cap=12) flaked under load when
+      # several iterations consecutively hit the "Registry hasn't yet
+      # re-registered" wait branch.
+      crash_until_dynsup_dies!(reg_name, upstream, dynsup_ref, 30)
 
       # 1. DynamicSupervisor restarted (pid changed).
       assert_receive {:DOWN, ^dynsup_ref, :process, ^dynsup_pid_before, _}, 5_000
@@ -179,27 +187,30 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
       assert dynsup_pid_after != dynsup_pid_before
       assert reg_pid_after != reg_pid_before
 
-      # 3. The new Registry's init/1 re-bootstrapped the
-      #    configured upstream. Pre-fix the surviving Registry
-      #    pointed at the dead DynSup; this lookup would either
-      #    return nil OR a pid that wasn't a child of the new
-      #    DynSup.
-      conn_pid_after = await_connection!(upstream, reg_name, 5_000)
-      assert conn_pid_after != conn_pid_before
-      assert Process.alive?(conn_pid_after)
+      # 3-4. The new Registry's init/1 re-bootstrapped the
+      #      configured upstream — verify atomically that:
+      #        a) Registry resolves the upstream to a pid,
+      #        b) that pid is alive,
+      #        c) that pid is a child of the new DynamicSupervisor,
+      #        d) that pid differs from the pre-cascade pid (the
+      #           cascade actually happened, not a stale reference).
+      #      Polled together because under parallel-test load a
+      #      Connection can die-and-be-respawned by the new DynSup
+      #      between any two single-step checks, leaving stale
+      #      references that flake `Process.alive?/1` or
+      #      `which_children/1`.
+      _conn_pid_after =
+        await_consistent_connection!(
+          upstream,
+          reg_name,
+          dynsup_pid_after,
+          conn_pid_before,
+          5_000
+        )
 
-      # 4. The fresh Connection lives under the NEW DynamicSupervisor
-      #    — verify the structural link, not just liveness, to
-      #    rule out the post-fix-but-still-buggy "Registry is
-      #    alive but pointing at the wrong DynSup" failure mode.
-      children_after = DynamicSupervisor.which_children(dynsup_pid_after)
-
-      child_pids =
-        Enum.map(children_after, fn {_id, pid, _type, _mods} -> pid end)
-
-      assert conn_pid_after in child_pids,
-             "fresh Connection must be a child of the new DynSup, got: " <>
-               "#{inspect(child_pids)}"
+      # The helper raises if any of (a)–(d) fails to hold within the
+      # timeout, so by here we know the cascade re-bootstrapped a
+      # fresh, alive Connection that is a child of the new DynSup.
     end
   end
 
@@ -297,5 +308,77 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase21Test do
           do_await_connection(upstream, reg_name, deadline)
         end
     end
+  end
+
+  # Atomically poll for a Connection that simultaneously satisfies
+  # all four conditions:
+  #   (a) Registry resolves the upstream to a pid,
+  #   (b) that pid is alive,
+  #   (c) that pid is a child of the given new DynSup,
+  #   (d) that pid != the pre-cascade pid (i.e. the cascade
+  #       actually re-bootstrapped, not a stale reference).
+  #
+  # Single-shot lookups race under load: a Connection can crash and
+  # be respawned by the new DynSup between any two checks. Polling
+  # the predicate as one block — and only returning when all four
+  # hold for the same pid simultaneously — is race-free.
+  defp await_consistent_connection!(upstream, reg_name, dynsup_pid, conn_pid_before, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_await_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+  end
+
+  defp do_await_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline) do
+    pid = UpstreamRegistry.connection_for(upstream, reg_name)
+
+    child_pids =
+      try do
+        DynamicSupervisor.which_children(dynsup_pid)
+        |> Enum.map(fn {_id, p, _type, _mods} -> p end)
+      catch
+        :exit, _ -> []
+      end
+
+    cond do
+      not is_pid(pid) ->
+        retry_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+
+      not Process.alive?(pid) ->
+        retry_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+
+      pid not in child_pids ->
+        retry_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+
+      pid == conn_pid_before ->
+        retry_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+
+      true ->
+        pid
+    end
+  end
+
+  defp retry_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      flunk(
+        "Connection for #{upstream} never reached a stable post-cascade state " <>
+          "(alive AND child of new DynSup AND pid != pre-cascade pid). " <>
+          "Last seen: registered=#{inspect(UpstreamRegistry.connection_for(upstream, reg_name))}, " <>
+          "children=#{inspect(safe_which_children(dynsup_pid))}, " <>
+          "pre=#{inspect(conn_pid_before)}"
+      )
+    else
+      receive do
+      after
+        10 -> :ok
+      end
+
+      do_await_consistent_connection(upstream, reg_name, dynsup_pid, conn_pid_before, deadline)
+    end
+  end
+
+  defp safe_which_children(dynsup_pid) do
+    DynamicSupervisor.which_children(dynsup_pid)
+    |> Enum.map(fn {_id, p, _type, _mods} -> p end)
+  catch
+    :exit, _ -> :unavailable
   end
 end
