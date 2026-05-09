@@ -343,6 +343,50 @@ defmodule PtcRunner.PtcToolProtocol do
   def lisp_run(source, opts \\ []), do: Lisp.run(source, opts)
 
   @doc """
+  Validate the `program` argument of a `ptc_lisp_execute` invocation.
+
+  Shared across the in-process `:tool_call` and text-mode loop branches
+  so the wire-format error wording for an absent, mistyped, or empty
+  `program` stays in lockstep with the rest of the protocol surface.
+
+  Returns `{:ok, program}` for a non-empty binary, or
+  `{:error, :args_error, message}` describing the violation.
+
+  ## Examples
+
+      iex> PtcRunner.PtcToolProtocol.validate_program("(+ 1 2)")
+      {:ok, "(+ 1 2)"}
+
+      iex> PtcRunner.PtcToolProtocol.validate_program(nil)
+      {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
+
+      iex> PtcRunner.PtcToolProtocol.validate_program(42)
+      {:error, :args_error, "ptc_lisp_execute `program` must be a string, got 42."}
+
+      iex> PtcRunner.PtcToolProtocol.validate_program("   ")
+      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
+  """
+  @spec validate_program(term()) ::
+          {:ok, String.t()} | {:error, :args_error, String.t()}
+  def validate_program(nil),
+    do:
+      {:error, :args_error,
+       "ptc_lisp_execute requires a non-empty `program` string argument."}
+
+  def validate_program(program) when not is_binary(program),
+    do:
+      {:error, :args_error,
+       "ptc_lisp_execute `program` must be a string, got #{inspect(program)}."}
+
+  def validate_program(program) when is_binary(program) do
+    if String.trim(program) == "" do
+      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
+    else
+      {:ok, program}
+    end
+  end
+
+  @doc """
   Delegates to `PtcRunner.SubAgent.Loop.JsonHandler.atomize_value/2`.
 
   Used by surfaces that need to coerce a raw JSON value into the
