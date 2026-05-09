@@ -997,6 +997,116 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       assert entry.config.static_headers == [{"x-foo", "bar"}]
     end
 
+    test "static_headers denylist rejects MCP-Protocol-Version (codex P1 #2)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"MCP-Protocol-Version" => "1999-01-01"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "MCP-Protocol-Version"
+      assert msg =~ "denylist"
+    end
+
+    test "static_headers denylist rejects Mcp-Session-Id (codex P1 #2)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"Mcp-Session-Id" => "fake-session"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "Mcp-Session-Id"
+      assert msg =~ "denylist"
+    end
+
+    test "static_headers denylist rejects User-Agent (codex P1 #2)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"User-Agent" => "evil/1.0"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "User-Agent"
+      assert msg =~ "denylist"
+    end
+
+    test "static_headers denylist is case-insensitive — lowercased mcp-session-id rejected",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"mcp-session-id" => "x"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      assert Exception.message(err) =~ "denylist"
+    end
+
     test "static_headers with Authorization is rejected (denylist)", %{tmp_dir: tmp_dir} do
       cfg_path =
         write_config(

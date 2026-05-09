@@ -12,8 +12,9 @@ defmodule PtcRunnerMcp.Upstream.HttpPhase2gTest do
     * SSE end-to-end through `Upstream.Http.call/4` (single-message and
       array-form, the latter asserting telemetry).
     * Cumulative `:response_too_large` against an SSE stream.
-    * Pool exhaustion → request-timeout when the upstream serves
-      requests sequentially under `pool_size: 1`.
+    * Concurrent callers run in parallel (impl mailbox does NOT
+      serialize) and `pool_size: 1` queues at Finch — not at the
+      impl GenServer.
     * Eager-start integration: an HTTP upstream that 503s at boot is
       non-fatal (§4.3) and renders as "(unavailable at startup)".
     * Connection-lifecycle through `Registry → Connection → Http.call/4`
@@ -150,58 +151,101 @@ defmodule PtcRunnerMcp.Upstream.HttpPhase2gTest do
     end
   end
 
-  # ───────── C. Pool exhaustion → queue + timeout ─────────
+  # ───────── C. Concurrent callers against a slow upstream ─────────
   #
-  # Spec ambiguity (flagged in the 2G hand-off): the brief framed
-  # this as "pool exhaustion → second concurrent caller queues at the
-  # Finch pool and times out". In the current `Upstream.Http` impl
-  # `tools/call` is dispatched via `GenServer.call(pid, {:tools_call,
-  # ...})`, so concurrent callers serialize at the impl GenServer's
-  # mailbox BEFORE ever touching Finch. `pool_size: 1` is therefore
-  # not the load-bearing knob — `request_timeout_ms` is. The
-  # observable property the spec is reaching for is "a slow upstream
-  # produces `:timeout` for concurrent callers", which we validate
-  # below: both concurrent callers get `:timeout` (the second was
-  # queued at the impl's mailbox; once dequeued, its own 100 ms
-  # `request_timeout_ms` trips against the 500 ms fixture delay).
-  describe "concurrent callers against a slow upstream" do
-    test "concurrent tools/call requests both surface :timeout against a 500 ms-delayed fixture" do
-      %{port: port} = boot_fake(:tools_call_slow, %{delay_ms: 500})
+  # Per `Plans/http-transport-credentials.md` §§4.1, 6.5, 10:
+  # `Upstream.Http.call/4` MUST run `Transport.post/1` from the caller
+  # process so multiple in-flight `tools/call` invocations against the
+  # same upstream proceed in parallel. The impl GenServer is consulted
+  # only for a fast `:checkout_request` mailbox call (id allocation +
+  # config snapshot).
+  #
+  # The codex P1 fix for commit `76f68de` resolved this — before the
+  # fix, every `tools/call` funnelled through one blocking
+  # `GenServer.call(pid, {:tools_call, ...})`, which serialized
+  # concurrent callers and made `:pool_size` effectively ignored. The
+  # tests below pin both the parallelism and the per-pool queueing
+  # behaviour.
+  describe "concurrent callers run in parallel (impl mailbox does NOT serialize)" do
+    test "two concurrent slow calls each finish in ~delay_ms (proves parallel dispatch)" do
+      delay_ms = 400
+      %{port: port} = boot_fake(:tools_call_slow, %{delay_ms: delay_ms})
 
-      name = unique_name("http-slow-concurrent")
+      name = unique_name("http-slow-parallel")
+
+      assert {:ok, _pid} =
+               Http.start_link(
+                 name,
+                 config(port, %{
+                   # `pool_size: 4` — both concurrent requests can hold
+                   # their own Finch connection at once. If the impl
+                   # serialized at its mailbox (the pre-fix bug), the
+                   # second call would not start until the first
+                   # finished, doubling the observed latency.
+                   pool_size: 4,
+                   handshake_timeout_ms: 5_000,
+                   request_timeout_ms: 5_000
+                 })
+               )
+
+      on_exit(fn -> safe_stop(name) end)
+
+      t0 = System.monotonic_time(:millisecond)
+
+      task1 = Task.async(fn -> Http.call(name, "echo", %{}, []) end)
+      task2 = Task.async(fn -> Http.call(name, "echo", %{}, []) end)
+
+      assert {:ok, _} = Task.await(task1, 5_000)
+      assert {:ok, _} = Task.await(task2, 5_000)
+
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      # Two parallel calls of `delay_ms` each should complete in ~delay_ms
+      # wall-clock. Allow generous slack for handshake / GenServer hops
+      # but reject anything close to `2 * delay_ms` (the serial bound).
+      # Threshold: less than 1.7× delay_ms.
+      assert elapsed < trunc(delay_ms * 1.7),
+             "concurrent calls took #{elapsed}ms (expected near #{delay_ms}ms; " <>
+               "near #{2 * delay_ms}ms would mean impl mailbox is serializing)"
+    end
+
+    test "pool_size: 1 with a slow upstream — second request queues at Finch" do
+      delay_ms = 300
+      %{port: port} = boot_fake(:tools_call_slow, %{delay_ms: delay_ms})
+
+      name = unique_name("http-pool1-queue")
 
       assert {:ok, _pid} =
                Http.start_link(
                  name,
                  config(port, %{
                    pool_size: 1,
-                   # Handshake must complete cleanly — give it plenty
-                   # of room (the slow scenario only delays
-                   # `tools/call`, not handshake steps).
                    handshake_timeout_ms: 5_000,
-                   request_timeout_ms: 100
+                   request_timeout_ms: 5_000
                  })
                )
 
       on_exit(fn -> safe_stop(name) end)
 
+      t0 = System.monotonic_time(:millisecond)
+
       task1 = Task.async(fn -> Http.call(name, "echo", %{}, []) end)
-      # Tiny stagger so the first request reaches the impl GenServer
-      # first (the second queues in the mailbox behind it).
+      # Stagger so task1 reaches Finch first.
       Process.sleep(20)
       task2 = Task.async(fn -> Http.call(name, "echo", %{}, []) end)
 
-      result1 = Task.await(task1, 5_000)
-      result2 = Task.await(task2, 5_000)
+      assert {:ok, _} = Task.await(task1, 5_000)
+      assert {:ok, _} = Task.await(task2, 5_000)
 
-      # Both calls trip their per-call read timeout. Transport maps
-      # Mint's `:timeout` to `{:error, :timeout, "http read timeout"}`,
-      # which `Http.call/4` propagates verbatim (`:timeout` is one of
-      # the allowed reasons in the impl's `handle_call/3`).
-      assert {:error, :timeout, detail1} = result1
-      assert {:error, :timeout, detail2} = result2
-      assert is_binary(detail1)
-      assert is_binary(detail2)
+      elapsed = System.monotonic_time(:millisecond) - t0
+
+      # `pool_size: 1`: the second request queues at the Finch pool,
+      # not at the impl mailbox. Both succeed but elapsed is ~2 ×
+      # delay_ms because the second request can only start after the
+      # first releases its connection. This pins the §4.1 invariant
+      # that pool_size IS the queueing knob for HTTP upstreams.
+      assert elapsed >= delay_ms * 2 - 100,
+             "pool_size:1 expected serial queueing (~#{2 * delay_ms}ms); got #{elapsed}ms"
     end
   end
 

@@ -183,6 +183,97 @@ defmodule PtcRunnerMcp.Upstream.Http.SessionTest do
     end
   end
 
+  # ─── codex P1 #2 belt-and-suspenders for `76f68de` ───
+  #
+  # `Application.@static_headers_denylist` is the primary defence; these
+  # tests pin that even if a config-loader bypass smuggled a
+  # protocol-controlled header through, `Session` would still strip it
+  # at header-construction time.
+  describe "filter_protocol_controlled (belt-and-suspenders)" do
+    test "headers_for_initialize/2 strips MCP-Protocol-Version from extras" do
+      extras = [{"mcp-protocol-version", "1999-01-01"}, {"x-custom", "ok"}]
+      headers = Session.headers_for_initialize(Session.new(), extras)
+
+      # Initialize MUST omit MCP-Protocol-Version per §6.1.1; the
+      # extra value MUST NOT be smuggled in.
+      refute Enum.any?(headers, fn {k, _} ->
+               is_binary(k) and String.downcase(k) == "mcp-protocol-version"
+             end)
+
+      # Non-protocol-controlled extras pass through.
+      assert {"x-custom", "ok"} in headers
+    end
+
+    test "headers_for_initialize/2 strips Mcp-Session-Id from extras" do
+      extras = [{"Mcp-Session-Id", "fake"}]
+      headers = Session.headers_for_initialize(Session.new(), extras)
+
+      refute Enum.any?(headers, fn {k, _} ->
+               is_binary(k) and String.downcase(k) == "mcp-session-id"
+             end)
+    end
+
+    test "headers_for_initialize/2 strips User-Agent (case-insensitive) from extras" do
+      extras = [{"USER-AGENT", "evil/1.0"}, {"X-Other", "kept"}]
+      headers = Session.headers_for_initialize(Session.new(), extras)
+
+      refute Enum.any?(headers, fn {k, _} ->
+               is_binary(k) and String.downcase(k) == "user-agent"
+             end)
+
+      assert {"X-Other", "kept"} in headers
+    end
+
+    test "headers_for_post/2 strips a smuggled MCP-Protocol-Version override" do
+      s = Session.new() |> Session.apply_handshake_complete()
+      headers = Session.headers_for_post(s, [{"MCP-Protocol-Version", "1999-01-01"}])
+
+      mcp_pv =
+        Enum.filter(headers, fn {k, _} ->
+          is_binary(k) and String.downcase(k) == "mcp-protocol-version"
+        end)
+
+      # Exactly one MCP-Protocol-Version, and it's the impl-controlled
+      # one (the extra was dropped, not appended).
+      assert [{"mcp-protocol-version", "2025-06-18"}] = mcp_pv
+    end
+
+    test "headers_for_post/2 strips a smuggled Mcp-Session-Id override" do
+      s = %Session{session_id: "real-session"}
+      headers = Session.headers_for_post(s, [{"mcp-session-id", "fake-session"}])
+
+      session_ids =
+        Enum.filter(headers, fn {k, _} ->
+          is_binary(k) and String.downcase(k) == "mcp-session-id"
+        end)
+
+      assert [{"mcp-session-id", "real-session"}] = session_ids
+    end
+
+    test "headers_for_post/2 strips Content-Type / Accept overrides too" do
+      s = Session.new() |> Session.apply_handshake_complete()
+
+      headers =
+        Session.headers_for_post(s, [
+          {"Content-Type", "text/plain"},
+          {"accept", "*/*"}
+        ])
+
+      ct =
+        Enum.filter(headers, fn {k, _} ->
+          is_binary(k) and String.downcase(k) == "content-type"
+        end)
+
+      accept =
+        Enum.filter(headers, fn {k, _} ->
+          is_binary(k) and String.downcase(k) == "accept"
+        end)
+
+      assert [{"content-type", "application/json"}] = ct
+      assert [{"accept", "application/json, text/event-stream"}] = accept
+    end
+  end
+
   describe "JSON-RPC body shapes" do
     test "initialize_body/2 includes the version, capabilities, and clientInfo" do
       body = Session.initialize_body(Session.new(), %{"name" => "client", "version" => "1.0"})

@@ -27,20 +27,37 @@ defmodule PtcRunnerMcp.Upstream.Http do
       `DELETE <url>` to release the session id (§6.1, third bullet)
       and stop the owned Finch process.
 
+  ## Caller-process dispatch (§4.1)
+
+  `call/4` runs the HTTP request from the caller process so multiple
+  concurrent `tools/call` invocations against the same upstream
+  proceed in parallel (Finch's pool, sized via `:pool_size`, governs
+  HTTP-level concurrency). The impl GenServer is consulted only for
+  a fast `:checkout_request` mailbox call that atomically allocates
+  the next JSON-RPC id and returns a snapshot of the wire-config.
+  This mirrors `Upstream.Stdio`, which also serializes only the
+  per-request bookkeeping at the impl mailbox while the wire I/O
+  runs from the caller.
+
   ## Session loss → impl exits abnormally (§4.3.1 / §6.3)
 
   When the server returns HTTP 404 to a request that carried our
-  held `Mcp-Session-Id`, we reply to the in-flight caller with
-  `{:error, :upstream_unavailable, "session_lost"}` and then
-  `{:stop, :session_lost, state}` ourselves. The owning Connection's
-  `:DOWN` monitor (`upstream/connection.ex:446`) fires;
-  `abnormal_exit?(:session_lost)` returns `true` per
-  `connection.ex:629`, so Connection invalidates `cached_tools`,
-  transitions to `:not_started`, and arms `backoff_until_ms`.
-  The next `(tool/mcp-call …)` cold-starts a fresh impl with a fresh
-  handshake. Same path applies to `:auth_failed` (post-handshake 401
-  / 403 — wired here even though Phase 2 has no auth, so Phase 3 only
-  needs to add credential rotation).
+  held `Mcp-Session-Id`, the caller process gets
+  `{:error, :upstream_unavailable, "session_lost"}` and fires a
+  `GenServer.cast(impl, :session_lost)` so the impl exits abnormally.
+  The owning Connection's `:DOWN` monitor
+  (`upstream/connection.ex:446`) fires; `abnormal_exit?(:session_lost)`
+  returns `true` per `connection.ex:629`, so Connection invalidates
+  `cached_tools`, transitions to `:not_started`, and arms
+  `backoff_until_ms`. The next `(tool/mcp-call …)` cold-starts a
+  fresh impl with a fresh handshake. Same path applies to
+  `:auth_failed` (post-handshake 401 / 403 — wired here even though
+  Phase 2 has no auth, so Phase 3 only needs to add credential
+  rotation).
+
+  If two concurrent callers both detect session-loss, both cast —
+  whichever arrives first triggers the stop, the rest are dropped by
+  the GenServer (or fall through `safe_cast/2`'s noproc catch).
 
   Connection itself is NOT modified by this stream; the `:DOWN` +
   `abnormal_exit?/1` path is reused verbatim.
@@ -122,14 +139,27 @@ defmodule PtcRunnerMcp.Upstream.Http do
         {:error, :upstream_unavailable, "http upstream '#{name}' is not running"}
 
       pid ->
-        # Add a small buffer over the application timeout so the impl
-        # gets a chance to surface `:timeout` from the HTTP layer
-        # before the GenServer call gives up. If the GenServer call
-        # itself times out (impl wedged), the caller gets
-        # `:upstream_error` rather than `:timeout` — same convention
-        # as `Upstream.Stdio.call/4`.
+        # Two-phase dispatch (fix for codex P1 against `76f68de` —
+        # serialized HTTP calls violate §§4.1, 6.5, 10):
+        #
+        #   1. Fast `GenServer.call(pid, :checkout_request)` — atomically
+        #      allocates the next JSON-RPC id and returns a snapshot of
+        #      everything `Transport.post/1` needs (url, finch_name,
+        #      headers, timeouts, max_bytes). This call holds the impl's
+        #      mailbox for microseconds — id allocation only.
+        #   2. Caller process runs `Transport.post/1` directly so
+        #      multiple in-flight `tools/call`s against the same upstream
+        #      proceed in parallel; Finch's connection pool handles
+        #      queueing per `pool_size`.
+        #
+        # On session-loss / auth-failure we fire-and-forget a
+        # `GenServer.cast(pid, ...)` to trigger the impl's abnormal exit
+        # so the owning Connection's `:DOWN` path arms backoff per §4.3.
+        # Multiple concurrent callers detecting the same session-loss
+        # both cast — the second cast is a no-op on a stopping
+        # GenServer.
         try do
-          GenServer.call(pid, {:tools_call, tool_name, args, timeout, max_bytes}, timeout + 1_000)
+          do_call(pid, name, tool_name, args, timeout, max_bytes)
         catch
           :exit, {:timeout, _} ->
             {:error, :upstream_error, "http transport timeout"}
@@ -143,6 +173,98 @@ defmodule PtcRunnerMcp.Upstream.Http do
     end
   rescue
     e -> {:error, :upstream_error, "http call raised: #{Exception.message(e)}"}
+  end
+
+  # Caller-process implementation of `call/4`. Splits into a fast
+  # mailbox-bound id-allocation step plus a long-running
+  # `Transport.post/1` that runs concurrently across callers.
+  defp do_call(pid, name, tool_name, args, timeout_ms, max_bytes) do
+    # Tight checkout — id allocation only. 5_000 ms ceiling protects
+    # against an impl wedged in `init/1` or a long `terminate/2`; in
+    # the steady state this returns in microseconds.
+    case GenServer.call(pid, :checkout_request, 5_000) do
+      {:ok, snap} ->
+        body_map = %{
+          "jsonrpc" => "2.0",
+          "id" => snap.request_id,
+          "method" => "tools/call",
+          "params" => %{"name" => tool_name, "arguments" => args}
+        }
+
+        case encode_body(body_map) do
+          {:ok, encoded} ->
+            post_opts = [
+              finch: snap.finch_name,
+              url: snap.url,
+              headers: snap.headers,
+              body: encoded,
+              request_timeout_ms: min(snap.request_timeout_ms, timeout_ms),
+              connect_timeout_ms: snap.connect_timeout_ms,
+              max_response_bytes: min(snap.max_response_bytes, max_bytes),
+              jsonrpc_id: snap.request_id
+            ]
+
+            classify_post_result(Transport.post(post_opts), pid, snap)
+
+          {:error, detail} ->
+            {:error, :upstream_error, "encode failed: #{detail}"}
+        end
+
+      {:error, reason, detail} ->
+        {:error, reason, detail}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :upstream_unavailable, "http upstream '#{name}' exited"}
+
+    :exit, {:timeout, _} ->
+      {:error, :upstream_error, "http checkout timeout"}
+  end
+
+  # Map `Transport.post/1` results, casting session-loss / auth-failure
+  # signals back to the impl GenServer so its abnormal exit triggers
+  # Connection backoff per §4.3.1.
+  defp classify_post_result({:ok, result}, _pid, _snap), do: {:ok, result}
+
+  defp classify_post_result(:ok, _pid, _snap) do
+    # 202 to a `tools/call` is a server contract violation (§6.4
+    # reserves 202 for notifications-only POSTs).
+    {:error, :upstream_error, "tools/call returned 202 (expected 200 with result)"}
+  end
+
+  defp classify_post_result({:error, :upstream_unavailable, "http 404"}, pid, snap) do
+    if snap.has_session_id? do
+      # Held a session id and the server returned 404 — §6.3 session-
+      # loss signal. Cast to the impl so it exits :session_lost; the
+      # owning Connection's `:DOWN` monitor arms backoff. Cast is
+      # fire-and-forget; if the GenServer is already dead (race with
+      # another concurrent caller's cast), the message is dropped.
+      _ = safe_cast(pid, :session_lost)
+      {:error, :upstream_unavailable, "session_lost"}
+    else
+      # 404 without a held session id is just a 404 (likely a
+      # misconfigured URL). Surface as `:upstream_unavailable`; impl
+      # stays alive.
+      {:error, :upstream_unavailable, "http 404"}
+    end
+  end
+
+  defp classify_post_result({:error, :upstream_unavailable, "auth_failed"}, pid, _snap) do
+    # §4.3.1: post-handshake 401/403 is the spec's auth-rotation
+    # signal. Cast to the impl so it exits :auth_failed.
+    _ = safe_cast(pid, :auth_failed)
+    {:error, :upstream_unavailable, "auth_failed"}
+  end
+
+  defp classify_post_result({:error, reason, detail}, _pid, _snap)
+       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] do
+    {:error, reason, detail}
+  end
+
+  defp safe_cast(pid, msg) do
+    GenServer.cast(pid, msg)
+  catch
+    :exit, _ -> :ok
   end
 
   @impl Upstream
@@ -225,65 +347,54 @@ defmodule PtcRunnerMcp.Upstream.Http do
     {:reply, {:ok, state.tools || []}, state}
   end
 
-  def handle_call({:tools_call, tool_name, args, timeout_ms, max_bytes}, from, state) do
+  def handle_call(:checkout_request, _from, state) do
+    # Atomic id allocation + snapshot for caller-process
+    # `Transport.post/1` (codex-fix for `76f68de`: serialized HTTP
+    # calls). Bumps `next_id` inside the GenServer so concurrent
+    # `Upstream.Http.call/4` invocations get distinct ids; everything
+    # else returned in the snapshot is read-only state.
     {id, session} = Session.next_request_id(state.session)
-
     headers = Session.headers_for_post(session, state.static_headers)
 
-    body_map = %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "method" => "tools/call",
-      "params" => %{"name" => tool_name, "arguments" => args}
+    snapshot = %{
+      url: state.url,
+      finch_name: state.finch_name,
+      headers: headers,
+      request_timeout_ms: state.request_timeout_ms,
+      connect_timeout_ms: state.connect_timeout_ms,
+      max_response_bytes: state.max_response_bytes,
+      request_id: id,
+      has_session_id?: is_binary(session.session_id)
     }
 
-    state = %{state | session: session}
-
-    case encode_body(body_map) do
-      {:ok, encoded} ->
-        post_opts = [
-          finch: state.finch_name,
-          url: state.url,
-          headers: headers,
-          body: encoded,
-          request_timeout_ms: min(state.request_timeout_ms, timeout_ms),
-          connect_timeout_ms: state.connect_timeout_ms,
-          max_response_bytes: min(state.max_response_bytes, max_bytes),
-          jsonrpc_id: id
-        ]
-
-        case Transport.post(post_opts) do
-          {:ok, result} ->
-            {:reply, {:ok, result}, state}
-
-          :ok ->
-            # Transport returned 202 to a `tools/call` — the spec says
-            # 202 is reserved for notifications-only POSTs. Treat as
-            # a server contract violation (world-fault).
-            {:reply,
-             {:error, :upstream_error, "tools/call returned 202 (expected 200 with result)"},
-             state}
-
-          {:error, :upstream_unavailable, "http 404"} ->
-            handle_possible_session_loss(from, state)
-
-          {:error, :upstream_unavailable, "auth_failed"} ->
-            handle_auth_failure(from, state)
-
-          {:error, reason, detail}
-          when reason in [
-                 :upstream_unavailable,
-                 :upstream_error,
-                 :timeout,
-                 :response_too_large
-               ] ->
-            {:reply, {:error, reason, detail}, state}
-        end
-
-      {:error, detail} ->
-        {:reply, {:error, :upstream_error, "encode failed: #{detail}"}, state}
-    end
+    {:reply, {:ok, snapshot}, %{state | session: session}}
   end
+
+  @impl GenServer
+  def handle_cast(:session_lost, state) do
+    # Caller-process detected 404 + held-session-id and is signalling
+    # us to exit so Connection arms backoff per §4.3.1. Multiple
+    # concurrent callers may both cast; whichever arrives first
+    # triggers the stop, the rest are dropped by the GenServer.
+    Log.log(:info, "http_upstream_session_lost", %{
+      name: state.name,
+      url: state.url
+    })
+
+    {:stop, :session_lost, state}
+  end
+
+  def handle_cast(:auth_failed, state) do
+    # §4.3.1: post-handshake 401/403 auth-rotation signal.
+    Log.log(:info, "http_upstream_auth_failed", %{
+      name: state.name,
+      url: state.url
+    })
+
+    {:stop, :auth_failed, state}
+  end
+
+  def handle_cast(_, state), do: {:noreply, state}
 
   @impl GenServer
   def handle_info({:EXIT, pid, reason}, %{parent_pid: parent} = state)
@@ -429,47 +540,6 @@ defmodule PtcRunnerMcp.Upstream.Http do
   end
 
   defp extract_tools(_), do: []
-
-  # ----------------------------------------------------------------
-  # Session-loss / auth-failure handling (§4.3.1)
-  # ----------------------------------------------------------------
-
-  defp handle_possible_session_loss(from, state) do
-    if Session.session_lost?(state.session, %{status: 404}) do
-      # Hold a session id and the server returned 404 — this is the
-      # spec's session-loss signal. Reply to the caller, then exit
-      # abnormally so the owning Connection arms backoff per §4.3.
-      GenServer.reply(from, {:error, :upstream_unavailable, "session_lost"})
-
-      Log.log(:info, "http_upstream_session_lost", %{
-        name: state.name,
-        url: state.url
-      })
-
-      {:stop, :session_lost, state}
-    else
-      # 404 without a held session id is just a 404 (likely a
-      # misconfigured URL or upstream-side route mismatch). Surface
-      # it as `:upstream_unavailable` and stay alive.
-      {:reply, {:error, :upstream_unavailable, "http 404"}, state}
-    end
-  end
-
-  defp handle_auth_failure(from, state) do
-    # §4.3.1: post-handshake 401/403 is the spec's auth-rotation
-    # signal. Reply to the caller, then exit abnormally. Phase 2 has
-    # no auth (so this is unreachable in practice unless a server
-    # spuriously returns 401 to an unauthenticated POST), but the
-    # wiring lives here so Phase 3 only adds credential rotation.
-    GenServer.reply(from, {:error, :upstream_unavailable, "auth_failed"})
-
-    Log.log(:info, "http_upstream_auth_failed", %{
-      name: state.name,
-      url: state.url
-    })
-
-    {:stop, :auth_failed, state}
-  end
 
   # ----------------------------------------------------------------
   # Transport wrappers

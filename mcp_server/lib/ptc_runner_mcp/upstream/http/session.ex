@@ -199,6 +199,18 @@ defmodule PtcRunnerMcp.Upstream.Http.Session do
   # Headers
   # ----------------------------------------------------------------
 
+  # Protocol-controlled headers — must never be supplied by static
+  # config (`Application.@static_headers_denylist` rejects them at
+  # config-load). We strip them defensively from the `extra` list
+  # too so a future loader bypass cannot smuggle them through.
+  @protocol_controlled_headers ~w(
+    mcp-protocol-version
+    mcp-session-id
+    user-agent
+    content-type
+    accept
+  )
+
   @doc """
   Headers for the `initialize` POST.
 
@@ -206,20 +218,24 @@ defmodule PtcRunnerMcp.Upstream.Http.Session do
   initialize request itself (the version is negotiated via the body).
   `Mcp-Session-Id` is also omitted — there is no session id yet.
 
-  Caller-supplied headers are appended last so they cannot override
-  the defaults this module sets.
+  Caller-supplied (static) headers are appended last; any extra that
+  collides case-insensitively with a protocol-controlled name is
+  dropped (belt-and-suspenders against a config-loader bypass —
+  `Application.@static_headers_denylist` is the primary defence).
   """
   @spec headers_for_initialize(t(), [{String.t(), String.t()}]) ::
           [{String.t(), String.t()}]
   def headers_for_initialize(%__MODULE__{}, extra) when is_list(extra) do
-    base_headers() ++ extra
+    base_headers() ++ filter_protocol_controlled(extra)
   end
 
   @doc """
   Headers for any POST after the `initialize` exchange completes.
 
   Always includes `MCP-Protocol-Version`. Includes `Mcp-Session-Id`
-  if and only if the server returned one on `initialize`.
+  if and only if the server returned one on `initialize`. Strips any
+  caller-supplied header that collides with a protocol-controlled
+  name (defence-in-depth — the config loader rejects them upstream).
   """
   @spec headers_for_post(t(), [{String.t(), String.t()}]) ::
           [{String.t(), String.t()}]
@@ -232,7 +248,7 @@ defmodule PtcRunnerMcp.Upstream.Http.Session do
         s when is_binary(s) -> headers ++ [{"mcp-session-id", s}]
       end
 
-    headers ++ extra
+    headers ++ filter_protocol_controlled(extra)
   end
 
   defp base_headers do
@@ -240,6 +256,13 @@ defmodule PtcRunnerMcp.Upstream.Http.Session do
       {"content-type", "application/json"},
       {"accept", "application/json, text/event-stream"}
     ]
+  end
+
+  defp filter_protocol_controlled(extra) when is_list(extra) do
+    Enum.reject(extra, fn
+      {k, _v} when is_binary(k) -> String.downcase(k) in @protocol_controlled_headers
+      _ -> false
+    end)
   end
 
   # ----------------------------------------------------------------
