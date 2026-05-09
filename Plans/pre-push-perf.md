@@ -120,7 +120,7 @@ the response. Changes:
 | 0 | ✅ Shipped | Commit `7cdca33`. |
 | 1 | ✅ Shipped | Commits `144ef7a` (base) + `58cd523` (codex-fixup). PR #887. |
 | Old 2 (async-flips) | ❌ Retired | Hypothesis falsified. Stashed, not shipped. |
-| New 2 (parallel subprojects) | 🔜 Pending | Spec below. |
+| New 2 (parallel subprojects) | ❌ Aborted at Gate A | Median wins by 13.48 s, p95 wins ~37 s, but introduces a 50% sandbox-timeout flake rate on the 10-core baseline machine. See §"Phase 2 (new) outcome — ABORTED at Gate A". |
 | 3 (mix-via-port) | ⏸ Conditional | Re-profile after new Phase 2 first. |
 | Old 4 (pooling) | 🗄 Shelved | Phase 2 lessons make this not worth the risk. |
 | Side: phase21 flake | 🔧 In flight | Separate branch + PR. |
@@ -176,7 +176,7 @@ doc below for archival reference.
 |---|---|---|---|
 | 0 | Drop unused test helpers | ✅ Shipped | Pure cleanup. Trivial. |
 | 1 | Tracked hook + docs-only short-circuit | ✅ Shipped | Highest leverage for docs-heavy pushes. Conservative implementation kept test-coverage risk low. |
-| 2 (new) | Parallel subproject checks | Pending | Sequential per-project loop is the next obvious bottleneck once docs-only is solved. Cheap, structural. |
+| 2 (new) | Parallel subproject checks | ❌ Aborted | Gate A measurement: 13.48 s median win and a 37 s p95 *improvement*, but introduces a new sandbox-timeout flake class (5/10 parallel runs failed; 0/10 sequential failures from this class). Criterion #4 ("no new flakes") fails decisively. See §"Phase 2 (new) outcome — ABORTED at Gate A". |
 | 3 | Eliminate `mix run`-via-`Port.open` | Conditional | Re-profile after new Phase 2 ships before deciding. |
 | Old 2 | Flip async:false files | Retired | Hypothesis falsified. See §"Old Phase 2 (RETIRED)" below. |
 | Old 4 | Pool subprocess fixtures | Shelved | Phase 2 lessons make this not worth the risk. See §"Old Phase 4 (SHELVED)" below. |
@@ -598,6 +598,128 @@ landing.
 
 This phase is the "measure twice, cut once" phase — the design
 *depends* on the measurement step actually showing a win.
+
+### Phase 2 (new) outcome — ABORTED at Gate A (2026-05-09)
+
+**Result:** measurement was decisive; refactor not landed. Single commit
+on `perf/phase2-parallel-subprojects` records this negative result and
+the plan; the hook is unchanged.
+
+**Hardware:** Apple M1 Pro, 10 cores (8 perf + 2 efficiency), 32 GB,
+macOS 25.3.0. Erlang/OTP 28, Elixir 1.19.3. Worktree rebased onto
+`origin/main` at `bd00dc5` so the phase21 cascade-flake fix is in.
+Warm deps + warm PLT for all three projects before timing.
+
+**Harness shape (exactly per plan §"Phase 2 (new)"):**
+
+```
+for proj in . mcp_server ptc_viewer; do
+  ( cd "$proj" \
+    && mix test --exclude clojure \
+    && if grep -qE '\{:dialyxir,' mix.exs; then mix dialyzer; fi
+  ) [ &  # parallel only ]
+done
+[ wait  # parallel only ]
+```
+
+stdout/stderr per project captured to side logs so failure-mode
+diagnosis didn't pollute timing.
+
+**Wallclock (10 alternating-then-isolated runs each side, contaminated
+runs excluded from timing stats):**
+
+| Variant | n (clean) | median | p95 | min | max | failure rate |
+|---|---|---|---|---|---|---|
+| Sequential | 9/10 | **57.93 s** | **86.83 s** | 53.87 s | 86.83 s | 1/10 (10%) |
+| Concurrent | 5/10 | **44.45 s** | **49.50 s** | 37.97 s | 49.50 s | **5/10 (50%)** |
+
+If only timing mattered: median wins by 13.48 s and p95 *improves*
+by ~37 s (concurrent has tighter tail because no single project's
+slow run cascades the others). Both clearly above the ≥5 s
+threshold.
+
+**But criterion #4 fails decisively.** Concurrent execution introduces
+a new flake class that does not exist sequentially:
+
+- Every parallel-run failure was in `root` (no failures in
+  `mcp_server` or `ptc_viewer` across 10 parallel runs).
+- Every failure was a `PtcRunner.Lisp.*` integration/runtime test
+  asserting on `Sandbox.execute/3` with the **default 1000 ms
+  wallclock budget**, failing as `MatchError` on
+  `{:error, %Step{fail: %{reason: :timeout, message: "execution
+  exceeded 1000ms limit"}}}`.
+- Distinct tests fail on different runs — it's not a single brittle
+  test, it's the whole class of `Sandbox`-budgeted assertions:
+  `BenchmarkScenariosTest`, `FunctionOpsTest`, `TerminationTest`,
+  `RuntimeInteropTest`, `EvalSetsTest`, `NameKeywordTest`,
+  `TreeTraversalTest`. Verified: the same tests pass cleanly when
+  the file is run in isolation (`mix test path/to/file.exs`,
+  3 consecutive iterations, 0 failures, 0.2 s).
+- Mechanism: 3 concurrent BEAM VMs (root + mcp_server + dialyzer)
+  saturate this 10-core box's scheduler. The `PtcRunner.Sandbox`
+  per-program 1 s wallclock is hard (enforced by
+  `Process.send_after` → `Process.exit(:kill)`). Programs that
+  normally complete in ~50 ms get scheduled-out long enough to blow
+  through 1000 ms wallclock and trip the timer. Result: timeout
+  `:error` instead of expected return value, MatchError at the
+  test site.
+- 1 sequential run (out of 10) failed with a *different*,
+  pre-existing flake (`PtcRunner.Lisp.RegistryTest`,
+  `binary_to_existing_atom("ends-with?")` startup race). Not
+  related to parallelization. Recorded for completeness; does not
+  count toward criterion #4 since it pre-dates this phase.
+
+**Per the multi-criterion threshold:**
+
+| Criterion | Result |
+|---|---|
+| Statistically repeatable positive median win | ✅ 13.48 s, n=9 vs n=5 clean |
+| No p95 regression | ✅ p95 *improves* by ~37 s |
+| ≥5 s median improvement, OR trivial impl + stable smaller win | ✅ 13.48 s ≥ 5 s |
+| **No new flakes introduced** | ❌ **5/10 parallel runs hit a brand-new sandbox-timeout flake class** |
+
+3 of 4 hold. Criterion #4 explicitly governs the abort. Per plan:
+*"Otherwise abort and document the negative result so a future
+revision doesn't re-attempt this phase blindly."*
+
+**Why parallel can't be made safe by the hook alone:** the failing
+assertions are in production-test code, not in the hook. Their
+implicit precondition is "the BEAM running this test gets enough
+CPU to execute a 50 ms PTC-Lisp program inside a 1000 ms wallclock
+budget." That precondition holds when one BEAM owns the box; it
+breaks when three BEAMs share it on a 10-core machine. Fixes that
+*could* be revisited later but were out-of-scope for Phase 2 as
+specified:
+
+- Bump `Sandbox`'s default wallclock budget (production-behavior
+  change, not a perf-phase change). Almost certainly the wrong
+  answer — the budget is asserted on by tests for a reason.
+- Re-baseline every Sandbox-budgeted test against a known load
+  factor and use a higher budget under contention. Invasive.
+- Run dialyzer for all 3 projects sequentially first, then test
+  for all 3 projects in parallel (or vice versa). Splits the win
+  in half; not measured.
+- Move the Sandbox-budgeted tests behind a `:cpu_sensitive` tag
+  excluded from the parallel-pre-push path. Drops gate coverage
+  on exactly the tests that proved most sensitive to environment
+  changes — anti-pattern.
+
+None of these belong in the phase as specified. A future revision
+that wants to re-attempt parallel subproject checks should design
+around this finding (e.g., gate parallelism on `nproc ≥ 16`, or
+restructure the Sandbox tests to use mock time instead of wallclock).
+
+**No refactor commit.** `.githooks/pre-push` and `.githooks/README.md`
+are unchanged. The plan revision and this outcome subsection ship as
+the single Phase 2 commit on `perf/phase2-parallel-subprojects`.
+
+**Next phase impact:** Phase 3 (mix-via-Port) was already conditional
+on re-profiling. The seq-baseline median of 57.93 s shows code-touching
+pushes still cost about as much as pre-Phase-1 (53 s baseline; the
+slight increase reflects machine load + post-rebase suite growth, not
+regression). Phase 3's hypothesis (mix-via-port lock contention is the
+remaining bottleneck) survives Phase 2's negative result and remains
+worth re-profiling.
 
 ## Old Phase 2 (RETIRED) — Flip safe `async: false` files in `mcp_server/test/`
 
