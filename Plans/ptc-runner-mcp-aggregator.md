@@ -1483,6 +1483,20 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-09 (phase2.3-shipped): Phase 2.3 decision-point mini-benchmark
+  shipped (`mcp_server/bench/aggregator_vs_native.exs`,
+  `Plans/phase2-decision-point-results.md`). One representative
+  cross-server-filter workflow run two ways — naive multi-call (3
+  separate `tools/call` requests) vs aggregator (one
+  `ptc_lisp_execute`). Headline numbers: 11.62× token ratio (4298 vs
+  370, ~3928 token saving on a 3-file 1KB-each fixture); 100/100
+  runtime success; 2.82× pmap speedup over sequential `(map ...)` at
+  50ms per upstream call; clean `upstream_calls` envelope on
+  synthetic upstream failure with `reason` + `error` fields per §8.5;
+  `:json-null` sentinel works as spec'd in §7.3. Field 6 (client
+  behavior with real MCP clients) deferred to Phase 3 alongside
+  catalog rollout. Recommendation in the writeup: continue to
+  Phase 3.
 - 2026-05-09 (phase2.2-shipped): Phase 2.2 merged as `bbfaada` after
   four codex review rounds. Single opt-in real-upstream integration
   test against `@modelcontextprotocol/server-filesystem@2026.1.14`,
