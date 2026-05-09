@@ -60,6 +60,23 @@ re-reviewed by codex; 9 further issues found. All addressed:
   state is a per-test-spawn invariant; partially exempting it
   without a defined reset proof was incoherent.
 
+**Revision 3 (2026-05-09, post-codex re-re-review):** revision 2
+re-reviewed; 1× `[P1]` and 2× `[P2]` issues. All addressed:
+- Phase 1 rename parser corrected: `status[0] in "RC"` → check both
+  status columns. Porcelain v1 puts index status in column 0 and
+  worktree status in column 1; renames can appear in either, and
+  the previous parser missed unstaged-detected renames (` R`/` C`).
+- Phase 1 markdown-reader inventory expanded with
+  `lib/ptc_runner/prompt_loader.ex:11`, `usage-rules*.md` via
+  `test/usage_rules_test.exs`, and an
+  `lib/ptc_runner/lisp/registry.ex` `@external_resource`.
+- Phase 1 explicit deny list now includes `usage-rules.md` and
+  `usage-rules/*.md`.
+- Phase 3 made explicit: `mcp_server/mix.exs` has no `compilers:`
+  list and no `test` alias today. The plan now says creating one
+  is part of the work and recommends the `test` alias path with a
+  `Mix.Tasks.Compile.MockEscript` module as the default.
+
 ## Goal
 
 Reduce `git push origin main` wallclock from the current ~53 s while
@@ -153,11 +170,18 @@ allow-list-based docs-only gate can drop pure-docs pushes from
      `test/ptc_runner/lisp/spec_validator_test.exs:283`, by
      `lib/ptc_runner/lisp/spec_validator.ex:21`, and by
      `test/support/ptc_lisp_benchmark.ex:63`.
-   - `priv/prompts/*.md` files are read by
-     `lib/ptc_runner/prompts.ex:78`.
+   - `priv/prompts/*.md` files are read at compile time via
+     `@external_resource` chains in `lib/ptc_runner/prompts.ex:78`
+     (multiple files), and by direct `File.read!` in
+     `lib/ptc_runner/prompt_loader.ex:11`.
    - `mcp_server/priv/mcp_authoring_card.md` and
      `mcp_server/priv/mcp_aggregator_authoring_card.md` are read by
-     `mcp_server/lib/ptc_runner_mcp/tools.ex:50`.
+     `mcp_server/lib/ptc_runner_mcp/tools.ex:50` and `:63` via
+     `@external_resource`.
+   - `usage-rules.md` and `usage-rules/*.md` are read by
+     `test/usage_rules_test.exs:33`.
+   - `lib/ptc_runner/lisp/registry.ex:25` declares an
+     `@external_resource` on a registry markdown file.
    - `mcp_server/README.md` and `ptc_viewer/README.md` are *not*
      verified doctested today, but are conservatively denied (cheap
      defense; they may be added to a doctest target later).
@@ -202,8 +226,11 @@ allow-list-based docs-only gate can drop pure-docs pushes from
              continue
          status = entry[:2].decode()
          path = entry[3:].decode()
-         # Renames / copies: status is "R " or "C "; the next NUL-record is the old path.
-         if status[0] in "RC":
+         # Renames / copies. Porcelain v1 puts the index status in column 0
+         # and the worktree status in column 1. Renames can appear in either
+         # column ("R " for staged, " R" for unstaged-detected, "RR" for both).
+         # When either column is R/C, the next NUL-record holds the old path.
+         if status[0] in "RC" or status[1] in "RC":
              print(path)         # new path
              if i + 1 < len(buf):
                  print(buf[i + 1].decode())  # old path
@@ -229,6 +256,8 @@ allow-list-based docs-only gate can drop pure-docs pushes from
    **Explicit deny list** — verified read at runtime or doctested,
    *must* fall through to the full gate:
    - `^README\.md$` (doctested by `test/readme_test.exs`)
+   - `^usage-rules\.md$`, `^usage-rules/.*\.md$` (read by
+     `test/usage_rules_test.exs`)
    - `^docs/.*\.md$` (especially `docs/ptc-lisp-specification.md`)
    - `^priv/prompts/.*\.md$` (read by `lib/ptc_runner/prompts.ex`)
    - `^mcp_server/priv/.*\.md$` (read by
@@ -368,14 +397,35 @@ A. **Pre-compile mock_server to escript with deps bundled.** Static
    exec. **Build the artifact at compile time, not at test runtime
    — building inside `setup_all` or any test process re-introduces
    the mix/build-lock contention this phase exists to remove.**
-   Concrete options:
-   - A `compilers: [:mock_escript, ...]` entry in mcp_server's
-     `mix.exs` that depends on the `:elixir` compiler and builds
-     the escript before tests can start.
-   - A `mix.exs` task aliased into `test` so `mix test`
-     transparently builds first, then runs the suite.
-   - A static path under `mcp_server/test/support/_build/` checked
-     into the repo (rejected — escripts are platform-specific).
+
+   **Critical: the integration point doesn't exist yet.** Verified
+   2026-05-09: `mcp_server/mix.exs` has an `aliases/0` block with
+   only `precommit`, `mcp.start`, `mcp.run` — no `compilers:` list,
+   no `test` alias. Phase 3 must explicitly *create* whichever
+   integration point it picks. This is part of the work, not a
+   plug-in.
+
+   Concrete options (pick during execution):
+
+   1. **Add a `test` alias** in `mcp_server/mix.exs`:
+      ```elixir
+      defp aliases, do: [
+        precommit: [...existing...],
+        mcp.start: [...],
+        mcp.run: [...],
+        test: ["compile.mock_escript", "test"]   # NEW
+      ]
+      ```
+      Plus a small `Mix.Tasks.Compile.MockEscript` module in
+      `mcp_server/lib/mix/tasks/` that builds the escript only when
+      stale. Simplest. Recommended default.
+   2. **Add a `:mock_escript` entry to a `compilers:` list** in
+      `mcp_server/mix.exs`. Requires more boilerplate (the project
+      currently has no `compilers:` key, so Mix uses defaults; we'd
+      have to declare them all explicitly to add ours). Heavier;
+      only if option 1 turns out insufficient.
+   3. **Static path under `mcp_server/test/support/_build/`** —
+      rejected because escripts are platform-specific.
 B. **Replace `mix run`-port spawn with a Burrito-style standalone
    release** if deps are heavy. Bigger change; probably overkill.
 C. **Move tests that genuinely need a real subprocess to
