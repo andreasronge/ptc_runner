@@ -27,22 +27,25 @@ defmodule PtcRunnerMcp.Credentials do
 
   ## What's NOT here
 
-    * Scheme-specific shaping (`apply/2`) — that lives in a separate
-      module added by a later phase, with visibility into the consuming
-      auth emitter's scheme. `materialize/1` is deliberately
-      scheme-agnostic at the source layer (§7.2).
+    * `materialize/1` is deliberately scheme-agnostic at the source
+      layer (§7.2). Scheme-specific shaping is the job of the pure
+      `apply_emitter/2` function (also defined in this module per
+      §7.3) — it has visibility into the consuming auth emitter's
+      scheme and produces an opaque `%RedactedHeaders{}` wrapper.
+      `apply_emitter/2` does NOT route through this GenServer.
     * The `Credentials.Redactor.scrub/1` filter — added by stream 1C.
       Stream 1C reads this module's ETS table via `:ets.tab2list/1`
       using the name returned by `table_name/0`.
     * Application/supervision wiring — added by stream 1D.
 
   Spec: `Plans/http-transport-credentials.md` §4.2, §5.4.1, §7.1, §7.2,
-  §7.4, §7.5.
+  §7.3, §7.4, §7.5.
   """
 
   use GenServer
 
   alias PtcRunnerMcp.Credentials.Binding
+  alias PtcRunnerMcp.Credentials.RedactedHeaders
   alias PtcRunnerMcp.Log
 
   import Bitwise, only: [&&&: 2]
@@ -121,6 +124,81 @@ defmodule PtcRunnerMcp.Credentials do
           | {:error, materialize_error_reason(), String.t()}
   def materialize(server, name) when is_binary(name) do
     GenServer.call(server, {:materialize, name})
+  end
+
+  @typedoc """
+  Auth emitter spec consumed by `apply_emitter/2`. Atom keys.
+
+    * `:scheme` — the consuming HTTP auth scheme (`:bearer`, `:basic`,
+      or `:custom_header`).
+    * `:binding` — the credential binding name (informational here;
+      `apply_emitter/2` does not look it up).
+    * `:header` — required when `:scheme` is `:custom_header`; the
+      header name to emit (lowercased on output). `nil` for `:bearer`
+      and `:basic` schemes.
+  """
+  @type emitter :: %{
+          scheme: :bearer | :basic | :custom_header,
+          binding: String.t(),
+          header: String.t() | nil
+        }
+
+  @type apply_error_reason :: :scheme_mismatch | :unencodable
+
+  @doc """
+  Convert a `materialize/1` result plus an auth emitter spec into a
+  `%RedactedHeaders{}` wrapper carrying the auth-bearing HTTP headers.
+
+  This is a **pure function** — it does NOT route through the
+  Credentials GenServer. Callers (the `Upstream.Http` request layer)
+  invoke it directly with the materialization they already hold.
+
+  Per spec §7.3:
+
+    * `:bearer` → `[{"authorization", "Bearer " <> raw}]`.
+    * `:custom_header` → `[{lowercase(emitter.header), raw}]`. The
+      emitter's `:header` field is taken verbatim (config-load
+      validation already enforced grammar and rejected `Authorization`
+      as a custom header name); we only lowercase for HTTP/2 wire
+      hygiene.
+    * `:basic` → `[{"authorization", "Basic " <> Base.encode64(user <> ":" <> pass)}]`.
+      `raw` may be either a `user:pass` colon-separated binary (split
+      on the **first** `:`, so passwords may contain colons) or a
+      JSON-shaped binary that decodes to `{"user":"…","pass":"…"}`
+      (auto-detected by leading `{`). A `raw` that conforms to
+      neither shape returns `{:error, :unencodable, "basic_shape_invalid"}`.
+      The detail string `"basic_shape_invalid"` is canonical (§5.5 #7,
+      §6.4, `upstream_calls` `error` field).
+
+  `scheme_hint` runtime check: if the materialization's
+  `:scheme_hint` is set and does NOT match `emitter.scheme`, returns
+  `{:error, :scheme_mismatch, detail}`. `:raw` matches any scheme.
+
+  The runtime check is a defense-in-depth duplicate of
+  `Application.check_scheme_hint_compat!/4` (which fires at config
+  load); it stays here so callers that assemble emitter +
+  materialization without going through the validated config path
+  still get a guaranteed mismatch error rather than a silently
+  malformed Authorization header.
+
+  ## Empty user / empty pass for `:basic`
+
+  `raw: ":pass"` (empty user) and `raw: "user:"` (empty pass) are both
+  **accepted**. RFC 7617 permits empty userid / empty password and
+  several real-world upstreams use one or the other (e.g. Stripe-style
+  "API token in user position with empty password", or "API token in
+  password position with empty user"). Returning the canonically
+  encoded `Basic` header here is more useful than rejecting bytes the
+  upstream may have meant to receive.
+  """
+  @spec apply_emitter(materialization(), emitter()) ::
+          {:ok, RedactedHeaders.t()}
+          | {:error, apply_error_reason(), String.t()}
+  def apply_emitter(%{raw: raw, scheme_hint: hint}, %{scheme: scheme} = emitter)
+      when is_binary(raw) and is_atom(hint) and is_atom(scheme) do
+    with :ok <- check_scheme_hint(hint, scheme) do
+      shape_headers(scheme, raw, emitter)
+    end
   end
 
   @doc "Sorted list of binding names known to the registry."
@@ -240,6 +318,63 @@ defmodule PtcRunnerMcp.Credentials do
     # Defensive: Binding.parse/2 already rejects `exec` at config
     # load. If a hand-built binding sneaks past, fail uniformly here.
     {:error, "exec source deferred to v1.1"}
+  end
+
+  # ---- apply_emitter/2 helpers ---------------------------------------------
+
+  # `:raw` hint matches any emitter scheme. Otherwise the hint atom
+  # MUST equal the emitter's scheme atom.
+  defp check_scheme_hint(:raw, _scheme), do: :ok
+  defp check_scheme_hint(hint, scheme) when hint == scheme, do: :ok
+
+  defp check_scheme_hint(hint, scheme) do
+    {:error, :scheme_mismatch,
+     "binding scheme_hint #{inspect(hint)} is incompatible with emitter scheme #{inspect(scheme)}"}
+  end
+
+  defp shape_headers(:bearer, raw, _emitter) do
+    {:ok, RedactedHeaders.new([{"authorization", "Bearer " <> raw}])}
+  end
+
+  defp shape_headers(:custom_header, raw, %{header: header}) when is_binary(header) do
+    {:ok, RedactedHeaders.new([{String.downcase(header), raw}])}
+  end
+
+  defp shape_headers(:basic, raw, _emitter) do
+    case parse_basic(raw) do
+      {:ok, user, pass} ->
+        encoded = Base.encode64(user <> ":" <> pass)
+        {:ok, RedactedHeaders.new([{"authorization", "Basic " <> encoded}])}
+
+      :error ->
+        {:error, :unencodable, "basic_shape_invalid"}
+    end
+  end
+
+  # JSON-shaped basic credentials: leading `{` triggers JSON
+  # auto-detect. The decoded object MUST contain string `"user"` and
+  # `"pass"` keys with binary values — anything else (decode error,
+  # missing keys, non-binary values) is `:error`, which the caller
+  # converts to the canonical `"basic_shape_invalid"`.
+  defp parse_basic(<<"{", _::binary>> = raw) do
+    case Jason.decode(raw) do
+      {:ok, %{"user" => user, "pass" => pass}} when is_binary(user) and is_binary(pass) ->
+        {:ok, user, pass}
+
+      _ ->
+        :error
+    end
+  end
+
+  # `user:pass` form: split on the FIRST `:` so passwords may contain
+  # colons (some upstreams use colon-bearing tokens as the password).
+  # Empty user (`":pass"`) and empty pass (`"user:"`) are both
+  # accepted — see moduledoc on `apply_emitter/2`.
+  defp parse_basic(raw) when is_binary(raw) do
+    case :binary.split(raw, ":") do
+      [user, pass] -> {:ok, user, pass}
+      _ -> :error
+    end
   end
 
   defp log_loose_file_mode(binding_name, path) do

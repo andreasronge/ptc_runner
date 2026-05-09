@@ -80,6 +80,8 @@ defmodule PtcRunnerMcp.Upstream.Http do
 
   use GenServer
 
+  alias PtcRunnerMcp.Credentials
+  alias PtcRunnerMcp.Credentials.RedactedHeaders
   alias PtcRunnerMcp.Log
   alias PtcRunnerMcp.Upstream
   alias PtcRunnerMcp.Upstream.Http.{Session, Transport}
@@ -323,6 +325,15 @@ defmodule PtcRunnerMcp.Upstream.Http do
       max_response_bytes: Map.get(config, :max_response_bytes, @default_max_response_bytes),
       pool_size: Map.get(config, :pool_size, @default_pool_size),
       proxy: Map.get(config, :proxy, nil),
+      # Phase 3C: per-request auth (§5.3.1, §7.3). `auth` is the list
+      # of parsed emitter maps (atom-keyed) produced by
+      # `Application.parse_http_upstream/3`; `[]` means "no auth, no
+      # materialize calls". `credentials` is the GenServer name to
+      # call `Credentials.materialize/2` against; defaults to the
+      # production singleton but tests override with their per-test
+      # pid so they can stand up isolated bindings.
+      auth: Map.get(config, :auth, []) || [],
+      credentials: Map.get(config, :credentials, Credentials),
       parent_pid: parent_pid
     }
 
@@ -353,21 +364,53 @@ defmodule PtcRunnerMcp.Upstream.Http do
     # calls). Bumps `next_id` inside the GenServer so concurrent
     # `Upstream.Http.call/4` invocations get distinct ids; everything
     # else returned in the snapshot is read-only state.
+    #
+    # Phase 3C: resolve `auth:` emitters into HTTP headers per request
+    # (§7.3 — re-derive on every call to keep structural-isolation
+    # guarantee tight). Materialize calls happen INSIDE this handler so
+    # they're serialized through the impl (cheap; env / file reads only)
+    # and the resolved headers leave with the snapshot. The caller
+    # process drops its reference to them once `Transport.post/1`
+    # returns.
     {id, session} = Session.next_request_id(state.session)
-    headers = Session.headers_for_post(session, state.static_headers)
 
-    snapshot = %{
-      url: state.url,
-      finch_name: state.finch_name,
-      headers: headers,
-      request_timeout_ms: state.request_timeout_ms,
-      connect_timeout_ms: state.connect_timeout_ms,
-      max_response_bytes: state.max_response_bytes,
-      request_id: id,
-      has_session_id?: is_binary(session.session_id)
-    }
+    case resolve_auth_headers(state) do
+      {:ok, auth_headers} ->
+        headers = Session.headers_for_post(session, state.static_headers) ++ auth_headers
 
-    {:reply, {:ok, snapshot}, %{state | session: session}}
+        snapshot = %{
+          url: state.url,
+          finch_name: state.finch_name,
+          headers: headers,
+          request_timeout_ms: state.request_timeout_ms,
+          connect_timeout_ms: state.connect_timeout_ms,
+          max_response_bytes: state.max_response_bytes,
+          request_id: id,
+          has_session_id?: is_binary(session.session_id)
+        }
+
+        {:reply, {:ok, snapshot}, %{state | session: session}}
+
+      {:error, _reason, detail} ->
+        # §5.5 #7 third bullet: per-request auth-resolution failure is
+        # treated like 401/403 — caller sees `:upstream_unavailable`
+        # with `"auth_failed: <specific>"`, and the impl exits
+        # `:auth_failed` so Connection arms backoff and the next call
+        # cold-starts with a fresh materialization (operators rotating
+        # env vars / files get picked up automatically).
+        Log.log(:info, "http_upstream_auth_failed", %{
+          name: state.name,
+          url: state.url,
+          detail: detail
+        })
+
+        # Bump session id even on failure so the wire-id invariant
+        # ("every allocated id is allocated exactly once") holds even
+        # though we never actually issue this request. Cheap and
+        # defensive.
+        {:stop, :auth_failed, {:error, :upstream_unavailable, "auth_failed: #{detail}"},
+         %{state | session: session}}
+    end
   end
 
   @impl GenServer
@@ -455,8 +498,29 @@ defmodule PtcRunnerMcp.Upstream.Http do
     {id, session} = Session.next_request_id(state.session)
     state = %{state | session: session}
 
-    headers = Session.headers_for_initialize(state.session, state.static_headers)
+    # §6.1.1: auth headers are required on EVERY POST including
+    # `initialize` (some upstreams, e.g. GitHub MCP, refuse to
+    # handshake without auth). Materialize fresh per request (§7.3).
+    # Boot-time auth failure short-circuits before any wire I/O so
+    # the detail string in `init/1`'s `{:stop, {:upstream_unavailable,
+    # detail}}` is the clean §8.3 form (`"resolution_failed: <binding>"`)
+    # rather than wrapped in a `"handshake step 1 ..."` prefix.
+    case resolve_auth_headers(state) do
+      {:ok, auth_headers} ->
+        headers =
+          Session.headers_for_initialize(state.session, state.static_headers) ++ auth_headers
 
+        run_initialize(state, headers, body_map, id)
+
+      {:error, _reason, detail} ->
+        # Pass the bare detail through unmodified — `do_handshake`
+        # caller in `init/1` will surface it as
+        # `{:upstream_unavailable, detail}` directly.
+        {:error, detail}
+    end
+  end
+
+  defp run_initialize(state, headers, body_map, id) do
     case post_with_meta(state, headers, body_map, id) do
       {:ok, %{status: status, headers: resp_headers, body: body}} ->
         case Session.apply_initialize_response(state.session, %{
@@ -481,17 +545,24 @@ defmodule PtcRunnerMcp.Upstream.Http do
 
   defp handshake_notifications_initialized(state) do
     body_map = Session.notifications_initialized_body()
-    headers = Session.headers_for_post(state.session, state.static_headers)
 
-    # Notifications carry no JSON-RPC id; pass `nil` for SSE
-    # correlation. Per §6.2 step 2, the server MUST return 202
-    # (Transport's mapper translates to `:ok`).
-    case post(state, headers, body_map, nil) do
-      :ok ->
-        {:ok, %{state | session: Session.apply_handshake_complete(state.session)}}
+    case resolve_auth_headers(state) do
+      {:ok, auth_headers} ->
+        headers = Session.headers_for_post(state.session, state.static_headers) ++ auth_headers
 
-      {:ok, _result} ->
-        {:error, "handshake step 2 (notifications/initialized) returned 200 (expected 202)"}
+        # Notifications carry no JSON-RPC id; pass `nil` for SSE
+        # correlation. Per §6.2 step 2, the server MUST return 202
+        # (Transport's mapper translates to `:ok`).
+        case post(state, headers, body_map, nil) do
+          :ok ->
+            {:ok, %{state | session: Session.apply_handshake_complete(state.session)}}
+
+          {:ok, _result} ->
+            {:error, "handshake step 2 (notifications/initialized) returned 200 (expected 202)"}
+
+          {:error, _reason, detail} ->
+            {:error, "handshake step 2 (notifications/initialized) failed: #{detail}"}
+        end
 
       {:error, _reason, detail} ->
         {:error, "handshake step 2 (notifications/initialized) failed: #{detail}"}
@@ -501,10 +572,19 @@ defmodule PtcRunnerMcp.Upstream.Http do
   defp handshake_tools_list(state) do
     {body_map, session} = Session.tools_list_body(state.session)
     state = %{state | session: session}
-
-    headers = Session.headers_for_post(state.session, state.static_headers)
     id = body_map["id"]
 
+    case resolve_auth_headers(state) do
+      {:ok, auth_headers} ->
+        headers = Session.headers_for_post(state.session, state.static_headers) ++ auth_headers
+        run_tools_list(state, headers, body_map, id)
+
+      {:error, _reason, detail} ->
+        {:error, "handshake step 3 (tools/list) failed: #{detail}"}
+    end
+  end
+
+  defp run_tools_list(state, headers, body_map, id) do
     case post(state, headers, body_map, id) do
       {:ok, result} ->
         # Transport's contract guarantees `result` is a map on the
@@ -540,6 +620,88 @@ defmodule PtcRunnerMcp.Upstream.Http do
   end
 
   defp extract_tools(_), do: []
+
+  # ----------------------------------------------------------------
+  # Per-request auth resolution (Phase 3C — §5.3.1, §7.3, §8.3)
+  # ----------------------------------------------------------------
+
+  # Resolve the upstream's `auth:` emitter list into a flat list of
+  # `{header_name, header_value}` tuples by calling
+  # `Credentials.materialize/2` and `Credentials.apply_emitter/2` for
+  # each emitter, in declared order.
+  #
+  # Returns:
+  #   * `{:ok, []}` when `state.auth == []` (no auth, no calls).
+  #   * `{:ok, [{name, value}, ...]}` on full success.
+  #   * `{:error, :upstream_unavailable, detail}` on the first failure.
+  #     Detail strings:
+  #       - `"resolution_failed: <binding-name>"` for `:unknown_binding`
+  #         (defensive — Phase 1's cross-reference validator should
+  #         catch this at config-load).
+  #       - `"resolution_failed: <binding-name>: <inner>"` for
+  #         `:resolution_failed` (env var unset, file unreadable).
+  #       - `"scheme_mismatch: <inner>"` for `:scheme_mismatch`
+  #         (defense-in-depth — config-load validator should catch this
+  #         too).
+  #       - `"basic_shape_invalid"` for `:unencodable` (basic raw not
+  #         in `user:pass` shape; canonical detail per §5.5 #7 third
+  #         bullet).
+  #
+  # The `RedactedHeaders` wrapper is unwrapped here; the bare list
+  # leaves this function. Callers must drop the reference once the
+  # request completes (caller-process scoping per §7.3).
+  defp resolve_auth_headers(%{auth: []}), do: {:ok, []}
+
+  defp resolve_auth_headers(state) do
+    Enum.reduce_while(state.auth, {:ok, []}, fn emitter, {:ok, acc} ->
+      case resolve_one_emitter(state.credentials, emitter) do
+        {:ok, headers} ->
+          {:cont, {:ok, acc ++ headers}}
+
+        {:error, _reason, _detail} = err ->
+          {:halt, err}
+      end
+    end)
+  end
+
+  defp resolve_one_emitter(credentials, emitter) do
+    case Credentials.materialize(credentials, emitter.binding) do
+      {:ok, materialization} ->
+        apply_emitter(materialization, emitter)
+
+      {:error, :unknown_binding, _detail} ->
+        # Binding name only — no value involved (resolution didn't
+        # happen). Phase 1's validator should prevent this in
+        # production; handled defensively here.
+        {:error, :upstream_unavailable, "resolution_failed: #{emitter.binding}"}
+
+      {:error, :resolution_failed, detail} ->
+        # Source read failed (env var unset, file missing). Detail
+        # already names the source (`env var 'X' is not set`,
+        # `file '/p': enoent`); we prefix with the binding name so
+        # operators can find the right binding quickly. The binding
+        # name is not secret per §8.3; the bytes would be, but
+        # resolution failed so there is no value to leak.
+        {:error, :upstream_unavailable, "resolution_failed: #{emitter.binding}: #{detail}"}
+    end
+  end
+
+  defp apply_emitter(materialization, emitter) do
+    case Credentials.apply_emitter(materialization, emitter) do
+      {:ok, %RedactedHeaders{} = wrapper} ->
+        {:ok, RedactedHeaders.headers(wrapper)}
+
+      {:error, :scheme_mismatch, detail} ->
+        {:error, :upstream_unavailable, "scheme_mismatch: #{detail}"}
+
+      {:error, :unencodable, detail} ->
+        # Detail is the canonical `"basic_shape_invalid"` per §5.5 #7
+        # third bullet. Pass it through verbatim — `caller_handle`
+        # in `:checkout_request` already prefixes with `"auth_failed: "`
+        # to form the final outgoing detail.
+        {:error, :upstream_unavailable, detail}
+    end
+  end
 
   # ----------------------------------------------------------------
   # Transport wrappers

@@ -57,6 +57,10 @@ defmodule PtcRunnerMcp.Test.FakeHttpServer do
     * `:jsonrpc_error_4xx` — handshake succeeds; `tools/call` returns
       HTTP 400 + JSON-RPC error body (must classify as
       `:upstream_error` world-fault per §6.4).
+    * `:tools_call_401` — handshake succeeds; `tools/call` returns
+      HTTP 401 (post-handshake auth-rotation signal). Phase 3C
+      (§4.3.1) — exercises the impl's `:auth_failed` abnormal-exit
+      path.
     * `:tools_call_slow` — handshake succeeds; `tools/call` sleeps
       `opts.delay_ms` (default 500) before returning a 200 success
       body. Used to drive pool-exhaustion / queue-timeout coverage

@@ -561,15 +561,32 @@ defmodule PtcRunnerMcp.Application do
     backoff_max_ms =
       pos_int_field!(config, "backoff_max_ms", @http_default_backoff_max_ms, name, path)
 
-    auth_raw = Map.get(config, "auth")
+    # Phase 3B: parse `auth:` into a list of emitter maps (atom-keyed,
+    # atom scheme). The Phase 1 cross-reference validator
+    # (`validate_auth_binding_refs!/3`) runs BEFORE this function on the
+    # raw string-keyed input — it has already verified that every
+    # `binding:` reference exists in `credentials:` and that the
+    # scheme/scheme_hint pair is compatible. This parser handles the
+    # *shape* checks (whitelist, header grammar, denylist, duplicate
+    # rejection) per §5.3.1 / §5.5 ##7, 8.
+    auth = parse_auth_emitters!(name, Map.get(config, "auth"), path)
+
+    # §5.3.2 final bullet: header names emitted by `auth:` MUST NOT
+    # collide with `static_headers:` names (case-insensitive). The
+    # static_headers denylist already rejects `Authorization`; this
+    # check catches `custom_header`-vs-`static_headers` collisions on
+    # arbitrary names like `X-Foo`.
+    :ok = check_auth_static_collision!(name, auth, static_headers, path)
 
     # §3 / §5.5 #2: insecure-auth gate. `allow_insecure_http: true` plus
     # any auth emitters requires the operator to ALSO set
-    # `allow_insecure_auth: true` — two explicit opt-ins.
+    # `allow_insecure_auth: true` — two explicit opt-ins. Empty `auth:
+    # []` (after parsing) does NOT trigger the gate, matching Phase 2
+    # behavior.
     :ok =
-      check_insecure_auth_gate!(name, allow_insecure_http, allow_insecure_auth, auth_raw, path)
+      check_insecure_auth_gate!(name, allow_insecure_http, allow_insecure_auth, auth, path)
 
-    base_config = %{
+    out_config = %{
       url: url,
       static_headers: static_headers,
       proxy: proxy,
@@ -579,18 +596,9 @@ defmodule PtcRunnerMcp.Application do
       max_response_bytes: max_response_bytes,
       pool_size: pool_size,
       backoff_initial_ms: backoff_initial_ms,
-      backoff_max_ms: backoff_max_ms
+      backoff_max_ms: backoff_max_ms,
+      auth: auth
     }
-
-    # Phase 2 does NOT parse the `auth:` block into emitter structs
-    # (Phase 3 owns that). When present, we pass it through under
-    # `:auth_raw` so Phase 3 can pick it up from the same shape — and
-    # so the cross-reference validator (which reads from the raw
-    # string-keyed map BEFORE this function runs) is unaffected.
-    out_config =
-      if is_nil(auth_raw),
-        do: base_config,
-        else: Map.put(base_config, :auth_raw, auth_raw)
 
     %{
       name: name,
@@ -817,8 +825,10 @@ defmodule PtcRunnerMcp.Application do
   # §3 non-goal "two explicit opt-ins": when the URL is plaintext AND
   # the entry carries auth emitters, the operator must opt in twice.
   # Empty / absent / null `auth:` and HTTPS URLs both bypass this check.
-  defp check_insecure_auth_gate!(name, true, false, auth_raw, path)
-       when is_list(auth_raw) and auth_raw != [] do
+  # `auth` here is the post-parse emitter list (atom-keyed maps); empty
+  # list bypasses the gate, same as Phase 2's empty/null behavior.
+  defp check_insecure_auth_gate!(name, true, false, auth, path)
+       when is_list(auth) and auth != [] do
     raise """
     upstreams_config: upstream '#{name}' has `allow_insecure_http: true` and a non-empty \
     `auth:` list, but `allow_insecure_auth:` is not set.
@@ -833,6 +843,288 @@ defmodule PtcRunnerMcp.Application do
 
   defp check_insecure_auth_gate!(_name, _allow_insecure_http, _allow_insecure_auth, _auth, _path),
     do: :ok
+
+  # ----------------------------------------------------------------
+  # Phase 3B: `auth:` emitter list parser (§5.3.1, §5.5 ##7, 8)
+  # ----------------------------------------------------------------
+
+  # Whitelist of recognized scheme strings → atom. Using a fixed map
+  # avoids `String.to_atom/1` on user input (CLAUDE.md guideline).
+  @auth_schemes %{
+    "bearer" => :bearer,
+    "basic" => :basic,
+    "custom_header" => :custom_header
+  }
+
+  # Recognized emitter-map keys. Anything else triggers a loud error so
+  # typos like `"sceme"` fail at config-load instead of silently
+  # producing a no-op emitter.
+  @auth_emitter_keys ~w(scheme binding header)
+
+  # Parse the optional `auth:` value on an HTTP upstream entry. Returns
+  # a (possibly empty) list of atom-keyed emitter maps in input order.
+  # Absent / nil / empty list all collapse to `[]` so downstream code
+  # never has to special-case the "no auth" path.
+  #
+  # On any shape error (unknown scheme, missing required field,
+  # forbidden header name, duplicate header within the list, ...) this
+  # raises a `RuntimeError` with the upstream name, the offending
+  # value, and the source path.
+  @spec parse_auth_emitters!(String.t(), term(), String.t()) ::
+          [
+            %{
+              scheme: :bearer | :basic | :custom_header,
+              binding: String.t(),
+              header: String.t() | nil
+            }
+          ]
+  defp parse_auth_emitters!(_name, nil, _path), do: []
+  defp parse_auth_emitters!(_name, [], _path), do: []
+
+  defp parse_auth_emitters!(name, list, path) when is_list(list) do
+    parsed = Enum.map(list, fn entry -> parse_auth_emitter!(name, entry, path) end)
+    :ok = reject_duplicate_emitter_headers!(name, parsed, path)
+    parsed
+  end
+
+  defp parse_auth_emitters!(name, other, path) do
+    raise """
+    upstreams_config: upstream '#{name}' `auth:` must be a list of emitter \
+    objects, got: #{inspect(other)}.
+
+    Source: #{path}
+    """
+  end
+
+  # Single emitter parser. Raises on any shape problem — see callers
+  # for the exhaustive list of rules.
+  defp parse_auth_emitter!(name, entry, path) when is_map(entry) do
+    :ok = reject_unknown_emitter_keys!(name, entry, path)
+
+    scheme = parse_emitter_scheme!(name, entry, path)
+    binding = parse_emitter_binding!(name, entry, path)
+    header = parse_emitter_header!(name, scheme, entry, path)
+
+    %{scheme: scheme, binding: binding, header: header}
+  end
+
+  defp parse_auth_emitter!(name, other, path) do
+    raise """
+    upstreams_config: upstream '#{name}' auth: emitter must be an object, got: \
+    #{inspect(other)}.
+
+    Source: #{path}
+    """
+  end
+
+  defp reject_unknown_emitter_keys!(name, entry, path) do
+    unknown =
+      entry
+      |> Map.keys()
+      |> Enum.reject(&(&1 in @auth_emitter_keys))
+
+    if unknown != [] do
+      raise """
+      upstreams_config: upstream '#{name}' auth: emitter has unknown key(s): \
+      #{inspect(unknown)}.
+
+      Recognized keys: #{inspect(@auth_emitter_keys)}.
+
+      Source: #{path}
+      """
+    end
+
+    :ok
+  end
+
+  defp parse_emitter_scheme!(name, entry, path) do
+    case Map.fetch(entry, "scheme") do
+      :error ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: emitter is missing required \
+        `scheme:` field.
+
+        Recognized schemes: "bearer", "basic", "custom_header".
+
+        Source: #{path}
+        """
+
+      {:ok, value} ->
+        case Map.fetch(@auth_schemes, value) do
+          {:ok, atom} ->
+            atom
+
+          :error ->
+            raise """
+            upstreams_config: upstream '#{name}' auth: emitter has unknown \
+            scheme #{inspect(value)}.
+
+            Recognized schemes: "bearer", "basic", "custom_header".
+
+            Source: #{path}
+            """
+        end
+    end
+  end
+
+  defp parse_emitter_binding!(name, entry, path) do
+    case Map.fetch(entry, "binding") do
+      {:ok, b} when is_binary(b) and b != "" ->
+        b
+
+      _ ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: emitter is missing required \
+        non-empty string `binding:` field.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  # `:bearer` and `:basic` schemes MUST NOT carry a `header:` field
+  # (operators who set one are confused about which scheme they want —
+  # loud error). `:custom_header` REQUIRES a `header:` field that
+  # passes RFC 7230 grammar, is not `Authorization` (use bearer/basic
+  # instead), and is not in the static_headers denylist (those are all
+  # protocol-controlled or auth-class names). Whitespace in the header
+  # is **not** trimmed — RFC 7230 forbids whitespace in tokens, so a
+  # leading/trailing space simply fails the grammar check loudly.
+  defp parse_emitter_header!(name, scheme, entry, path) when scheme in [:bearer, :basic] do
+    case Map.fetch(entry, "header") do
+      :error ->
+        nil
+
+      {:ok, nil} ->
+        nil
+
+      {:ok, other} ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: emitter scheme '#{scheme}' \
+        must not carry a `header:` field (got: #{inspect(other)}).
+
+        The `header:` field is only valid for scheme "custom_header".
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp parse_emitter_header!(name, :custom_header, entry, path) do
+    case Map.fetch(entry, "header") do
+      {:ok, header} when is_binary(header) ->
+        :ok = validate_custom_header_name!(name, header, path)
+        header
+
+      _ ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: emitter scheme \
+        'custom_header' is missing required string `header:` field.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp validate_custom_header_name!(name, header, path) do
+    cond do
+      not Regex.match?(@rfc7230_token_regex, header) ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: custom_header `header:` \
+        '#{header}' violates RFC 7230 token grammar.
+
+        Allowed characters: A-Z a-z 0-9 ! # $ % & ' * + - . ^ _ ` | ~
+
+        Source: #{path}
+        """
+
+      String.downcase(header) == "authorization" ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: custom_header `header:` \
+        cannot be 'Authorization' (case-insensitive).
+
+        Use scheme "bearer" or "basic" to emit the Authorization header.
+
+        Source: #{path}
+        """
+
+      String.downcase(header) in @static_headers_denylist ->
+        raise """
+        upstreams_config: upstream '#{name}' auth: custom_header `header:` \
+        '#{header}' is in the sensitive-name denylist (case-insensitive).
+
+        Denylisted names cannot be emitted as custom headers; use the
+        appropriate scheme ("bearer"/"basic") for auth-class headers, or
+        rename the header.
+
+        Source: #{path}
+        """
+
+      true ->
+        :ok
+    end
+  end
+
+  # §5.3.1: reject duplicate header names produced by emitters within a
+  # single upstream's `auth:` list (case-insensitive). Two `bearer`
+  # emitters both produce `Authorization`; a `bearer` + a `basic` does
+  # the same; two `custom_header` emitters with the same `header:` (any
+  # case) collide. The error message names the duplicated header so
+  # operators can find it quickly.
+  defp reject_duplicate_emitter_headers!(name, parsed, path) do
+    _final =
+      parsed
+      |> Enum.map(&emitter_header_name/1)
+      |> Enum.reduce(MapSet.new(), fn header, seen ->
+        if MapSet.member?(seen, header) do
+          raise """
+          upstreams_config: upstream '#{name}' has duplicate `auth:` emitter \
+          header '#{header}' (case-insensitive).
+
+          Multiple emitters cannot produce the same HTTP header — pick one.
+
+          Source: #{path}
+          """
+        end
+
+        MapSet.put(seen, header)
+      end)
+
+    :ok
+  end
+
+  # The lowercased header name an emitter would produce at request
+  # time. `:bearer` and `:basic` both emit `Authorization` (so a
+  # bearer + basic pair collides). `:custom_header` emits its
+  # case-folded `header:` field.
+  defp emitter_header_name(%{scheme: :bearer}), do: "authorization"
+  defp emitter_header_name(%{scheme: :basic}), do: "authorization"
+  defp emitter_header_name(%{scheme: :custom_header, header: header}), do: String.downcase(header)
+
+  # §5.3.2 final bullet: header names emitted by `auth:` MUST NOT
+  # collide with `static_headers:` keys (case-insensitive). The static
+  # headers list is already lowercased by `http_static_headers!/3`.
+  defp check_auth_static_collision!(name, auth, static_headers, path) do
+    static_names = MapSet.new(static_headers, fn {key, _value} -> key end)
+
+    Enum.each(auth, fn emitter ->
+      header = emitter_header_name(emitter)
+
+      if MapSet.member?(static_names, header) do
+        raise """
+        upstreams_config: upstream '#{name}' header '#{header}' is emitted by \
+        both `auth:` and `static_headers:` (case-insensitive).
+
+        Each header name must come from exactly one source — remove the
+        `static_headers:` entry, or remove the `auth:` emitter.
+
+        Source: #{path}
+        """
+      end
+    end)
+
+    :ok
+  end
 
   # Parse the optional top-level `credentials:` block.
   # Raises with a clear message on shape errors per §5.5 #1 / #11.

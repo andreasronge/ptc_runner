@@ -220,6 +220,23 @@ defmodule PtcRunnerMcp.Test.FakeHttpServer.Plug do
     end)
   end
 
+  defp dispatch(:tools_call_401, conn, decoded, ctx) do
+    # Phase 3C (§4.3.1): post-handshake 401 on `tools/call` to drive
+    # the auth-rotation abnormal-exit path. Handshake itself succeeds
+    # so the impl reaches steady state; only the call gets rejected.
+    case method(decoded) do
+      "tools/call" ->
+        send_resp_with_headers(conn, 401, ~s({"error":"unauthorized"}), [
+          {"content-type", "application/json"}
+        ])
+
+      _ ->
+        handle_2025_06_18(conn, decoded, ctx, fn ->
+          json(conn, 200, success_tools_call_body(decoded), [])
+        end)
+    end
+  end
+
   defp dispatch(:jsonrpc_error_4xx, conn, decoded, ctx) do
     case method(decoded) do
       "tools/call" ->
