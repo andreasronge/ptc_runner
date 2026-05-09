@@ -79,14 +79,24 @@ def run(args, **kwargs):
 def committed_paths(local_sha, remote_sha):
     """Return the set of file paths changed in commits being pushed.
 
-    Handles the all-zeros remote-sha case (first push of a new branch)
-    by falling back to `origin/main..local_sha`. If `origin/main` does
-    not exist either, fall back to listing every commit reachable from
-    local_sha — conservative, but correct (we'd rather over-include and
-    run the full gate than under-include and skip it).
-    """
-    paths = set()
+    Uses the cumulative range diff `<base>..<local_sha>` rather than
+    iterating commits with `git diff-tree`. Per-commit diff-tree
+    silently emits nothing for merge commits unless `-m` is passed,
+    which can let a merge whose conflict resolution changes source
+    files slip past the docs-only check while every non-merge commit
+    in the range only touches allow-listed paths. The cumulative
+    range diff (`git diff A..B`) reflects merge-resolution changes
+    naturally because it compares tree B to tree A directly.
 
+    `--no-renames` decomposes renames into delete+add so both old
+    and new paths surface. The dirty-set parser already handles
+    rename-aware worktree state separately.
+
+    Handles the all-zeros remote-sha case (first push of a new
+    branch) by falling back to `origin/main..local_sha` or
+    `origin/HEAD..local_sha`. If neither exists, returns None to
+    force the full gate — conservative.
+    """
     if set(remote_sha) == {"0"}:
         # First push of this branch.
         for base in ("origin/main", "origin/HEAD"):
@@ -95,34 +105,24 @@ def committed_paths(local_sha, remote_sha):
                 rev_range = f"{base}..{local_sha}"
                 break
         else:
-            # No suitable upstream; fall back to all commits reachable.
-            rev_range = local_sha
+            # No suitable upstream; force full gate.
+            return None
     else:
         rev_range = f"{remote_sha}..{local_sha}"
 
-    out, rc = run(["git", "rev-list", rev_range])
+    out, rc = run(
+        ["git", "diff", "--name-only", "--no-renames", rev_range]
+    )
     if rc != 0:
-        # Range invalid (e.g., remote-sha not present locally). Be
-        # conservative: force full gate.
+        # Range invalid (e.g., remote-sha not present locally) or
+        # diff failed for any other reason. Be conservative.
         return None
 
-    commits = [c for c in out.decode().split("\n") if c]
-    if not commits:
-        return paths
-
-    # Use diff-tree per commit. Cheap and deterministic; avoids issues
-    # with merge commits and `--combined`.
-    for c in commits:
-        out, rc = run(
-            ["git", "diff-tree", "-r", "--name-only", "--no-commit-id", c]
-        )
-        if rc != 0:
-            return None
-        for line in out.decode().split("\n"):
-            line = line.strip()
-            if line:
-                paths.add(line)
-
+    paths = set()
+    for line in out.decode().split("\n"):
+        line = line.strip()
+        if line:
+            paths.add(line)
     return paths
 
 
