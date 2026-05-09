@@ -234,9 +234,16 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
   end
 
-  # Clojure-style namespaces: normalize to built-in or provide helpful error
+  # Clojure-style namespaces: normalize to built-in or provide helpful error.
+  # `json/` and `mcp/` use namespace-qualified env keys (e.g., `:"json/parse-string"`)
+  # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
+  # and `qualified_namespace_lookup/2` (Plans/json-support.md §4.4 OQ-5 option (a)).
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
-    normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
+    case qualified_namespace_lookup(ns, key) do
+      {:ok, qualified} -> {:ok, {:var, qualified}}
+      :not_qualified -> normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
+      :unknown_member -> namespaced_unknown_member_error(ns, key)
+    end
   end
 
   # Turn history variables: *1, *2, *3
@@ -377,9 +384,18 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
-    normalize_clojure_namespace(ns, func, fn ->
-      dispatch_list_form({:symbol, func}, rest, list, tail?)
-    end)
+    case qualified_namespace_lookup(ns, func) do
+      {:ok, qualified} ->
+        dispatch_list_form({:symbol, qualified}, rest, list, tail?)
+
+      :not_qualified ->
+        normalize_clojure_namespace(ns, func, fn ->
+          dispatch_list_form({:symbol, func}, rest, list, tail?)
+        end)
+
+      :unknown_member ->
+        namespaced_unknown_member_error(ns, func)
+    end
   end
 
   # Comparison operators (strict 2-arity per spec section 8.4)
@@ -1107,6 +1123,72 @@ defmodule PtcRunner.Lisp.Analyze do
   # Clojure namespace normalization
   # ============================================================
 
+  # Per-namespace lookup tables for namespace-qualified env keys (OQ-5 option (a)).
+  # Namespaces listed here use qualified atoms in `Env.initial()` (e.g.
+  # `:"json/parse-string"`) rather than aliasing the unqualified name.
+  # See Plans/json-support.md §4.4 step 4.
+  #
+  # Tables are computed at compile time from `Env.initial()` so the lookup is
+  # a plain map access at runtime, and so the qualified atoms are guaranteed
+  # interned before any user input reaches the analyzer (avoids the
+  # `String.to_existing_atom/1` race where the analyzer module loads before
+  # Env's `builtin_bindings/0` runs).
+  @qualified_namespaces [:json, :mcp]
+
+  @qualified_namespace_tables (for ns <- @qualified_namespaces, into: %{} do
+                                 prefix = Atom.to_string(ns) <> "/"
+                                 prefix_len = byte_size(prefix)
+
+                                 entries =
+                                   for {atom, _binding} <- PtcRunner.Lisp.Env.initial(),
+                                       atom_str = Atom.to_string(atom),
+                                       String.starts_with?(atom_str, prefix),
+                                       into: %{} do
+                                     rest =
+                                       binary_part(
+                                         atom_str,
+                                         prefix_len,
+                                         byte_size(atom_str) - prefix_len
+                                       )
+
+                                     {String.to_atom(rest), atom}
+                                   end
+
+                                 {ns, entries}
+                               end)
+
+  @qualified_namespace_members (for {ns, table} <- @qualified_namespace_tables, into: %{} do
+                                  members = table |> Map.values() |> Enum.map(&Atom.to_string/1)
+                                  {ns, members |> Enum.sort() |> Enum.join(", ")}
+                                end)
+
+  # Lookup a `(namespace/func)` form against the qualified-env-key namespaces.
+  # Returns:
+  #   - `{:ok, qualified_atom}` when `<ns>/<func>` resolves to an env entry
+  #   - `:unknown_member` when `<ns>` is qualified but `<func>` isn't a member
+  #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
+  #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
+  defp qualified_namespace_lookup(ns, func) do
+    case Map.get(@qualified_namespace_tables, ns) do
+      nil ->
+        :not_qualified
+
+      table ->
+        case Map.get(table, func) do
+          nil -> :unknown_member
+          qualified -> {:ok, qualified}
+        end
+    end
+  end
+
+  defp namespaced_unknown_member_error(ns, func) do
+    available = Map.get(@qualified_namespace_members, ns, "")
+    category_name = Env.category_name(Env.namespace_category(ns))
+
+    {:error,
+     {:invalid_form, "#{ns}/#{func} is not available. #{category_name} functions: #{available}"}}
+  end
+
   # Normalize Clojure-style namespaces to builtins or provide helpful errors.
   # Takes a success callback to allow different behavior for symbol vs call position.
   defp normalize_clojure_namespace(ns, func, on_success) do
@@ -1128,7 +1210,10 @@ defmodule PtcRunner.Lisp.Analyze do
 
       true ->
         {:error,
-         {:invalid_form, "unknown namespace #{ns}/. Use tool/ for tools, data/ for input data"}}
+         {:invalid_form,
+          "unknown namespace #{ns}/. Available namespaces: tool/, data/, json/, mcp/, " <>
+            "clojure.string/, clojure.set/. For JSON parsing use json/parse-string " <>
+            "(not cheshire.core/...)."}}
     end
   end
 

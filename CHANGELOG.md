@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PTC-Lisp JSON builtins** — `(json/parse-string s)` and
+  `(json/generate-string v)` are now available unconditionally in every
+  PTC-Lisp run (default mode and aggregator mode alike). Cheshire-shaped
+  signatures: parse decodes JSON to Elixir values with **string** map
+  keys (no atom keys); encode runs a pre-validation walk before
+  invoking `Jason.encode/1` and rejects atoms outside `true/false/nil`,
+  atom-keyed maps, tuples, PIDs, references, and functions by returning
+  `nil` rather than silently coercing them. Both functions follow the
+  DIV-* convention and **never raise** — failures surface as `nil` so
+  programs without try/catch can guard cleanly. The analyzer also
+  recognizes the `mcp/` namespace as forward-compat for Phase B
+  (`mcp/text` / `mcp/json` land in a follow-up). Documented under
+  `docs/clojure-conformance-gaps.md` as DIV-23 and DIV-24, and in
+  `Plans/json-support.md` §4. Cheshire users get an analyzer redirect:
+  `(cheshire.core/parse-string ...)` now points at `json/parse-string`.
+
 - `KeyNormalizer.canonical_cache_key/2` — deterministic, layer-agnostic
   cache key for tool-result caching. Normalizes map keys to strings,
   recurses through nested maps/lists/tuples, and collapses integer-equal
