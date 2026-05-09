@@ -357,9 +357,16 @@ when no explicit value is given.
 - **A value** when the upstream's `tools/call` succeeded. The
   returned shape is the upstream's full MCP envelope —
   `%{"content" => [%{"type" => "text", "text" => "..."}], ...}`
-  for most upstreams. Drill in with `(get-in result [:content 0
-  :text])` (PTC-Lisp's `get-in` accepts keyword or string keys
-  interchangeably).
+  for most upstreams. Use `(mcp/text r)` to extract the first
+  text item, `(mcp/json r)` to get parsed JSON (it prefers the
+  typed `structuredContent` channel — populated natively by some
+  upstreams, or via aggregator auto-decode when the upstream
+  declares `mimeType: application/json`/`+json`). The classic
+  `(get-in result [:content 0 :text])` still works (PTC-Lisp's
+  `get-in` accepts keyword or string keys interchangeably) but
+  the helpers are the preferred path. See
+  [`docs/aggregator-mode.md`](../docs/aggregator-mode.md) §"JSON
+  helpers" for the full table.
 - **`nil`** for *world-fault* failures — upstream unavailable,
   timeout, response oversize, per-program cap exhausted. The
   `upstream_calls` array on the response carries the reason.

@@ -2,9 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-05-09 |
-| `main` HEAD | `e94e19a` |
-| Status | Feature-complete through Phase 4. Live and connected to Claude Code. |
+| Snapshot date | 2026-05-09 (refreshed after json-support shipped) |
+| `main` HEAD | `eea8323` |
+| Status | Feature-complete through Phase 4 + json-support all three phases. Live and connected to Claude Code. JSON ergonomics validated end-to-end against `mem.read_graph` (Phase B path) and a fake JSON-with-mimeType upstream (Phase C path). |
 
 This doc is the "pick up where we left off" handoff. The
 authoritative spec is still `Plans/ptc-runner-mcp-aggregator.md`
@@ -25,9 +25,13 @@ that doesn't fit there.
 | 4 | `e1c151f` | Public `Stdio` `:binary` mode + `isError: true` normalization to `nil` (resolves §16's high+medium bugs from real-client probing) |
 | de-flake | `e94e19a` | Two parallel-load test races resolved (cancellation EOF monitor + supervisor cascade TOCTOU) |
 | JSON spec | `aecdb91` | `Plans/json-support.md` — drafted, 6 codex rounds, ready to implement |
+| JSON Phase A | `8da57a2` | `(json/parse-string s)` + `(json/generate-string v)` PTC-Lisp builtins; analyzer/registry/docs/prompt wiring; `:json` + `:mcp` namespaces forward-compat'd. +53 tests. |
+| JSON Phase B | `69b73c3` | `(mcp/text r)` + `(mcp/json r)` unwrap helpers in `:ptc_runner`; authoring cards extended; §5.2 `structuredContent`-first precedence. +45 tests. |
+| Spec fix | `6852ca4` | `Plans/json-support.md` §5.2 reworded: key-presence semantics (not truthiness), `false`/`0`/`""`/`[]` carve-out. Doc-only; Phase B implementation already correct. |
+| JSON Phase C | `eea8323` | Aggregator auto-decode of JSON-as-text upstreams when `mimeType: application/json` or `+json` suffix. Additive (preserves `content[]`); `:decode_failed` is silent for the program. New telemetry event `[:ptc_runner_mcp, :upstream, :auto_decode, :stop]`. +17 tests. |
 
-mcp_server tests: 384 passing, 0 failures, 13 excluded (`:integration`, `:real_upstream`, `:clojure`).
-Parent project: 4745 tests + 333 doctests + 3 properties, 0 failures.
+mcp_server tests: 418 passing, 0 failures, 13 excluded (`:integration`, `:real_upstream`, `:clojure`).
+Parent project: 4822 tests + 357 doctests + 3 properties, 0 failures.
 
 ## Live wiring
 
@@ -43,7 +47,14 @@ Configured upstreams:
 - `fs` = `@modelcontextprotocol/server-filesystem@2026.1.14`,
   sandboxed to `~/ptc-mcp-sandbox/`
 - `mem` = `@modelcontextprotocol/server-memory` (in-memory
-  knowledge graph, ephemeral per process)
+  knowledge graph, ephemeral per process; natively populates
+  `structuredContent` on `read_graph` — exercises Phase B's
+  `mcp/json` precedence)
+- `fakejson` = `python3 ~/ptc-mcp-sandbox/fake_json_upstream.py`
+  (one-tool fake: `get_payload` returns a fixed JSON document as
+  text with `mimeType: application/json`; exercises Phase C's
+  aggregator auto-decode promotion). Source: `fake_json_upstream.py`
+  in the sandbox dir. Keep around as a Phase C regression target.
 
 To re-test, open a fresh `claude` session and ask the LLM to use
 `ptc_lisp_execute` against the sandbox.
@@ -72,43 +83,32 @@ LLM authoring quality against catalog-driven shapes.
 
 ## Open work, ranked
 
-### 1. Implement `Plans/json-support.md` (medium effort, high payoff)
+### 1. ~~Implement `Plans/json-support.md`~~ — DONE
 
-Spec is internally consistent after 6 codex rounds. Three layers:
+Shipped across three phases (`8da57a2` / `69b73c3` / `eea8323`)
+with one post-impl spec correction (`6852ca4`). OQ-5 resolved as
+option (a) per-namespace lookup tables, materialized at compile
+time from `Env.initial()` to dodge a load-order race the engineer
+caught (atom interning vs `String.to_existing_atom/1`). All four
+gates passed clean codex review. Live-validated:
 
-- **PTC-Lisp builtins** — `json/parse-string`, `json/generate-string`
-  in `:ptc_runner` proper (`lib/ptc_runner/lisp/runtime/json.ex`).
-  DIV-* convention: failures return `nil`, never raise.
-  `generate-string` requires a pre-validation walk (Jason silently
-  encodes atoms; spec rejects them via `encodable_value?` /
-  `encodable_key?` predicates — see §4.4 sketch).
-- **MCP unwrap helpers** — `mcp/text`, `mcp/json` in `:ptc_runner`
-  proper (NOT `:ptc_runner_mcp` — would invert the dependency
-  direction). Unconditional registration; harmless against
-  non-MCP-shaped maps.
-- **Aggregator auto-decode** — at the `aggregator_tools.ex:428`
-  classify_value site, promote `content[0].text` into
-  `structuredContent` iff the upstream declares
-  `mimeType: "application/json"` or any `+json` suffix. Additive,
-  preserves `content[]`. Decoded `nil` becomes `:json-null` in
-  `structuredContent`.
+- **Phase B path** (`mem.read_graph`): `mcp/json` correctly preferred
+  the natively-populated `structuredContent` over `content[0].text`.
+  Original regex-workaround obsolete.
+- **Phase C path** (`fakejson.get_payload`): aggregator auto-decode
+  fired (mimeType=`application/json` matched §6.1 condition 3),
+  produced additive `structuredContent` alongside preserved
+  `content[]`. Wire-amplification ~2× as specified.
 
-**§4.4 has the four required registration steps**: analyzer
-allowlist (both `json/` AND `mcp/` namespaces), `Env.initial()`
-entries (all four forms), `priv/functions.exs` sync,
-namespaced-dispatch resolution per OQ-5.
-
-**OQ-5 is the architectural decision the implementer makes**: PTC-
-Lisp's analyzer parses `(json/parse-string ...)` as
-`{:ns_symbol, :json, :"parse-string"}` and dispatches the unqualified
-atom; just registering `:"json/parse-string"` in `Env.initial()`
-won't work. Pick (a) per-namespace lookup tables (recommended for
-v1) or (b) full namespaced atom dispatch.
-
-ExUnit gate: all four of `(json/parse-string ...)`,
-`(json/generate-string ...)`, `(mcp/text ...)`, `(mcp/json ...)`
-must evaluate without "unknown namespace" or "unbound function"
-errors.
+Surprise worth flagging for future readers: on `mem.read_graph` the
+regex-workaround was technically *unnecessary even pre-Phase-B* —
+`mem` already populated `structuredContent`. The LLM didn't know to
+look there. The actual user-visible win is the authoring-card
+update advertising `mcp/json`, which steers the LLM to the typed
+channel. Phase B/C plumbing makes the helper robust against the
+variation in real upstreams (some populate `structuredContent`
+natively, others emit JSON-as-text with mimeType, others emit
+JSON-as-text without mimeType — only the third remains friction).
 
 ### 2. Phase 5 hardening — remaining §16 items
 

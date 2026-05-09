@@ -135,6 +135,43 @@ program treats it as an ordinary value:
 (map :name repos)          ;; pluck a field per repo
 ```
 
+### JSON helpers (`json/*`, `mcp/*`)
+
+Many MCP upstreams wrap their payload in the standard envelope
+`%{"content" => [%{"type" => "text", "text" => "..."}]}`, sometimes
+with the typed JSON also placed in `"structuredContent"`. PTC-Lisp
+provides four helpers so programs don't hand-roll `get-in` chains
+or parse JSON-as-text by hand:
+
+| Helper | Returns |
+|---|---|
+| `(json/parse-string s)` | parsed JSON value, or `nil` on failure (string keys; never raises) |
+| `(json/generate-string v)` | JSON-encoded string, or `nil` on non-encodable input (atoms outside `true/false/nil`, atom-keyed maps, tuples, PIDs) |
+| `(mcp/text r)` | `r["content"][0]["text"]`, or `nil` for any non-conforming shape |
+| `(mcp/json r)` | `r["structuredContent"]` if the key is present (preserving `:json-null` / `false` / `0` / `""` / `[]` verbatim), else `(json/parse-string (mcp/text r))` |
+
+The aggregator also auto-promotes `content[0].text` into
+`structuredContent` when the upstream declares
+`mimeType: "application/json"` or any `+json` suffix
+(RFC 6839). The promotion is additive — `content[]` is preserved —
+so reading via either channel works. Programs that hit the
+auto-decode path can simply destructure:
+
+```clojure
+;; Upstream emits content[0]={text:"{\"items\":[...]}", mimeType:"application/json"}.
+;; Aggregator auto-decodes; structuredContent appears for free.
+(def result (tool/mcp-call {:server "issues" :tool "list" :args {}}))
+(get-in result ["structuredContent" "items"])
+
+;; Or use mcp/json — works whether structuredContent came from
+;; auto-decode, native upstream support, or text-parse fallback.
+(get (mcp/json result) "items")
+```
+
+The previous regex-split workaround for upstreams returning
+JSON-as-text is obsolete. See `Plans/json-support.md` §5–§6 for
+the full semantics.
+
 ### `:json-null` semantics
 
 `nil` and `:json-null` are distinct:
