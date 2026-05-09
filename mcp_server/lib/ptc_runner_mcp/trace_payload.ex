@@ -16,7 +16,33 @@ defmodule PtcRunnerMcp.TracePayload do
 
   **Error reasons and messages are NEVER redacted at any level**
   (debug requires them — § 6.9 last bullet).
+
+  ## Credentials redaction
+
+  In addition to the `--trace-payloads` policy redaction above, every
+  string emitted by `redact_program/2`, `redact_context/2`,
+  `redact_validated/2`, and `redact_prints/2` is finally passed
+  through `PtcRunnerMcp.Credentials.Redactor.scrub/1` to substring-
+  replace any registered binding plaintext (per
+  `Plans/http-transport-credentials.md` §7.5.1).
+
+  ### Why hook here, not in `TraceFile` or in `PtcRunner.TraceLog`?
+
+  The actual JSONL encoding lives in `PtcRunner.TraceLog.Collector`
+  (the parent `:ptc_runner` library), which has no dependency on
+  `:ptc_runner_mcp` and cannot call `Redactor.scrub/1`. `TraceFile`
+  only forwards header opts and never sees the per-event JSON
+  payloads (they reach the collector via telemetry). So the cleanest
+  hook is the **values produced by `TracePayload`** — those are
+  exactly the strings that risk containing binding plaintext
+  (`:full` and `:summary` previews of programs/contexts/prints can
+  include literal secret bytes if a Lisp program embedded one).
+  Telemetry handler-level metadata (request_id, status, etc.) does
+  not flow through TracePayload but is structurally scalar and
+  cannot carry secrets per §7.5.3 (a).
   """
+
+  alias PtcRunnerMcp.Credentials.Redactor
 
   @preview_chars 256
   @print_preview_chars 80
@@ -46,9 +72,11 @@ defmodule PtcRunnerMcp.TracePayload do
   @spec redact_program(String.t() | nil, level()) :: term()
   def redact_program(nil, _level), do: nil
 
-  def redact_program(program, :full) when is_binary(program), do: program
+  def redact_program(program, :full) when is_binary(program), do: scrub_strings(program)
 
   def redact_program(program, :none) when is_binary(program) do
+    # `:none` mode emits only sha256 + byte_size — neither can carry
+    # a registered plaintext, so we skip the scrub walk.
     %{
       "sha256" => sha256_hex(program),
       "bytes" => byte_size(program)
@@ -56,11 +84,11 @@ defmodule PtcRunnerMcp.TracePayload do
   end
 
   def redact_program(program, :summary) when is_binary(program) do
-    %{
+    scrub_strings(%{
       "sha256" => sha256_hex(program),
       "preview" => utf8_preview(program, @preview_chars),
       "bytes" => byte_size(program)
-    }
+    })
   end
 
   # ----------------------------------------------------------------
@@ -77,7 +105,7 @@ defmodule PtcRunnerMcp.TracePayload do
   @spec redact_context(map() | nil, level()) :: term()
   def redact_context(nil, _level), do: nil
 
-  def redact_context(ctx, :full) when is_map(ctx), do: ctx
+  def redact_context(ctx, :full) when is_map(ctx), do: scrub_strings(ctx)
 
   def redact_context(ctx, :none) when is_map(ctx) do
     bytes =
@@ -90,9 +118,13 @@ defmodule PtcRunnerMcp.TracePayload do
   end
 
   def redact_context(ctx, :summary) when is_map(ctx) do
-    Map.new(ctx, fn {k, v} ->
-      {to_string(k), %{"type" => json_type(v), "count" => json_count(v)}}
-    end)
+    # Top-level keys are stringified — they're operator-chosen names,
+    # not values, but scrub them anyway as defense in depth.
+    scrub_strings(
+      Map.new(ctx, fn {k, v} ->
+        {to_string(k), %{"type" => json_type(v), "count" => json_count(v)}}
+      end)
+    )
   end
 
   # ----------------------------------------------------------------
@@ -108,13 +140,13 @@ defmodule PtcRunnerMcp.TracePayload do
   """
   @spec redact_validated(term(), level()) :: term()
   def redact_validated(nil, _level), do: nil
-  def redact_validated(value, :full), do: value
+  def redact_validated(value, :full), do: scrub_strings(value)
 
   def redact_validated(value, :summary) when is_map(value) and not is_struct(value) do
-    %{
+    scrub_strings(%{
       "type" => "object",
       "keys" => value |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
-    }
+    })
   end
 
   def redact_validated(value, :summary) when is_list(value) do
@@ -136,7 +168,10 @@ defmodule PtcRunnerMcp.TracePayload do
   end
 
   def redact_validated(value, :none) when is_map(value) and not is_struct(value) do
-    %{"type" => "object", "keys" => value |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()}
+    scrub_strings(%{
+      "type" => "object",
+      "keys" => value |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+    })
   end
 
   def redact_validated(value, :none) when is_list(value) do
@@ -161,7 +196,7 @@ defmodule PtcRunnerMcp.TracePayload do
   @spec redact_prints([String.t()] | nil, level()) :: term()
   def redact_prints(nil, _level), do: nil
 
-  def redact_prints(prints, :full) when is_list(prints), do: prints
+  def redact_prints(prints, :full) when is_list(prints), do: scrub_strings(prints)
 
   def redact_prints(prints, :none) when is_list(prints) do
     %{"count" => length(prints)}
@@ -181,7 +216,7 @@ defmodule PtcRunnerMcp.TracePayload do
         utf8_preview(first_line, @print_preview_chars)
       end)
 
-    %{"count" => length(prints), "items" => items}
+    scrub_strings(%{"count" => length(prints), "items" => items})
   end
 
   # ----------------------------------------------------------------
@@ -228,4 +263,25 @@ defmodule PtcRunnerMcp.TracePayload do
   def json_count(v) when is_list(v), do: length(v)
   def json_count(v) when is_map(v) and not is_struct(v), do: map_size(v)
   def json_count(_), do: nil
+
+  # ----------------------------------------------------------------
+  # Credentials redaction walk (§7.5.1)
+  # ----------------------------------------------------------------
+
+  # Recursively scrub every binary leaf in a redacted payload through
+  # `Credentials.Redactor.scrub/1`. Maps, lists, atoms, and numbers
+  # are walked but otherwise passed through. Structs are returned
+  # unchanged (no current redacted shape produces a struct).
+  @spec scrub_strings(term()) :: term()
+  defp scrub_strings(value) when is_binary(value), do: Redactor.scrub(value)
+
+  defp scrub_strings(value) when is_list(value) do
+    Enum.map(value, &scrub_strings/1)
+  end
+
+  defp scrub_strings(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} -> {scrub_strings(k), scrub_strings(v)} end)
+  end
+
+  defp scrub_strings(value), do: value
 end
