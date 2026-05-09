@@ -514,16 +514,31 @@ and is included in `docs/aggregator-mode.md`'s example library.
 `mcp/json` is the "give me the typed JSON of this result"
 helper. It prefers the spec-blessed `structuredContent` channel
 when it's present and falls back to parsing `content[0].text`
-otherwise:
+otherwise. Precedence — **key-presence**, NOT truthiness:
 
-1. If `result` is a map AND `(get result "structuredContent")`
-   returns a non-`nil` value, return that value verbatim — including
-   the `:json-null` sentinel from §6.4 sub-field promotion. (`or`-
-   chain semantics: `:json-null` is truthy in PTC-Lisp, so it
-   short-circuits the fallback.)
-2. Otherwise, return `(json/parse-string (mcp/text result))`.
+1. If `result` is a map AND `"structuredContent"` is a key in the
+   map (regardless of value), return that value verbatim — including
+   `:json-null` (§6.4 sub-field promotion), `false`, `0`, `""`, and
+   `[]`. All of these are valid JSON payloads that an upstream may
+   legitimately put on the typed channel.
+2. Otherwise (key absent), return `(json/parse-string (mcp/text result))`.
 
-This matters because **the dominant case post-Phase 4 is
+> **Implementation trap — do not use `or` over `Map.get/2`.** A
+> literal `(get r "structuredContent")` returns `nil` for both
+> "key absent" and "key present, value `nil`", and combining it with
+> an `or`-chain falls through to `mcp/text` whenever the value is
+> any falsy term — including legitimate JSON payloads like `false`
+> or `0` (post-Phase-C auto-decode of `"false"` / `"0"` text yields
+> exactly these). The implementation **MUST** branch on key presence
+> via `Map.fetch/2` + `case`, not on truthiness of `Map.get/2`.
+> Phase B's runtime uses `Map.fetch(result, "structuredContent")`
+> for this reason; the regression test in `runtime/mcp_test.exs`
+> covers the `false` case explicitly. The earlier "(`or`-chain
+> semantics: `:json-null` is truthy)" wording was misleading because
+> it considered the keyword sentinel but missed every other
+> falsy-but-valid JSON term.
+
+This precedence matters because **the dominant case post-Phase 4 is
 `structuredContent`-populated**, either via §6 auto-decode or via
 upstreams that natively use the spec channel. A naive
 `(json/parse-string (mcp/text result))` would return `nil` whenever
@@ -1435,6 +1450,21 @@ invoking codex; they are **not** instructions to codex itself.
 
 ## 12. Document History
 
+- 2026-05-09 (post-Phase-B finding — §5.2 precedence rewording).
+  Phase B implementation surfaced that §5.2's "`or`-chain semantics:
+  `:json-null` is truthy" wording was incomplete: it considered the
+  keyword sentinel but missed `false`, `0`, `""`, and `[]` — all
+  legitimate JSON payloads an upstream may place on the typed
+  `structuredContent` channel (post-Phase-C auto-decode of `"false"`
+  / `"0"` text yields exactly these). A literal `or`-chain over
+  `Map.get/2` collapses "key absent" and "key present, value falsy"
+  into the same fallback, dropping valid payloads. Reworded §5.2 to
+  specify **key-presence** semantics via `Map.fetch/2` + `case`,
+  with an explicit "implementation trap — do not use `or` over
+  `Map.get/2`" callout. Phase B's runtime already implements this
+  correctly (regression test covers `structuredContent: false`); the
+  spec wording is brought into agreement with the implementation.
+  No code change needed; this is documentation-only.
 - 2026-05-09 (review pass 11 — implementation phasing). Added §11
   "Implementation Phases" specifying a three-phase ship plan
   (A: JSON primitives, B: MCP unwrap helpers, C: aggregator
