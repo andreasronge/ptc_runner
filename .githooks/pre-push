@@ -39,7 +39,6 @@ if [ -z "${FORCE_FULL_PRE_PUSH:-}" ]; then
   PY_TMP="$(mktemp -t pre-push-docs-only.XXXXXX.py)"
   trap 'rm -f "$PY_TMP"' EXIT
   cat > "$PY_TMP" <<'PYEOF'
-import os
 import re
 import subprocess
 import sys
