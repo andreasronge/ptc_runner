@@ -389,15 +389,25 @@ plus shell + mix-startup overhead).
 
    ```
    for proj in . mcp_server ptc_viewer; do
-     ( cd "$proj" && mix test --exclude clojure && mix dialyzer ) &
+     (
+       cd "$proj" && \
+       mix test --exclude clojure && \
+       if grep -qE '\{:dialyxir,' mix.exs; then mix dialyzer; fi
+     ) &
    done
    wait
    ```
 
-   Three background jobs, each doing test-then-dialyzer
-   sequentially **inside** the project. Not six fully-concurrent
-   commands. Compare against the current sequential loop on the
-   *same* machine, *same* load profile.
+   Three background jobs, each doing test-then-(conditionally)-
+   dialyzer sequentially **inside** the project. Not six
+   fully-concurrent commands. The dialyzer step is gated on the
+   presence of `:dialyxir` in the project's `mix.exs`, mirroring
+   the current hook's `project_has_dep` check
+   (`.githooks/pre-push:296`). `ptc_viewer/mix.exs` has no
+   `:dialyxir` dep today, so the harness skips dialyzer there —
+   exactly as the production hook does. Compare against the
+   current sequential loop on the *same* machine, *same* load
+   profile.
 
    Required preconditions for the measurement to be meaningful:
    - **Warm deps and PLT** for all three projects (`mix deps.compile`
