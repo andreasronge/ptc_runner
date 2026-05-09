@@ -9,6 +9,8 @@ the per-clone `.git/hooks/` directory). Today there is one:
   pushed and dirty path matches the strict allow-list documented in
   `Plans/pre-push-perf.md` §"Phase 1".
 
+> **Note:** The docs-only short-circuit requires Python 3 (`python3` on `PATH`). Without it the hook degrades gracefully to the full gate with no error, so contributors without Python 3 will simply never see the <0.5 s fast path.
+
 ## One-time setup per clone
 
 After cloning (or in any existing clone), point git at this directory:
