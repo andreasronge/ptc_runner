@@ -172,16 +172,15 @@ allow-list-based docs-only gate can drop pure-docs pushes from
      `test/support/ptc_lisp_benchmark.ex:63`.
    - `priv/prompts/*.md` files are read at compile time via
      `@external_resource` chains in `lib/ptc_runner/prompts.ex:78`
-     (multiple files), and by direct `File.read!` in
-     `lib/ptc_runner/prompt_loader.ex:11`.
+     (multiple files; the canonical reader). The moduledoc example
+     in `lib/ptc_runner/prompt_loader.ex:11` is illustrative, not
+     a live read site.
    - `mcp_server/priv/mcp_authoring_card.md` and
      `mcp_server/priv/mcp_aggregator_authoring_card.md` are read by
      `mcp_server/lib/ptc_runner_mcp/tools.ex:50` and `:63` via
      `@external_resource`.
    - `usage-rules.md` and `usage-rules/*.md` are read by
      `test/usage_rules_test.exs:33`.
-   - `lib/ptc_runner/lisp/registry.ex:25` declares an
-     `@external_resource` on a registry markdown file.
    - `mcp_server/README.md` and `ptc_viewer/README.md` are *not*
      verified doctested today, but are conservatively denied (cheap
      defense; they may be added to a doctest target later).
