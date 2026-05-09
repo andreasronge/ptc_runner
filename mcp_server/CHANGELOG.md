@@ -22,6 +22,39 @@ revisions.
   list the helpers; non-aggregator clients can still use them, they
   just return `nil` against unrelated map shapes. See
   `Plans/json-support.md` §5.
+- Aggregator auto-decode of JSON-as-text upstream payloads
+  (`Plans/json-support.md` §6 / Phase C). When a successful
+  `tools/call` envelope's `content[0]` is a text item with mimeType
+  `application/json` or any `+json` suffix (RFC 6839 — covers
+  `application/ld+json`, `application/vnd.foo+json`, etc.) and
+  `structuredContent` is absent or `nil`, the aggregator decodes the
+  text and adds it under `structuredContent` *additively* —
+  `content[]` is preserved verbatim. A decoded bare `nil` (the JSON
+  literal `"null"`) is substituted with the `:"json-null"` keyword
+  sentinel at the sub-field level so it's distinguishable from
+  "field absent"; `false` / `0` / `""` / `[]` are legitimate JSON
+  payloads and promote verbatim. Pipeline ordering is
+  `classify_value` → auto-decode → §7.3 top-level `:json-null`
+  rewrite, so `isError: true` envelopes never reach auto-decode and
+  never trigger a spurious telemetry event. Malformed JSON with
+  matching mimeType passes through unchanged: the upstream call
+  itself succeeded, so a normal `status: "ok"` entry is still
+  recorded in `upstream_calls`, but **no** `reason` / `error`
+  fields are added for the soft decode failure — that side-channel
+  is reserved for world-faults. The new telemetry event is the only
+  operator-visible signal for the decode-failure outcome.
+- New telemetry event
+  `[:ptc_runner_mcp, :upstream, :auto_decode, :stop]` per
+  `Plans/json-support.md` §7. Metadata: `server`, `tool`,
+  `mime_type`, `outcome` (one of `:promoted`, `:already_structured`,
+  `:decode_failed`). Measurements vary by outcome —
+  `:promoted` carries `decoded_bytes` (best-effort:
+  `byte_size(Jason.encode!(value))`; round-trip encode failure
+  suppresses the field but not the event), `:already_structured`
+  carries `decoded_bytes: 0`, `:decode_failed` carries
+  `decoded_bytes: 0` and `text_bytes` (size of the rejected text
+  for cap correlation). No event fires when no text-content item is
+  present or when the mimeType doesn't match.
 
 ### Breaking changes
 
