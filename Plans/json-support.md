@@ -2,10 +2,10 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft |
+| Status | **Implemented** (Phase A `8da57a2`, Phase B `69b73c3`, Phase C `eea8323`; spec fix `6852ca4`). Live-validated end-to-end against the aggregator: Phase B path via `mem.read_graph`'s native `structuredContent`, Phase C auto-decode via a fake upstream emitting `mimeType: application/json`. |
 | Target packages | `:ptc_runner` (PTC-Lisp builtins), `:ptc_runner_mcp` (helpers, auto-decode) |
 | Depends on | `ptc-runner-mcp-aggregator.md` |
-| Last revised | 2026-05-09 (pass 11) |
+| Last revised | 2026-05-09 (pass 11 + post-impl §5.2 fix) |
 
 This document specifies JSON-handling support for PTC-Lisp programs and
 the MCP aggregator. It addresses the concrete friction observed when
