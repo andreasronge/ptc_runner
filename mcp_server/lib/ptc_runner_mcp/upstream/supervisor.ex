@@ -160,6 +160,7 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
     children = [
       Upstream.Fake.child_spec_for_registry(),
       Upstream.Stdio.child_spec_for_registry(),
+      Upstream.Http.child_spec_for_registry(),
       Upstream.Connection.child_spec_for_registry(),
       {DynamicSupervisor,
        name: PtcRunnerMcp.Upstream.DynamicSupervisor,

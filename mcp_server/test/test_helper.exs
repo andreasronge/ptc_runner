@@ -50,6 +50,14 @@ case Process.whereis(PtcRunnerMcp.Upstream.Stdio.Names) do
     :ok
 end
 
+case Process.whereis(PtcRunnerMcp.Upstream.Http.Names) do
+  nil ->
+    {:ok, _} = Registry.start_link(keys: :unique, name: PtcRunnerMcp.Upstream.Http.Names)
+
+  _pid ->
+    :ok
+end
+
 case Process.whereis(PtcRunnerMcp.Upstream.Connection.Names) do
   nil ->
     {:ok, _} =

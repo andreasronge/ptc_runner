@@ -567,7 +567,584 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
     end
   end
 
-  # ---- 8. literal-binding warning (§5.4.1 / §5.5 #4) ------------------------
+  # ---- 7. HTTP transport dep-presence check (§4.5) --------------------------
+
+  describe "HTTP transport dep-presence check (§4.5)" do
+    test "stdio-only config loads without invoking the :req presence check",
+         %{tmp_dir: tmp_dir} do
+      # The §4.5 guard fires only when at least one upstream declares
+      # `transport: "http"`. A stdio-only config (transport field
+      # absent on every entry) MUST load cleanly even if `:req` were
+      # not available. We can't realistically unload `:req` at runtime
+      # — instead we exercise the loader directly and assert it
+      # succeeds without raising. The fact that `check_http_deps!/3`
+      # below works with a `fn _ -> false end` predicate completes the
+      # proof: when no entry asks for HTTP, the predicate is never
+      # called.
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "fs" => %{"command" => "echo", "args" => ["hello"]}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{upstreams: [_], credentials: %{}} = Application.load_aggregator_config(args)
+
+      # And explicitly: the helper, given a stdio-only entry map and a
+      # predicate that always returns false, MUST NOT raise.
+      assert :ok =
+               Application.check_http_deps!(
+                 %{"fs" => %{"command" => "echo"}},
+                 "fake.json",
+                 fn _ -> false end
+               )
+    end
+
+    test "config with transport: http and :req absent raises with §4.5 message" do
+      # Simulate `:req` being absent by injecting a predicate that
+      # returns `false` for `Req`. The raised message MUST match the
+      # spec shape exactly: upstream name, the suggested deps line,
+      # and the source path.
+      upstreams = %{
+        "github" => %{
+          "transport" => "http",
+          "url" => "https://example.test"
+        }
+      }
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.check_http_deps!(upstreams, "/path/to/upstreams.json", fn _ -> false end)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "upstream 'github'"
+      assert msg =~ "uses HTTP transport but :req is not available"
+      assert msg =~ ~s({:req, "~> 0.5"})
+      assert msg =~ "mix deps.get"
+      assert msg =~ "Source: /path/to/upstreams.json"
+    end
+
+    test "config with transport: http and :req loaded passes the check" do
+      upstreams = %{
+        "github" => %{
+          "transport" => "http",
+          "url" => "https://example.test"
+        }
+      }
+
+      assert :ok =
+               Application.check_http_deps!(
+                 upstreams,
+                 "/path/to/upstreams.json",
+                 fn _ -> true end
+               )
+    end
+
+    test "multiple HTTP upstreams: failing entry name appears in raise" do
+      # Two HTTP entries; both would fail when `:req` is absent. The
+      # implementation iterates over them, so AT LEAST ONE name must
+      # appear in the raised message — and per §4.5 the raise is per-
+      # upstream so the operator sees a concrete name (not a generic
+      # "some upstream" message).
+      upstreams = %{
+        "alpha" => %{"transport" => "http", "url" => "https://a.example"},
+        "beta" => %{"transport" => "http", "url" => "https://b.example"}
+      }
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.check_http_deps!(upstreams, "fake.json", fn _ -> false end)
+        end
+
+      msg = Exception.message(err)
+
+      assert msg =~ "upstream 'alpha'" or msg =~ "upstream 'beta'",
+             "expected one of the HTTP upstream names in error, got: #{msg}"
+    end
+
+    test "real loader runs with :req available (transport: http config valid up to Phase 2A scope)",
+         %{tmp_dir: tmp_dir} do
+      # End-to-end: a config with `transport: "http"` reaches the
+      # loader, the §4.5 check fires (because `:req` IS loaded in
+      # test-env after Phase 2A's mix.exs change), and parsing
+      # completes. Phase 2A does not yet validate the URL or other
+      # HTTP-specific fields — that's 2E. So the entry just lands in
+      # the entries list via `parse_upstream_entries/2`'s default
+      # branch (which still slots an `Upstream.Stdio` impl per Phase
+      # 1 wiring).
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{"source" => "literal", "value" => "v-aaaa"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{credentials: %{"tok" => _}} = Application.load_aggregator_config(args)
+    end
+  end
+
+  # ---- 8. transport: "http" config-loader (Phase 2E, §5.3 / §5.5) ----------
+
+  describe "transport: http config-loader" do
+    test "minimal valid HTTPS config loads with Upstream.Http impl + defaults",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test"
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+
+      assert entry.name == "remote"
+      assert entry.impl == PtcRunnerMcp.Upstream.Http
+
+      cfg = entry.config
+      assert cfg.url == "https://example.test"
+      assert cfg.static_headers == []
+      assert cfg.proxy == nil
+      assert cfg.handshake_timeout_ms == 10_000
+      assert cfg.request_timeout_ms == 30_000
+      assert cfg.max_response_bytes == 2_097_152
+      assert cfg.connect_timeout_ms == 5_000
+      assert cfg.pool_size == 4
+      assert cfg.backoff_initial_ms == 100
+      assert cfg.backoff_max_ms == 30_000
+      refute Map.has_key?(cfg, :auth_raw)
+    end
+
+    test "explicit transport: stdio is parsed as Stdio (same as absent)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "fs" => %{
+                "transport" => "stdio",
+                "command" => "echo",
+                "args" => ["hi"]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+
+      assert entry.impl == PtcRunnerMcp.Upstream.Stdio
+      assert entry.config[:command] == "echo"
+      assert entry.config[:args] == ["hi"]
+    end
+
+    test "absent transport is parsed as Stdio (Phase 1 default)", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "fs" => %{"command" => "echo"}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+
+      assert entry.impl == PtcRunnerMcp.Upstream.Stdio
+    end
+
+    test "unknown transport value raises with upstream name", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "weird" => %{"transport" => "sse", "url" => "https://x.test"}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "weird"
+      assert msg =~ "sse"
+    end
+
+    test "url: http:// without allow_insecure_http: true raises", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "plain" => %{"transport" => "http", "url" => "http://x.test"}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "allow_insecure_http"
+      assert msg =~ "plain"
+    end
+
+    test "url: http:// with allow_insecure_http: true loads", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "plain" => %{
+                "transport" => "http",
+                "url" => "http://x.test",
+                "allow_insecure_http" => true
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert entry.config.url == "http://x.test"
+    end
+
+    test "http:// + allow_insecure_http + non-empty auth requires allow_insecure_auth: missing → raise",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{"source" => "literal", "value" => "v-aaaa"}
+            },
+            "upstreams" => %{
+              "plain" => %{
+                "transport" => "http",
+                "url" => "http://x.test",
+                "allow_insecure_http" => true,
+                "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "allow_insecure_auth"
+      assert msg =~ "plain"
+    end
+
+    test "http:// + allow_insecure_http + auth + allow_insecure_auth: true loads",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{"source" => "literal", "value" => "v-aaaa"}
+            },
+            "upstreams" => %{
+              "plain" => %{
+                "transport" => "http",
+                "url" => "http://x.test",
+                "allow_insecure_http" => true,
+                "allow_insecure_auth" => true,
+                "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+
+      assert entry.impl == PtcRunnerMcp.Upstream.Http
+      # `auth_raw` carries the unparsed list through to Phase 3.
+      assert entry.config.auth_raw == [%{"scheme" => "bearer", "binding" => "tok"}]
+    end
+
+    test "bad URL scheme (file://) raises", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "weird" => %{"transport" => "http", "url" => "file:///etc/passwd"}
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      # Either the scheme rejection branch (no host) or the unsupported
+      # scheme branch — both are loud raises with the upstream name.
+      assert msg =~ "weird"
+    end
+
+    test "proxy: http://proxy:8080 loads with proxy field set", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "proxy" => "http://proxy.test:8080"
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert entry.config.proxy == "http://proxy.test:8080"
+    end
+
+    test "proxy: http://user:pass@proxy raises (no proxy auth in v1)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "proxy" => "http://user:pass@proxy.test:8080"
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "user:pass"
+      assert msg =~ "remote"
+    end
+
+    test "static_headers passed through as lowercase tuple list", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"X-Foo" => "bar"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert entry.config.static_headers == [{"x-foo", "bar"}]
+    end
+
+    test "static_headers with Authorization is rejected (denylist)", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"Authorization" => "Bearer x"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "Authorization"
+      assert msg =~ "denylist"
+    end
+
+    test "static_headers with duplicate keys (after lowercase) raises", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"X-Foo" => "a", "x-foo" => "b"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "duplicate"
+      assert msg =~ "x-foo"
+    end
+
+    test "static_headers with invalid RFC 7230 token raises", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "static_headers" => %{"in valid" => "x"}
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "RFC 7230"
+      assert msg =~ "in valid"
+    end
+
+    test "non-integer integer field (pool_size: \"ten\") raises", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "pool_size" => "ten"
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "pool_size"
+      assert msg =~ "positive integer"
+    end
+
+    test "end-to-end: HTTP and stdio upstreams parse to correct impls", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{"source" => "literal", "value" => "v-aaaa"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+              },
+              "fs" => %{
+                "command" => "echo",
+                "args" => ["hello"]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      %{upstreams: entries} = Application.load_aggregator_config(args)
+
+      assert length(entries) == 2
+
+      by_name = Map.new(entries, fn entry -> {entry.name, entry} end)
+
+      assert by_name["remote"].impl == PtcRunnerMcp.Upstream.Http
+      assert by_name["remote"].config.url == "https://example.test"
+      assert by_name["remote"].config.auth_raw == [%{"scheme" => "bearer", "binding" => "tok"}]
+
+      assert by_name["fs"].impl == PtcRunnerMcp.Upstream.Stdio
+      assert by_name["fs"].config[:command] == "echo"
+      assert by_name["fs"].config[:args] == ["hello"]
+    end
+  end
+
+  # ---- 9. literal-binding warning (§5.4.1 / §5.5 #4) ------------------------
 
   describe "literal-binding warning" do
     setup do
