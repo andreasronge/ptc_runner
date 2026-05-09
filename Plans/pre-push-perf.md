@@ -10,7 +10,7 @@ issues that aren't worth fixing.
 
 Started: 2026-05-09. Branch base: `main` at `ab75ab9`.
 
-**Revision (2026-05-09, post-codex):** original plan reviewed by
+**Revision 1 (2026-05-09, post-codex):** original plan reviewed by
 codex against actual repo state. Codex flagged 13 issues. All
 incorporated:
 - Baseline counts corrected (5 of 30 sync files are integration-only
@@ -28,6 +28,37 @@ incorporated:
 - Phase 0 added for unrelated cleanup codex spotted.
 - Plan now says "current pre-push gate," not "full suite" — current
   hook excludes `:clojure`, `:integration`, `:real_upstream` tags.
+
+**Revision 2 (2026-05-09, post-codex re-review):** revision 1
+re-reviewed by codex; 9 further issues found. All addressed:
+- Phase 1 dirty-path enumeration switched from `awk '{print $2}'`
+  (broken on renames + paths with spaces) to `-z`-delimited
+  porcelain v1 with rename-aware Python parser; both old and new
+  paths of a rename go into the dirty set.
+- Phase 1 `^.*\.txt$` allow-list pattern narrowed to exact
+  `^LICENSES/MIT\.txt$` to avoid silently matching future
+  `priv/**.txt` or `test/support/**.txt` fixtures.
+- Phase 1 explicit deny list added with verified runtime-read
+  paths: `priv/prompts/*.md`,
+  `mcp_server/priv/{mcp_authoring_card,mcp_aggregator_authoring_card}.md`,
+  plus the previously-listed README and docs.
+- Phase 1 `mcp_server/README.md` doctested claim corrected — it
+  isn't doctested today, kept conservatively denied.
+- Phase 2 acceptance command rewritten as a `for` loop. Multiple
+  `--seed` flags in one `mix test` command don't produce 25 runs.
+- Phase 2 stress variant added with `--max-cases` × seed grid to
+  catch scheduler-density races, not just ordering races.
+- Phase 2 `async: false` count grep filters integration files.
+- Phase 3 default approach pinned to compile-time artifact build
+  (compiler entry or `mix.exs` alias on `test`). Building the
+  escript inside `setup_all` would re-introduce mix/build-lock
+  contention this phase exists to remove.
+- Phase 3 acceptance grep broadened to catch
+  `System.find_executable("mix")` and `exec mix` wrappers, not
+  just `command: "mix"`.
+- Phase 4 backoff tests removed from pooling candidates — backoff
+  state is a per-test-spawn invariant; partially exempting it
+  without a defined reset proof was incoherent.
 
 ## Goal
 
@@ -114,15 +145,24 @@ allow-list-based docs-only gate can drop pure-docs pushes from
    directory. Hook moves must use
    `git rev-parse --git-path hooks/pre-push` or the resolved hook
    path, not literal paths.
-2. Several markdown files are read by tests:
+2. Several markdown files are read at runtime or doctested. Verified
+   by grepping for `File.read`/`File.read!`/`@external_resource`
+   against `*.md` paths in the repo:
    - `README.md` is doctested by `test/readme_test.exs`.
    - `docs/ptc-lisp-specification.md` is read by
-     `test/ptc_runner/lisp/spec_validator_test.exs` and by
-     `lib/ptc_runner/lisp/spec_validator.ex`.
-   - `mcp_server/README.md` is doctested in its own `:ptc_runner_mcp`
-     project.
-   - Other `*.md` files under `docs/`, `Plans/`, `mcp_server/`,
-     `ptc_viewer/` may also be referenced.
+     `test/ptc_runner/lisp/spec_validator_test.exs:283`, by
+     `lib/ptc_runner/lisp/spec_validator.ex:21`, and by
+     `test/support/ptc_lisp_benchmark.ex:63`.
+   - `priv/prompts/*.md` files are read by
+     `lib/ptc_runner/prompts.ex:78`.
+   - `mcp_server/priv/mcp_authoring_card.md` and
+     `mcp_server/priv/mcp_aggregator_authoring_card.md` are read by
+     `mcp_server/lib/ptc_runner_mcp/tools.ex:50`.
+   - `mcp_server/README.md` and `ptc_viewer/README.md` are *not*
+     verified doctested today, but are conservatively denied (cheap
+     defense; they may be added to a doctest target later).
+   - All other `*.md` files under `docs/`, `mcp_server/docs/`,
+     `mcp_server/`, `ptc_viewer/` are conservatively denied.
 3. The hook runs `mix test` against the **working tree**, not the
    committed bytes. A docs-only short-circuit must verify
    working-tree + index are clean (or only contain docs-allowed
@@ -146,19 +186,61 @@ allow-list-based docs-only gate can drop pure-docs pushes from
      repo's default base).
    - Take the union of files changed across all those commits via
      `git diff-tree -r --name-only --no-commit-id`.
-   - Also enumerate dirty paths in the worktree:
-     `git status --porcelain --untracked-files=normal | awk '{print $2}'`.
-   - Combine both sets.
-3. Define a strict **docs-only allow-list** (paths that are *not*
-   read by tests):
+   - Enumerate dirty paths in the worktree using `-z`-delimited
+     porcelain output to handle paths with spaces, renames, and
+     copies safely:
+     ```bash
+     git status --porcelain=v1 -z --untracked-files=normal |
+       python3 -c '
+     import sys
+     buf = sys.stdin.buffer.read().split(b"\\0")
+     i = 0
+     while i < len(buf):
+         entry = buf[i]
+         if not entry:
+             i += 1
+             continue
+         status = entry[:2].decode()
+         path = entry[3:].decode()
+         # Renames / copies: status is "R " or "C "; the next NUL-record is the old path.
+         if status[0] in "RC":
+             print(path)         # new path
+             if i + 1 < len(buf):
+                 print(buf[i + 1].decode())  # old path
+             i += 2
+         else:
+             print(path)
+             i += 1'
+     ```
+     Both old and new paths of a rename go into the dirty-set so a
+     dirty rename `Plans/a.md → README.md` cannot evade the deny.
+   - Combine the committed-diff set and the dirty set.
+3. Define a strict **docs-only allow-list** (exact patterns, paths
+   that are *not* read by tests, runtime code, or doctests):
    - `^Plans/.*\.md$`
    - `^CHANGELOG\.md$`
-   - `^.*\.txt$` (license, etc.)
+   - `^LICENSES/MIT\.txt$`
    - `^\.gitignore$`
    - `^\.githooks/README\.md$` (the hook setup README, if added)
-   Anything else — including `README.md`, `docs/**/*.md`,
-   `mcp_server/README.md`, `mcp_server/docs/**/*.md` — falls through
-   to the full gate.
+   The previous draft used `^.*\.txt$` — too broad, would silently
+   match future `priv/**.txt` or `test/support/**.txt` fixtures.
+   Pin to the exact license path instead.
+
+   **Explicit deny list** — verified read at runtime or doctested,
+   *must* fall through to the full gate:
+   - `^README\.md$` (doctested by `test/readme_test.exs`)
+   - `^docs/.*\.md$` (especially `docs/ptc-lisp-specification.md`)
+   - `^priv/prompts/.*\.md$` (read by `lib/ptc_runner/prompts.ex`)
+   - `^mcp_server/priv/.*\.md$` (read by
+     `mcp_server/lib/ptc_runner_mcp/tools.ex`)
+   - `^mcp_server/README\.md$`, `^mcp_server/docs/.*\.md$`
+   - `^ptc_viewer/README\.md$`, `^ptc_viewer/docs/.*\.md$`
+   - All `lib/**`, `test/**`, `mcp_server/lib/**`,
+     `mcp_server/test/**`, `ptc_viewer/lib/**`,
+     `ptc_viewer/test/**`, `mix.exs`, `mix.lock`, `config/**`,
+     `priv/**` (anything not explicitly allow-listed).
+   The hook should be allow-list-positive: every file in the
+   combined set must match the allow-list, otherwise full gate.
 4. If every file in the combined set matches the allow-list:
    print `📝 Docs-only push, skipping test/dialyzer gate (override:
    FORCE_FULL_PRE_PUSH=1)` and exit 0.
@@ -220,11 +302,32 @@ tests genuinely conflict on shared state.
 
 **Acceptance:**
 
-- `mix test mcp_server/test/ --seed 0 --seed 1 --seed 2 … --seed 24`
-  (25 distinct seeds, scripted) all pass green. Catches scheduler
-  and ordering races the original "5× same seed" criterion missed.
-- `rg 'async:\s*false' mcp_server/test/ -l | wc -l` decreases
-  measurably (target: at least 8 files flipped).
+- 25-seed loop passes green (multiple `--seed` flags do *not* run
+  multiple suites — must be a loop):
+  ```bash
+  (cd mcp_server && \
+    for s in $(seq 0 24); do \
+      mix test --seed "$s" || { echo "FAIL seed=$s"; exit 1; } \
+    done)
+  ```
+- Stress variant — vary scheduler concurrency, not just ordering.
+  3 seeds × 3 `--max-cases` settings = 9 runs, all green:
+  ```bash
+  (cd mcp_server && \
+    for cases in 1 4 20; do \
+      for s in 0 7 13; do \
+        mix test --seed "$s" --max-cases "$cases" || \
+          { echo "FAIL seed=$s cases=$cases"; exit 1; } \
+      done \
+    done)
+  ```
+  Captures races that only surface at specific schedule densities
+  (low `--max-cases` exposes single-thread-only invariants; high
+  exposes contention).
+- `rg 'async:\s*false' mcp_server/test/ -l | grep -v '/integration/' | wc -l`
+  (excluding integration files, which Phase 2 doesn't touch)
+  decreases measurably from the baseline 25 — target: at least 8
+  files flipped.
 - For every file *not* flipped, a one-line comment explains why
   sync is required (specific shared-state reference). No file is
   left as `async: false` without a recorded reason.
@@ -262,8 +365,17 @@ deps must be available in the spawned interpreter.
 
 A. **Pre-compile mock_server to escript with deps bundled.** Static
    artifact, no `mix run` needed. Spawn cost drops to a single
-   exec. Build the escript via a `mix.exs` task that runs once at
-   suite startup or as a `setup_all`.
+   exec. **Build the artifact at compile time, not at test runtime
+   — building inside `setup_all` or any test process re-introduces
+   the mix/build-lock contention this phase exists to remove.**
+   Concrete options:
+   - A `compilers: [:mock_escript, ...]` entry in mcp_server's
+     `mix.exs` that depends on the `:elixir` compiler and builds
+     the escript before tests can start.
+   - A `mix.exs` task aliased into `test` so `mix test`
+     transparently builds first, then runs the suite.
+   - A static path under `mcp_server/test/support/_build/` checked
+     into the repo (rejected — escripts are platform-specific).
 B. **Replace `mix run`-port spawn with a Burrito-style standalone
    release** if deps are heavy. Bigger change; probably overkill.
 C. **Move tests that genuinely need a real subprocess to
@@ -272,17 +384,27 @@ C. **Move tests that genuinely need a real subprocess to
    real subprocess. Probably unacceptable; flag if it's the only
    viable path.
 
-Default plan: option A unless something prevents it.
+Default plan: option A with the compile-time build approach,
+unless something prevents it.
 
 **Acceptance:**
 
-- `rg 'command:\s*"mix"' mcp_server/test mcp_server/lib`
-  returns zero hits in default-path test files (integration files
-  may keep them).
-- `rg 'exec mix' mcp_server/test mcp_server/lib` similarly clean.
+- All forms of mix-via-port are gone from default test paths:
+  ```bash
+  rg --type elixir \
+    'command:\s*"mix"|command:\s*System\.find_executable\(.*"mix"\)|exec\s+mix' \
+    mcp_server/test mcp_server/lib | grep -v '/integration/'
+  ```
+  returns zero hits. Broadened from the previous draft to catch
+  `System.find_executable("mix")` and `exec mix` in wrapper
+  scripts.
+- The wrapper shell script at
+  `mcp_server/test/ptc_runner_mcp/upstream_stdio_phase1b_test.exs:734`
+  is updated to invoke the escript directly, not `mix run`.
 - The "Waiting for lock on the build directory" warning does not
   appear across 10 consecutive `(cd mcp_server && mix test)` runs
-  with random seeds.
+  with random seeds. (Necessary but not sufficient — the structural
+  grep above is the primary acceptance.)
 - Behavioral coverage preserved: every test that previously launched
   a `mix run` mock now launches the precompiled artifact and still
   exercises the stdio handshake / tools/list / call paths it
@@ -341,10 +463,14 @@ per codex):
    backoff.
 2. **Tests in groups 3–5 (parent-exit, crash, env-driven) keep
    per-test spawn — non-negotiable.**
-3. **Tests in groups 1–2 (echo, slow) and 6 (clean backoff
-   start) are candidates for pooling**, *if* a per-checkout state
-   reset hook is added to the mock server (separate small
-   refactor).
+3. **Tests in groups 1–2 (echo, slow) are candidates for pooling**,
+   *if* a per-checkout state reset hook is added to the mock server
+   (separate small refactor). Group 6 (backoff) is removed from the
+   pooling-candidate list — codex pointed out that listing backoff
+   state as a per-test-spawn invariant under §"Invariants" #2 and
+   then partially exempting it for pooling without defining the
+   reset proof is incoherent. Backoff tests keep per-test spawn
+   unless a future revision defines a verified reset protocol.
 4. Build a `setup_all` fixture for the poolable groups that spawns
    one upstream per `describe` and registers tests against it via
    per-test alias.
@@ -358,8 +484,9 @@ per codex):
 - Inventory document committed to `Plans/` listing every upstream
   spawn site, classification, and pool-vs-per-test decision with
   reason.
-- Pool-eligible tests pass under 25-seed sweep (same protocol as
-  Phase 2).
+- Pool-eligible tests pass under the 25-seed loop *and* the 9-run
+  scheduler-density stress (same protocol as Phase 2 — the loops,
+  not multiple `--seed` flags in one command).
 - Suite still passes when each pool-eligible `describe` is run
   alone (`mix test path/to/file.exs:LINE`).
 - mcp_server suite wallclock drops by another ≥3 s, or this phase
