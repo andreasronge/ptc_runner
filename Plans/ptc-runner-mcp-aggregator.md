@@ -1439,6 +1439,15 @@ Honest weaknesses:
   shutdown of an upstream that's stuck in `initialize`. Not a data
   correctness issue. Promote to its own hardening phase if the
   scenario shows up outside shutdown.
+- Real-upstream test path-escaping (Phase 2.2 follow-up): the
+  `real_filesystem_test` interpolates the temp directory path
+  directly into a PTC-Lisp source string. On macOS/Linux with sane
+  paths this is fine, but on Windows or with a `TMPDIR` containing
+  backslashes/quotes the path would change the parsed `:path` arg
+  or break Lisp parsing. Fix is one line:
+  `Jason.encode!(file_path)` (or equivalent) to produce a
+  syntactically safe Lisp string literal. Only matters when running
+  the opt-in test on a non-POSIX-path environment.
 - Decomposed cold-start telemetry: §10 telemetry currently emits a
   single `duration` measurement on the upstream-call span.
   `upstream_calls[].duration_ms` includes ensure-started overhead per
@@ -1474,6 +1483,18 @@ Honest weaknesses:
   Phase 1a "transport layer" framing with "upstream-behaviour call
   layer." Inlined the Phase 3 catalog format example so the
   specification is self-contained.
+- 2026-05-09 (phase2.2-shipped): Phase 2.2 merged as `bbfaada` after
+  four codex review rounds. Single opt-in real-upstream integration
+  test against `@modelcontextprotocol/server-filesystem@2026.1.14`,
+  gated on `MCP_REAL_UPSTREAM=1` and `:real_upstream` tag. Bundled in
+  the same commit: a pre-existing Phase 1a flake fix —
+  `upstream_registry_phase1a_test`'s crash-invalidation case raced
+  with concurrent `async: true` tests sharing the literal name
+  `"beta"` against the global `Fake.Names` registry. All shared static
+  names uniquified via `System.unique_integer([:positive])` in three
+  test files. 11-seed full-suite stress confirms zero flakes. One
+  remaining [P3] (test path escaping for Windows/quoted-TMPDIR) logged
+  in §16 — does not affect macOS/Linux runs.
 - 2026-05-08 (phase2.1-scope-cut): Reduced §12.4.1 from three findings
   to two. The Stdio shutdown propagation finding was implemented via
   a parent-EXIT clause inside `wait_for_id/3`, but codex correctly
