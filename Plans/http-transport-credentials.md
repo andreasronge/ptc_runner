@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft, codex-rounds-1-through-5 revisions applied (2026-05-09). Verdict at round 5: SHIP-WITH-FIXES → fixes applied → ready for build target after one verification round or human sign-off. |
+| Status | Build-ready (2026-05-09). Spec frozen; §12 enumerates phased subagent build with codex review gates between phases. |
 | Target package | `:ptc_runner_mcp` |
 | Depends on | `Plans/ptc-runner-mcp-aggregator.md` (Phase 4 shipped) |
 | Sibling docs | `Plans/positioning-mcp-aggregator.md` §"Honest weaknesses #6, #7"; §"Feature signals #3, #4" |
@@ -67,16 +67,16 @@ Goals:
 4. Make raw secrets unreachable from the PTC-Lisp sandbox **and from
    PtcRunner's own logging / tracing surfaces**, by **structural
    isolation** as the primary guarantee and best-effort redaction as
-   defense in depth. Structural isolation: only the `Credentials`
-   registry holds resolved auth bytes; only `Upstream.Http` is a
-   legitimate consumer; the sandbox has no built-in to reach the
-   registry; the `upstream_calls` collector records binding *names*,
-   never values; HTTP upstream config has no field that accepts a raw
-   secret (see §5.3 — the `headers:` field that would have been a
-   leak path is removed). Defense in depth: an ETS redaction set
-   (owner-write, globally-read; §7.5) substring-matches known-
-   resolved values in any string the log / trace / `upstream_calls`
-   writers would emit.
+   defense in depth. Structural isolation: resolved auth bytes are not
+   stored in upstream config maps, Connection snapshots, trace payloads,
+   or `upstream_calls`; only `Upstream.Http` is a legitimate consumer;
+   the sandbox has no built-in to reach the registry; the
+   `upstream_calls` collector records binding *names*, never values;
+   HTTP upstream config has no dynamic header field that accepts a raw
+   secret (see §5.3). Defense in depth: an ETS redaction set
+   (owner-write, globally-readable by BEAM processes; §7.5)
+   substring-matches known-resolved values in any string the log /
+   trace / `upstream_calls` writers would emit.
 5. Stay opt-in: existing stdio configs **MUST** continue to load and
    run unchanged (§14 — Migration & Compatibility).
 
@@ -111,7 +111,7 @@ The corresponding `upstreams.json`:
     "github": {
       "transport": "http",
       "url": "https://api.githubcopilot.com/mcp/",
-      "auth": { "scheme": "bearer", "binding": "github-pat" }
+      "auth": [{ "scheme": "bearer", "binding": "github-pat" }]
     },
     "fs": {
       "command": "npx",
@@ -129,9 +129,10 @@ The corresponding `upstreams.json`:
 | Streamable HTTP transport | The MCP transport defined in spec revision 2025-03-26 and refined in 2025-06-18: one endpoint URL serving both client→server `POST`s (JSON-RPC requests/responses) and optional server→client `GET` SSE streams (notifications). Replaces the legacy "HTTP+SSE" two-endpoint transport. v1 targets the **2025-06-18** revision; see §6.1. |
 | MCP session | A session established by the `initialize` handshake. The server returns a `Mcp-Session-Id` header on the initialize response; subsequent requests echo it. Session loss (server returns `404` for an in-flight `Mcp-Session-Id`) is a normal, recoverable event. |
 | Binding | A named entry in the `credentials:` config block. Identifies how to obtain auth material; its **value** is never exposed. |
-| Auth emitter | An entry in an HTTP upstream's `auth:` list that produces one HTTP header at request time. Schemes in v1: `bearer`, `basic`, `custom_header`. Multiple emitters per upstream are allowed (§5.3.1) — each upstream produces N headers, one per emitter. |
+| Auth emitter | An entry in an HTTP upstream's `auth:` list that produces one auth-bearing HTTP header at request time. Schemes in v1: `bearer`, `basic`, `custom_header`. Multiple emitters per upstream are allowed (§5.3.1) — each upstream produces N headers, one per emitter. |
+| Static header | A literal, non-secret HTTP header configured on an HTTP upstream via `static_headers:` (§5.3.2). Static headers are never `${VAR}`-expanded, never materialized through `Credentials`, and are rejected for sensitive header names. |
 | Resolved auth material | The transient bytes the credentials registry produces for a binding when asked. Lifetime: held in process memory only; never written to disk; not cached on `Upstream.Http` Connection state across requests in v1 (§7.3). |
-| Redaction set | An ETS table owned by the credentials registry (`:protected` mode — owner-write, globally-read) populated the first time each binding is materialized. Holds **plaintext bytes** (not hashes — see §7.5 for why hashes are insufficient). Read consumers: the redactor filter wired into `Log`, `TraceFile`, `TracePayload`, and `UpstreamCalls`. Best-effort second line of defense; the primary guarantee is structural. |
+| Redaction set | An ETS table owned by the credentials registry (`:protected` mode — owner-write, globally-readable by BEAM processes) populated the first time each binding is materialized. Holds **plaintext bytes** (not hashes — see §7.5 for why hashes are insufficient). Read consumers: the redactor filter wired into `Log`, `TraceFile`, `TracePayload`, and `UpstreamCalls`. Best-effort second line of defense; the primary guarantee is structural isolation from the PTC-Lisp sandbox and normal MCP/logging surfaces, not BEAM-wide secrecy. |
 
 ## 3. Non-Goals
 
@@ -251,20 +252,22 @@ It holds the parsed `credentials:` config block as
 
 The result is opaque to callers; the `Upstream.Http` impl hands it to
 `Credentials.apply/2` (§7.3) along with the auth emitter spec, and
-`apply/2` returns a tagged header list `{:redacted_headers, [{name, value}]}`
-for the request layer to splice into the outbound request. Callers
-never inspect `material`-shaped fields directly and never destructure
-the tagged tuple beyond splicing it. This indirection makes the v2
-OAuth migration non-breaking: the materialization shape extends
+`apply/2` returns an opaque `%Credentials.RedactedHeaders{}` wrapper for
+the request layer to splice into the outbound request. Callers never
+inspect `material`-shaped fields directly and never unwrap the header
+wrapper except at the HTTP request boundary. This indirection makes the
+v2 OAuth migration non-breaking: the materialization shape extends
 (adding refresh-callback metadata) without breaking call sites.
 
-Resolved auth bytes flow through three places in v1: (a) the registry
-GenServer's state, (b) the redaction set ETS table, (c) the
-in-flight `Req` request struct for the duration of the HTTP call.
-They flow through **nowhere else**. The §7.5 redaction filter is
-defense in depth covering paths (a) and (b) leaking through some
-future `inspect/2` of state, plus any code path that puts header
-bytes into a string before logging it.
+Resolved auth bytes flow through a deliberately small set of places in
+v1: (a) the Credentials GenServer state for `literal` binding specs and
+transient materialization variables, (b) the redaction set ETS table,
+(c) transient variables in `Upstream.Http` while constructing headers,
+and (d) the in-flight `Req` / Finch request for the duration of the HTTP
+call. They are not stored in upstream config maps, Connection snapshots,
+trace payloads, or `upstream_calls` entries. The §7.5 redaction filter
+is defense in depth for any code path that accidentally turns those
+bytes into a string before logging or tracing it.
 
 ### 4.3 Connection lifecycle for HTTP upstreams
 
@@ -284,8 +287,10 @@ Boot-time semantics:
   with an `auth:` block, because the handshake `POST` needs the auth
   header. A binding that fails to resolve at boot
   (`{:error, :resolution_failed, …}`) renders the upstream as
-  unavailable at startup and arms the per-Connection backoff window
-  for the first user-driven retry.
+  unavailable at startup. This is an init-time failure, so it follows
+  current `Connection` semantics and **does not** arm the recovery
+  backoff window; backoff is reserved for `:DOWN` from a previously
+  started impl.
 - **Boot-time HTTP failures are non-fatal**, identical to stdio
   subprocess-spawn failures. The aggregator does not refuse to boot
   because GitHub is down.
@@ -427,7 +432,11 @@ is extended with two changes:
 The existing `${VAR}` placeholder resolution in `env` values (§5.2 of
 the aggregator spec, implemented at
 `mcp_server/lib/ptc_runner_mcp/application.ex:401`) is **unchanged**.
-Stdio configs **MUST NOT** be required to migrate to bindings.
+Stdio configs **MUST NOT** be required to migrate to bindings. The
+loader change for this spec MUST narrow the recursive placeholder
+resolver so it only applies to stdio `env` values, not to the entire
+decoded upstreams JSON tree. In particular, `credentials:` and
+`static_headers:` values are parsed literally.
 
 ### 5.3 HTTP upstream spec (new)
 
@@ -438,6 +447,9 @@ Stdio configs **MUST NOT** be required to migrate to bindings.
                                         //   unless allow_insecure_http: true)
   "auth": [<auth-emitter>, ...] | null, // optional; default null = no headers.
                                         //   See §5.3.1 for emitter shapes.
+  "static_headers": { String -> String },
+                                        // optional literal non-secret headers.
+                                        //   See §5.3.2.
   "proxy": String | null,               // optional explicit proxy URL
                                         //   (overrides HTTPS_PROXY env var)
   "handshake_timeout_ms": Int,          // default 10000
@@ -453,21 +465,24 @@ Stdio configs **MUST NOT** be required to migrate to bindings.
 }
 ```
 
-**No `headers:` field.** The codex-1 draft included a `headers: { String -> String }`
-block for static request headers. That block was removed: the existing
-config loader recursively resolves `${VAR}` placeholders before
-normalization (`mcp_server/lib/ptc_runner_mcp/application.ex:401`), so
-a `headers:` value containing `"Authorization": "Bearer ${TOKEN}"`
-would land the raw token in the upstream config map and propagate
-through `Connection.config` / `snapshot/1` / any `inspect/2` of state.
-That is exactly the leak path the credentials registry is supposed to
-close. **All upstream-facing HTTP headers in v1 — auth-bearing or not
-— flow through `auth:` emitters and are produced by `Credentials.apply/2`.**
-Operators who legitimately need a non-secret static header
-(`X-Tenant`, `X-Trace-ID`) configure a `custom_header` emitter with
-either a `literal` binding (loud warning at non-test boot per §5.4.1)
-or an `env` binding pointing at a non-secret env var. The User-Agent
-is always set by the impl per §6.1.1 and is not configurable in v1.
+**No dynamic `headers:` field.** The codex-1 draft included a
+`headers: { String -> String }` block that allowed `${VAR}` expansion.
+That shape was removed: the existing config loader recursively resolves
+`${VAR}` placeholders before normalization
+(`mcp_server/lib/ptc_runner_mcp/application.ex:401`), so a value like
+`"Authorization": "Bearer ${TOKEN}"` would land the raw token in the
+upstream config map and propagate through `Connection.config` /
+`snapshot/1` / any `inspect/2` of state. That is exactly the leak path
+the credentials registry is supposed to close.
+
+v1 has two header channels:
+
+1. **Secret or auth-bearing headers** flow through `auth:` emitters and
+   are produced by `Credentials.apply/2`.
+2. **Literal non-secret headers** flow through `static_headers:` (§5.3.2).
+
+The User-Agent is always set by the impl per §6.1.1 and is not
+configurable in v1.
 
 #### 5.3.1 `auth:` is an ordered list of emitters
 
@@ -507,7 +522,31 @@ If `auth: []` or `auth: null`, the HTTP upstream sends no auth
 headers — useful for upstreams behind a network boundary that
 requires no per-request auth.
 
-#### 5.3.2 Proxy resolution
+#### 5.3.2 `static_headers:` literal non-secret headers
+
+`static_headers:` is an optional map of literal HTTP header names to
+literal string values. It exists for headers such as `X-MCP-Readonly:
+true`, `X-MCP-Toolsets: context`, `X-Tenant`, or `X-Trace-ID` that
+are required by real remote MCP servers but are not secrets.
+
+Rules:
+
+- Values are **never** `${VAR}`-expanded. The HTTP config loader MUST
+  parse `static_headers:` only after bypassing the legacy recursive
+  placeholder resolver used for stdio `env` (§14.2).
+- Header names MUST match the same RFC 7230 token grammar as
+  `custom_header`.
+- Header names MUST NOT be any sensitive name in this case-insensitive
+  denylist: `Authorization`, `Proxy-Authorization`, `Cookie`,
+  `Set-Cookie`, `X-Api-Key`, `X-API-Key`.
+- Header names MUST NOT duplicate any name emitted by `auth:`.
+- Header values MUST be strings and are sent verbatim.
+- Static header values are **not** inserted into the redaction set.
+
+Operators who need a secret-bearing custom header use
+`auth: [{ "scheme": "custom_header", ... }]`, not `static_headers:`.
+
+#### 5.3.3 Proxy resolution
 
 If `proxy:` is set on the upstream entry, the HTTP impl passes it to
 `Req` as `connect_options: [proxy: parse(proxy_url)]`. The URL
@@ -562,11 +601,13 @@ base64-encoding, building `Authorization: Bearer …`) happens in
   every `materialize/1` call** (no in-process cache); the env var is
   the authoritative source. Empty string is treated as missing and
   fails resolution.
-- **`file`** — `File.read!/1` + `String.trim_trailing/1`. Cached for
-  60 s by default (configurable per binding via `cache_ttl_ms`).
-  File mode **MUST** be readable by the PtcRunner process; v1 does
-  not enforce permission checks (e.g., 0600) but logs at info level
-  if `mode & 0o077 != 0` so operators notice world-readable secrets.
+- **`file`** — `File.read/1` + `String.trim_trailing/1` at
+  materialization time. v1 does **not** cache file bindings; the file
+  is the authoritative source and rotation is picked up on the next
+  request / cold start. File mode **MUST** be readable by the PtcRunner
+  process; v1 does not enforce permission checks (e.g., 0600) but logs
+  at info level if `mode & 0o077 != 0` so operators notice
+  world-readable secrets.
 - **`literal`** — value used verbatim. **Loud `Logger.warning` at
   config-load time** if `MIX_ENV != :test`, because shipping a
   literal secret in a config file is a known footgun. The warning
@@ -578,8 +619,7 @@ All binding shapes accept:
 
 ```
 { ...,
-  "scheme_hint": "bearer" | "basic" | "raw",   // optional sanity check
-  "cache_ttl_ms": Int }                         // default per-source
+  "scheme_hint": "bearer" | "basic" | "raw" }   // optional sanity check
 ```
 
 `scheme_hint`, when set, **MUST** match the auth scheme the binding is
@@ -604,7 +644,10 @@ descriptive message:
    each (not a failure — useful for local development).
 5. Self-as-upstream rejection (§5.3 of the aggregator spec) continues
    to apply to stdio entries only.
-6. Every `auth:` emitter's `binding` is checked at three distinct
+6. The legacy `${VAR}` placeholder resolver **MUST** run only for
+   stdio `env` values. HTTP `url`, `auth`, `static_headers`, `proxy`,
+   and `credentials` fields are not placeholder-expanded.
+7. Every `auth:` emitter's `binding` is checked at three distinct
    moments. Each moment has different failure semantics:
    - **Config-load type-shape check (loud failure).** The binding's
      declared `scheme_hint` (or, if unset, `:raw`) **MUST** be
@@ -630,12 +673,15 @@ descriptive message:
      :unencodable" — both are credential problems from the program's
      perspective, both surface identically. The detail string in
      logs distinguishes the two cases for operators.
-7. `auth:` emitter `header:` field on `custom_header` scheme **MUST**
+8. `auth:` emitter `header:` field on `custom_header` scheme **MUST**
    match the RFC 7230 token grammar and **MUST NOT** be `Authorization`
    (case-insensitive). Use `bearer`/`basic` schemes for the
    Authorization header.
-8. `proxy:` URL **MUST** parse as a valid HTTP/HTTPS URL if set.
-9. `exec` source in any binding **MUST** raise a config-load error in
+9. `static_headers:` names **MUST** pass §5.3.2 validation, including
+   the sensitive-name denylist and duplicate-header rejection against
+   `auth:` emitters.
+10. `proxy:` URL **MUST** parse as a valid HTTP/HTTPS URL if set.
+11. `exec` source in any binding **MUST** raise a config-load error in
    v1 (the source name is reserved; v1.1 will gate behind
    `allow_exec_bindings: true`).
 
@@ -671,9 +717,9 @@ The Streamable HTTP transport defines one HTTP endpoint serving:
   - `200 OK` + `text/event-stream` for a streamed response, where the
     stream contains one or more SSE events whose `data:` lines are
     JSON-RPC messages and whose terminating event carries the request
-    response. 2025-06-18 emits one message per event; 2025-03-26 may
-    emit array-form payloads (see §6.4.1 for the backward-compat
-    decoder);
+    response. 2025-06-18 emits one message per event; v1 also accepts
+    legacy array-form payloads from servers that negotiate/accept
+    2025-06-18 but still emit pre-2025-06-18 framing (see §6.4.1);
   - `202 Accepted` with no body when the POST carried only
     notifications and/or responses (no requests requiring a reply).
   - `4xx`/`5xx` per §6.4.
@@ -689,11 +735,14 @@ Every `POST` MUST include:
 
 - `Content-Type: application/json`
 - `Accept: application/json, text/event-stream`
-- `MCP-Protocol-Version: 2025-06-18` — included on every request
-  AFTER the `initialize` exchange completes. **MUST be omitted on the
-  `initialize` request itself** per the 2025-06-18 spec (the version
-  is negotiated by the initialize request body). The impl tracks
-  whether handshake has completed and conditionally adds the header.
+- `MCP-Protocol-Version: <negotiated-version>` — included on every
+  request AFTER the `initialize` exchange completes. **MUST be omitted
+  on the `initialize` request itself** per the 2025-06-18 spec (the
+  version is negotiated by the initialize request body). v1 supports
+  only `"2025-06-18"`; if the server negotiates a different version,
+  the handshake fails unless that version has been explicitly added to
+  the supported-version list in code and tests. The impl tracks whether
+  handshake has completed and conditionally adds the header.
 - `Mcp-Session-Id: <id>` — required after `initialize` returns one;
   absent on the `initialize` request itself.
 - `User-Agent: ptc-runner-mcp/<version>` — set by the impl, not
@@ -701,13 +750,16 @@ Every `POST` MUST include:
 - Auth headers as produced by `Credentials.apply/2` from the upstream's
   `auth:` emitter list (§5.3.1). May produce zero headers (`auth: []`),
   one (single emitter), or many (list of emitters).
+- Static headers from `static_headers:` (§5.3.2), after duplicate-name
+  validation against auth headers.
 
 The `initialize` request body **MUST** carry
 `"protocolVersion": "2025-06-18"`. If the server replies with a
-different `protocolVersion` it accepts (per the lifecycle
-negotiation), v1 logs at info level and proceeds; it does not fall
-back to the older transport. If the server rejects the version, the
-handshake fails and the upstream renders as unavailable at startup.
+different `protocolVersion`, v1 treats that as an unsupported
+negotiated version and the handshake fails. This is intentionally
+stricter than "log and proceed": sending a post-handshake
+`MCP-Protocol-Version` header that differs from the negotiated version
+is a protocol bug.
 
 #### 6.1.2 Headers (server → client)
 
@@ -814,8 +866,9 @@ A `200 OK` + `text/event-stream` response carries one or more SSE
 events, each with `data: <json-rpc>` lines. **2025-06-18 removed
 JSON-RPC batching**, so a 2025-06-18-conformant server emits one
 JSON-RPC message per SSE event's `data:` payload. v1 also accepts
-**array-form payloads as a backward-compat path** for 2025-03-26
-servers still in the field — see OQ-9. The decode procedure:
+**array-form payloads as a compatibility path** for legacy or
+nonconforming servers that negotiate/accept 2025-06-18 but still emit
+pre-2025-06-18 framing — see OQ-9. The decode procedure:
 
 1. Parse each event's `data:` payload as JSON.
 2. **2025-06-18 path (default).** If the parsed value is an object,
@@ -823,7 +876,7 @@ servers still in the field — see OQ-9. The decode procedure:
 3. **Backward-compat path.** If the parsed value is an array, iterate
    and treat each element as one JSON-RPC message. Telemetry SHOULD
    record this (counter `sse_array_compat_count`) so operators
-   notice when they're talking to pre-2025-06-18 servers.
+   notice when an upstream is using legacy SSE framing.
 4. For each message: if it is the response to the in-flight request id,
    complete the call. If it is a notification or a different request,
    **drop** it (v1 does not consume server-pushed notifications).
@@ -846,12 +899,22 @@ detail}`. This is the HTTP analog of the NDJSON pre-decode cap in
 
 ### 6.5 Connection pooling
 
-Each `Upstream.Http` Connection maintains its own `Finch` pool keyed
-by `{name, scheme, host, port}`, sized by `pool_size` (default 4).
-Pool exhaustion → callers queue with deadline `request_timeout_ms`;
-queue timeout returns `{:error, :timeout, ...}`. Different upstream
-names get separate pools (no sharing — auth headers and host configs
-diverge).
+Each `Upstream.Http` impl starts and owns a dedicated named Finch
+process, for example `PtcRunnerMcp.Upstream.Http.Finch.<safe_name>`,
+with pool options derived from that upstream's `pool_size`. Requests
+MUST pass `finch: <that-name>` to Req. This avoids Req's auto-started
+global Finch pool, which the Req docs note is not automatically
+terminated, and guarantees two upstream entries pointing at the same
+host do not accidentally share pool configuration.
+
+Pool exhaustion → callers queue with deadline
+`min(request_timeout_ms, call_opts[:timeout])`; queue timeout returns
+`{:error, :timeout, ...}`. On `Upstream.Http.stop/1` and impl
+termination, the owned Finch process is stopped best-effort before the
+impl exits. If implementation chooses a shared supervised Finch
+instead, it MUST document that choice and prove per-upstream
+`pool_size`, proxy, and transport options do not bleed across upstream
+names.
 
 ## 7. Credentials Registry
 
@@ -870,6 +933,26 @@ ordering). An HTTP upstream's `start_link/2` calls
 `Credentials.materialize/1` synchronously during its handshake; that
 call cannot succeed before `Credentials` is registered.
 
+This is an intentional change from the current top-level
+`PtcRunnerMcp.Application` strategy (`:one_for_one` at
+`mcp_server/lib/ptc_runner_mcp/application.ex:54`). A Credentials
+crash deletes the named ETS redaction table because the table is owned
+by that process. Restarting later children forces HTTP upstreams to
+re-handshake and re-materialize bindings, rebuilding redaction coverage
+before new authenticated requests are sent. If implementation chooses
+not to change the top-level strategy, it MUST instead add an explicit
+credential-generation / redaction-table recovery mechanism and prove
+running HTTP impls cannot continue emitting values whose redaction set
+was lost.
+
+Application config loading changes shape from "return upstream list" to
+"return parsed aggregator config": `%{upstreams: entries, credentials:
+bindings}`. `Credentials` is started whenever the parsed config includes
+a `credentials:` block or any HTTP upstream, including the stdio-only
+Phase 1 case used to test non-disruptive boot. The upstream supervisor
+still starts only when `upstreams` is non-empty, preserving
+`:mcp_no_tools` mode.
+
 ### 7.2 Binding resolution
 
 ```elixir
@@ -879,7 +962,6 @@ defmodule PtcRunnerMcp.Credentials.Binding do
           name: String.t(),
           source: source(),
           scheme_hint: :bearer | :basic | :raw | nil,
-          cache_ttl_ms: pos_integer(),
           spec: map()           # source-specific fields (var, path, command, ...)
         }
 end
@@ -915,12 +997,17 @@ it doesn't have. This revision splits the responsibilities cleanly.
 ### 7.3 `Credentials.apply/2`
 
 ```elixir
+defmodule PtcRunnerMcp.Credentials.RedactedHeaders do
+  @type t :: %__MODULE__{headers: [{String.t(), String.t()}]}
+  defstruct [:headers]
+end
+
 @spec apply(materialization :: %{raw: binary(), scheme_hint: atom(),
                                   expires_at: integer() | :never},
             emitter :: %{scheme: :bearer | :basic | :custom_header,
                           binding: String.t(),
                           header: String.t() | nil}) ::
-        {:ok, {:redacted_headers, [{header :: String.t(), value :: String.t()}]}}
+        {:ok, PtcRunnerMcp.Credentials.RedactedHeaders.t()}
         | {:error, :scheme_mismatch | :unencodable, String.t()}
 ```
 
@@ -941,30 +1028,30 @@ Per-scheme behavior:
   Produces `[{"authorization", "Basic " <> Base.encode64(user <> ":" <> pass)}]`.
   A `raw` that doesn't conform to either shape returns
   `{:error, :unencodable, "basic_shape_invalid"}` (the canonical
-  detail string used across §5.5 #6 third bullet, §6.4, and the
+  detail string used across §5.5 #7 third bullet, §6.4, and the
   `upstream_calls` `error` field).
 
 `scheme_hint` enforcement: if the materialization's `scheme_hint` is
 set (from the binding spec) and does **not** match `emitter.scheme`,
 `apply/2` returns `{:error, :scheme_mismatch, detail}`. `:raw` matches
 any scheme. This is the runtime check; the config-load validator
-performs the same check statically per §5.5 #6.
+performs the same check statically per §5.5 #7.
 
-The result is wrapped in a `{:redacted_headers, list}` tuple that
-pattern-matches as opaque to most code — `Upstream.Http`'s request
-layer is the only consumer that destructures it (to splice into the
-outbound `Req` request); no `Logger` / `inspect` / `Jason.encode`
-path renders the inner list because it's tag-tuple-shaped, and the
-impl tags any in-flight `Req.Request` struct it holds as
-`redacted: true` for the trace/log filter to find.
+The result is wrapped in a small struct (for example
+`%Credentials.RedactedHeaders{headers: [...]}`) whose `Inspect`
+implementation renders only `#Credentials.RedactedHeaders<[REDACTED]>`.
+`Upstream.Http`'s request layer is the only consumer that unwraps it to
+splice headers into the outbound `Req` request. A plain tagged tuple is
+not sufficient here: `inspect({:redacted_headers, headers})` would still
+print the inner list.
 
 The header bytes are **not** held on `Upstream.Http` Connection
 GenServer state across requests in v1. Each request:
 
 1. Calls `Credentials.materialize(binding)` for each emitter
-   (registry lookup; possibly cached).
-2. Calls `Credentials.apply/2` for each emitter to produce
-   `{:redacted_headers, hs}`.
+   (registry lookup plus source read).
+2. Calls `Credentials.apply/2` for each emitter to produce a
+   `%Credentials.RedactedHeaders{}` wrapper.
 3. Splices each emitter's headers into the `Req` request struct,
    in emitter order.
 4. Drops its local reference to all materializations and header lists
@@ -980,23 +1067,16 @@ guarantee tight.)
 
 ### 7.4 Refresh and cache invalidation
 
-For `env` and `literal` sources the resolved value lives as long as
-the source does — `env` is re-checked on every `materialize/1` call,
-`literal` never changes. For `file` source the resolution result is
-cached per binding under `cache_ttl_ms` (default 60 s).
+v1 has no credential value cache. `env` and `file` sources are
+re-resolved on every `materialize/1` call; `literal` is read from the
+parsed binding spec. This keeps rotation semantics simple: changing an
+environment variable inside the BEAM process or replacing a file is
+picked up by the next request / cold start without a `refresh/1` API or
+TTL boundary.
 
-A binding's cache is invalidated:
-
-- when the TTL expires;
-- on explicit `Credentials.refresh(binding_name)` (intended for
-  operator tooling; not called from the HTTP impl);
-- implicitly: when an HTTP upstream's impl exits with `:auth_failed`
-  (§6.3), the next cold-start re-calls `materialize/1`, which will
-  re-resolve from source if the cache has been invalidated by the
-  caller — but `:auth_failed` itself does **not** call `refresh/1`.
-  Operators rotate the source (replace the file, re-export the env
-  var, restart PtcRunner) and the `:auth_failed` retry loop picks up
-  the new value at the next cache miss.
+The redaction set still accumulates every materialized value for the
+server lifetime (§7.5), so old rotated secrets remain redacted if they
+appear in later logs or traces.
 
 ### 7.5 Redaction set and redactor filter
 
@@ -1021,7 +1101,8 @@ register false positives, causing `[REDACTED]` to replace innocent
 substrings). `:private` would prevent the cross-process readers from
 working at all. The codex-1 draft called this "process-private" —
 that wording suggested `:private` and was wrong; this revision uses
-"owner-write, globally-read" which is what `:protected` actually means.
+"owner-write, globally-readable by BEAM processes" which is what
+`:protected` actually means.
 - The table holds **plaintext bytes** (not SHA-256 hashes). The
   codex-1 draft proposed hashing — that idea was wrong: substring-
   matching a log line against `SHA-256("secret123")` does not detect
@@ -1068,15 +1149,18 @@ the value) is out of scope — v1 does not run multi-node.
 The redactor is **defense in depth**. The primary guarantee is
 structural:
 
-(a) Resolved values exist in only three places: the `Credentials`
-    registry's GenServer state, the redaction-set ETS table, and the
-    in-flight `Req` request struct.
+(a) Resolved values are not stored in upstream config maps, Connection
+    snapshots, trace payloads, or `upstream_calls` entries. They exist
+    only in Credentials state/materialization paths, the redaction-set
+    ETS table, transient HTTP header construction variables, and the
+    in-flight `Req` / Finch request.
 (b) Only `Upstream.Http`'s request layer destructures
-    `{:redacted_headers, …}`.
+    `%Credentials.RedactedHeaders{...}`.
 (c) HTTP upstream config has no field that accepts a raw secret —
-    `auth:` references bindings; the removed `headers:` field
-    closed the path that would have allowed `Authorization: Bearer ${TOKEN}`
-    in config (§5.3 explanation).
+    `auth:` references bindings; `static_headers:` is literal-only and
+    rejects sensitive header names; the removed dynamic `headers:` field
+    closed the path that would have allowed
+    `Authorization: Bearer ${TOKEN}` in config (§5.3 explanation).
 
 The redactor catches code paths that violate (b) by accidentally
 inspecting state, plus partial-token leak shapes ("Bearer " prefix +
@@ -1088,11 +1172,11 @@ catch:
   a two-character secret would corrupt logs). v1 does **not**
   enforce a minimum binding length. The codex-2 draft proposed an
   8-byte minimum but it composed badly with `env` / `file` sources
-  whose value is unknown until materialization, and rejected
-  legitimate non-secret `custom_header` bindings (e.g., the GitHub
-  example's `"true"` / `"context"` for read-only and toolset routing).
-  Operators who care about substring-match safety pick longer
-  secrets — entropic credentials are virtually always > 16 bytes.
+  whose value is unknown until materialization. Non-secret short
+  header values should use `static_headers:` so they never enter the
+  redaction set. Operators who care about substring-match safety pick
+  longer secrets — entropic credentials are virtually always > 16
+  bytes.
 - Secrets logged before `Credentials` boots (impossible in practice;
   Credentials is in the supervision tree before Upstream.Supervisor).
 - Disk reads that bypass `Log` / `TraceFile`. Operators who write
@@ -1159,8 +1243,10 @@ upstream from starting; the run-time path never sees them.
 When an HTTP upstream's eager-start handshake fails because
 `Credentials.materialize/1` returned `{:error, :resolution_failed, …}`,
 the upstream renders as "(unavailable at startup)" in the catalog
-(§4.3) and the per-Connection backoff is armed for the first user-
-driven retry. The `upstream_unavailable` reason is recorded with
+(§4.3). The next user-driven call may retry immediately, subject to
+the existing per-program failure cache after one failed
+`ensure_started/1` attempt in that program. The `upstream_unavailable`
+reason is recorded with
 detail `"resolution_failed: <binding-name>"` (the binding name is not
 secret; the value would be, but resolution failed so there is no
 value to leak).
@@ -1262,11 +1348,13 @@ HTTP upstreams. New HTTP-specific limits, configured per upstream:
 
 - **`pool_size`** (default 4) — Finch pool size for this upstream.
 - **`connect_timeout_ms`** (default 5000) — TCP+TLS connect deadline.
-- **`request_timeout_ms`** (default 30000) — full request deadline,
-  envelope around the program's per-call timeout.
+- **`request_timeout_ms`** (default 30000) — HTTP request-envelope
+  deadline. Effective per-call deadline is
+  `min(request_timeout_ms, call_opts[:timeout])`, so the program-level
+  `upstream_call_timeout_ms` is never exceeded.
 
 The credentials registry has no per-call cost worth limiting in v1
-(materialize is cached, redaction is O(n) over a small set).
+(env/file materialization is small, redaction is O(n) over a small set).
 
 ## 11. Telemetry (delta from §10 of aggregator spec)
 
@@ -1283,8 +1371,8 @@ family:
   exit (§6.3 / §4.3.1). Metadata: `%{name, prior_session_id_hash}` —
   the prior session ID is hashed to avoid leaking it in telemetry.
 - `[:ptc_runner_mcp, :credentials, :resolve, :start | :stop]` — per
-  binding materialization, with `%{binding, source, cache_hit?,
-  duration_ms}`. **MUST NOT** include the resolved value.
+  binding materialization, with `%{binding, source, duration_ms}`.
+  **MUST NOT** include the resolved value.
 - `[:ptc_runner_mcp, :credentials, :resolve, :error]` — fired on
   resolution failure, with `%{binding, source, reason}` (`reason` is a
   short atom like `:env_missing` / `:file_not_found`, not a detail
@@ -1301,14 +1389,100 @@ the existing top-level subtrees (`:upstream`, `:program`, `:tools`).
 
 ## 12. Implementation Phases
 
-This is the build sequence. Each phase ends with a clean
-`mix precommit` and a passing codex review (per
-`memory/feedback_codex_review_gate.md`).
+### 12.0 Build orchestration
+
+Phases run **sequentially** (each phase depends on artifacts from the
+previous one). **Within a phase**, work is decomposed into independent
+subagent streams that run in **parallel** where the spec permits.
+
+**Subagent assignment.** All implementation work runs through the
+`Engineer` subagent (TDD discipline, constitutional principles). Spec
+clarifications during a phase route to the `Architect` subagent.
+Codex reviews are invoked via `/codex` (skill: `codex` from
+`memory/feedback_codex_review_gate.md`) — they are **hard gates** and
+do not run via subagents.
+
+**Parallelism rule.** Two streams may run in parallel only if neither
+writes to a file the other reads. Each per-phase plan below tags
+streams as `[P]` (parallel-safe) or `[S]` (sequential, blocks the
+phase).
+
+**Phase exit gates.** A phase is "done" only when **all four** clear:
+
+1. **Spec conformance** — every §-numbered MUST in the relevant
+   section is exercised by a test (annotated with the §-ref in a
+   test-name comment).
+2. **`mix precommit` clean** — format + compile (warnings-as-errors)
+   + credo --strict + dialyzer + test, all green.
+3. **Codex review pass** — `/codex review` against the phase diff
+   returns no [P0]/[P1] findings. [P2] findings that the implementer
+   judges out-of-scope are recorded in the phase's exit note with
+   rationale; [P0]/[P1] block the phase.
+4. **Human sign-off** — short summary written for the user
+   (deliverables + diff size + codex outcome + open follow-ups).
+
+**Codex review cadence.** One codex review at end of each phase
+against the phase's diff. Mid-phase consult (`/codex consult`) is
+allowed when an architectural fork emerges — record the consult
+outcome in the phase's exit note.
+
+**No-cross-phase-leak rule.** A phase MUST NOT introduce code that
+only makes sense once a later phase ships. Phase 1's `Credentials`
+registry is bootable on a stdio-only config and has zero callers
+outside its own tests; Phase 2's `Upstream.Http` works against an
+unauthenticated fixture; Phase 3 is the first phase where the two
+halves wire together. This is a forcing function: each phase must
+stand on its own under `mix test` against the codebase as it exists
+at that phase's HEAD.
+
+**Branching.** Per `memory/feedback_commit_directly.md`, phases land
+on `main` directly (no feature branch). Each phase exit creates one
+commit (or a tight series — credentials parser, registry GenServer,
+redactor wiring as three commits inside Phase 1 is fine).
 
 ### Phase 1 — Credentials registry
 
 **Scope.** Ship `PtcRunnerMcp.Credentials` + `Credentials.Binding` +
 `Credentials.Redactor` against the existing stdio-only world.
+
+**Subagent streams.**
+
+- **1A [S]** — `Binding.parse/1` + binding type module
+  (`mcp_server/lib/ptc_runner_mcp/credentials/binding.ex`). Pure
+  functions; no GenServer. Blocks 1B and 1C.
+- **1B [P]** — `Credentials` GenServer + ETS redaction set
+  (`credentials.ex`). Depends on 1A's binding type. **Parallel with
+  1C** once 1A lands.
+- **1C [P]** — `Credentials.Redactor.scrub/1` + wire-up into `Log`,
+  `TraceFile`, `TracePayload`, `UpstreamCalls`. Depends on 1A's type
+  for table format; reads ETS table by name. **Parallel with 1B.**
+- **1D [S]** — `Application` config-loader extension (parse
+  `credentials:` block, validate `auth:` cross-references, narrow the
+  legacy `${VAR}` resolver per §5.2 / §5.5 #6) **and** supervisor
+  ordering (`Credentials` before `Upstream.Supervisor` via
+  `:rest_for_one`). Blocks until 1A/1B/1C land; this is the
+  integration step.
+- **1E [P]** — Tests (one Engineer subagent per test file in the
+  §13.1 list — `BindingTest`, `CredentialsTest`, `RedactorTest`,
+  `LiteralWarningTest`, plus the boot-integration test). May start as
+  soon as the file each test targets is at least skeleton-merged;
+  each test author owns the failing-test → green-test cycle for
+  their file.
+
+**Codex gate.** End of phase: `/codex review` against the Phase 1
+diff. **Focus prompt** to pass to codex:
+
+> Review the credentials registry diff. Adversarial focus: (1) Is
+> there any code path where a resolved binding value reaches a log,
+> trace, or upstream_calls record without `Redactor.scrub/1` running
+> first? Walk every `Log.log` / `TraceFile.write` / `UpstreamCalls`
+> caller. (2) Is the ETS table mode actually `:protected`, and does
+> the redaction set hold plaintext (not hashes — see §7.5)? (3) Does
+> the supervisor ordering guarantee `Credentials` is registered
+> before any consumer calls `materialize/1` (relevant when Phase 2
+> lands; today no consumer exists, but the boot test must pass).
+> (4) Does the `exec`-source rejection at config-load emit a
+> "deferred to v1.1" message (not a generic "unknown source")?
 
 **Note on standalone shippability.** Phase 1 ships infrastructure
 (`Credentials` registry, `Binding` parser, `Redactor.scrub/1` filter
@@ -1333,7 +1507,8 @@ Shipping Phase 1 alone has zero user-visible effect.
 **Deliverables.**
 
 - `PtcRunnerMcp.Credentials` GenServer + ETS-backed redaction set
-  (`:protected` mode — owner-write, globally-read; §7.5) holding
+  (`:protected` mode — owner-write, globally-readable by BEAM
+  processes; §7.5) holding
   plaintext bytes.
 - `Binding.parse/1` for the v1 sources: `env`, `file`, `literal`.
   **`exec` source explicitly rejected at config-load** with a "v1.1
@@ -1341,7 +1516,7 @@ Shipping Phase 1 alone has zero user-visible effect.
 - `Credentials.materialize/1` returning the §7.2 shape
   `{:ok, %{raw, scheme_hint, expires_at}} | {:error, …}`. **No `:scheme`
   / `:material` keys** — the source layer is scheme-agnostic.
-- `Credentials.apply/2` returning `{:ok, {:redacted_headers, [...]}}`,
+- `Credentials.apply/2` returning `{:ok, %Credentials.RedactedHeaders{}}`,
   taking the full materialization plus the auth emitter spec
   (§7.3); does the Basic `user:pass` shaping internally so the source
   layer doesn't need to know.
@@ -1395,9 +1570,61 @@ discipline (no hashing crept back in), `exec`-deferral error message
 upstream. Validates the wire format and Connection-lifecycle
 integration before adding auth.
 
+**Subagent streams.**
+
+- **2A [S]** — `:req` + `:bandit` Mix dep wiring + dep-presence
+  failure-mode (§4.5). Blocks all other 2-phase work.
+- **2B [P]** — `Upstream.Http.Transport` (Req-based POST wrapper +
+  status-code → behaviour-return mapper per §6.4) and
+  `Upstream.Http.Session` (handshake state, session-id capture,
+  `MCP-Protocol-Version` header conditional, abnormal-exit-on-
+  session-loss per §6.3 / §4.3.1). Two streams may run in parallel
+  if each owns its own file; they meet at `Upstream.Http`.
+- **2C [P]** — SSE response decoder (single-message form +
+  array-form compat path per §6.4.1 / OQ-9, with cumulative
+  `:max_response_bytes` enforcement). Independent of 2B if both
+  publish a small interface module; otherwise 2C blocks on 2B's
+  response-shape contract.
+- **2D [S]** — `Upstream.Http` GenServer that owns its named Finch
+  process and ties 2B + 2C + Connection-lifecycle integration
+  together. Depends on 2B/2C.
+- **2E [S]** — `Application` config-loader extension for
+  `transport: "http"` parsing, `url` / `proxy` / `allow_insecure_*`
+  validation (§5.5 ##2, 3, 6, 8, 9, 10, 11). Independent file but
+  needs 2D's config-shape stabilized.
+- **2F [P]** — `test/support/fake_mcp_http_server.ex` Plug fixture
+  (configurable handshake / session-id / response-shape /
+  inflate-for-too-large / header-introspection). Independent of 2D's
+  internals. Can be developed against the spec's wire format alone.
+- **2G [P]** — Tests per §13.2 (handshake matrix, session-loss DOWN
+  path, pool exhaustion, `:response_too_large` cumulative cap,
+  SSE single + array, 4xx-with-JSON-RPC-body world-fault,
+  eager-start-503 catalog rendering). One Engineer per test file;
+  each requires the fixture (2F) and the impl module they exercise.
+
+**Codex gate.** End of phase: `/codex review` against Phase 2 diff.
+**Focus prompt:**
+
+> Review the HTTP transport diff. Adversarial focus: (1) Connection
+> lifecycle — does session-loss-404 cleanly produce
+> `{:stop, :session_lost}` and does `Connection.abnormal_exit?/1`
+> fire backoff? Same for `:auth_failed` (used by Phase 3 — verify
+> the wiring exists even if no caller produces it yet). (2) SSE
+> decoding — is the cumulative `:max_response_bytes` enforced
+> *pre-decode* per §6.4.1, and does the array-form compat path
+> correctly select the in-flight request id while dropping
+> notifications? (3) Status-code mapping — every row of the §6.4
+> table has a test? In particular, 4xx with JSON-RPC body must map
+> to `:upstream_error` (world-fault), not programmer-fault. (4) Are
+> the named Finch process's lifetime bounds actually tied to the
+> impl GenServer (no zombie pool on impl crash)? (5) Does the
+> `MCP-Protocol-Version` header omission/inclusion match §6.1.1
+> (omitted on initialize; required on every post-handshake POST)?
+
 **Deliverables.**
 
-- `:req` added as optional dep.
+- `:req` added as optional dep; `:bandit` added as test/dev dep for
+  the local HTTP fixture.
 - `PtcRunnerMcp.Upstream.Http` + `Upstream.Http.Session` +
   `Upstream.Http.Transport` modules.
 - Config-loader: `transport: "http"` parsing, URL validation,
@@ -1406,19 +1633,21 @@ integration before adding auth.
 - 2025-06-18 Streamable HTTP handshake (initialize without
   `MCP-Protocol-Version`; notifications/initialized expecting 202; then
   tools/list with `MCP-Protocol-Version: 2025-06-18`) over `Req`.
-- Per-Connection Finch pool, sized by `pool_size`.
+- Dedicated named Finch process per HTTP upstream, sized by
+  `pool_size`, stopped with the impl.
 - Session-id capture and echo (§6.1.2).
 - Session-loss → `:stop, :session_lost` → existing Connection
   `:DOWN` path (§4.3.1).
 - All §6.4 status-code mappings, including 4xx-with-JSON-RPC-body →
   `upstream_error` world-fault.
 - SSE response decoding: single-message form (2025-06-18 default)
-  plus array-form **backward-compat path** for 2025-03-26 servers
-  per §6.4.1 / OQ-9.
+  plus array-form **compatibility path** for legacy/nonconforming
+  servers per §6.4.1 / OQ-9.
 - `max_response_bytes` cumulative cap on streamed responses.
 - Tests:
-  - `Upstream.Http` against a `Plug.Cowboy` fixture server that
-    speaks the 2025-06-18 wire format.
+  - `Upstream.Http` against a local Plug fixture server served by
+    Bandit (`:bandit` test/dev dependency) that speaks the 2025-06-18
+    wire format.
   - Handshake success / handshake-malformed-response / handshake-401.
   - 202 Accepted response to `notifications/initialized` (the codex-1
     draft accepted 200; revised spec rejects 200 here).
@@ -1430,7 +1659,7 @@ integration before adding auth.
     repeatedly pushes data without termination.
   - SSE single-message form: one event with `data:` carrying one
     JSON-RPC object → impl correlates to the request id and completes.
-  - SSE array-form (backward-compat for 2025-03-26 servers): one event
+  - SSE array-form (compatibility path): one event
     with `data:` carrying a JSON array of multiple messages → impl
     extracts the one matching the in-flight request id, drops the rest,
     increments `sse_array_compat_count` telemetry counter.
@@ -1451,20 +1680,99 @@ mapping of HTTP statuses to `upstream_calls.reason`.
 parsing, multi-emitter header construction, redaction of materialized
 values, `:auth_failed` exit semantics.
 
+**Subagent streams.**
+
+- **3A [S]** — `Credentials.apply/2` (§7.3) + the
+  `%Credentials.RedactedHeaders{}` struct with custom `Inspect` impl.
+  Pure functions; blocks 3B and 3D.
+- **3B [P]** — `Upstream.Http` per-request integration: call
+  `Credentials.materialize/1` then `Credentials.apply/2` for each
+  emitter, splice headers into `Req` request, drop references after.
+  Depends on 3A.
+- **3C [P]** — `Application` config-loader extension for `auth:`
+  list parsing (§5.3.1), `static_headers:` (§5.3.2), `proxy:`
+  (§5.3.3), and the §5.5 ##7, 8, 9, 10 validations including
+  duplicate-header rejection and `scheme_hint` static cross-check.
+  Parallel with 3A/3B once the §5.3 config shape is final.
+- **3D [P]** — Boot-time materialization integration: HTTP
+  upstream's eager-start handshake calls `materialize/1`;
+  `:resolution_failed` renders as "(unavailable at startup)". Touches
+  `Upstream.Http.start_link/2` only. Depends on 3A's apply contract.
+- **3E [S]** — 401/403 → `:auth_failed` exit reason wiring; verify
+  the §4.3.1 abnormal-exit handling Phase 2 stubbed actually fires.
+- **3F [P]** — Tests per §13.3:
+  - **3F.1** Per-scheme header shape (bearer, basic with both string
+    and map binding shapes, custom_header) — Engineer subagent.
+  - **3F.2** Multi-emitter ordering and duplicate-name rejection —
+    Engineer subagent.
+  - **3F.3** 401 → world-fault → cold-start re-materialize —
+    Engineer subagent (parameterizes the fixture from Phase 2F).
+  - **3F.4** **`RedactionEndToEndTest` property test** — randomized
+    32-byte secrets; assert byte sequence absent from JSONL trace,
+    `upstream_calls`, log capture buffer over a full
+    handshake-and-call cycle. This is the load-bearing test for the
+    structural-isolation guarantee (§4.2 / §7.5.3). Engineer
+    subagent — must be written by someone who hasn't been deep in
+    the implementation, so they spot leak paths the implementer
+    missed.
+  - **3F.5** `static_headers:` sent verbatim, not redacted, and
+    sensitive-name denylist enforced — Engineer subagent.
+  - **3F.6** `allow_insecure_http: true` without
+    `allow_insecure_auth: true` rejected when `auth:` non-empty —
+    Engineer subagent.
+
+**Codex gate.** End of phase: `/codex review` against Phase 3 diff,
+plus a `/codex challenge` mid-phase before tests are finalized
+(adversarial pass to find leak paths the implementer missed).
+
+**Review focus** (for `/codex review`):
+
+> Review the auth integration diff. Adversarial focus: (1) "Where
+> else can the resolved bytes leak?" — walk every place
+> `materialize/1`'s `:raw` field flows: GenServer state, Connection
+> snapshots, Logger metadata, supervisor restart messages, stack
+> traces, `:sys.get_state` calls, `inspect/2` of any struct that
+> transitively contains the bytes. The `RedactedHeaders` `Inspect`
+> impl must render `[REDACTED]` even on partial-token slices. (2)
+> Is `apply/2`'s `:scheme_mismatch` enforcement actually firing at
+> request time, in addition to the static check at config-load?
+> (3) Does the §7.5.2 first-emission-race property hold under the
+> new wiring — registration into ETS happens *before*
+> `materialize/1` returns, and the request layer never sees a value
+> that isn't already redaction-registered? (4) For multi-emitter
+> upstreams, is duplicate-name rejection happening at config-load
+> AND at request-time (defense in depth), and are headers spliced
+> in declared order?
+
+**Challenge focus** (for `/codex challenge` mid-phase):
+
+> Try to construct a config + program execution path that causes a
+> resolved auth value to appear in any of: a JSONL trace file, an
+> `upstream_calls` envelope, a Logger output, a telemetry event
+> payload, a GenServer crash report, or an `Inspect` rendering of
+> any struct held by Connection or Upstream.Http. The redactor is
+> defense-in-depth, not the primary guarantee — focus on
+> structural paths that *bypass* the redactor (e.g., `:DOWN`
+> messages, `:sys.get_state`, custom telemetry handlers, stack
+> traces from a deliberately raised exception in the request path).
+
 **Deliverables.**
 
 - `auth:` **list** parsing for `bearer`, `basic`, `custom_header`
   schemes (§5.3.1). Multi-emitter support; ordered application;
   config-load rejection of duplicate header names per §5.3.1
   (resolved: reject at config-load; see OQ-2-resolved in §15).
+- `static_headers:` parsing for literal non-secret headers (§5.3.2),
+  including sensitive-name denylist, no `${VAR}` expansion, and
+  duplicate-name rejection against `auth:` emitters.
 - `proxy:` field plumbing: explicit URL only, parsed and passed to
-  `Req` as `connect_options: [proxy: …]` per §5.3.2. **No env-var
+  `Req` as `connect_options: [proxy: …]` per §5.3.3. **No env-var
   resolution** (the codex-1 draft asked for `HTTPS_PROXY` / `NO_PROXY`
   env-var behavior; that was based on a false claim about Finch / Mint
-  auto-resolution and was withdrawn — see §3 and §5.3.2).
+  auto-resolution and was withdrawn — see §3 and §5.3.3).
 - `Upstream.Http` resolves bindings on each request via
-  `Credentials.materialize/1` + `Credentials.apply/2`. Tagged-tuple
-  `{:redacted_headers, ...}` flow per §7.3.
+  `Credentials.materialize/1` + `Credentials.apply/2`. Opaque
+  `%Credentials.RedactedHeaders{}` flow per §7.3.
 - 401 / 403 handling: world-fault, then impl exits abnormally with
   `:auth_failed` reason; next Connection cold-start re-materializes
   bindings (§4.3.1, §6.3).
@@ -1479,14 +1787,16 @@ values, `:auth_failed` exit semantics.
     with both string and map binding, custom_header).
   - Multi-emitter upstream produces all configured headers; ordered.
   - 401 → `nil`; impl exits with `:auth_failed`; Connection
-    invalidates and arms backoff; next cold-start succeeds against
-    the same binding (no auto-refresh) and against a rotated binding.
+    invalidates and arms backoff; next cold-start succeeds against a
+    rotated env/file binding without any explicit refresh call.
   - Token bytes never appear in `upstream_calls`, log lines, trace
     JSONL when an HTTP request is exercised end-to-end. **Property
     test** asserting this across randomized 32-byte secrets.
   - `Authorization` rejected as a `custom_header` field name at
     config load.
   - Mismatched `scheme_hint` rejected at config load.
+  - `static_headers:` values are sent verbatim, are not redacted, and
+    reject sensitive names such as `Authorization` / `Cookie`.
   - Explicit `proxy:` URL is parsed and applied; absence of `proxy:`
     means direct connection (no env-var fallback).
   - `allow_insecure_http: true` without `allow_insecure_auth: true`
@@ -1506,44 +1816,78 @@ documented, requires bearer auth, has a non-trivial tool surface.
 `https://api.githubcopilot.com/mcp/` (Streamable HTTP, bearer auth via
 GitHub PAT). Documented at <https://github.com/github/github-mcp-server>.
 
+**Subagent streams.** Most of Phase 4 is sequential investigation
+work (live endpoint behavior is not parallelizable until known).
+
+- **4A [S]** — Document current GitHub MCP header expectations
+  (`X-MCP-Readonly`, `X-MCP-Toolsets`, PAT scope set) — fetch live
+  docs once, pin the values into the test config, record fetch date
+  in a comment so future drift is visible. Single Engineer subagent
+  with WebFetch.
+- **4B [S]** — Opt-in integration test
+  (`@tag :real_remote_upstream`, gated on `MCP_REAL_REMOTE=1` +
+  `GITHUB_PAT`). Depends on 4A.
+- **4C [S]** — End-to-end probe via `claude -p` against the live
+  aggregator with `--allowedTools mcp__ptc-runner__ptc_lisp_execute`
+  asking the LLM to call `get_me`. Per
+  `memory/reference_aggregator_sandbox.md`, run from
+  `~/ptc-mcp-sandbox/` with the upstreams config copy-pasted in.
+  Capture output + rendered catalog snippet, save to
+  `Plans/aggregator-state-2026-05-09.md` snapshot.
+- **4D [P]** — Failure-mode probe (intentionally invalid PAT →
+  401 → world-fault → next call) and best-effort session-loss probe.
+  Independent of 4C once the test infrastructure exists.
+- **4E [P]** — README + `docs/aggregator-mode.md` HTTP example
+  block. Doc-only stream, runs in parallel with 4C/4D.
+
+**Codex gate.** End of phase: `/codex review` is **not** the
+primary gate here (live-endpoint validation is the gate). Instead:
+
+- `/codex consult` if any wire-format surprise emerges from the live
+  endpoint that the spec didn't predict (record consult outcome in
+  the phase exit note; spec edits route through Architect).
+- `/codex review` only if the integration required spec-shape
+  changes (e.g., a header name turned out wrong).
+
+**Phase 4 exit gate departs from the standard four:** the recorded
+probe transcript + a clean failure-mode probe + the catalog snippet
+in `Plans/aggregator-state-2026-05-09.md` substitute for codex
+review. `mix precommit` and human sign-off still apply.
+
 **Deliverables.**
 
 - Opt-in integration test (`@tag :real_remote_upstream`, gated on
   `MCP_REAL_REMOTE=1` + `GITHUB_PAT`).
 - End-to-end probe upstream config that pins **read-only mode and a
   minimal toolset** to keep the test deterministic and unable to
-  mutate state. All three headers (auth + two scoping) flow through
-  the single `auth:` list per §5.3.1 — there is no separate static-
-  headers field:
+  mutate state. Bearer auth flows through `auth:`; non-secret GitHub
+  scoping headers flow through `static_headers:`:
 
   ```json
   {
     "credentials": {
-      "github-pat":      { "source": "env", "var": "GITHUB_PAT" },
-      "github-readonly": { "source": "literal", "value": "true" },
-      "github-toolsets": { "source": "literal", "value": "context" }
+      "github-pat": { "source": "env", "var": "GITHUB_PAT" }
     },
     "upstreams": {
       "github": {
         "transport": "http",
         "url": "https://api.githubcopilot.com/mcp/",
         "auth": [
-          { "scheme": "bearer",        "binding": "github-pat" },
-          { "scheme": "custom_header", "binding": "github-readonly",
-            "header": "X-MCP-Readonly" },
-          { "scheme": "custom_header", "binding": "github-toolsets",
-            "header": "X-MCP-Toolsets" }
-        ]
+          { "scheme": "bearer", "binding": "github-pat" }
+        ],
+        "static_headers": {
+          "X-MCP-Readonly": "true",
+          "X-MCP-Toolsets": "context"
+        }
       }
     }
   }
   ```
 
   (Note: GitHub's MCP server reads `X-MCP-Readonly: true` and
-  `X-MCP-Toolsets: <comma-list>` to scope tools. `literal` source
-  emits a `Logger.warning` per §5.4.1 — fine in a test context, and
-  the values `"true"` / `"context"` are not secrets so the warning
-  is informational. Confirm header names against current GitHub MCP
+  `X-MCP-Toolsets: <comma-list>` to scope tools. These values are not
+  credentials, so they deliberately bypass the redaction set via
+  `static_headers:`. Confirm header names against current GitHub MCP
   docs at probe time; the GitHub server has rev'd these.)
 
 - **PAT scope expectation.** The test PAT **MUST** carry only
@@ -1579,15 +1923,43 @@ real server.
 
 ### Phase 5 — Documentation, telemetry, hardening
 
-- Telemetry events from §11 wired up.
-- Aggregator authoring card (§8.1) shows the `[transport: http]`
-  annotation.
-- `docs/aggregator-mode.md` HTTP section.
-- README reorientation toward "stdio + HTTP" rather than "stdio".
-- Positioning doc updates: weakness #6 retired, weakness #7
-  retired-with-caveats (binding indirection + structural redaction
-  gives functional parity with Cloudflare's binding objects, but
-  Cloudflare's V8 isolation is still a different threat model).
+**Scope.** Final polish: telemetry, catalog annotation, doc
+updates, positioning-doc retirement of resolved weaknesses.
+
+**Subagent streams.** All five streams are independent.
+
+- **5A [P]** — Telemetry events from §11 (`[:upstream, :http,
+  :request, …]`, `[:credentials, :resolve, …]`, `[:credentials,
+  :redactor, :scrubbed]` sampled). Engineer subagent.
+- **5B [P]** — Aggregator authoring card (§9.1 / §8.1 of base spec)
+  renders `[transport: http]` annotation in catalog. Touches
+  `mcp_server/lib/ptc_runner_mcp/upstream/catalog.ex`.
+- **5C [P]** — `docs/aggregator-mode.md` HTTP section — example
+  config, security guidance, link to `Plans/`.
+- **5D [P]** — README reorientation: "stdio + HTTP" framing in the
+  intro paragraph and aggregator-mode link block.
+- **5E [P]** — `Plans/positioning-mcp-aggregator.md` updates per
+  §14.3: weakness #6 retired; weakness #7 retired-with-caveats;
+  feature signals #3 and #4 marked delivered.
+
+**Codex gate.** End of phase: `/codex review` against Phase 5 diff,
+plus a final `/codex review` against the **cumulative**
+Phase-1-through-5 diff (or the merge commit range) to confirm the
+shipped feature is internally consistent.
+
+**Cumulative review focus:**
+
+> Final review of the HTTP transport + credentials registry feature
+> (Phases 1-5). (1) Re-run the Phase 3 leak audit against the
+> shipped code — does the `RedactionEndToEndTest` actually exercise
+> every emission path Phase 5 just added telemetry to? Telemetry
+> handlers are a new leak surface. (2) Catalog annotation does not
+> break the existing `outputSchema` (§9.3). (3) `docs/` and README
+> claims match the shipped behavior — no overclaim about OAuth,
+> mTLS, persistent token storage, or SSE GET subscriptions (all §3
+> non-goals). (4) Positioning doc weakness retirement is honest —
+> binding indirection gives functional parity for the leak vector,
+> not for the threat model.
 
 ## 13. Testing Requirements
 
@@ -1595,11 +1967,11 @@ real server.
 
 - `BindingTest` — each v1 source's success/failure paths;
   `exec`-rejected-with-deferral-message; type-shape validation at
-  config-load (§5.5 #6 first bullet) — `:basic` consuming a binding
+  config-load (§5.5 #7 first bullet) — `:basic` consuming a binding
   with a `scheme_hint: "bearer"` is rejected loudly.
-- `CredentialsTest` — `materialize` cache semantics; TTL boundary;
-  `refresh/1` on demand; first-emission race (registration occurs
-  before `materialize/1` returns).
+- `CredentialsTest` — `materialize` source-resolution semantics;
+  env/file re-read on each call; first-emission race (registration
+  occurs before `materialize/1` returns).
 - `RedactorTest` — known plaintext substituted across `Log` /
   `TraceFile` / `UpstreamCalls` paths. **Property test** asserting
   that no SHA-256 hash of any registered value appears in any output
@@ -1611,8 +1983,8 @@ real server.
 
 ### 13.2 Phase 2 (HTTP transport, no auth)
 
-- `Upstream.HttpTest` against a `Plug.Cowboy`-based fixture server
-  in `test/support/fake_mcp_http_server.ex`. Fixture supports:
+- `Upstream.HttpTest` against a Plug/Bandit-based fixture server in
+  `test/support/fake_mcp_http_server.ex`. Fixture supports:
   - configurable handshake response (success / malformed / 401 /
     timeout);
   - `application/json` and `text/event-stream` response shapes;
@@ -1622,7 +1994,7 @@ real server.
 - Connection-lifecycle integration tests via the existing
   `RegistryTest` shape, parameterized over impl.
 - `:real_remote_upstream` tag is reserved for Phase 4 (GitHub MCP).
-  Phase 2 stays entirely against the local `Plug.Cowboy` fixture; no
+  Phase 2 stays entirely against the local Plug/Bandit fixture; no
   public-endpoint tests at this phase.
 
 ### 13.3 Phase 3 (Auth integration)
@@ -1732,33 +2104,28 @@ traceability with the codex-3 review log.
 
 **OQ-7-deferred — Should `exec` source be in v1 at all?** **Resolved:
 deferred to v1.1** behind explicit `allow_exec_bindings: true`
-server-level flag. §3 lists `exec` as a non-goal for v1; §5.5 #9
+server-level flag. §3 lists `exec` as a non-goal for v1; §5.5 #11
 rejects it at config load. Operators who need 1Password / Vault /
 STS wire it through `file` source with their own refresh cron. This
 question is closed; the OQ number is preserved for traceability with
 the codex-1 review log.
 
+**OQ-1-resolved — `request_timeout_ms` interaction with per-call
+timeout.** **Resolved: clamp.** `request_timeout_ms` is the HTTP
+envelope, but the effective deadline for pool checkout, send, and read
+is `min(request_timeout_ms, call_opts[:timeout])` (§6.5 / §10). This
+preserves the `Upstream.call/4` invariant that the program-level
+timeout is authoritative.
+
+**OQ-3-resolved — Binding cache invalidation across Connection
+restarts.** **Resolved: no credential value cache in v1.** `env` and
+`file` sources are re-resolved on every `materialize/1` call (§7.4).
+This makes rotation behavior immediate on the next request / cold start
+and removes the need for `Credentials.refresh/1` in v1. A future v2 may
+add caching after adding explicit invalidation and admin reload
+semantics.
+
 ### Open
-
-**OQ-1 — `request_timeout_ms` interaction with per-call timeout.**
-The aggregator's existing `upstream_call_timeout_ms` (§9 of base
-spec) is the per-`tool/mcp-call` deadline the program sees. The new
-`request_timeout_ms` is the HTTP-impl-internal deadline. Proposal:
-`request_timeout_ms` is the **HTTP envelope**, but the impl
-**MUST** clamp the effective deadline to
-`min(request_timeout_ms, upstream_call_timeout_ms)` so the program-
-level timeout is never exceeded. Confirm in Phase 2 that this
-matches the behaviour invariant ("`call/4` MUST enforce `:timeout`").
-
-**OQ-3 — Binding cache invalidation across Connection restarts.**
-When an HTTP Connection's backoff window expires and a new cold-start
-attempt fires, should it force-refresh the binding (bypassing TTL
-cache) or use cached value? Proposal: use cache. A 401 on the cached
-value triggers `:auth_failed` exit; the next cold-start re-calls
-`materialize/1`, which re-resolves at the next TTL boundary.
-Operators rotating a secret out-of-band update the source (file /
-env) and either wait for TTL or call `Credentials.refresh/1` from
-admin tooling. Confirm in Phase 3.
 
 **OQ-4 — Redaction set growth over server lifetime.** The set
 accumulates one entry per binding × rotation. v1 never evicts.
@@ -1803,13 +2170,14 @@ can see whether real upstreams use this surface. v2 may expose
 **OQ-9 — Backward-compat batched SSE.** The 2025-06-18 revision
 **removed** JSON-RPC batching from the wire protocol; an event's
 `data:` payload is a single JSON-RPC message, not an array. v1
-targets 2025-06-18, so a strict reading would say "single-message
-only." But 2025-03-26 servers still in the field may emit batched
-arrays. Proposal: v1 implementations parse single-message form by
-default and **also** accept array-form as a backward-compat path
-(the cost is one branch in the SSE decoder). Mark this as
-"compat path" rather than a 2025-06-18 conformance requirement.
-Confirm in Phase 2.
+targets 2025-06-18 and fails the handshake on a different negotiated
+version (§6.1.1), so this does not mean full 2025-03-26 protocol
+support. But a legacy or nonconforming server may accept 2025-06-18
+and still emit batched arrays. Proposal: v1 implementations parse
+single-message form by default and **also** accept array-form as a
+compatibility path (the cost is one branch in the SSE decoder). Mark
+this as "compat path" rather than a 2025-06-18 conformance
+requirement. Confirm in Phase 2.
 
 ## 16. Citations
 
