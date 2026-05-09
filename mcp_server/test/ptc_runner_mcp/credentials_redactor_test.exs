@@ -189,6 +189,24 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
       assert out.nested == [%{a: 1}, %{b: :two}]
     end
 
+    test "scrubs binary keys (not just values) in maps" do
+      # JSON-encodes verbatim; a secret embedded in a key would leak
+      # through the encoder if scrub_deep walked values only.
+      event = %{
+        "metadata" => %{
+          "deep-secret-aaaaaaaaaaa" => "value",
+          "harmless_key" => "safe"
+        }
+      }
+
+      out = Redactor.scrub_deep(event)
+
+      keys = Map.keys(out["metadata"])
+      refute "deep-secret-aaaaaaaaaaa" in keys
+      assert Enum.any?(keys, &String.contains?(&1, "[REDACTED]"))
+      assert "harmless_key" in keys
+    end
+
     test "scrubs binaries inside lists and tuples" do
       event = %{
         list: ["safe", "deep-secret-aaaaaaaaaaa", "also-safe"],

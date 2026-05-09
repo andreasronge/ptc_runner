@@ -312,6 +312,68 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       assert msg =~ "basic", "expected emitter scheme, got: #{msg}"
     end
 
+    test "scheme_mismatch: basic binding consumed by bearer emitter is rejected",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "tok" => %{
+                "source" => "literal",
+                "value" => "u:p",
+                "scheme_hint" => "basic"
+              }
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "bearer", "binding" => "tok"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+
+      err =
+        assert_raise RuntimeError, fn ->
+          Application.load_aggregator_config(args)
+        end
+
+      msg = Exception.message(err)
+      assert msg =~ "scheme_hint"
+      assert msg =~ "basic"
+      assert msg =~ "bearer"
+    end
+
+    test "scheme_hint :raw feeds basic emitter (no rejection)", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "any" => %{
+                "source" => "literal",
+                "value" => "u:p",
+                "scheme_hint" => "raw"
+              }
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [%{"scheme" => "basic", "binding" => "any"}]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{credentials: _} = Application.load_aggregator_config(args)
+    end
+
     test "scheme_hint :raw feeds any scheme (no rejection)", %{tmp_dir: tmp_dir} do
       cfg_path =
         write_config(
