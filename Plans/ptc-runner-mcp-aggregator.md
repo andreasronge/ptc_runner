@@ -583,10 +583,19 @@ A world-fault failure **MUST**:
 | Failure | Reason |
 |---|---|
 | `ensure_started/1` failed (subprocess spawn error, `initialize` error, `notifications/initialized` rejected, or `tools/list` failure), or the upstream is currently in its post-crash recovery window | `upstream_unavailable` |
-| Upstream returned a JSON-RPC error to a `tools/call` | `upstream_error` |
+| Upstream returned a JSON-RPC error to a `tools/call`, OR returned a successful response with `isError: true` | `upstream_error` |
 | Upstream call exceeded `upstream_call_timeout` | `timeout` |
 | Upstream response exceeded `max_upstream_response_bytes` | `response_too_large` |
 | Per-program upstream call cap exceeded | `cap_exhausted` |
+
+`isError: true` is treated as a world-fault for parity with JSON-RPC
+errors — both surface as `nil` to the program with the human-readable
+detail (extracted from `content[0].text` when the upstream uses the
+standard MCP shape) recorded in `upstream_calls[].error`. Without this
+normalization the documented `(remove nil? results)` / `(when result
+...)` idiom would silently propagate tool-level error envelopes as
+data; the §7.1 *world-fault → nil* contract is the LLM-facing
+guarantee.
 
 `cap_exhausted` is world-fault, not programmer-fault. The LLM may
 write `(pmap #(tool/mcp-call ...) urls)` over a runtime-sized list;
