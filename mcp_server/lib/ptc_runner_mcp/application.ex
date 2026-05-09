@@ -512,6 +512,24 @@ defmodule PtcRunnerMcp.Application do
     mcp-protocol-version mcp-session-id user-agent
   )
 
+  # `auth:` custom_header emitter denylist (case-insensitive, per
+  # §5.3.1). NARROWER than `@static_headers_denylist`:
+  #
+  #   * `Authorization` and `Proxy-Authorization` — use scheme
+  #     "bearer" or "basic" instead. Spec §5.3.1 verbatim.
+  #   * Protocol-controlled (impl owns per §6.1.1 / §6.3) — static
+  #     vs auth doesn't matter; these must NEVER come from config:
+  #     `mcp-protocol-version`, `mcp-session-id`, `user-agent`.
+  #
+  # Critically: `x-api-key`, `cookie`, `set-cookie` are NOT on this
+  # list. `x-api-key` is the canonical use case for custom_header
+  # secret-bearing headers (cited in §5.3.1's example shape). Cookies
+  # via custom_header are unusual but not forbidden by the spec.
+  @auth_custom_header_denylist ~w(
+    authorization proxy-authorization
+    mcp-protocol-version mcp-session-id user-agent
+  )
+
   # HTTP defaults from §5.3.
   @http_default_handshake_timeout_ms 10_000
   @http_default_request_timeout_ms 30_000
@@ -1048,14 +1066,17 @@ defmodule PtcRunnerMcp.Application do
         Source: #{path}
         """
 
-      String.downcase(header) in @static_headers_denylist ->
+      String.downcase(header) in @auth_custom_header_denylist ->
         raise """
         upstreams_config: upstream '#{name}' auth: custom_header `header:` \
-        '#{header}' is in the sensitive-name denylist (case-insensitive).
+        '#{header}' is reserved (case-insensitive).
 
-        Denylisted names cannot be emitted as custom headers; use the
-        appropriate scheme ("bearer"/"basic") for auth-class headers, or
-        rename the header.
+        Reserved names: Authorization / Proxy-Authorization (use scheme
+        "bearer"/"basic"); MCP-Protocol-Version / Mcp-Session-Id /
+        User-Agent (impl-controlled per §6.1.1 / §6.3).
+
+        Other static_headers-denylisted names like X-Api-Key / Cookie
+        are valid custom_header use cases and ARE permitted here.
 
         Source: #{path}
         """

@@ -1484,19 +1484,65 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
       assert msg =~ "Authorization" or msg =~ "authorization"
     end
 
-    # 10. custom_header with header in static_headers denylist (Cookie).
-    test "custom_header with header: Cookie (denylist) raises", %{tmp_dir: tmp_dir} do
-      msg =
-        expect_auth_raise!(
+    # 10. codex-e361ad1 [P1]: §5.3.1 explicitly cites X-Api-Key as a
+    # canonical custom_header use case. It MUST be permitted (the
+    # static_headers denylist applies only to literal non-secret
+    # headers, not to auth: emitters).
+    test "custom_header with header: X-Api-Key is PERMITTED (canonical use case)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
           tmp_dir,
-          [%{"scheme" => "custom_header", "binding" => "tok", "header" => "Cookie"}]
+          Jason.encode!(%{
+            "credentials" => %{
+              "api_key" => %{"source" => "literal", "value" => "test-api-key"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [
+                  %{"scheme" => "custom_header", "binding" => "api_key", "header" => "X-Api-Key"}
+                ]
+              }
+            }
+          })
         )
 
-      assert msg =~ "denylist"
-      assert msg =~ "Cookie"
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert [%{scheme: :custom_header, header: "X-Api-Key"}] = entry.config.auth
     end
 
-    # 10b. Same denylist applies to MCP-Protocol-Version (protocol-controlled).
+    # 10b. Cookie is similarly NOT in the auth_custom_header denylist —
+    # cookies via custom_header are unusual but spec-permitted.
+    test "custom_header with header: Cookie is permitted (not in auth denylist)",
+         %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "credentials" => %{
+              "session" => %{"source" => "literal", "value" => "session-cookie"}
+            },
+            "upstreams" => %{
+              "remote" => %{
+                "transport" => "http",
+                "url" => "https://example.test",
+                "auth" => [
+                  %{"scheme" => "custom_header", "binding" => "session", "header" => "Cookie"}
+                ]
+              }
+            }
+          })
+        )
+
+      args = Application.parse_args(["--upstreams-config", cfg_path])
+      assert %{upstreams: [entry]} = Application.load_aggregator_config(args)
+      assert [%{scheme: :custom_header, header: "Cookie"}] = entry.config.auth
+    end
+
+    # 10c. Same denylist applies to MCP-Protocol-Version (protocol-controlled).
     test "custom_header with header: MCP-Protocol-Version (denylist) raises",
          %{tmp_dir: tmp_dir} do
       msg =
@@ -1511,7 +1557,8 @@ defmodule PtcRunnerMcp.ApplicationCredentialsTest do
           ]
         )
 
-      assert msg =~ "denylist"
+      assert msg =~ "reserved"
+      assert msg =~ "MCP-Protocol-Version"
     end
 
     # 11. RFC 7230 grammar: header with embedded space rejected.
