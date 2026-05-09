@@ -1439,6 +1439,45 @@ Honest weaknesses:
   shutdown of an upstream that's stuck in `initialize`. Not a data
   correctness issue. Promote to its own hardening phase if the
   scenario shows up outside shutdown.
+- **High: Latin1 encoding crash on non-ASCII / large payloads
+  (Phase 4 hardening).** `PtcRunnerMcp.Stdio`'s public-facing port is
+  in default text/Latin1 mode, so any byte outside Latin1 — UTF-8
+  punctuation in program source (e.g., em-dashes), or a large
+  upstream response that gets mirrored back through the program's
+  return value — crashes the entire server with
+  `{:no_translation, :unicode, :latin1}` **before** the
+  `max_upstream_response_bytes` guard can fire. Availability bug:
+  any upstream emitting a >~stdin-buffer response can take down the
+  MCP server. Fix: switch the public Stdio port to `:binary` mode and
+  enforce the size cap on the raw byte stream pre-decode (mirrors how
+  Phase 1b's `Upstream.Stdio` already handles upstream responses).
+  Same fix likely covers the em-dash-in-source crash observed during
+  Phase 3 probing. Resolve before any broader public release.
+- **Medium: `isError: true` upstream envelopes not normalized to
+  `nil` (spec compliance).** When an upstream's `tools/call` returns
+  successfully but with `isError: true` (filesystem-MCP for ENOENT,
+  most upstreams for tool-level failures), the JSON-RPC call itself
+  succeeded, so `upstream_calls` records `status: "ok"`. The §7.1
+  contract — *world-fault → nil, programmer-fault → raise* — implies
+  tool-level errors should be a third bucket. Programs using the
+  documented `(remove nil? results)` / `(when result ...)` idiom
+  silently propagate error envelopes as data. Resolution options:
+  (a) normalize MCP `isError: true` to `nil` and record
+  `upstream_error` in `upstream_calls` (preserves the documented
+  idiom — preferred); (b) add a `:json-error` sentinel parallel to
+  `:json-null` (more accurate but new analyzer surface); (c) document
+  the gap and require programs to inspect `(get result "isError")`
+  (cheapest but defeats the spec promise). Pick (a) in the same
+  hardening phase that fixes the Latin1 issue.
+- **Low: PTC-Lisp has no JSON decoder for upstream string payloads.**
+  Some upstreams (e.g., `mem.read_graph` from
+  `@modelcontextprotocol/server-memory`) embed JSON as a string
+  inside `content[0].text` rather than using `structuredContent`.
+  Programs that need to consume the embedded JSON fall back to
+  string/regex parsing, which is brittle to upstream formatting
+  changes. Options: add a `(json/parse ...)` builtin to
+  `PtcRunner.Lisp`, or auto-decode when an upstream's content
+  payload is JSON-shaped. Low priority; LLMs work around it.
 - Phase 3 catalog `false`-const corner case: `Catalog.render_type/1`
   uses `cond` with truthiness checks to detect `:enum` / `:const`
   constraints, so a schema `{"const": false}` skips the const branch
@@ -1505,6 +1544,23 @@ Honest weaknesses:
   behavior with real MCP clients) deferred to Phase 3 alongside
   catalog rollout. Recommendation in the writeup: continue to
   Phase 3.
+- 2026-05-09 (real-client probes): Hand-driven probe sweep against a
+  live aggregator (filesystem-MCP + memory-MCP) via `claude -p`
+  surfaced two real bugs and one ergonomic gap, all logged in §16:
+  (1) public Stdio port is in Latin1 mode and crashes on non-ASCII or
+  large payloads before the size cap fires (high — availability);
+  (2) upstream `isError: true` envelopes aren't normalized to `nil`,
+  breaking the §7.1 world-fault idiom for tool-level errors (medium
+  — spec compliance); (3) PTC-Lisp has no JSON decoder for upstream
+  string payloads (low — ergonomics). All five §14 spec contracts
+  that were testable from a real client (cap_exhausted under pmap,
+  programmer-fault on unknown tool, cross-server compose with mem,
+  catalog-driven authoring, parallelism gains) **held under load**;
+  the aggregator's value proposition is real. Surprising bonus: the
+  PTC-Lisp `get-in` accepts either keyword or string keys
+  interchangeably, which makes catalog-driven LLM authoring much
+  more forgiving against upstream JSON envelopes. Treat as intended
+  behavior.
 - 2026-05-09 (phase3-shipped): Phase 3 merged as `d93c88f` after
   three codex review rounds. Inline upstream catalog rendered into
   `ptc_lisp_execute`'s description per §12.5 format, frozen at boot

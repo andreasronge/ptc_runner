@@ -10,7 +10,9 @@ over stdio JSON-RPC. The server advertises a single tool,
 `ptc_lisp_execute`, which accepts a PTC-Lisp program plus optional
 `context` and `signature`, runs it in an isolated BEAM process
 (1 s wall-clock, 10 MB memory, no I/O except `println`, no
-filesystem, no network), and returns a structured result.
+filesystem, no network — see [aggregator mode](#aggregator-mode)
+for an opt-in way to call other MCP servers from inside the
+sandbox), and returns a structured result.
 
 The pitch over Python/JS execution servers:
 
@@ -182,7 +184,159 @@ them to the `args` array, e.g.:
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 
-### Tracing for power users
+## Aggregator mode
+
+In default mode the sandbox is sealed: programs do deterministic
+computation, no external I/O. **Aggregator mode** opt-in lets a
+PTC-Lisp program call configured upstream MCP servers via
+`(tool/mcp-call ...)` and compose their results inside the sandbox.
+The calling LLM sees only the final transformed value, plus a
+machine-readable `upstream_calls` audit trail in the response.
+
+Use it when you'd otherwise have an LLM orchestrate N native MCP
+calls and reduce the results client-side. Empirically, on a 3-call
+cross-server filter workflow this gives ~11× token savings and
+~3× wall-clock speedup with `pmap`. See
+[`docs/aggregator-mode.md`](../docs/aggregator-mode.md) for the
+full reference (PTC-Lisp authoring against `tool/mcp-call`,
+catalog format, error model, three example programs).
+
+### Quick start
+
+**1. Write an upstreams config** (JSON). Example —
+`~/ptc-mcp-sandbox/upstreams.json`:
+
+```json
+{
+  "upstreams": {
+    "fs": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@modelcontextprotocol/server-filesystem@2026.1.14",
+        "/Users/you/ptc-mcp-sandbox"
+      ],
+      "handshake_timeout_ms": 60000
+    },
+    "mem": {
+      "command": "npx",
+      "args": ["--yes", "@modelcontextprotocol/server-memory"],
+      "handshake_timeout_ms": 60000
+    }
+  }
+}
+```
+
+The `${VAR}` placeholders inside `env` are resolved from the
+parent process at startup (e.g., `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`).
+Unset variables fail-fast with a clear startup error.
+
+**2. Point the server at the config.** One of, in priority order
+(highest wins):
+
+```bash
+# CLI flag (passed via the client's `args`)
+--upstreams-config /Users/you/ptc-mcp-sandbox/upstreams.json
+
+# Environment variable
+PTC_RUNNER_MCP_UPSTREAMS=/Users/you/ptc-mcp-sandbox/upstreams.json
+
+# XDG default
+~/.config/ptc_runner_mcp/upstreams.json
+```
+
+**3. Wire into your MCP client.** For Claude Code with a wrapper
+script (works around `mix run` PATH inheritance from any client):
+
+```bash
+cat > ~/ptc-mcp-sandbox/run.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+exec 2>>"$HOME/ptc-mcp-sandbox/server.stderr.log"
+cd /absolute/path/to/ptc_runner/mcp_server
+exec /opt/homebrew/bin/mix run --no-halt --no-compile -- \
+  --upstreams-config "$HOME/ptc-mcp-sandbox/upstreams.json"
+EOF
+chmod +x ~/ptc-mcp-sandbox/run.sh
+claude mcp add ptc-runner ~/ptc-mcp-sandbox/run.sh
+```
+
+For Claude Desktop / Cursor / Cline, add `--upstreams-config` to
+the `args` array of an existing release-binary entry:
+
+```json
+"args": ["start", "--upstreams-config", "/absolute/path/to/upstreams.json"]
+```
+
+Restart the client. The `tools/list` description will now include
+an inline catalog of every tool advertised by every configured
+upstream — that's what the LLM uses to know which `(tool/mcp-call
+...)` shapes are valid.
+
+### Aggregator-mode flags
+
+These come into effect when at least one upstream is configured.
+The first two override the v1 1 s / 10 MB defaults to be more
+realistic for programs that orchestrate real subprocess upstreams.
+
+| Flag | Env var | Default (aggregator) | Meaning |
+|---|---|---|---|
+| `--upstreams-config` | `PTC_RUNNER_MCP_UPSTREAMS` | (XDG default) | Path to upstreams JSON. Aggregator mode is enabled iff at least one upstream is configured. |
+| `--program-timeout-ms` | `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS` | `10_000` (10 s) | Outer wall-clock cap on the PTC-Lisp program (replaces v1's 1 s). |
+| `--program-memory-limit-bytes` | `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES` | `100 * 1024 * 1024` (100 MB) | Sandbox heap cap (replaces v1's 10 MB). |
+| `--upstream-call-timeout-ms` | `PTC_RUNNER_MCP_UPSTREAM_CALL_TIMEOUT_MS` | `5_000` (5 s) | Per-upstream-call wall-clock cap. Exceeded → call returns `nil` + entry with reason `timeout`. |
+| `--max-upstream-response-bytes` | `PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES` | `2 * 1024 * 1024` (2 MB) | Per-response size cap, enforced pre-decode. Exceeded → `nil` + `response_too_large`. |
+| `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` | `50` | Total `tool/mcp-call` budget per program. Exceeded → `nil` + `cap_exhausted`. Stops `pmap` over an unbounded list from runaway-firing. |
+
+CLI flag wins over env var; aggregator-mode defaults only apply
+when no explicit value is given.
+
+### Failure model in 30 seconds
+
+`(tool/mcp-call ...)` returns one of three things:
+
+- **A value** when the upstream's `tools/call` succeeded. The
+  returned shape is the upstream's full MCP envelope —
+  `%{"content" => [%{"type" => "text", "text" => "..."}], ...}`
+  for most upstreams. Drill in with `(get-in result [:content 0
+  :text])` (PTC-Lisp's `get-in` accepts keyword or string keys
+  interchangeably).
+- **`nil`** for *world-fault* failures — upstream unavailable,
+  timeout, response oversize, per-program cap exhausted. The
+  `upstream_calls` array on the response carries the reason.
+- **A runtime error envelope** for *programmer-fault* failures —
+  unknown server, unknown tool on a started upstream, args that
+  aren't JSON-encodable. The program terminates with a `runtime_error`
+  reason; the LLM should fix the program rather than retry.
+
+Programs that don't care about the distinction can write
+`(remove nil? results)` to discard world-faults and `(when result
+...)` to skip individual `nil`s.
+
+### Known limits (Phase 4 hardening)
+
+Two real bugs surfaced during real-client probing; tracked in
+[`Plans/ptc-runner-mcp-aggregator.md`](../Plans/ptc-runner-mcp-aggregator.md)
+§16:
+
+- The public-facing stdio port runs in Latin1 mode and crashes on
+  non-ASCII bytes (UTF-8 punctuation in a program, large upstream
+  responses being mirrored back through the program's return).
+  Symptom: `MCP error -32000: Connection closed`. Workaround: keep
+  program source ASCII-only; transform large upstream payloads
+  inside the sandbox rather than returning them verbatim.
+- An upstream `tools/call` that succeeds with `isError: true`
+  (e.g., filesystem-MCP for a missing file) is recorded as
+  `status: "ok"` in `upstream_calls` and the program receives the
+  error envelope as a non-`nil` value. The documented `(remove
+  nil? ...)` idiom won't filter these out. Workaround: explicitly
+  inspect `(get result "isError")` for tool-call results that can
+  fail at the application level.
+
+Both fixes are tracked for a hardening pass before broader public
+release.
+
+## Tracing for power users
 
 Setting `--trace-dir /tmp/ptc-traces` writes one JSONL file per
 `tools/call` invocation under that directory. Each file contains
