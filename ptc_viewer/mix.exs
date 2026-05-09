@@ -21,7 +21,8 @@ defmodule PtcViewer.MixProject do
     [
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.6"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
     ]
   end
 end
