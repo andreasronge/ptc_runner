@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Application do
     * `--max-concurrent-calls <int>` / `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS`
     * `--program-timeout-ms <int>` / `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS`
     * `--program-memory-limit-bytes <int>` / `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES`
+    * `--aggregator-read-only` / `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY`
     * `--log-level <debug|info|warn|error>` / `PTC_RUNNER_MCP_LOG_LEVEL`
     * `--trace-dir <path>` / `PTC_RUNNER_MCP_TRACE_DIR`
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
@@ -32,7 +33,15 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Credentials, Limits, Log, TraceConfig, TraceHandler}
+  alias PtcRunnerMcp.{
+    AggregatorConfig,
+    ConcurrencyGate,
+    Credentials,
+    Limits,
+    Log,
+    TraceConfig,
+    TraceHandler
+  }
 
   @impl Application
   def start(_type, _args) do
@@ -41,6 +50,7 @@ defmodule PtcRunnerMcp.Application do
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
 
     %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
+    apply_aggregator_config(args)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
 
@@ -108,6 +118,7 @@ defmodule PtcRunnerMcp.Application do
           upstream_call_timeout_ms: :integer,
           max_upstream_response_bytes: :integer,
           max_upstream_calls_per_program: :integer,
+          aggregator_read_only: :boolean,
           upstreams_config: :string,
           log_level: :string,
           trace_dir: :string,
@@ -117,6 +128,22 @@ defmodule PtcRunnerMcp.Application do
       )
 
     Map.new(opts)
+  end
+
+  # Public-but-undocumented seam used by tests to verify CLI > env >
+  # default precedence for non-limit aggregator behavior.
+  @doc false
+  @spec apply_aggregator_config(map()) :: :ok
+  def apply_aggregator_config(args) when is_map(args) do
+    AggregatorConfig.set(%{
+      read_only:
+        read_bool(
+          args,
+          :aggregator_read_only,
+          "PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY",
+          AggregatorConfig.defaults().read_only
+        )
+    })
   end
 
   # Public-but-undocumented seam used by `Application.start/2` and by
@@ -295,6 +322,29 @@ defmodule PtcRunnerMcp.Application do
 
       _ ->
         default
+    end
+  end
+
+  defp read_bool(args, key, env_name, default) do
+    case env_or(args, key, env_name, nil) do
+      nil -> default
+      value when is_boolean(value) -> value
+      value when is_binary(value) -> parse_bool(value, default)
+      _ -> default
+    end
+  end
+
+  defp parse_bool(value, default) do
+    case String.downcase(String.trim(value)) do
+      "1" -> true
+      "true" -> true
+      "yes" -> true
+      "on" -> true
+      "0" -> false
+      "false" -> false
+      "no" -> false
+      "off" -> false
+      _ -> default
     end
   end
 

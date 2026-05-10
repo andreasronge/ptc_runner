@@ -17,7 +17,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{Limits, Tools, UpstreamCalls}
+  alias PtcRunnerMcp.{AggregatorConfig, Limits, Tools, UpstreamCalls}
   alias PtcRunnerMcp.Upstream.Registry
 
   @registry_name PtcRunnerMcp.Upstream.Registry
@@ -27,10 +27,12 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
     {:ok, _pid} = Registry.start_link(name: @registry_name)
     Limits.set(Limits.defaults())
+    AggregatorConfig.set(AggregatorConfig.defaults())
 
     on_exit(fn ->
       stop_existing_registry()
       Limits.set(Limits.defaults())
+      AggregatorConfig.set(AggregatorConfig.defaults())
     end)
 
     :ok
@@ -682,6 +684,17 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       annotations = Tools.tool_entry()["annotations"]
       assert annotations["readOnlyHint"] == false
       assert annotations["destructiveHint"] == true
+      assert annotations["idempotentHint"] == false
+      assert annotations["openWorldHint"] == true
+    end
+
+    test "read-only aggregator config advertises non-destructive but still open-world" do
+      put_fake("alpha", %{})
+      :ok = AggregatorConfig.set(%{read_only: true})
+
+      annotations = Tools.tool_entry()["annotations"]
+      assert annotations["readOnlyHint"] == true
+      assert annotations["destructiveHint"] == false
       assert annotations["idempotentHint"] == false
       assert annotations["openWorldHint"] == true
     end

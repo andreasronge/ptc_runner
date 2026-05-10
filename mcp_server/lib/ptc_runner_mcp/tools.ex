@@ -37,6 +37,7 @@ defmodule PtcRunnerMcp.Tools do
     UpstreamCalls
   }
 
+  alias PtcRunnerMcp.AggregatorConfig
   alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
@@ -321,17 +322,26 @@ defmodule PtcRunnerMcp.Tools do
     }
   end
 
-  # Phase 1a §8.2: in aggregator mode the static contract is "this
-  # server can call upstream MCP tools." `destructiveHint: true` is
-  # the conservative worst-case advertisement; `false` would falsely
-  # claim safety when configured upstreams may delete or mutate.
+  # Phase 1a §8.2: aggregator mode is conservative by default because
+  # configured upstreams may delete or mutate. `--aggregator-read-only`
+  # is an operator assertion for read-only upstream configurations; it
+  # changes annotations only, not enforcement.
   defp annotations_for(:mcp_aggregator) do
-    %{
-      "readOnlyHint" => false,
-      "destructiveHint" => true,
-      "idempotentHint" => false,
-      "openWorldHint" => true
-    }
+    if AggregatorConfig.read_only?() do
+      %{
+        "readOnlyHint" => true,
+        "destructiveHint" => false,
+        "idempotentHint" => false,
+        "openWorldHint" => true
+      }
+    else
+      %{
+        "readOnlyHint" => false,
+        "destructiveHint" => true,
+        "idempotentHint" => false,
+        "openWorldHint" => true
+      }
+    end
   end
 
   @doc "The single tool entry returned in `tools/list`."

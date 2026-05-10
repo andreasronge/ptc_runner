@@ -22,7 +22,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.Tools
+  alias PtcRunnerMcp.{AggregatorConfig, Tools}
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
@@ -37,8 +37,10 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
     on_exit(fn ->
       stop_existing_registry()
       Catalog.clear_frozen()
+      AggregatorConfig.set(AggregatorConfig.defaults())
     end)
 
+    AggregatorConfig.set(AggregatorConfig.defaults())
     :ok
   end
 
@@ -88,6 +90,19 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       ann = entry["annotations"]
       assert ann["readOnlyHint"] == false
       assert ann["destructiveHint"] == true
+      assert ann["openWorldHint"] == true
+    end
+
+    test "aggregator read-only config flips safety annotations for Codex-style clients" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, @registry_name)
+      :ok = Catalog.freeze("")
+      :ok = AggregatorConfig.set(%{read_only: true})
+
+      ann = Tools.tool_entry()["annotations"]
+      assert ann["readOnlyHint"] == true
+      assert ann["destructiveHint"] == false
+      assert ann["idempotentHint"] == false
       assert ann["openWorldHint"] == true
     end
 
