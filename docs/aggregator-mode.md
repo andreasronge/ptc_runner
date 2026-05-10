@@ -50,7 +50,7 @@ config from the first match in:
 If none is found, the server runs in MCP v1 (`:mcp_no_tools`)
 mode and `(tool/mcp-call ...)` is unavailable.
 
-### Format
+### Format — stdio upstream
 
 ```json
 {
@@ -70,23 +70,118 @@ mode and `(tool/mcp-call ...)` is unavailable.
 }
 ```
 
-`${VAR}` placeholders **MUST** be resolved from the parent
-process environment at startup. Unset variables abort startup
-with a clear error.
+`${VAR}` placeholders inside stdio `env` values are resolved
+from the parent-process environment at startup. Unset
+variables abort startup with a clear error. **Note**: the
+`${VAR}` resolver is narrowed to stdio `env` only — credentials,
+HTTP `url`, `static_headers`, `proxy`, and other fields are
+parsed literally (see `Plans/http-transport-credentials.md` §5.2).
 
-The configured upstream name (`"fs"`, `"github"`) is the string
-PTC-Lisp programs pass as `:server`. Tool names are discovered
-from each upstream's `tools/list` response and surfaced in the
-catalog (see [Catalog](#catalog) below).
+### Format — HTTP upstream + credentials
+
+`Plans/http-transport-credentials.md` adds Streamable HTTP
+transport (MCP rev 2025-06-18) and a credentials registry:
+
+```json
+{
+  "credentials": {
+    "github-pat": {
+      "source": "env",
+      "var": "GITHUB_PAT"
+    }
+  },
+  "upstreams": {
+    "github": {
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth": [
+        { "scheme": "bearer", "binding": "github-pat" }
+      ],
+      "static_headers": {
+        "X-MCP-Readonly": "true"
+      }
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/sandbox"]
+    }
+  }
+}
+```
+
+Mixed transports are fully supported. From the program's
+perspective, an HTTP upstream and a stdio upstream are
+indistinguishable.
+
+**Credentials.** Top-level `credentials:` block holds named
+bindings. Three sources are supported in v1: `env` (read from
+process env at request time, never cached), `file` (read +
+trim trailing whitespace at request time), and `literal`
+(value embedded in config — emits a `Logger.warning` outside
+`MIX_ENV: :test`). The reserved source `exec` is deferred to
+v1.1.
+
+**Auth emitters.** Each HTTP upstream's `auth:` is an ordered
+list. Three schemes:
+
+- `bearer` → `Authorization: Bearer <value>`
+- `basic` → `Authorization: Basic base64(user:pass)`. The
+  binding's `value` may be either `user:pass` or a JSON
+  `{"user":"…","pass":"…"}` shape.
+- `custom_header` → `<header>: <value>`. The header name MUST
+  match RFC 7230 token grammar and MUST NOT be `Authorization`
+  (use `bearer`/`basic`) or any of the impl-controlled
+  protocol headers (`MCP-Protocol-Version`, `Mcp-Session-Id`,
+  `User-Agent`).
+
+**Static headers.** `static_headers:` sets literal non-secret
+headers (e.g., `X-MCP-Readonly`, `X-Tenant`). The `${VAR}`
+resolver does NOT touch these — they are parsed verbatim.
+Sensitive header names are rejected at config-load:
+`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`,
+`X-Api-Key`, plus the protocol-controlled triple. Use `auth:`
+emitters for any secret-bearing header.
+
+**HTTPS by default.** Plain `http://` URLs are rejected unless
+`allow_insecure_http: true` is set. Sending `auth:` over plain
+HTTP additionally requires `allow_insecure_auth: true` — two
+explicit opt-ins.
+
+**Optional `:req` dep.** HTTP transport requires the `:req`
+package. It's an optional Mix dep — stdio-only operators don't
+need it. If a `transport: "http"` entry is configured but
+`:req` is unloaded, boot fails loudly with a clear message.
+
+**Resolution semantics.**
+
+- Resolved auth bytes are NEVER stored in upstream config maps,
+  Connection state, trace JSONL, `upstream_calls` envelopes, or
+  Logger output. Structural isolation per
+  `Plans/http-transport-credentials.md` §4.2 is the primary
+  guarantee.
+- The redactor (substring-replaces registered plaintext with
+  `[REDACTED]` in any formatted string the logger / trace /
+  upstream_calls writers emit) is defense in depth.
+- env / file bindings are re-resolved on every request — no
+  in-process value cache. Rotating an env var or replacing a
+  file is picked up on the next request without restart.
 
 ### Operational notes
 
 - Self-as-upstream is rejected at startup (a configured
   `command` whose resolved path equals the running PtcRunner
-  release).
+  release). The check applies to stdio entries; an HTTP URL
+  pointing at this PtcRunner's loopback is technically possible
+  and unsafeguarded — programs that loop will eventually hit
+  `max_upstream_calls_per_program`.
 - `fake` fields are NOT honored from the JSON config — fakes
   exist only for tests and require the `Upstream.Registry`
   test API.
+- Boot-time HTTP failures (handshake 503, binding resolution
+  failure) are non-fatal — the upstream renders as
+  "(unavailable at startup)" in the catalog and arms backoff
+  for the next call. The aggregator does not refuse to boot
+  because a remote MCP is down.
 
 ## Writing PTC-Lisp programs against `tool/mcp-call`
 

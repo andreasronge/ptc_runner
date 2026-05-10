@@ -19,6 +19,13 @@ Build LLM agents that write and execute programs. SubAgents combine the reasonin
 > For the conceptual overview (when to use it, comparison with
 > Python / JS execution servers, security model), see
 > [`docs/mcp-server.md`](docs/mcp-server.md).
+>
+> **Aggregator mode** wraps any combination of upstream MCP servers
+> — stdio (`@modelcontextprotocol/server-filesystem`, in-process
+> CLIs) and HTTP (Streamable HTTP rev 2025-06-18; bearer / basic /
+> custom-header auth via a credentials registry; `https://api.githubcopilot.com/mcp/`,
+> Cloudflare-hosted MCPs, etc.) — and exposes them through a single
+> `(tool/mcp-call …)` form. See [`docs/aggregator-mode.md`](docs/aggregator-mode.md).
 
 ## Quick Start
 
