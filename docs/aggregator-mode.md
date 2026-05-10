@@ -352,6 +352,10 @@ github:
     sees both "this argument is a fixed literal" and what the
     literal is. Strings carry their JSON quotes (`const<"fixed">`),
     numbers and booleans render bare (`const<42>`, `const<true>`).
+    Falsy consts are detected by key-presence rather than
+    truthiness, so `{"const": false}` / `{"const": null}` /
+    `{"const": 0}` / `{"const": ""}` all render `const<…>` and do
+    not collapse to the primitive type label.
   - Both override the primitive `type` label: a schema like
     `{"type": "string", "enum": ["open","closed"]}` renders as
     `enum<string>`, NOT `string`. Constrained args are exactly

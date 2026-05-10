@@ -98,6 +98,40 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
       assert meta.reason == :upstream_error
     end
 
+    # §16 (decomposed cold-start telemetry): the `:stop` event splits
+    # the wall-clock total into ensure-started cost (cold-start
+    # spawn + handshake) and call cost (steady-state `tools/call`),
+    # so operators can attribute regressions to one or the other.
+    # Both fields are always present, both on success and on
+    # world-fault, with `0` when the corresponding phase didn't run.
+    test ":stop carries decomposed ensure_duration_ms + call_duration_ms" do
+      :ok = put_fake("alpha", %{"echo" => fn args, _ -> {:ok, args} end})
+
+      _env =
+        Tools.call_with_gate(%{
+          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|
+        })
+
+      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, stop_meta}
+
+      assert is_integer(stop_meta.ensure_duration_ms) and stop_meta.ensure_duration_ms >= 0
+      assert is_integer(stop_meta.call_duration_ms) and stop_meta.call_duration_ms >= 0
+    end
+
+    test ":stop carries decomposed durations on world-fault too" do
+      :ok = put_fake("alpha", %{"err" => fn _, _ -> {:error, :upstream_error, "boom"} end})
+
+      _env =
+        Tools.call_with_gate(%{
+          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|
+        })
+
+      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, meta}
+      assert meta.status == :error
+      assert is_integer(meta.ensure_duration_ms) and meta.ensure_duration_ms >= 0
+      assert is_integer(meta.call_duration_ms) and meta.call_duration_ms >= 0
+    end
+
     test "default metadata does NOT include raw args or raw results" do
       :ok =
         put_fake("alpha", %{
