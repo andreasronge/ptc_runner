@@ -183,6 +183,7 @@ them to the `args` array, e.g.:
 | `--trace-dir` | `PTC_RUNNER_MCP_TRACE_DIR` | unset | Directory for per-call JSONL trace files. Tracing is OFF unless this is set. |
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
+| `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
 
 ## Aggregator mode
 
@@ -300,6 +301,66 @@ an inline catalog of every tool advertised by every configured
 upstream — that's what the LLM uses to know which `(tool/mcp-call
 ...)` shapes are valid.
 
+### Codex configuration
+
+Codex reads MCP servers from `~/.codex/config.toml` and can be
+configured with `codex mcp add`. For aggregator setups where all
+upstreams are read-only by construction, set
+`PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY=true` (or pass
+`--aggregator-read-only`) so Codex sees `ptc_lisp_execute` as
+non-destructive. Without this setting, aggregator mode advertises the
+conservative worst case (`destructiveHint: true`) because arbitrary
+upstreams may mutate or delete data; noninteractive Codex runs may
+cancel such tool calls.
+
+Example read-only GitHub upstream config:
+
+```json
+{
+  "upstreams": {
+    "github": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "-e", "GITHUB_READ_ONLY=1",
+        "-e", "GITHUB_TOOLSETS=repos,issues,pull_requests",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
+      "handshake_timeout_ms": 60000
+    }
+  }
+}
+```
+
+Example wrapper:
+
+```bash
+cat > ~/ptc-mcp-sandbox/run-codex.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token)"
+export PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY=true
+
+exec 2>>"$HOME/ptc-mcp-sandbox/server.stderr.log"
+cd /absolute/path/to/ptc_runner/mcp_server
+exec /opt/homebrew/bin/mix run --no-halt --no-compile -- \
+  --upstreams-config "$HOME/ptc-mcp-sandbox/upstreams.json"
+EOF
+chmod +x ~/ptc-mcp-sandbox/run-codex.sh
+codex mcp add ptc-runner -- ~/ptc-mcp-sandbox/run-codex.sh
+```
+
+`--aggregator-read-only` is an operator assertion, not a policy
+engine. It changes MCP annotations only. Upstream servers still need
+to enforce read-only behavior themselves (for example,
+`GITHUB_READ_ONLY=1`, narrow GitHub toolsets, scoped filesystem
+directories, or upstream-specific read-only modes).
+
 ### What the LLM sees
 
 Even with N upstreams configured, the client's `tools/list` returns
@@ -373,6 +434,7 @@ realistic for programs that orchestrate real subprocess upstreams.
 | `--upstream-call-timeout-ms` | `PTC_RUNNER_MCP_UPSTREAM_CALL_TIMEOUT_MS` | `5_000` (5 s) | Per-upstream-call wall-clock cap. Exceeded → call returns `nil` + entry with reason `timeout`. |
 | `--max-upstream-response-bytes` | `PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES` | `2 * 1024 * 1024` (2 MB) | Per-response size cap, enforced pre-decode. Exceeded → `nil` + `response_too_large`. |
 | `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` | `50` | Total `tool/mcp-call` budget per program. Exceeded → `nil` + `cap_exhausted`. Stops `pmap` over an unbounded list from runaway-firing. |
+| `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Advertise aggregator mode as read-only/non-destructive for clients like Codex when upstreams enforce read-only behavior. |
 
 CLI flag wins over env var; aggregator-mode defaults only apply
 when no explicit value is given.
@@ -406,6 +468,11 @@ Programs that don't care about the distinction can write
 `(remove nil? results)` to discard world-faults and `(when result
 ...)` to skip individual `nil`s.
 
+Common LLM authoring mistake: upstream calls return the upstream's
+MCP tool-result envelope, not always the direct business value. Prefer
+`(mcp/text result)` for text content and `(mcp/json result)` for JSON
+payloads instead of hand-rolled `get-in` chains.
+
 ## Tracing for power users
 
 Setting `--trace-dir /tmp/ptc-traces` writes one JSONL file per
@@ -420,6 +487,27 @@ when `--trace-dir` is unset.
 `context`, and rendered `result` bytes; `summary` (the default
 when tracing is on) records sizes and SHA-256 digests only.
 Pick `summary` unless you are actively debugging a specific call.
+
+For local evaluation of aggregator benefits, run with:
+
+```bash
+--trace-dir /tmp/ptc-traces --trace-payloads full
+```
+
+Then inspect the JSONL trace file to see the generated PTC-Lisp
+program, `program_bytes`, total call duration, and result size. The
+MCP response's `upstream_calls` array records each upstream call's
+server, tool, status, reason on failure, and duration. To estimate
+token savings, compare:
+
+- aggregator `tools/list` bytes vs the sum of native upstream
+  `tools/list` bytes;
+- aggregator final result bytes vs the sum of native upstream raw
+  result bytes.
+
+Use `--trace-payloads full` only for local debugging or measurement;
+it records source programs and payload values. Use `summary` or
+`none` for normal operation.
 
 ## Lifecycle commands
 
