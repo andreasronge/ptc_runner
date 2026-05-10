@@ -184,10 +184,16 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # The map keys are strings (PTC-Lisp's JSON convention), and
       # `get-in` accepts integer list indices, so the path
       # `["content" 0 "text"]` resolves to the file's text.
+      # `Jason.encode!/1` produces the JSON-encoded form of the path
+      # (with surrounding quotes and embedded backslashes/quotes
+      # escaped). PTC-Lisp's string literal syntax matches JSON's,
+      # so this is a syntactically safe Lisp string regardless of
+      # what `System.tmp_dir!()` returns — Windows backslashes,
+      # quotes in $TMPDIR, etc. all survive intact.
       program = """
       (let [resp (tool/mcp-call {:server "#{@upstream_name}"
                                  :tool "read_text_file"
-                                 :args {:path "#{file_path}"}})
+                                 :args {:path #{Jason.encode!(file_path)}}})
             text (get-in resp ["content" 0 "text"])
             lines (split-lines text)]
         {:line-count (count lines)})
@@ -301,10 +307,13 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # `error`.
       missing = Path.join(tmpdir, "definitely_not_there.txt")
 
+      # `Jason.encode!/1` for the same reason as the success-path
+      # test above — emits a JSON-encoded (quote-and-escape-safe)
+      # Lisp string literal regardless of $TMPDIR contents.
       program = """
       (let [r (tool/mcp-call {:server "#{@upstream_name}"
                               :tool "read_text_file"
-                              :args {:path "#{missing}"}})]
+                              :args {:path #{Jason.encode!(missing)}}})]
         {:was-nil (nil? r)})
       """
 

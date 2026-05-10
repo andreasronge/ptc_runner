@@ -842,7 +842,7 @@ Aggregator mode adds one event prefix to the v1 set:
 | Event | Measurements | Metadata |
 |---|---|---|
 | `[:ptc_runner_mcp, :upstream, :call, :start]` | `system_time` | `request_id`, `server`, `tool`, `caller: :mcp`, `profile: :mcp_aggregator` |
-| `[:ptc_runner_mcp, :upstream, :call, :stop]` | `duration` | `request_id`, `server`, `tool`, `status`, `reason?`, `caller: :mcp`, `profile: :mcp_aggregator` |
+| `[:ptc_runner_mcp, :upstream, :call, :stop]` | `duration` | `request_id`, `server`, `tool`, `status`, `reason?`, `ensure_duration_ms`, `call_duration_ms`, `caller: :mcp`, `profile: :mcp_aggregator` |
 | `[:ptc_runner_mcp, :upstream, :call, :exception]` | `duration` | `request_id`, `server`, `tool`, `kind`, `reason`, `stacktrace`, `caller: :mcp`, `profile: :mcp_aggregator` |
 
 `profile` is a metadata field, not a measurement. `caller:` **MUST
@@ -853,6 +853,16 @@ Default metadata **MUST NOT** include raw upstream tool arguments or
 raw upstream results. Operators who need to debug a broken upstream
 opt in via the existing `trace_handler` / `trace_file` surfaces; the
 default-off behavior protects production logs from client-data leakage.
+
+`ensure_duration_ms` and `call_duration_ms` decompose the same
+wall-clock that `upstream_calls[].duration_ms` aggregates per §8.5 —
+the former is the cold-start spawn + handshake cost paid by the
+leader of a `pmap` cluster (followers see `0`), the latter is the
+steady-state `tools/call` round-trip. Both are integer milliseconds
+and both are always present on `:stop` (`0` when the corresponding
+phase didn't run, e.g. `call_duration_ms: 0` on an `ensure_started`
+failure). Sum equals the `duration` measurement on the same event
+modulo measurement granularity.
 
 ## 11. MCP v1 Seams (Phase 0)
 
@@ -1459,31 +1469,37 @@ Honest weaknesses:
   the text and additively populates `structuredContent` so downstream
   programs can read typed values without manual string parsing. Auto-
   decode added — see `Plans/json-support.md` §6.
-- Phase 3 catalog `false`-const corner case: `Catalog.render_type/1`
-  uses `cond` with truthiness checks to detect `:enum` / `:const`
-  constraints, so a schema `{"const": false}` skips the const branch
-  and renders as the primitive type (`boolean`) instead of
-  `const<false>`. Fix is one line — `Map.has_key?` instead of
-  truthiness. Real-world impact is narrow (most boolean consts in MCP
-  tool schemas are omitted rather than set to `false`), but the
-  affected tools would advertise the wrong catalog label.
-- Real-upstream test path-escaping (Phase 2.2 follow-up): the
-  `real_filesystem_test` interpolates the temp directory path
-  directly into a PTC-Lisp source string. On macOS/Linux with sane
-  paths this is fine, but on Windows or with a `TMPDIR` containing
-  backslashes/quotes the path would change the parsed `:path` arg
-  or break Lisp parsing. Fix is one line:
-  `Jason.encode!(file_path)` (or equivalent) to produce a
-  syntactically safe Lisp string literal. Only matters when running
-  the opt-in test on a non-POSIX-path environment.
-- Decomposed cold-start telemetry: §10 telemetry currently emits a
-  single `duration` measurement on the upstream-call span.
-  `upstream_calls[].duration_ms` includes ensure-started overhead per
-  §8.5, but the telemetry layer does not split `ensure_duration` and
-  `call_duration` into separate metadata fields. If operators want to
-  attribute cold-start cost vs steady-state cost, add the split in
-  Phase 1b or as a follow-up (cheap to add — both values already
-  exist in the closure's local scope).
+- **Resolved (2026-05-10): Phase 3 catalog `false`-const corner case
+  fixed.** Originally: `Catalog.render_type/1` used `cond` with
+  truthiness binding to detect `:enum` / `:const` constraints, so a
+  schema `{"const": false}` (and any other falsy const — `null`, `0`,
+  `""`) skipped the const branch and rendered as the primitive type
+  instead of `const<false>`. Fix replaced the truthy-binding cond
+  with a presence-based `fetch_field/3` helper that returns `{:ok,
+  value} | :error`, so falsy values are still detected as "key
+  present." Regression tests added in `catalog_test.exs` for `false`,
+  `null`, `0`, and `""` const values.
+- **Resolved (2026-05-10): Real-upstream test path-escaping fixed.**
+  Originally: `real_filesystem_test` interpolated the temp directory
+  path directly into a PTC-Lisp source string (`"#{file_path}"`),
+  which would break on Windows or any `TMPDIR` containing backslashes
+  or quotes. Replaced both interpolation sites with `Jason.encode!/1`
+  applied to the path (no surrounding quotes — the JSON encoding
+  itself emits the quoted form), so the rendered Lisp source carries
+  a properly-escaped string literal regardless of platform.
+- **Resolved (2026-05-10): Decomposed cold-start telemetry shipped.**
+  Originally: §10 emitted only a single `duration` measurement; the
+  ensure-started overhead bundled into `upstream_calls[].duration_ms`
+  per §8.5 was not separable on the telemetry channel. Resolved by
+  threading a `%{ensure_duration_ms, call_duration_ms}` map through
+  `aggregator_tools.do_dispatch/5`'s result tuple, merging it into
+  `:stop`-event metadata. Both fields are integer milliseconds and
+  always present (`0` when the corresponding phase didn't run — e.g.
+  `pmap` followers paying no spawn cost see `ensure_duration_ms: 0`,
+  `ensure_started`-failure paths see `call_duration_ms: 0`). The
+  §10 table reflects the new fields; §8.5 `duration_ms` semantics
+  are unchanged. Test coverage in `telemetry_phase1a_test.exs`
+  covers both success and world-fault paths.
 - **Resolved (2026-05-10): HTTP transport + credentials registry
   shipped.** Originally implicit in §4.2's "Both the Phase 1a in-
   process Fake and the Phase 1b stdio implementation conform to a
@@ -1708,6 +1724,22 @@ Honest weaknesses:
   weaknesses #6 (stdio-only) and #7 (credential binding weaker
   than Cloudflare) retired in `Plans/positioning-mcp-aggregator.md`
   per http-creds §14.3.
+- 2026-05-10 (phase5-hardening-cleanup): Three §16 leftovers from the
+  2026-05-09 state snapshot landed together. (1) Phase 3 catalog
+  false-const corner case — `Catalog.render_type/1` switched from
+  truthy-binding cond to a presence-based `fetch_field/3` so falsy
+  consts (`false`, `null`, `0`, `""`) render `const<…>` instead of
+  the primitive type. (2) Phase 2.2 real-upstream test path-escaping
+  — both `real_filesystem_test` interpolation sites switched from
+  `"#{path}"` to `Jason.encode!(path)` so the Lisp source stays
+  parseable on Windows / quoted-`TMPDIR` machines. (3) Decomposed
+  cold-start telemetry — `[:ptc_runner_mcp, :upstream, :call, :stop]`
+  metadata gained `ensure_duration_ms` and `call_duration_ms` fields
+  threaded through `do_dispatch/5`'s result tuple, with `0` on paths
+  that didn't run that phase (cached failure / follower / ensure
+  error → `call_duration_ms: 0`). §10 table and §16 entries updated
+  accordingly. Hung-handshake `Connection.ensure_started` async
+  refactor remains the only deferred §16 architectural item.
 
 ## 18. Subagent Implementation Notes
 

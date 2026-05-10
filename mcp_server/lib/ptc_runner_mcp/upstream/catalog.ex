@@ -304,28 +304,27 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   # it for the primitive type label loses information the catalog
   # exists to surface.
   defp render_type(schema) when is_map(schema) do
-    cond do
-      const_value = get_field(schema, "const", :const) ->
+    # `fetch_field` distinguishes "key absent" from "key present with
+    # a falsy value" — `{"const": false}`, `{"const": null}`,
+    # `{"const": 0}`, `{"const": ""}` are all valid JSON Schema
+    # const constraints that must render `const<...>` rather than
+    # falling through to the primitive type. A truthy-binding cond
+    # (e.g. `Map.get/2 |> truthy?`) would skip them all because
+    # `false`/`nil`/`0`/`""` are all falsy in Elixir's `cond`.
+    case fetch_field(schema, "const", :const) do
+      {:ok, const_value} ->
         render_const(const_value)
 
-      enum_values = enum_value(schema) ->
-        render_enum(enum_values)
-
-      true ->
-        render_primitive_type(schema)
+      :error ->
+        case enum_value(schema) do
+          values when is_list(values) -> render_enum(values)
+          nil -> render_primitive_type(schema)
+        end
     end
   end
 
   defp render_type(_), do: "any"
 
-  # `cond` clauses in `render_type/1` use truthy-binding: `Map.get`
-  # returns `nil` when the key is absent, which falls through to
-  # the next clause. For `const`, a literal `nil` value is itself
-  # meaningful (`{"const": null}`), but rendering "any" for that
-  # edge case is acceptable — `Jason.encode!(nil)` would otherwise
-  # produce `const<null>` and the LLM would still treat the param
-  # as "must be null," which is fine. Trade-off documented; keep
-  # the simple cond shape.
   defp enum_value(schema) do
     case get_field(schema, "enum", :enum) do
       list when is_list(list) and list != [] -> list
@@ -352,6 +351,17 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
     case Map.fetch(schema, string_key) do
       {:ok, v} -> v
       :error -> Map.get(schema, atom_key)
+    end
+  end
+
+  # Like `get_field/3` but returns `{:ok, value} | :error`, so callers
+  # can distinguish "key absent" from "key present with a falsy value"
+  # — the case that breaks `{"const": false}` / `{"const": null}` /
+  # `{"const": 0}` / `{"const": ""}` if you only check truthiness.
+  defp fetch_field(schema, string_key, atom_key) do
+    case Map.fetch(schema, string_key) do
+      {:ok, _} = ok -> ok
+      :error -> Map.fetch(schema, atom_key)
     end
   end
 

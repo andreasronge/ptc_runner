@@ -306,6 +306,81 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       assert output =~ "n: const<42>"
     end
+
+    # Regression: `{"const": <falsy>}` schemas. A truthy-binding cond
+    # in `render_type/1` would skip the const branch entirely for any
+    # falsy value (`false`, `null`, `0`, `""`) and render the schema
+    # as the primitive type instead, dropping the constraint label.
+    test "const: false renders as `const<false>`, not as `boolean`" do
+      tools = [
+        %{
+          name: "x",
+          input_schema: %{
+            "properties" => %{"flag" => %{"type" => "boolean", "const" => false}},
+            "required" => ["flag"]
+          },
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "u", tools: tools}])
+
+      assert output =~ "flag: const<false>"
+      refute output =~ "flag: boolean"
+    end
+
+    test "const: null renders as `const<null>`, not as primitive type" do
+      tools = [
+        %{
+          name: "x",
+          input_schema: %{
+            "properties" => %{"v" => %{"type" => "null", "const" => nil}},
+            "required" => ["v"]
+          },
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "u", tools: tools}])
+
+      assert output =~ "v: const<null>"
+    end
+
+    test "const: 0 renders as `const<0>`, not as `integer`" do
+      tools = [
+        %{
+          name: "x",
+          input_schema: %{
+            "properties" => %{"n" => %{"type" => "integer", "const" => 0}},
+            "required" => ["n"]
+          },
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "u", tools: tools}])
+
+      assert output =~ "n: const<0>"
+      refute output =~ "n: integer"
+    end
+
+    test ~s|const: "" renders as `const<"">`, not as `string`| do
+      tools = [
+        %{
+          name: "x",
+          input_schema: %{
+            "properties" => %{"s" => %{"type" => "string", "const" => ""}},
+            "required" => ["s"]
+          },
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "u", tools: tools}])
+
+      assert output =~ ~s|s: const<"">|
+      refute output =~ "s: string"
+    end
   end
 
   describe "render_entries/1 — description handling" do

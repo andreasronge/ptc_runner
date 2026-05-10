@@ -211,6 +211,14 @@ defmodule PtcRunnerMcp.AggregatorTools do
       profile: :mcp_aggregator
     }
 
+    # `do_dispatch/5` returns a 4-tuple — `{:ok, value, durations}` /
+    # `{:world_fault, reason, detail, durations}`.
+    # The durations map carries `ensure_duration_ms` (cold-start
+    # spawn + handshake) and `call_duration_ms` (steady-state
+    # `tools/call` round-trip) decomposed per spec §16. Operators
+    # subscribe to the `[:upstream, :call, :stop]` event and read
+    # both fields off the metadata to attribute cold-start vs
+    # steady-state cost; programs see only the unwrapped payload.
     :telemetry.span([:ptc_runner_mcp, :upstream, :call], telemetry_meta, fn ->
       result = do_dispatch(call_context, registry, server, tool, call_args)
       {result, stop_meta(telemetry_meta, result)}
@@ -230,15 +238,19 @@ defmodule PtcRunnerMcp.AggregatorTools do
       {:cached, reason, detail} ->
         # Per §8.5 "`upstream_unavailable` during recovery/backoff
         # window with no attempt made → 0": no fresh attempt was
-        # made for this entry, so duration is 0.
+        # made for this entry, so duration is 0. Both telemetry
+        # components are zero for the same reason — we neither
+        # spawned the upstream nor issued a `tools/call`.
         entry = UpstreamCalls.error_entry(server, tool, reason, detail, 0)
         UpstreamCalls.record(call_context, entry)
-        {:world_fault, reason, detail}
+        {:world_fault, reason, detail, zero_durations()}
 
       :miss ->
         attempt_dispatch(call_context, registry, server, tool, call_args)
     end
   end
+
+  defp zero_durations, do: %{ensure_duration_ms: 0, call_duration_ms: 0}
 
   defp attempt_dispatch(call_context, registry, server, tool, call_args) do
     # §4.3 first bullet "no automatic retry of `ensure_started/1`
@@ -288,7 +300,10 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
         entry = UpstreamCalls.error_entry(server, tool, reason, detail, duration)
         UpstreamCalls.record(call_context, entry)
-        {:world_fault, reason, detail}
+        # Telemetry decomposition: ensure_duration is the wall-clock
+        # the leader paid attempting to spawn/handshake the upstream;
+        # call_duration is 0 because we never reached `tools/call`.
+        {:world_fault, reason, detail, %{ensure_duration_ms: duration, call_duration_ms: 0}}
     end
   end
 
@@ -308,10 +323,12 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # Leader's ensure_started failed (or follower timed out
         # waiting). Followers have `duration_ms: 0` per §8.5
         # ("upstream_unavailable during recovery/backoff window
-        # with no attempt made → 0").
+        # with no attempt made → 0"). Both telemetry components
+        # are zero — followers paid no spawn cost (the leader did)
+        # and never issued a `tools/call` of their own.
         entry = UpstreamCalls.error_entry(server, tool, reason, detail, 0)
         UpstreamCalls.record(call_context, entry)
-        {:world_fault, reason, detail}
+        {:world_fault, reason, detail, zero_durations()}
     end
   end
 
@@ -397,6 +414,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
     # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry events
     # which carry both fields separately.
     total_duration = ensure_duration + call_duration
+    durations = %{ensure_duration_ms: ensure_duration, call_duration_ms: call_duration}
 
     case result do
       {:ok, value} ->
@@ -423,7 +441,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
               UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration)
 
             UpstreamCalls.record(call_context, entry)
-            {:world_fault, :upstream_error, detail}
+            {:world_fault, :upstream_error, detail, durations}
 
           :ok ->
             # Pipeline ordering (Plans/json-support.md §6.4 — single
@@ -450,14 +468,14 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
             entry = UpstreamCalls.success_entry(server, tool, total_duration)
             UpstreamCalls.record(call_context, entry)
-            {:ok, rewritten}
+            {:ok, rewritten, durations}
         end
 
       {:error, reason, detail}
       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
         entry = UpstreamCalls.error_entry(server, tool, reason, detail, total_duration)
         UpstreamCalls.record(call_context, entry)
-        {:world_fault, reason, detail}
+        {:world_fault, reason, detail, durations}
 
       other ->
         # Defensive fallback: a buggy impl that returns a non-conformant
@@ -467,22 +485,28 @@ defmodule PtcRunnerMcp.AggregatorTools do
         detail = "upstream impl returned malformed result: #{inspect(other, limit: 50)}"
         entry = UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration)
         UpstreamCalls.record(call_context, entry)
-        {:world_fault, :upstream_error, detail}
+        {:world_fault, :upstream_error, detail, durations}
     end
   end
 
   # The closure returns the value visible to the program: a real
   # value on success, or `nil` on world-fault. Telemetry receives a
-  # richer shape (the raw result + reason), which we strip here.
-  defp unwrap_for_program({:ok, value}), do: value
-  defp unwrap_for_program({:world_fault, _reason, _detail}), do: nil
+  # richer shape (the raw result + reason + durations), which we
+  # strip here.
+  defp unwrap_for_program({:ok, value, _durations}), do: value
+  defp unwrap_for_program({:world_fault, _reason, _detail, _durations}), do: nil
 
-  defp stop_meta(meta, {:ok, _value}), do: Map.put(meta, :status, :ok)
+  defp stop_meta(meta, {:ok, _value, durations}) do
+    meta
+    |> Map.put(:status, :ok)
+    |> Map.merge(durations)
+  end
 
-  defp stop_meta(meta, {:world_fault, reason, _detail}) do
+  defp stop_meta(meta, {:world_fault, reason, _detail, durations}) do
     meta
     |> Map.put(:status, :error)
     |> Map.put(:reason, reason)
+    |> Map.merge(durations)
   end
 
   # ----------------------------------------------------------------
