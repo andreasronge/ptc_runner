@@ -74,6 +74,24 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   @ellipsis "..."
   @persistent_term_key {__MODULE__, :frozen}
 
+  # §9.1 (http-transport-credentials.md): the per-server header gains
+  # an optional `[transport: stdio|http]` tag so the LLM can see at a
+  # glance whether an upstream is local-only or has a network
+  # dependency. The tag is derived from the upstream's `:impl` module
+  # (read off the routing entry — we deliberately do NOT add a new
+  # `transport:` field to the upstream entry struct).
+  #
+  # Only the two real transports get an annotation. `Fake` (in-process,
+  # used in tests) and any unknown impl render WITHOUT a tag — this is
+  # the conservative choice that keeps existing Fake-driven catalog
+  # tests byte-equal to their pre-§9.1 expectations, and avoids
+  # advertising a "fake" transport to a real LLM if a misconfigured
+  # production deploy somehow ended up wired to `Fake`.
+  @transport_tags %{
+    PtcRunnerMcp.Upstream.Stdio => "stdio",
+    PtcRunnerMcp.Upstream.Http => "http"
+  }
+
   @doc """
   Renders the catalog for the routing `Registry` named `registry`.
 
@@ -98,13 +116,25 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   @doc """
   Renders the catalog from an explicit list of upstream snapshots.
 
-  Each entry is `%{name: String.t(), tools: [Upstream.tool_schema()] | nil}`.
+  Each entry is
+  `%{name: String.t(), tools: [Upstream.tool_schema()] | nil, impl: module() | nil}`.
+  The `:impl` key is optional — when absent or `nil` the per-server
+  header has no `[transport: …]` annotation. When present and the
+  module is one of the recognised transports (`Upstream.Stdio` /
+  `Upstream.Http`), the header gains a `[transport: stdio|http]` tag
+  per §9.1.
+
   Used directly by tests to exercise the rendering rules without
   spinning up a Registry. `nil` for `:tools` means "no cached tools
   yet" and emits the unavailable-at-startup placeholder.
   """
-  @spec render_entries([%{name: String.t(), tools: [Upstream.tool_schema()] | nil}]) ::
-          String.t()
+  @spec render_entries([
+          %{
+            required(:name) => String.t(),
+            required(:tools) => [Upstream.tool_schema()] | nil,
+            optional(:impl) => module() | nil
+          }
+        ]) :: String.t()
   def render_entries([]), do: ""
 
   def render_entries(entries) when is_list(entries) do
@@ -167,14 +197,14 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
       end
 
     routings
-    |> Enum.map(fn {name, %{routing_id: routing_id}} ->
+    |> Enum.map(fn {name, %{routing_id: routing_id} = routing} ->
       tools =
         case Connection.whereis(routing_id, name) do
           nil -> nil
           pid -> safe_cached_tools(pid)
         end
 
-      %{name: name, tools: tools}
+      %{name: name, tools: tools, impl: Map.get(routing, :impl)}
     end)
     |> Enum.sort_by(& &1.name)
   end
@@ -185,18 +215,33 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
     :exit, _ -> nil
   end
 
-  defp render_upstream(%{name: name, tools: nil}) do
-    "#{name}:\n  (unavailable at startup)"
+  defp render_upstream(%{name: name, tools: nil} = entry) do
+    "#{header(name, entry)}\n  (unavailable at startup)"
   end
 
-  defp render_upstream(%{name: name, tools: []}) do
-    "#{name}:\n  (no tools advertised)"
+  defp render_upstream(%{name: name, tools: []} = entry) do
+    "#{header(name, entry)}\n  (no tools advertised)"
   end
 
-  defp render_upstream(%{name: name, tools: tools}) when is_list(tools) do
+  defp render_upstream(%{name: name, tools: tools} = entry) when is_list(tools) do
     rendered_tools = Enum.map_join(tools, "\n", &render_tool/1)
-    "#{name}:\n#{rendered_tools}"
+    "#{header(name, entry)}\n#{rendered_tools}"
   end
+
+  # Per-server header: `name:` for unknown / Fake / missing impl
+  # (preserves byte-for-byte the pre-§9.1 catalog shape that existing
+  # tests pin), and `name [transport: stdio|http]:` when the impl is
+  # one of the two real transports.
+  defp header(name, entry) do
+    case transport_tag(Map.get(entry, :impl)) do
+      nil -> "#{name}:"
+      tag -> "#{name} [transport: #{tag}]:"
+    end
+  end
+
+  defp transport_tag(nil), do: nil
+  defp transport_tag(impl) when is_atom(impl), do: Map.get(@transport_tags, impl)
+  defp transport_tag(_), do: nil
 
   defp render_tool(tool) do
     name = tool_field(tool, :name)

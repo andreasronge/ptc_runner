@@ -244,21 +244,66 @@ can read. If a generated PTC-Lisp program needs human review or
 debugging, there is a learning curve. (Matters less for end-users —
 they don't read the code, just see the result.)
 
-**6. Stdio-only upstreams in v1.**
+**6. ~~Stdio-only upstreams in v1.~~** ✅ **RETIRED** (delivered by
+`Plans/http-transport-credentials.md`).
 
-PtcRunner aggregator only supports stdio-launched subprocess upstreams.
-Cloudflare Code Mode supports any MCP transport (stdio, SSE, streamable
-HTTP). Remote MCP servers are excluded from PtcRunner aggregator until
-a transport abstraction lands. See §"Feature signals."
+The aggregator now supports HTTP-transport upstreams (Streamable HTTP,
+MCP rev 2025-06-18) alongside stdio. Operators can wrap remote MCPs
+that have no stdio surface — GitHub MCP at
+`https://api.githubcopilot.com/mcp/`, Cloudflare-hosted MCPs,
+organization-internal HTTP MCPs behind SSO gateways. v1 does not
+implement OAuth flows, mTLS, or persistent token storage; static-secret
+bindings (env / file / literal) cover the common case. SSE GET
+subscriptions for server-pushed notifications are deferred to v1.x —
+a cached `tools/list` is refreshed on Connection restart, same as
+stdio.
 
-**7. Credential-binding model is weaker than Cloudflare's.**
+**7. ~~Credential-binding model is weaker than Cloudflare's.~~** ✅
+**RETIRED-WITH-CAVEAT** (delivered by `Plans/http-transport-credentials.md`;
+threat-model parity for the leak vector, NOT for the sandbox-isolation
+threat model).
 
-Cloudflare Code Mode hides API keys behind already-authorized binding
-objects — the sandboxed code literally cannot read the secret. PtcRunner
-resolves `${VAR}` placeholders into the upstream subprocess env at
-startup; the PTC-Lisp program never sees them, but a misbehaving
-upstream that echoes its env back through a tool call could leak. The
-guarantee is functionally similar but structurally weaker.
+The aggregator now ships a credentials registry (`PtcRunnerMcp.Credentials`)
+with three properties that close the leak vector this section originally
+flagged:
+
+1. **Structural isolation.** Resolved auth bytes are not stored in
+   upstream config maps, Connection state, trace JSONL,
+   `upstream_calls` envelopes, or Logger output. They live only in
+   the Credentials GenServer state, the redaction-set ETS table,
+   transient HTTP-header construction variables, and the in-flight
+   Req request — by construction, not by convention.
+2. **Binding indirection.** `auth:` references named bindings; the
+   value is resolved at request time and never appears in
+   `inspect/2` of any state. The opaque `%RedactedHeaders{}` wrapper
+   renders `[REDACTED]` even when transitively contained.
+3. **Defense-in-depth redaction.** A redactor substring-replaces
+   registered plaintext with `[REDACTED]` in every formatted string
+   the Log / TraceFile / TracePayload / UpstreamCalls / TraceHandler
+   writers emit, in case any code path bypasses the structural rules.
+
+This gives **functional parity** with Cloudflare Code Mode for the
+specific threat: "a misbehaving upstream that echoes its env (or, on
+HTTP, its request headers) back through a tool result." A 16-cycle
+randomized-secret property test (`test/ptc_runner_mcp/redaction_end_to_end_test.exs`)
+asserts the secret never appears in trace JSONL, log capture, or
+GenServer state across handshake-and-call cycles.
+
+**The remaining gap is sandbox isolation, not the leak vector.**
+Cloudflare's V8-isolated bindings are a different threat model: the
+sandboxed code literally cannot hold the secret bytes (no JS reference
+to them exists), so even a sandbox escape cannot exfiltrate. PtcRunner
+resolves bindings into the BEAM runtime's process memory; a sandbox
+escape that reached arbitrary Erlang term inspection could in
+principle find the bytes. PTC-Lisp's sandbox model is process-isolation
++ allow-list of safe functions, not V8-isolate-grade bytecode
+verification — so this threat-model gap stays open.
+
+Operators who need V8-isolate-grade secret hiding pick Cloudflare
+Code Mode. Operators who need self-host + structural isolation +
+in-process redaction pick PtcRunner. Both points on the trade-off
+curve are legitimate; the leak vector this section once flagged is
+no longer one of them.
 
 ## Composition story (works with, not against)
 
@@ -316,8 +361,9 @@ paying for a planner agent?**
   prototype-grade.
 - **PtcRunner aggregator** — typed return signatures, structured audit
   trail, three-class failure model, BEAM "language without I/O" sandbox,
-  self-hostable single binary, but PTC-Lisp learning curve and
-  stdio-only upstreams.
+  self-hostable single binary, stdio + Streamable HTTP upstreams,
+  bindings-based credentials with structural redaction. PTC-Lisp
+  learning curve still applies.
 - **mcpfy** — hosted SaaS take.
 - **Anthropic pattern** — DIY; pick this if you want full control and
   are willing to build it.
@@ -382,22 +428,26 @@ PTC-Lisp-callable directory of definitions — e.g. `(catalog/list-servers)`,
 catalog tax on every request. Required for credible large-fleet (200+
 tool) deployments.
 
-**3. HTTP / SSE / Streamable HTTP upstream transport.**
+**3. ~~HTTP / SSE / Streamable HTTP upstream transport.~~** ✅
+**DELIVERED** by `Plans/http-transport-credentials.md` (commits
+`76f68de..78096cb`). PtcRunner now wraps Streamable HTTP upstreams
+(MCP rev 2025-06-18) alongside stdio. Validated against the live
+GitHub MCP server (`https://api.githubcopilot.com/mcp/`) via the
+opt-in `@real_remote_upstream` test in
+`mcp_server/test/ptc_runner_mcp/upstream/http_real_github_test.exs`.
+Long-lived SSE GET subscriptions for server-pushed notifications are
+deferred to v1.x — `tools/list` refresh on Connection restart matches
+the stdio semantics.
 
-Stdio-only locks PtcRunner out of remote MCP servers (Cloudflare-hosted,
-GitHub's MCP server, organization-internal HTTP MCPs). Adding a
-transport abstraction with stdio + SSE + streamable HTTP brings parity
-with Cloudflare Code Mode on this dimension. Probably the single biggest
-adoption blocker for self-host users.
-
-**4. Credential-binding model (Cloudflare-style).**
-
-Today `${VAR}` placeholders pass secrets into upstream subprocess env at
-startup. Cloudflare's bindings hide the secret behind an already-
-authorized client. PtcRunner equivalent: a binding registry where the
-program references `:server "github"` and the runtime injects auth
-out-of-band, so a misbehaving upstream that echoes env back cannot leak
-the raw token. Important for multi-tenant / shared-deployment stories.
+**4. ~~Credential-binding model (Cloudflare-style).~~** ✅ **DELIVERED**
+by `Plans/http-transport-credentials.md` (commits
+`43640bd..a73b930`). Top-level `credentials:` config block holds named
+bindings (env / file / literal sources; `exec` deferred to v1.1).
+HTTP `auth:` emitter list references bindings by name; the program
+references `:server "github"` and the runtime resolves + applies
+auth headers out-of-band. Structural isolation closes the
+"misbehaving upstream echoes env back" leak vector — see Honest
+Weakness #7 (retired-with-caveat) for the full parity statement.
 
 ### Medium-impact
 
@@ -474,9 +524,13 @@ For clarity on what *not* to chase:
    "language without I/O" sandbox**, and **self-hostable single-binary
    deployment with no cloud dependency**.
 4. Its honest weaknesses are **workflows that require model judgment
-   between tool calls**, **stdio-only upstreams in v1**, **catalog
-   token cost at scale**, **credential binding weaker than Cloudflare's**,
-   and **PTC-Lisp learning curve for human reviewers**.
+   between tool calls**, **catalog token cost at scale**,
+   **PTC-Lisp learning curve for human reviewers**, and the
+   **sandbox-isolation gap vs. Cloudflare's V8 isolates** (binding
+   credentials are structurally redacted but live in BEAM process
+   memory; a sandbox escape that reached arbitrary term inspection
+   could in principle find them — this is a different threat model
+   than V8-isolate-grade hiding).
 
 Anything stronger than these four claims needs supporting data before it
 goes into a README or talk.

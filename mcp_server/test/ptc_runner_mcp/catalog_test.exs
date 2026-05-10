@@ -484,6 +484,225 @@ defmodule PtcRunnerMcp.CatalogTest do
     end
   end
 
+  describe "render_entries/1 — `[transport: …]` header annotation (§9.1)" do
+    # Per `Plans/http-transport-credentials.md` §9.1 the per-server
+    # header gains an optional `[transport: stdio|http]` tag derived
+    # from the upstream's `:impl` module. The tag exists so the LLM
+    # can see which servers are local-only vs network-dependent
+    # without inflating the catalog meaningfully. Only the two real
+    # transports (`Stdio` / `Http`) get a tag; `Fake` and unknown
+    # impls render with the pre-§9.1 `name:` header so existing
+    # Fake-driven Registry tests stay byte-equal.
+
+    test "stdio + http upstreams render side-by-side with their transport tags" do
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      entries = [
+        %{name: "fs", tools: tools, impl: PtcRunnerMcp.Upstream.Stdio},
+        %{name: "github", tools: tools, impl: PtcRunnerMcp.Upstream.Http}
+      ]
+
+      output = Catalog.render_entries(entries)
+
+      assert output =~ "fs [transport: stdio]:"
+      assert output =~ "github [transport: http]:"
+    end
+
+    test "single stdio upstream gets `[transport: stdio]`" do
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      output =
+        Catalog.render_entries([
+          %{name: "fs", tools: tools, impl: PtcRunnerMcp.Upstream.Stdio}
+        ])
+
+      assert output =~ "fs [transport: stdio]:"
+      assert output =~ "ping() - Ping"
+    end
+
+    test "single http upstream gets `[transport: http]`" do
+      tools = [%{name: "search_repos", input_schema: %{}, description: "Search"}]
+
+      output =
+        Catalog.render_entries([
+          %{name: "github", tools: tools, impl: PtcRunnerMcp.Upstream.Http}
+        ])
+
+      assert output =~ "github [transport: http]:"
+      assert output =~ "search_repos() - Search"
+    end
+
+    test "Fake impl renders WITHOUT a transport tag" do
+      # Fake is in-process and only used in tests; emitting
+      # `[transport: fake]` would (a) leak test machinery into the
+      # advertised description if a misconfigured production deploy
+      # ended up wired to Fake, and (b) break every existing Registry-
+      # driven catalog test (they assert `=~ "name:"`). The
+      # conservative choice is to render Fake the same as a missing
+      # impl: bare `name:` header.
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      output =
+        Catalog.render_entries([
+          %{name: "u", tools: tools, impl: PtcRunnerMcp.Upstream.Fake}
+        ])
+
+      assert output == "u:\n  ping() - Ping"
+      refute output =~ "[transport:"
+    end
+
+    test "missing :impl key renders WITHOUT a transport tag (back-compat)" do
+      # The pre-§9.1 entry shape has no `:impl` key at all. The
+      # render_entries/1 typespec marks `:impl` as optional; absent
+      # means "no annotation," preserving every existing test that
+      # doesn't supply an impl.
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      output = Catalog.render_entries([%{name: "u", tools: tools}])
+
+      assert output == "u:\n  ping() - Ping"
+    end
+
+    test "explicit nil :impl renders WITHOUT a transport tag" do
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      output =
+        Catalog.render_entries([%{name: "u", tools: tools, impl: nil}])
+
+      assert output == "u:\n  ping() - Ping"
+    end
+
+    test "unknown impl module renders WITHOUT a transport tag" do
+      tools = [%{name: "ping", input_schema: %{}, description: "Ping"}]
+
+      output =
+        Catalog.render_entries([%{name: "u", tools: tools, impl: SomeOther.Module}])
+
+      assert output == "u:\n  ping() - Ping"
+    end
+
+    test "transport tag appears ONLY on the per-server header — not on tool description lines" do
+      tools = [
+        %{
+          name: "search_repos",
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{"query" => %{"type" => "string"}},
+            "required" => ["query"]
+          },
+          description: "Search repositories"
+        },
+        %{
+          name: "get_pr",
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{
+              "owner" => %{"type" => "string"},
+              "repo" => %{"type" => "string"},
+              "number" => %{"type" => "integer"}
+            },
+            "required" => ["owner", "repo", "number"]
+          },
+          description: "Get a pull request"
+        }
+      ]
+
+      output =
+        Catalog.render_entries([
+          %{name: "github", tools: tools, impl: PtcRunnerMcp.Upstream.Http}
+        ])
+
+      [header_line | tool_lines] = String.split(output, "\n")
+
+      # Header carries the tag.
+      assert header_line == "github [transport: http]:"
+
+      # Tool description lines MUST NOT carry the tag — exactly one
+      # `[transport: …]` substring in the whole output.
+      for line <- tool_lines do
+        refute line =~ "[transport:"
+      end
+
+      assert length(Regex.scan(~r/\[transport:/, output)) == 1
+    end
+
+    test "transport tag appears on `(unavailable at startup)` placeholder header too" do
+      # An upstream whose eager-start failed renders with the
+      # placeholder body, but the header is still derived from the
+      # configured impl — the LLM still benefits from knowing whether
+      # the broken upstream is HTTP or stdio.
+      output =
+        Catalog.render_entries([
+          %{name: "github", tools: nil, impl: PtcRunnerMcp.Upstream.Http}
+        ])
+
+      assert output == "github [transport: http]:\n  (unavailable at startup)"
+    end
+
+    test "transport tag appears on `(no tools advertised)` placeholder header too" do
+      output =
+        Catalog.render_entries([
+          %{name: "fs", tools: [], impl: PtcRunnerMcp.Upstream.Stdio}
+        ])
+
+      assert output == "fs [transport: stdio]:\n  (no tools advertised)"
+    end
+  end
+
+  describe "outputSchema (§9.3) — auth + http_status optional fields" do
+    # Plan §9.3: the aggregator-mode `outputSchema`'s upstream_calls
+    # entry schema gains two optional fields — `auth` (object) and
+    # `http_status` (integer). Strict validators on the consumer side
+    # MUST accept HTTP-augmented entries as valid §8.5 records.
+
+    alias PtcRunnerMcp.Tools
+
+    test "upstream_calls items.properties contains both `auth` (object) and `http_status` (integer)" do
+      schema = Tools.output_schema_for(:mcp_aggregator)
+
+      # The aggregator schema is `{type: object, oneOf: [...]}`; each
+      # branch's `properties.upstream_calls` carries the entry-shape.
+      branches = schema["oneOf"]
+      assert is_list(branches) and branches != []
+
+      for branch <- branches do
+        upstream_calls = get_in(branch, ["properties", "upstream_calls"])
+        assert upstream_calls["type"] == "array"
+
+        item_props = get_in(upstream_calls, ["items", "properties"])
+        assert is_map(item_props)
+
+        # `auth` is an object with required {scheme, binding}.
+        auth = item_props["auth"]
+        assert auth["type"] == "object"
+        assert auth["required"] == ["scheme", "binding"]
+        assert get_in(auth, ["properties", "scheme", "type"]) == "string"
+        assert get_in(auth, ["properties", "binding", "type"]) == "string"
+
+        # `http_status` is an integer (HTTP status range).
+        http_status = item_props["http_status"]
+        assert http_status["type"] == "integer"
+
+        # Both MUST be optional (not in the items.required array).
+        required = get_in(upstream_calls, ["items", "required"])
+        refute "auth" in required
+        refute "http_status" in required
+      end
+    end
+
+    test "stdio profile (`:mcp_no_tools`) does NOT carry upstream_calls (and therefore not auth/http_status)" do
+      # Sanity guard: the new optional fields belong to the aggregator
+      # profile only. The base v1 outputSchema MUST stay byte-for-byte
+      # unchanged so non-aggregator deploys aren't paying for HTTP
+      # fields they can't produce.
+      schema = Tools.output_schema_for(:mcp_no_tools)
+
+      for branch <- schema["oneOf"] do
+        refute Map.has_key?(branch["properties"], "upstream_calls")
+      end
+    end
+  end
+
   describe "frozen/0 + freeze/1 + clear_frozen/0 (§12.5 freeze-at-boot)" do
     # These tests share the global `:persistent_term` slot, so they
     # MUST clear on entry and exit to avoid leaking state across the

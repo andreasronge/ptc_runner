@@ -322,8 +322,11 @@ defmodule PtcRunnerMcp.Upstream.HttpPhase2gTest do
       assert Connection.cached_tools(bad_pid) == nil
 
       # Catalog renders the upstream as "(unavailable at startup)".
+      # Per §9.1 (http-transport-credentials.md), the per-server
+      # header gains a `[transport: http]` tag for HTTP upstreams —
+      # the placeholder body itself is unchanged.
       catalog = Catalog.render(reg_name)
-      assert catalog =~ "#{bad_name}:\n  (unavailable at startup)"
+      assert catalog =~ "#{bad_name} [transport: http]:\n  (unavailable at startup)"
     end
   end
 
