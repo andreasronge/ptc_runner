@@ -155,11 +155,7 @@ defmodule PtcRunner.SubAgent.Debug do
   def print_chain([]), do: :ok
 
   def print_chain(steps) when is_list(steps) do
-    label = " Agent Chain "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{label}#{String.duplicate("-", @box_width - 3 - String.length(label))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Agent Chain ")
 
     steps
     |> Enum.with_index(1)
@@ -167,7 +163,7 @@ defmodule PtcRunner.SubAgent.Debug do
       print_chain_step(step, index, length(steps))
     end)
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}\n")
+    print_box_footer(trailing_newline?: true)
 
     :ok
   end
@@ -184,11 +180,7 @@ defmodule PtcRunner.SubAgent.Debug do
         msgs when is_list(msgs) -> " (#{length(msgs)} msgs)"
       end
 
-    header = " Turn #{turn.number}#{msg_indicator} "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Turn #{turn.number}#{msg_indicator} ")
 
     # Show original mission template on first turn (when raw mode is on)
     # This helps distinguish template variables from hardcoded values
@@ -262,7 +254,7 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
     end)
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    print_box_footer()
   end
 
   # Print program section (or text mode indicator)
@@ -426,11 +418,7 @@ defmodule PtcRunner.SubAgent.Debug do
 
   # Print plan progress summaries
   defp print_summaries(summaries) do
-    header = " Progress "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Progress ")
 
     Enum.each(summaries, fn {id, summary} ->
       IO.puts(
@@ -438,16 +426,12 @@ defmodule PtcRunner.SubAgent.Debug do
       )
     end)
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    print_box_footer()
   end
 
   # Print usage summary
   defp print_usage_summary(usage) do
-    header = " Usage "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Usage ")
 
     if usage[:input_tokens] do
       IO.puts(
@@ -486,16 +470,12 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Turns:         #{usage.turns}")
     end
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    print_box_footer()
   end
 
   # Print compaction statistics summary
   defp print_compaction_summary(compaction) do
-    header = " Compaction "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Compaction ")
 
     IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   Strategy:     #{compaction.strategy}")
 
@@ -529,7 +509,7 @@ defmodule PtcRunner.SubAgent.Debug do
       end
     end
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    print_box_footer()
   end
 
   # Print tool call statistics from all turns
@@ -551,11 +531,7 @@ defmodule PtcRunner.SubAgent.Debug do
         end)
         |> Enum.sort_by(fn {_name, count, _args} -> -count end)
 
-      header = " Tool Calls "
-
-      IO.puts(
-        "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", @box_width - 3 - String.length(header))}+#{ansi(:reset)}"
-      )
+      print_box_header(" Tool Calls ")
 
       Enum.each(stats, fn {name, count, args_list} ->
         IO.puts(
@@ -581,7 +557,7 @@ defmodule PtcRunner.SubAgent.Debug do
         end
       end)
 
-      IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+      print_box_footer()
     end
   end
 
@@ -648,6 +624,21 @@ defmodule PtcRunner.SubAgent.Debug do
   }
 
   defp ansi(code), do: Map.get(@ansi_codes, code, "")
+
+  defp print_box_header(label) do
+    dashes = String.duplicate("-", max(@box_width - 3 - String.length(label), 0))
+    IO.puts("\n#{ansi(:cyan)}+-#{label}#{dashes}+#{ansi(:reset)}")
+  end
+
+  defp print_box_footer(opts \\ []) do
+    line = "#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}"
+
+    if Keyword.get(opts, :trailing_newline?, false) do
+      IO.puts(line <> "\n")
+    else
+      IO.puts(line)
+    end
+  end
 
   # ============================================================
   # Private Helpers - System Prompt Sections
@@ -725,11 +716,7 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp print_system_for_turn(turn_number, _sections, full_prompt, :all) do
-    header = " Turn #{turn_number} — System Prompt "
-
-    IO.puts(
-      "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", max(@box_width - 3 - String.length(header), 0))}+#{ansi(:reset)}"
-    )
+    print_box_header(" Turn #{turn_number} — System Prompt ")
 
     full_prompt
     |> String.split("\n")
@@ -737,7 +724,7 @@ defmodule PtcRunner.SubAgent.Debug do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
     end)
 
-    IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+    print_box_footer()
   end
 
   defp print_system_for_turn(turn_number, sections, _full_prompt, keys) when is_list(keys) do
@@ -749,11 +736,7 @@ defmodule PtcRunner.SubAgent.Debug do
   defp print_system_for_turn(turn_number, sections, _full_prompt, key) when is_atom(key) do
     case Map.fetch(sections, key) do
       {:ok, content} ->
-        header = " Turn #{turn_number} — :#{key} "
-
-        IO.puts(
-          "\n#{ansi(:cyan)}+-#{header}#{String.duplicate("-", max(@box_width - 3 - String.length(header), 0))}+#{ansi(:reset)}"
-        )
+        print_box_header(" Turn #{turn_number} — :#{key} ")
 
         content
         |> String.trim()
@@ -762,7 +745,7 @@ defmodule PtcRunner.SubAgent.Debug do
           IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{line}")
         end)
 
-        IO.puts("#{ansi(:cyan)}+#{String.duplicate("-", @box_width - 2)}+#{ansi(:reset)}")
+        print_box_footer()
 
       :error ->
         available = sections |> Map.keys() |> Enum.sort()

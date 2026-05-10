@@ -1,7 +1,7 @@
 defmodule PtcRunner.SubAgent.Namespace.Data do
   @moduledoc "Renders the data/ namespace section."
 
-  alias PtcRunner.Lisp.Format
+  alias PtcRunner.SubAgent.Namespace.SampleFormatter
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
   alias PtcRunner.SubAgent.Signature.Renderer
 
@@ -78,7 +78,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
       if is_firewalled do
         "[Hidden] [Firewalled]"
       else
-        "sample: #{format_sample(value, opts)}"
+        "sample: #{SampleFormatter.format(value, opts)}"
       end
 
     desc_part =
@@ -112,12 +112,5 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
     Map.get(descriptions, key_atom) || Map.get(descriptions, key_str)
   rescue
     ArgumentError -> Map.get(descriptions, to_string(key))
-  end
-
-  defp format_sample(value, opts) do
-    limit = Keyword.get(opts, :sample_limit, 3)
-    printable_limit = Keyword.get(opts, :sample_printable_limit, 80)
-    {str, _truncated} = Format.to_clojure(value, limit: limit, printable_limit: printable_limit)
-    str
   end
 end

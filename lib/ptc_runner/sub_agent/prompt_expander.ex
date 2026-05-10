@@ -184,6 +184,34 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   end
 
   @doc """
+  Raise `ArgumentError` if any `{{placeholder}}` in `prompt` is not a parameter of `signature`.
+
+  Returns `:ok` when every placeholder is covered by the signature parameters.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.PromptExpander.validate_placeholders!("Hello {{name}}", "(name :string) -> :string")
+      :ok
+
+      iex> PtcRunner.SubAgent.PromptExpander.validate_placeholders!("No placeholders", "(name :string) -> :string")
+      :ok
+  """
+  @spec validate_placeholders!(String.t(), String.t()) :: :ok
+  def validate_placeholders!(prompt, signature) when is_binary(prompt) and is_binary(signature) do
+    placeholders = extract_placeholder_names(prompt)
+    signature_params = extract_signature_params(signature)
+
+    case placeholders -- signature_params do
+      [] ->
+        :ok
+
+      missing ->
+        formatted_missing = Enum.map_join(missing, ", ", &"{{#{&1}}}")
+        raise ArgumentError, "placeholders #{formatted_missing} not found in signature"
+    end
+  end
+
+  @doc """
   Expand a template with annotations showing where substitutions occurred.
 
   Returns an annotated string where substituted values are wrapped with `~{data/...}`
