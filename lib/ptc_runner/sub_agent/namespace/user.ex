@@ -1,7 +1,7 @@
 defmodule PtcRunner.SubAgent.Namespace.User do
   @moduledoc "Renders the user/ namespace section (LLM-defined functions and values)."
 
-  alias PtcRunner.Lisp.Format
+  alias PtcRunner.SubAgent.Namespace.SampleFormatter
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
   @doc """
@@ -170,16 +170,9 @@ defmodule PtcRunner.SubAgent.Namespace.User do
           "#{padded_name}; = #{type_label}"
 
         true ->
-          sample = format_sample(value, opts)
+          sample = SampleFormatter.format(value, opts)
           "#{padded_name}; = #{type_label}, sample: #{sample}"
       end
     end)
-  end
-
-  defp format_sample(value, opts) do
-    limit = Keyword.get(opts, :sample_limit, 3)
-    printable_limit = Keyword.get(opts, :sample_printable_limit, 80)
-    {str, _truncated} = Format.to_clojure(value, limit: limit, printable_limit: printable_limit)
-    str
   end
 end

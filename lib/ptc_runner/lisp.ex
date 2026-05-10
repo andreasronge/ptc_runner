@@ -966,13 +966,7 @@ defmodule PtcRunner.Lisp do
 
   # Let bindings — extend scope with bound vars
   defp collect_undefined_vars({:let, bindings, body}, scope) do
-    {binding_errors, extended_scope} =
-      Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
-        value_errs = collect_undefined_vars(value, sc)
-        new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
-        {errs ++ value_errs, new_scope}
-      end)
-
+    {binding_errors, extended_scope} = reduce_bindings(bindings, scope)
     binding_errors ++ collect_undefined_vars(body, extended_scope)
   end
 
@@ -985,13 +979,7 @@ defmodule PtcRunner.Lisp do
 
   # loop — extend scope with binding vars
   defp collect_undefined_vars({:loop, bindings, body}, scope) do
-    {binding_errors, extended_scope} =
-      Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
-        value_errs = collect_undefined_vars(value, sc)
-        new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
-        {errs ++ value_errs, new_scope}
-      end)
-
+    {binding_errors, extended_scope} = reduce_bindings(bindings, scope)
     binding_errors ++ collect_undefined_vars(body, extended_scope)
   end
 
@@ -1124,6 +1112,14 @@ defmodule PtcRunner.Lisp do
   defp collect_undefined_vars(other, _scope) do
     Logger.debug("collect_undefined_vars: unhandled node #{inspect(other, limit: 3)}")
     []
+  end
+
+  defp reduce_bindings(bindings, scope) do
+    Enum.reduce(bindings, {[], scope}, fn {:binding, pattern, value}, {errs, sc} ->
+      value_errs = collect_undefined_vars(value, sc)
+      new_scope = Enum.reduce(pattern_vars(pattern), sc, &MapSet.put(&2, &1))
+      {errs ++ value_errs, new_scope}
+    end)
   end
 
   # Extract def/defonce names from definite-execution contexts only.

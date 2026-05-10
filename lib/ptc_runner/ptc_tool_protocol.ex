@@ -480,24 +480,19 @@ defmodule PtcRunner.PtcToolProtocol do
 
   # Lists: encode elements, propagate path with `[index]`.
   defp do_to_json(value, path) when is_list(value) do
-    value
-    |> Enum.with_index()
-    |> Enum.reduce_while({:ok, []}, fn {elem, idx}, {:ok, acc} ->
-      case do_to_json(elem, [{:index, idx} | path]) do
-        {:ok, encoded} -> {:cont, {:ok, [encoded | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
-      err -> err
-    end
+    encode_indexed(value, path)
   end
 
   # Tuples: encode as JSON array.
   defp do_to_json(value, path) when is_tuple(value) do
-    value
-    |> Tuple.to_list()
+    encode_indexed(Tuple.to_list(value), path)
+  end
+
+  # Anything else (PIDs, references, functions, ports, unknown structs).
+  defp do_to_json(_other, path), do: {:error, path}
+
+  defp encode_indexed(list, path) do
+    list
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {elem, idx}, {:ok, acc} ->
       case do_to_json(elem, [{:index, idx} | path]) do
@@ -510,9 +505,6 @@ defmodule PtcRunner.PtcToolProtocol do
       err -> err
     end
   end
-
-  # Anything else (PIDs, references, functions, ports, unknown structs).
-  defp do_to_json(_other, path), do: {:error, path}
 
   defp map_key_to_string(k, _path) when is_binary(k), do: {:ok, k}
   defp map_key_to_string(k, _path) when is_atom(k), do: {:ok, Atom.to_string(k)}

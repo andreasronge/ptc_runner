@@ -284,19 +284,7 @@ defmodule PtcRunner.SubAgent.Validator do
 
     with prompt when is_binary(prompt) <- prompt_text,
          {:ok, signature} <- Keyword.fetch(opts, :signature) do
-      placeholders = PromptExpander.extract_placeholder_names(prompt)
-      signature_params = PromptExpander.extract_signature_params(signature)
-
-      case placeholders -- signature_params do
-        [] ->
-          :ok
-
-        missing ->
-          formatted_missing = Enum.map_join(missing, ", ", &"{{#{&1}}}")
-
-          raise ArgumentError,
-                "placeholders #{formatted_missing} not found in signature"
-      end
+      PromptExpander.validate_placeholders!(prompt, signature)
     else
       _ -> :ok
     end

@@ -177,21 +177,13 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   # List support for update
   def update_variadic([l, k, f]) when is_list(l) and is_integer(k) and k >= 0 do
-    if k < length(l) do
-      List.update_at(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
-    else
-      raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
-    end
+    update_at_or_raise(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
   end
 
   def update_variadic([l, k, f | extra_args]) when is_list(l) and is_integer(k) and k >= 0 do
-    if k < length(l) do
-      List.update_at(l, k, fn old_val ->
-        apply_with_arity_check(f, [old_val | extra_args], "update")
-      end)
-    else
-      raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
-    end
+    update_at_or_raise(l, k, fn old_val ->
+      apply_with_arity_check(f, [old_val | extra_args], "update")
+    end)
   end
 
   # Keep 3-arg version for direct calls
@@ -202,8 +194,12 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   def update(l, k, f) when is_list(l) and is_integer(k) and k >= 0 do
+    update_at_or_raise(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
+  end
+
+  defp update_at_or_raise(l, k, fun) when is_list(l) and is_integer(k) do
     if k < length(l) do
-      List.update_at(l, k, fn old_val -> apply_with_arity_check(f, [old_val], "update") end)
+      List.update_at(l, k, fun)
     else
       raise ArgumentError, "index #{k} out of bounds for list of length #{length(l)}"
     end
