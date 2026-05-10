@@ -227,9 +227,36 @@ catalog format, error model, three example programs).
 }
 ```
 
-The `${VAR}` placeholders inside `env` are resolved from the
+The `${VAR}` placeholders inside stdio `env` are resolved from the
 parent process at startup (e.g., `"GITHUB_TOKEN": "${GITHUB_TOKEN}"`).
 Unset variables fail-fast with a clear startup error.
+
+**HTTP upstreams** (Streamable HTTP rev 2025-06-18) plug in the same
+way alongside stdio entries, with a top-level `credentials:` block
+for bearer / basic / custom-header auth:
+
+```json
+{
+  "credentials": {
+    "github-pat": { "source": "env", "var": "GITHUB_PAT" }
+  },
+  "upstreams": {
+    "github": {
+      "transport": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth": [{ "scheme": "bearer", "binding": "github-pat" }],
+      "static_headers": { "X-MCP-Readonly": "true" }
+    },
+    "fs": { "command": "npx", "args": ["--yes", "@modelcontextprotocol/server-filesystem", "/tmp"] }
+  }
+}
+```
+
+Mixed transports work transparently; from a PTC-Lisp program's
+view, `(tool/mcp-call {:server "github" ...})` and
+`(tool/mcp-call {:server "fs" ...})` are indistinguishable. Full
+config + auth-emitter + redaction reference in
+[`docs/aggregator-mode.md`](../docs/aggregator-mode.md).
 
 **2. Point the server at the config.** One of, in priority order
 (highest wins):

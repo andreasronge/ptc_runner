@@ -1484,6 +1484,23 @@ Honest weaknesses:
   attribute cold-start cost vs steady-state cost, add the split in
   Phase 1b or as a follow-up (cheap to add — both values already
   exist in the closure's local scope).
+- **Resolved (2026-05-10): HTTP transport + credentials registry
+  shipped.** Originally implicit in §4.2's "Both the Phase 1a in-
+  process Fake and the Phase 1b stdio implementation conform to a
+  single `Upstream` behaviour" — the third impl, `Upstream.Http`
+  (Streamable HTTP rev 2025-06-18), conforms to the same behaviour
+  without a shape change. Resolved by `Plans/http-transport-credentials.md`
+  Phases 1-5: credentials registry with bindings (`env`/`file`/
+  `literal`); `auth:` emitter list (bearer/basic/custom_header);
+  structural redaction across Connection state, traces,
+  `upstream_calls`, logs, and telemetry; Streamable HTTP transport
+  with session-loss → exit-and-respawn semantics; per-request
+  resolution (no credential value cache); validated against
+  `https://api.githubcopilot.com/mcp/`. The §8.5 `upstream_calls`
+  entry shape gains optional `auth: {scheme, binding}` and
+  `http_status` fields (additive, stdio entries unchanged) per
+  the http-creds spec §9.2. The §10 telemetry tree gains a parallel
+  `[:credentials, :resolve, ...]` subtree per http-creds §11.
 
 ## 17. Document History
 
@@ -1663,6 +1680,34 @@ Honest weaknesses:
   phase; spelled out Phase 1a Fake cancellation as detach-equivalent
   with no requirement to kill the fake function (§12.2); added §18
   pasteable subagent briefs.
+- 2026-05-10 (phase6-http-credentials): Phase 6 — HTTP transport +
+  credentials registry — shipped per `Plans/http-transport-credentials.md`
+  (commits `7fc8898..0983647`). New sibling `Upstream.Http` impl
+  conforms to the existing §6.3 `Upstream` behaviour without shape
+  change. Adds: top-level `credentials:` config block with
+  env/file/literal sources (§5.4 of http-creds); `auth:` emitter
+  list per upstream (bearer/basic/custom_header schemes); structural
+  redaction of resolved auth bytes across Connection state, traces,
+  `upstream_calls`, logs, and telemetry, asserted by a 16-cycle
+  randomized-secret property test; Streamable HTTP rev 2025-06-18
+  wire format with session-loss → exit-and-respawn semantics
+  (reuses existing `abnormal_exit?/1` backoff path); per-upstream
+  named Finch pool sized by `pool_size`; static_headers (literal
+  non-secret) with sensitive-name denylist. Additive `upstream_calls`
+  fields (`auth: {scheme, binding}`, `http_status`) per http-creds
+  §9.2 — stdio entries unchanged. Catalog rendering gains
+  `[transport: http|stdio]` per-server header annotation per
+  http-creds §9.1. New `[:upstream, :http, :request, …]`,
+  `[:upstream, :http, :session_lost]` (with hashed prior session
+  id), and `[:credentials, :resolve, …]` telemetry events per
+  http-creds §11. Validated against the live GitHub MCP server
+  (`https://api.githubcopilot.com/mcp/`) via opt-in
+  `@real_remote_upstream` test. Shipped after 8 codex review
+  cycles across 5 phases, every phase passed within ≤3 rounds.
+  Suite: 695 tests, 0 failures (was 471 pre-feature). Honest
+  weaknesses #6 (stdio-only) and #7 (credential binding weaker
+  than Cloudflare) retired in `Plans/positioning-mcp-aggregator.md`
+  per http-creds §14.3.
 
 ## 18. Subagent Implementation Notes
 
