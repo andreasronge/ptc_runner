@@ -206,7 +206,18 @@ defmodule PtcRunnerMcp.Upstream.Http do
               jsonrpc_id: snap.request_id
             ]
 
-            classify_post_result(Transport.post(post_opts), pid, snap)
+            # §11 telemetry — wrap the wire call with
+            # `:upstream, :http, :request, :start | :stop`. Try/rescue/catch
+            # ensures `:stop` fires even if `Transport.post/1` raises
+            # (it shouldn't — its public contract is total — but
+            # operators rely on `:stop`-counts as the canonical
+            # "request happened" signal).
+            result =
+              with_request_telemetry(snap.name, "tools/call", fn ->
+                Transport.post(post_opts)
+              end)
+
+            classify_post_result(result, pid, snap)
 
           {:error, detail} ->
             {:error, :upstream_error, "encode failed: #{detail}"}
@@ -241,6 +252,19 @@ defmodule PtcRunnerMcp.Upstream.Http do
       # owning Connection's `:DOWN` monitor arms backoff. Cast is
       # fire-and-forget; if the GenServer is already dead (race with
       # another concurrent caller's cast), the message is dropped.
+      #
+      # §11 telemetry — `:session_lost` event fires here (caller-side)
+      # so the `prior_session_id_hash` reflects the id we actually
+      # held. The impl's `handle_cast(:session_lost, ...)` does NOT
+      # double-emit; it only logs + exits. Multiple concurrent callers
+      # may both detect 404 + held-session — each emits its own event,
+      # which is correct (each was an independent failed request).
+      :telemetry.execute(
+        [:ptc_runner_mcp, :upstream, :http, :session_lost],
+        %{count: 1},
+        %{name: snap.name, prior_session_id_hash: hash_session_id(snap.session_id)}
+      )
+
       _ = safe_cast(pid, :session_lost)
       {:error, :upstream_unavailable, "session_lost"}
     else
@@ -386,7 +410,14 @@ defmodule PtcRunnerMcp.Upstream.Http do
           connect_timeout_ms: state.connect_timeout_ms,
           max_response_bytes: state.max_response_bytes,
           request_id: id,
-          has_session_id?: is_binary(session.session_id)
+          has_session_id?: is_binary(session.session_id),
+          # §11 telemetry — caller-process `tools/call` emits its own
+          # `:upstream, :http, :request, :start | :stop` events; needs
+          # the upstream name + the held session id (for hashing on
+          # session-loss). The session id never leaves this process
+          # except as a SHA-256 hash via `hash_session_id/1`.
+          name: state.name,
+          session_id: session.session_id
         }
 
         {:reply, {:ok, snapshot}, %{state | session: session}}
@@ -710,16 +741,23 @@ defmodule PtcRunnerMcp.Upstream.Http do
   defp post(state, headers, body_map, jsonrpc_id) do
     case encode_body(body_map) do
       {:ok, encoded} ->
-        Transport.post(
-          finch: state.finch_name,
-          url: state.url,
-          headers: headers,
-          body: encoded,
-          request_timeout_ms: state.handshake_timeout_ms,
-          connect_timeout_ms: state.connect_timeout_ms,
-          max_response_bytes: state.max_response_bytes,
-          jsonrpc_id: jsonrpc_id
-        )
+        # §11 telemetry — wrap each wire call with
+        # `:upstream, :http, :request, :start | :stop`. The
+        # `jsonrpc_method` is read from `body_map` (not `state`) so
+        # each handshake step / notification surfaces with its own
+        # method label.
+        with_request_telemetry(state.name, jsonrpc_method(body_map), fn ->
+          Transport.post(
+            finch: state.finch_name,
+            url: state.url,
+            headers: headers,
+            body: encoded,
+            request_timeout_ms: state.handshake_timeout_ms,
+            connect_timeout_ms: state.connect_timeout_ms,
+            max_response_bytes: state.max_response_bytes,
+            jsonrpc_id: jsonrpc_id
+          )
+        end)
 
       {:error, detail} ->
         {:error, :upstream_error, "encode failed: #{detail}"}
@@ -729,21 +767,124 @@ defmodule PtcRunnerMcp.Upstream.Http do
   defp post_with_meta(state, headers, body_map, jsonrpc_id) do
     case encode_body(body_map) do
       {:ok, encoded} ->
-        Transport.post_with_meta(
-          finch: state.finch_name,
-          url: state.url,
-          headers: headers,
-          body: encoded,
-          request_timeout_ms: state.handshake_timeout_ms,
-          connect_timeout_ms: state.connect_timeout_ms,
-          max_response_bytes: state.max_response_bytes,
-          jsonrpc_id: jsonrpc_id
-        )
+        with_request_telemetry(state.name, jsonrpc_method(body_map), fn ->
+          Transport.post_with_meta(
+            finch: state.finch_name,
+            url: state.url,
+            headers: headers,
+            body: encoded,
+            request_timeout_ms: state.handshake_timeout_ms,
+            connect_timeout_ms: state.connect_timeout_ms,
+            max_response_bytes: state.max_response_bytes,
+            jsonrpc_id: jsonrpc_id
+          )
+        end)
 
       {:error, detail} ->
         {:error, :upstream_error, "encode failed: #{detail}"}
     end
   end
+
+  defp jsonrpc_method(%{"method" => m}) when is_binary(m), do: m
+  defp jsonrpc_method(_), do: "unknown"
+
+  # §11 telemetry — wrap a wire call with `:upstream, :http, :request,
+  # :start | :stop`. Emits:
+  #
+  #   * `:start` — `%{system_time: ...}`, metadata `%{name, jsonrpc_method}`.
+  #   * `:stop` (success) — `%{duration_ms}`, metadata
+  #     `%{name, jsonrpc_method, http_status, duration_ms}` so consumers
+  #     can index either way (measurement OR metadata-side duration);
+  #     §11 didn't pin this, so we surface in both. `http_status` is
+  #     `nil` on transport-error stops (§11 says "absent" — we put `nil`
+  #     so the metadata shape is invariant for handlers that pattern-match).
+  #   * `:stop` (transport error) — `http_status` set to `nil`.
+  #
+  # Try/rescue/catch ensures `:stop` always fires, even if `fun` raises.
+  # The exception is re-raised after emission.
+  defp with_request_telemetry(name, jsonrpc_method, fun)
+       when is_binary(name) and is_binary(jsonrpc_method) and is_function(fun, 0) do
+    start_metadata = %{name: name, jsonrpc_method: jsonrpc_method}
+    start_mono = System.monotonic_time()
+
+    :telemetry.execute(
+      [:ptc_runner_mcp, :upstream, :http, :request, :start],
+      %{system_time: System.system_time()},
+      start_metadata
+    )
+
+    try do
+      result = fun.()
+
+      duration_ms =
+        System.convert_time_unit(
+          System.monotonic_time() - start_mono,
+          :native,
+          :millisecond
+        )
+
+      :telemetry.execute(
+        [:ptc_runner_mcp, :upstream, :http, :request, :stop],
+        %{duration_ms: duration_ms},
+        Map.merge(start_metadata, %{
+          http_status: http_status_from_result(result),
+          duration_ms: duration_ms
+        })
+      )
+
+      result
+    rescue
+      e ->
+        emit_request_stop_error(start_metadata, start_mono)
+        reraise(e, __STACKTRACE__)
+    catch
+      kind, reason ->
+        emit_request_stop_error(start_metadata, start_mono)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp emit_request_stop_error(start_metadata, start_mono) do
+    duration_ms =
+      System.convert_time_unit(
+        System.monotonic_time() - start_mono,
+        :native,
+        :millisecond
+      )
+
+    :telemetry.execute(
+      [:ptc_runner_mcp, :upstream, :http, :request, :stop],
+      %{duration_ms: duration_ms},
+      Map.merge(start_metadata, %{http_status: nil, duration_ms: duration_ms})
+    )
+  end
+
+  # `Transport.post/1` and `Transport.post_with_meta/1` collapse status
+  # codes into shaped error returns rather than threading the raw
+  # status through. We can recover it from the success payload (200 →
+  # `{:ok, _}`, 202 → `:ok`, post_with_meta success → `{:ok, %{status,
+  # ...}}`); on the error branch (`{:error, reason, detail}`) status
+  # is not directly recoverable without changing Transport's contract,
+  # so we surface `nil` — operators reading the telemetry stream still
+  # see latency + error reason via the metadata's `:jsonrpc_method` and
+  # the lifetime of the request.
+  defp http_status_from_result({:ok, %{status: s}}) when is_integer(s), do: s
+  defp http_status_from_result({:ok, _result}), do: 200
+  defp http_status_from_result(:ok), do: 202
+  defp http_status_from_result({:error, _reason, _detail}), do: nil
+
+  # §11 — `prior_session_id_hash` for the `:session_lost` event.
+  # SHA-256 (hex, lowercase) truncated to 16 chars. 16 hex chars is
+  # 64 bits of correlation strength — plenty for cross-referencing
+  # session-loss events without leaking the opaque session ID into
+  # operator dashboards / metric pipelines.
+  defp hash_session_id(id) when is_binary(id) do
+    :crypto.hash(:sha256, id)
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
+  defp hash_session_id(_), do: nil
 
   defp encode_body(body_map) do
     case Jason.encode(body_map) do

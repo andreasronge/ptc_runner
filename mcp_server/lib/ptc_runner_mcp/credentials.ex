@@ -123,8 +123,109 @@ defmodule PtcRunnerMcp.Credentials do
           {:ok, materialization()}
           | {:error, materialize_error_reason(), String.t()}
   def materialize(server, name) when is_binary(name) do
-    GenServer.call(server, {:materialize, name})
+    # §11 telemetry — `:credentials, :resolve, :start | :stop | :error`.
+    # Wraps the GenServer call so `duration_ms` measures the full
+    # resolve including source I/O (env / file). Metadata never carries
+    # the resolved value — only the binding name, the source atom, and
+    # (on error) a short atom reason.
+    start_mono = System.monotonic_time()
+
+    :telemetry.execute(
+      [:ptc_runner_mcp, :credentials, :resolve, :start],
+      %{system_time: System.system_time()},
+      %{binding: name}
+    )
+
+    raw_result = GenServer.call(server, {:materialize, name})
+
+    duration_ms =
+      System.convert_time_unit(
+        System.monotonic_time() - start_mono,
+        :native,
+        :millisecond
+      )
+
+    {result, source} = strip_source(raw_result)
+    emit_resolve_outcome(name, result, source, duration_ms)
+    result
   end
+
+  # The GenServer returns a result map with an internal `:_source` key
+  # so we can tag telemetry without re-fetching the binding. Strip it
+  # before handing the materialization back to the caller — the
+  # documented `materialization()` shape does not include `:_source`,
+  # and `apply_emitter/2` does not look at it.
+  defp strip_source({:ok, %{_source: source} = m}) do
+    {{:ok, Map.delete(m, :_source)}, source}
+  end
+
+  defp strip_source({:ok, m}), do: {{:ok, m}, :unknown}
+
+  defp strip_source({:error, _, _} = err), do: {err, :unknown}
+
+  # Map a `materialize/1` result onto the appropriate :stop / :error
+  # telemetry event. The resolved bytes are NEVER passed into
+  # telemetry metadata — only the binding name, the source atom, and
+  # the duration (or short atom reason on error).
+  defp emit_resolve_outcome(name, {:ok, _m}, source, duration_ms) do
+    :telemetry.execute(
+      [:ptc_runner_mcp, :credentials, :resolve, :stop],
+      %{duration_ms: duration_ms},
+      %{binding: name, source: source}
+    )
+  end
+
+  defp emit_resolve_outcome(name, {:error, :unknown_binding, _detail}, _source, duration_ms) do
+    # `:unknown_binding` has no source — we never reached resolution.
+    # Use `:unknown` as the source atom; the reason atom carries the
+    # diagnosis. No detail string is included (no path leak risk).
+    :telemetry.execute(
+      [:ptc_runner_mcp, :credentials, :resolve, :error],
+      %{duration_ms: duration_ms},
+      %{binding: name, source: :unknown, reason: :unknown_binding}
+    )
+  end
+
+  defp emit_resolve_outcome(name, {:error, :resolution_failed, detail}, _source_in, duration_ms) do
+    {source, reason} = classify_resolution_failure(detail)
+
+    :telemetry.execute(
+      [:ptc_runner_mcp, :credentials, :resolve, :error],
+      %{duration_ms: duration_ms},
+      %{binding: name, source: source, reason: reason}
+    )
+  end
+
+  # Map `resolution_failed` detail strings to (source, short-atom
+  # reason) pairs. The detail strings are produced by `resolve/1` in
+  # this module:
+  #   * `"env var '<VAR>' is not set"`        → :env, :env_missing
+  #   * `"file '<path>' is empty"`            → :file, :file_empty
+  #   * `"file '<path>': <enoent|eacces|…>"`  → :file, :file_not_found / :file_unreadable
+  #
+  # We deliberately match on the leading prefix so the reason atom
+  # never echoes the path (which could appear in operator dashboards)
+  # — §11 mandates short atoms, not detail strings.
+  defp classify_resolution_failure(detail) when is_binary(detail) do
+    cond do
+      String.starts_with?(detail, "env var ") ->
+        {:env, :env_missing}
+
+      String.starts_with?(detail, "file ") and String.contains?(detail, "is empty") ->
+        {:file, :file_empty}
+
+      String.starts_with?(detail, "file ") and String.contains?(detail, "no such file") ->
+        {:file, :file_not_found}
+
+      String.starts_with?(detail, "file ") ->
+        {:file, :file_unreadable}
+
+      true ->
+        {:unknown, :resolution_failed}
+    end
+  end
+
+  defp classify_resolution_failure(_), do: {:unknown, :resolution_failed}
 
   @typedoc """
   Auth emitter spec consumed by `apply_emitter/2`. Atom keys.
@@ -271,11 +372,18 @@ defmodule PtcRunnerMcp.Credentials do
             # a value that isn't yet in the redaction set.
             :ets.insert(table, {raw, true})
 
+            # `:_source` is an internal-only key that lets `materialize/2`
+            # tag the `:credentials, :resolve, :stop` telemetry with the
+            # binding's source atom (`:env | :file | :literal`) without
+            # forcing a second `Map.fetch/2` on the binding map. The
+            # leading underscore signals "not part of the documented
+            # `materialization()` shape" — `apply_emitter/2` ignores it.
             {:ok,
              %{
                raw: raw,
                scheme_hint: b.scheme_hint || :raw,
-               expires_at: :never
+               expires_at: :never,
+               _source: b.source
              }}
 
           {:error, detail} ->

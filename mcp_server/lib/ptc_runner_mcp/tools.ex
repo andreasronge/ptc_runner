@@ -134,6 +134,16 @@ defmodule PtcRunnerMcp.Tools do
   # schema with an optional `upstream_calls` array. Strict
   # `structuredContent` validators that don't know about the new
   # field would otherwise reject responses that include it.
+  #
+  # Phase 5 / `Plans/http-transport-credentials.md` §9.3 extends the
+  # per-entry schema with two additional optional fields:
+  #
+  #   * `auth` — object `{scheme, binding}`, present when the upstream
+  #     is HTTP and has at least one `auth:` emitter.
+  #   * `http_status` — integer, present when a failure came from an
+  #     HTTP response (4xx / 5xx / 429).
+  #
+  # Both are optional; stdio entries are byte-for-byte unchanged.
   @upstream_calls_schema %{
     "type" => "array",
     "items" => %{
@@ -154,7 +164,16 @@ defmodule PtcRunnerMcp.Tools do
             "cap_exhausted"
           ]
         },
-        "error" => %{"type" => "string"}
+        "error" => %{"type" => "string"},
+        "auth" => %{
+          "type" => "object",
+          "required" => ["scheme", "binding"],
+          "properties" => %{
+            "scheme" => %{"type" => "string"},
+            "binding" => %{"type" => "string"}
+          }
+        },
+        "http_status" => %{"type" => "integer", "minimum" => 100, "maximum" => 599}
       }
     }
   }
