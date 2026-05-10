@@ -66,6 +66,11 @@ feedback loop.
   ledger surfaces partial work in either case.
 - Cancellation stops future work. It does not roll back completed
   upstream side effects.
+- Repair is conservative. In the absence of reliable upstream
+  read/write annotations, repair stops after the first upstream call.
+  Operators who want broader runtime-error repair should use upstreams
+  that populate read-only/destructive annotations or run the
+  aggregator in read-only mode.
 - Operators configure SubAgent details through one JSON file under a
   documented allowlist. Reserved keys are rejected loudly at boot.
 - The MCP-controlled middle of the system prompt (PTC-Lisp rules,
@@ -122,7 +127,7 @@ Allowed keys (v1):
 |---|---|---|---|
 | `max_turns` | integer | `1` | `max_turns` |
 | `retry_turns` | integer | `0` | `retry_turns` |
-| `mission_timeout_ms` | integer | aggregator task budget | `mission_timeout` |
+| `mission_timeout_ms` | integer, milliseconds | aggregator task budget | `mission_timeout` |
 | `system_prompt` | object | `null` | `system_prompt` (see below) |
 | `cache` | boolean | `false` | `cache` |
 | `thinking` | boolean | `false` | `thinking` |
@@ -150,7 +155,9 @@ Reserved keys (rejected at boot):
 - `output` — locked to `:ptc_lisp`.
 - `ptc_transport` — locked for v1.
 - `trace_context` — set by the MCP adapter so MCP traces and the
-  upstream ledger stay correlated.
+  upstream ledger stay correlated. It carries the MCP `request_id`
+  and trace id so SubAgent traces and the MCP envelope's `trace_id`
+  refer to the same internal run.
 - Any key whose name begins with `_` — SubAgent-internal.
 - Any key not in the allowlist — rejected with the allowed-key list
   in the error.
@@ -245,6 +252,11 @@ The tool implementation normalizes keyword and string keys, enforces
 the existing aggregator policy, appends a ledger entry, and returns
 the tagged PTC-Lisp value described in "Tool Errors As Data".
 
+The MCP adapter builds the `mcp-call` closure with a captured
+per-call ledger reference, such as an Agent or task-local holder.
+SubAgent does not know about the ledger; it only calls the injected
+tool function.
+
 #### Step Projection
 
 `ptc_task` translates the final SubAgent result to the MCP envelope:
@@ -260,8 +272,9 @@ the tagged PTC-Lisp value described in "Tool Errors As Data".
   `ptc_task` renderer;
 - the MCP ledger becomes `upstream_calls`;
 - the compact response includes the last generated program when
-  `include_program` is enabled; full turn detail lives in trace
-  storage.
+  `include_program` is enabled (defined in
+  `Plans/agentic-mcp-aggregator.md`); full turn detail lives in
+  trace storage.
 
 ## System Prompt Assembly
 
@@ -295,6 +308,11 @@ USER message, per ptc_task call:
   - context     (optional JSON)
   - constraints (optional JSON)
 ```
+
+The v1 role string is:
+
+> You are an agent that writes PTC-Lisp programs to fulfill
+> plain-English tasks via the configured upstream MCP servers.
 
 Reuse properties:
 
@@ -340,6 +358,13 @@ Required invariants:
 - no raw schemas or response-shape hints;
 - no silent over-budget output;
 - no LLM-generated prose.
+
+The simple fill-in-order algorithm can omit later alphabetical
+upstreams when an earlier upstream consumes most of the budget. This
+is acceptable for v1 because omission is signaled by
+`(+N more upstreams)`. Operators can raise
+`--agentic-capability-summary-max-bytes` or supply a verbatim summary
+override when that tradeoff is poor for a deployment.
 
 Example output (budget `800`, three upstreams):
 
@@ -405,6 +430,22 @@ Properties:
   tool annotations when available. If the runtime cannot prove a call
   is read-only, it records `:unknown`, which is treated like `:write`
   for retry safety.
+
+Effect classification algorithm:
+
+- if `--aggregator-read-only=true`, every permitted upstream call is
+  recorded as `:read`;
+- otherwise, if the upstream tool annotation has `readOnlyHint=true`
+  and not `destructiveHint=true`, record `:read`;
+- otherwise, if the upstream tool annotation has
+  `destructiveHint=true`, record `:write`;
+- otherwise, record `:unknown`.
+
+MCP annotations are inconsistently populated by upstream servers in
+the wild. For unannotated deployments, `:unknown` may be the dominant
+classification, which means `retry_turns > 0` mostly helps
+parse/validation/pre-call runtime failures after the first upstream
+call. This is intentional conservatism for v1.
 
 ## Tool Errors As Data
 
@@ -633,6 +674,14 @@ Capability summary tests:
 - operator override is forwarded verbatim and fails boot when
   oversize.
 
+Effect classification tests:
+
+- aggregator read-only posture records permitted calls as `:read`;
+- `readOnlyHint=true` and not `destructiveHint=true` records `:read`;
+- `destructiveHint=true` records `:write`;
+- absent or ambiguous annotations record `:unknown`;
+- `:unknown` disables repair like `:write`.
+
 Adapter tests (stub planner):
 
 - single-shot run produces aggregator-spec envelope and ledger entry;
@@ -682,9 +731,8 @@ Real-provider smoke (`gemini-flash-lite`):
 - post-execution LLM summarization;
 - direct filesystem/network access from generated code;
 - replacing or hiding `ptc_lisp_execute`;
-- exposing `cache`, `thinking`, `memory_limit`, `memory_strategy`,
-  `ptc_transport` as CLI flags (they remain reachable via the
-  SubAgent config file when applicable).
+- exposing `memory_limit`, `memory_strategy`, or `ptc_transport` as
+  CLI flags or SubAgent config-file keys.
 
 ## Near-Term Sequencing
 
