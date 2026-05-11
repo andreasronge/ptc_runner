@@ -22,7 +22,9 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:ex_unit, :mix, :req, :req_llm]
+        plt_add_apps: [:ex_unit, :mix, :req, :req_llm],
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true
       ]
     ]
   end
@@ -36,7 +38,7 @@ defmodule PtcRunner.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, prepush: :test]
     ]
   end
 
@@ -66,14 +68,19 @@ defmodule PtcRunner.MixProject do
     [
       precommit: [
         "format --check-formatted",
-        "compile --force --warnings-as-errors",
+        "compile --warnings-as-errors",
         "credo --strict",
-        "dialyzer",
         "schema.gen",
         "ptc.validate_spec",
         "test --warnings-as-errors",
         "cmd --cd demo mix test --color",
         "cmd --cd ptc_viewer mix test --color"
+      ],
+      # Slower checks kept out of the per-commit loop; run before pushing.
+      # CI runs dialyzer + the unused-deps check on every PR regardless.
+      prepush: [
+        "dialyzer",
+        "deps.unlock --check-unused"
       ],
       "schema.gen": [
         "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
