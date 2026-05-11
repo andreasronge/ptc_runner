@@ -369,9 +369,7 @@ defmodule PtcRunner.PtcToolProtocol do
   @spec validate_program(term()) ::
           {:ok, String.t()} | {:error, :args_error, String.t()}
   def validate_program(nil),
-    do:
-      {:error, :args_error,
-       "ptc_lisp_execute requires a non-empty `program` string argument."}
+    do: {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
 
   def validate_program(program) when not is_binary(program),
     do:
