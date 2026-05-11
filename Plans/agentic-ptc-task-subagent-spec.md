@@ -991,6 +991,30 @@ source of truth when a detail is not repeated here.
 - If a phase needs to touch files owned by another active worker,
   stop and update the integration plan instead of making overlapping
   edits.
+- A phase gated by a review below is not done until the review has no
+  unresolved correctness, contract, or safety findings.
+
+### Review Gates
+
+Review gates are phase gates, not additional implementation phases.
+Each gate must use an independent Codex review or challenge pass with
+at least `high` reasoning effort. Use `xhigh` for write-safety review
+when schedule and budget allow.
+
+- **R0: Contract gate after Phase 0.** The integrator reviews shared
+  names and data shapes for `completion_mode`, ledger entries,
+  response projection, `partial_side_effects`, and continuation hook
+  requirements before parallel implementation starts.
+- **R1: Vertical-slice integration gate after Phase 3.** Review Worker
+  C and Worker D together. Confirm every success and error projection
+  includes the ledger, tagged `mcp-call` values match the prompt
+  contract, planner/execution summaries are stable, and tests cover
+  `(return ...)`, `(fail ...)`, world faults, programmer faults, and
+  dropped or empty ledger regressions.
+- **R2: Write-safety gate before Phase 6 merge.** Run an adversarial
+  review focused on write/unknown side effects, cancellation, partial
+  side-effect classification, no-continuation-after-write rules, and
+  client-facing safety wording.
 
 ### Phase Plan
 
