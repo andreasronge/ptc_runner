@@ -19,6 +19,16 @@ defmodule PtcRunnerMcp.CatalogTest do
 
   alias PtcRunnerMcp.Upstream.Catalog
 
+  setup do
+    Catalog.clear_frozen()
+
+    on_exit(fn ->
+      Catalog.clear_frozen()
+    end)
+
+    :ok
+  end
+
   describe "render_entries/1 — empty inputs" do
     test "empty list → empty string" do
       assert Catalog.render_entries([]) == ""
@@ -34,6 +44,23 @@ defmodule PtcRunnerMcp.CatalogTest do
       output = Catalog.render_entries([%{name: "github", tools: []}])
 
       assert output == "github:\n  (no tools advertised)"
+    end
+  end
+
+  describe "structured frozen snapshot" do
+    test "freezes and clears a structured snapshot independently of rendered text" do
+      entries = [%{name: "github", tools: [], impl: PtcRunnerMcp.Upstream.Http}]
+
+      Catalog.freeze("rendered")
+      Catalog.freeze_snapshot(entries)
+
+      assert Catalog.frozen() == "rendered"
+      assert Catalog.frozen_snapshot() == entries
+
+      Catalog.clear_frozen()
+
+      assert Catalog.frozen() == ""
+      assert Catalog.frozen_snapshot() == []
     end
   end
 

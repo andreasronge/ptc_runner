@@ -18,6 +18,7 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.llm_retry == nil
       assert agent.llm == nil
       assert agent.system_prompt == nil
+      assert agent.completion_mode == :implicit
     end
 
     test "creates agent with all fields provided" do
@@ -45,6 +46,17 @@ defmodule PtcRunner.SubAgent.NewTest do
       assert agent.llm_retry == %{max_attempts: 3}
       assert agent.llm == :sonnet
       assert agent.system_prompt == %{prefix: "You are an expert"}
+    end
+
+    test "accepts explicit completion mode as Phase 0 contract" do
+      agent = SubAgent.new(prompt: "Test", completion_mode: :explicit)
+      assert agent.completion_mode == :explicit
+    end
+
+    test "rejects unknown completion modes" do
+      assert_raise ArgumentError, "completion_mode must be :implicit or :explicit", fn ->
+        SubAgent.new(prompt: "Test", completion_mode: :terminal)
+      end
     end
 
     test "applies default values for optional fields" do

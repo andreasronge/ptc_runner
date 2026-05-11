@@ -129,10 +129,30 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
 
     if upstreams == [] do
       Catalog.freeze("")
+      Catalog.freeze_snapshot([])
     else
+      snapshot =
+        try do
+          Catalog.snapshot(registry)
+        rescue
+          e ->
+            Log.log(:warn, "catalog_freeze_snapshot_failed", %{
+              error: Exception.message(e)
+            })
+
+            []
+        catch
+          :exit, reason ->
+            Log.log(:warn, "catalog_freeze_snapshot_exit", %{
+              reason: inspect(reason, limit: 50)
+            })
+
+            []
+        end
+
       catalog =
         try do
-          Catalog.render(registry)
+          Catalog.render_entries(snapshot)
         rescue
           e ->
             Log.log(:warn, "catalog_freeze_render_failed", %{
@@ -149,6 +169,7 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
             ""
         end
 
+      Catalog.freeze_snapshot(snapshot)
       Catalog.freeze(catalog)
     end
   end
