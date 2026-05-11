@@ -37,9 +37,10 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
     assert String.ends_with?(
              prompt,
-             "- Return compact selected fields, not full upstream envelopes."
+             "- Return a human-readable text answer that addresses the task."
            )
 
+    assert prompt =~ "Check the value before returning it"
     assert prompt =~ "You may continue across turns"
     assert prompt =~ "Write-capable upstream calls may have side effects"
   end
@@ -49,10 +50,12 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
     assert count(prompt, "ptc_task MCP-call contract:") == 1
     assert count(prompt, "In `ptc_task`, `tool/mcp-call` returns a tagged map") == 1
+    assert prompt =~ "Prefer `(mcp/text ...)` for human-readable upstream text"
+    assert prompt =~ "unexpected shape, inspect `(mcp/text ...)`"
     assert prompt =~ "inspect `:ok`"
     refute prompt =~ ":tag"
     refute prompt =~ "returns `nil`"
-    refute prompt =~ "returns nil"
+    refute prompt =~ "tool/mcp-call returns nil"
   end
 
   test "assemble returns user message and generic tool-rendering suppression data" do

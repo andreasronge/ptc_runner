@@ -499,6 +499,7 @@ server uses the configured planner model to run a SubAgent in explicit
 completion mode, with one MCP-owned tool available inside the planner:
 `tool/mcp-call`. The planner may call upstream MCP servers, inspect the
 tagged result, and must finish with `(return ...)` or `(fail ...)`.
+Successful `ptc_task` answers are intended to be human-readable text.
 
 `ptc_task` does not replace `ptc_lisp_execute`. Both tools are
 advertised when all of these are true:
@@ -547,7 +548,6 @@ Once enabled, clients call:
   "arguments": {
     "task": "Read README.md and return the first 5 non-empty lines.",
     "constraints": {
-      "output_format": "text",
       "max_items": 5
     }
   }
@@ -557,7 +557,7 @@ Once enabled, clients call:
 The response includes:
 
 - `status`: `"ok"` or `"error"`;
-- `answer` and, when applicable, `structured_result`;
+- `answer`, a human-readable text response;
 - `program`, unless `--agentic-include-program=false`;
 - `upstream_calls`, the ledger of MCP calls made by the planner;
 - `planner` metadata, including model, turn count, duration, and token
@@ -611,6 +611,22 @@ upstream catalog at boot, capped by
 `--agentic-capability-summary-max-bytes`, and logged only as byte count
 plus SHA-256 hash. To provide your own wording, set
 `--agentic-capability-summary /path/to/summary.md`.
+
+When an upstream tool advertises `outputSchema`, the generated catalog
+turns the supported JSON Schema subset into compact PTC-style output
+hints, for example:
+
+```text
+list_entries(path: string) -> {entries [:string], truncated :bool?}
+```
+
+These hints are planner guidance, not runtime validation of upstream
+results. Supported conversions include JSON Schema `string`,
+`integer`, `number`, `boolean`, arrays with `items`, and objects with
+`properties`; unknown or complex schemas fall back to `:any` or
+`:map`. If an upstream omits `outputSchema`, the server does not invent
+a hard output type. The tool description remains the only shape hint
+for text-shaped tools such as `filesystem.list_directory`.
 
 ### Real-provider smoke
 

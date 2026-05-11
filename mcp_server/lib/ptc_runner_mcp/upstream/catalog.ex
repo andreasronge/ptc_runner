@@ -292,13 +292,24 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   defp render_tool(tool) do
     name = tool_field(tool, :name)
     schema = tool_field(tool, :input_schema, %{})
+    output_schema = tool_field(tool, :output_schema, nil)
     description = tool_field(tool, :description, "")
 
     args = render_args(schema)
+    output_part = render_output(output_schema)
     desc_part = render_description(description)
 
-    "  #{name}(#{args})#{desc_part}"
+    "  #{name}(#{args})#{output_part}#{desc_part}"
   end
+
+  defp render_output(schema) when is_map(schema) do
+    case render_signature_type(schema) do
+      "" -> ""
+      type -> " -> #{type}"
+    end
+  end
+
+  defp render_output(_), do: ""
 
   # Argument ordering rule: required args first in the order they
   # appear in the schema's `required` array, then optional args
@@ -370,6 +381,83 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   end
 
   defp render_type(_), do: "any"
+
+  defp render_signature_type(schema) when is_map(schema) do
+    case schema_variant_type(schema) do
+      {:ok, type} -> type
+      :error -> render_signature_primitive(schema)
+    end
+  end
+
+  defp render_signature_type(_), do: ":any"
+
+  defp schema_variant_type(schema) do
+    schemas = get_field(schema, "oneOf", :oneOf) || get_field(schema, "anyOf", :anyOf)
+
+    case schemas do
+      list when is_list(list) and list != [] ->
+        types =
+          list
+          |> Enum.map(&render_signature_type/1)
+          |> Enum.uniq()
+
+        case types do
+          [type] -> {:ok, type}
+          _ -> {:ok, ":any"}
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp render_signature_primitive(schema) do
+    case get_field(schema, "type", :type) do
+      "string" -> ":string"
+      "integer" -> ":int"
+      "number" -> ":float"
+      "boolean" -> ":bool"
+      "array" -> render_signature_array(schema)
+      "object" -> render_signature_object(schema)
+      _ -> ":any"
+    end
+  end
+
+  defp render_signature_array(schema) do
+    items = get_field(schema, "items", :items)
+    "[#{render_signature_type(items || %{})}]"
+  end
+
+  defp render_signature_object(schema) do
+    properties = get_field(schema, "properties", :properties)
+
+    case properties do
+      props when is_map(props) and map_size(props) > 0 ->
+        required = signature_required_names(schema)
+
+        fields =
+          props
+          |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+          |> Enum.take(5)
+          |> Enum.map_join(", ", fn {key, value} ->
+            key = to_string(key)
+            optional = if key in required, do: "", else: "?"
+            "#{key} #{render_signature_type(value)}#{optional}"
+          end)
+
+        "{#{fields}}"
+
+      _ ->
+        ":map"
+    end
+  end
+
+  defp signature_required_names(schema) do
+    case get_field(schema, "required", :required) do
+      list when is_list(list) -> Enum.map(list, &to_string/1)
+      _ -> []
+    end
+  end
 
   defp enum_value(schema) do
     case get_field(schema, "enum", :enum) do

@@ -485,8 +485,7 @@ defmodule PtcRunnerMcp.Agentic do
         },
         "constraints" => %{
           "type" => "object",
-          "description" =>
-            "Optional constraints such as max_items, preferred_fields, output_format, or max_result_bytes."
+          "description" => "Optional soft constraints such as max_items or preferred_fields."
         }
       }
     }

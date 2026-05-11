@@ -642,15 +642,26 @@ defmodule PtcRunnerMcp.Upstream.Http do
         input_schema: Map.get(t, "inputSchema") || Map.get(t, "input_schema") || %{}
       }
 
-      case Map.get(t, "description") do
-        nil -> base
-        "" -> base
-        desc when is_binary(desc) -> Map.put(base, :description, desc)
-      end
+      base
+      |> maybe_put_description(Map.get(t, "description"))
+      |> maybe_put_map(:output_schema, Map.get(t, "outputSchema") || Map.get(t, "output_schema"))
+      |> maybe_put_map(:annotations, Map.get(t, "annotations"))
     end)
   end
 
   defp extract_tools(_), do: []
+
+  defp maybe_put_description(tool, nil), do: tool
+  defp maybe_put_description(tool, ""), do: tool
+
+  defp maybe_put_description(tool, description) when is_binary(description),
+    do: Map.put(tool, :description, description)
+
+  defp maybe_put_description(tool, _description), do: tool
+
+  defp maybe_put_map(tool, _key, value) when value in [nil, %{}], do: tool
+  defp maybe_put_map(tool, key, value) when is_map(value), do: Map.put(tool, key, value)
+  defp maybe_put_map(tool, _key, _value), do: tool
 
   # ----------------------------------------------------------------
   # Per-request auth resolution (Phase 3C — §5.3.1, §7.3, §8.3)

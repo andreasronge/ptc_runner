@@ -63,7 +63,12 @@ defmodule PtcRunnerMcp.Upstream.HttpTest do
         %{
           "name" => "echo",
           "description" => "echoes",
-          "inputSchema" => %{"type" => "object"}
+          "inputSchema" => %{"type" => "object"},
+          "outputSchema" => %{
+            "type" => "object",
+            "properties" => %{"ok" => %{"type" => "boolean"}}
+          },
+          "annotations" => %{"readOnlyHint" => true}
         }
       ]
 
@@ -75,7 +80,19 @@ defmodule PtcRunnerMcp.Upstream.HttpTest do
 
       # tools/list reflects the cache populated at handshake time.
       assert {:ok, tools} = Http.list_tools(name)
-      assert [%{name: "echo", description: "echoes", input_schema: %{"type" => "object"}}] = tools
+
+      assert [
+               %{
+                 name: "echo",
+                 description: "echoes",
+                 input_schema: %{"type" => "object"},
+                 output_schema: %{
+                   "type" => "object",
+                   "properties" => %{"ok" => %{"type" => "boolean"}}
+                 },
+                 annotations: %{"readOnlyHint" => true}
+               }
+             ] = tools
 
       # tools/call returns the upstream's `result` map verbatim.
       assert {:ok, %{"content" => [%{"type" => "text", "text" => "called echo"}]}} =
