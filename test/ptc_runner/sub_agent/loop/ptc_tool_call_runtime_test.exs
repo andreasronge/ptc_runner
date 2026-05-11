@@ -14,50 +14,9 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
 
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.PtcToolCallTestHelpers
+
   alias PtcRunner.SubAgent
-
-  # ============================================================
-  # LLM stub helper
-  # ============================================================
-
-  # Build an LLM callback that returns one of the supplied canned responses
-  # on each successive call. The optional `:on_request` arg captures each
-  # input map for later assertion.
-  defp scripted_llm(responses, opts \\ []) do
-    counter = :counters.new(1, [:atomics])
-    pid = Keyword.get(opts, :send_to)
-
-    fn input ->
-      :counters.add(counter, 1, 1)
-      idx = :counters.get(counter, 1)
-
-      if pid, do: send(pid, {:llm_request, idx, input})
-
-      response = Enum.at(responses, idx - 1) || List.last(responses)
-
-      case response do
-        {:error, reason} -> {:error, reason}
-        resp -> {:ok, resp}
-      end
-    end
-  end
-
-  defp tool_call_response(program, opts \\ []) do
-    id = Keyword.get(opts, :id, "call_1")
-    content = Keyword.get(opts, :content)
-
-    %{
-      content: content,
-      tool_calls: [
-        %{id: id, name: "ptc_lisp_execute", args: %{"program" => program}}
-      ],
-      tokens: %{input: 0, output: 0}
-    }
-  end
-
-  defp content_response(content) do
-    %{content: content, tokens: %{input: 0, output: 0}}
-  end
 
   # ============================================================
   # Success path / (return ...) / (fail ...)
@@ -1060,29 +1019,5 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
       assert {:ok, step} = SubAgent.run(agent, llm: llm)
       assert step.return == :done
     end
-  end
-
-  # ============================================================
-  # Helpers
-  # ============================================================
-
-  defp paired_tool_call_id?(messages, id) when is_list(messages) do
-    Enum.any?(messages, fn
-      %{role: :tool, tool_call_id: ^id} -> true
-      _ -> false
-    end)
-  end
-
-  defp paired_tool_call_id?(_messages, _id), do: false
-
-  defp find_tool_message(messages, id) when is_list(messages) do
-    Enum.find(messages, fn
-      %{role: :tool, tool_call_id: ^id} -> true
-      _ -> false
-    end)
-  end
-
-  defp json_field(%{content: content}, field) do
-    Jason.decode!(content) |> Map.get(field)
   end
 end
