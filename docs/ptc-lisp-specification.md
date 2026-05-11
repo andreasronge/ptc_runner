@@ -2515,6 +2515,41 @@ The `seq` function converts a collection to a sequence:
 
 **`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Uses `String.to_existing_atom/1` internally, so only keywords already known to the VM can be created.
 
+### 8.4a Bitwise Operations
+
+Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be integers; non-integer arguments raise a `type-error`. For the single-bit ops (`bit-set`, `bit-clear`, `bit-flip`, `bit-test`), `n` is the zero-based bit index and must be a non-negative integer.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `bit-and` | `(bit-and x & more)` | Bitwise AND of integers |
+| `bit-or` | `(bit-or x & more)` | Bitwise OR of integers |
+| `bit-xor` | `(bit-xor x & more)` | Bitwise exclusive OR of integers |
+| `bit-and-not` | `(bit-and-not x & more)` | Bitwise AND of `x` with the complement of each subsequent argument |
+| `bit-not` | `(bit-not x)` | Bitwise complement (two's complement) of an integer |
+| `bit-shift-left` | `(bit-shift-left x n)` | Shift `x` left by `n` bits |
+| `bit-shift-right` | `(bit-shift-right x n)` | Arithmetic (sign-extending) shift `x` right by `n` bits |
+| `bit-set` | `(bit-set x n)` | Set bit `n` of `x` to 1 |
+| `bit-clear` | `(bit-clear x n)` | Clear bit `n` of `x` (set it to 0) |
+| `bit-flip` | `(bit-flip x n)` | Flip bit `n` of `x` |
+| `bit-test` | `(bit-test x n)` | Return `true` if bit `n` of `x` is set, else `false` |
+
+```clojure
+(bit-and 12 10)         ; => 8
+(bit-or 12 10)          ; => 14
+(bit-xor 12 10)         ; => 6
+(bit-and-not 15 9)      ; => 6
+(bit-not 0)             ; => -1
+(bit-shift-left 1 4)    ; => 16
+(bit-shift-right 256 4) ; => 16
+(bit-set 0 3)           ; => 8
+(bit-clear 15 1)        ; => 13
+(bit-flip 0 2)          ; => 4
+(bit-test 5 0)          ; => true
+(bit-test 5 1)          ; => false
+```
+
+> **BEAM divergence:** Erlang/BEAM integers are arbitrary-precision, so the shift amount is *not* taken modulo 64 and `bit-shift-left` results can grow without bound (unlike the JVM's fixed 64-bit longs). `unsigned-bit-shift-right` is intentionally not provided because it has no defined meaning without a fixed integer width.
+
 ### 8.5 Comparison
 
 | Function | Signature | Description |
