@@ -194,7 +194,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, envelope), :drain}
 
-      Map.get(params, "name") != "ptc_lisp_execute" ->
+      Map.get(params, "name") not in ["ptc_lisp_execute", "ptc_task"] ->
         # Unknown tool: handled synchronously (no Lisp execution, no
         # gate). We still trace + emit `[:ptc_runner_mcp, :call, :*]`
         # so subscribers see the call regardless of outcome.
@@ -226,7 +226,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp async_tools_call(id, params) do
     args = extract_arguments(params)
 
-    case Tools.validate(args) do
+    case validate_tool_args(params, args) do
       {:error, args_error_envelope} ->
         Log.log(:info, "tools_call_stop", %{
           request_id: id,
@@ -235,7 +235,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, args_error_envelope), :continue}
 
-      {:ok, program, context, parsed_signature} ->
+      {:ok, :ptc_lisp_execute, {program, context, parsed_signature}} ->
         work_fn = fn ->
           traced_tools_call(id, params, fn ->
             # Phase 1a §10: thread the JSON-RPC request id into
@@ -248,6 +248,36 @@ defmodule PtcRunnerMcp.JsonRpc do
         end
 
         {:async_call, id, work_fn, :continue}
+
+      {:ok, :ptc_task, validated} ->
+        work_fn = fn ->
+          traced_tools_call(id, params, fn ->
+            Tools.call_agentic_validated(validated, request_id: id)
+          end)
+        end
+
+        {:async_call, id, work_fn, :continue}
+    end
+  end
+
+  defp validate_tool_args(%{"name" => "ptc_lisp_execute"}, args) do
+    case Tools.validate(args) do
+      {:ok, program, context, parsed_signature} ->
+        {:ok, :ptc_lisp_execute, {program, context, parsed_signature}}
+
+      {:error, envelope} ->
+        {:error, envelope}
+    end
+  end
+
+  defp validate_tool_args(%{"name" => "ptc_task"}, args) do
+    if Tools.agentic_advertised?() do
+      case PtcRunnerMcp.Agentic.validate(args) do
+        {:ok, validated} -> {:ok, :ptc_task, validated}
+        {:error, envelope} -> {:error, envelope}
+      end
+    else
+      {:error, Envelope.unknown_tool("ptc_task")}
     end
   end
 

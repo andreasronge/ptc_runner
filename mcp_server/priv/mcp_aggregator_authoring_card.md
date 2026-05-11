@@ -42,6 +42,23 @@ Programs that don't care about the distinction can treat `:json-null` as truthy 
 - `(mcp/text r)` — `r["content"][0]["text"]` or `nil`.
 - `(mcp/json r)` — `r["structuredContent"]` if set, else `(json/parse-string (mcp/text r))`. Use for typed JSON results.
 
+## Dialect quick reference
+
+- Use Clojure-style forms, not Common Lisp or JavaScript.
+- Use `(let [name value ...] body)`, never `let*` or parenthesized let bindings.
+- Use `(fn [x] body)`, never `lambda`.
+- Use the final expression as the result; avoid `print`.
+- String helpers are unqualified: `(split-lines s)`, `(split s delimiter)`, `(trim s)`, `(count s)`, `(subs s start)`, `(join "\n" coll)`.
+- Use `subs`, never `substring`.
+- JSON helpers are `(json/parse-string s)` and `(json/generate-string v)`, never `json/stringify`.
+
+## Authoring rules
+
+- Unwrap upstream results before filtering: use `(mcp/json r)` for JSON payloads and `(mcp/text r)` for text.
+- Return compact maps/vectors, not full upstream envelopes. Use `map`, `filter`, `take`, and selected fields.
+- Keep returned strings short; long previews truncate. Prefer fewer items/fields over `println`.
+- Do not pass `signature` in exploratory aggregator calls. Omit it unless the user explicitly needs validated output and you know the exact PTC signature syntax.
+
 ## Response envelope
 
 Each call to `ptc_lisp_execute` returns a structured payload that may include an `upstream_calls` array — one entry per `(tool/mcp-call ...)` invocation, in completion order, recording `server`, `tool`, `status`, `duration_ms`, and (on error) `reason` and `error`. The field is omitted when no upstream calls were made.

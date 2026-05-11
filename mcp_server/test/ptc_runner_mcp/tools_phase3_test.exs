@@ -106,6 +106,31 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       assert ann["openWorldHint"] == true
     end
 
+    test "aggregator-mode inputSchema discourages exploratory signature use" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, @registry_name)
+      :ok = Catalog.freeze("")
+
+      description =
+        Tools.tool_entry()
+        |> get_in(["inputSchema", "properties", "signature", "description"])
+
+      assert description =~ "Usually omit in aggregator mode"
+      assert description =~ "Do not pass for exploratory upstream calls"
+      refute description =~ "shorthand-optional"
+    end
+
+    test ~S|placeholder signature "any" is treated as omitted| do
+      env =
+        Tools.call_with_gate(%{
+          "program" => "(+ 1 2)",
+          "signature" => "any"
+        })
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["status"] == "ok"
+    end
+
     test "no upstream catalog block when Registry has zero upstreams" do
       {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
 

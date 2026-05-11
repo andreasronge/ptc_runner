@@ -38,6 +38,13 @@ defmodule PtcRunnerMcp.TraceHandler do
     [:ptc_runner_mcp, :call, :start],
     [:ptc_runner_mcp, :call, :stop],
     [:ptc_runner_mcp, :call, :exception],
+    [:ptc_runner_mcp, :agentic_task, :start],
+    [:ptc_runner_mcp, :agentic_task, :stop],
+    [:ptc_runner_mcp, :agentic_task, :exception],
+    [:ptc_runner_mcp, :agentic_planner, :start],
+    [:ptc_runner_mcp, :agentic_planner, :stop],
+    [:ptc_runner_mcp, :agentic_planner, :exception],
+    [:ptc_runner_mcp, :agentic_validation_reject],
     [:ptc_runner, :lisp, :execute, :start],
     [:ptc_runner, :lisp, :execute, :stop],
     [:ptc_runner, :lisp, :execute, :exception]

@@ -41,7 +41,7 @@ if Code.ensure_loaded?(ReqLLM) do
     def call(model, %{schema: schema} = req) when is_map(schema) do
       messages = build_messages(req)
 
-      case generate_object(model, messages, schema, cache: req[:cache] || false) do
+      case generate_object(model, messages, schema, request_opts(req)) do
         {:ok, %{object: object, tokens: tokens}} ->
           {:ok, %{content: Jason.encode!(object), tokens: tokens}}
 
@@ -52,12 +52,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
     def call(model, %{tools: tools} = req) when is_list(tools) and tools != [] do
       messages = build_messages(req)
-      generate_with_tools(model, messages, tools, cache: req[:cache] || false)
+      generate_with_tools(model, messages, tools, request_opts(req))
     end
 
     def call(model, req) do
       messages = build_messages(req)
-      generate_text(model, messages, cache: req[:cache] || false)
+      generate_text(model, messages, request_opts(req))
     end
 
     @impl true
@@ -280,6 +280,20 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Provider Implementations ---
 
+    defp request_opts(req) do
+      req
+      |> Map.take([
+        :api_key,
+        :cache,
+        :max_tokens,
+        :provider_options,
+        :receive_timeout,
+        :req_http_options,
+        :temperature
+      ])
+      |> Enum.into([])
+    end
+
     defp call_ollama(model, messages, opts) do
       base_url = Keyword.get(opts, :ollama_base_url, @ollama_base_url)
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
@@ -309,6 +323,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+      generation_opts = Keyword.take(opts, [:max_tokens, :temperature])
 
       formatted_messages =
         Enum.map(messages, fn msg ->
@@ -318,7 +333,8 @@ if Code.ensure_loaded?(ReqLLM) do
       Logger.debug("Calling OpenAI-compatible API: #{base_url} with #{model}")
 
       case Req.post("#{base_url}/chat/completions",
-             json: %{model: model, messages: formatted_messages},
+             json:
+               Map.merge(%{model: model, messages: formatted_messages}, Map.new(generation_opts)),
              receive_timeout: timeout
            ) do
         {:ok, %{status: 200, body: body}} ->
@@ -348,11 +364,15 @@ if Code.ensure_loaded?(ReqLLM) do
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
+      generation_opts =
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
 
       req_opts =
         [receive_timeout: timeout, req_http_options: http_opts]
+        |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
       case ReqLLM.generate_text(model, messages, req_opts) do
@@ -374,11 +394,15 @@ if Code.ensure_loaded?(ReqLLM) do
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
+      generation_opts =
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
 
       req_opts =
         [receive_timeout: timeout, req_http_options: http_opts]
+        |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
       case ReqLLM.generate_object(model, messages, schema, req_opts) do
@@ -399,6 +423,9 @@ if Code.ensure_loaded?(ReqLLM) do
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
+      generation_opts =
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
 
@@ -406,6 +433,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
       req_opts =
         [receive_timeout: timeout, req_http_options: http_opts, tools: req_llm_tools]
+        |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
       case ReqLLM.generate_text(model, messages, req_opts) do

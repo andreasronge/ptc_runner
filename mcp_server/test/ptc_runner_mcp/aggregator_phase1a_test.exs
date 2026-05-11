@@ -676,6 +676,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert desc =~ "nil"
       assert desc =~ ":json-null"
       assert desc =~ "upstream_calls"
+      assert desc =~ "Authoring rules"
+      assert desc =~ "Unwrap upstream results before filtering"
+      assert desc =~ "Do not pass `signature` in exploratory aggregator calls"
     end
 
     test "annotations match §8.2 (destructiveHint: true, readOnlyHint: false)" do

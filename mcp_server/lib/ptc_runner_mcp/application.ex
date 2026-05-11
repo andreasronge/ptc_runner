@@ -34,6 +34,7 @@ defmodule PtcRunnerMcp.Application do
   use Application
 
   alias PtcRunnerMcp.{
+    AgenticConfig,
     AggregatorConfig,
     ConcurrencyGate,
     Credentials,
@@ -45,14 +46,22 @@ defmodule PtcRunnerMcp.Application do
 
   @impl Application
   def start(_type, _args) do
+    PtcRunner.Dotenv.load()
     args = parse_args(System.argv())
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
 
     %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
     apply_aggregator_config(args)
+    apply_agentic_config(args)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
+
+    if AgenticConfig.enabled?() and upstreams == [] do
+      Log.log(:warn, "agentic_without_aggregator", %{
+        message: "agentic mode is enabled but no upstream MCP servers are configured"
+      })
+    end
 
     # Eagerly initialize the concurrency-gate atomics ref so that
     # concurrent first acquires cannot race on lazy persistent_term
@@ -119,6 +128,14 @@ defmodule PtcRunnerMcp.Application do
           max_upstream_response_bytes: :integer,
           max_upstream_calls_per_program: :integer,
           aggregator_read_only: :boolean,
+          agentic: :boolean,
+          agentic_model: :string,
+          agentic_task_timeout_ms: :integer,
+          agentic_planner_timeout_ms: :integer,
+          agentic_max_output_tokens: :integer,
+          agentic_max_result_bytes: :integer,
+          agentic_include_program: :boolean,
+          agentic_trace_prompts: :boolean,
           upstreams_config: :string,
           log_level: :string,
           trace_dir: :string,
@@ -142,6 +159,59 @@ defmodule PtcRunnerMcp.Application do
           :aggregator_read_only,
           "PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY",
           AggregatorConfig.defaults().read_only
+        )
+    })
+  end
+
+  @doc false
+  @spec apply_agentic_config(map()) :: :ok
+  def apply_agentic_config(args) when is_map(args) do
+    defaults = AgenticConfig.defaults()
+
+    AgenticConfig.set(%{
+      enabled: read_bool(args, :agentic, "PTC_RUNNER_MCP_AGENTIC", defaults.enabled),
+      model: env_or(args, :agentic_model, "PTC_RUNNER_MCP_AGENTIC_MODEL", defaults.model),
+      task_timeout_ms:
+        read_int(
+          args,
+          :agentic_task_timeout_ms,
+          "PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS",
+          defaults.task_timeout_ms
+        ),
+      planner_timeout_ms:
+        read_int(
+          args,
+          :agentic_planner_timeout_ms,
+          "PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS",
+          defaults.planner_timeout_ms
+        ),
+      max_output_tokens:
+        read_int(
+          args,
+          :agentic_max_output_tokens,
+          "PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS",
+          defaults.max_output_tokens
+        ),
+      max_result_bytes:
+        read_int(
+          args,
+          :agentic_max_result_bytes,
+          "PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES",
+          defaults.max_result_bytes
+        ),
+      include_program:
+        read_bool(
+          args,
+          :agentic_include_program,
+          "PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM",
+          defaults.include_program
+        ),
+      trace_prompts:
+        read_bool(
+          args,
+          :agentic_trace_prompts,
+          "PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS",
+          defaults.trace_prompts
         )
     })
   end
