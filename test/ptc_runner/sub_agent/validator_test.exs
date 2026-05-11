@@ -366,9 +366,14 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
   end
 
   describe "completion_mode validation" do
-    test "defaults to :explicit" do
+    test "defaults to :implicit" do
       agent = SubAgent.new(prompt: "test")
-      assert agent.completion_mode == :explicit
+      assert agent.completion_mode == :implicit
+    end
+
+    test "accepts :implicit" do
+      agent = SubAgent.new(prompt: "test", completion_mode: :implicit)
+      assert agent.completion_mode == :implicit
     end
 
     test "accepts :explicit" do
@@ -377,7 +382,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
 
     test "rejects invalid values" do
-      assert_raise ArgumentError, ~r/completion_mode must be :explicit/, fn ->
+      assert_raise ArgumentError, ~r/completion_mode must be :implicit or :explicit/, fn ->
         SubAgent.new(prompt: "test", completion_mode: :invalid)
       end
     end

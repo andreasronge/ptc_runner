@@ -143,6 +143,7 @@ defmodule PtcRunner.SubAgent.Loop do
     token_limit = Keyword.get(opts, :token_limit)
     on_budget_exceeded = Keyword.get(opts, :on_budget_exceeded, :fail)
     budget_callback = Keyword.get(opts, :budget)
+    continuation_guard = Keyword.get(opts, :continuation_guard)
 
     # Extract runtime context for nesting depth and turn budget
     nesting_depth = Keyword.get(opts, :_nesting_depth, 0)
@@ -193,6 +194,7 @@ defmodule PtcRunner.SubAgent.Loop do
           token_limit: token_limit,
           on_budget_exceeded: on_budget_exceeded,
           budget_callback: budget_callback,
+          continuation_guard: continuation_guard,
           trace_context: trace_context,
           max_heap: max_heap,
           journal: journal,
@@ -290,6 +292,7 @@ defmodule PtcRunner.SubAgent.Loop do
       token_limit: run_opts.token_limit,
       on_budget_exceeded: run_opts.on_budget_exceeded,
       budget_callback: run_opts.budget_callback,
+      continuation_guard: run_opts.continuation_guard,
       trace_context: run_opts.trace_context,
       max_heap: run_opts.max_heap || agent.max_heap,
       journal: run_opts.journal,
@@ -417,17 +420,30 @@ defmodule PtcRunner.SubAgent.Loop do
         # Execute single turn - returns signal
         case execute_turn(agent, llm, state) do
           {:continue, next_state, turn} ->
-            # Emit turn stop IMMEDIATELY (not batched)
-            # Use turn_tokens from next_state for correct measurements
-            Metrics.emit_turn_stop_immediate(
-              turn,
-              state,
-              turn_start,
-              next_state.turn_tokens
-            )
+            case apply_continuation_guard(turn, state, next_state) do
+              :continue ->
+                # Emit turn stop IMMEDIATELY (not batched)
+                # Use turn_tokens from next_state for correct measurements
+                Metrics.emit_turn_stop_immediate(
+                  turn,
+                  state,
+                  turn_start,
+                  next_state.turn_tokens
+                )
 
-            # TCO: tail-recursive call
-            driver_loop(agent, llm, next_state)
+                # TCO: tail-recursive call
+                driver_loop(agent, llm, next_state)
+
+              {:stop, result} ->
+                Metrics.emit_turn_stop_immediate(
+                  turn,
+                  state,
+                  turn_start,
+                  next_state.turn_tokens
+                )
+
+                result
+            end
 
           {:stop, result, turn, turn_tokens} ->
             # Emit turn stop for final turn
@@ -440,6 +456,28 @@ defmodule PtcRunner.SubAgent.Loop do
             )
 
             result
+        end
+    end
+  end
+
+  defp apply_continuation_guard(turn, state, next_state) do
+    case state.continuation_guard do
+      nil ->
+        :continue
+
+      guard when is_function(guard, 3) ->
+        case guard.(turn, state, next_state) do
+          :continue ->
+            :continue
+
+          {:stop, {:ok, %Step{}} = result} ->
+            {:stop, result}
+
+          {:stop, {:error, %Step{}} = result} ->
+            {:stop, result}
+
+          other ->
+            raise ArgumentError, "continuation_guard returned invalid value: #{inspect(other)}"
         end
     end
   end

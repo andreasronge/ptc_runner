@@ -131,6 +131,17 @@ defmodule PtcRunner.SubAgent.Definition do
   @type ptc_reference :: :compact
 
   @typedoc """
+  Completion contract for PTC-Lisp SubAgents.
+
+  - `:implicit` preserves historic behavior: a final bare expression can
+    complete single-shot agents.
+  - `:explicit` is reserved for hosts that require `(return ...)` or `(fail ...)`
+    terminal forms. Phase 0 defines the contract; Worker A owns full
+    explicit-mode enforcement.
+  """
+  @type completion_mode :: :implicit | :explicit
+
+  @typedoc """
   Output format options for truncation and display.
 
   Fields:
@@ -195,7 +206,7 @@ defmodule PtcRunner.SubAgent.Definition do
           plan: [plan_step()],
           progress_fn: (map(), term() -> {String.t(), term()}) | nil,
           journaling: boolean(),
-          completion_mode: :explicit
+          completion_mode: completion_mode()
         }
 
   @default_format_options [
@@ -245,7 +256,7 @@ defmodule PtcRunner.SubAgent.Definition do
     plan: [],
     progress_fn: nil,
     journaling: false,
-    completion_mode: :explicit
+    completion_mode: :implicit
   ]
 
   @doc false

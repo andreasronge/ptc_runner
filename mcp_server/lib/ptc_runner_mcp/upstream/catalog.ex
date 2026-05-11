@@ -73,6 +73,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   @description_limit 80
   @ellipsis "..."
   @persistent_term_key {__MODULE__, :frozen}
+  @persistent_snapshot_key {__MODULE__, :frozen_snapshot}
 
   # §9.1 (http-transport-credentials.md): the per-server header gains
   # an optional `[transport: stdio|http]` tag so the LLM can see at a
@@ -107,10 +108,29 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   """
   @spec render(atom() | pid()) :: String.t()
   def render(registry) when is_atom(registry) or is_pid(registry) do
-    case configured_entries(registry) do
+    case snapshot(registry) do
       [] -> ""
       entries -> Enum.map_join(entries, "\n\n", &render_upstream/1)
     end
+  end
+
+  @doc """
+  Returns the structured catalog snapshot for a routing `Registry`.
+
+  The shape is the same input accepted by `render_entries/1`:
+  `%{name: String.t(), tools: list() | nil, impl: module() | nil}`.
+  `ptc_task` capability summaries use this structured snapshot instead of
+  parsing the human-oriented rendered catalog string.
+  """
+  @spec snapshot(atom() | pid()) :: [
+          %{
+            required(:name) => String.t(),
+            required(:tools) => [Upstream.tool_schema()] | nil,
+            optional(:impl) => module() | nil
+          }
+        ]
+  def snapshot(registry) when is_atom(registry) or is_pid(registry) do
+    configured_entries(registry)
   end
 
   @doc """
@@ -161,6 +181,20 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   end
 
   @doc """
+  Returns the frozen structured catalog snapshot, or `[]` if none is frozen.
+  """
+  @spec frozen_snapshot() :: [
+          %{
+            required(:name) => String.t(),
+            required(:tools) => [Upstream.tool_schema()] | nil,
+            optional(:impl) => module() | nil
+          }
+        ]
+  def frozen_snapshot do
+    :persistent_term.get(@persistent_snapshot_key, [])
+  end
+
+  @doc """
   Stores `catalog` (a pre-rendered string) into `:persistent_term`
   so subsequent `frozen/0` reads return it.
 
@@ -173,6 +207,17 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   end
 
   @doc """
+  Stores the structured catalog snapshot into `:persistent_term`.
+
+  This is a sibling contract to `freeze/1`; Phase 0 keeps it separate so
+  existing boot paths that only freeze the rendered catalog remain unchanged.
+  """
+  @spec freeze_snapshot(list()) :: :ok
+  def freeze_snapshot(entries) when is_list(entries) do
+    :persistent_term.put(@persistent_snapshot_key, entries)
+  end
+
+  @doc """
   Removes any frozen catalog from `:persistent_term`. Test-only
   cleanup hook — production never needs this because the
   MCP-server lifetime is the BEAM VM lifetime, and a fresh VM
@@ -181,6 +226,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   @spec clear_frozen() :: :ok
   def clear_frozen do
     _ = :persistent_term.erase(@persistent_term_key)
+    _ = :persistent_term.erase(@persistent_snapshot_key)
     :ok
   end
 

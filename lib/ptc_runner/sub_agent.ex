@@ -274,7 +274,8 @@ defmodule PtcRunner.SubAgent do
         :memory_strategy,
         :max_tool_calls,
         :plan,
-        :journaling
+        :journaling,
+        :completion_mode
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -311,7 +312,8 @@ defmodule PtcRunner.SubAgent do
         :memory_strategy,
         :max_tool_calls,
         :plan,
-        :journaling
+        :journaling,
+        :completion_mode
       ])
 
     run(agent, runtime_opts)
@@ -366,8 +368,8 @@ defmodule PtcRunner.SubAgent do
           # Determine execution mode
           # JSON and tool_calling modes always use the loop (even for single-shot)
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
-          if agent.output == :ptc_lisp and agent.max_turns == 1 and map_size(agent.tools) == 0 and
-               agent.retry_turns == 0 do
+          if agent.completion_mode == :implicit and agent.output == :ptc_lisp and
+               agent.max_turns == 1 and map_size(agent.tools) == 0 and agent.retry_turns == 0 do
             # PTC-Lisp single-shot mode
             run_single_shot(
               agent,
@@ -384,6 +386,7 @@ defmodule PtcRunner.SubAgent do
             updated_opts =
               opts
               |> Keyword.put(:context, context)
+              |> Keyword.put(:llm, llm)
               |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
 
             alias PtcRunner.SubAgent.Loop

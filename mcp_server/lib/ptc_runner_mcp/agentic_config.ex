@@ -14,7 +14,14 @@ defmodule PtcRunnerMcp.AgenticConfig do
     max_output_tokens: 1_200,
     max_result_bytes: 4_096,
     include_program: true,
-    trace_prompts: false
+    trace_prompts: false,
+    max_turns: 1,
+    retry_turns: 0,
+    allow_writes: false,
+    subagent_config_path: nil,
+    capability_summary_max_bytes: 800,
+    capability_summary_path: nil,
+    system_prompt: %{prefix: nil, suffix: nil}
   }
 
   @type t :: %{
@@ -25,7 +32,14 @@ defmodule PtcRunnerMcp.AgenticConfig do
           max_output_tokens: pos_integer(),
           max_result_bytes: pos_integer(),
           include_program: boolean(),
-          trace_prompts: boolean()
+          trace_prompts: boolean(),
+          max_turns: pos_integer(),
+          retry_turns: non_neg_integer(),
+          allow_writes: boolean(),
+          subagent_config_path: String.t() | nil,
+          capability_summary_max_bytes: pos_integer(),
+          capability_summary_path: String.t() | nil,
+          system_prompt: %{prefix: String.t() | nil, suffix: String.t() | nil}
         }
 
   @spec defaults() :: t()

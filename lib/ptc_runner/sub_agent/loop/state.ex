@@ -84,6 +84,7 @@ defmodule PtcRunner.SubAgent.Loop.State do
     token_limit: nil,
     on_budget_exceeded: nil,
     budget_callback: nil,
+    continuation_guard: nil,
 
     # Trace context
     trace_context: nil,
@@ -175,6 +176,10 @@ defmodule PtcRunner.SubAgent.Loop.State do
           token_limit: pos_integer() | nil,
           on_budget_exceeded: :return_partial | :fail | nil,
           budget_callback: (map() -> :continue | :stop) | nil,
+          continuation_guard:
+            (Turn.t(), t(), t() ->
+               :continue | {:stop, {:ok | :error, PtcRunner.Step.t()}})
+            | nil,
           # Trace context
           trace_context: map() | nil,
           # Lisp resource limits
