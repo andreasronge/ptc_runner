@@ -351,6 +351,9 @@ defmodule PtcRunner.Lisp.Env do
       {:vec, {:normal, &Runtime.vec/1}},
       {:keyword, {:normal, &Runtime.keyword/1}},
       {:vector, {:collect, &Function.identity/1}},
+      # `list` is an alias for `vector` — PTC-Lisp is vector-first, but LLMs
+      # reach for Clojure's `list`. Returning a vector keeps semantics uniform.
+      {:list, {:collect, &Function.identity/1}},
       {:"hash-map", {:collect, &Runtime.hash_map/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},

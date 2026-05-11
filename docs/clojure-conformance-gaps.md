@@ -581,6 +581,30 @@ Clojure throws on float arguments. PTC-Lisp accepts whole-number floats (returns
 
 **Fix:** Changed `even?`/`odd?` to truncate whole-number floats before `rem`, and return `false` for non-whole floats and non-numbers.
 
+### DIV-25: `list` is an alias for `vector`
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+
+```clojure
+;; Clojure
+(list 1 2 3)       ;=> (1 2 3)   ; a persistent list
+(list? (list 1))   ;=> true
+
+;; PTC-Lisp
+(list 1 2 3)       ;=> [1 2 3]   ; a vector
+(vector? (list 1)) ;=> true
+```
+
+PTC-Lisp has no separate list type — it is vector-first. `list` is provided
+because LLMs reach for it out of Clojure training data; it returns a vector so
+downstream code behaves uniformly. `list?` and `list*` are not provided.
+
+**Rationale:** Eliminates a common LLM error class (`list`/`cons` reflexes) at
+near-zero cost, without introducing a second sequential collection type.
+
 ---
 
 ## Adding New Gaps

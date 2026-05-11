@@ -729,6 +729,24 @@
       divergences: nil
     },
     %{
+      name: "list",
+      description:
+        "Create a vector from arguments — alias for `vector` (PTC-Lisp is vector-first)",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(list & args)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: nil,
+      see_also: ["vector", "vec"],
+      clojure_var: "list",
+      divergences:
+        "Returns a vector, not a Clojure list — PTC-Lisp has no separate list type. See docs/clojure-conformance-gaps.md."
+    },
+    %{
       name: "constantly",
       description: "Returns a function that always returns `x`, ignoring its arguments",
       binding: :normal,
@@ -6014,9 +6032,9 @@
     },
     %{
       name: "list",
-      status: :candidate,
-      description: "Creates list from items",
-      notes: "pure data structure creation"
+      status: :supported,
+      description: "Alias for vector (PTC-Lisp is vector-first)",
+      notes: "implemented as alias for vector"
     },
     %{
       name: "list*",
