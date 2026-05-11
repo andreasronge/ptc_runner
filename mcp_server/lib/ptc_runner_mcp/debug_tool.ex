@@ -44,14 +44,29 @@ defmodule PtcRunnerMcp.DebugTool do
     }
   end
 
+  # Minimum payload room we always keep, even when the JSON-RPC frame
+  # reserve is so large it would otherwise leave nothing — enough for the
+  # shrunken `op=get` "too large" shape with a 256-byte `request_id`.
+  @min_payload_bytes 1_024
+
+  # Small cushion over the computed frame reserve (e.g. a trailing newline the
+  # transport may add) so the advertised cap is a true ceiling.
+  @frame_cushion_bytes 8
+
   @doc """
   Handle a `tools/call name: "ptc_debug"` request.
 
-  Validates `arguments` and dispatches; returns an MCP envelope.
-  Validation failures produce the standard `args_error` envelope.
+  `frame_reserve_bytes` is how many bytes the surrounding JSON-RPC
+  success frame (`{"jsonrpc":"2.0","id":<id>,"result":...}`) adds around
+  the MCP envelope; it counts against `--max-debug-response-bytes` so the
+  advertised cap holds even for requests with a large `id`. Validation
+  failures produce the standard `args_error` envelope (not capped — the
+  message is already bounded by `show/1`, and an oversized response there
+  can only be as large as the oversized request that caused it).
   """
-  @spec call(map()) :: map()
-  def call(params) when is_map(params) do
+  @spec call(map(), non_neg_integer()) :: map()
+  def call(params, frame_reserve_bytes \\ 0)
+      when is_map(params) and is_integer(frame_reserve_bytes) do
     args =
       case Map.get(params, "arguments") do
         m when is_map(m) -> m
@@ -59,8 +74,17 @@ defmodule PtcRunnerMcp.DebugTool do
       end
 
     case validate(args) do
-      {:ok, op, opts} -> run(op, opts)
-      {:error, message} -> Envelope.render_error(:args_error, message)
+      {:ok, op, opts} ->
+        cap =
+          max(
+            DebugConfig.max_response_bytes() - frame_reserve_bytes - @frame_cushion_bytes,
+            @min_payload_bytes
+          )
+
+        run(op, opts, cap)
+
+      {:error, message} ->
+        Envelope.render_error(:args_error, message)
     end
   end
 
@@ -170,7 +194,7 @@ defmodule PtcRunnerMcp.DebugTool do
   # Dispatch
   # ----------------------------------------------------------------
 
-  defp run(:stats, opts) do
+  defp run(:stats, opts, cap) do
     raw = DebugBuffer.stats(opts)
 
     %{
@@ -187,10 +211,10 @@ defmodule PtcRunnerMcp.DebugTool do
     }
     |> maybe_put("upstream_calls", upstream_calls_json(raw.upstream_calls))
     |> maybe_put("agentic", agentic_json(raw.agentic))
-    |> capped_envelope(:stats)
+    |> capped_envelope(:stats, cap)
   end
 
-  defp run(:recent, opts) do
+  defp run(:recent, opts, cap) do
     records = DebugBuffer.recent(opts)
 
     %{
@@ -200,10 +224,10 @@ defmodule PtcRunnerMcp.DebugTool do
       "count" => length(records),
       "calls" => Enum.map(records, &recent_call_json/1)
     }
-    |> capped_envelope(:recent)
+    |> capped_envelope(:recent, cap)
   end
 
-  defp run(:get, opts) do
+  defp run(:get, opts, cap) do
     request_id = Keyword.fetch!(opts, :request_id)
 
     base = %{
@@ -247,7 +271,7 @@ defmodule PtcRunnerMcp.DebugTool do
           end
       end
 
-    capped_envelope(result, :get)
+    capped_envelope(result, :get, cap)
   end
 
   # ----------------------------------------------------------------
@@ -465,15 +489,14 @@ defmodule PtcRunnerMcp.DebugTool do
   # Size cap (§ 6.4)
   # ----------------------------------------------------------------
 
-  # Wrap `sc` in the success envelope, enforcing `--max-debug-response-bytes`
-  # against the *fully serialized envelope* — not just `structuredContent`.
-  # `Envelope.success/1` duplicates the payload into `content[0].text` (as a
-  # JSON-of-JSON string, so quotes/backslashes are escaped a second time), so
-  # the only reliable measure is `byte_size(Jason.encode!(envelope))`. If the
-  # full envelope exceeds the cap, shrink the payload and re-measure.
-  defp capped_envelope(sc, kind) do
-    cap = DebugConfig.max_response_bytes()
-
+  # Wrap `sc` in the success envelope, enforcing `cap` (already net of the
+  # JSON-RPC frame reserve — see `call/2`) against the *fully serialized
+  # envelope*, not just `structuredContent`. `Envelope.success/1` duplicates
+  # the payload into `content[0].text` (as a JSON-of-JSON string, so quotes /
+  # backslashes are escaped a second time), so the only reliable measure is
+  # `byte_size(Jason.encode!(envelope))`. If it exceeds `cap`, shrink and
+  # re-measure.
+  defp capped_envelope(sc, kind, cap) do
     if within_cap?(sc, cap) do
       ok_envelope(sc)
     else
@@ -481,14 +504,9 @@ defmodule PtcRunnerMcp.DebugTool do
     end
   end
 
-  # `cap` is interpreted as a bound on the JSON-RPC `result` (the MCP
-  # envelope). We reserve a small slack for the surrounding
-  # `{"jsonrpc":"2.0","id":...,"result":...}` frame the transport adds.
-  @jsonrpc_frame_slack_bytes 96
-
   defp within_cap?(sc, cap) do
     case Jason.encode(ok_envelope(sc)) do
-      {:ok, json} -> byte_size(json) + @jsonrpc_frame_slack_bytes <= cap
+      {:ok, json} -> byte_size(json) <= cap
       _ -> true
     end
   end
@@ -680,6 +698,25 @@ defmodule PtcRunnerMcp.DebugTool do
               "truncated" => %{"type" => "boolean"},
               "note" => %{"type" => "string"}
             })
+        },
+        # Validation failures (and a few transport-level errors) return the
+        # standard R23 error payload, not one of the three success shapes —
+        # advertise it so strict clients validating `structuredContent`
+        # against `outputSchema` don't reject the server's own error replies
+        # (cf. the same fix in `PtcRunnerMcp.Tools`).
+        %{
+          "type" => "object",
+          "required" => ["status", "reason", "message", "feedback"],
+          "properties" => %{
+            "status" => %{"const" => "error"},
+            "reason" => %{
+              "type" => "string",
+              "enum" => ["args_error", "unknown_tool", "shutting_down"]
+            },
+            "message" => %{"type" => "string"},
+            "feedback" => %{"type" => "string"},
+            "result" => %{"type" => "string"}
+          }
         }
       ]
     }

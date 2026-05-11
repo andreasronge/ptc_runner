@@ -217,7 +217,7 @@ defmodule PtcRunnerMcp.JsonRpc do
         # the `ptc_task` gate on `Tools.agentic_advertised?/0`.
         envelope =
           if DebugConfig.enabled?() do
-            DebugTool.call(params)
+            DebugTool.call(params, success_frame_overhead(id))
           else
             Envelope.unknown_tool(DebugTool.tool_name())
           end
@@ -480,6 +480,18 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   defp success_reply(id, result) do
     %{"jsonrpc" => "2.0", "id" => id, "result" => result}
+  end
+
+  # Bytes the JSON-RPC success frame adds *around* the `result` value, i.e.
+  # `{"jsonrpc":"2.0","id":<id>,"result":<value>}` minus `<value>`. `ptc_debug`'s
+  # `--max-debug-response-bytes` is a bound on the whole frame, so the
+  # (client-chosen) `id` must count against it. Serialize with an empty-string
+  # result placeholder and subtract its 2 bytes (`""`).
+  defp success_frame_overhead(id) do
+    case Jason.encode(success_reply(id, "")) do
+      {:ok, json} -> max(byte_size(json) - 2, 0)
+      _ -> 64
+    end
   end
 
   defp error_reply(id, code, message) do
