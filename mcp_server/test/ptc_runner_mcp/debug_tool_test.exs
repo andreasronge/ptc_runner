@@ -405,6 +405,27 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert byte_size(Jason.encode!(env)) < 4_096
   end
 
+  test "get: a --trace-dir containing glob metacharacters still resolves trace files" do
+    dir = Path.join(System.tmp_dir!(), "ptc_dbg[meta]?_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    :ok = enable_debug()
+
+    hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("meta-id")
+
+    File.write!(
+      Path.join(dir, "2026-05-11T00-00-00.000Z-#{hash8}-ok.jsonl"),
+      Jason.encode!(%{"ok" => true}) <> "\n"
+    )
+
+    g = sc(call_debug(10, %{"op" => "get", "request_id" => "meta-id"}))
+    assert g["found"] == true
+    assert g["source"] == "trace_file"
+    assert g["record"] == [%{"ok" => true}]
+  end
+
   # ----------------------------------------------------------------
   # ring eviction + clamping
   # ----------------------------------------------------------------
