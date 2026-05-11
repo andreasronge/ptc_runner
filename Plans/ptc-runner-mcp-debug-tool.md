@@ -154,11 +154,16 @@ record call lands in the `Stdio` worker around the whole recognized-tool path,
 *or* the gate moves into `JsonRpc`; either is fine as long as the recorder
 observes validation errors, gate rejections, and the final envelope alike.)
 
-For validation-error and `busy` records the program/context may be partially
-known or absent (validation failed before a usable program existed):
-`program`/`context` are best-effort or `nil`, `result_bytes`/`prints_count` are
-`nil`, `status` is `:error`, `reason` is `"args_error"` / `"busy"`, and `agentic`
-is `nil`.
+For records where the program never executed — `args_error` (the
+`program`/`context` failed validation, so the raw input is untrusted and
+unbounded) or `busy` (the args were never inspected) — `program` and `context`
+are **always `nil`**, not stored even under `--trace-payloads full`: a rejected
+request must not be able to fill the count-bounded ring with payloads that
+exceeded the tool limits. `result_bytes`/`prints_count` are `nil`, `status` is
+`:error`, `reason` is `"args_error"` / `"busy"`, and `agentic` is `nil`. (A
+`runtime_error`/`timeout`/`fail` record *does* keep `program`/`context` — the
+program ran, so it already passed `--max-program-bytes` / `--max-context-bytes`
+and the data is bounded and useful.)
 
 Record shape (internal, atom-keyed; redacted per `--trace-payloads` *before*
 storage):
@@ -362,13 +367,25 @@ When not found: `{ "op": "get", "request_id": "…", "found": false, "source": "
 
 ### 6.4 Size cap
 
-The serialized `structuredContent` is hard-capped at `--max-debug-response-bytes`
-(default 64 KiB; § 12 Q4, resolved — a dedicated knob, *not* coupled to
-`--max-upstream-response-bytes`, which governs an unrelated surface). On overflow:
-`recent` drops oldest records until it fits and sets `"truncated": true`; `stats`
-drops the heaviest optional sections (`by_server` first, then per-tool
-`duration_ms` detail) and sets `"truncated": true`; `get` returns
+`--max-debug-response-bytes` (default 64 KiB; § 12 Q4, resolved — a dedicated
+knob, *not* coupled to `--max-upstream-response-bytes`, which governs an
+unrelated surface) bounds the **whole JSON-RPC reply frame**, not just
+`structuredContent`: the `{"jsonrpc":"2.0","id":<id>,"result":<envelope>}`
+wrapper — including the client-chosen `id` — counts against it, and the payload
+budget is the cap net of that wrapper. On overflow: `recent` drops oldest
+records until it fits and sets `"truncated": true`; `stats` drops the heaviest
+optional sections (`by_server` first, then per-tool `duration_ms` detail) and
+sets `"truncated": true`; `get` drops the record body and returns
 `{ "found": true, "truncated": true, "note": "record exceeds --max-debug-response-bytes; set --trace-dir and read the trace file directly" }`.
+
+Two irreducible floors the cap cannot beat (and shouldn't try to): (1) a valid
+JSON-RPC reply must echo `id` verbatim, so if `byte_size(id)` alone approaches
+the cap the response is dominated by the caller's own bytes — the server only
+guarantees to minimize *its* contribution (`max_frame_bytes` bounds the incoming
+`id`); (2) `op=get` on a trace file larger than the cap never reads the file —
+it returns `{ "found": true, "source": "trace_file", "truncated": true, "note":
+"trace file <name> exceeds --max-debug-response-bytes; read it directly under
+--trace-dir" }` (a single `File.stat` decides this; the file is not loaded).
 
 ## 7. Where it hooks in (implementation sketch)
 

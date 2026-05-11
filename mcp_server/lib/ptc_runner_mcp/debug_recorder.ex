@@ -83,8 +83,17 @@ defmodule PtcRunnerMcp.DebugRecorder do
     sc = Map.get(envelope, "structuredContent", %{})
     is_error = Map.get(envelope, "isError", false) == true
     {status, reason} = status_and_reason(sc, is_error)
-    program = Map.get(args, "program")
-    context = Map.get(args, "context")
+
+    # If the program never executed — `args_error` (the `program`/`context`
+    # failed validation, so it may be raw and unbounded) or `busy` (we never
+    # looked at the args) — don't put its payload into the count-bounded ring
+    # at all, not even under `--trace-payloads full`. A `runtime_error` /
+    # `timeout` / `fail` means the program *did* run, so it already passed
+    # `--max-program-bytes` / `--max-context-bytes`; keeping it is bounded and
+    # useful for debugging.
+    executed? = not (status == :error and reason in ["args_error", "busy"])
+    program = if executed?, do: Map.get(args, "program")
+    context = if executed?, do: Map.get(args, "context")
 
     record = %{
       request_id: to_string(request_id || ""),

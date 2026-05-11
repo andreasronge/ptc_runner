@@ -44,11 +44,6 @@ defmodule PtcRunnerMcp.DebugTool do
     }
   end
 
-  # Minimum payload room we always keep, even when the JSON-RPC frame
-  # reserve is so large it would otherwise leave nothing — enough for the
-  # shrunken `op=get` "too large" shape with a 256-byte `request_id`.
-  @min_payload_bytes 1_024
-
   # Small cushion over the computed frame reserve (e.g. a trailing newline the
   # transport may add) so the advertised cap is a true ceiling.
   @frame_cushion_bytes 8
@@ -59,10 +54,20 @@ defmodule PtcRunnerMcp.DebugTool do
   `frame_reserve_bytes` is how many bytes the surrounding JSON-RPC
   success frame (`{"jsonrpc":"2.0","id":<id>,"result":...}`) adds around
   the MCP envelope; it counts against `--max-debug-response-bytes` so the
-  advertised cap holds even for requests with a large `id`. Validation
-  failures produce the standard `args_error` envelope (not capped — the
-  message is already bounded by `show/1`, and an oversized response there
-  can only be as large as the oversized request that caused it).
+  cap bounds the *whole reply*, including the (client-chosen) `id`.
+
+  When `id` consumes most of `--max-debug-response-bytes` the payload
+  budget shrinks toward zero and `run/3` reduces the response to its
+  minimal shape. That minimal shape — a handful of required fields plus
+  the echoed `id` — is the irreducible floor: JSON-RPC mandates echoing
+  `id` verbatim, so an operator who sets `--max-debug-response-bytes`
+  below `byte_size(id) + minimal_shape` is asking for the impossible; the
+  server minimizes its own contribution, the `id` passthrough is on the
+  caller. (`max_frame_bytes` already bounds the incoming `id`.)
+
+  Validation failures produce the standard `args_error` envelope (not
+  capped — the message is already bounded by `show/1`, and an oversized
+  response there can only be as large as the oversized request).
   """
   @spec call(map(), non_neg_integer()) :: map()
   def call(params, frame_reserve_bytes \\ 0)
@@ -76,10 +81,7 @@ defmodule PtcRunnerMcp.DebugTool do
     case validate(args) do
       {:ok, op, opts} ->
         cap =
-          max(
-            DebugConfig.max_response_bytes() - frame_reserve_bytes - @frame_cushion_bytes,
-            @min_payload_bytes
-          )
+          max(DebugConfig.max_response_bytes() - frame_reserve_bytes - @frame_cushion_bytes, 0)
 
         run(op, opts, cap)
 
