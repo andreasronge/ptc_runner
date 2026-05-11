@@ -89,6 +89,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deferred to a follow-up. Compaction stats surface on `step.usage.compaction`.
   See `docs/guides/subagent-compaction.md`.
 
+### Fixed
+
+- **PTC-Lisp: no more leaked Elixir internals in type errors** (#862) —
+  calling a collection op with the collection and predicate swapped
+  (e.g. `(filter [1 2 3] (fn [x] true))`) no longer surfaces a raw
+  `protocol Enumerable not implemented for Function, only anonymous
+  functions of arity 2 ...`; it now reports `expected a collection, got
+  a function — ... arguments may be swapped`. `(get key map)` with the
+  arguments swapped now suggests the correct `(get map key)` order
+  instead of `get: invalid argument types: keyword, map`. A builtin
+  used as a value (e.g. `(first filter)`) now renders as type
+  `function` rather than the leaky `unknown`.
+
 ## [0.10.1] - 2026-05-04
 
 ### Fixed

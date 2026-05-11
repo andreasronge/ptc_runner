@@ -87,7 +87,20 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
         "Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)", args}}
   end
 
+  # (get key map) / (get-in path map) — collection must come first. A keyword
+  # or string first arg with a map second arg is almost always swapped.
+  defp specific_type_error(name, [k, %{} = _m] = args)
+       when name in [:get, :get_in] and (is_atom(k) or is_binary(k) or is_list(k)) do
+    {:ok,
+     {:type_error,
+      "#{display_name(name)} expects the collection first, e.g. (#{display_name(name)} map key) — " <>
+        "got (#{describe_type(k)}, map), arguments appear to be swapped", args}}
+  end
+
   defp specific_type_error(_name, _args), do: :none
+
+  defp display_name(:get_in), do: "get-in"
+  defp display_name(name), do: to_string(name)
 
   defp generic_type_error(fun_name, args) do
     type_descriptions = Enum.map(args, &describe_type/1)
@@ -109,6 +122,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def describe_type(x) when is_boolean(x), do: "boolean"
   def describe_type(x) when is_atom(x), do: "keyword"
   def describe_type(x) when is_function(x), do: "function"
+  # Internal builtin-binding tuples (e.g. `{:normal, &fun/2}`) — these reach
+  # error formatting when a builtin is used as a value, e.g. `(first filter)`.
+  # Surface them as "function" rather than the leaky "unknown".
+  def describe_type({tag, _}) when tag in [:normal, :collect], do: "function"
+
+  def describe_type({tag, _, _}) when tag in [:variadic, :variadic_nonempty, :multi_arity],
+    do: "function"
+
   def describe_type(_), do: "unknown"
 
   # Special forms that require parentheses - bare symbols will fail with :unbound_var

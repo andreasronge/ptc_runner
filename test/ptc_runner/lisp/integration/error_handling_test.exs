@@ -66,7 +66,19 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "(filter (where :x) 42)"
 
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
-      assert message =~ "invalid argument types"
+      assert message =~ "expected a collection, got number 42"
+    end
+
+    test "filter with arguments swapped returns a clean error, not a raw protocol error" do
+      # (filter coll pred) instead of (filter pred coll) — the predicate ends up
+      # in the collection slot. Previously leaked `protocol Enumerable not
+      # implemented for Function ...`.
+      source = "(filter [1 2 3] (fn [x] true))"
+
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
+      assert message =~ "expected a collection, got a function"
+      assert message =~ "arguments may be swapped"
+      refute message =~ "protocol Enumerable"
     end
 
     test "count with non-collection returns type error" do
@@ -91,6 +103,22 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "first does not support sets"
+    end
+
+    test "get with key and map swapped suggests the right order" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run(~s|(get :status {"status" "ok"})|)
+
+      assert message =~ "get expects the collection first"
+      assert message =~ "arguments appear to be swapped"
+    end
+
+    test "builtin used as a value reports type 'function', not 'unknown'" do
+      # ((first filter) 1 2): `filter` is a builtin reference; (first <builtin>)
+      # is a type error whose argument used to render as the leaky "unknown".
+      assert {:error, %Step{fail: %{message: message}}} = Lisp.run("((first filter) 1 2)")
+      assert message =~ "function"
+      refute message =~ "unknown"
     end
   end
 
