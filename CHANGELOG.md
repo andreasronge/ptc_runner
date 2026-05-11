@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PTC-Lisp `list` builtin** — `(list & args)` is now available as an alias
+  for `vector`, returning a vector (PTC-Lisp has no separate list type). This
+  matches LLM Clojure training data and removes a recurring `list`/`cons`
+  error class at zero prompt cost (`cons` was already supported). Documented
+  as DIV-25 in `docs/clojure-conformance-gaps.md`. Closes #779.
+
 - **PTC-Lisp MCP unwrap helpers** — `(mcp/text r)` and `(mcp/json r)`
   are now available unconditionally in every PTC-Lisp run. `mcp/text`
   returns `r["content"][0]["text"]` (the well-known MCP envelope

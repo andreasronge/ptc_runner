@@ -74,26 +74,26 @@ end
 
 ---
 
-### 2. Multi-Turn Memory Persistence
+### 2. Multi-Turn State Persistence (`def`)
 
-**What we're testing:** Agent stores intermediate results and retrieves them correctly across turns.
+**What we're testing:** Agent stores intermediate results with `(def name value)` and retrieves them by bare symbol across turns.
 
-**Implementation Clue: Explicit Memory Schema**
+**Implementation Clue: Explicit Binding Schema**
 
 ```elixir
 %{
-  name: "memory-accumulation-revenue",
+  name: "def-accumulation-revenue",
   level: 3,
   multi_turn: true,
   queries: [
-    "Store the total revenue from orders with status 'completed' as 'completed-revenue' in memory",
-    "Store the total revenue from orders with status 'pending' as 'pending-revenue' in memory",
-    "Calculate what percentage of total revenue (completed + pending) is from pending orders. Use memory/completed-revenue and memory/pending-revenue."
+    "Store the total revenue from orders with status 'completed' as completed-revenue (use def)",
+    "Store the total revenue from orders with status 'pending' as pending-revenue (use def)",
+    "Calculate what percentage of total revenue (completed + pending) is from pending orders. Use the completed-revenue and pending-revenue values you stored with def."
   ],
   expect: :number,
   constraint: {:between, 0, 100},
   assertions: [
-    {:memory_keys_used, ["completed-revenue", "pending-revenue"]}
+    {:def_bindings_used, ["completed-revenue", "pending-revenue"]}
   ]
 }
 ```
@@ -102,19 +102,19 @@ end
 
 | Edge Case | Detection | Mitigation |
 |-----------|-----------|------------|
-| Naming Drift | `memory/get` key doesn't match `memory/put` key | Provide `(memory/keys)` introspection; include stored keys in turn prompt |
-| Type Drift | Stored `{:count 42}`, retrieved as `42` | Include value schema in memory: `{:key "x", :value 42, :type :integer}` |
-| Lost in the Middle | Turn 5 forgets Turn 1 schema | Summarize memory state at start of each turn prompt |
+| Naming Drift | symbol referenced doesn't match the name passed to `def` | Include defined names in the turn prompt |
+| Type Drift | Stored `{:count 42}`, referenced as `42` | Note the shape of each binding in the turn prompt |
+| Lost in the Middle | Turn 5 forgets Turn 1 binding | Summarize the user namespace at the start of each turn prompt |
 
-**Memory Introspection Helper:**
+**Binding Introspection Helper:**
 
 ```elixir
 # Add to system prompt for multi-turn tests:
 """
-Current memory state:
-#{format_memory_state(memory)}
+Defined so far (user namespace):
+#{format_user_ns(user_ns)}
 
-Available keys: #{inspect(Map.keys(memory))}
+Available names: #{inspect(Map.keys(user_ns))}
 """
 ```
 
@@ -122,16 +122,16 @@ Available keys: #{inspect(Map.keys(memory))}
 
 ```elixir
 %{
-  name: "memory-naming-consistency",
+  name: "def-naming-consistency",
   level: 3,
   queries: [
-    "Count employees in Engineering and store as 'eng-count'",
-    "Count employees in Sales and store as 'sales-count'",
+    "Count employees in Engineering and store as eng-count (use def)",
+    "Count employees in Sales and store as sales-count (use def)",
     # Intentionally use slightly different naming to see if LLM drifts
     "What is the ratio of engineering to sales employees? Use the stored counts."
   ],
   assertions: [
-    {:no_memory_miss, true}  # memory/get never returned nil
+    {:no_unbound_symbol, true}  # never referenced an undefined symbol
   ]
 }
 ```
@@ -439,7 +439,7 @@ demo/lib/ptc_demo/test_runner/
 ├── firewall_check.ex    # Detect data leaks
 ├── tool_tracker.ex      # Track sub-agent/tool usage
 ├── compile_validator.ex # Two-phase compile tests
-└── memory_tracker.ex    # Track memory/put and memory/get
+└── def_tracker.ex       # Track def bindings and symbol references
 ```
 
 ### Result Structure Extension
@@ -453,7 +453,7 @@ defmodule PtcDemo.TestRunner.Result do
     :programs,           # List of all programs tried
     :turn_count,
     :tool_calls,         # %{"tool_name" => count}
-    :memory_operations,  # [{:put, key, value}, {:get, key, result}]
+    :def_bindings,       # [{name, value}] established via (def name value)
     :firewalled_access,  # ["_field1", "_field2"]
     :errors_received,    # List of error messages agent saw
     :assertions_results  # %{assertion_name => :pass | {:fail, reason}}
@@ -486,10 +486,10 @@ mix ptc_demo.eval --category nested_agents
 4. Add duplicate program detection
 5. Tune error messages for actionability
 
-### Phase 2: Memory Persistence (Week 1-2)
-1. Implement `MemoryTracker` module
-2. Add memory state to turn prompts
-3. Create 3-5 memory accumulation tests
+### Phase 2: State Persistence via `def` (Week 1-2)
+1. Implement `DefTracker` module
+2. Add user-namespace state to turn prompts
+3. Create 3-5 `def` accumulation tests
 4. Add naming drift detection
 
 ### Phase 3: Context Firewall (Week 2)

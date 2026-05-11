@@ -35,8 +35,34 @@ defmodule PtcRunner.Dotenv do
     :ok
   end
 
+  @doc """
+  Find the nearest `.env` file by walking up from `dir`.
+
+  Returns the path to the first `.env` found, or `nil` if none exists up to
+  the filesystem root.
+  """
+  @spec find_dotenv(String.t()) :: String.t() | nil
+  def find_dotenv("/"), do: nil
+
+  def find_dotenv(dir) do
+    candidate = Path.join(dir, ".env")
+
+    if File.regular?(candidate) do
+      candidate
+    else
+      find_dotenv(Path.dirname(dir))
+    end
+  end
+
+  @doc """
+  Parse `path` as a `.env` file and set the variables it declares.
+
+  Lines are `KEY=VALUE`; blank lines and `#` comments are ignored. Surrounding
+  single or double quotes are stripped from the value. Existing environment
+  variables are never overwritten.
+  """
   @spec load_file(String.t()) :: :ok
-  defp load_file(path) do
+  def load_file(path) do
     path
     |> File.read!()
     |> String.split("\n")
@@ -45,19 +71,6 @@ defmodule PtcRunner.Dotenv do
       |> String.trim()
       |> parse_env_line()
     end)
-  end
-
-  @spec find_dotenv(String.t()) :: String.t() | nil
-  defp find_dotenv("/"), do: nil
-
-  defp find_dotenv(dir) do
-    candidate = Path.join(dir, ".env")
-
-    if File.regular?(candidate) do
-      candidate
-    else
-      find_dotenv(Path.dirname(dir))
-    end
   end
 
   defp parse_env_line(""), do: :ok

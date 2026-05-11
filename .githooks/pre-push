@@ -54,6 +54,7 @@ RUN_FULL = 2
 ALLOW_PATTERNS = [
     re.compile(r"^Plans/.*\.md$"),
     re.compile(r"^CHANGELOG\.md$"),
+    re.compile(r"^(mcp_server|ptc_viewer)/CHANGELOG\.md$"),
     re.compile(r"^LICENSES/MIT\.txt$"),
     re.compile(r"^\.gitignore$"),
     re.compile(r"^\.githooks/README\.md$"),

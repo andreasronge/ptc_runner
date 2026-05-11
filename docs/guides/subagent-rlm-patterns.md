@@ -10,7 +10,7 @@ Recursive Language Models ([arXiv:2512.24601](https://arxiv.org/abs/2512.24601))
 2. **Fans out** work to parallel sub-agents
 3. **Aggregates** results into a final answer
 
-The key insight: put bulk context in a persistent environment (memory/data), let the model manipulate it via code, and use sub-LLM calls strategically.
+The key insight: put bulk context in the data namespace (`data/`), let the model manipulate it via code, and use sub-LLM calls strategically.
 
 ## The Problem: Context Limitations
 
