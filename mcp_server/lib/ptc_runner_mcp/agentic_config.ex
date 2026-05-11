@@ -32,6 +32,9 @@ defmodule PtcRunnerMcp.AgenticConfig do
   )
   @prompt_slot_max_bytes 4_096
 
+  alias PtcRunnerMcp.Agentic.CapabilitySummary
+  alias PtcRunnerMcp.Log
+
   @type t :: %{
           enabled: boolean(),
           model: String.t(),
@@ -141,6 +144,20 @@ defmodule PtcRunnerMcp.AgenticConfig do
   end
 
   def log_boot(_config, _source_keys), do: :ok
+
+  @doc false
+  @spec log_auto_capability_summary(t()) :: :ok
+  def log_auto_capability_summary(%{enabled: true, capability_summary: nil} = config) do
+    summary = CapabilitySummary.from_frozen(max_bytes: config.capability_summary_max_bytes)
+
+    Log.log(
+      :info,
+      "agentic_capability_summary",
+      Map.put(capability_summary_report(summary), :source, "auto")
+    )
+  end
+
+  def log_auto_capability_summary(_config), do: :ok
 
   defp validate_subagent_config(decoded, path) when is_map(decoded) and not is_struct(decoded) do
     case reject_top_level_keys(decoded, path) do

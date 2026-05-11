@@ -38,6 +38,7 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
 
   use Supervisor
 
+  alias PtcRunnerMcp.AgenticConfig
   alias PtcRunnerMcp.Log
   alias PtcRunnerMcp.Upstream
   alias PtcRunnerMcp.Upstream.{Catalog, Connection, Registry}
@@ -172,6 +173,8 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
       Catalog.freeze_snapshot(snapshot)
       Catalog.freeze(catalog)
     end
+
+    AgenticConfig.log_auto_capability_summary(AgenticConfig.get())
   end
 
   @impl Supervisor
