@@ -163,9 +163,9 @@ callers.
   Crossing a cap returns a structured error result, not a server
   crash.
 - **Cross-call leakage.** Each `tools/call` runs in a fresh BEAM
-  process with empty memory, empty tool cache, and no journal reuse.
-  Two sequential calls cannot see each other's `(memory/put …)`
-  state — asserted by an isolation regression test.
+  process with empty user namespace, empty tool cache, and no journal
+  reuse. Two sequential calls cannot see each other's `(def …)`
+  bindings — asserted by an isolation regression test.
 
 ### What the sandbox does NOT protect against
 

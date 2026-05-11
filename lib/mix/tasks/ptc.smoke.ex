@@ -12,7 +12,7 @@ defmodule Mix.Tasks.Ptc.Smoke do
   ## Test Files
 
   Place `.clj` files in `test/smoke/`. Each file should be valid in both
-  PTC-Lisp and Clojure/Babashka (avoid PTC-specific features like `memory/`,
+  PTC-Lisp and Clojure/Babashka (avoid PTC-specific features like
   `tool/`, `data/`, `call`).
 
   ## Output Normalization
