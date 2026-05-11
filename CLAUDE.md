@@ -30,12 +30,13 @@ mix test                        # Run tests (--failed to re-run failures)
 mix format                      # Format code
 mix credo --strict              # Lint
 mix dialyzer                    # Type checking
-mix precommit                   # Run before pushing (format + compile + credo + dialyzer + test)
+mix precommit                   # Fast quality gate (format + compile + credo + schema + spec + tests)
+mix prepush                     # Slower checks before pushing (dialyzer + unused-deps check)
 ```
 
 Full quality check: `mix format --check-formatted && mix compile --warnings-as-errors && mix test`
 
-Always run `mix precommit` before `git push`. If it fails, fix all issues before pushing.
+Run `mix precommit` before committing and `mix prepush` before `git push`. If either fails, fix all issues before pushing. (CI also runs dialyzer and the unused-deps check on every PR.)
 
 ## Project Structure
 
@@ -92,7 +93,7 @@ Programs execute in isolated BEAM processes with timeout (1s) and memory limits 
 ### Code Quality
 
 - When fixing dialyzer or Credo issues, always re-run the tool after changes to verify the fix. Never assume fixes are correct without verification.
-- Run `mix precommit` to catch all issues before committing.
+- Run `mix precommit` to catch most issues before committing, and `mix prepush` (dialyzer) before pushing.
 
 ### Testing
 
