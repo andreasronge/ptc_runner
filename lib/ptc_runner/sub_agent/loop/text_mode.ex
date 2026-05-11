@@ -1423,26 +1423,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp extract_program(%{args: args}) when is_map(args) do
     program = Map.get(args, "program") || Map.get(args, :program)
-    validate_program(program)
+    PtcToolProtocol.validate_program(program)
   end
 
-  defp extract_program(_), do: validate_program(nil)
-
-  defp validate_program(nil),
-    do: {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
-
-  defp validate_program(program) when not is_binary(program),
-    do:
-      {:error, :args_error,
-       "ptc_lisp_execute `program` must be a string, got #{inspect(program)}."}
-
-  defp validate_program(program) when is_binary(program) do
-    if String.trim(program) == "" do
-      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
-    else
-      {:ok, program}
-    end
-  end
+  defp extract_program(_), do: PtcToolProtocol.validate_program(nil)
 
   defp execute_single_tool(tool_name, tool_args, state) do
     start = System.monotonic_time(:millisecond)

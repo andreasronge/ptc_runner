@@ -1075,23 +1075,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       args = Map.get(call, :args) || Map.get(call, "args")
       program = if is_map(args), do: Map.get(args, "program") || Map.get(args, :program)
 
-      validate_program(program)
-    end
-  end
-
-  defp validate_program(nil) do
-    {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
-  end
-
-  defp validate_program(program) when not is_binary(program) do
-    {:error, :args_error, "ptc_lisp_execute `program` must be a string, got #{inspect(program)}."}
-  end
-
-  defp validate_program(program) when is_binary(program) do
-    if String.trim(program) == "" do
-      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
-    else
-      {:ok, program}
+      PtcToolProtocol.validate_program(program)
     end
   end
 
