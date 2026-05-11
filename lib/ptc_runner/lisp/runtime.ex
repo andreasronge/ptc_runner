@@ -190,6 +190,19 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate sqrt(x), to: Math
   defdelegate pow(x, y), to: Math
 
+  # Bitwise operations (integers only)
+  defdelegate bit_and(x, y), to: Math
+  defdelegate bit_or(x, y), to: Math
+  defdelegate bit_xor(x, y), to: Math
+  defdelegate bit_and_not(x, y), to: Math
+  defdelegate bit_not(x), to: Math
+  defdelegate bit_shift_left(x, n), to: Math
+  defdelegate bit_shift_right(x, n), to: Math
+  defdelegate bit_clear(x, n), to: Math
+  defdelegate bit_set(x, n), to: Math
+  defdelegate bit_flip(x, n), to: Math
+  defdelegate bit_test(x, n), to: Math
+
   # ============================================================
   # Comparison
   # ============================================================

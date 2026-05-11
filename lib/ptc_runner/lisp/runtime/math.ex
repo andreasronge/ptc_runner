@@ -6,7 +6,9 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   and utility functions like floor, ceil, round, etc.
   """
 
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Runtime.SpecialValues
+  alias PtcRunner.Lisp.TypeError
 
   def add(args) when is_list(args) do
     if SpecialValues.any_nan?(args) do
@@ -295,6 +297,72 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   defp pow_neg_inf_exp(x) when Kernel.abs(x) > 1, do: 0.0
   defp pow_neg_inf_exp(x) when Kernel.abs(x) < 1, do: :infinity
   defp pow_neg_inf_exp(_x), do: 1.0
+
+  # ============================================================
+  # Bitwise operations (integers only)
+  #
+  # These map to Erlang's bitwise BIFs. Unlike Clojure/JVM, BEAM integers
+  # are arbitrary-precision two's-complement, so there is no implicit
+  # 64-bit width: `bit-shift-left`/`bit-shift-right` do not wrap the shift
+  # amount modulo 64, and the result of a left shift can grow without bound.
+  # For practical (small, non-negative shift) inputs the behaviour matches
+  # Clojure exactly. `unsigned-bit-shift-right` is intentionally not provided
+  # because it has no well-defined meaning without a fixed integer width.
+  # ============================================================
+
+  @doc "Bitwise AND of two integers."
+  def bit_and(x, y), do: :erlang.band(int!(x, "bit-and"), int!(y, "bit-and"))
+
+  @doc "Bitwise OR of two integers."
+  def bit_or(x, y), do: :erlang.bor(int!(x, "bit-or"), int!(y, "bit-or"))
+
+  @doc "Bitwise exclusive OR of two integers."
+  def bit_xor(x, y), do: :erlang.bxor(int!(x, "bit-xor"), int!(y, "bit-xor"))
+
+  @doc "Bitwise AND of `x` with the complement of `y`."
+  def bit_and_not(x, y),
+    do: :erlang.band(int!(x, "bit-and-not"), :erlang.bnot(int!(y, "bit-and-not")))
+
+  @doc "Bitwise complement (two's complement) of an integer."
+  def bit_not(x), do: :erlang.bnot(int!(x, "bit-not"))
+
+  @doc "Shift `x` left by `n` bits."
+  def bit_shift_left(x, n),
+    do: :erlang.bsl(int!(x, "bit-shift-left"), shift!(n, "bit-shift-left"))
+
+  @doc "Arithmetic shift `x` right by `n` bits (sign-extending)."
+  def bit_shift_right(x, n),
+    do: :erlang.bsr(int!(x, "bit-shift-right"), shift!(n, "bit-shift-right"))
+
+  @doc "Clear bit `n` of `x` (set it to 0)."
+  def bit_clear(x, n),
+    do: :erlang.band(int!(x, "bit-clear"), :erlang.bnot(bit_mask(n, "bit-clear")))
+
+  @doc "Set bit `n` of `x` to 1."
+  def bit_set(x, n), do: :erlang.bor(int!(x, "bit-set"), bit_mask(n, "bit-set"))
+
+  @doc "Flip bit `n` of `x`."
+  def bit_flip(x, n), do: :erlang.bxor(int!(x, "bit-flip"), bit_mask(n, "bit-flip"))
+
+  @doc "Return true if bit `n` of `x` is set."
+  def bit_test(x, n),
+    do: :erlang.band(:erlang.bsr(int!(x, "bit-test"), shift!(n, "bit-test")), 1) == 1
+
+  defp int!(x, _name) when is_integer(x), do: x
+
+  defp int!(x, name) do
+    raise TypeError,
+          "#{name}: expected an integer, got #{Helpers.describe_type(x)} #{inspect(x)}"
+  end
+
+  defp shift!(n, _name) when is_integer(n) and n >= 0, do: n
+
+  defp shift!(n, name) do
+    raise TypeError,
+          "#{name}: shift amount must be a non-negative integer, got #{inspect(n)}"
+  end
+
+  defp bit_mask(n, name), do: :erlang.bsl(1, shift!(n, name))
 
   # Comparison (for direct use, not inside where)
   def not_eq(x, y), do: not eq(x, y)
