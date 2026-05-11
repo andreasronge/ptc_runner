@@ -147,7 +147,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
     test "default planner model alias resolves to OpenRouter Gemini Flash Lite" do
       assert PtcRunner.LLM.Registry.resolve!(AgenticConfig.defaults().model) ==
-               "openrouter:google/gemini-3.1-flash-lite-preview"
+               "openrouter:google/gemini-3.1-flash-lite"
     end
 
     test "real planner path forwards timeout and max token caps to the LLM request" do
@@ -220,7 +220,7 @@ defmodule PtcRunnerMcp.AgenticTest do
             "constraints" => %{
               "max_items" => 1,
               "preferred_fields" => ["id", "name"],
-              "output_format" => "xml"
+              "unknown" => true
             }
           }
         })
@@ -229,7 +229,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       sc = env["structuredContent"]
       assert sc["status"] == "ok"
       assert sc["structured_result"] == %{"items" => [%{"id" => 1, "name" => "one"}]}
-      assert [%{"code" => "unsupported_output_format"}] = sc["warnings"]
+      assert [%{"code" => "unsupported_constraint", "detail" => "unknown"}] = sc["warnings"]
       assert sc["program"] =~ "(return"
       assert sc["planner"]["model"] == "stub:model"
     end

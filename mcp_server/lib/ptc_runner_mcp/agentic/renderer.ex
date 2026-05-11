@@ -1,8 +1,6 @@
 defmodule PtcRunnerMcp.Agentic.Renderer do
   @moduledoc false
 
-  @supported_output_formats MapSet.new(["text", "compact_text", "json"])
-
   @spec normalize_constraints(term()) :: {:ok, map(), [map()]} | {:error, String.t()}
   def normalize_constraints(nil), do: {:ok, %{}, []}
 
@@ -10,22 +8,12 @@ defmodule PtcRunnerMcp.Agentic.Renderer do
     {known, warnings} =
       Enum.reduce(value, {%{}, []}, fn {key, val}, {acc, warnings} ->
         case key do
-          "max_result_bytes" when is_integer(val) and val > 0 ->
-            {Map.put(acc, "max_result_bytes", val), warnings}
-
           "max_items" when is_integer(val) and val > 0 ->
             {Map.put(acc, "max_items", val), warnings}
 
           "preferred_fields" when is_list(val) ->
             fields = Enum.filter(val, &(is_binary(&1) and &1 != ""))
             {Map.put(acc, "preferred_fields", fields), warnings}
-
-          "output_format" when is_binary(val) ->
-            if MapSet.member?(@supported_output_formats, val) do
-              {Map.put(acc, "output_format", val), warnings}
-            else
-              {acc, [warning("unsupported_output_format", val) | warnings]}
-            end
 
           other when is_binary(other) ->
             {acc, [warning("unsupported_constraint", other) | warnings]}
@@ -45,7 +33,7 @@ defmodule PtcRunnerMcp.Agentic.Renderer do
   @spec render(map(), map(), pos_integer()) :: {map(), [map()]}
   def render(execution_payload, constraints, default_max_result_bytes)
       when is_map(execution_payload) and is_map(constraints) do
-    max_bytes = Map.get(constraints, "max_result_bytes", default_max_result_bytes)
+    max_bytes = default_max_result_bytes
 
     result =
       execution_payload

@@ -54,7 +54,9 @@ defmodule PtcRunnerMcp.Upstream do
   @type tool_schema :: %{
           required(:name) => String.t(),
           required(:input_schema) => map(),
-          optional(:description) => String.t()
+          optional(:description) => String.t(),
+          optional(:output_schema) => map(),
+          optional(:annotations) => map()
         }
 
   @typedoc "Per-call options threaded through from `Limits`."

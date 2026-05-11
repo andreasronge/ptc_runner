@@ -127,6 +127,50 @@ defmodule PtcRunner.Lisp.Runtime.McpTest do
       assert Mcp.json(result) == %{"chosen" => true}
     end
 
+    test "structuredContent content mirror is treated as text, not typed JSON" do
+      text = "[FILE] README.md\n[DIR] lib"
+
+      result = %{
+        "structuredContent" => %{"content" => text},
+        "content" => [%{"type" => "text", "text" => text}]
+      }
+
+      assert Mcp.json(result) == nil
+      assert Mcp.text(result) == text
+    end
+
+    test "structuredContent content mirror can still parse real JSON text" do
+      text = ~S|{"entries":["README.md","lib"]}|
+
+      result = %{
+        "structuredContent" => %{"content" => text},
+        "content" => [%{"type" => "text", "text" => text}]
+      }
+
+      assert Mcp.json(result) == %{"entries" => ["README.md", "lib"]}
+    end
+
+    test "structuredContent content field still wins when it is not a text mirror" do
+      result = %{
+        "structuredContent" => %{"content" => "typed"},
+        "content" => [%{"type" => "text", "text" => "summary"}]
+      }
+
+      assert Mcp.json(result) == %{"content" => "typed"}
+    end
+
+    test "structuredContent with content plus sibling fields stays intact" do
+      result = %{
+        "structuredContent" => %{
+          "content" => "summary",
+          "citations" => ["a.md"]
+        },
+        "content" => [%{"type" => "text", "text" => "summary"}]
+      }
+
+      assert Mcp.json(result) == %{"content" => "summary", "citations" => ["a.md"]}
+    end
+
     test "preserves :json-null sentinel in structuredContent (§6.2 sub-field rule)" do
       # Sub-field :json-null is preserved so programs can distinguish
       # "field present, value JSON null" from "field absent."

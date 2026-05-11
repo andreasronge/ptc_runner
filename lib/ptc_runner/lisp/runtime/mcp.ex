@@ -102,9 +102,19 @@ defmodule PtcRunner.Lisp.Runtime.Mcp do
   @spec json(term()) :: term() | nil
   def json(result) when is_map(result) do
     case Map.fetch(result, "structuredContent") do
-      {:ok, nil} -> Json.parse_string(text(result))
-      {:ok, value} -> value
-      :error -> Json.parse_string(text(result))
+      {:ok, nil} ->
+        Json.parse_string(text(result))
+
+      {:ok, %{"content" => content} = structured} when is_binary(content) ->
+        if map_size(structured) == 1 and content == text(result),
+          do: Json.parse_string(content),
+          else: structured
+
+      {:ok, value} ->
+        value
+
+      :error ->
+        Json.parse_string(text(result))
     end
   end
 

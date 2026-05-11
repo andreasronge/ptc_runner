@@ -194,6 +194,52 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       assert output == "fs:\n  ping() - Ping the server"
     end
+
+    test "renders compact PTC-Lisp output hints when output_schema is available" do
+      tools = [
+        %{
+          name: "list_entries",
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{"path" => %{"type" => "string"}},
+            "required" => ["path"]
+          },
+          output_schema: %{
+            "type" => "object",
+            "properties" => %{
+              "entries" => %{"type" => "array", "items" => %{"type" => "string"}},
+              "truncated" => %{"type" => "boolean"}
+            },
+            "required" => ["entries"]
+          },
+          description: "List entries"
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "fs", tools: tools}])
+
+      assert output ==
+               "fs:\n  list_entries(path: string) -> {entries [:string], truncated :bool?} - List entries"
+    end
+
+    test "does not invent output hints when output_schema is absent" do
+      tools = [
+        %{
+          name: "list_directory",
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{"path" => %{"type" => "string"}},
+            "required" => ["path"]
+          },
+          description: "Results use [FILE] and [DIR] prefixes"
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "fs", tools: tools}])
+
+      assert output ==
+               "fs:\n  list_directory(path: string) - Results use [FILE] and [DIR] prefixes"
+    end
   end
 
   describe "render_entries/1 — enum / const constraints take priority over `type`" do

@@ -37,6 +37,27 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
     refute CapabilitySummary.generate(entries) =~ "properties"
   end
 
+  test "includes compact output hints when output_schema is available" do
+    entries = [
+      %{
+        name: "docs",
+        tools: [
+          %{
+            name: "search",
+            output_schema: %{
+              "type" => "object",
+              "properties" => %{
+                "items" => %{"type" => "array", "items" => %{"type" => "string"}}
+              }
+            }
+          }
+        ]
+      }
+    ]
+
+    assert CapabilitySummary.generate(entries) == "- docs: search->{items [:string]}"
+  end
+
   test "uses the frozen structured snapshot" do
     Catalog.freeze_snapshot([
       %{name: "zeta", tools: [%{name: "last"}]},

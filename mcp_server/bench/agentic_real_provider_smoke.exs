@@ -150,7 +150,7 @@ defmodule Bench.AgenticRealProviderSmoke do
       %{
         name: "custom",
         task: task,
-        constraints: %{"output_format" => "text"},
+        constraints: %{},
         check: fn payload -> Map.get(payload, "status") == "ok" end
       }
     ]
@@ -161,7 +161,7 @@ defmodule Bench.AgenticRealProviderSmoke do
       %{
         name: "read_readme",
         task: "Read README.md and return the first 5 non-empty lines exactly as text.",
-        constraints: %{"max_items" => 5, "output_format" => "text"},
+        constraints: %{"max_items" => 5},
         check: fn payload ->
           answer = to_string(Map.get(payload, "answer", ""))
 
@@ -173,17 +173,15 @@ defmodule Bench.AgenticRealProviderSmoke do
       %{
         name: "list_repo_root",
         task:
-          "Use filesystem list_directory with path \".\". Return the first 5 listed entry names as a JSON array.",
-        constraints: %{"max_items" => 5, "output_format" => "json"},
+          "Use filesystem list_directory with path \".\". Tell the user the first 5 listed entry names.",
+        constraints: %{"max_items" => 5},
         check: fn payload ->
-          structured = Map.get(payload, "structured_result")
           answer = to_string(Map.get(payload, "answer", ""))
 
           Map.get(payload, "status") == "ok" and
             upstream_ok?(payload, "list_directory") and
-            ((is_list(structured) and length(structured) == 5 and
-                Enum.all?(structured, &is_binary/1)) or
-               (String.starts_with?(answer, "[") and String.contains?(answer, ".gitignore")))
+            String.contains?(answer, ".gitignore") and
+            not String.contains?(answer, "[null]")
         end
       }
     ]

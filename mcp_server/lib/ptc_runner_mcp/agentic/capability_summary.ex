@@ -110,14 +110,14 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   defp full_bullet(%{name: name, tools: []}), do: "- #{name}: (no tools advertised)"
 
   defp full_bullet(%{name: name, tools: tools}) when is_list(tools) do
-    "- #{name}: " <> Enum.join(tool_names(tools), ", ")
+    "- #{name}: " <> Enum.join(tool_labels(tools), ", ")
   end
 
   defp full_bullet(%{name: name}), do: "- #{name}: (no tools advertised)"
 
   defp clipped_bullet(%{tools: tools} = entry, lines, max_bytes)
        when is_list(tools) and tools != [] do
-    names = tool_names(tools)
+    names = tool_labels(tools)
 
     names
     |> Enum.with_index(1)
@@ -142,16 +142,55 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
 
   defp clipped_bullet(_entry, _lines, _max_bytes), do: nil
 
-  defp tool_names(tools) do
+  defp tool_labels(tools) do
     tools
-    |> Enum.map(&tool_name/1)
+    |> Enum.map(&tool_label/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.sort()
+  end
+
+  defp tool_label(tool) do
+    name = tool_name(tool)
+
+    case output_type(tool) do
+      "" -> name
+      type -> "#{name}->#{type}"
+    end
   end
 
   defp tool_name(%{name: name}), do: to_string(name)
   defp tool_name(%{"name" => name}), do: to_string(name)
   defp tool_name(_), do: ""
+
+  defp output_type(%{output_schema: schema}), do: signature_type(schema)
+  defp output_type(%{"output_schema" => schema}), do: signature_type(schema)
+  defp output_type(%{"outputSchema" => schema}), do: signature_type(schema)
+  defp output_type(_), do: ""
+
+  defp signature_type(%{"type" => "string"}), do: ":string"
+  defp signature_type(%{"type" => "integer"}), do: ":int"
+  defp signature_type(%{"type" => "number"}), do: ":float"
+  defp signature_type(%{"type" => "boolean"}), do: ":bool"
+  defp signature_type(%{"type" => "array", "items" => items}), do: "[#{signature_type(items)}]"
+  defp signature_type(%{"type" => "array"}), do: "[:any]"
+
+  defp signature_type(%{"type" => "object", "properties" => properties})
+       when is_map(properties) do
+    if map_size(properties) == 0 do
+      ":map"
+    else
+      fields =
+        properties
+        |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+        |> Enum.take(3)
+        |> Enum.map_join(",", fn {key, value} -> "#{key} #{signature_type(value)}" end)
+
+      "{#{fields}}"
+    end
+  end
+
+  defp signature_type(%{"type" => "object"}), do: ":map"
+  defp signature_type(_), do: ":any"
 
   defp maybe_append_more_upstreams(lines, omitted, max_bytes) when omitted > 0 do
     marker = "- (+#{omitted} more upstreams)"
