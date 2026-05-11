@@ -68,6 +68,10 @@ defmodule PtcRunner.Lisp.Env do
     :System => :interop,
     :"java.time.LocalDate" => :interop,
     :LocalDate => :interop,
+    # `Instant/parse` and `LocalDate/parse` both resolve to the `parse`
+    # builtin, which auto-dispatches on the string shape (Date vs DateTime).
+    :"java.time.Instant" => :interop,
+    :Instant => :interop,
     :Double => :interop,
     # JSON / MCP namespaces — Plans/json-support.md §4.4 step 1.
     # `mcp/` is forward-compat for Phase B (mcp/text, mcp/json) and
@@ -478,7 +482,7 @@ defmodule PtcRunner.Lisp.Env do
       {:".isBefore", {:normal, &Runtime.dot_is_before/2}},
       {:".isAfter", {:normal, &Runtime.dot_is_after/2}},
       {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
-      {:parse, {:normal, &Runtime.local_date_parse/1}},
+      {:parse, {:normal, &Runtime.parse_temporal/1}},
 
       # ============================================================
       # Double Constants

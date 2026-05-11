@@ -162,12 +162,58 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
 
     test "LocalDate/parse error on invalid date" do
       assert {:error, step} = Lisp.run("(LocalDate/parse \"not-a-date\")")
-      assert step.fail.message =~ "LocalDate/parse: invalid date 'not-a-date'"
+      assert step.fail.message =~ "parse: invalid ISO-8601 date 'not-a-date'"
     end
 
     test "LocalDate/parse error on nil" do
       assert {:error, step} = Lisp.run("(LocalDate/parse nil)")
-      assert step.fail.message =~ "LocalDate/parse: cannot parse nil"
+      assert step.fail.message =~ "parse: cannot parse nil"
+    end
+  end
+
+  describe "ISO-8601 instant parsing (#885)" do
+    test "parse returns a DateTime for an instant string with offset Z" do
+      {:ok, step} = Lisp.run(~s|(parse "2026-01-01T00:00:00Z")|)
+      assert %DateTime{} = step.return
+      assert step.return.year == 2026
+      assert step.return.time_zone == "Etc/UTC"
+    end
+
+    test "Instant/parse namespace alias also works" do
+      {:ok, step} = Lisp.run(~s|(Instant/parse "2026-03-04T12:30:00Z")|)
+      assert %DateTime{} = step.return
+      assert step.return.month == 3
+      assert step.return.day == 4
+    end
+
+    test "numeric offset is honoured (result is UTC)" do
+      {:ok, step} = Lisp.run(~s|(parse "2026-01-01T02:00:00+02:00")|)
+      assert %DateTime{} = step.return
+      assert step.return.hour == 0
+    end
+
+    test "offsetless date-time is treated as UTC" do
+      {:ok, step} = Lisp.run(~s|(parse "2026-01-01T08:15:00")|)
+      assert %DateTime{} = step.return
+      assert step.return.hour == 8
+      assert step.return.time_zone == "Etc/UTC"
+    end
+
+    test "bare YYYY-MM-DD still returns a Date" do
+      {:ok, step} = Lisp.run(~s|(parse "2026-01-01")|)
+      assert %Date{} = step.return
+    end
+
+    test "the parsed DateTime works with comparison interop" do
+      {:ok, step} =
+        Lisp.run(~s|(.isBefore (parse "2026-01-01T00:00:00Z") (parse "2026-12-31T00:00:00Z"))|)
+
+      assert step.return == true
+    end
+
+    test "invalid instant string raises a clean error" do
+      assert {:error, step} = Lisp.run(~s|(parse "2026-13-99T00:00:00Z")|)
+      assert step.fail.message =~ "parse: invalid ISO-8601 date/time"
     end
   end
 

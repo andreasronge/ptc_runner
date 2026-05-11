@@ -151,25 +151,53 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   @doc """
-  Simulates java.time.LocalDate/parse.
-  Only supports ISO-8601 YYYY-MM-DD.
+  Parse an ISO-8601 temporal string. Backs the `parse` builtin (also
+  reachable as `LocalDate/parse`).
+
+  Dispatches on the string shape:
+
+  - `"YYYY-MM-DD"` → `Date`
+  - a string carrying a time component (`...T...`) → `DateTime`. An offset
+    (`Z`, `+02:00`, …) is honoured; an offsetless `...T...` value is treated
+    as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result.
+
+  This is a deliberate divergence from Java's `LocalDate.parse`, which
+  rejects anything with a time component — returning a `DateTime` is far more
+  useful for an LLM that just wants to compare two timestamps.
   """
-  def local_date_parse(nil) do
-    raise "LocalDate/parse: cannot parse nil"
+  def parse_temporal(nil) do
+    raise "parse: cannot parse nil"
   end
 
-  def local_date_parse(s) when is_binary(s) do
-    case Date.from_iso8601(s) do
-      {:ok, date} ->
-        date
-
-      {:error, _} ->
-        raise "LocalDate/parse: invalid date '#{s}'"
+  def parse_temporal(s) when is_binary(s) do
+    if String.contains?(s, "T") do
+      parse_iso8601_instant(s)
+    else
+      case Date.from_iso8601(s) do
+        {:ok, date} -> date
+        {:error, _} -> raise "parse: invalid ISO-8601 date '#{s}' (expected YYYY-MM-DD)"
+      end
     end
   end
 
-  def local_date_parse(other) do
-    raise "LocalDate/parse: expected string, got #{inspect(other)}"
+  def parse_temporal(other) do
+    raise "parse: expected string, got #{inspect(other)}"
+  end
+
+  defp parse_iso8601_instant(s) do
+    case DateTime.from_iso8601(s) do
+      {:ok, dt, _offset} ->
+        dt
+
+      {:error, :missing_offset} ->
+        case NaiveDateTime.from_iso8601(s) do
+          {:ok, ndt} -> DateTime.from_naive!(ndt, "Etc/UTC")
+          {:error, _} -> raise "parse: invalid ISO-8601 date/time '#{s}'"
+        end
+
+      {:error, _} ->
+        raise "parse: invalid ISO-8601 date/time '#{s}'"
+    end
   end
 
   @doc """
