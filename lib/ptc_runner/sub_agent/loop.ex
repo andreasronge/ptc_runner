@@ -904,15 +904,14 @@ defmodule PtcRunner.SubAgent.Loop do
     end
   end
 
-  # Head 2: Single-shot mode without retry_turns — skip validation (no retry possible)
-  # Must come before explicit fail to preserve original semantics where single-shot
-  # catches all returns including fail (treats them as success in single-shot mode).
+  # Head 2: Implicit single-shot mode without retry_turns — preserve historic
+  # behavior where any successful final expression is the result.
   defp handle_successful_execution(
          code,
          response,
          lisp_step,
          state,
-         %{max_turns: 1, retry_turns: 0} = agent
+         %{completion_mode: :implicit, max_turns: 1, retry_turns: 0} = agent
        ) do
     # Normalize hyphenated keys to underscored at the boundary (Clojure -> Elixir)
     normalized_step = %{lisp_step | return: KeyNormalizer.normalize_keys(lisp_step.return)}
@@ -960,7 +959,52 @@ defmodule PtcRunner.SubAgent.Loop do
     {:stop, {:error, final_step}, turn, state.turn_tokens}
   end
 
-  # Head 4: Normal continuation — check memory limits or continue
+  # Head 4: Explicit completion final turns require `(return ...)` or `(fail ...)`.
+  defp handle_successful_execution(
+         code,
+         response,
+         lisp_step,
+         state,
+         %{completion_mode: :explicit} = _agent
+       )
+       when state.current_turn_type in [:must_return, :retry] do
+    turn =
+      Metrics.build_turn(state, response, code, lisp_step.return,
+        success?: false,
+        prints: lisp_step.prints,
+        tool_calls: lisp_step.tool_calls,
+        memory: lisp_step.memory,
+        type: state.current_turn_type
+      )
+
+    duration_ms = System.monotonic_time(:millisecond) - state.start_time
+
+    error_step =
+      Step.error(
+        :must_return_missing,
+        "Final turn must call (return value) or (fail reason)",
+        lisp_step.memory
+      )
+
+    final_messages =
+      state.messages ++
+        [%{role: :assistant, content: ResponseHandler.strip_thinking(response)}]
+
+    final_step =
+      StepAssembler.finalize(error_step, state,
+        duration_ms: duration_ms,
+        memory_bytes: lisp_step.usage.memory_bytes,
+        is_error: true,
+        final_turn: turn,
+        final_messages: final_messages,
+        journal: lisp_step.journal,
+        child_steps: state.child_steps ++ lisp_step.child_steps
+      )
+
+    {:stop, {:error, final_step}, turn, state.turn_tokens}
+  end
+
+  # Head 5: Normal continuation — check memory limits or continue
   defp handle_successful_execution(code, response, lisp_step, state, agent) do
     case check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->

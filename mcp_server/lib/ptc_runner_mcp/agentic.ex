@@ -10,7 +10,7 @@ defmodule PtcRunnerMcp.Agentic do
     Tools
   }
 
-  alias PtcRunnerMcp.Agentic.{Planner, Renderer}
+  alias PtcRunnerMcp.Agentic.{CapabilitySummary, Planner, Renderer}
   alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
 
   @tool_name "ptc_task"
@@ -560,10 +560,17 @@ defmodule PtcRunnerMcp.Agentic do
     Use this tool for bounded plain-English tasks over the configured upstream MCP servers. Describe the result you want; the aggregator will plan and execute internal upstream calls.
 
     Available upstream capabilities:
-    #{capability_summary(UpstreamCatalog.frozen())}
+    #{capability_summary_for_tool_description()}
 
     Do not try to call upstream MCP servers through this tool. Ask for the outcome in plain English.
     """
+  end
+
+  defp capability_summary_for_tool_description do
+    cfg = AgenticConfig.get()
+
+    cfg.capability_summary ||
+      CapabilitySummary.from_frozen(max_bytes: cfg.capability_summary_max_bytes)
   end
 
   defp task_annotations do

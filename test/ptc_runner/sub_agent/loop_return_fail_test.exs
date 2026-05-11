@@ -1,6 +1,7 @@
 defmodule PtcRunner.SubAgent.LoopReturnFailTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop
 
   import PtcRunner.TestSupport.SubAgentTestHelpers
@@ -151,6 +152,69 @@ defmodule PtcRunner.SubAgent.LoopReturnFailTest do
 
       assert step.return == 42
       # Should have taken 2 turns (first turn didn't trigger return)
+      assert :counters.get(call_count, 1) == 2
+    end
+  end
+
+  describe "explicit completion mode" do
+    test "max_turns: 1 uses loop mode and accepts explicit return" do
+      llm = fn _ -> {:ok, ~S|```clojure
+(return {:answer 42})
+```|} end
+
+      agent = SubAgent.new(prompt: "Compute", max_turns: 1, completion_mode: :explicit)
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == %{"answer" => 42}
+      assert step.fail == nil
+    end
+
+    test "max_turns: 1 treats explicit fail as error" do
+      llm = fn _ -> {:ok, ~S|```clojure
+(fail {:reason :bad-input})
+```|} end
+
+      agent = SubAgent.new(prompt: "Compute", max_turns: 1, completion_mode: :explicit)
+
+      assert {:error, step} = SubAgent.run(agent, llm: llm)
+      assert step.fail.reason == :failed
+      assert step.fail.message =~ "bad-input"
+    end
+
+    test "max_turns: 1 rejects bare final expression" do
+      llm = fn _ -> {:ok, ~S|```clojure
+(+ 40 2)
+```|} end
+
+      agent = SubAgent.new(prompt: "Compute", max_turns: 1, completion_mode: :explicit)
+
+      assert {:error, step} = SubAgent.run(agent, llm: llm)
+      assert step.fail.reason == :must_return_missing
+      assert step.fail.message =~ "must call (return value) or (fail reason)"
+    end
+
+    test "bare non-final expression can continue until explicit return" do
+      call_count = :counters.new(1, [:atomics])
+
+      llm = fn _ ->
+        count = :counters.get(call_count, 1) + 1
+        :counters.put(call_count, 1, count)
+
+        if count == 1 do
+          {:ok, ~S|```clojure
+(+ 1 2)
+```|}
+        else
+          {:ok, ~S|```clojure
+(return 42)
+```|}
+        end
+      end
+
+      agent = SubAgent.new(prompt: "Compute", max_turns: 2, completion_mode: :explicit)
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == 42
       assert :counters.get(call_count, 1) == 2
     end
   end

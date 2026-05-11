@@ -17,6 +17,12 @@ defmodule PtcRunnerMcp.Application do
     * `--trace-dir <path>` / `PTC_RUNNER_MCP_TRACE_DIR`
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
     * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
+    * `--agentic-max-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS`
+    * `--agentic-retry-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS`
+    * `--agentic-allow-writes` / `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES`
+    * `--agentic-subagent-config <path>` / `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG`
+    * `--agentic-capability-summary-max-bytes <int>` / `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES`
+    * `--agentic-capability-summary <path>` / `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY`
 
   Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
   the program-level limit flags with v1 defaults (1 s / 10 MB).
@@ -54,6 +60,7 @@ defmodule PtcRunnerMcp.Application do
     %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
     apply_aggregator_config(args)
     apply_agentic_config(args)
+    validate_agentic_boot!(upstreams)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
 
@@ -136,6 +143,12 @@ defmodule PtcRunnerMcp.Application do
           agentic_max_result_bytes: :integer,
           agentic_include_program: :boolean,
           agentic_trace_prompts: :boolean,
+          agentic_max_turns: :integer,
+          agentic_retry_turns: :integer,
+          agentic_allow_writes: :boolean,
+          agentic_subagent_config: :string,
+          agentic_capability_summary_max_bytes: :integer,
+          agentic_capability_summary: :string,
           upstreams_config: :string,
           log_level: :string,
           trace_dir: :string,
@@ -168,7 +181,40 @@ defmodule PtcRunnerMcp.Application do
   def apply_agentic_config(args) when is_map(args) do
     defaults = AgenticConfig.defaults()
 
-    AgenticConfig.set(%{
+    subagent_config_path =
+      env_or(
+        args,
+        :agentic_subagent_config,
+        "PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG",
+        defaults.subagent_config_path
+      )
+
+    subagent_config = AgenticConfig.load_subagent_config!(subagent_config_path)
+    source_keys = agentic_source_keys(args, subagent_config)
+
+    capability_summary_max_bytes =
+      read_int(
+        args,
+        :agentic_capability_summary_max_bytes,
+        "PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES",
+        defaults.capability_summary_max_bytes
+      )
+
+    capability_summary_path =
+      env_or(
+        args,
+        :agentic_capability_summary,
+        "PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY",
+        defaults.capability_summary_path
+      )
+
+    capability_summary =
+      AgenticConfig.load_capability_summary!(
+        capability_summary_path,
+        capability_summary_max_bytes
+      )
+
+    config = %{
       enabled: read_bool(args, :agentic, "PTC_RUNNER_MCP_AGENTIC", defaults.enabled),
       model: env_or(args, :agentic_model, "PTC_RUNNER_MCP_AGENTIC_MODEL", defaults.model),
       task_timeout_ms:
@@ -212,8 +258,66 @@ defmodule PtcRunnerMcp.Application do
           :agentic_trace_prompts,
           "PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS",
           defaults.trace_prompts
+        ),
+      max_turns:
+        read_int(
+          args,
+          :agentic_max_turns,
+          "PTC_RUNNER_MCP_AGENTIC_MAX_TURNS",
+          Map.get(subagent_config, :max_turns, defaults.max_turns)
+        ),
+      retry_turns:
+        read_non_neg_int(
+          args,
+          :agentic_retry_turns,
+          "PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS",
+          Map.get(subagent_config, :retry_turns, defaults.retry_turns)
+        ),
+      allow_writes:
+        read_bool(
+          args,
+          :agentic_allow_writes,
+          "PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES",
+          defaults.allow_writes
+        ),
+      subagent_config_path: subagent_config_path,
+      capability_summary_max_bytes: capability_summary_max_bytes,
+      capability_summary_path: capability_summary_path,
+      capability_summary: capability_summary,
+      system_prompt:
+        Map.merge(
+          defaults.system_prompt,
+          Map.get(subagent_config, :system_prompt, %{})
         )
-    })
+    }
+
+    :ok = AgenticConfig.set(config)
+    AgenticConfig.log_boot(AgenticConfig.get(), source_keys)
+  end
+
+  @doc false
+  @spec validate_agentic_boot!([map()]) :: :ok
+  def validate_agentic_boot!(upstreams) when is_list(upstreams) do
+    cfg = AgenticConfig.get()
+
+    cond do
+      cfg.allow_writes and not cfg.enabled ->
+        raise """
+        agentic configuration invalid: --agentic-allow-writes requires --agentic.
+        """
+
+      cfg.enabled and upstreams != [] and not AggregatorConfig.read_only?() and
+          not cfg.allow_writes ->
+        raise """
+        agentic configuration invalid: configured upstream access is not asserted read-only.
+
+        Set --aggregator-read-only if all configured upstream tools are operator-asserted read-only,
+        or set --agentic-allow-writes to explicitly enable write-capable agentic configuration validation.
+        """
+
+      true ->
+        :ok
+    end
   end
 
   # Public-but-undocumented seam used by `Application.start/2` and by
@@ -395,6 +499,25 @@ defmodule PtcRunnerMcp.Application do
     end
   end
 
+  defp read_non_neg_int(args, key, env_name, default) do
+    case env_or(args, key, env_name, nil) do
+      nil ->
+        default
+
+      n when is_integer(n) and n >= 0 ->
+        n
+
+      bin when is_binary(bin) ->
+        case Integer.parse(bin) do
+          {n, _} when n >= 0 -> n
+          _ -> default
+        end
+
+      _ ->
+        default
+    end
+  end
+
   defp read_bool(args, key, env_name, default) do
     case env_or(args, key, env_name, nil) do
       nil -> default
@@ -431,6 +554,50 @@ defmodule PtcRunnerMcp.Application do
         end
     end
   end
+
+  defp agentic_source_keys(args, subagent_config) do
+    %{
+      max_turns:
+        agentic_value_source(
+          args,
+          :agentic_max_turns,
+          "PTC_RUNNER_MCP_AGENTIC_MAX_TURNS",
+          subagent_config,
+          :max_turns
+        ),
+      retry_turns:
+        agentic_value_source(
+          args,
+          :agentic_retry_turns,
+          "PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS",
+          subagent_config,
+          :retry_turns
+        ),
+      allow_writes:
+        direct_value_source(args, :agentic_allow_writes, "PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES"),
+      system_prompt_prefix: system_prompt_source(subagent_config, :prefix),
+      system_prompt_suffix: system_prompt_source(subagent_config, :suffix)
+    }
+  end
+
+  defp agentic_value_source(args, arg_key, env_name, config, config_key) do
+    direct_value_source(args, arg_key, env_name) ||
+      if Map.has_key?(config, config_key), do: "config_file", else: nil
+  end
+
+  defp direct_value_source(args, key, env_name) do
+    cond do
+      Map.has_key?(args, key) -> "cli"
+      System.get_env(env_name) not in [nil, ""] -> "env"
+      true -> nil
+    end
+  end
+
+  defp system_prompt_source(%{system_prompt: prompt}, key) when is_map(prompt) do
+    if Map.has_key?(prompt, key), do: "config_file", else: nil
+  end
+
+  defp system_prompt_source(_config, _key), do: nil
 
   # In :test, the application starts an empty supervisor; tests
   # construct the stdio loop themselves with a fake IO device.
