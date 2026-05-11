@@ -309,10 +309,10 @@ defmodule PtcRunner.Lisp.Env do
       # ============================================================
       # Bitwise operations — integers only
       # ============================================================
-      {:"bit-and", {:variadic_nonempty, :"bit-and", &Runtime.bit_and/2}},
-      {:"bit-or", {:variadic_nonempty, :"bit-or", &Runtime.bit_or/2}},
-      {:"bit-xor", {:variadic_nonempty, :"bit-xor", &Runtime.bit_xor/2}},
-      {:"bit-and-not", {:variadic_nonempty, :"bit-and-not", &Runtime.bit_and_not/2}},
+      {:"bit-and", {:collect, &Runtime.bit_and/1}},
+      {:"bit-or", {:collect, &Runtime.bit_or/1}},
+      {:"bit-xor", {:collect, &Runtime.bit_xor/1}},
+      {:"bit-and-not", {:collect, &Runtime.bit_and_not/1}},
       {:"bit-not", {:normal, &Runtime.bit_not/1}},
       {:"bit-shift-left", {:normal, &Runtime.bit_shift_left/2}},
       {:"bit-shift-right", {:normal, &Runtime.bit_shift_right/2}},
