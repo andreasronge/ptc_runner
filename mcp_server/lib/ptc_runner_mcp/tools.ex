@@ -388,11 +388,18 @@ defmodule PtcRunnerMcp.Tools do
   @doc "Handle a `tools/list` request."
   @spec list() :: map()
   def list do
-    tools =
+    base =
       if agentic_advertised?() do
         [tool_entry(), Agentic.tool_entry()]
       else
         [tool_entry()]
+      end
+
+    tools =
+      if PtcRunnerMcp.DebugConfig.enabled?() do
+        base ++ [PtcRunnerMcp.DebugTool.tool_entry()]
+      else
+        base
       end
 
     %{"tools" => tools}
@@ -427,7 +434,7 @@ defmodule PtcRunnerMcp.Tools do
   `notifications/cancelled`). `Tools.call/1` keeps the legacy permit
   acquire/release for direct in-process callers (and tests); the
   worker path uses `call_validated/3` to skip the gate (the stdio
-  reader owns it). See `Stdio.handle_async_call/3`.
+  reader owns it). See `Stdio.handle_async_call/4`.
   """
   @spec call(map()) :: map()
   def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
@@ -567,7 +574,7 @@ defmodule PtcRunnerMcp.Tools do
     # tests. The MCP stdio reader does NOT call this — it owns the
     # gate itself (acquire before spawn, release on worker DOWN) so a
     # worker killed by `notifications/cancelled` cannot leak permits
-    # via a skipped `try/after` cleanup. See `Stdio.handle_async_call/3`.
+    # via a skipped `try/after` cleanup. See `Stdio.handle_async_call/4`.
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
         try do

@@ -19,12 +19,16 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   Phase 4 introduces three new outcomes:
 
-    * `{:async_call, request_id, work_fn, lifecycle}` — `tools/call`
-      that has passed argument validation and is ready to execute in
-      a per-call worker. The caller (`PtcRunnerMcp.Stdio`) acquires
-      a concurrency permit, spawns the worker to run `work_fn.()`,
-      and writes the resulting envelope wrapped in `success_reply/2`.
-      Permit ownership stays with the caller (release-on-DOWN).
+    * `{:async_call, request_id, work_fn, on_busy, lifecycle}` —
+      `tools/call` that has passed argument validation and is ready to
+      execute in a per-call worker. The caller (`PtcRunnerMcp.Stdio`)
+      acquires a concurrency permit, spawns the worker to run
+      `work_fn.()`, and writes the resulting envelope wrapped in
+      `success_reply/2`. Permit ownership stays with the caller
+      (release-on-DOWN). When the caller is at its concurrency cap it
+      writes a `busy` envelope instead and invokes `on_busy.(envelope)`
+      — a 1-arity callback that records the rejected call into the
+      `ptc_debug` ring (no-op when the debug tool is disabled).
     * `{:cancel, request_id, lifecycle}` — `notifications/cancelled`
       with a `requestId`. The caller looks up the worker pid in its
       in-flight table; hits kill it (no reply emitted), misses are
@@ -35,7 +39,18 @@ defmodule PtcRunnerMcp.JsonRpc do
       stays in drain.
   """
 
-  alias PtcRunnerMcp.{Envelope, Lifecycle, Log, Tools, TraceFile, TracePayload, Version}
+  alias PtcRunnerMcp.{
+    DebugConfig,
+    DebugRecorder,
+    DebugTool,
+    Envelope,
+    Lifecycle,
+    Log,
+    Tools,
+    TraceFile,
+    TracePayload,
+    Version
+  }
 
   @typedoc "Lifecycle directive returned alongside any dispatch result."
   @type lifecycle :: :continue | :drain | :exit
@@ -44,7 +59,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   @type result ::
           {:reply, map(), lifecycle()}
           | {:noreply, lifecycle()}
-          | {:async_call, term(), (-> map()), lifecycle()}
+          | {:async_call, term(), (-> map()), (map() -> any()), lifecycle()}
           | {:cancel, term(), lifecycle()}
 
   @doc """
@@ -168,8 +183,8 @@ defmodule PtcRunnerMcp.JsonRpc do
   end
 
   # `tools/call` sent as a notification is malformed but tolerated:
-  # no reply, no worker spawn — discard the work_fn.
-  defp suppress_reply_if_notification({:async_call, _id, _work_fn, lifecycle}, true) do
+  # no reply, no worker spawn — discard the work_fn / on_busy.
+  defp suppress_reply_if_notification({:async_call, _id, _work_fn, _on_busy, lifecycle}, true) do
     {:noreply, lifecycle}
   end
 
@@ -193,6 +208,26 @@ defmodule PtcRunnerMcp.JsonRpc do
         Log.log(:info, "tools_call_rejected_shutting_down", %{request_id: id})
 
         {:reply, success_reply(id, envelope), :drain}
+
+      Map.get(params, "name") == DebugTool.tool_name() ->
+        # `ptc_debug`: handled synchronously, NO concurrency permit,
+        # NOT through the async `Tools.call/1` path, and NEVER written
+        # to the ring (no self-noise, no recursion). Gated on
+        # `--debug-tool`; when disabled it is an unknown tool, mirroring
+        # the `ptc_task` gate on `Tools.agentic_advertised?/0`.
+        envelope =
+          if DebugConfig.enabled?() do
+            DebugTool.call(params)
+          else
+            Envelope.unknown_tool(DebugTool.tool_name())
+          end
+
+        Log.log(:info, "tools_call_stop", %{
+          request_id: id,
+          is_error: Map.get(envelope, "isError")
+        })
+
+        {:reply, success_reply(id, envelope), :continue}
 
       Map.get(params, "name") not in ["ptc_lisp_execute", "ptc_task"] ->
         # Unknown tool: handled synchronously (no Lisp execution, no
@@ -218,11 +253,22 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   # Validate the inner `arguments` synchronously, then return either:
   #
-  #   * `{:reply, ..., :continue}` — args_error envelope, no worker spawn.
-  #   * `{:async_call, request_id, work_fn, :continue}` — work_fn closes
-  #     over the validated tuple and the raw params (for tracing
-  #     metadata). Stdio acquires the permit, spawns a worker that
-  #     runs work_fn(), and replies with the resulting envelope.
+  #   * `{:reply, ..., :continue}` — args_error envelope, no worker
+  #     spawn. The args_error is recorded into the `ptc_debug` ring
+  #     here (it's a recognized-tool outcome — § 5.1).
+  #   * `{:async_call, request_id, work_fn, on_busy, :continue}` —
+  #     work_fn closes over the validated tuple and the raw params (for
+  #     tracing metadata + the post-execution ring record); on_busy is
+  #     a 1-arity callback Stdio invokes (passing the `busy` envelope it
+  #     built) when it rejects the call at the concurrency cap, so that
+  #     rejection is also recorded. Stdio acquires the permit, spawns a
+  #     worker that runs work_fn(), and replies with the resulting
+  #     envelope.
+  #
+  # The `ptc_debug` ring records (success / args_error / busy) are
+  # built via `DebugRecorder.record_outcome/4`, which no-ops when
+  # `--debug-tool` is disabled and swallows + `warn`-logs any failure
+  # — it can never affect the response.
   defp async_tools_call(id, params) do
     args = extract_arguments(params)
 
@@ -233,30 +279,56 @@ defmodule PtcRunnerMcp.JsonRpc do
           is_error: true
         })
 
+        DebugRecorder.record_outcome(id, params, args_error_envelope, duration_ms: 0)
+
         {:reply, success_reply(id, args_error_envelope), :continue}
 
       {:ok, :ptc_lisp_execute, {program, context, parsed_signature}} ->
-        work_fn = fn ->
-          traced_tools_call(id, params, fn ->
-            # Phase 1a §10: thread the JSON-RPC request id into
-            # `Tools.call_validated/4` so the
-            # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
-            # metadata can correlate upstream calls back to the
-            # parent `tools/call` request.
-            Tools.call_validated(program, context, parsed_signature, request_id: id)
+        work_fn =
+          recorded_work_fn(id, params, fn ->
+            traced_tools_call(id, params, fn ->
+              # Phase 1a §10: thread the JSON-RPC request id into
+              # `Tools.call_validated/4` so the
+              # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
+              # metadata can correlate upstream calls back to the
+              # parent `tools/call` request.
+              Tools.call_validated(program, context, parsed_signature, request_id: id)
+            end)
           end)
-        end
 
-        {:async_call, id, work_fn, :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params), :continue}
 
       {:ok, :ptc_task, validated} ->
-        work_fn = fn ->
-          traced_tools_call(id, params, fn ->
-            Tools.call_agentic_validated(validated, request_id: id)
+        work_fn =
+          recorded_work_fn(id, params, fn ->
+            traced_tools_call(id, params, fn ->
+              Tools.call_agentic_validated(validated, request_id: id)
+            end)
           end)
-        end
 
-        {:async_call, id, work_fn, :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params), :continue}
+    end
+  end
+
+  # Wrap an executing closure so that after it produces the envelope we
+  # record the call into the `ptc_debug` ring with the measured
+  # duration. The recorder itself is fault-isolated; this wrapper adds
+  # the timing only.
+  defp recorded_work_fn(id, params, run_fn) when is_function(run_fn, 0) do
+    fn ->
+      started = System.monotonic_time(:millisecond)
+      envelope = run_fn.()
+      duration_ms = max(System.monotonic_time(:millisecond) - started, 0)
+      DebugRecorder.record_outcome(id, params, envelope, duration_ms: duration_ms)
+      envelope
+    end
+  end
+
+  # 1-arity callback Stdio runs (passing the `busy` envelope it built)
+  # when it rejects this call at the concurrency cap.
+  defp busy_record_fn(id, params) do
+    fn busy_envelope ->
+      DebugRecorder.record_outcome(id, params, busy_envelope, duration_ms: 0)
     end
   end
 

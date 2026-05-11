@@ -864,6 +864,22 @@ in tests; same discipline as `tool_description/1`):
 The pre-card portion (the `tool_description(:mcp_no_tools)` string)
 retains its existing substring assertions from `:ptc_runner` tests.
 
+### 8.5 Debug tool (opt-in)
+
+When `--debug-tool` is set the server advertises a second (or third,
+alongside `ptc_task`) tool, `ptc_debug` — a read-only diagnostics
+surface over a bounded in-memory ring of recent `tools/call` records.
+Off by default, dispatched synchronously with no concurrency permit,
+never written to the ring. Full contract:
+**`Plans/ptc-runner-mcp-debug-tool.md`** (config flags, the three ops
+`stats`/`recent`/`get`, redaction reuse, size cap, recording
+semantics). The three new boot flags (`--debug-tool` /
+`PTC_RUNNER_MCP_DEBUG_TOOL`, `--debug-ring-size` /
+`PTC_RUNNER_MCP_DEBUG_RING_SIZE`, `--max-debug-response-bytes` /
+`PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES`) follow the same
+CLI > env > default precedence as every other flag and are parsed in
+`PtcRunnerMcp.Application` (see § 5.2 / § 6.5 / § 11).
+
 ## 9. Request contract
 
 ### 9.1 Argument shape
@@ -1160,6 +1176,12 @@ server adds across-request limits.
 | `max_concurrent_calls` | `min(8, :erlang.system_info(:logical_processors))` | `--max-concurrent-calls`, env | tool result `busy` |
 | `program_timeout` | 1 s wall-clock (sandbox `receive…after`) | not configurable in v1 | tool result `timeout` |
 | `program_memory_limit` | 10 MB (sandbox) | not configurable in v1 | tool result `memory_limit` |
+| `debug_ring_size` (when `--debug-tool`) | 500 records | `--debug-ring-size`, `PTC_RUNNER_MCP_DEBUG_RING_SIZE` (clamped `[10, 5000]`) | FIFO eviction of oldest record |
+| `max_debug_response_bytes` (when `--debug-tool`) | 64 KiB | `--max-debug-response-bytes`, `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `ptc_debug` response truncated, `truncated: true` set |
+
+The `ptc_debug` tool itself (and its ring buffer) exist only when
+`--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL` is set — off by default;
+see § 8.5 and `Plans/ptc-runner-mcp-debug-tool.md`.
 
 `max_concurrent_calls` is enforced as a counting semaphore around
 `Lisp.run/2`. When the cap is hit, additional `tools/call` requests
