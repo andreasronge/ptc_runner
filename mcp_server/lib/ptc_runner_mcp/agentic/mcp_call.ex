@@ -33,8 +33,15 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   """
   @spec build(Ledger.t(), keyword()) :: map()
   def build(ledger, opts \\ []) when is_pid(ledger) and is_list(opts) do
+    call_counter = Keyword.get_lazy(opts, :call_counter, fn -> :atomics.new(1, signed: false) end)
+
+    opts =
+      opts
+      |> Keyword.put(:ledger, ledger)
+      |> Keyword.put(:call_counter, call_counter)
+
     %{
-      "mcp-call" => fn args -> call(args, Keyword.put(opts, :ledger, ledger)) end
+      "mcp-call" => fn args -> call(args, opts) end
     }
   end
 
@@ -62,7 +69,9 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     started_at = System.monotonic_time(:millisecond)
 
     try do
-      dispatch(registry, server, tool, call_args, opts)
+      with :ok <- check_cap(opts) do
+        dispatch(registry, server, tool, call_args, opts)
+      end
       |> complete_and_tag(ledger, id, started_at)
     rescue
       e ->
@@ -280,6 +289,18 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
       other ->
         detail = "upstream impl returned malformed result: #{inspect(other, limit: 50)}"
         {:world_fault, :upstream_error, detail, total_duration}
+    end
+  end
+
+  defp check_cap(opts) do
+    counter = Keyword.get_lazy(opts, :call_counter, fn -> :atomics.new(1, signed: false) end)
+    max_calls = Keyword.get(opts, :max_calls, Limits.max_upstream_calls_per_program())
+    slot = :atomics.add_get(counter, 1, 1)
+
+    if slot <= max_calls do
+      :ok
+    else
+      {:world_fault, :cap_exhausted, "cap_exhausted", 0}
     end
   end
 

@@ -44,5 +44,26 @@ defmodule PtcRunnerMcp.AgenticContractTest do
            ] = entries
 
     assert Ledger.side_effecting_attempted?(entries)
+
+    assert [
+             %{
+               "server" => "github",
+               "tool" => "search_issues",
+               "status" => "ok",
+               "effect" => "read",
+               "duration_ms" => 12,
+               "result_bytes" => 40,
+               "turn" => 1
+             },
+             %{
+               "server" => "github",
+               "tool" => "create_issue",
+               "status" => "error",
+               "effect" => "unknown",
+               "reason" => "timeout",
+               "error" => "request timed out",
+               "turn" => 1
+             }
+           ] = Projection.ledger_entries(entries)
   end
 end
