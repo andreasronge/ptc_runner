@@ -162,6 +162,31 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert call["result_bytes"] == nil
   end
 
+  test "args_error: a rejected, oversized program/context is NOT stored in the ring" do
+    # `--trace-payloads full` would otherwise store the raw program/context
+    # verbatim — but a rejected request never passed the tool limits, so it
+    # must not be allowed to fill the count-bounded ring.
+    TraceConfig.set(%{trace_dir: nil, trace_payloads: :full, trace_max_files: 1000})
+    :ok = enable_debug()
+
+    huge_ctx = %{"blob" => String.duplicate("y", 100_000)}
+    # `program` is not a string → fails validation → args_error, no execution.
+    env = call_execute(1, %{"program" => 12_345, "context" => huge_ctx})
+    assert env["isError"] == true
+    assert sc(env)["reason"] == "args_error"
+    _ = flush_ring()
+
+    recent_reply = call_debug(10, %{"op" => "recent"})
+    r = sc(recent_reply)
+    assert r["count"] == 1
+    [call] = r["calls"]
+    assert call["reason"] == "args_error"
+    assert call["program"] == nil
+    assert call["context"] == nil
+    # The 100 KB blob never made it anywhere near the response.
+    assert byte_size(Jason.encode!(recent_reply)) < 2_000
+  end
+
   test "busy rejection is recorded and shows in stats.errors.by_reason and recent" do
     :ok = enable_debug()
     Limits.set(Map.put(Limits.defaults(), :max_concurrent_calls, 1))
