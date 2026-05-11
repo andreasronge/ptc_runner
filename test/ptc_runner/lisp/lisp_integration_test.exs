@@ -854,4 +854,16 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: [1, 2]}} = Lisp.run(code)
     end
   end
+
+  describe "list builtin" do
+    test "list returns a vector" do
+      {:ok, %{return: result}} = Lisp.run("(list 1 2 3)")
+      assert result == [1, 2, 3]
+    end
+
+    test "list produces a vector-typed value" do
+      {:ok, %{return: result}} = Lisp.run("(vector? (list 1))")
+      assert result == true
+    end
+  end
 end

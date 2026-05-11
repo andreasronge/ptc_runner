@@ -6032,9 +6032,9 @@
     },
     %{
       name: "list",
-      status: :candidate,
-      description: "Creates list from items",
-      notes: "pure data structure creation"
+      status: :supported,
+      description: "Alias for vector (PTC-Lisp is vector-first)",
+      notes: "implemented as alias for vector"
     },
     %{
       name: "list*",
