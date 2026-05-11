@@ -3012,14 +3012,16 @@ Programs that call `println` will have their output available in the `prints` li
 
 ### 8.14 Date and Time (Minimal Java Interop)
 
-PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date`, `java.time.LocalDate`, and `java.lang.System`.
+PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date`, `java.time.LocalDate`, `java.time.Instant`, and `java.lang.System`.
 
 | Symbol | Signature | Description |
 |--------|-----------|-------------|
 | `java.util.Date.` | `(java.util.Date.)` | Current UTC time |
 | | `(java.util.Date. arg)` | Construct from timestamp (ms/sec), ISO-8601/RFC 2822 string, or an existing DateTime/NaiveDateTime/Date |
-| `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string into a Date object |
-| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only**) |
+| `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string (`YYYY-MM-DD`) into a Date; if the string contains a time component (`...T...`), returns a DateTime instead |
+| `Instant/parse` | `(Instant/parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime (offsetless `...T...` strings treated as UTC; bare `YYYY-MM-DD` returns a Date instead); also available as `(parse iso-string)` |
+| `parse` | `(parse iso-string)` | Alias for `Instant/parse` / `LocalDate/parse` auto-dispatch — same as `(Instant/parse ...)` |
+| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only** — works on results from `Instant/parse` and `LocalDate/parse` when input had a time component; does NOT work on Date objects) |
 | `.isBefore` | `(.isBefore a b)` | Returns true if `a` comes strictly before `b` (same-type only) |
 | `.isAfter` | `(.isAfter a b)` | Returns true if `a` comes strictly after `b` (same-type only) |
 | `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
@@ -3039,13 +3041,24 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 
 #### `java.time.LocalDate/parse`
 
-- **Shorthand**: `(LocalDate/parse s)` is also supported.
-- **Behavior**: Parses a string in ISO-8601 date format (`YYYY-MM-DD`). Returns an opaque Date object representing just the date (no time).
-- **Format**: When displayed or returned to an LLM, it is formatted as an ISO string: `"2023-10-27"`.
+- **Shorthand**: `(LocalDate/parse s)` is also supported; also available as the bare `(parse s)` builtin.
+- **Behavior**: Auto-dispatches on the input string:
+  - `YYYY-MM-DD` (date-only): Returns an opaque **Date** object representing just the date (no time).
+  - `...T...` (string containing a time component): Returns a **DateTime** instead (divergence from Java's strict `LocalDate.parse`; see `Instant/parse`).
+- **Format**: When displayed or returned to an LLM, a Date is formatted as an ISO string: `"2023-10-27"`.
+
+#### `Instant/parse`
+
+- **Shorthand**: `(Instant/parse s)` and the bare `(parse s)` are both supported (all three share the same auto-dispatch implementation).
+- **Behavior**: Parses an ISO-8601 instant or date-time string to a **DateTime**:
+  - Accepts an explicit offset (`Z`, `+02:00`, …).
+  - An offsetless `...T...` string (e.g., `"2026-01-08T14:30:00"`) is treated as UTC.
+  - A bare `YYYY-MM-DD` string (no time component) returns a **Date** instead (same as `LocalDate/parse`).
+- **Methods**: `.isBefore`, `.isAfter`, and `.getTime` all work on the returned DateTime.
 
 #### Methods and Utilities
 
-- **`.getTime`**: Takes a **DateTime** object (from `java.util.Date.`) and returns its value as Unix milliseconds (integer). **Note:** This method does not work on objects from `LocalDate/parse`.
+- **`.getTime`**: Takes a **DateTime** object and returns its value as Unix milliseconds (integer). Works on results from `java.util.Date.`, `Instant/parse`, and `LocalDate/parse` when the input contained a time component. **Does NOT work on Date objects** (bare `YYYY-MM-DD` results).
 - **`System/currentTimeMillis`**: Returns the current system time in milliseconds.
 
 #### Errors and Type Safety
