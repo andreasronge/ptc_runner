@@ -254,23 +254,22 @@ defmodule PtcRunnerMcp.DebugTool do
   # `--trace-dir` enrichment (Phase 2)
   # ----------------------------------------------------------------
 
-  # One bounded directory glob: `<trace_dir>/*-<hash8>-*.jsonl`. On a
-  # same-millisecond hash collision, pick the newest by mtime. Miss /
-  # no `--trace-dir` / read failure → `:no_trace_file` (ring fallback);
-  # a file bigger than the response cap → `{:too_large, basename}` (not read).
+  # One bounded directory listing of `<trace_dir>`, filtered to
+  # `*-<hash8>-*.jsonl`. On a same-millisecond hash collision, pick the newest
+  # by mtime. Miss / no `--trace-dir` / read failure → `:no_trace_file` (ring
+  # fallback); a file bigger than the response cap → `{:too_large, basename}`
+  # (not read).
   defp trace_file_lookup(request_id) do
     case TraceConfig.get().trace_dir do
       dir when is_binary(dir) and dir != "" ->
         hash8 = TraceFile.request_id_hash8(request_id)
-        pattern = Path.join(dir, "*-#{hash8}-*.jsonl")
 
-        case Path.wildcard(pattern) do
+        case matching_trace_files(dir, hash8) do
           [] ->
             :no_trace_file
 
           paths ->
-            path = newest_by_mtime(paths)
-            read_trace_file(path)
+            read_trace_file(newest_by_mtime(paths))
         end
 
       _ ->
@@ -280,6 +279,23 @@ defmodule PtcRunnerMcp.DebugTool do
     _ -> :no_trace_file
   catch
     _, _ -> :no_trace_file
+  end
+
+  # `File.ls/1`, not `Path.wildcard/1`: the operator-supplied `--trace-dir` may
+  # contain glob metacharacters (`[` `]` `?` `*`), which `Path.wildcard` would
+  # interpret as part of the pattern — missing real files or matching sibling
+  # directories. We list the directory literally and match filenames in Elixir.
+  # `hash8` is `[0-9a-f]{8}` (or `"00000000"`), so it is safe to interpolate.
+  defp matching_trace_files(dir, hash8) do
+    case File.ls(dir) do
+      {:ok, names} ->
+        names
+        |> Enum.filter(&(String.ends_with?(&1, ".jsonl") and String.contains?(&1, "-#{hash8}-")))
+        |> Enum.map(&Path.join(dir, &1))
+
+      {:error, _} ->
+        []
+    end
   end
 
   # Bound the read. `ptc_debug` runs synchronously in the Stdio process, so a

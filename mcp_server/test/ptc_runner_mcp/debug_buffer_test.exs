@@ -236,4 +236,23 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     assert Process.alive?(pid)
     assert DebugBuffer.count() <= 10
   end
+
+  test "record/1 load-sheds when the buffer mailbox is backed up" do
+    pid = start_buffer(10)
+    :sys.suspend(pid)
+
+    try do
+      # Pile messages straight into the mailbox while the server can't drain.
+      for _ <- 1..1_001, do: GenServer.cast(pid, {:record, rec([])})
+      {:message_queue_len, before} = Process.info(pid, :message_queue_len)
+      assert before >= 1_000
+
+      # Over the threshold → `record/1` drops the record instead of enqueuing.
+      :ok = DebugBuffer.record(rec([]))
+      {:message_queue_len, after_len} = Process.info(pid, :message_queue_len)
+      assert after_len == before
+    after
+      :sys.resume(pid)
+    end
+  end
 end

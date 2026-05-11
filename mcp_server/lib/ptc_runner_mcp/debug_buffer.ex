@@ -57,10 +57,17 @@ defmodule PtcRunnerMcp.DebugBuffer do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
+  # Load-shed threshold for the recorder's mailbox. A burst of call
+  # completions can enqueue casts faster than the buffer drains them, and the
+  # mailbox is not bounded by `ring_size` (the ETS ring is trimmed only after a
+  # message is processed). Once the queue is this deep we drop new records —
+  # diagnostics are best-effort; an unbounded mailbox is not acceptable.
+  @max_mailbox 1_000
+
   @doc """
   Record one call record. Fire-and-forget cast: never blocks, never
-  fails the caller, and is a silent no-op when the buffer is not
-  running.
+  fails the caller, a silent no-op when the buffer is not running, and
+  load-sheds (drops the record) when the buffer's mailbox is backed up.
   """
   @spec record(record()) :: :ok
   def record(rec) when is_map(rec) do
@@ -69,8 +76,14 @@ defmodule PtcRunnerMcp.DebugBuffer do
         :ok
 
       pid when is_pid(pid) ->
-        GenServer.cast(pid, {:record, rec})
-        :ok
+        case Process.info(pid, :message_queue_len) do
+          {:message_queue_len, n} when is_integer(n) and n >= @max_mailbox ->
+            :ok
+
+          _ ->
+            GenServer.cast(pid, {:record, rec})
+            :ok
+        end
     end
   rescue
     _ -> :ok
