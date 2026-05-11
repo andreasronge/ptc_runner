@@ -102,9 +102,16 @@ defmodule PtcRunnerMcp.DebugTool do
         {:error, "argument `op` is required (one of: stats, recent, get)"}
 
       other ->
-        {:error, "argument `op` must be one of stats, recent, get (got: #{inspect(other)})"}
+        {:error, "argument `op` must be one of stats, recent, get (got: #{show(other)})"}
     end
   end
+
+  # Bound a client-supplied value before echoing it into a validation-error
+  # message: a huge `op` / `limit` / `request_id` etc. must not blow the
+  # response past `--max-debug-response-bytes` via the `args_error` text. The
+  # capped-envelope path only covers successful ops, so validation messages
+  # bound themselves here.
+  defp show(v), do: v |> inspect(limit: 5, printable_limit: 64) |> String.slice(0, 80)
 
   defp validate_int(args, key, min, max) do
     case Map.fetch(args, key) do
@@ -118,10 +125,10 @@ defmodule PtcRunnerMcp.DebugTool do
         {:ok, v}
 
       {:ok, v} when is_integer(v) ->
-        {:error, "argument `#{key}` must be between #{min} and #{max} (got: #{v})"}
+        {:error, "argument `#{key}` must be between #{min} and #{max} (got: #{show(v)})"}
 
       {:ok, v} ->
-        {:error, "argument `#{key}` must be an integer (got: #{inspect(v)})"}
+        {:error, "argument `#{key}` must be an integer (got: #{show(v)})"}
     end
   end
 
@@ -130,7 +137,7 @@ defmodule PtcRunnerMcp.DebugTool do
       :error -> {:ok, nil}
       {:ok, nil} -> {:ok, nil}
       {:ok, v} when is_boolean(v) -> {:ok, v}
-      {:ok, v} -> {:error, "argument `#{key}` must be a boolean (got: #{inspect(v)})"}
+      {:ok, v} -> {:error, "argument `#{key}` must be a boolean (got: #{show(v)})"}
     end
   end
 
@@ -152,7 +159,7 @@ defmodule PtcRunnerMcp.DebugTool do
       nil -> {:ok, nil}
       v when is_binary(v) and byte_size(v) <= 256 -> {:ok, nil}
       v when is_binary(v) -> {:error, "argument `request_id` exceeds 256 bytes"}
-      v -> {:error, "argument `request_id` must be a string (got: #{inspect(v)})"}
+      v -> {:error, "argument `request_id` must be a string (got: #{show(v)})"}
     end
   end
 
