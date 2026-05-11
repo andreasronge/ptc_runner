@@ -218,6 +218,18 @@ defmodule PtcRunnerMcp.DebugTool do
         {:ok, lines} ->
           Map.merge(base, %{"found" => true, "source" => "trace_file", "record" => lines})
 
+        {:too_large, basename} ->
+          # The trace file exists but is bigger than the response cap, so we
+          # never loaded it (see `read_trace_file/1`). Point the caller at it
+          # instead of streaming megabytes through the synchronous path.
+          Map.merge(base, %{
+            "found" => true,
+            "source" => "trace_file",
+            "truncated" => true,
+            "note" =>
+              "trace file #{basename} exceeds --max-debug-response-bytes; read it directly under --trace-dir"
+          })
+
         :no_trace_file ->
           case DebugBuffer.get(request_id) do
             {:ok, rec} ->
@@ -244,7 +256,8 @@ defmodule PtcRunnerMcp.DebugTool do
 
   # One bounded directory glob: `<trace_dir>/*-<hash8>-*.jsonl`. On a
   # same-millisecond hash collision, pick the newest by mtime. Miss /
-  # no `--trace-dir` / read failure → `:no_trace_file` (ring fallback).
+  # no `--trace-dir` / read failure → `:no_trace_file` (ring fallback);
+  # a file bigger than the response cap → `{:too_large, basename}` (not read).
   defp trace_file_lookup(request_id) do
     case TraceConfig.get().trace_dir do
       dir when is_binary(dir) and dir != "" ->
@@ -257,7 +270,7 @@ defmodule PtcRunnerMcp.DebugTool do
 
           paths ->
             path = newest_by_mtime(paths)
-            read_jsonl(path)
+            read_trace_file(path)
         end
 
       _ ->
@@ -267,6 +280,28 @@ defmodule PtcRunnerMcp.DebugTool do
     _ -> :no_trace_file
   catch
     _, _ -> :no_trace_file
+  end
+
+  # Bound the read. `ptc_debug` runs synchronously in the Stdio process, so a
+  # multi-MB trace (e.g. `--trace-payloads full` with a large `context`) must
+  # not be slurped into memory and decoded before `capped_envelope/2` can drop
+  # it — that would stall all JSON-RPC handling. Stat first: if the raw file is
+  # already bigger than the response cap, skip the read and return a pointer.
+  # Files at/under the cap are bounded (≤ `--max-debug-response-bytes`, default
+  # 64 KiB), so reading them is safe; the envelope cap still applies after.
+  defp read_trace_file(path) do
+    cap = DebugConfig.max_response_bytes()
+
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} when is_integer(size) and size > cap ->
+        {:too_large, Path.basename(path)}
+
+      {:ok, _stat} ->
+        read_jsonl(path)
+
+      {:error, _} ->
+        :no_trace_file
+    end
   end
 
   defp newest_by_mtime([single]), do: single
