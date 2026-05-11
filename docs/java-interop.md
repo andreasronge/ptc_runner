@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-16 interop entries across 6 classes.
+17 interop entries across 7 classes.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
 
@@ -39,11 +39,18 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `System/currentTimeMillis` | Static | `(System/currentTimeMillis), (currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
 
 
+### java.time.Instant
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Instant/parse` | Static | `(Instant/parse iso-string), (parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime | Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin. |
+
+
 ### java.time.LocalDate
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `LocalDate/parse` | Static | `(LocalDate/parse date-string)` | Parse ISO-8601 date string (YYYY-MM-DD) to Date | Returns Elixir Date. Only supports ISO-8601 YYYY-MM-DD format. |
+| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
 
 
 ### java.time.LocalDate / java.util.Date
