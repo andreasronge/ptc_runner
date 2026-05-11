@@ -18,9 +18,20 @@ defmodule PtcRunner.Lisp.RuntimeBitwiseTest do
       assert_lisp("(bit-xor 1 2 4 8)", 15)
     end
 
-    test "single argument returns itself" do
+    test "single integer argument returns itself" do
       assert_lisp("(bit-and 42)", 42)
       assert_lisp("(bit-or 42)", 42)
+    end
+
+    test "single non-integer argument is still rejected (not silently returned)" do
+      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
+               PtcRunner.Lisp.run("(bit-and 2.5)")
+
+      assert msg =~ "bit-and: expected an integer, got number 2.5"
+    end
+
+    test "zero arguments is an arity error" do
+      assert {:error, %{fail: %{reason: :arity_error}}} = PtcRunner.Lisp.run("(bit-and)")
     end
 
     test "negative operands (two's complement)" do
@@ -74,14 +85,25 @@ defmodule PtcRunner.Lisp.RuntimeBitwiseTest do
   end
 
   describe "type errors" do
-    test "non-integer argument reports a clean PTC-Lisp error, not an Erlang ArithmeticError" do
-      assert {:error, %{fail: %{message: msg}}} = PtcRunner.Lisp.run("(bit-and 5 2.5)")
+    test "non-integer argument to a variadic op is a clean :type_error, not an Erlang ArithmeticError" do
+      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
+               PtcRunner.Lisp.run("(bit-and 5 2.5)")
+
       assert msg =~ "bit-and: expected an integer, got number 2.5"
       refute msg =~ "ArithmeticError"
     end
 
-    test "negative shift amount is rejected" do
-      assert {:error, %{fail: %{message: msg}}} = PtcRunner.Lisp.run("(bit-shift-left 1 -1)")
+    test "non-integer argument to a fixed-arity op is a clean :type_error" do
+      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
+               PtcRunner.Lisp.run("(bit-shift-left 1.0 2)")
+
+      assert msg =~ "bit-shift-left: expected an integer, got number 1.0"
+    end
+
+    test "negative shift amount is a clean :type_error" do
+      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
+               PtcRunner.Lisp.run("(bit-shift-left 1 -1)")
+
       assert msg =~ "non-negative integer"
     end
   end

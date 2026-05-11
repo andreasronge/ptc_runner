@@ -7,8 +7,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   """
 
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Runtime.SpecialValues
-  alias PtcRunner.Lisp.TypeError
 
   def add(args) when is_list(args) do
     if SpecialValues.any_nan?(args) do
@@ -308,20 +308,31 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   # For practical (small, non-negative shift) inputs the behaviour matches
   # Clojure exactly. `unsigned-bit-shift-right` is intentionally not provided
   # because it has no well-defined meaning without a fixed integer width.
+  #
+  # Type errors are raised as `ExecutionError{reason: :type_error}` so they
+  # surface as PTC-Lisp `:type_error`s regardless of how the builtin is
+  # bound (`:normal` vs `:collect`) — the per-binding dispatchers in
+  # `Eval.Apply` only rescue `RuntimeError`/`ArithmeticError`.
   # ============================================================
 
-  @doc "Bitwise AND of two integers."
-  def bit_and(x, y), do: :erlang.band(int!(x, "bit-and"), int!(y, "bit-and"))
+  @doc "Bitwise AND of all arguments (at least one, all integers)."
+  def bit_and(args) when is_list(args), do: reduce_bitwise(args, &:erlang.band/2, "bit-and")
 
-  @doc "Bitwise OR of two integers."
-  def bit_or(x, y), do: :erlang.bor(int!(x, "bit-or"), int!(y, "bit-or"))
+  @doc "Bitwise OR of all arguments (at least one, all integers)."
+  def bit_or(args) when is_list(args), do: reduce_bitwise(args, &:erlang.bor/2, "bit-or")
 
-  @doc "Bitwise exclusive OR of two integers."
-  def bit_xor(x, y), do: :erlang.bxor(int!(x, "bit-xor"), int!(y, "bit-xor"))
+  @doc "Bitwise exclusive OR of all arguments (at least one, all integers)."
+  def bit_xor(args) when is_list(args), do: reduce_bitwise(args, &:erlang.bxor/2, "bit-xor")
 
-  @doc "Bitwise AND of `x` with the complement of `y`."
-  def bit_and_not(x, y),
-    do: :erlang.band(int!(x, "bit-and-not"), :erlang.bnot(int!(y, "bit-and-not")))
+  @doc "Bitwise AND of the first argument with the complement of each subsequent one."
+  def bit_and_not([x | rest] = args) when is_list(args) and rest != [],
+    do:
+      Enum.reduce(rest, int!(x, "bit-and-not"), fn y, acc ->
+        :erlang.band(acc, :erlang.bnot(int!(y, "bit-and-not")))
+      end)
+
+  def bit_and_not([x]), do: int!(x, "bit-and-not")
+  def bit_and_not([]), do: arity_error("bit-and-not")
 
   @doc "Bitwise complement (two's complement) of an integer."
   def bit_not(x), do: :erlang.bnot(int!(x, "bit-not"))
@@ -348,21 +359,35 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def bit_test(x, n),
     do: :erlang.band(:erlang.bsr(int!(x, "bit-test"), shift!(n, "bit-test")), 1) == 1
 
+  defp reduce_bitwise([], _f, name), do: arity_error(name)
+  defp reduce_bitwise([x], _f, name), do: int!(x, name)
+
+  defp reduce_bitwise([h | t], f, name),
+    do: Enum.reduce(t, int!(h, name), fn x, acc -> f.(acc, int!(x, name)) end)
+
   defp int!(x, _name) when is_integer(x), do: x
 
   defp int!(x, name) do
-    raise TypeError,
-          "#{name}: expected an integer, got #{Helpers.describe_type(x)} #{inspect(x)}"
+    raise ExecutionError,
+      reason: :type_error,
+      message: "#{name}: expected an integer, got #{Helpers.describe_type(x)} #{inspect(x)}"
   end
 
   defp shift!(n, _name) when is_integer(n) and n >= 0, do: n
 
   defp shift!(n, name) do
-    raise TypeError,
-          "#{name}: shift amount must be a non-negative integer, got #{inspect(n)}"
+    raise ExecutionError,
+      reason: :type_error,
+      message: "#{name}: shift amount must be a non-negative integer, got #{inspect(n)}"
   end
 
   defp bit_mask(n, name), do: :erlang.bsl(1, shift!(n, name))
+
+  defp arity_error(name) do
+    raise ExecutionError,
+      reason: :arity_error,
+      message: "#{name} requires at least 1 argument, got 0"
+  end
 
   # Comparison (for direct use, not inside where)
   def not_eq(x, y), do: not eq(x, y)
