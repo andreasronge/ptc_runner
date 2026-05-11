@@ -81,9 +81,9 @@ defmodule PtcRunner.LLM.DefaultRegistry do
       }
     },
     "gemini-flash-lite" => %{
-      description: "Gemini 3.1 Flash Lite Preview - Google's lightweight model",
+      description: "Gemini 3.1 Flash Lite - Google's lightweight model",
       providers: %{
-        openrouter: "google/gemini-3.1-flash-lite-preview"
+        openrouter: "google/gemini-3.1-flash-lite"
       }
     },
     "deepseek" => %{
