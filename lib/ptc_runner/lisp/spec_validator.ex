@@ -911,7 +911,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
         failures: [
           {"<task crashed>", nil, "Task exited: #{inspect(reason)}", "<unknown>"}
           | results.failures
-        ]
+        ],
+        by_section: update_section_stats(results.by_section, "<unknown>", :fail)
     }
   end
 
