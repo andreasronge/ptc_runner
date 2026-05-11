@@ -190,11 +190,12 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate sqrt(x), to: Math
   defdelegate pow(x, y), to: Math
 
-  # Bitwise operations (integers only)
-  defdelegate bit_and(x, y), to: Math
-  defdelegate bit_or(x, y), to: Math
-  defdelegate bit_xor(x, y), to: Math
-  defdelegate bit_and_not(x, y), to: Math
+  # Bitwise operations (integers only). The variadic ones take all args as a
+  # list (`:collect` binding) so the degenerate one-arg form is still validated.
+  defdelegate bit_and(args), to: Math
+  defdelegate bit_or(args), to: Math
+  defdelegate bit_xor(args), to: Math
+  defdelegate bit_and_not(args), to: Math
   defdelegate bit_not(x), to: Math
   defdelegate bit_shift_left(x, n), to: Math
   defdelegate bit_shift_right(x, n), to: Math

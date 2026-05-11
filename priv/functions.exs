@@ -522,7 +522,7 @@
     %{
       name: "bit-and",
       description: "Bitwise AND of integers",
-      binding: :variadic_nonempty,
+      binding: :collect,
       category: :math,
       dispatch: :env,
       signatures: ["(bit-and x & more)"],
@@ -538,7 +538,7 @@
     %{
       name: "bit-and-not",
       description: "Bitwise AND of `x` with the complement of each subsequent argument",
-      binding: :variadic_nonempty,
+      binding: :collect,
       category: :math,
       dispatch: :env,
       signatures: ["(bit-and-not x & more)"],
@@ -602,7 +602,7 @@
     %{
       name: "bit-or",
       description: "Bitwise OR of integers",
-      binding: :variadic_nonempty,
+      binding: :collect,
       category: :math,
       dispatch: :env,
       signatures: ["(bit-or x & more)"],
@@ -684,7 +684,7 @@
     %{
       name: "bit-xor",
       description: "Bitwise exclusive OR of integers",
-      binding: :variadic_nonempty,
+      binding: :collect,
       category: :math,
       dispatch: :env,
       signatures: ["(bit-xor x & more)"],
