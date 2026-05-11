@@ -29,6 +29,8 @@ defmodule PtcRunnerMcp.Tools do
   alias PtcRunner.PtcToolProtocol
 
   alias PtcRunnerMcp.{
+    Agentic,
+    AgenticConfig,
     AggregatorTools,
     ConcurrencyGate,
     Envelope,
@@ -344,7 +346,7 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
-  @doc "The single tool entry returned in `tools/list`."
+  @doc "The `ptc_lisp_execute` tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
     profile = current_profile()
@@ -352,7 +354,7 @@ defmodule PtcRunnerMcp.Tools do
     %{
       "name" => @tool_name,
       "description" => advertised_description(profile, catalog: catalog_for(profile)),
-      "inputSchema" => input_schema(),
+      "inputSchema" => input_schema_for(profile),
       "outputSchema" => output_schema_for(profile),
       "annotations" => annotations_for(profile)
     }
@@ -383,9 +385,24 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
-  @doc "Handle a `tools/list` request. Always returns the single advertised tool."
+  @doc "Handle a `tools/list` request."
   @spec list() :: map()
-  def list, do: %{"tools" => [tool_entry()]}
+  def list do
+    tools =
+      if agentic_advertised?() do
+        [tool_entry(), Agentic.tool_entry()]
+      else
+        [tool_entry()]
+      end
+
+    %{"tools" => tools}
+  end
+
+  @doc false
+  @spec agentic_advertised?() :: boolean()
+  def agentic_advertised? do
+    configured_aggregator_mode?() and AgenticConfig.enabled?()
+  end
 
   @doc """
   Handle a `tools/call` request.
@@ -418,6 +435,11 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   def call(%{"name" => @tool_name}), do: handle_execute_with_gate(%{})
+
+  def call(%{"name" => "ptc_task", "arguments" => args}) when is_map(args),
+    do: handle_agentic_call(args)
+
+  def call(%{"name" => "ptc_task"}), do: handle_agentic_call(%{})
 
   def call(%{"name" => name}) when is_binary(name), do: Envelope.unknown_tool(name)
   def call(_), do: Envelope.unknown_tool("")
@@ -488,6 +510,12 @@ defmodule PtcRunnerMcp.Tools do
     handle_execute_with_gate(args)
   end
 
+  @doc false
+  @spec call_agentic_validated(map(), keyword()) :: map()
+  def call_agentic_validated(validated, opts \\ []) when is_map(validated) do
+    Agentic.run_validated(validated, opts)
+  end
+
   defp handle_execute_with_gate(args) do
     case validate(args) do
       {:ok, program, context, parsed_signature} ->
@@ -495,6 +523,40 @@ defmodule PtcRunnerMcp.Tools do
 
       {:error, envelope} ->
         envelope
+    end
+  end
+
+  defp handle_agentic_with_gate(args) do
+    case Agentic.validate(args) do
+      {:ok, validated} ->
+        run_agentic_with_gate(validated)
+
+      {:error, envelope} ->
+        envelope
+    end
+  end
+
+  defp handle_agentic_call(args) do
+    if agentic_advertised?() do
+      handle_agentic_with_gate(args)
+    else
+      Envelope.unknown_tool("ptc_task")
+    end
+  end
+
+  defp run_agentic_with_gate(validated) do
+    cap = Limits.max_concurrent_calls()
+
+    case ConcurrencyGate.try_acquire(cap) do
+      :ok ->
+        try do
+          Agentic.run_validated(validated, request_id: nil)
+        after
+          ConcurrencyGate.release()
+        end
+
+      :full ->
+        Envelope.busy(cap)
     end
   end
 
@@ -710,9 +772,13 @@ defmodule PtcRunnerMcp.Tools do
         {:error, "argument `signature` must be a string, got #{type_label(value)}"}
 
       {:ok, value} ->
-        case PtcToolProtocol.parse_signature(value) do
-          {:ok, parsed} -> {:ok, parsed}
-          {:error, reason} -> {:error, "argument `signature` is malformed: #{reason}"}
+        if String.trim(value) == "any" do
+          {:ok, nil}
+        else
+          case PtcToolProtocol.parse_signature(value) do
+            {:ok, parsed} -> {:ok, parsed}
+            {:error, reason} -> {:error, "argument `signature` is malformed: #{reason}"}
+          end
         end
     end
   end
@@ -726,7 +792,7 @@ defmodule PtcRunnerMcp.Tools do
   defp type_label(nil), do: "null"
   defp type_label(_), do: "unknown"
 
-  defp input_schema do
+  defp input_schema_for(profile) when profile in [:mcp_no_tools, :mcp_aggregator] do
     %{
       "type" => "object",
       "properties" => %{
@@ -743,13 +809,22 @@ defmodule PtcRunnerMcp.Tools do
         },
         "signature" => %{
           "type" => "string",
-          "description" =>
-            "Optional PTC signature for return validation, e.g. '() -> {count :int}'. " <>
-              "The '() ->' prefix is shorthand-optional — a bare type like '{count :int}' " <>
-              "is equivalent and accepted. See docs/signature-syntax.md."
+          "description" => signature_description_for(profile)
         }
       },
       "required" => ["program"]
     }
+  end
+
+  defp signature_description_for(:mcp_no_tools) do
+    "Optional PTC signature for return validation, e.g. '() -> {count :int}'. " <>
+      "The '() ->' prefix is shorthand-optional — a bare type like '{count :int}' " <>
+      "is equivalent and accepted. See docs/signature-syntax.md."
+  end
+
+  defp signature_description_for(:mcp_aggregator) do
+    "Usually omit in aggregator mode. Do not pass for exploratory upstream calls. " <>
+      "Only use when the user explicitly needs validated output and you know the exact " <>
+      "PTC signature syntax, e.g. '() -> {count :int}'."
   end
 end
