@@ -475,6 +475,17 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert sc(out_of_range)["reason"] == "args_error"
   end
 
+  test "validation errors are bounded — a huge `op` cannot exceed --max-debug-response-bytes" do
+    :ok = enable_debug(max_response_bytes: 4_096)
+
+    huge = String.duplicate("x", 200_000)
+    env = call_debug(1, %{"op" => huge})
+    assert sc(env)["reason"] == "args_error"
+    # The args_error text echoes the offending value, but it is bounded
+    # (`show/1`), so the whole JSON-RPC result stays well under the cap.
+    assert byte_size(Jason.encode!(env)) < 4_096
+  end
+
   # ----------------------------------------------------------------
   # redaction at --trace-payloads none
   # ----------------------------------------------------------------
