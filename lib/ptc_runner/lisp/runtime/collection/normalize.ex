@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
   into two reusable normalization functions.
   """
 
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
@@ -22,11 +23,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
     Enum.map(m, fn {k, v} -> [k, v] end)
   end
 
+  # A function passes `Enumerable.impl_for/1` (via `Enumerable.Function`) but
+  # only an arity-2 function is actually enumerable, so `Enum.to_list/1` would
+  # leak a raw `Protocol.UndefinedError` ("protocol Enumerable not implemented
+  # for Function, only anonymous functions of arity 2 ..."). Reject it cleanly —
+  # this is almost always swapped arguments, e.g. `(filter coll pred)`.
+  def to_seq(f) when is_function(f) do
+    raise "expected a collection, got a function — collection operations like filter/map/reduce take the collection last; arguments may be swapped"
+  end
+
   def to_seq(other) do
     if Enumerable.impl_for(other) do
       Enum.to_list(other)
     else
-      raise "type_error: invalid argument types for collection operation, got #{inspect(other)}"
+      raise "expected a collection, got #{Helpers.describe_type(other)} #{inspect(other)}"
     end
   end
 
@@ -81,6 +91,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
           "expected #{type}, got path #{inspect(v)} - paths require a function or data-extraction variant"
       end
 
-    raise "type_error: #{msg}"
+    raise msg
   end
 end
