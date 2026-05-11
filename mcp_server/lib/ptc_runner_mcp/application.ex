@@ -23,6 +23,9 @@ defmodule PtcRunnerMcp.Application do
     * `--agentic-subagent-config <path>` / `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG`
     * `--agentic-capability-summary-max-bytes <int>` / `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES`
     * `--agentic-capability-summary <path>` / `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY`
+    * `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL`
+    * `--debug-ring-size <int>` / `PTC_RUNNER_MCP_DEBUG_RING_SIZE`
+    * `--max-debug-response-bytes <int>` / `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES`
 
   Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
   the program-level limit flags with v1 defaults (1 s / 10 MB).
@@ -44,6 +47,7 @@ defmodule PtcRunnerMcp.Application do
     AggregatorConfig,
     ConcurrencyGate,
     Credentials,
+    DebugConfig,
     Limits,
     Log,
     TraceConfig,
@@ -60,6 +64,7 @@ defmodule PtcRunnerMcp.Application do
     %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
     apply_aggregator_config(args)
     apply_agentic_config(args)
+    apply_debug_config(args)
     validate_agentic_boot!(upstreams)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
@@ -153,7 +158,11 @@ defmodule PtcRunnerMcp.Application do
           log_level: :string,
           trace_dir: :string,
           trace_payloads: :string,
-          trace_max_files: :integer
+          trace_max_files: :integer,
+          # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
+          debug_tool: :boolean,
+          debug_ring_size: :integer,
+          max_debug_response_bytes: :integer
         ]
       )
 
@@ -174,6 +183,74 @@ defmodule PtcRunnerMcp.Application do
           AggregatorConfig.defaults().read_only
         )
     })
+  end
+
+  # Public-but-undocumented seam used by tests to verify CLI > env >
+  # default precedence for the opt-in `ptc_debug` tool config
+  # (`Plans/ptc-runner-mcp-debug-tool.md` § 4).
+  @doc false
+  @spec apply_debug_config(map()) :: :ok
+  def apply_debug_config(args) when is_map(args) do
+    defaults = DebugConfig.defaults()
+
+    enabled =
+      read_bool(args, :debug_tool, "PTC_RUNNER_MCP_DEBUG_TOOL", defaults.enabled)
+
+    requested_ring_size =
+      read_int(
+        args,
+        :debug_ring_size,
+        "PTC_RUNNER_MCP_DEBUG_RING_SIZE",
+        defaults.ring_size
+      )
+
+    {ring_size, clamped?} = DebugConfig.clamp_ring_size(requested_ring_size)
+
+    if clamped? do
+      {lo, hi} = DebugConfig.ring_size_bounds()
+
+      Log.log(:warn, "debug_ring_size_clamped", %{
+        requested: requested_ring_size,
+        clamped_to: ring_size,
+        min: lo,
+        max: hi
+      })
+    end
+
+    requested_max_response_bytes =
+      read_int(
+        args,
+        :max_debug_response_bytes,
+        "PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES",
+        defaults.max_response_bytes
+      )
+
+    {max_response_bytes, mrb_clamped?} =
+      DebugConfig.clamp_max_response_bytes(requested_max_response_bytes)
+
+    if mrb_clamped? do
+      Log.log(:warn, "max_debug_response_bytes_clamped", %{
+        requested: requested_max_response_bytes,
+        clamped_to: max_response_bytes,
+        min: DebugConfig.max_response_bytes_min()
+      })
+    end
+
+    :ok =
+      DebugConfig.set(%{
+        enabled: enabled,
+        ring_size: ring_size,
+        max_response_bytes: max_response_bytes
+      })
+
+    if enabled do
+      Log.log(:info, "debug_config", %{
+        ring_size: ring_size,
+        max_response_bytes: max_response_bytes
+      })
+    end
+
+    :ok
   end
 
   @doc false
@@ -601,9 +678,23 @@ defmodule PtcRunnerMcp.Application do
 
   # In :test, the application starts an empty supervisor; tests
   # construct the stdio loop themselves with a fake IO device.
+  #
+  # The `ptc_debug` ring buffer (`DebugBuffer`) is supervised here too,
+  # but only when `--debug-tool` is set. It is listed **last** so that
+  # under `:rest_for_one` a `DebugBuffer` crash restarts nothing after
+  # it — an optional diagnostics failure must degrade to "no
+  # diagnostics", never to a client-visible stdio disconnect.
   defp stdio_children(_args) do
     if attach_stdio?() do
-      [{PtcRunnerMcp.Stdio, []}]
+      [{PtcRunnerMcp.Stdio, []}] ++ debug_children()
+    else
+      []
+    end
+  end
+
+  defp debug_children do
+    if DebugConfig.enabled?() do
+      [{PtcRunnerMcp.DebugBuffer, [ring_size: DebugConfig.ring_size()]}]
     else
       []
     end

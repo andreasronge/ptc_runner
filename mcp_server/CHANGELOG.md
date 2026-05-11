@@ -11,6 +11,36 @@ revisions.
 
 ### Added
 
+- Opt-in `ptc_debug` diagnostics tool
+  (`Plans/ptc-runner-mcp-debug-tool.md`). Disabled by default; enable
+  with `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL`. Read-only
+  (`readOnlyHint: true, idempotentHint: true`); exposes three ops over
+  a bounded in-memory ring buffer of recent `tools/call` records —
+  `stats` (per-tool counts / error-rates / latency percentiles,
+  error-reason histogram, `upstream_calls` outcomes, agentic planner
+  stats, plus a self-description: `ring_size`, `ring_count`,
+  `trace_dir_enabled`, `payload_policy`, time `window`), `recent`
+  (last N records, newest-first, `errors_only` / `limit` /
+  `since_seconds` filters), and `get` (one record by `request_id`;
+  upgraded to the full on-disk JSONL trace when `--trace-dir` is set
+  via a single bounded directory glob, else the ring record). Records
+  every recognized-tool call that produced an envelope — successes,
+  `args_error` validation failures, and `busy` gate rejections —
+  except `ptc_debug`'s own calls. Reuses the `--trace-payloads`
+  redaction policy + `Credentials.Redactor.scrub/1`; every response
+  echoes `payload_policy` and `redaction_applied: true`. Responses are
+  hard-capped by `--max-debug-response-bytes` (default 64 KiB) with
+  graceful truncation. The ring buffer (`DebugBuffer` GenServer + ETS)
+  and the per-call recording hook exist only when `--debug-tool` is
+  set; `ptc_debug` is dispatched synchronously with no concurrency
+  permit and is never written to the ring. The recorder is fully
+  fault-isolated — a dead/overloaded `DebugBuffer` degrades to "no
+  diagnostics", never to "tool call failed".
+- New flags: `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL` (bool,
+  default `false`); `--debug-ring-size` / `PTC_RUNNER_MCP_DEBUG_RING_SIZE`
+  (int, default `500`, clamped to `[10, 5000]` with a warn-log on
+  clamp); `--max-debug-response-bytes` /
+  `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` (int, default `65536`).
 - `mcp/text` and `mcp/json` are part of the base PTC-Lisp surface
   (`:ptc_runner`'s `Env.initial/0`) and are available unconditionally
   in both default and aggregator modes. `(mcp/text r)` returns
