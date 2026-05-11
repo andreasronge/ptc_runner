@@ -1,7 +1,16 @@
 defmodule PtcRunnerMcp.AgenticTest do
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{AgenticConfig, JsonRpc, Limits, Tools, TraceConfig, TraceHandler}
+  alias PtcRunnerMcp.{
+    AgenticConfig,
+    AggregatorConfig,
+    JsonRpc,
+    Limits,
+    Tools,
+    TraceConfig,
+    TraceHandler
+  }
+
   alias PtcRunnerMcp.Application, as: McpApplication
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Registry
@@ -50,6 +59,21 @@ defmodule PtcRunnerMcp.AgenticTest do
     end
   end
 
+  defmodule SequencePlanner do
+    def call(_model, _prompt, _opts) do
+      sequence = Application.fetch_env!(:ptc_runner_mcp, :agentic_test_sequence)
+
+      program =
+        Agent.get_and_update(sequence, fn
+          [program | rest] -> {program, rest}
+          [] -> flunk("agentic test planner sequence exhausted")
+        end)
+
+      {:ok, program,
+       %{"model" => "stub:model", "duration_ms" => 1, "prompt_bytes" => 10, "output_bytes" => 20}}
+    end
+  end
+
   defmodule CapturingAdapter do
     def call(model, req) do
       send(Application.fetch_env!(:ptc_runner_mcp, :agentic_test_pid), {:llm_call, model, req})
@@ -61,8 +85,10 @@ defmodule PtcRunnerMcp.AgenticTest do
     stop_existing_registry()
     Catalog.clear_frozen()
     AgenticConfig.set(AgenticConfig.defaults())
+    AggregatorConfig.set(AggregatorConfig.defaults())
     original_planner = Elixir.Application.get_env(:ptc_runner_mcp, :agentic_planner)
     original_test_pid = Elixir.Application.get_env(:ptc_runner_mcp, :agentic_test_pid)
+    original_test_sequence = Elixir.Application.get_env(:ptc_runner_mcp, :agentic_test_sequence)
     original_llm_adapter = Elixir.Application.get_env(:ptc_runner, :llm_adapter)
     original_trace = TraceConfig.get()
 
@@ -70,11 +96,13 @@ defmodule PtcRunnerMcp.AgenticTest do
       stop_existing_registry()
       Catalog.clear_frozen()
       AgenticConfig.set(AgenticConfig.defaults())
+      AggregatorConfig.set(AggregatorConfig.defaults())
       Limits.set(Limits.defaults())
       TraceConfig.set(original_trace)
       TraceHandler.detach()
       restore_app_env(:agentic_planner, original_planner)
       restore_app_env(:agentic_test_pid, original_test_pid)
+      restore_app_env(:agentic_test_sequence, original_test_sequence)
       restore_ptc_env(:llm_adapter, original_llm_adapter)
     end)
 
@@ -292,6 +320,250 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert sc["program"] =~ "(fail"
     end
 
+    test "read-only multi-turn can recover from a missing terminal form and records actual turns" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2})
+      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, %{"seen" => true}} end})
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [
+            ~S|(tool/mcp-call {:server "alpha" :tool "ok" :args {"turn" 1}})|,
+            ~S|(return (tool/mcp-call {:server "alpha" :tool "ok" :args {"turn" 2}}))|
+          ]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "call twice"}})
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+      assert sc["execution"]["turn_count"] == 2
+      assert sc["structured_result"] == %{"ok" => true, "value" => %{"seen" => true}}
+
+      assert [
+               %{"status" => "ok", "turn" => 1},
+               %{"status" => "ok", "turn" => 2}
+             ] = sc["upstream_calls"]
+    end
+
+    test "read-only multi-turn can continue after parse feedback while budget allows" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2})
+      {:ok, sequence} = Agent.start_link(fn -> ["not ptc-lisp", ~S|(return 9)|] end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "recover"}})
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+      assert sc["execution"]["turn_count"] == 2
+      assert sc["structured_result"] == 9
+      assert sc["upstream_calls"] == []
+    end
+
+    test "read-only multi-turn can continue after runtime feedback while budget allows" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2})
+      {:ok, sequence} = Agent.start_link(fn -> [~S|(+ 1 "x")|, ~S|(return 11)|] end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env =
+        Tools.call(%{
+          "name" => "ptc_task",
+          "arguments" => %{"task" => "recover from runtime error"}
+        })
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+      assert sc["execution"]["turn_count"] == 2
+      assert sc["structured_result"] == 11
+      assert sc["upstream_calls"] == []
+    end
+
+    test "write-effect non-terminal turn is blocked before continuation" do
+      :ok = AggregatorConfig.set(%{read_only: false})
+
+      :ok =
+        AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2, allow_writes: true})
+
+      :ok =
+        put_fake("alpha", %{
+          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+        })
+
+      {:ok, _} = Registry.ensure_started("alpha", @registry_name)
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [
+            ~S|(tool/mcp-call {:server "alpha" :tool "write" :args {}})|,
+            ~S|(return :should-not-run)|
+          ]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write then continue"}})
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "partial_side_effects"
+      assert sc["message"] =~ "Continuation blocked"
+      assert sc["execution"]["turn_count"] == 1
+
+      assert [
+               %{"status" => "ok", "effect" => "write", "turn" => 1}
+             ] = sc["upstream_calls"]
+    end
+
+    test "unknown-effect non-terminal runtime error is blocked before continuation" do
+      :ok = AggregatorConfig.set(%{read_only: false})
+
+      :ok =
+        AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2, allow_writes: true})
+
+      :ok = put_fake("alpha", %{"unknown" => {fn _, _ -> {:ok, "done"} end, %{}}})
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [
+            ~S|(do (tool/mcp-call {:server "alpha" :tool "unknown" :args {}}) (+ 1 "x"))|,
+            ~S|(return :should-not-run)|
+          ]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env =
+        Tools.call(%{
+          "name" => "ptc_task",
+          "arguments" => %{"task" => "unknown side effect then runtime error"}
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "partial_side_effects"
+      assert sc["execution"]["turn_count"] == 1
+
+      assert [
+               %{"status" => "ok", "effect" => "unknown", "turn" => 1}
+             ] = sc["upstream_calls"]
+    end
+
+    test "write-effect final missing terminal reports partial side effects" do
+      :ok = AggregatorConfig.set(%{read_only: false})
+
+      :ok =
+        AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 1, allow_writes: true})
+
+      :ok =
+        put_fake("alpha", %{
+          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+        })
+
+      {:ok, _} = Registry.ensure_started("alpha", @registry_name)
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [~S|(tool/mcp-call {:server "alpha" :tool "write" :args {}})|]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      env =
+        Tools.call(%{
+          "name" => "ptc_task",
+          "arguments" => %{"task" => "write on final turn without terminal form"}
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "partial_side_effects"
+      assert sc["execution"]["turn_count"] == 1
+
+      assert [
+               %{"status" => "ok", "effect" => "write", "turn" => 1}
+             ] = sc["upstream_calls"]
+    end
+
+    test "write-effect turn may finish with return in the same turn" do
+      :ok = AggregatorConfig.set(%{read_only: false})
+
+      :ok =
+        AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2, allow_writes: true})
+
+      :ok =
+        put_fake("alpha", %{
+          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+        })
+
+      {:ok, _} = Registry.ensure_started("alpha", @registry_name)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [~S|(return (tool/mcp-call {:server "alpha" :tool "write" :args {}}))|]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write and return"}})
+
+      assert env["isError"] == false
+      sc = env["structuredContent"]
+      assert sc["structured_result"] == %{"ok" => true, "value" => %{"written" => true}}
+
+      assert [
+               %{"status" => "ok", "effect" => "write", "turn" => 1}
+             ] = sc["upstream_calls"]
+    end
+
+    test "write-effect turn may finish with fail in the same turn" do
+      :ok = AggregatorConfig.set(%{read_only: false})
+
+      :ok =
+        AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2, allow_writes: true})
+
+      :ok =
+        put_fake("alpha", %{
+          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+        })
+
+      {:ok, _} = Registry.ensure_started("alpha", @registry_name)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [
+            ~S|(do (tool/mcp-call {:server "alpha" :tool "write" :args {}}) (fail {:reason :after-write}))|
+          ]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write and fail"}})
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "agent_failed"
+
+      assert [
+               %{"status" => "ok", "effect" => "write", "turn" => 1}
+             ] = sc["upstream_calls"]
+    end
+
     test "constraints are capped before prompt assembly" do
       Limits.set(Map.put(Limits.defaults(), :max_context_bytes, 32))
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, RaisingPlanner)
@@ -347,8 +619,12 @@ defmodule PtcRunnerMcp.AgenticTest do
   defp tools_config(tools) do
     %{
       tools:
-        Map.new(tools, fn {n, fun} ->
-          {n, {%{name: n, input_schema: %{}}, fun}}
+        Map.new(tools, fn
+          {n, {fun, annotations}} ->
+            {n, {%{name: n, input_schema: %{}, annotations: annotations}, fun}}
+
+          {n, fun} ->
+            {n, {%{name: n, input_schema: %{}}, fun}}
         end)
     }
   end
