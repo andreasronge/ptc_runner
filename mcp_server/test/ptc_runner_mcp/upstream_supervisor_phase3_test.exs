@@ -39,6 +39,9 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase3Test do
   """
   use ExUnit.Case, async: false
 
+  alias PtcRunnerMcp.Agentic.CapabilitySummary
+  alias PtcRunnerMcp.AgenticConfig
+  alias PtcRunnerMcp.Log
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
   alias PtcRunnerMcp.Upstream.Fake
@@ -47,11 +50,15 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase3Test do
 
   setup do
     reg_name = :"phase3-reg-#{System.unique_integer([:positive])}"
+    original_agentic = AgenticConfig.get()
+    original_log_level = Log.level()
     Catalog.clear_frozen()
 
     on_exit(fn ->
       stop_registry(reg_name)
       Catalog.clear_frozen()
+      AgenticConfig.set(original_agentic)
+      Log.set_level(original_log_level)
     end)
 
     {:ok, reg_name: reg_name}
@@ -233,6 +240,92 @@ defmodule PtcRunnerMcp.UpstreamSupervisorPhase3Test do
       assert Catalog.frozen() == Catalog.render(reg_name)
       assert Catalog.frozen() =~ "#{a}:"
       assert Catalog.frozen() =~ "#{b}:"
+    end
+
+    test "logs generated agentic capability summary metadata after catalog freeze", %{
+      reg_name: reg_name
+    } do
+      a = unique_name("alpha")
+
+      upstreams = [
+        %{name: a, impl: Fake, config: fake_config()}
+      ]
+
+      Log.set_level(:info)
+
+      :ok =
+        AgenticConfig.set(%{
+          AgenticConfig.defaults()
+          | enabled: true,
+            capability_summary: nil
+        })
+
+      {:ok, _pid} = UpstreamRegistry.start_link(name: reg_name, upstreams: upstreams)
+
+      :ok =
+        UpstreamSupervisor.eager_start_upstreams(
+          upstreams: upstreams,
+          registry_name: reg_name
+        )
+
+      log =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          :ok =
+            UpstreamSupervisor.freeze_catalog(
+              upstreams: upstreams,
+              registry_name: reg_name
+            )
+        end)
+
+      summary = CapabilitySummary.from_frozen()
+      decoded = Jason.decode!(String.trim(log))
+
+      assert decoded["event"] == "agentic_capability_summary"
+      assert decoded["fields"]["source"] == "auto"
+      assert decoded["fields"]["bytes"] == byte_size(summary)
+
+      assert decoded["fields"]["hash"] ==
+               :crypto.hash(:sha256, summary) |> Base.encode16(case: :lower)
+
+      refute log =~ "ping"
+    end
+
+    test "does not log generated capability summary metadata when override is configured", %{
+      reg_name: reg_name
+    } do
+      a = unique_name("alpha")
+
+      upstreams = [
+        %{name: a, impl: Fake, config: fake_config()}
+      ]
+
+      Log.set_level(:info)
+
+      :ok =
+        AgenticConfig.set(%{
+          AgenticConfig.defaults()
+          | enabled: true,
+            capability_summary: "operator summary"
+        })
+
+      {:ok, _pid} = UpstreamRegistry.start_link(name: reg_name, upstreams: upstreams)
+
+      :ok =
+        UpstreamSupervisor.eager_start_upstreams(
+          upstreams: upstreams,
+          registry_name: reg_name
+        )
+
+      log =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          :ok =
+            UpstreamSupervisor.freeze_catalog(
+              upstreams: upstreams,
+              registry_name: reg_name
+            )
+        end)
+
+      refute log =~ "agentic_capability_summary"
     end
 
     test "freezes empty string for no-upstreams config", %{reg_name: reg_name} do

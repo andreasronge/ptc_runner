@@ -45,13 +45,15 @@ and reviewed:
   non-terminal outcomes and project `reason: "partial_side_effects"`.
   Same-turn `(return ...)` and `(fail ...)` after write/unknown calls
   remain terminal.
+- Auto-generated capability-summary byte/hash metadata is logged after
+  the boot-time upstream catalog freeze, without logging summary text.
 
 Known remaining work:
 
-- Auto-generated capability-summary byte/hash logging is still lazy
-  rather than boot-time because the catalog freezes later.
 - Cancellation/interruption behavior around in-flight side-effecting
-  calls still needs final adapter tests and polish.
+  calls needs a larger cooperative-cancellation design if `ptc_task`
+  should return a `cancelled` envelope with a partial ledger. The
+  current stdio path kills workers and emits no reply.
 - Real-provider smoke and go/no-go work remain Phase 7.
 
 ## Decision And Motivation
@@ -803,10 +805,12 @@ aggregator's default and not an enforcement layer by itself.
 Cancellation:
 
 - the host MCP client cancelling `ptc_task` stops future work;
-- in-flight upstream calls are best-effort cancelled where the
-  sandbox supports it;
+- current stdio cancellation kills the in-flight per-call worker and
+  emits no reply, matching the existing MCP cancellation behavior;
 - completed upstream side effects are not rolled back;
-- the response records `cancelled` and includes the partial ledger.
+- returning a `cancelled` envelope with a partial agentic ledger would
+  require a future cooperative-cancellation path that keeps the
+  worker alive long enough to project the ledger.
 
 ## Planner Prompt Additions
 
@@ -958,10 +962,13 @@ Adapter tests (stub planner):
   `nil` or a raw upstream envelope in `ptc_task`;
 - operator `system_prompt.prefix` and `suffix` appear in the
   assembled prompt, and the final MCP recap appears after the suffix;
-- cancellation mid-turn returns `cancelled` with the partial ledger.
-- an in-flight write/unknown call interrupted by cancellation or
-  wrapper failure still leaves an attempted ledger entry, so the
-  continuation guard treats it as side-effecting.
+- current stdio cancellation of an in-flight `ptc_task` emits no
+  reply and releases the worker permit;
+- future cooperative cancellation, if added, should return
+  `cancelled` with the partial ledger.
+- an in-flight write/unknown call interrupted by wrapper failure still
+  leaves an attempted ledger entry, so the continuation guard treats it
+  as side-effecting.
 
 Renderer and aggregator-policy tests inherit from the aggregator
 spec.
