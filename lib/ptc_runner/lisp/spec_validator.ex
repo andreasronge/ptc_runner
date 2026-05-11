@@ -879,7 +879,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
         end,
         ordered: true,
         timeout: 30_000,
-        max_concurrency: System.schedulers_online()
+        max_concurrency: System.schedulers_online(),
+        on_timeout: :kill_task
       )
       |> Enum.reduce(initial_results, &fold_example_result/2)
 
