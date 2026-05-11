@@ -230,7 +230,7 @@ Error output shape:
 ```json
 {
   "status": "error",
-  "reason": "agentic_config_error | planner_error | planner_timeout | planner_non_code | ptc_parse_error | ptc_validation_error | ptc_runtime_error | upstream_error | budget_exceeded | cancelled",
+  "reason": "agentic_config_error | planner_error | planner_timeout | planner_non_code | ptc_parse_error | ptc_validation_error | ptc_runtime_error | upstream_error | partial_side_effects | budget_exceeded | cancelled",
   "message": "human-readable failure",
   "warnings": [],
   "program": "(generated ptc-lisp when available and enabled)",
