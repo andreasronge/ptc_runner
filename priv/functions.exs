@@ -520,6 +520,184 @@
       divergences: nil
     },
     %{
+      name: "bit-and",
+      description: "Bitwise AND of integers",
+      binding: :variadic_nonempty,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-and x & more)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only — raises a type error on non-integer arguments.",
+      see_also: ["bit-or", "bit-xor", "bit-and-not"],
+      clojure_var: "bit-and",
+      divergences: nil
+    },
+    %{
+      name: "bit-and-not",
+      description: "Bitwise AND of `x` with the complement of each subsequent argument",
+      binding: :variadic_nonempty,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-and-not x & more)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only — raises a type error on non-integer arguments.",
+      see_also: ["bit-and", "bit-not"],
+      clojure_var: "bit-and-not",
+      divergences: nil
+    },
+    %{
+      name: "bit-clear",
+      description: "Clear bit `n` of `x` (set it to 0)",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-clear x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only; `n` must be a non-negative integer.",
+      see_also: ["bit-set", "bit-flip", "bit-test"],
+      clojure_var: "bit-clear",
+      divergences: nil
+    },
+    %{
+      name: "bit-flip",
+      description: "Flip bit `n` of `x`",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-flip x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only; `n` must be a non-negative integer.",
+      see_also: ["bit-set", "bit-clear", "bit-test"],
+      clojure_var: "bit-flip",
+      divergences: nil
+    },
+    %{
+      name: "bit-not",
+      description: "Bitwise complement (two's complement) of an integer",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-not x)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only — raises a type error on non-integer arguments.",
+      see_also: ["bit-and", "bit-or", "bit-xor"],
+      clojure_var: "bit-not",
+      divergences: nil
+    },
+    %{
+      name: "bit-or",
+      description: "Bitwise OR of integers",
+      binding: :variadic_nonempty,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-or x & more)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only — raises a type error on non-integer arguments.",
+      see_also: ["bit-and", "bit-xor", "bit-and-not"],
+      clojure_var: "bit-or",
+      divergences: nil
+    },
+    %{
+      name: "bit-set",
+      description: "Set bit `n` of `x` to 1",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-set x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only; `n` must be a non-negative integer.",
+      see_also: ["bit-clear", "bit-flip", "bit-test"],
+      clojure_var: "bit-set",
+      divergences: nil
+    },
+    %{
+      name: "bit-shift-left",
+      description: "Shift `x` left by `n` bits",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-shift-left x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Integers only; `n` must be a non-negative integer. Unlike Clojure/JVM, BEAM integers are arbitrary-precision: the shift amount is not taken modulo 64 and the result can grow without bound.",
+      see_also: ["bit-shift-right"],
+      clojure_var: "bit-shift-left",
+      divergences: nil
+    },
+    %{
+      name: "bit-shift-right",
+      description: "Arithmetic shift `x` right by `n` bits (sign-extending)",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-shift-right x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Integers only; `n` must be a non-negative integer. Unlike Clojure/JVM, BEAM integers are arbitrary-precision: the shift amount is not taken modulo 64. `unsigned-bit-shift-right` is not provided because it has no defined meaning without a fixed integer width.",
+      see_also: ["bit-shift-left"],
+      clojure_var: "bit-shift-right",
+      divergences: nil
+    },
+    %{
+      name: "bit-test",
+      description: "Return true if bit `n` of `x` is set",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-test x n)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only; `n` must be a non-negative integer.",
+      see_also: ["bit-set", "bit-clear", "bit-flip"],
+      clojure_var: "bit-test",
+      divergences: nil
+    },
+    %{
+      name: "bit-xor",
+      description: "Bitwise exclusive OR of integers",
+      binding: :variadic_nonempty,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(bit-xor x & more)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Integers only — raises a type error on non-integer arguments.",
+      see_also: ["bit-and", "bit-or", "bit-and-not"],
+      clojure_var: "bit-xor",
+      divergences: nil
+    },
+    %{
       name: "boolean",
       description: "",
       binding: :normal,
@@ -4938,69 +5116,69 @@
     },
     %{
       name: "bit-and",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise AND",
-      notes: "pure bitwise arithmetic"
+      notes: "integers only"
     },
     %{
       name: "bit-and-not",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise AND with complement",
-      notes: "pure bitwise arithmetic"
+      notes: "integers only"
     },
     %{
       name: "bit-clear",
-      status: :candidate,
+      status: :supported,
       description: "Clears bit at index",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-flip",
-      status: :candidate,
+      status: :supported,
       description: "Flips bit at index",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-not",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise complement",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-or",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise OR",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-set",
-      status: :candidate,
+      status: :supported,
       description: "Sets bit at index",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-shift-left",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise left shift",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only; BEAM has no fixed integer width (shift amount not mod 64)"
     },
     %{
       name: "bit-shift-right",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise right shift",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only; arithmetic (sign-extending) shift"
     },
     %{
       name: "bit-test",
-      status: :candidate,
+      status: :supported,
       description: "Tests bit at index",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{
       name: "bit-xor",
-      status: :candidate,
+      status: :supported,
       description: "Bitwise exclusive OR",
-      notes: "pure bitwise operation on integers"
+      notes: "integers only"
     },
     %{name: "boolean", status: :supported, description: "Coerces to boolean", notes: ""},
     %{
@@ -7209,9 +7387,10 @@
     },
     %{
       name: "unsigned-bit-shift-right",
-      status: :candidate,
+      status: :not_relevant,
       description: "Unsigned right shift",
-      notes: "pure bitwise arithmetic operation"
+      notes:
+        "no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from"
     },
     %{
       name: "update",

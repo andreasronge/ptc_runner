@@ -303,6 +303,21 @@ defmodule PtcRunner.Lisp.Env do
       {:pow, {:normal, &Runtime.pow/2}},
 
       # ============================================================
+      # Bitwise operations — integers only
+      # ============================================================
+      {:"bit-and", {:variadic_nonempty, :"bit-and", &Runtime.bit_and/2}},
+      {:"bit-or", {:variadic_nonempty, :"bit-or", &Runtime.bit_or/2}},
+      {:"bit-xor", {:variadic_nonempty, :"bit-xor", &Runtime.bit_xor/2}},
+      {:"bit-and-not", {:variadic_nonempty, :"bit-and-not", &Runtime.bit_and_not/2}},
+      {:"bit-not", {:normal, &Runtime.bit_not/1}},
+      {:"bit-shift-left", {:normal, &Runtime.bit_shift_left/2}},
+      {:"bit-shift-right", {:normal, &Runtime.bit_shift_right/2}},
+      {:"bit-clear", {:normal, &Runtime.bit_clear/2}},
+      {:"bit-set", {:normal, &Runtime.bit_set/2}},
+      {:"bit-flip", {:normal, &Runtime.bit_flip/2}},
+      {:"bit-test", {:normal, &Runtime.bit_test/2}},
+
+      # ============================================================
       # Comparison — normal (binary)
       # ============================================================
       {:=, {:normal, &Runtime.Math.eq/2}},

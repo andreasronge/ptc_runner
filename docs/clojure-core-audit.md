@@ -12,9 +12,9 @@ See also: [Function Reference](function-reference.md) | [Clojure String Audit](c
 
 | Status | Count |
 |--------|-------|
-| Supported | 211 |
-| Candidate | 71 |
-| Not Relevant | 252 |
+| Supported | 223 |
+| Candidate | 58 |
+| Not Relevant | 253 |
 | Not Classified | 0 |
 | **Total** | **534** |
 
@@ -76,17 +76,17 @@ See also: [Function Reference](function-reference.md) | [Clojure String Audit](c
 | `bigint` | 🔲 candidate | Coerces to BigInt | pure numerical coercion |
 | `biginteger` | 🔲 candidate | Coerces to BigInteger | pure numerical coercion |
 | `binding` | ❌ not_relevant | Binds vars to new values for body duration | relies on thread-local var binding mechanism |
-| `bit-and` | 🔲 candidate | Bitwise AND | pure bitwise arithmetic |
-| `bit-and-not` | 🔲 candidate | Bitwise AND with complement | pure bitwise arithmetic |
-| `bit-clear` | 🔲 candidate | Clears bit at index | pure bitwise operation on integers |
-| `bit-flip` | 🔲 candidate | Flips bit at index | pure bitwise operation on integers |
-| `bit-not` | 🔲 candidate | Bitwise complement | pure bitwise operation on integers |
-| `bit-or` | 🔲 candidate | Bitwise OR | pure bitwise operation on integers |
-| `bit-set` | 🔲 candidate | Sets bit at index | pure bitwise operation on integers |
-| `bit-shift-left` | 🔲 candidate | Bitwise left shift | pure bitwise operation on integers |
-| `bit-shift-right` | 🔲 candidate | Bitwise right shift | pure bitwise operation on integers |
-| `bit-test` | 🔲 candidate | Tests bit at index | pure bitwise operation on integers |
-| `bit-xor` | 🔲 candidate | Bitwise exclusive OR | pure bitwise operation on integers |
+| `bit-and` | ✅ supported | Bitwise AND | integers only |
+| `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only |
+| `bit-clear` | ✅ supported | Clears bit at index | integers only |
+| `bit-flip` | ✅ supported | Flips bit at index | integers only |
+| `bit-not` | ✅ supported | Bitwise complement | integers only |
+| `bit-or` | ✅ supported | Bitwise OR | integers only |
+| `bit-set` | ✅ supported | Sets bit at index | integers only |
+| `bit-shift-left` | ✅ supported | Bitwise left shift | integers only; BEAM has no fixed integer width (shift amount not mod 64) |
+| `bit-shift-right` | ✅ supported | Bitwise right shift | integers only; arithmetic (sign-extending) shift |
+| `bit-test` | ✅ supported | Tests bit at index | integers only |
+| `bit-xor` | ✅ supported | Bitwise exclusive OR | integers only |
 | `boolean` | ✅ supported | Coerces to boolean |  |
 | `boolean-array` | ❌ not_relevant | Creates boolean Java array | creates Java array, incompatible with BEAM/non-JVM environments |
 | `boolean?` | ✅ supported | Returns true if value is Boolean |  |
@@ -288,7 +288,7 @@ See also: [Function Reference](function-reference.md) | [Clojure String Audit](c
 | `let` | ✅ supported | Local variable bindings |  |
 | `letfn` | 🔲 candidate | Binds function names for mutual recursion | pure binding of functions for recursion |
 | `line-seq` | ❌ not_relevant | Lazy seq of lines from reader | relies on lazy sequences and reader I/O |
-| `list` | 🔲 candidate | Creates list from items | pure data structure creation |
+| `list` | ✅ supported | Alias for vector (PTC-Lisp is vector-first) | implemented as alias for vector |
 | `list*` | 🔲 candidate | Creates list with seq appended | pure list constructor |
 | `list?` | 🔲 candidate | Returns true if list | pure predicate |
 | `load` | ❌ not_relevant | Loads Clojure file from classpath | relies on file I/O and classpath |
@@ -520,7 +520,7 @@ See also: [Function Reference](function-reference.md) | [Clojure String Audit](c
 | `unchecked-subtract-int` | ❌ not_relevant | Subtracts ints without check | relies on JVM-specific primitive behavior/overflow semantics |
 | `underive` | ❌ not_relevant | Removes hierarchical relationship | requires global hierarchy/multimethod infrastructure |
 | `unreduced` | 🔲 candidate | Unwraps from reduced | pure transformation used for handling reduced values in reductions |
-| `unsigned-bit-shift-right` | 🔲 candidate | Unsigned right shift | pure bitwise arithmetic operation |
+| `unsigned-bit-shift-right` | ❌ not_relevant | Unsigned right shift | no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from |
 | `update` | ✅ supported | Applies function to map value at key |  |
 | `update-in` | ✅ supported | Applies function to nested map value |  |
 | `update-keys` | ✅ supported | Applies function to map keys |  |

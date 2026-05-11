@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PTC-Lisp bitwise operations** — `bit-and`, `bit-or`, `bit-xor`,
+  `bit-and-not`, `bit-not`, `bit-shift-left`, `bit-shift-right`,
+  `bit-clear`, `bit-set`, `bit-flip`, and `bit-test` are now available
+  (integers only; non-integer arguments raise a clean PTC-Lisp type
+  error rather than an Erlang `ArithmeticError`). The first three plus
+  `bit-and-not` are variadic. BEAM integers are arbitrary-precision
+  two's-complement, so — unlike Clojure/JVM — the shift amount is not
+  taken modulo 64 and a left shift can grow without bound;
+  `unsigned-bit-shift-right` is intentionally not provided because it
+  has no defined meaning without a fixed integer width. Closes #825.
+
 - **PTC-Lisp `list` builtin** — `(list & args)` is now available as an alias
   for `vector`, returning a vector (PTC-Lisp has no separate list type). This
   matches LLM Clojure training data and removes a recurring `list`/`cons`
