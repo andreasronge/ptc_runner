@@ -65,6 +65,17 @@ defmodule PtcRunnerMcp.DebugConfigTest do
     assert DebugConfig.ring_size() == 5000
   end
 
+  test "ring size 0 reaches the clamp, not the default" do
+    :ok = Application.apply_debug_config(%{debug_tool: true, debug_ring_size: 0})
+    assert DebugConfig.ring_size() == 10
+  end
+
+  test "ring size 0 via env var reaches the clamp" do
+    System.put_env("PTC_RUNNER_MCP_DEBUG_RING_SIZE", "0")
+    :ok = Application.apply_debug_config(%{debug_tool: true})
+    assert DebugConfig.ring_size() == 10
+  end
+
   test "clamp_ring_size/1 reports whether it clamped" do
     assert DebugConfig.clamp_ring_size(500) == {500, false}
     assert DebugConfig.clamp_ring_size(5) == {10, true}
@@ -75,6 +86,11 @@ defmodule PtcRunnerMcp.DebugConfigTest do
     :ok = Application.apply_debug_config(%{debug_tool: true, max_debug_response_bytes: 100})
     assert DebugConfig.max_response_bytes() == DebugConfig.max_response_bytes_min()
     assert DebugConfig.max_response_bytes() == 4_096
+  end
+
+  test "max_debug_response_bytes 0 reaches the floor, not the default" do
+    :ok = Application.apply_debug_config(%{debug_tool: true, max_debug_response_bytes: 0})
+    assert DebugConfig.max_response_bytes() == DebugConfig.max_response_bytes_min()
   end
 
   test "clamp_max_response_bytes/1 reports whether it clamped" do
