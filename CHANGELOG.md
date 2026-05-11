@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PTC-Lisp ISO-8601 instant parsing** — the `parse` builtin (also
+  reachable as `LocalDate/parse` or the new `Instant/parse` namespace
+  alias) now auto-dispatches on the string shape: `YYYY-MM-DD` → `Date`,
+  a string with a time component (`...T...`) → `DateTime`. An offset
+  (`Z`, `+02:00`, …) is honoured and an offsetless date-time is treated
+  as UTC; `.isBefore` / `.isAfter` / `.getTime` work on the result.
+  Previously `(parse "2026-01-01T00:00:00Z")` raised a type error. This
+  is a deliberate divergence from Java's strict `LocalDate.parse` (which
+  rejects time components) — see `docs/java-interop.md`. Closes #885.
+
 - **PTC-Lisp bitwise operations** — `bit-and`, `bit-or`, `bit-xor`,
   `bit-and-not`, `bit-not`, `bit-shift-left`, `bit-shift-right`,
   `bit-clear`, `bit-set`, `bit-flip`, and `bit-test` are now available

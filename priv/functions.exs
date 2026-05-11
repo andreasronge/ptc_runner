@@ -2659,19 +2659,26 @@
     },
     %{
       name: "parse",
-      description: "Parse date string to DateTime",
+      description:
+        "Parse an ISO-8601 temporal string: `YYYY-MM-DD` → Date, a string with a time component (`...T...`) → DateTime (offsetless treated as UTC)",
       binding: :normal,
       category: :interop,
       dispatch: :env,
-      signatures: ["(LocalDate/parse date-str)"],
+      signatures: [
+        "(parse iso-string)",
+        "(LocalDate/parse date-str)",
+        "(Instant/parse iso-string)"
+      ],
       since: nil,
       section: "Interop",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Reachable as the bare `parse` builtin or via the `LocalDate/` and `Instant/` namespaces — all three dispatch on the string shape. `.isBefore`/`.isAfter`/`.getTime` work on both Date and DateTime results.",
+      see_also: [".isBefore", ".isAfter", ".getTime", "java.util.Date."],
       clojure_var: "parse",
-      divergences: nil
+      divergences:
+        "Unlike Java's LocalDate.parse, accepts strings with a time component and returns a DateTime instead of raising — more useful for LLM timestamp comparisons. See docs/java-interop.md."
     },
     %{
       name: "parse-double",
@@ -8106,9 +8113,19 @@
       name: "LocalDate/parse",
       class: "java.time.LocalDate",
       kind: :static,
-      description: "Parse ISO-8601 date string (YYYY-MM-DD) to Date",
-      signatures: ["(LocalDate/parse date-string)"],
-      notes: "Returns Elixir Date. Only supports ISO-8601 YYYY-MM-DD format."
+      description: "Parse an ISO-8601 date string (YYYY-MM-DD) to a Date",
+      signatures: ["(LocalDate/parse date-string)", "(parse date-string)"],
+      notes:
+        "Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin."
+    },
+    %{
+      name: "Instant/parse",
+      class: "java.time.Instant",
+      kind: :static,
+      description: "Parse an ISO-8601 instant/date-time string to a DateTime",
+      signatures: ["(Instant/parse iso-string)", "(parse iso-string)"],
+      notes:
+        "Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin."
     },
     %{
       name: "System/currentTimeMillis",
