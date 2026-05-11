@@ -382,6 +382,29 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert g["record"] == [%{"which" => "newer"}]
   end
 
+  test "get: a trace file larger than --max-debug-response-bytes is not read; returns a pointer" do
+    dir = Path.join(System.tmp_dir!(), "ptc_dbg_big_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :full, trace_max_files: 1000})
+    :ok = enable_debug(max_response_bytes: 4_096)
+
+    hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("huge-trace")
+    big = Path.join(dir, "2026-05-11T00-00-00.000Z-#{hash8}-ok.jsonl")
+    File.write!(big, String.duplicate("x", 50_000) <> "\n")
+
+    env = call_debug(10, %{"op" => "get", "request_id" => "huge-trace"})
+    g = sc(env)
+    assert g["found"] == true
+    assert g["source"] == "trace_file"
+    assert g["truncated"] == true
+    refute Map.has_key?(g, "record")
+    assert g["note"] =~ "exceeds --max-debug-response-bytes"
+    # The whole JSON-RPC result must stay under the configured cap.
+    assert byte_size(Jason.encode!(env)) < 4_096
+  end
+
   # ----------------------------------------------------------------
   # ring eviction + clamping
   # ----------------------------------------------------------------

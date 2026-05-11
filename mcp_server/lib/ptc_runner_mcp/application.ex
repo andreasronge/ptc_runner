@@ -197,7 +197,7 @@ defmodule PtcRunnerMcp.Application do
       read_bool(args, :debug_tool, "PTC_RUNNER_MCP_DEBUG_TOOL", defaults.enabled)
 
     requested_ring_size =
-      read_int(
+      read_int_raw(
         args,
         :debug_ring_size,
         "PTC_RUNNER_MCP_DEBUG_RING_SIZE",
@@ -218,7 +218,7 @@ defmodule PtcRunnerMcp.Application do
     end
 
     requested_max_response_bytes =
-      read_int(
+      read_int_raw(
         args,
         :max_debug_response_bytes,
         "PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES",
@@ -569,6 +569,30 @@ defmodule PtcRunnerMcp.Application do
         case Integer.parse(bin) do
           {n, _} when n > 0 -> n
           _ -> default
+        end
+
+      _ ->
+        default
+    end
+  end
+
+  # Like `read_int/4` but does NOT reject non-positive values: used for options
+  # that have their own clamp/floor (debug ring size, debug response cap), so an
+  # operator's `0`/negative reaches the clamp (and its `warn` log) instead of
+  # being silently swapped for the default. Falls back to `default` only when
+  # the value is absent or not an integer at all.
+  defp read_int_raw(args, key, env_name, default) do
+    case env_or(args, key, env_name, nil) do
+      nil ->
+        default
+
+      n when is_integer(n) ->
+        n
+
+      bin when is_binary(bin) ->
+        case Integer.parse(bin) do
+          {n, _} -> n
+          :error -> default
         end
 
       _ ->
