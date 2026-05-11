@@ -426,6 +426,34 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert g["record"] == [%{"ok" => true}]
   end
 
+  test "the response cap accounts for the JSON-RPC frame (large request id)" do
+    :ok = enable_debug(max_response_bytes: 8_192)
+
+    # Enough recorded calls (with chunky program previews) that an uncapped
+    # `recent` would blow well past the 8 KiB cap.
+    Enum.each(1..40, fn i ->
+      call_execute(i, %{"program" => "(str " <> String.duplicate("\"x\" ", 60) <> ")"})
+    end)
+
+    _ = flush_ring()
+
+    big_id = String.duplicate("z", 1_000)
+
+    frame = %{
+      "jsonrpc" => "2.0",
+      "id" => big_id,
+      "method" => "tools/call",
+      "params" => %{"name" => "ptc_debug", "arguments" => %{"op" => "recent", "limit" => 200}}
+    }
+
+    {:reply, reply, _} = JsonRpc.dispatch({:ok, frame})
+
+    # The whole serialized JSON-RPC reply — id included — stays within the cap,
+    # and the payload was shrunk to make room for the id.
+    assert byte_size(Jason.encode!(reply)) <= 8_192
+    assert sc(reply["result"])["truncated"] == true
+  end
+
   # ----------------------------------------------------------------
   # ring eviction + clamping
   # ----------------------------------------------------------------
@@ -494,6 +522,23 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert entry["inputSchema"]["additionalProperties"] == false
     # `ptc_debug` is listed after `ptc_lisp_execute`.
     assert List.last(Enum.map(list["tools"], & &1["name"])) == "ptc_debug"
+
+    # outputSchema must also cover the standard `args_error` payload so strict
+    # clients validating `structuredContent` don't reject the server's own
+    # validation-error replies.
+    branches = entry["outputSchema"]["oneOf"]
+    assert is_list(branches) and length(branches) == 4
+
+    err = Enum.find(branches, &(get_in(&1, ["properties", "status", "const"]) == "error"))
+    assert err
+    assert "args_error" in err["properties"]["reason"]["enum"]
+
+    # And the actual envelope a failed `ptc_debug` call returns matches it.
+    bad = sc(call_debug(99, %{}))
+    assert bad["status"] == "error"
+    assert bad["reason"] == "args_error"
+    assert Map.has_key?(bad, "message")
+    assert Map.has_key?(bad, "feedback")
   end
 
   # ----------------------------------------------------------------
