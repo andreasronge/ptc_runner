@@ -6,13 +6,16 @@
 An [MCP](https://modelcontextprotocol.io/) server that exposes
 [PtcRunner](https://hex.pm/packages/ptc_runner)'s PTC-Lisp sandbox
 to any MCP client (Claude Desktop, Cursor, Cline, Claude Code, …)
-over stdio JSON-RPC. The server advertises a single tool,
+over stdio JSON-RPC. In default mode the server advertises
 `ptc_lisp_execute`, which accepts a PTC-Lisp program plus optional
 `context` and `signature`, runs it in an isolated BEAM process
 (1 s wall-clock, 10 MB memory, no I/O except `println`, no
 filesystem, no network — see [aggregator mode](#aggregator-mode)
 for an opt-in way to call other MCP servers from inside the
-sandbox), and returns a structured result.
+sandbox), and returns a structured result. In aggregator mode, the
+experimental [agentic mode](#agentic-mode) can also expose
+`ptc_task`, a natural-language task tool backed by a configured
+planner model.
 
 The pitch over Python/JS execution servers:
 
@@ -184,6 +187,20 @@ them to the `args` array, e.g.:
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
+| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `ptc_task` tool when aggregator mode is active. |
+| `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
+| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `ptc_task` request. |
+| `--agentic-planner-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS` | `15000` | Per-planner-call timeout. |
+| `--agentic-max-output-tokens` | `PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS` | `1200` | Planner output token cap. |
+| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `ptc_task` response. |
+| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `ptc_task` responses. |
+| `--agentic-trace-prompts` | `PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS` | `false` | Include agentic prompt snapshots in traces. Use only for local debugging. |
+| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `ptc_task`. |
+| `--agentic-retry-turns` | `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS` | `0` | Additional retry turns after parser/runtime/validation feedback. |
+| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `ptc_task` in write-capable or unknown-effect aggregator configurations. |
+| `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
+| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
+| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
 
 ## Aggregator mode
 
@@ -472,6 +489,143 @@ Common LLM authoring mistake: upstream calls return the upstream's
 MCP tool-result envelope, not always the direct business value. Prefer
 `(mcp/text result)` for text content and `(mcp/json result)` for JSON
 payloads instead of hand-rolled `get-in` chains.
+
+## Agentic mode
+
+Agentic mode is an experimental layer on top of aggregator mode. It
+adds a second MCP tool, `ptc_task`, for clients that want to ask for a
+natural-language task instead of authoring PTC-Lisp directly. The
+server uses the configured planner model to run a SubAgent in explicit
+completion mode, with one MCP-owned tool available inside the planner:
+`tool/mcp-call`. The planner may call upstream MCP servers, inspect the
+tagged result, and must finish with `(return ...)` or `(fail ...)`.
+
+`ptc_task` does not replace `ptc_lisp_execute`. Both tools are
+advertised when all of these are true:
+
+- at least one upstream MCP server is configured;
+- `--agentic` or `PTC_RUNNER_MCP_AGENTIC=true` is set;
+- the aggregator posture is read-only, or
+  `--agentic-allow-writes` / `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES=true`
+  is set explicitly.
+
+### Quick start
+
+Use the same upstream config as [aggregator mode](#aggregator-mode),
+then enable agentic mode and provide an LLM key for the planner
+provider. The default `gemini-flash-lite` alias resolves inside
+PtcRunner to `openrouter:google/gemini-3.1-flash-lite`.
+
+```bash
+export OPENROUTER_API_KEY=...
+export PTC_RUNNER_MCP_UPSTREAMS="$HOME/ptc-mcp-sandbox/upstreams.json"
+export PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY=true
+export PTC_RUNNER_MCP_AGENTIC=true
+export PTC_RUNNER_MCP_AGENTIC_MODEL=gemini-flash-lite
+
+cd /absolute/path/to/ptc_runner/mcp_server
+mix run --no-halt --no-compile
+```
+
+Equivalent release-binary args:
+
+```json
+"args": [
+  "start",
+  "--upstreams-config", "/absolute/path/to/upstreams.json",
+  "--aggregator-read-only",
+  "--agentic",
+  "--agentic-model", "gemini-flash-lite"
+]
+```
+
+Once enabled, clients call:
+
+```json
+{
+  "name": "ptc_task",
+  "arguments": {
+    "task": "Read README.md and return the first 5 non-empty lines.",
+    "constraints": {
+      "output_format": "text",
+      "max_items": 5
+    }
+  }
+}
+```
+
+The response includes:
+
+- `status`: `"ok"` or `"error"`;
+- `answer` and, when applicable, `structured_result`;
+- `program`, unless `--agentic-include-program=false`;
+- `upstream_calls`, the ledger of MCP calls made by the planner;
+- `planner` metadata, including model, turn count, duration, and token
+  fields when the provider reports them.
+
+### Turns and write safety
+
+By default `ptc_task` runs with `max_turns: 1` and `retry_turns: 0`.
+That keeps the planner cheap and predictable, but a model may fail if
+it needs feedback to correct a generated program. Raise
+`--agentic-max-turns` for multi-turn planner repair. Read-only
+continuations may use parser/runtime/validation feedback. After any
+write-capable or unknown-effect upstream call, `ptc_task` blocks
+further continuation unless the planner returns or fails in the same
+turn; this avoids retrying after partial side effects.
+
+`--agentic-allow-writes` is intentionally separate from
+`--aggregator-read-only`. If the aggregator is not asserted read-only,
+agentic boot fails unless writes are explicitly allowed. Upstream
+servers still own the real permission boundary.
+
+### SubAgent config file
+
+For deployment-specific prompt guidance, use a small JSON file:
+
+```json
+{
+  "max_turns": 2,
+  "retry_turns": 1,
+  "system_prompt": {
+    "prefix": "Prefer read-only tools and keep answers concise.",
+    "suffix": "Return JSON only when the task asks for JSON."
+  }
+}
+```
+
+Pass it with `--agentic-subagent-config /path/to/agentic.json` or
+`PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG=/path/to/agentic.json`.
+Allowed keys are `max_turns`, `retry_turns`, and `system_prompt`
+with `prefix` / `suffix`. Reserved keys such as `tools`,
+`completion_mode`, `signature`, and `ptc_transport` fail boot because
+the MCP server owns those parts of the SubAgent contract. See
+[`priv/agentic.example.json`](priv/agentic.example.json) and
+[`priv/agentic.example.md`](priv/agentic.example.md).
+
+### Capability summary
+
+`ptc_task` advertises a compact capability summary instead of the full
+aggregator authoring card. By default this is generated from the frozen
+upstream catalog at boot, capped by
+`--agentic-capability-summary-max-bytes`, and logged only as byte count
+plus SHA-256 hash. To provide your own wording, set
+`--agentic-capability-summary /path/to/summary.md`.
+
+### Real-provider smoke
+
+From `mcp_server/`, with `OPENROUTER_API_KEY` available:
+
+```bash
+mix run --no-start bench/agentic_real_provider_smoke.exs \
+  --model=gemini-flash-lite \
+  --runs=1 \
+  --fail-on-skip
+```
+
+The smoke starts a local filesystem upstream and exercises `ptc_task`
+through the real planner provider. It exits non-zero on failures and
+prints the generated program for failed cases.
 
 ## Tracing for power users
 
