@@ -108,6 +108,39 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
       assert result_bytes > 0
     end
 
+    test "accepts a dynamic turn provider" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
+      {:ok, ledger} = Ledger.start_link()
+      {:ok, turn_tracker} = Agent.start_link(fn -> 3 end)
+
+      assert %{ok: true, value: true} =
+               McpCall.call(
+                 %{"server" => "alpha", "tool" => "ok", "args" => %{}},
+                 ledger: ledger,
+                 registry: @registry_name,
+                 turn: fn -> Agent.get(turn_tracker, & &1) end
+               )
+
+      assert [%{turn: 3}] = Ledger.entries(ledger)
+    end
+
+    test "falls back to turn one for an invalid dynamic turn provider" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
+      {:ok, ledger} = Ledger.start_link()
+
+      assert %{ok: true, value: true} =
+               McpCall.call(
+                 %{"server" => "alpha", "tool" => "ok", "args" => %{}},
+                 ledger: ledger,
+                 registry: @registry_name,
+                 turn: fn -> nil end
+               )
+
+      assert [%{turn: 1}] = Ledger.entries(ledger)
+    end
+
     test "records attempted entries before completing in-flight calls" do
       :ok = AggregatorConfig.set(%{read_only: true})
       parent = self()

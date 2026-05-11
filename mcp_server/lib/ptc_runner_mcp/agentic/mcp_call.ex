@@ -55,7 +55,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   @spec call(map(), keyword()) :: map()
   def call(args, opts) when is_map(args) and is_list(opts) do
     ledger = Keyword.fetch!(opts, :ledger)
-    turn = Keyword.get(opts, :turn, 1)
+    turn = resolve_turn(Keyword.get(opts, :turn, 1))
     registry = Keyword.get(opts, :registry, Registry)
 
     %{server: server, tool: tool, args: call_args} = normalize_args!(args)
@@ -93,6 +93,17 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   def call(args, _opts) do
     raise_programmer_fault("tool/mcp-call expects a map, got #{inspect_short(args)}")
   end
+
+  defp resolve_turn(turn) when is_integer(turn) and turn > 0, do: turn
+
+  defp resolve_turn(fun) when is_function(fun, 0) do
+    case fun.() do
+      turn when is_integer(turn) and turn > 0 -> turn
+      _other -> 1
+    end
+  end
+
+  defp resolve_turn(_other), do: 1
 
   @doc """
   Normalizes top-level `mcp-call` args.

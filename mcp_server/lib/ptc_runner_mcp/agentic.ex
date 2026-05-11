@@ -1,7 +1,9 @@
 defmodule PtcRunnerMcp.Agentic do
   @moduledoc false
 
+  alias PtcRunner.Step
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Loop.StepAssembler
 
   alias PtcRunnerMcp.{
     AgenticConfig,
@@ -63,11 +65,12 @@ defmodule PtcRunnerMcp.Agentic do
   defp do_run_validated(validated, cfg, request_id, deadline) do
     with :ok <- require_budget(deadline),
          {:ok, ledger} <- Ledger.start_link(),
+         {:ok, turn_tracker} <- Agent.start_link(fn -> 1 end),
          {:ok, planner_log} <- Agent.start_link(fn -> [] end),
          assembled <- assemble_prompt(validated, cfg),
-         agent <- build_subagent(assembled, ledger, cfg),
-         llm <- planner_llm(cfg, deadline, request_id, planner_log),
-         result <- run_subagent(agent, llm, validated, request_id),
+         agent <- build_subagent(assembled, ledger, turn_tracker, cfg),
+         llm <- planner_llm(cfg, deadline, request_id, planner_log, turn_tracker),
+         result <- run_subagent(agent, llm, validated, request_id, ledger),
          :ok <- require_budget(deadline) do
       project_subagent_result(result, ledger, planner_log, validated, cfg)
     else
@@ -85,11 +88,15 @@ defmodule PtcRunnerMcp.Agentic do
     )
   end
 
-  defp build_subagent(assembled, ledger, cfg) do
+  defp build_subagent(assembled, ledger, turn_tracker, cfg) do
     SubAgent.new(
       prompt: assembled.user_message,
       system_prompt: assembled.system_prompt,
-      tools: McpCall.build(ledger, max_calls: Limits.max_upstream_calls_per_program()),
+      tools:
+        McpCall.build(ledger,
+          max_calls: Limits.max_upstream_calls_per_program(),
+          turn: fn -> Agent.get(turn_tracker, & &1) end
+        ),
       max_turns: cfg.max_turns,
       retry_turns: cfg.retry_turns,
       completion_mode: :explicit,
@@ -99,8 +106,9 @@ defmodule PtcRunnerMcp.Agentic do
     )
   end
 
-  defp planner_llm(cfg, deadline, request_id, planner_log) do
+  defp planner_llm(cfg, deadline, request_id, planner_log, turn_tracker) do
     fn input ->
+      update_turn_tracker(turn_tracker, Map.get(input, :turn))
       prompt = render_subagent_input(input)
 
       case call_planner(cfg, prompt, deadline, request_id) do
@@ -115,6 +123,12 @@ defmodule PtcRunnerMcp.Agentic do
     end
   end
 
+  defp update_turn_tracker(turn_tracker, turn) when is_integer(turn) and turn > 0 do
+    Agent.update(turn_tracker, fn _ -> turn end)
+  end
+
+  defp update_turn_tracker(_turn_tracker, _turn), do: :ok
+
   defp render_subagent_input(input) do
     messages =
       input
@@ -128,12 +142,45 @@ defmodule PtcRunnerMcp.Agentic do
     |> Enum.join("\n\n")
   end
 
-  defp run_subagent(agent, llm, validated, request_id) do
+  defp run_subagent(agent, llm, validated, request_id, ledger) do
     SubAgent.run(agent,
       llm: llm,
       context: validated.context,
+      continuation_guard: continuation_guard(ledger),
       trace_context: %{request_id: request_id}
     )
+  end
+
+  defp continuation_guard(ledger) do
+    fn _turn, _state, next_state ->
+      if Ledger.side_effecting_attempted?(ledger) do
+        {:stop, build_partial_side_effects_step(next_state)}
+      else
+        :continue
+      end
+    end
+  end
+
+  defp build_partial_side_effects_step(next_state) do
+    duration_ms = monotonic_ms() - next_state.start_time
+
+    step =
+      Step.error(
+        Projection.partial_side_effects(),
+        "Continuation blocked after write or unknown upstream side effects",
+        next_state.memory
+      )
+
+    final_step =
+      StepAssembler.finalize(step, next_state,
+        duration_ms: duration_ms,
+        turn_offset: -1,
+        is_error: true,
+        journal: next_state.journal,
+        child_steps: next_state.child_steps
+      )
+
+    {:error, final_step}
   end
 
   defp call_planner(cfg, prompt, deadline, request_id) do
@@ -225,6 +272,7 @@ defmodule PtcRunnerMcp.Agentic do
 
   defp project_subagent_result({:error, step}, ledger, planner_log, _validated, cfg) do
     planner = planner_payload(planner_log)
+    side_effecting_attempted? = Ledger.side_effecting_attempted?(ledger)
 
     partial = %{
       "planner" => planner,
@@ -238,7 +286,12 @@ defmodule PtcRunnerMcp.Agentic do
     }
 
     Envelope.error_envelope(
-      error_payload(map_step_reason(step, planner), step.fail.message, partial, cfg)
+      error_payload(
+        map_step_reason(step, planner, side_effecting_attempted?),
+        step.fail.message,
+        partial,
+        cfg
+      )
     )
   end
 
@@ -256,19 +309,35 @@ defmodule PtcRunnerMcp.Agentic do
     |> Map.put("calls", length(calls))
   end
 
-  defp map_step_reason(%{fail: %{reason: :failed}}, _planner), do: :agent_failed
-  defp map_step_reason(%{fail: %{reason: :timeout}}, _planner), do: :budget_exceeded
+  defp map_step_reason(%{fail: %{reason: :failed}}, _planner, _side_effecting_attempted?),
+    do: :agent_failed
 
-  defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "agentic_config_error"}),
-    do: :agentic_config_error
+  defp map_step_reason(
+         %{fail: %{reason: :partial_side_effects}},
+         _planner,
+         _side_effecting_attempted?
+       ),
+       do: Projection.partial_side_effects()
 
-  defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "planner_timeout"}),
+  defp map_step_reason(%{fail: %{reason: _reason}}, _planner, true),
+    do: Projection.partial_side_effects()
+
+  defp map_step_reason(%{fail: %{reason: :timeout}}, _planner, false), do: :budget_exceeded
+
+  defp map_step_reason(
+         %{fail: %{reason: :llm_error}},
+         %{"error" => "agentic_config_error"},
+         false
+       ),
+       do: :agentic_config_error
+
+  defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "planner_timeout"}, false),
     do: :planner_timeout
 
-  defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "planner_error"}),
+  defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "planner_error"}, false),
     do: :planner_error
 
-  defp map_step_reason(%{fail: %{reason: reason}}, _planner) when is_atom(reason),
+  defp map_step_reason(%{fail: %{reason: reason}}, _planner, false) when is_atom(reason),
     do: :"ptc_#{reason}"
 
   defp final_program(%{turns: turns}) when is_list(turns) do

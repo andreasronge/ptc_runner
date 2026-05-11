@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Draft |
+| Status | Draft; implementation through Phase 6 mostly complete |
 | Date | 2026-05-10 |
 | Related | `Plans/agentic-mcp-aggregator.md`, `Plans/agentic-aggregator-spike.md`, `docs/guides/subagent-concepts.md` |
 
@@ -25,6 +25,34 @@ adapter shape, planner/SubAgent option contract, system-prompt
 assembly, compact capability summary generation, auto-logged upstream
 ledger, terminal contract, and safety contract for write-capable
 agentic execution.
+
+## Implementation Status
+
+As of 2026-05-11, Phases 0 through 3 are implemented, Phase 4 is
+largely implemented, and the Phase 5/6 runtime slice is implemented
+and reviewed:
+
+- `ptc_task` is SubAgent-backed and uses explicit `(return ...)` /
+  `(fail ...)` completion.
+- Generated PTC-Lisp calls upstream MCP tools through the scoped
+  `tool/mcp-call` wrapper, which records tagged results and a
+  per-request upstream-call ledger.
+- Ledger entries record the actual SubAgent turn across multi-turn
+  runs.
+- Read-only multi-turn continuation works for missing terminal forms,
+  parse feedback, and runtime feedback when budget allows.
+- Write/unknown upstream attempts block further LLM continuation after
+  non-terminal outcomes and project `reason: "partial_side_effects"`.
+  Same-turn `(return ...)` and `(fail ...)` after write/unknown calls
+  remain terminal.
+
+Known remaining work:
+
+- Auto-generated capability-summary byte/hash logging is still lazy
+  rather than boot-time because the catalog freezes later.
+- Cancellation/interruption behavior around in-flight side-effecting
+  calls still needs final adapter tests and polish.
+- Real-provider smoke and go/no-go work remain Phase 7.
 
 ## Decision And Motivation
 
