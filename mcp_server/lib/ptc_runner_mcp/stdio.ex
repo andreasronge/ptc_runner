@@ -520,10 +520,10 @@ defmodule PtcRunnerMcp.Stdio do
       {:noreply, lifecycle} ->
         apply_lifecycle(state, lifecycle)
 
-      {:async_call, request_id, work_fn, lifecycle} ->
+      {:async_call, request_id, work_fn, on_busy, lifecycle} ->
         state
         |> apply_lifecycle(lifecycle)
-        |> handle_async_call(request_id, work_fn)
+        |> handle_async_call(request_id, work_fn, on_busy)
 
       {:cancel, request_id, lifecycle} ->
         state
@@ -615,9 +615,9 @@ defmodule PtcRunnerMcp.Stdio do
   #
   # Returns updated state.
   @doc false
-  @spec handle_async_call(State.t(), term(), (-> map())) :: State.t()
-  def handle_async_call(%State{} = state, request_id, work_fn)
-      when is_function(work_fn, 0) do
+  @spec handle_async_call(State.t(), term(), (-> map()), (map() -> any())) :: State.t()
+  def handle_async_call(%State{} = state, request_id, work_fn, on_busy)
+      when is_function(work_fn, 0) and is_function(on_busy, 1) do
     if Map.has_key?(state.in_flight, request_id) do
       # JSON-RPC 2.0 § 4: a client MUST use unique ids for outstanding
       # requests. A duplicate id while the previous one is still in
@@ -638,11 +638,11 @@ defmodule PtcRunnerMcp.Stdio do
       write_reply(state, reply)
       state
     else
-      try_acquire_and_spawn(state, request_id, work_fn)
+      try_acquire_and_spawn(state, request_id, work_fn, on_busy)
     end
   end
 
-  defp try_acquire_and_spawn(state, request_id, work_fn) do
+  defp try_acquire_and_spawn(state, request_id, work_fn, on_busy) do
     cap = Limits.max_concurrent_calls()
 
     case ConcurrencyGate.try_acquire(cap) do
@@ -660,8 +660,21 @@ defmodule PtcRunnerMcp.Stdio do
         })
 
         write_reply(state, success_reply(request_id, envelope))
+        # Record the `busy` rejection into the `ptc_debug` ring (the
+        # recorder must observe gate rejections — § 5.1). The callback
+        # is fault-isolated by `DebugRecorder`, but wrap defensively
+        # anyway: a recording failure must never affect serving.
+        safe_invoke(on_busy, envelope)
         state
     end
+  end
+
+  defp safe_invoke(fun, arg) do
+    fun.(arg)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp spawn_worker(state, request_id, work_fn) do

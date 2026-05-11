@@ -107,6 +107,9 @@ Notes:
 
 - `--debug-ring-size` is clamped to `[10, 5000]`; out-of-range values are
   clamped and a `warn` log line is emitted.
+- `--max-debug-response-bytes` is raised to a small floor (4 KiB) if set lower —
+  enough to always hold a minimal envelope — and a `warn` log line is emitted on
+  clamp. This keeps the cap a *real* hard limit even for absurd operator values.
 - The ring buffer (`DebugBuffer` process + ETS table) and the per-call recording
   hook exist **only when `--debug-tool` is set**. When disabled there is no
   process, no ETS table, and only a single cheap `:persistent_term` read per call

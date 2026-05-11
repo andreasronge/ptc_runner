@@ -201,6 +201,9 @@ them to the `args` array, e.g.:
 | `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
 | `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
 | `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
+| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [Diagnostics](#diagnostics-the-ptc_debug-tool)). |
+| `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
+| `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `ptc_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
 
 ## Aggregator mode
 
@@ -678,6 +681,76 @@ token savings, compare:
 Use `--trace-payloads full` only for local debugging or measurement;
 it records source programs and payload values. Use `summary` or
 `none` for normal operation.
+
+### Reading traces without writing code
+
+With `--trace-dir` set you do not need a bespoke trace reader: point
+a generic **filesystem MCP server** (e.g.
+`@modelcontextprotocol/server-filesystem`) at the trace directory and
+let the client read the raw per-call JSONL. The zero-code escape
+hatch — fine for ad-hoc digging, but `ptc_debug` (below) is the
+purpose-built interface, and `ptc_viewer` (`mix ptc.viewer` in the
+repo) is the human-facing web UI for the same trace files.
+
+## Diagnostics: the `ptc_debug` tool
+
+`ptc_debug` is an **opt-in, read-only** MCP tool that lets the client
+LLM ask "how is this server doing?" — without filesystem access and
+without grepping JSONL. It is **off by default**; pass `--debug-tool`
+(or `PTC_RUNNER_MCP_DEBUG_TOOL=true`) to advertise it. When disabled
+there is no extra process, no ring buffer, and the tool does not
+appear in `tools/list`.
+
+It records every recognized-tool `tools/call`
+(`ptc_lisp_execute`, `ptc_task`) — successes, `args_error` validation
+failures, and `busy` concurrency-gate rejections alike — into a
+bounded in-memory ring (`--debug-ring-size`, default 500, FIFO
+eviction). `ptc_debug`'s own calls and unknown-tool requests are not
+recorded. The ring lives in process memory: it is lost on restart,
+and in a multi-client process it mixes records from all clients —
+both facts are surfaced in every `stats` response (`debug_source`,
+`window`, `ring_count`).
+
+Three operations (`op` is required):
+
+| `op` | What it returns |
+|---|---|
+| `stats` | Aggregate health: per-tool call counts / success-error rates / latency percentiles, an error-reason histogram, upstream-call outcomes (`total`/`ok`/`by_reason`/`by_server`), agentic planner stats, plus a self-description (`ring_size`, `ring_count`, `trace_dir_enabled`, `payload_policy`, time `window`). |
+| `recent` | The last `limit` (≤ 200, default 20) call records, newest first. `errors_only: true` restricts to failures; `since_seconds` windows by age. |
+| `get` | The full redacted record for one `request_id`. When `--trace-dir` is set, returns the on-disk JSONL trace (`source: "trace_file"`); otherwise the ring record (`source: "ring_buffer"`). |
+
+```jsonc
+// tools/call
+{ "name": "ptc_debug", "arguments": { "op": "stats" } }
+
+// → structuredContent (abridged)
+{
+  "op": "stats", "payload_policy": "summary", "redaction_applied": true,
+  "debug_source": "ring_buffer", "ring_size": 500, "ring_count": 137,
+  "trace_dir_enabled": false,
+  "window": { "from": "…", "to": "…", "calls": 137 },
+  "by_tool": { "ptc_lisp_execute": { "calls": 120, "ok": 110, "error": 10,
+                                     "error_rate": 0.083,
+                                     "duration_ms": { "p50": 12, "p95": 210, "max": 1400 } } },
+  "errors": { "by_reason": { "timeout": 4, "runtime_error": 3, "args_error": 6, "busy": 1 } }
+}
+```
+
+### Redaction
+
+`ptc_debug` reuses the trace redaction stack: the active
+`--trace-payloads` policy (`none` / `summary` / `full`, default
+`summary`) plus `Credentials.Redactor.scrub/1`. It never emits data
+at a level higher than `--trace-payloads` allows; every response
+echoes `payload_policy` and carries `redaction_applied: true`. At
+`none` the `program` field is just a SHA-256 + byte count and
+`context` is byte counts only. **Residual leakage is still possible
+even after redaction** — error messages (always captured in full),
+upstream tool/server names, upstream-call reasons, agentic planner
+outcomes, and (at `summary`) program previews. Do not enable
+`ptc_debug` on a server that handles sensitive prompts/data unless
+you also set `--trace-payloads none`, and run **one server process
+per trust boundary** (v1 does not partition the ring per client).
 
 ## Lifecycle commands
 
