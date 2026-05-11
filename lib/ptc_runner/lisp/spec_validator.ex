@@ -869,38 +869,50 @@ defmodule PtcRunner.Lisp.SpecValidator do
       by_section: %{}
     }
 
-    validate_example_list(examples, initial_results)
-  end
+    # Each example runs in its own sandbox process, so they parallelize cleanly.
+    # Keep `ordered: true` so `failures` ordering is deterministic.
+    results =
+      examples
+      |> Task.async_stream(
+        fn {code, expected, section} ->
+          {validate_example(code, expected), code, expected, section}
+        end,
+        ordered: true,
+        timeout: 30_000,
+        max_concurrency: System.schedulers_online(),
+        on_timeout: :kill_task
+      )
+      |> Enum.reduce(initial_results, &fold_example_result/2)
 
-  defp validate_example_list([], results) do
     {:ok, results}
   end
 
-  defp validate_example_list([{code, expected, section} | rest], results) do
-    case validate_example(code, expected) do
-      :ok ->
-        # Update section stats
-        by_section = update_section_stats(results.by_section, section, :pass)
+  defp fold_example_result({:ok, {:ok, _code, _expected, section}}, results) do
+    %{
+      results
+      | passed: results.passed + 1,
+        by_section: update_section_stats(results.by_section, section, :pass)
+    }
+  end
 
-        validate_example_list(rest, %{
-          results
-          | passed: results.passed + 1,
-            by_section: by_section
-        })
+  defp fold_example_result({:ok, {{:error, reason}, code, expected, section}}, results) do
+    %{
+      results
+      | failed: results.failed + 1,
+        failures: [{code, expected, reason, section} | results.failures],
+        by_section: update_section_stats(results.by_section, section, :fail)
+    }
+  end
 
-      {:error, reason} ->
-        failure = {code, expected, reason, section}
-
-        # Update section stats
-        by_section = update_section_stats(results.by_section, section, :fail)
-
-        validate_example_list(rest, %{
-          results
-          | failed: results.failed + 1,
-            failures: [failure | results.failures],
-            by_section: by_section
-        })
-    end
+  defp fold_example_result({:exit, reason}, results) do
+    %{
+      results
+      | failed: results.failed + 1,
+        failures: [
+          {"<task crashed>", nil, "Task exited: #{inspect(reason)}", "<unknown>"}
+          | results.failures
+        ]
+    }
   end
 
   defp update_section_stats(by_section, section, status) do
