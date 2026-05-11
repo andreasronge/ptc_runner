@@ -178,6 +178,23 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
              ] = Ledger.entries(ledger)
     end
 
+    test "enforces the per-program upstream call cap across one built tool closure" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
+      {:ok, ledger} = Ledger.start_link()
+      %{"mcp-call" => mcp_call} = McpCall.build(ledger, registry: @registry_name, max_calls: 1)
+
+      args = %{"server" => "alpha", "tool" => "ok", "args" => %{}}
+
+      assert mcp_call.(args) == %{ok: true, value: true}
+      assert mcp_call.(args) == %{ok: false, reason: "cap_exhausted", message: "cap_exhausted"}
+
+      assert [
+               %{status: :ok},
+               %{status: :error, error_reason: "cap_exhausted", error: "cap_exhausted"}
+             ] = Ledger.entries(ledger)
+    end
+
     test "programmer faults before dispatch reject without ledger entries" do
       :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
       {:ok, ledger} = Ledger.start_link()

@@ -37,14 +37,15 @@ defmodule PtcRunnerMcp.AgenticTest do
 
   defmodule UpstreamErrorPlanner do
     def call(_model, _prompt, _opts) do
-      {:ok, ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|,
+      {:ok,
+       ~S|(let [r (tool/mcp-call {:server "alpha" :tool "err" :args {}})] (if (:ok r) (return (:value r)) (return {:fallback (:reason r)})))|,
        %{"model" => "stub:model", "duration_ms" => 1, "prompt_bytes" => 10, "output_bytes" => 20}}
     end
   end
 
   defmodule RuntimeErrorAfterUpstreamPlanner do
     def call(_model, _prompt, _opts) do
-      {:ok, ~S|(do (tool/mcp-call {:server "alpha" :tool "ok" :args {}}) (/ 1 0))|,
+      {:ok, ~S|(do (tool/mcp-call {:server "alpha" :tool "ok" :args {}}) (fail {:reason :bad}))|,
        %{"model" => "stub:model", "duration_ms" => 1, "prompt_bytes" => 10, "output_bytes" => 20}}
     end
   end
@@ -214,13 +215,13 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert env["structuredContent"]["structured_result"] == 42
     end
 
-    test "explanatory planner output is rejected as non-code" do
+    test "explanatory planner output fails the explicit SubAgent terminal contract" do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, ExplanatoryPlanner)
 
       env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == true
-      assert env["structuredContent"]["reason"] == "planner_non_code"
+      assert env["structuredContent"]["reason"] == "ptc_max_turns_exceeded"
     end
 
     test "valid programs may contain signature as ordinary data" do
@@ -247,16 +248,16 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert sc["message"] =~ "planner crashed"
     end
 
-    test "upstream world faults return upstream_error instead of successful nil results" do
+    test "handled upstream world faults can still return successful fallback results" do
       :ok = put_fake("alpha", %{"err" => fn _, _ -> {:error, :upstream_error, "404"} end})
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, UpstreamErrorPlanner)
 
       env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "call upstream"}})
 
-      assert env["isError"] == true
+      assert env["isError"] == false
       sc = env["structuredContent"]
-      assert sc["reason"] == "upstream_error"
-      assert sc["message"] =~ "alpha.err"
+      assert sc["status"] == "ok"
+      assert sc["structured_result"] == %{"fallback" => "upstream_error"}
 
       assert [%{"status" => "error", "reason" => "upstream_error", "error" => "404"}] =
                sc["upstream_calls"]
@@ -264,7 +265,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert sc["program"] =~ "tool/mcp-call"
     end
 
-    test "execution errors preserve upstream_calls recorded before the failure" do
+    test "agent failures preserve upstream_calls recorded before the failure" do
       :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, "done"} end})
 
       Elixir.Application.put_env(
@@ -277,7 +278,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       assert env["isError"] == true
       sc = env["structuredContent"]
-      assert sc["reason"] == "ptc_runtime_error"
+      assert sc["reason"] == "agent_failed"
       assert sc["planner"]["model"] == "stub:model"
 
       assert [
@@ -288,7 +289,7 @@ defmodule PtcRunnerMcp.AgenticTest do
                }
              ] = sc["upstream_calls"]
 
-      assert sc["program"] =~ "(/ 1 0)"
+      assert sc["program"] =~ "(fail"
     end
 
     test "constraints are capped before prompt assembly" do
