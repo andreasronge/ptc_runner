@@ -1855,7 +1855,7 @@ defmodule PtcRunnerMcp.Application do
       reason: "expected array, got #{inspect(value)}"
     })
 
-    []
+    nil
   end
 
   defp maybe_put(map, _key, nil), do: map

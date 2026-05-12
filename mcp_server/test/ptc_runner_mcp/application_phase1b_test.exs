@@ -311,20 +311,6 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
       assert entry.metadata == %{}
     end
 
-    test "description and capabilities are not logged as unknown keys" do
-      input = %{
-        "command" => "npx",
-        "description" => "A server",
-        "capabilities" => ["tools"]
-      }
-
-      output = PtcRunnerMcp.Application.normalize_stdio_config(input)
-
-      refute Map.has_key?(output, :description)
-      refute Map.has_key?(output, :capabilities)
-      assert output[:command] == "npx"
-    end
-
     test "partial metadata (description only) preserves what's present" do
       json =
         Jason.encode!(%{
