@@ -397,6 +397,56 @@ The Connection is still re-attempted on the first
 backoff) — only the catalog text is frozen, not the runtime
 upstream state.
 
+### Catalog discovery from PTC-Lisp — `catalog/` builtins
+
+The inline catalog above is a static, truncated snapshot baked
+into the tool description. For programs that need to *inspect*
+the configured upstreams at runtime — enumerate servers, page
+through a server's tools, or read a tool's full input schema —
+aggregator mode also exposes a `catalog/` namespace with four
+builtins. (Outside aggregator mode these forms do not exist.)
+
+| Form | Signature | Returns |
+|------|-----------|---------|
+| `catalog/summary` | `(catalog/summary)` | A map `{"mode" <catalog-mode-string> "servers" [...] "catalogs_loaded" <bool>}`. Each server entry has `"name"`, `"description"`, `"tool_count"` (`nil` if its `tools/list` isn't cached yet) and, when present, `"capabilities"`. `"catalogs_loaded"` is `true` only when every configured upstream's tool list is cached. |
+| `catalog/list-servers` | `(catalog/list-servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
+| `catalog/list-tools` | `(catalog/list-tools server)`<br>`(catalog/list-tools server opts)` | A list of compact tool maps — `{"server" "tool" "summary" "arg_keys" "read_only"}` — for `server`, sorted by tool name. `opts` is a map: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | A detailed map for one tool: `"server"`, `"tool"`, `"summary"`, `"description"` (untruncated), `"input_schema"` (the upstream's JSON Schema), `"arg_keys"`, `"annotations"`, `"call_example"` (a ready-to-edit `(tool/mcp-call …)` snippet) and `"response_notes"`. |
+
+`catalog/list-tools` and `catalog/describe-tool` trigger a lazy
+`ensure_started/1` for the target upstream if its tools aren't
+cached yet — using the same per-program failure cache and ensure
+locks as `(tool/mcp-call ...)`, so concurrent `pmap` children
+cooperate instead of stampeding. Result maps are size-capped at
+`--max-catalog-result-bytes` (default 256 KiB) of JSON: an
+over-cap `list-tools` page is truncated entry-by-entry, an
+over-cap `describe-tool` result becomes a world fault.
+
+**Error model** — identical split to `(tool/mcp-call ...)`:
+
+- **World fault → `nil`**: upstream can't be started, the result
+  is too large to cap, or the per-program catalog op budget is
+  exhausted. The program keeps running.
+- **Programmer fault → program raises**: `server` not configured,
+  `tool` not found on that server, or a bad argument (e.g.
+  `:limit` outside `1..200`, `server`/`tool` not a non-empty
+  string).
+
+The catalog op budget is a **separate** atomics counter from the
+`(tool/mcp-call ...)` budget — discovery calls never eat into a
+program's upstream-call quota.
+
+```clojure
+;; List the read-only tools the "github" upstream exposes
+(->> (catalog/list-tools "github" {:limit 100})
+     (filter :read_only)
+     (map :tool))
+
+;; Only describe a tool if its server is actually configured
+(when (some (where :name "fs") (catalog/list-servers))
+  (catalog/describe-tool "fs" "read_text_file"))
+```
+
 ## Three example programs
 
 ### Example 1 — Simple read

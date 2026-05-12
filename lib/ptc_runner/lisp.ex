@@ -257,6 +257,7 @@ defmodule PtcRunner.Lisp do
     tool_cache = Keyword.get(opts, :tool_cache, %{})
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
     strict_data = Keyword.get(opts, :strict_data, false)
+    catalog_exec = Keyword.get(opts, :catalog_exec)
     # Phase 4: when `link: true`, the sandbox child is spawned linked to
     # the caller (in addition to monitored). MCP server uses this so a
     # cancelled call's worker, when killed, takes the sandbox child
@@ -300,6 +301,7 @@ defmodule PtcRunner.Lisp do
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
+        catalog_exec: catalog_exec,
         link: link_sandbox
       }
 
@@ -370,7 +372,8 @@ defmodule PtcRunner.Lisp do
       tool_cache: tool_cache,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
-      strict_data: strict_data
+      strict_data: strict_data,
+      catalog_exec: catalog_exec
     } = opts
 
     with {:ok, raw_ast} <- Parser.parse(source),
@@ -397,7 +400,8 @@ defmodule PtcRunner.Lisp do
           tool_cache: tool_cache,
           tools_meta: tools_meta,
           max_tool_calls: max_tool_calls,
-          strict_data: strict_data
+          strict_data: strict_data,
+          catalog_exec: catalog_exec
         ]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
