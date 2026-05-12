@@ -57,7 +57,7 @@ Programs that don't care about the distinction can treat `:json-null` as truthy 
 - Unwrap upstream results before filtering: use `(mcp/json r)` for JSON payloads and `(mcp/text r)` for text.
 - Return compact maps/vectors, not full upstream envelopes. Use `map`, `filter`, `take`, and selected fields.
 - Keep returned strings short; long previews truncate. Prefer fewer items/fields over `println`.
-- Do not pass `signature` in exploratory aggregator calls. Omit it unless the user explicitly needs validated output and you know the exact PTC signature syntax.
+- For typed output, use `output_schema` (JSON Schema) instead of `signature`. Omit both for exploratory aggregator calls.
 
 ## Response envelope
 

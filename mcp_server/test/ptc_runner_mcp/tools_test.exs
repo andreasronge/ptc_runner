@@ -19,7 +19,7 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert ann["openWorldHint"] == false
     end
 
-    test "inputSchema has program required and context/signature optional" do
+    test "inputSchema has program required and context/output_schema/signature optional" do
       %{"tools" => [tool]} = Tools.list()
       schema = tool["inputSchema"]
 
@@ -27,6 +27,7 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert schema["required"] == ["program"]
       assert Map.has_key?(schema["properties"], "program")
       assert Map.has_key?(schema["properties"], "context")
+      assert Map.has_key?(schema["properties"], "output_schema")
       assert Map.has_key?(schema["properties"], "signature")
     end
 
