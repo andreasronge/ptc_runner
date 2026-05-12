@@ -822,8 +822,8 @@ defmodule PtcRunnerMcp.Stdio do
   # JSON-RPC reply construction (kept here so JsonRpc stays pure).
   # ----------------------------------------------------------------
 
-  defp success_reply(id, result) do
-    %{"jsonrpc" => "2.0", "id" => id, "result" => result}
+  defp success_reply(id, result) when is_map(result) do
+    %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__ptc_debug_structured")}
   end
 
   defp error_reply(id, code, message) do

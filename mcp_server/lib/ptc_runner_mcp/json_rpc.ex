@@ -316,7 +316,7 @@ defmodule PtcRunnerMcp.JsonRpc do
       envelope = run_fn.()
       duration_ms = max(System.monotonic_time(:millisecond) - started, 0)
       DebugRecorder.record_outcome(id, params, envelope, duration_ms: duration_ms)
-      envelope
+      strip_private_result(envelope)
     end
   end
 
@@ -475,8 +475,13 @@ defmodule PtcRunnerMcp.JsonRpc do
   # ----------------------------------------------------------------
 
   defp success_reply(id, result) do
-    %{"jsonrpc" => "2.0", "id" => id, "result" => result}
+    %{"jsonrpc" => "2.0", "id" => id, "result" => strip_private_result(result)}
   end
+
+  defp strip_private_result(result) when is_map(result),
+    do: Map.delete(result, "__ptc_debug_structured")
+
+  defp strip_private_result(result), do: result
 
   # Bytes the JSON-RPC success frame adds *around* the `result` value, i.e.
   # `{"jsonrpc":"2.0","id":<id>,"result":<value>}` minus `<value>`. `ptc_debug`'s

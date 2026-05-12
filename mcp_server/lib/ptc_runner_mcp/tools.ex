@@ -34,9 +34,11 @@ defmodule PtcRunnerMcp.Tools do
     AgenticConfig,
     AggregatorTools,
     ConcurrencyGate,
+    DebugConfig,
     Envelope,
     Limits,
     PayloadMetrics,
+    ResponseProfile,
     Sandbox,
     UpstreamCalls
   }
@@ -208,6 +210,46 @@ defmodule PtcRunnerMcp.Tools do
       end)
   }
 
+  @compact_output_schema %{
+    "type" => "object",
+    "oneOf" => [
+      %{
+        "type" => "object",
+        "required" => ["status"],
+        "properties" => %{
+          "status" => %{"const" => "ok"},
+          "result" => %{"type" => "string"},
+          "validated" => %{},
+          "truncated" => %{"type" => "boolean"}
+        }
+      },
+      %{
+        "type" => "object",
+        "required" => ["status", "reason", "message"],
+        "properties" => %{
+          "status" => %{"const" => "error"},
+          "reason" => %{"type" => "string"},
+          "message" => %{"type" => "string"},
+          "feedback" => %{"type" => "string"},
+          "result" => %{"type" => "string"},
+          "upstream_calls" => %{
+            "type" => "array",
+            "items" => %{
+              "type" => "object",
+              "required" => ["server", "tool", "status"],
+              "properties" => %{
+                "server" => %{"type" => "string"},
+                "tool" => %{"type" => "string"},
+                "status" => %{"const" => "error"},
+                "reason" => %{"type" => "string"}
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+
   @doc """
   The verbatim authoring-card markdown shipped at
   `mcp_server/priv/mcp_authoring_card.md`.
@@ -257,6 +299,18 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   @doc """
+  Profile-aware advertised description for the composed capability and
+  response profile.
+  """
+  @spec advertised_description(atom(), ResponseProfile.t(), keyword()) :: String.t()
+  def advertised_description(capability_profile, response_profile, opts)
+      when response_profile in [:slim, :structured, :debug] do
+    capability_profile
+    |> advertised_description(opts)
+    |> prepend_response_profile_note(capability_profile, response_profile)
+  end
+
+  @doc """
   The verbatim aggregator-mode authoring-card markdown shipped at
   `mcp_server/priv/mcp_aggregator_authoring_card.md`. Read at compile
   time via `@external_resource`.
@@ -287,6 +341,16 @@ defmodule PtcRunnerMcp.Tools do
   @spec output_schema_for(profile :: atom()) :: map()
   def output_schema_for(:mcp_no_tools), do: @output_schema
   def output_schema_for(:mcp_aggregator), do: @aggregator_output_schema
+
+  @doc """
+  Advertised `outputSchema` for the composed capability and response
+  profile. `nil` means no `outputSchema` should be advertised.
+  """
+  @spec output_schema_for(atom(), ResponseProfile.t()) :: map() | nil
+  def output_schema_for(_capability_profile, :slim), do: nil
+  def output_schema_for(_capability_profile, :structured), do: @compact_output_schema
+  def output_schema_for(:mcp_no_tools, :debug), do: @output_schema
+  def output_schema_for(:mcp_aggregator, :debug), do: @aggregator_output_schema
 
   @doc """
   Backward-compatible alias for `output_schema_for(:mcp_no_tools)`.
@@ -366,15 +430,19 @@ defmodule PtcRunnerMcp.Tools do
   @doc "The `ptc_lisp_execute` tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
-    profile = current_profile()
+    capability_profile = current_profile()
+    response_profile = ResponseProfile.current()
 
     %{
       "name" => @tool_name,
-      "description" => advertised_description(profile, catalog: catalog_for(profile)),
-      "inputSchema" => input_schema_for(profile),
-      "outputSchema" => output_schema_for(profile),
-      "annotations" => annotations_for(profile)
+      "description" =>
+        advertised_description(capability_profile, response_profile,
+          catalog: catalog_for(capability_profile)
+        ),
+      "inputSchema" => input_schema_for(capability_profile),
+      "annotations" => annotations_for(capability_profile)
     }
+    |> maybe_put_output_schema(output_schema_for(capability_profile, response_profile))
   end
 
   # §12.5: read the FROZEN catalog from `:persistent_term`. The
@@ -486,7 +554,9 @@ defmodule PtcRunnerMcp.Tools do
          {:ok, parsed_signature} <- validate_output_contract(args) do
       {:ok, program, context, parsed_signature}
     else
-      {:error, message} -> {:error, Envelope.render_error(:args_error, message)}
+      {:error, message} ->
+        payload = Envelope.render_error_payload(:args_error, message)
+        {:error, Envelope.ptc_lisp_error(payload)}
     end
   end
 
@@ -664,17 +734,41 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   defp decorate_and_wrap({:ok, payload}, entries) when is_map(payload) do
-    payload
-    |> UpstreamCalls.decorate(entries)
-    |> decorate_ptc_metrics(:ok, entries)
-    |> Envelope.success()
+    case ResponseProfile.current() do
+      :debug ->
+        payload
+        |> UpstreamCalls.decorate(entries)
+        |> decorate_ptc_metrics(:ok, entries)
+        |> Envelope.ptc_lisp_success()
+
+      _ ->
+        debug_payload =
+          payload
+          |> UpstreamCalls.decorate(entries)
+          |> decorate_ptc_metrics(:ok, entries)
+
+        payload
+        |> Envelope.ptc_lisp_success()
+        |> maybe_attach_debug_structured(debug_payload)
+    end
   end
 
   defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
-    payload
-    |> UpstreamCalls.decorate(entries)
-    |> decorate_ptc_metrics(:error, entries)
-    |> Envelope.error_envelope()
+    decorated = UpstreamCalls.decorate(payload, entries)
+
+    case ResponseProfile.current() do
+      :debug ->
+        decorated
+        |> decorate_ptc_metrics(:error, entries)
+        |> Envelope.ptc_lisp_error()
+
+      _ ->
+        debug_payload = decorate_ptc_metrics(decorated, :error, entries)
+
+        decorated
+        |> Envelope.ptc_lisp_error()
+        |> maybe_attach_debug_structured(debug_payload)
+    end
   end
 
   # `Plans/ptc-runner-mcp-payload-reduction.md` §4.2 / §7 #8: attach
@@ -730,10 +824,34 @@ defmodule PtcRunnerMcp.Tools do
   # between `Sandbox.execute` and this wrap. Keeping the wrap in one
   # place means Phase 1a touches a single function rather than
   # scattering decoration through Sandbox renderers.
-  defp wrap_sandbox_result({:ok, payload}) when is_map(payload), do: Envelope.success(payload)
+  # Mirrors the slim-profile attach in `decorate_and_wrap/2`: in a
+  # non-debug profile this path still hands the pre-slim payload to the
+  # debug recorder (via `__ptc_debug_structured`) when `--debug-tool`
+  # is on, so a `--debug-tool --response-profile slim` server keeps
+  # full diagnostics even for no-upstream executions.
+  defp wrap_sandbox_result({:ok, payload}) when is_map(payload) do
+    case ResponseProfile.current() do
+      :debug ->
+        Envelope.ptc_lisp_success(payload)
 
-  defp wrap_sandbox_result({:error, payload}) when is_map(payload),
-    do: Envelope.error_envelope(payload)
+      _ ->
+        payload
+        |> Envelope.ptc_lisp_success()
+        |> maybe_attach_debug_structured(payload)
+    end
+  end
+
+  defp wrap_sandbox_result({:error, payload}) when is_map(payload) do
+    case ResponseProfile.current() do
+      :debug ->
+        Envelope.ptc_lisp_error(payload)
+
+      _ ->
+        payload
+        |> Envelope.ptc_lisp_error()
+        |> maybe_attach_debug_structured(payload)
+    end
+  end
 
   # § 9.2: missing → not a string → empty after trim → too large.
   defp validate_program(args) do
@@ -948,5 +1066,43 @@ defmodule PtcRunnerMcp.Tools do
     "Advanced/legacy. Usually omit in aggregator mode. Prefer `output_schema` for " <>
       "typed output. Only use when you know the exact PTC signature syntax, " <>
       "e.g. '() -> {count :int}'. Mutually exclusive with `output_schema`."
+  end
+
+  defp prepend_response_profile_note(description, capability_profile, :slim) do
+    profile_note =
+      "Response profile: slim. Successful calls return concise human-readable text " <>
+        "in content[0].text and do not include structuredContent or outputSchema. " <>
+        "Use --response-profile structured for compact machine-readable results, or " <>
+        "--debug-tool for diagnostic details."
+
+    aggregator_note =
+      case capability_profile do
+        :mcp_aggregator ->
+          " Upstream world faults return nil inside the PTC-Lisp program; unhandled " <>
+            "repairable failures are summarized in error text."
+
+        _ ->
+          ""
+      end
+
+    profile_note <> aggregator_note <> "\n\n" <> description
+  end
+
+  defp prepend_response_profile_note(description, _capability_profile, :structured) do
+    "Response profile: structured. Calls return compact structuredContent with concise " <>
+      "human-readable text; debug-only observability fields are omitted.\n\n" <> description
+  end
+
+  defp prepend_response_profile_note(description, _capability_profile, :debug), do: description
+
+  defp maybe_put_output_schema(tool, nil), do: tool
+  defp maybe_put_output_schema(tool, schema), do: Map.put(tool, "outputSchema", schema)
+
+  defp maybe_attach_debug_structured(envelope, structured) do
+    if DebugConfig.enabled?() do
+      Map.put(envelope, "__ptc_debug_structured", structured)
+    else
+      envelope
+    end
   end
 end

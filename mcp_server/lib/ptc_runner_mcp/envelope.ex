@@ -70,11 +70,15 @@ defmodule PtcRunnerMcp.Envelope do
   @doc """
   Build a `busy` envelope when `:max_concurrent_calls` is exceeded.
 
-  Convenience wrapper around `render_error(:busy, ...)`.
+  Profile-aware: routes through `ptc_lisp_error/1` so a busy rejection
+  honors the active response profile (slim text vs. structured vs.
+  debug) just like any other `ptc_lisp_execute` error.
   """
   @spec busy(pos_integer()) :: t()
   def busy(cap) when is_integer(cap) and cap > 0 do
-    render_error(:busy, "server busy: #{cap} concurrent calls in flight", cap: cap)
+    :busy
+    |> render_error_payload("server busy: #{cap} concurrent calls in flight", cap: cap)
+    |> ptc_lisp_error()
   end
 
   @doc """
@@ -210,5 +214,187 @@ defmodule PtcRunnerMcp.Envelope do
       "structuredContent" => structured,
       "content" => [%{"type" => "text", "text" => Jason.encode!(structured)}]
     }
+  end
+
+  @doc "Wrap a `ptc_lisp_execute` success according to the response profile."
+  @spec ptc_lisp_success(map(), keyword()) :: t()
+  def ptc_lisp_success(structured, opts \\ []) when is_map(structured) do
+    case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do
+      :slim ->
+        text_envelope(false, render_success_text(structured))
+
+      :structured ->
+        compact = compact_structured_success(structured)
+
+        %{
+          "isError" => false,
+          "structuredContent" => compact,
+          "content" => [%{"type" => "text", "text" => render_success_text(compact)}]
+        }
+
+      :debug ->
+        success(structured)
+    end
+  end
+
+  @doc "Wrap a `ptc_lisp_execute` error according to the response profile."
+  @spec ptc_lisp_error(map(), keyword()) :: t()
+  def ptc_lisp_error(structured, opts \\ []) when is_map(structured) do
+    case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do
+      :slim ->
+        text_envelope(true, render_error_text(structured))
+
+      :structured ->
+        compact = compact_structured_error(structured)
+
+        %{
+          "isError" => true,
+          "structuredContent" => compact,
+          "content" => [%{"type" => "text", "text" => render_error_text(compact)}]
+        }
+
+      :debug ->
+        error_envelope(structured)
+    end
+  end
+
+  @doc false
+  @spec compact_structured_success(map()) :: map()
+  def compact_structured_success(structured) do
+    %{"status" => Map.get(structured, "status", "ok")}
+    |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("validated", Map.get(structured, "validated"), keep_nil?: false)
+    |> maybe_put_true("truncated", Map.get(structured, "truncated"))
+  end
+
+  @doc false
+  @spec compact_structured_error(map()) :: map()
+  def compact_structured_error(structured) do
+    %{"status" => Map.get(structured, "status", "error")}
+    |> maybe_put("reason", Map.get(structured, "reason"))
+    |> maybe_put("message", Map.get(structured, "message"))
+    |> maybe_put("feedback", Map.get(structured, "feedback"))
+    |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("upstream_calls", compact_upstream_errors(Map.get(structured, "upstream_calls")),
+      keep_nil?: false
+    )
+  end
+
+  @doc false
+  @spec render_success_text(map()) :: String.t()
+  def render_success_text(structured) do
+    result =
+      cond do
+        is_binary(Map.get(structured, "result")) ->
+          Map.fetch!(structured, "result")
+
+        Map.has_key?(structured, "validated") ->
+          preview(Map.get(structured, "validated"))
+
+        true ->
+          ""
+      end
+
+    text =
+      case Map.get(structured, "prints") do
+        prints when is_list(prints) and prints != [] ->
+          "<prints>\n" <>
+            Enum.map_join(prints, "\n", &to_string/1) <> "\n\n<result>\n" <> result
+
+        _ ->
+          result
+      end
+
+    if Map.get(structured, "truncated") == true do
+      text <> "\n\n[truncated]"
+    else
+      text
+    end
+  end
+
+  @doc false
+  @spec render_error_text(map()) :: String.t()
+  def render_error_text(structured) do
+    reason = Map.get(structured, "reason")
+    message = Map.get(structured, "message")
+    feedback = Map.get(structured, "feedback")
+
+    base =
+      cond do
+        is_binary(reason) and is_binary(message) and message != "" -> reason <> ": " <> message
+        is_binary(message) and message != "" -> message
+        is_binary(reason) and reason != "" -> reason
+        true -> "error"
+      end
+
+    base
+    |> append_feedback(feedback)
+    |> append_upstream_error(Map.get(structured, "upstream_calls"))
+  end
+
+  defp text_envelope(is_error, text) do
+    %{
+      "isError" => is_error,
+      "content" => [%{"type" => "text", "text" => text}]
+    }
+  end
+
+  defp maybe_put(map, key, value, opts \\ [])
+
+  defp maybe_put(map, _key, nil, opts) do
+    if Keyword.get(opts, :keep_nil?, true), do: map, else: map
+  end
+
+  defp maybe_put(map, key, value, _opts) do
+    if value in ["", [], %{}], do: map, else: Map.put(map, key, value)
+  end
+
+  defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
+  defp maybe_put_true(map, _key, _), do: map
+
+  defp compact_upstream_errors(entries) when is_list(entries) do
+    compacted =
+      entries
+      |> Enum.filter(&(Map.get(&1, "status") == "error"))
+      |> Enum.map(fn entry ->
+        %{
+          "server" => Map.get(entry, "server"),
+          "tool" => Map.get(entry, "tool"),
+          "status" => "error"
+        }
+        |> maybe_put("reason", Map.get(entry, "reason"))
+      end)
+
+    if compacted == [], do: nil, else: compacted
+  end
+
+  defp compact_upstream_errors(_), do: nil
+
+  defp append_feedback(text, feedback) when is_binary(feedback) and feedback != "" do
+    text <> "\n" <> feedback
+  end
+
+  defp append_feedback(text, _), do: text
+
+  defp append_upstream_error(text, entries) when is_list(entries) do
+    case Enum.find(entries, &(Map.get(&1, "status") == "error")) do
+      nil ->
+        text
+
+      entry ->
+        server = Map.get(entry, "server", "?")
+        tool = Map.get(entry, "tool", "?")
+        reason = Map.get(entry, "reason") || Map.get(entry, "error") || "error"
+        text <> "\nupstream #{server}.#{tool} failed: #{reason}"
+    end
+  end
+
+  defp append_upstream_error(text, _), do: text
+
+  defp preview(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      {:error, _} -> inspect(value)
+    end
   end
 end
