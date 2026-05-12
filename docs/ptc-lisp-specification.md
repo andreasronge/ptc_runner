@@ -3169,6 +3169,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
+| `catalog/` | Catalog discovery | (MCP aggregator mode) inspect configured upstream servers and their tools |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3342,7 +3343,31 @@ Invoke registered tools using the `tool/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
-### 9.7 Clojure Namespace Compatibility
+### 9.7 Catalog Discovery — `catalog/` (MCP aggregator mode)
+
+When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through the `catalog/` namespace. Outside aggregator mode these forms are unavailable. See [docs/aggregator-mode.md](aggregator-mode.md#catalog-discovery-from-ptc-lisp--catalog-builtins) for the full reference.
+
+| Form | Signature | Returns |
+|------|-----------|---------|
+| `catalog/summary` | `(catalog/summary)` | Map `{"mode" "servers" [...] "catalogs_loaded" bool}` — one compact entry per server (`name`, `description`, `tool_count`, optional `capabilities`). |
+| `catalog/list-servers` | `(catalog/list-servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
+| `catalog/list-tools` | `(catalog/list-tools server)` / `(catalog/list-tools server opts)` | List of compact tool maps (`server`, `tool`, `summary`, `arg_keys`, `read_only`), sorted by tool name. `opts` is a map with `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0) for pagination. |
+| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | Detailed tool map (`input_schema`, `arg_keys`, `annotations`, `call_example`, `response_notes`, …). |
+
+**Error model** (same split as `tool/mcp-call`):
+- *World faults* — an upstream that can't be started, an oversized catalog result, or an exhausted per-program catalog op budget — make the form return `nil`. The program continues.
+- *Programmer faults* — an unknown server name, an unknown tool name, or a bad argument (e.g. `:limit` out of range) — raise an execution error that terminates the program.
+
+```clojure
+;; Discover which upstreams are available, then describe a tool on one of them
+(let [servers (catalog/list-servers)]
+  (when (some (where :name "github") servers)
+    (catalog/describe-tool "github" "search_repos")))
+```
+
+The `catalog/` op budget is separate from the `tool/mcp-call` budget; catalog discovery never consumes upstream-call quota.
+
+### 9.8 Clojure Namespace Compatibility
 
 LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normalizes these to built-in functions at analysis time.
 
@@ -4225,6 +4250,7 @@ When the interpreter encounters a symbol, it resolves in this order:
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
+| `catalog/summary`, `catalog/list-servers`, `catalog/list-tools`, `catalog/describe-tool` | Upstream catalog discovery (MCP aggregator mode) |
 | `foo` | Local binding or built-in |
 
 ### Example
