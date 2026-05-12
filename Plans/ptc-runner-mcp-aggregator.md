@@ -716,18 +716,24 @@ not changed.
 ### 8.3 Response payload (structured)
 
 The structured payload returned to the calling client **MUST** have
-the v1 shape, plus an optional `upstream_calls` array:
+the v1 shape, plus an optional `upstream_calls` array and (per
+`Plans/ptc-runner-mcp-payload-reduction.md` §4.2) an optional
+`ptc_metrics` object:
 
 ```json
 {
   "result": ...,
   "prints": [...],
   "validated": ...,
-  "upstream_calls": [...]
+  "upstream_calls": [...],
+  "ptc_metrics": { ... }
 }
 ```
 
-`upstream_calls` **MUST** be omitted when empty.
+`upstream_calls` **MUST** be omitted when empty. `ptc_metrics` is
+present only in aggregator mode and only when the program made ≥ 1
+upstream call (it's the payload-reduction accounting — see
+`Plans/ptc-runner-mcp-payload-reduction.md`).
 
 The MCP request handler, not `PtcRunnerMcp.Envelope`, owns the
 decoration. The decoration runs **after**
@@ -759,12 +765,29 @@ do not reject the new field.
   "status": "ok" | "error",
   "duration_ms": 420,
   "reason": "upstream_error" | "timeout" | "response_too_large" | "upstream_unavailable" | "cap_exhausted",
-  "error": "404 Not Found"
+  "error": "404 Not Found",
+  "result_bytes": 48122,
+  "oversize": false
 }
 ```
 
 Required fields: `server`, `tool`, `status`, `duration_ms`. `reason`
 and `error` **MUST** be present iff `status: "error"`.
+
+`result_bytes` / `oversize` (per
+`Plans/ptc-runner-mcp-payload-reduction.md` §4.1): `result_bytes` is
+the byte size of the upstream response **as the aggregator received
+it** — pre-redaction, pre-ring, pre-envelope-cap — or `null` when not
+applicable / not cheaply known. `oversize` is `true` iff the response
+exceeded `--max-upstream-response-bytes` (`reason: "response_too_large"`
+→ the program received an error tag, not the data); for that path
+`result_bytes` is `null` (the overflow path aborts without retaining a
+count; the detail string is never parsed for a number). Only
+`status: "ok"`, `oversize: false` entries' bytes are counted as useful
+payload reduction (`ptc_metrics.upstream_result_bytes`); failed-call
+bytes and oversize bytes are reported separately. See
+`Plans/ptc-runner-mcp-payload-reduction.md` for the `ptc_metrics`
+envelope block and the `ptc_debug stats.payload_reduction` aggregate.
 
 Ordering: completion order, per §6.4.
 

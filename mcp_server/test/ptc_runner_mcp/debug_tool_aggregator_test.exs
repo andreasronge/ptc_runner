@@ -236,4 +236,167 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert s["by_tool"]["ptc_task"]["calls"] == 2
     assert s["agentic"]["tasks"] == 2
   end
+
+  # ----------------------------------------------------------------
+  # Phase C — payload_reduction aggregate
+  # (Plans/ptc-runner-mcp-payload-reduction.md §4.4 / §4.5)
+  # ----------------------------------------------------------------
+
+  test "payload_reduction stats totals/ratios match the per-call ptc_metrics" do
+    :ok = Catalog.freeze("test catalog")
+    :ok = enable_debug()
+
+    big = %{"rows" => Enum.map(1..120, fn i -> %{"id" => i, "label" => "r-#{i}"} end)}
+    small = %{"v" => Enum.to_list(1..20)}
+
+    put_fake("alpha", %{
+      "big" => fn _, _ -> {:ok, big} end,
+      "small" => fn _, _ -> {:ok, small} end
+    })
+
+    env1 =
+      call_execute(
+        1,
+        ~S|(count (get (tool/mcp-call {:server "alpha" :tool "big" :args {}}) "rows"))|
+      )
+
+    env2 =
+      call_execute(
+        2,
+        ~S|(count (get (tool/mcp-call {:server "alpha" :tool "small" :args {}}) "v"))|
+      )
+
+    # A pure-compute aggregator program: 0 upstream calls → no ptc_metrics.
+    env3 = call_execute(3, ~S|(+ 1 2 3)|)
+
+    m1 = env1["structuredContent"]["ptc_metrics"]
+    m2 = env2["structuredContent"]["ptc_metrics"]
+    assert is_map(m1) and is_map(m2)
+    assert env3["structuredContent"]["ptc_metrics"] == nil
+
+    _ = flush_ring()
+    s = call_debug(10, %{"op" => "stats"})
+    pr = s["payload_reduction"]
+
+    assert pr["schema_version"] == 1
+    # Only the two calls that carried ptc_metrics count.
+    assert pr["calls_with_metrics"] == 2
+    assert pr["total_final_result_bytes"] == m1["final_result_bytes"] + m2["final_result_bytes"]
+
+    assert pr["total_upstream_result_bytes"] ==
+             m1["upstream_result_bytes"] + m2["upstream_result_bytes"]
+
+    assert pr["total_upstream_calls"] == m1["upstream_call_count"] + m2["upstream_call_count"]
+
+    # weighted = Σupstream / max(Σfinal, 1).
+    assert pr["reduction_ratio"]["weighted"] ==
+             Float.round(
+               pr["total_upstream_result_bytes"] / max(pr["total_final_result_bytes"], 1),
+               2
+             )
+
+    # top_reducers ordered by per-call ratio, highest first; the big
+    # fetch reduces more than the small one.
+    assert [first | _] = pr["top_reducers"]
+    assert first["request_id"] == "1"
+    assert first["ratio"] == m1["payload_reduction_ratio"]
+    assert length(pr["top_reducers"]) == 2
+
+    # estimated tokens are ceil(bytes/4).
+    assert pr["estimated_tokens"]["final_result"] == div(pr["total_final_result_bytes"] + 3, 4)
+    assert pr["estimated_tokens"]["method"] == "utf8_bytes_div_4"
+
+    assert pr["estimated_tokens"]["upstream_result"] ==
+             div(pr["total_upstream_result_bytes"] + 3, 4)
+
+    # No ptc_task calls in this window → no agentic_planner sub-block.
+    refute Map.has_key?(pr, "agentic_planner")
+
+    # recent surfaces ptc_metrics on the per-call view; get keeps the
+    # per-entry upstream_calls with result_bytes/oversize.
+    r = call_debug(11, %{"op" => "recent"})
+    rec1 = Enum.find(r["calls"], &(&1["request_id"] == "1"))
+    assert rec1["ptc_metrics"]["payload_reduction_ratio"] == m1["payload_reduction_ratio"]
+    # The pure-compute call has no ptc_metrics in its record.
+    rec3 = Enum.find(r["calls"], &(&1["request_id"] == "3"))
+    refute Map.has_key?(rec3, "ptc_metrics")
+
+    g = call_debug(12, %{"op" => "get", "request_id" => "1"})
+    assert g["record"]["ptc_metrics"]["upstream_result_bytes"] == m1["upstream_result_bytes"]
+    [entry] = g["record"]["upstream_calls"]
+    assert is_integer(entry["result_bytes"])
+    assert entry["oversize"] == false
+  end
+
+  test "payload_reduction.agentic_planner appears when the window has ptc_task calls" do
+    :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
+    :ok = Catalog.freeze("alpha:\n  (none)")
+    :ok = AgenticConfig.set(%{enabled: true, model: "stub:model"})
+    Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, StubPlanner)
+    :ok = enable_debug()
+
+    env = call_task(1, "return the items")
+    assert env["isError"] == false
+    m = env["structuredContent"]["ptc_metrics"]
+    assert is_map(m["server_side_llm"])
+
+    _ = flush_ring()
+    s = call_debug(10, %{"op" => "stats"})
+    pr = s["payload_reduction"]
+    ap = pr["agentic_planner"]
+
+    assert ap["tasks"] == 1
+    # StubPlanner's meta carries no provider tokens → not provider-reported.
+    assert ap["provider_reported_tasks"] == 0
+    assert ap["total_prompt_tokens"] == nil
+    assert ap["total_completion_tokens"] == nil
+    assert is_integer(ap["total_prompt_bytes"])
+    assert is_integer(ap["total_completion_bytes"])
+
+    assert ap["estimated_total_tokens"] ==
+             div(ap["total_prompt_bytes"] + 3, 4) + div(ap["total_completion_bytes"] + 3, 4)
+  end
+
+  test "a :mcp_no_tools-only window has no payload_reduction block" do
+    # No upstreams configured → :mcp_no_tools profile, no ptc_metrics.
+    :ok = enable_debug()
+    _ = call_execute(1, ~S|(+ 1 2)|)
+    _ = flush_ring()
+
+    s = call_debug(10, %{"op" => "stats"})
+    refute Map.has_key?(s, "payload_reduction")
+  end
+
+  test "stats shrink drops payload_reduction.top_reducers first, then the block, before by_server" do
+    :ok = Catalog.freeze("test catalog")
+    # A tiny response cap forces the shrink ladder.
+    DebugConfig.set(%{enabled: true, ring_size: 500, max_response_bytes: 1_400})
+    {:ok, _pid} = DebugBuffer.start_link(ring_size: 500, name: DebugBuffer)
+
+    big = %{
+      "rows" => Enum.map(1..200, fn i -> %{"id" => i, "txt" => String.duplicate("q", 20)} end)
+    }
+
+    put_fake("alpha", %{"big" => fn _, _ -> {:ok, big} end})
+
+    Enum.each(1..5, fn id ->
+      _ =
+        call_execute(
+          id,
+          ~S|(count (get (tool/mcp-call {:server "alpha" :tool "big" :args {}}) "rows"))|
+        )
+    end)
+
+    _ = flush_ring()
+    s = call_debug(10, %{"op" => "stats"})
+
+    assert s["truncated"] == true
+    # top_reducers is the first thing dropped; either the whole
+    # payload_reduction block is gone, or it survives without
+    # top_reducers — never with top_reducers while truncated.
+    case s["payload_reduction"] do
+      nil -> :ok
+      pr when is_map(pr) -> refute Map.has_key?(pr, "top_reducers")
+    end
+  end
 end

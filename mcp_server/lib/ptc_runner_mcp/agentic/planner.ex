@@ -5,18 +5,31 @@ defmodule PtcRunnerMcp.Agentic.Planner do
   alias PtcRunner.LLM.Registry
   alias PtcRunnerMcp.Credentials.Redactor
 
+  # The fixed system message prepended to every planner request.
+  # `prompt_bytes` in the call meta counts this *plus* the built user
+  # prompt (and any prior-turn content rendered into it by the agentic
+  # adapter) per `Plans/ptc-runner-mcp-payload-reduction.md` §4.3 —
+  # i.e. all message content sent to the provider, not just the
+  # dynamically-built prompt string.
+  @system_message "You generate only PTC-Lisp programs."
+
+  @doc "The fixed system message sent on every planner request."
+  @spec system_message() :: String.t()
+  def system_message, do: @system_message
+
   @spec call(String.t(), String.t(), keyword()) ::
           {:ok, String.t(), map()} | {:error, :config | :planner, String.t(), map()}
   def call(model, prompt, opts) when is_binary(model) and is_binary(prompt) and is_list(opts) do
     with {:ok, resolved} <- resolve_model(model),
          :ok <- check_api_key(resolved) do
       request = %{
-        system: "You generate only PTC-Lisp programs.",
+        system: @system_message,
         messages: [%{role: :user, content: prompt}],
         receive_timeout: Keyword.fetch!(opts, :timeout_ms),
         max_tokens: Keyword.fetch!(opts, :max_output_tokens)
       }
 
+      prompt_bytes = byte_size(@system_message) + byte_size(prompt)
       started = System.monotonic_time(:millisecond)
 
       case LLM.call(resolved, request) do
@@ -27,18 +40,19 @@ defmodule PtcRunnerMcp.Agentic.Planner do
            %{
              "model" => resolved,
              "duration_ms" => duration,
-             "prompt_bytes" => byte_size(prompt),
+             "prompt_bytes" => prompt_bytes,
              "output_bytes" => byte_size(content),
+             "completion_bytes" => byte_size(content),
              "tokens" => Map.get(response, :tokens, %{})
            }}
 
         {:ok, other} ->
           {:error, :planner, "planner returned no text content: #{inspect(other, limit: 20)}",
-           %{"model" => resolved, "prompt_bytes" => byte_size(prompt)}}
+           %{"model" => resolved, "prompt_bytes" => prompt_bytes}}
 
         {:error, reason} ->
           {:error, :planner, inspect(reason, limit: 20),
-           %{"model" => resolved, "prompt_bytes" => byte_size(prompt)}}
+           %{"model" => resolved, "prompt_bytes" => prompt_bytes}}
       end
     end
   end

@@ -43,6 +43,9 @@ defmodule PtcRunnerMcp.DebugBuffer do
           required(:signature_present?) => boolean(),
           required(:protocol_version) => String.t() | nil,
           required(:upstream_calls) => [map()],
+          # `Plans/ptc-runner-mcp-payload-reduction.md` §4.5: the
+          # envelope's `ptc_metrics` block (string-keyed) or `nil`.
+          required(:ptc_metrics) => map() | nil,
           required(:agentic) => map() | nil
         }
 
@@ -279,7 +282,8 @@ defmodule PtcRunnerMcp.DebugBuffer do
       by_tool: %{},
       errors: %{by_reason: %{}},
       upstream_calls: nil,
-      agentic: nil
+      agentic: nil,
+      payload_reduction: nil
     }
   end
 
@@ -302,7 +306,8 @@ defmodule PtcRunnerMcp.DebugBuffer do
       by_tool: by_tool(records),
       errors: %{by_reason: count_by(records, fn r -> if r.status == :error, do: r.reason end)},
       upstream_calls: upstream_stats(records),
-      agentic: agentic_stats(records)
+      agentic: agentic_stats(records),
+      payload_reduction: payload_reduction_stats(records)
     }
   end
 
@@ -421,4 +426,174 @@ defmodule PtcRunnerMcp.DebugBuffer do
       }
     end
   end
+
+  # ----------------------------------------------------------------
+  # payload_reduction aggregate
+  # (Plans/ptc-runner-mcp-payload-reduction.md §4.4)
+  # ----------------------------------------------------------------
+  #
+  # Built from the per-call `ptc_metrics` blocks the recorder copied
+  # into the ring. `null` when the window has no call carrying one.
+  # The per-call ratios that are `null` (pure-compute / all-failed /
+  # errored) are skipped from p50/p95/max; `weighted` is computed from
+  # the totals (with the same `max(.., 1)` denominator guard).
+  defp payload_reduction_stats(records) do
+    with_metrics =
+      records
+      |> Enum.map(fn r -> {r, Map.get(r, :ptc_metrics)} end)
+      |> Enum.filter(fn {_r, m} -> is_map(m) end)
+
+    if with_metrics == [] do
+      nil
+    else
+      total_final = sum_metric(with_metrics, "final_result_bytes")
+      total_upstream = sum_metric(with_metrics, "upstream_result_bytes")
+      total_error = sum_metric(with_metrics, "upstream_error_bytes")
+      total_oversize = sum_metric(with_metrics, "upstream_oversize_bytes")
+      total_calls = sum_metric(with_metrics, "upstream_call_count")
+
+      ratios =
+        with_metrics
+        |> Enum.map(fn {_r, m} -> Map.get(m, "payload_reduction_ratio") end)
+        |> Enum.filter(&is_number/1)
+
+      %{
+        schema_version: 1,
+        calls_with_metrics: length(with_metrics),
+        total_final_result_bytes: total_final,
+        total_upstream_result_bytes: total_upstream,
+        total_upstream_error_bytes: total_error,
+        total_upstream_oversize_bytes: total_oversize,
+        total_upstream_calls: total_calls,
+        reduction_ratio: ratio_summary(ratios, total_upstream, total_final),
+        estimated_tokens: %{
+          final_result: est_tokens(total_final),
+          upstream_result: est_tokens(total_upstream),
+          method: "utf8_bytes_div_4"
+        },
+        top_reducers: top_reducers(with_metrics),
+        agentic_planner: agentic_planner_stats(with_metrics)
+      }
+    end
+  end
+
+  defp sum_metric(with_metrics, key) do
+    Enum.reduce(with_metrics, 0, fn {_r, m}, acc ->
+      case Map.get(m, key) do
+        n when is_integer(n) and n >= 0 -> acc + n
+        _ -> acc
+      end
+    end)
+  end
+
+  defp ratio_summary([], total_upstream, total_final) do
+    %{p50: nil, p95: nil, max: nil, weighted: weighted_ratio(total_upstream, total_final)}
+  end
+
+  defp ratio_summary(ratios, total_upstream, total_final) do
+    sorted = Enum.sort(ratios)
+
+    %{
+      p50: float_percentile(sorted, 0.50),
+      p95: float_percentile(sorted, 0.95),
+      max: List.last(sorted),
+      weighted: weighted_ratio(total_upstream, total_final)
+    }
+  end
+
+  # `total_upstream_result_bytes / max(total_final_result_bytes, 1)` —
+  # `null` when either total is 0 (same honesty rule as the per-call
+  # ratio).
+  defp weighted_ratio(total_upstream, total_final)
+       when is_integer(total_upstream) and is_integer(total_final) do
+    if total_upstream <= 0 or total_final <= 0 do
+      nil
+    else
+      Float.round(total_upstream / max(total_final, 1), 2)
+    end
+  end
+
+  # Nearest-rank percentile over a non-empty sorted float list.
+  defp float_percentile(sorted, q) do
+    n = length(sorted)
+    rank = max(1, round(Float.ceil(q * n)))
+    Enum.at(sorted, min(rank, n) - 1)
+  end
+
+  # `ceil(n / 4)` — the `utf8_bytes_div_4` token estimate, over a
+  # non-negative integer.
+  defp est_tokens(n) when is_integer(n) and n >= 0, do: div(n + 3, 4)
+
+  # Up to 10 calls with the highest per-call `payload_reduction_ratio`,
+  # newest as the tie-break. Calls whose ratio is `null` never appear.
+  defp top_reducers(with_metrics) do
+    with_metrics
+    |> Enum.filter(fn {_r, m} -> is_number(Map.get(m, "payload_reduction_ratio")) end)
+    |> Enum.sort_by(
+      fn {r, m} -> {Map.get(m, "payload_reduction_ratio"), r.ts} end,
+      fn {ratio_a, ts_a}, {ratio_b, ts_b} ->
+        cond do
+          ratio_a > ratio_b -> true
+          ratio_a < ratio_b -> false
+          # Equal ratio → newer ts first.
+          true -> DateTime.compare(ts_a, ts_b) != :lt
+        end
+      end
+    )
+    |> Enum.take(10)
+    |> Enum.map(fn {r, m} ->
+      %{
+        request_id: r.request_id,
+        ts: r.ts,
+        tool: r.tool,
+        final_result_bytes: int_or_zero(Map.get(m, "final_result_bytes")),
+        upstream_result_bytes: int_or_zero(Map.get(m, "upstream_result_bytes")),
+        ratio: Map.get(m, "payload_reduction_ratio")
+      }
+    end)
+  end
+
+  # The `agentic_planner` sub-block — present only when the window has
+  # ≥ 1 `ptc_task` call carrying `ptc_metrics.server_side_llm`.
+  defp agentic_planner_stats(with_metrics) do
+    tasks =
+      with_metrics
+      |> Enum.filter(fn {r, m} ->
+        r.tool == "ptc_task" and is_map(Map.get(m, "server_side_llm"))
+      end)
+      |> Enum.map(fn {_r, m} -> Map.get(m, "server_side_llm") end)
+
+    if tasks == [] do
+      nil
+    else
+      provider_reported = Enum.count(tasks, &(Map.get(&1, "provider_reported") == true))
+      all_provider_reported? = provider_reported == length(tasks)
+
+      %{
+        tasks: length(tasks),
+        provider_reported_tasks: provider_reported,
+        total_prompt_tokens:
+          if(all_provider_reported?, do: sum_token_field(tasks, "prompt_tokens")),
+        total_completion_tokens:
+          if(all_provider_reported?, do: sum_token_field(tasks, "completion_tokens")),
+        total_prompt_bytes: sum_token_field(tasks, "prompt_bytes"),
+        total_completion_bytes: sum_token_field(tasks, "completion_bytes"),
+        estimated_total_tokens:
+          est_tokens(sum_token_field(tasks, "prompt_bytes")) +
+            est_tokens(sum_token_field(tasks, "completion_bytes"))
+      }
+    end
+  end
+
+  defp sum_token_field(tasks, key) do
+    Enum.reduce(tasks, 0, fn t, acc ->
+      case Map.get(t, key) do
+        n when is_integer(n) and n >= 0 -> acc + n
+        _ -> acc
+      end
+    end)
+  end
+
+  defp int_or_zero(n) when is_integer(n) and n >= 0, do: n
+  defp int_or_zero(_), do: 0
 end

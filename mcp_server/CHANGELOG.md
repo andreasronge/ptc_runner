@@ -11,6 +11,44 @@ revisions.
 
 ### Added
 
+- PTC payload-reduction metrics
+  (`Plans/ptc-runner-mcp-payload-reduction.md`). Aggregator-mode
+  responses (`ptc_lisp_execute` with ≥ 1 upstream call, and every
+  `ptc_task`) now carry a `ptc_metrics` block on `structuredContent`,
+  and each `upstream_calls[]` entry gains `result_bytes` (the byte
+  size of the upstream response *as received* — pre-redaction,
+  pre-ring, pre-envelope-cap; `null` when not cheaply known) and
+  `oversize` (`true` iff the response exceeded
+  `--max-upstream-response-bytes`). `ptc_metrics` reports
+  `final_result_bytes`, `prints_bytes`, the upstream-call byte tally
+  split by ok/error/oversize (`upstream_result_bytes` /
+  `upstream_error_bytes` / `upstream_oversize_bytes` — only successful
+  non-oversize bytes count toward the denominator), the
+  `payload_reduction_ratio = round(upstream_result_bytes /
+  max(final_result_bytes, 1), 2)` (JSON `null` — never `0` or `∞` —
+  when either side is `0`, e.g. a pure-compute or errored program),
+  `utf8_bytes_div_4` token estimates, and `baseline.conservative` /
+  `baseline.optimistic` blocks (`optimistic.available: false` always —
+  the no-PTC counterfactual is not measurable by the server). For
+  `ptc_task` the block also carries `server_side_llm` — the planner
+  LLM's prompt/completion byte sizes (always present, with the fixed
+  system message included in `prompt_bytes`) and provider token counts
+  (`provider_reported: true` with real numbers when the LLM adapter
+  surfaces `usage`, else `null` + byte estimates) — and an
+  `efficiency_note` stating the ratio excludes the planner cost.
+  `ptc_metrics` is additive and never appears on the `:mcp_no_tools`
+  `ptc_lisp_execute` profile or on a 0-upstream-call aggregator
+  program; the aggregator and `ptc_task` `outputSchema`s advertise the
+  new optional fields. When `--debug-tool` is enabled, `ptc_debug
+  op=stats` gains a `payload_reduction` aggregate (totals,
+  p50/p95/max/weighted ratio skipping `null`s, `top_reducers` (≤ 10 by
+  per-call ratio, newest tie-break), `estimated_tokens`, and — for
+  windows containing `ptc_task` calls — an `agentic_planner` sub-block
+  with the summed planner tokens/bytes), `ptc_debug recent` / `get`
+  records carry the per-call `ptc_metrics`, and the size-cap shrink
+  drops `payload_reduction.top_reducers` first, then the
+  `payload_reduction` block, before touching `by_server` / `by_tool`.
+  No new CLI flags, no new telemetry events.
 - Opt-in `ptc_debug` diagnostics tool
   (`Plans/ptc-runner-mcp-debug-tool.md`). Disabled by default; enable
   with `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL`. Read-only

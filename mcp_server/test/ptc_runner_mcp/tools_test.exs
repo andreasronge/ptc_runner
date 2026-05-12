@@ -139,5 +139,22 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert block["type"] == "text"
       assert Jason.decode!(block["text"]) == sc
     end
+
+    # Plans/ptc-runner-mcp-payload-reduction.md §7 #8: the
+    # `:mcp_no_tools` profile has no upstreams → nothing to measure →
+    # no `ptc_metrics` (and no `upstream_calls`). This test runs
+    # without an `Upstream.Registry`, so `Tools` is in `:mcp_no_tools`
+    # mode.
+    test "the :mcp_no_tools profile never decorates with ptc_metrics" do
+      env =
+        Tools.call(%{
+          "name" => "ptc_lisp_execute",
+          "arguments" => %{"program" => "(+ 1 2)"}
+        })
+
+      sc = env["structuredContent"]
+      refute Map.has_key?(sc, "ptc_metrics")
+      refute Map.has_key?(sc, "upstream_calls")
+    end
   end
 end
