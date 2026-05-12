@@ -251,7 +251,8 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
       call_upstream(impl, server, tool, call_args, opts, ensure_duration)
     else
       {:error, reason, detail, %{duration_ms: duration}} ->
-        {:world_fault, reason, detail, duration}
+        # No upstream call was issued — no bytes received.
+        {:world_fault, reason, detail, duration, nil}
 
       {:programmer_fault, message} ->
         raise_programmer_fault(message)
@@ -288,18 +289,27 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
 
     case result do
       {:ok, %{"isError" => true} = value} ->
-        {:world_fault, :upstream_error, extract_is_error_detail(value), total_duration}
+        # A tool-level error envelope: the JSON-RPC call succeeded, the
+        # upstream signaled application failure. Per
+        # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 these bytes
+        # are NOT useful compression — they go into
+        # `upstream_error_bytes` — but the program *did* receive the
+        # full envelope, so we record its size (matching the
+        # `ptc_lisp_execute` aggregator path).
+        {:world_fault, :upstream_error, extract_is_error_detail(value), total_duration,
+         result_bytes(value)}
 
       {:ok, value} ->
         {:ok, value, total_duration}
 
       {:error, reason, detail}
       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
-        {:world_fault, reason, detail, total_duration}
+        # No (or only-partial) bytes received; not retained — `nil`.
+        {:world_fault, reason, detail, total_duration, nil}
 
       other ->
         detail = "upstream impl returned malformed result: #{inspect(other, limit: 50)}"
-        {:world_fault, :upstream_error, detail, total_duration}
+        {:world_fault, :upstream_error, detail, total_duration, nil}
     end
   end
 
@@ -311,7 +321,8 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     if slot <= max_calls do
       :ok
     else
-      {:world_fault, :cap_exhausted, "cap_exhausted", 0}
+      # Rejected without an attempt — no bytes received.
+      {:world_fault, :cap_exhausted, "cap_exhausted", 0, nil}
     end
   end
 
@@ -325,15 +336,24 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     tagged_success(value)
   end
 
-  defp complete_and_tag({:world_fault, reason, detail, duration}, ledger, id, _started_at) do
+  defp complete_and_tag(
+         {:world_fault, reason, detail, duration, result_bytes},
+         ledger,
+         id,
+         _started_at
+       ) do
     # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1: only the
-    # `response_too_large` world-fault is `oversize`. No partial byte
-    # count is retained for any world-fault, so `result_bytes` is left
-    # unset (→ `nil` in the projection). `reason` is always one of the
-    # `Upstream.reason/0` atoms (plus `:cap_exhausted`).
+    # `response_too_large` world-fault is `oversize`. `result_bytes` is
+    # the encoded size for a tool-level `isError` envelope the program
+    # actually received (counted into `upstream_error_bytes`), `nil`
+    # for every world-fault where no full payload reached the program
+    # (transport errors, oversize, cap, ensure-failed). `reason` is
+    # always one of the `Upstream.reason/0` atoms (plus
+    # `:cap_exhausted`).
     :ok =
       Ledger.complete_error(ledger, id, reason_string(reason), detail,
         duration_ms: duration,
+        result_bytes: result_bytes,
         oversize: reason == :response_too_large
       )
 
