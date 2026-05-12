@@ -17,6 +17,10 @@ ExUnit.start(exclude: [:integration, :real_upstream, :real_remote_upstream])
 # stderr emission can `PtcRunnerMcp.Log.set_level/1` themselves.
 PtcRunnerMcp.Log.set_level(:error)
 
+# Most historical MCP tests assert the original verbose envelope shape.
+# New response-profile tests opt into `:slim` / `:structured` explicitly.
+PtcRunnerMcp.ResponseProfile.set(:debug)
+
 # Phase 1a aggregator: the in-process `Upstream.Fake` registers each
 # fake GenServer under `{:via, Registry, {PtcRunnerMcp.Upstream.Fake.Names, name}}`.
 # Phase 1b adds:

@@ -5,8 +5,8 @@
 #   1. Native Gmail MCP server:
 #        npx -y @gongrzhe/server-gmail-autoauth-mcp
 #
-#   2. PTC Runner aggregator:
-#        ptc_runner_mcp start --upstreams-config <gmail-upstreams.json>
+#   2. PTC Runner aggregator variants:
+#        ptc_slim, ptc_structured, ptc_debug
 #
 # The harness measures client-visible JSON-RPC frame bytes rather than
 # only PTC's internal `ptc_metrics`, then reports cold and warm costs:
@@ -453,16 +453,10 @@ defmodule RealMcpPayloadBench.Report do
 
   def estimate_tokens(bytes), do: div(bytes + 3, 4)
 
-  def summarize_case(case_def, native_overhead, ptc_overhead, native_call, ptc_call) do
+  def summarize_case(case_def, native_overhead, ptc_variants, native_call) do
     native_task_bytes = native_call.request_bytes + native_call.response_bytes
-    ptc_task_bytes = ptc_call.request_bytes + ptc_call.response_bytes
 
     native_cold = native_overhead["cold_overhead_bytes"] + native_task_bytes
-    ptc_cold = ptc_overhead["cold_overhead_bytes"] + ptc_task_bytes
-
-    sc = get_in(ptc_call.reply, ["result", "structuredContent"]) || %{}
-    ptc_metrics = Map.get(sc, "ptc_metrics")
-    upstream_calls = Map.get(sc, "upstream_calls", [])
 
     %{
       "case" => case_def.name,
@@ -479,48 +473,31 @@ defmodule RealMcpPayloadBench.Report do
         "latency_ms" => native_call.latency_ms,
         "is_error" => get_in(native_call.reply, ["result", "isError"]) == true
       },
-      "ptc" => %{
-        "cold_bytes" => ptc_cold,
-        "warm_bytes" => ptc_task_bytes,
-        "cold_est_tokens" => estimate_tokens(ptc_cold),
-        "warm_est_tokens" => estimate_tokens(ptc_task_bytes),
-        "request_bytes" => ptc_call.request_bytes,
-        "response_bytes" => ptc_call.response_bytes,
-        "latency_ms" => ptc_call.latency_ms,
-        "status" => Map.get(sc, "status"),
-        "ptc_metrics" => ptc_metrics,
-        "upstream_calls" =>
-          Enum.map(upstream_calls, fn call ->
-            Map.take(call, [
-              "server",
-              "tool",
-              "status",
-              "duration_ms",
-              "result_bytes",
-              "oversize",
-              "reason"
-            ])
-          end)
-      },
-      "comparison" => %{
-        "warm_delta_bytes_ptc_minus_native" => ptc_task_bytes - native_task_bytes,
-        "cold_delta_bytes_ptc_minus_native" => ptc_cold - native_cold,
-        "warm_ratio_ptc_over_native" => ratio(ptc_task_bytes, native_task_bytes),
-        "cold_ratio_ptc_over_native" => ratio(ptc_cold, native_cold),
-        "ptc_warm_wins" => ptc_task_bytes < native_task_bytes,
-        "ptc_cold_wins" => ptc_cold < native_cold
-      }
+      "ptc_variants" =>
+        Map.new(ptc_variants, fn {variant, %{session: session, call: ptc_call}} ->
+          {to_string(variant),
+           summarize_ptc_variant(session, ptc_call, native_task_bytes, native_cold)}
+        end)
     }
   end
 
-  def overhead_summary(native, ptc) do
+  def overhead_summary(native, ptc_sessions) do
+    ptc =
+      Map.new(ptc_sessions, fn {variant, session} ->
+        {to_string(variant), session.overhead}
+      end)
+
     %{
       "native" => native,
       "ptc" => ptc,
       "both_available_catalog_lower_bound_bytes" =>
-        native["cold_overhead_bytes"] + ptc["cold_overhead_bytes"],
+        native["cold_overhead_bytes"] +
+          (ptc |> Map.values() |> Enum.map(& &1["cold_overhead_bytes"]) |> Enum.sum()),
       "both_available_catalog_lower_bound_est_tokens" =>
-        estimate_tokens(native["cold_overhead_bytes"] + ptc["cold_overhead_bytes"])
+        estimate_tokens(
+          native["cold_overhead_bytes"] +
+            (ptc |> Map.values() |> Enum.map(& &1["cold_overhead_bytes"]) |> Enum.sum())
+        )
     }
   end
 
@@ -534,9 +511,8 @@ defmodule RealMcpPayloadBench.Report do
     IO.puts("")
 
     Enum.each(results["cases"], fn row ->
-      c = row["comparison"]
       native = row["native"]
-      ptc = row["ptc"]
+      variants = row["ptc_variants"]
 
       IO.puts("#{row["case"]} [#{row["category"]}]")
       IO.puts("  #{row["reason"]}")
@@ -545,19 +521,33 @@ defmodule RealMcpPayloadBench.Report do
         "  native warm/cold est tokens: #{native["warm_est_tokens"]} / #{native["cold_est_tokens"]}, latency #{native["latency_ms"]}ms"
       )
 
-      IO.puts(
-        "  ptc    warm/cold est tokens: #{ptc["warm_est_tokens"]} / #{ptc["cold_est_tokens"]}, latency #{ptc["latency_ms"]}ms"
-      )
+      Enum.each(["ptc_slim", "ptc_structured", "ptc_debug"], fn name ->
+        ptc = variants[name]
 
-      IO.puts(
-        "  warm delta bytes ptc-native: #{c["warm_delta_bytes_ptc_minus_native"]}, ratio #{c["warm_ratio_ptc_over_native"]}, ptc_wins=#{c["ptc_warm_wins"]}"
-      )
+        IO.puts(
+          "  #{name} warm/cold est tokens: #{ptc["warm_est_tokens"]} / #{ptc["cold_est_tokens"]}, latency #{ptc["latency_ms"]}ms"
+        )
 
-      case ptc["ptc_metrics"] do
-        %{} = m ->
-          IO.puts(
-            "  ptc_metrics: upstream=#{m["upstream_result_bytes"]}B final=#{m["final_result_bytes"]}B ratio=#{inspect(m["payload_reduction_ratio"])}"
-          )
+        c = ptc["comparison"]
+
+        IO.puts(
+          "    warm delta bytes ptc-native: #{c["warm_delta_bytes_ptc_minus_native"]}, ratio #{c["warm_ratio_ptc_over_native"]}, ptc_wins=#{c["ptc_warm_wins"]}"
+        )
+
+        case ptc["ptc_metrics"] do
+          %{} = m ->
+            IO.puts(
+              "    ptc_metrics: upstream=#{m["upstream_result_bytes"]}B final=#{m["final_result_bytes"]}B ratio=#{inspect(m["payload_reduction_ratio"])}"
+            )
+
+          _ ->
+            :ok
+        end
+      end)
+
+      case best_variant(variants, "warm_bytes") do
+        {name, v} ->
+          IO.puts("  best warm: #{name} at #{v["warm_bytes"]}B, native #{native["warm_bytes"]}B")
 
         _ ->
           :ok
@@ -570,7 +560,10 @@ defmodule RealMcpPayloadBench.Report do
 
     IO.puts("Catalog/session overhead")
     IO.puts("  native cold overhead bytes: #{overhead["native"]["cold_overhead_bytes"]}")
-    IO.puts("  ptc cold overhead bytes:    #{overhead["ptc"]["cold_overhead_bytes"]}")
+
+    Enum.each(overhead["ptc"], fn {name, data} ->
+      IO.puts("  #{name} cold overhead bytes: #{data["cold_overhead_bytes"]}")
+    end)
 
     IO.puts(
       "  both-available lower bound: #{overhead["both_available_catalog_lower_bound_est_tokens"]} est tokens"
@@ -579,6 +572,52 @@ defmodule RealMcpPayloadBench.Report do
 
   defp ratio(_num, 0), do: nil
   defp ratio(num, den), do: Float.round(num / den, 3)
+
+  defp summarize_ptc_variant(session, ptc_call, native_task_bytes, native_cold) do
+    ptc_task_bytes = ptc_call.request_bytes + ptc_call.response_bytes
+    ptc_cold = session.overhead["cold_overhead_bytes"] + ptc_task_bytes
+    sc = get_in(ptc_call.reply, ["result", "structuredContent"]) || %{}
+    ptc_metrics = Map.get(sc, "ptc_metrics")
+    upstream_calls = Map.get(sc, "upstream_calls", [])
+
+    %{
+      "cold_bytes" => ptc_cold,
+      "warm_bytes" => ptc_task_bytes,
+      "cold_est_tokens" => estimate_tokens(ptc_cold),
+      "warm_est_tokens" => estimate_tokens(ptc_task_bytes),
+      "request_bytes" => ptc_call.request_bytes,
+      "response_bytes" => ptc_call.response_bytes,
+      "latency_ms" => ptc_call.latency_ms,
+      "status" => Map.get(sc, "status"),
+      "ptc_metrics" => ptc_metrics,
+      "upstream_calls" =>
+        Enum.map(upstream_calls, fn call ->
+          Map.take(call, [
+            "server",
+            "tool",
+            "status",
+            "duration_ms",
+            "result_bytes",
+            "oversize",
+            "reason"
+          ])
+        end),
+      "comparison" => %{
+        "warm_delta_bytes_ptc_minus_native" => ptc_task_bytes - native_task_bytes,
+        "cold_delta_bytes_ptc_minus_native" => ptc_cold - native_cold,
+        "warm_ratio_ptc_over_native" => ratio(ptc_task_bytes, native_task_bytes),
+        "cold_ratio_ptc_over_native" => ratio(ptc_cold, native_cold),
+        "ptc_warm_wins" => ptc_task_bytes < native_task_bytes,
+        "ptc_cold_wins" => ptc_cold < native_cold
+      }
+    }
+  end
+
+  defp best_variant(variants, key) do
+    variants
+    |> Enum.filter(fn {_name, data} -> is_integer(data[key]) end)
+    |> Enum.min_by(fn {_name, data} -> data[key] end, fn -> nil end)
+  end
 end
 
 opts = RealMcpPayloadBench.Cli.parse(System.argv())
@@ -603,37 +642,69 @@ if cases == [] do
   System.halt(2)
 end
 
-ptc_command =
-  [
-    RealMcpPayloadBench.McpSession.shell_quote(opts.release_bin),
-    "start",
-    "--debug-tool",
-    "--trace-dir",
-    RealMcpPayloadBench.McpSession.shell_quote("/tmp/ptc-runner-real-mcp-payload-bench"),
-    "--trace-payloads",
-    "summary",
-    "--upstreams-config",
-    RealMcpPayloadBench.McpSession.shell_quote(opts.upstreams_config)
-  ]
+ptc_command = fn response_profile ->
+  debug_args =
+    if response_profile == "debug" do
+      ["--debug-tool"]
+    else
+      []
+    end
+
+  ([
+     RealMcpPayloadBench.McpSession.shell_quote(opts.release_bin),
+     "start"
+   ] ++
+     debug_args ++
+     [
+       "--response-profile",
+       response_profile,
+       "--trace-dir",
+       RealMcpPayloadBench.McpSession.shell_quote(
+         "/tmp/ptc-runner-real-mcp-payload-bench-#{response_profile}"
+       ),
+       "--trace-payloads",
+       "summary",
+       "--upstreams-config",
+       RealMcpPayloadBench.McpSession.shell_quote(opts.upstreams_config)
+     ])
   |> Enum.join(" ")
+end
 
 native = RealMcpPayloadBench.McpSession.start("native_gmail", opts.native_gmail_command)
 
-ptc =
-  RealMcpPayloadBench.McpSession.start(
-    "ptc_runner",
-    ptc_command,
-    [{"RELEASE_DISTRIBUTION", "none"}, {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}]
-  )
+ptc_sessions =
+  %{
+    ptc_slim:
+      RealMcpPayloadBench.McpSession.start("ptc_slim", ptc_command.("slim"), [
+        {"RELEASE_DISTRIBUTION", "none"},
+        {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}
+      ]),
+    ptc_structured:
+      RealMcpPayloadBench.McpSession.start("ptc_structured", ptc_command.("structured"), [
+        {"RELEASE_DISTRIBUTION", "none"},
+        {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}
+      ]),
+    ptc_debug:
+      RealMcpPayloadBench.McpSession.start("ptc_debug", ptc_command.("debug"), [
+        {"RELEASE_DISTRIBUTION", "none"},
+        {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}
+      ])
+  }
 
 try do
   {native, _native_handshake} = RealMcpPayloadBench.McpSession.handshake(native)
-  {ptc, _ptc_handshake} = RealMcpPayloadBench.McpSession.handshake(ptc)
 
-  {native, ptc, all_rows} =
-    Enum.reduce(1..opts.runs, {native, ptc, []}, fn run, {native, ptc, acc} ->
-      {native, ptc, run_rows} =
-        Enum.reduce(cases, {native, ptc, []}, fn case_def, {native, ptc, rows} ->
+  ptc_sessions =
+    Map.new(ptc_sessions, fn {variant, session} ->
+      {session, _handshake} = RealMcpPayloadBench.McpSession.handshake(session)
+      {variant, session}
+    end)
+
+  {native, ptc_sessions, all_rows} =
+    Enum.reduce(1..opts.runs, {native, ptc_sessions, []}, fn run, {native, ptc_sessions, acc} ->
+      {native, ptc_sessions, run_rows} =
+        Enum.reduce(cases, {native, ptc_sessions, []}, fn case_def,
+                                                          {native, ptc_sessions, rows} ->
           {native_after, native_call} =
             RealMcpPayloadBench.McpSession.call_tool(
               native,
@@ -648,24 +719,33 @@ try do
               do: Map.put(ptc_args, "signature", case_def.ptc_signature),
               else: ptc_args
 
-          {ptc_after, ptc_call} =
-            RealMcpPayloadBench.McpSession.call_tool(ptc, "ptc_lisp_execute", ptc_args)
+          {ptc_sessions_after, ptc_calls} =
+            Enum.reduce(ptc_sessions, {%{}, %{}}, fn {variant, session}, {sessions, calls} ->
+              {session_after, ptc_call} =
+                RealMcpPayloadBench.McpSession.call_tool(
+                  session,
+                  "ptc_lisp_execute",
+                  ptc_args
+                )
 
-          ptc = ptc_after
+              {
+                Map.put(sessions, variant, session_after),
+                Map.put(calls, variant, %{session: session_after, call: ptc_call})
+              }
+            end)
 
           row =
             RealMcpPayloadBench.Report.summarize_case(
               case_def,
               native.overhead,
-              ptc.overhead,
-              native_call,
-              ptc_call
+              ptc_calls,
+              native_call
             )
 
-          {native_after, ptc_after, [Map.put(row, "run", run) | rows]}
+          {native_after, ptc_sessions_after, [Map.put(row, "run", run) | rows]}
         end)
 
-      {native, ptc, acc ++ Enum.reverse(run_rows)}
+      {native, ptc_sessions, acc ++ Enum.reverse(run_rows)}
     end)
 
   result = %{
@@ -681,10 +761,18 @@ try do
     },
     "commands" => %{
       "native_gmail" => opts.native_gmail_command,
-      "ptc_runner" => ptc_command
+      "ptc_runner" => %{
+        "ptc_slim" => ptc_command.("slim"),
+        "ptc_structured" => ptc_command.("structured"),
+        "ptc_debug" => ptc_command.("debug")
+      }
     },
-    "tools" => %{"native" => native.tools, "ptc" => ptc.tools},
-    "overhead" => RealMcpPayloadBench.Report.overhead_summary(native.overhead, ptc.overhead),
+    "tools" =>
+      %{"native" => native.tools}
+      |> Map.merge(
+        Map.new(ptc_sessions, fn {variant, session} -> {to_string(variant), session.tools} end)
+      ),
+    "overhead" => RealMcpPayloadBench.Report.overhead_summary(native.overhead, ptc_sessions),
     "cases" => all_rows
   }
 
@@ -695,5 +783,8 @@ try do
   IO.puts("Wrote #{opts.out}")
 after
   RealMcpPayloadBench.McpSession.close(native)
-  RealMcpPayloadBench.McpSession.close(ptc)
+
+  Enum.each(ptc_sessions, fn {_variant, session} ->
+    RealMcpPayloadBench.McpSession.close(session)
+  end)
 end

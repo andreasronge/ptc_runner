@@ -88,7 +88,11 @@ defmodule PtcRunnerMcp.DebugRecorder do
     tool = Map.get(params, "name")
     args = extract_arguments(params)
     level = TraceConfig.trace_payloads()
-    sc = Map.get(envelope, "structuredContent", %{})
+
+    sc =
+      Map.get(envelope, "__ptc_debug_structured") ||
+        Map.get(envelope, "structuredContent", %{})
+
     is_error = Map.get(envelope, "isError", false) == true
     {status, reason} = status_and_reason(sc, is_error)
 

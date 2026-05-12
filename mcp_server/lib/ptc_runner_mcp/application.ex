@@ -26,6 +26,7 @@ defmodule PtcRunnerMcp.Application do
     * `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL`
     * `--debug-ring-size <int>` / `PTC_RUNNER_MCP_DEBUG_RING_SIZE`
     * `--max-debug-response-bytes <int>` / `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES`
+    * `--response-profile <slim|structured|debug>` / `PTC_RUNNER_MCP_RESPONSE_PROFILE`
 
   Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
   the program-level limit flags with v1 defaults (1 s / 10 MB).
@@ -50,6 +51,7 @@ defmodule PtcRunnerMcp.Application do
     DebugConfig,
     Limits,
     Log,
+    ResponseProfile,
     TraceConfig,
     TraceHandler
   }
@@ -65,6 +67,7 @@ defmodule PtcRunnerMcp.Application do
     apply_aggregator_config(args)
     apply_agentic_config(args)
     apply_debug_config(args)
+    apply_response_profile(args)
     validate_agentic_boot!(upstreams)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
@@ -162,7 +165,8 @@ defmodule PtcRunnerMcp.Application do
           # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
           debug_tool: :boolean,
           debug_ring_size: :integer,
-          max_debug_response_bytes: :integer
+          max_debug_response_bytes: :integer,
+          response_profile: :string
         ]
       )
 
@@ -251,6 +255,12 @@ defmodule PtcRunnerMcp.Application do
     end
 
     :ok
+  end
+
+  @doc false
+  @spec apply_response_profile(map()) :: :ok
+  def apply_response_profile(args) when is_map(args) do
+    ResponseProfile.set(ResponseProfile.resolve(args))
   end
 
   @doc false
