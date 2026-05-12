@@ -234,6 +234,19 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
   end
 
+  # Catalog builtins in symbol position (e.g., passing catalog/summary as a value)
+  defp do_analyze({:ns_symbol, :catalog, name}, _tail?)
+       when name in [:summary, :"list-servers", :"list-tools", :"describe-tool"] do
+    {:ok, {catalog_core_ast_tag(name)}}
+  end
+
+  defp do_analyze({:ns_symbol, :catalog, other}, _tail?) do
+    {:error,
+     {:invalid_form,
+      "Unknown catalog function: catalog/#{other}. Available: " <>
+        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool"}}
+  end
+
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
   # `json/` and `mcp/` use namespace-qualified env keys (e.g., `:"json/parse-string"`)
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
@@ -381,6 +394,70 @@ defmodule PtcRunner.Lisp.Analyze do
     do:
       {:error,
        {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
+
+  # Catalog builtins via catalog/ namespace
+  defp dispatch_list_form({:ns_symbol, :catalog, :summary}, [], _list, _tail?),
+    do: {:ok, {:catalog_summary}}
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :summary}, _args, _list, _tail?),
+    do: {:error, {:invalid_arity, :"catalog/summary", "(catalog/summary) takes no arguments"}}
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"list-servers"}, [], _list, _tail?),
+    do: {:ok, {:catalog_list_servers}}
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"list-servers"}, _args, _list, _tail?),
+    do:
+      {:error,
+       {:invalid_arity, :"catalog/list-servers", "(catalog/list-servers) takes no arguments"}}
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"list-tools"}, [server_ast], _list, _tail?) do
+    with {:ok, server} <- do_analyze(server_ast, false) do
+      {:ok, {:catalog_list_tools, [server]}}
+    end
+  end
+
+  defp dispatch_list_form(
+         {:ns_symbol, :catalog, :"list-tools"},
+         [server_ast, opts_ast],
+         _list,
+         _tail?
+       ) do
+    with {:ok, server} <- do_analyze(server_ast, false),
+         {:ok, opts} <- do_analyze(opts_ast, false) do
+      {:ok, {:catalog_list_tools, [server, opts]}}
+    end
+  end
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"list-tools"}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :"catalog/list-tools",
+      "(catalog/list-tools server) or (catalog/list-tools server opts) — got #{length(args)} args"}}
+  end
+
+  defp dispatch_list_form(
+         {:ns_symbol, :catalog, :"describe-tool"},
+         [server_ast, tool_ast],
+         _list,
+         _tail?
+       ) do
+    with {:ok, server} <- do_analyze(server_ast, false),
+         {:ok, tool} <- do_analyze(tool_ast, false) do
+      {:ok, {:catalog_describe_tool, [server, tool]}}
+    end
+  end
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"describe-tool"}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :"catalog/describe-tool",
+      "(catalog/describe-tool server tool) requires exactly 2 arguments, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:ns_symbol, :catalog, other}, _rest, _list, _tail?) do
+    {:error,
+     {:invalid_form,
+      "Unknown catalog function: catalog/#{other}. Available: " <>
+        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool"}}
+  end
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
@@ -1211,11 +1288,17 @@ defmodule PtcRunner.Lisp.Analyze do
       true ->
         {:error,
          {:invalid_form,
-          "unknown namespace #{ns}/. Available namespaces: tool/, data/, json/, mcp/, " <>
+          "unknown namespace #{ns}/. Available namespaces: tool/, data/, catalog/, json/, mcp/, " <>
             "clojure.string/, clojure.set/. For JSON parsing use json/parse-string " <>
             "(not cheshire.core/...)."}}
     end
   end
+
+  # Maps catalog builtin names to their CoreAST tag atoms.
+  defp catalog_core_ast_tag(:summary), do: :catalog_summary
+  defp catalog_core_ast_tag(:"list-servers"), do: :catalog_list_servers
+  defp catalog_core_ast_tag(:"list-tools"), do: :catalog_list_tools
+  defp catalog_core_ast_tag(:"describe-tool"), do: :catalog_describe_tool
 
   # ============================================================
   # Placeholder detection

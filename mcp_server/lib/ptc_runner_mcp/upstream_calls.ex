@@ -58,10 +58,13 @@ defmodule PtcRunnerMcp.UpstreamCalls do
           required(:collector_pid) => pid(),
           required(:collector_ref) => reference(),
           required(:call_counter) => :atomics.atomics_ref(),
+          required(:catalog_op_counter) => :atomics.atomics_ref(),
           required(:failure_cache) => :ets.tid(),
           required(:max_calls) => pos_integer(),
+          required(:max_catalog_ops) => pos_integer(),
           required(:call_timeout_ms) => pos_integer(),
-          required(:max_response_bytes) => pos_integer()
+          required(:max_response_bytes) => pos_integer(),
+          required(:max_catalog_result_bytes) => pos_integer()
         }
 
   @doc """
@@ -109,10 +112,13 @@ defmodule PtcRunnerMcp.UpstreamCalls do
       collector_pid: Keyword.get(opts, :collector_pid, self()),
       collector_ref: Keyword.get(opts, :collector_ref, make_ref()),
       call_counter: :atomics.new(1, signed: false),
+      catalog_op_counter: :atomics.new(1, signed: false),
       failure_cache: :ets.new(:upstream_failure_cache, [:set, :public]),
       max_calls: Keyword.fetch!(opts, :max_calls),
+      max_catalog_ops: Keyword.get(opts, :max_catalog_ops, 25),
       call_timeout_ms: Keyword.fetch!(opts, :call_timeout_ms),
-      max_response_bytes: Keyword.fetch!(opts, :max_response_bytes)
+      max_response_bytes: Keyword.fetch!(opts, :max_response_bytes),
+      max_catalog_result_bytes: Keyword.get(opts, :max_catalog_result_bytes, 262_144)
     }
   end
 
@@ -231,6 +237,17 @@ defmodule PtcRunnerMcp.UpstreamCalls do
           end
         end
     end
+  end
+
+  @doc """
+  Atomically increments the catalog operation counter and checks
+  against the per-program cap. Returns `:proceed` if under the
+  limit, `:cap_exhausted` otherwise.
+  """
+  @spec check_catalog_cap(call_context()) :: :proceed | :cap_exhausted
+  def check_catalog_cap(%{catalog_op_counter: counter, max_catalog_ops: max_ops}) do
+    slot = :atomics.add_get(counter, 1, 1)
+    if slot <= max_ops, do: :proceed, else: :cap_exhausted
   end
 
   @doc """

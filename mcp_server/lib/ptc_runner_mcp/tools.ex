@@ -33,6 +33,8 @@ defmodule PtcRunnerMcp.Tools do
     Agentic,
     AgenticConfig,
     AggregatorTools,
+    CatalogBuiltins,
+    CatalogConfig,
     ConcurrencyGate,
     DebugConfig,
     Envelope,
@@ -682,13 +684,17 @@ defmodule PtcRunnerMcp.Tools do
     if configured_aggregator_mode?() do
       request_id = Keyword.get(exec_opts, :request_id)
 
+      catalog_config = CatalogConfig.get()
+
       call_context =
         UpstreamCalls.new_call_context(
           collector_pid: self(),
           collector_ref: make_ref(),
           max_calls: Limits.max_upstream_calls_per_program(),
+          max_catalog_ops: catalog_config.max_catalog_ops_per_program,
           call_timeout_ms: Limits.upstream_call_timeout_ms(),
-          max_response_bytes: Limits.max_upstream_response_bytes()
+          max_response_bytes: Limits.max_upstream_response_bytes(),
+          max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
         )
 
       # Thread `request_id` into the closure so
@@ -698,12 +704,18 @@ defmodule PtcRunnerMcp.Tools do
       # this as the join key.
       tools = AggregatorTools.build(call_context, request_id: request_id)
 
+      catalog_exec =
+        CatalogBuiltins.build(call_context,
+          registry: UpstreamRegistry,
+          catalog_config: catalog_config
+        )
+
       sandbox_result =
         Sandbox.execute(
           program,
           context,
           parsed_signature,
-          [tools: tools, profile: :mcp_aggregator] ++ sandbox_opts
+          [tools: tools, catalog_exec: catalog_exec, profile: :mcp_aggregator] ++ sandbox_opts
         )
 
       entries = UpstreamCalls.drain(call_context.collector_ref)
