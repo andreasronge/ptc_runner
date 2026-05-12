@@ -665,27 +665,30 @@ defmodule PtcRunnerMcp.Tools do
   defp decorate_and_wrap({:ok, payload}, entries) when is_map(payload) do
     payload
     |> UpstreamCalls.decorate(entries)
-    |> decorate_ptc_metrics(entries)
+    |> decorate_ptc_metrics(:ok, entries)
     |> Envelope.success()
   end
 
   defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
     payload
     |> UpstreamCalls.decorate(entries)
-    |> decorate_ptc_metrics(entries)
+    |> decorate_ptc_metrics(:error, entries)
     |> Envelope.error_envelope()
   end
 
   # `Plans/ptc-runner-mcp-payload-reduction.md` §4.2 / §7 #8: attach
   # `ptc_metrics` only in the `:mcp_aggregator` profile (this code path
   # is aggregator-only) and only when the program made ≥ 1 upstream
-  # call — a pure-compute program has nothing to measure. On error the
-  # `result` field is absent, so `final_result_bytes` is 0 and the
-  # ratio degrades to `null` (§7 #2, #9).
-  defp decorate_ptc_metrics(payload, []) when is_map(payload), do: payload
+  # call — a pure-compute program has nothing to measure. On error,
+  # `final_result_bytes` is always 0 — the error payload can carry a
+  # `result` *preview* of the failed value (the `(fail ...)` path), but
+  # that is not "the answer the program produced" (§7 #9), so the ratio
+  # degrades to `null` (§7 #2).
+  defp decorate_ptc_metrics(payload, _kind, []) when is_map(payload), do: payload
 
-  defp decorate_ptc_metrics(payload, entries) when is_map(payload) and is_list(entries) do
-    final_result_bytes = result_field_bytes(payload)
+  defp decorate_ptc_metrics(payload, kind, entries)
+       when is_map(payload) and kind in [:ok, :error] and is_list(entries) do
+    final_result_bytes = if kind == :ok, do: result_field_bytes(payload), else: 0
     prints_bytes = prints_field_bytes(payload)
 
     Map.put(
@@ -695,11 +698,11 @@ defmodule PtcRunnerMcp.Tools do
     )
   end
 
-  # `final_result_bytes`: byte size of the `result` field returned to
-  # the client (a string preview of the program's answer; absent on
-  # error or when both the rendered value and the program's return are
-  # `nil` — see `PtcRunner.PtcToolProtocol.render_success/2`). 0 in
-  # those cases.
+  # `final_result_bytes` (success envelopes only): byte size of the
+  # `result` field returned to the client (a string preview of the
+  # program's answer; absent when both the rendered value and the
+  # program's return are `nil` — see
+  # `PtcRunner.PtcToolProtocol.render_success/2`). 0 then.
   defp result_field_bytes(%{"result" => r}) when is_binary(r), do: byte_size(r)
   defp result_field_bytes(_), do: 0
 
