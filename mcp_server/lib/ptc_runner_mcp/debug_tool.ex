@@ -220,6 +220,7 @@ defmodule PtcRunnerMcp.DebugTool do
     }
     |> maybe_put("upstream_calls", upstream_calls_json(raw.upstream_calls))
     |> maybe_put("agentic", agentic_json(raw.agentic))
+    |> maybe_put("payload_reduction", payload_reduction_json(Map.get(raw, :payload_reduction)))
     |> capped_envelope(:stats, cap)
   end
 
@@ -440,7 +441,9 @@ defmodule PtcRunnerMcp.DebugTool do
   # ----------------------------------------------------------------
 
   # `recent` view: `upstream_calls` collapsed to a count (full per-call
-  # detail is reachable via `get`).
+  # detail is reachable via `get`). `ptc_metrics` (pure counts/ratios —
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §4.5) is surfaced here
+  # too; it's small and has no payload.
   defp recent_call_json(rec) do
     %{
       "request_id" => rec.request_id,
@@ -458,11 +461,13 @@ defmodule PtcRunnerMcp.DebugTool do
       "upstream_calls" => length(rec.upstream_calls || [])
     }
     |> maybe_put("agentic", agentic_record_json(rec.agentic))
+    |> maybe_put("ptc_metrics", Map.get(rec, :ptc_metrics))
   end
 
   # `get` view: the full redacted ring record, including the per-call
   # `upstream_calls` entries (already redacted to `server`/`tool`/
-  # `status`/`duration_ms`/`reason` by `DebugRecorder`).
+  # `status`/`duration_ms`/`reason`/`result_bytes`/`oversize` by
+  # `DebugRecorder`).
   defp full_record_json(rec) do
     rec
     |> recent_call_json()
@@ -529,6 +534,62 @@ defmodule PtcRunnerMcp.DebugTool do
     }
   end
 
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §4.4 — the
+  # `payload_reduction` aggregate. `nil` when the window has no call
+  # carrying `ptc_metrics`.
+  defp payload_reduction_json(nil), do: nil
+
+  defp payload_reduction_json(m) when is_map(m) do
+    base = %{
+      "schema_version" => m.schema_version,
+      "calls_with_metrics" => m.calls_with_metrics,
+      "total_final_result_bytes" => m.total_final_result_bytes,
+      "total_upstream_result_bytes" => m.total_upstream_result_bytes,
+      "total_upstream_error_bytes" => m.total_upstream_error_bytes,
+      "total_upstream_oversize_bytes" => m.total_upstream_oversize_bytes,
+      "total_upstream_calls" => m.total_upstream_calls,
+      "reduction_ratio" => %{
+        "p50" => m.reduction_ratio.p50,
+        "p95" => m.reduction_ratio.p95,
+        "max" => m.reduction_ratio.max,
+        "weighted" => m.reduction_ratio.weighted
+      },
+      "estimated_tokens" => %{
+        "final_result" => m.estimated_tokens.final_result,
+        "upstream_result" => m.estimated_tokens.upstream_result,
+        "method" => m.estimated_tokens.method
+      },
+      "top_reducers" => Enum.map(m.top_reducers, &top_reducer_json/1)
+    }
+
+    maybe_put(base, "agentic_planner", agentic_planner_json(Map.get(m, :agentic_planner)))
+  end
+
+  defp top_reducer_json(tr) do
+    %{
+      "request_id" => tr.request_id,
+      "ts" => iso8601(tr.ts),
+      "tool" => tr.tool,
+      "final_result_bytes" => tr.final_result_bytes,
+      "upstream_result_bytes" => tr.upstream_result_bytes,
+      "ratio" => tr.ratio
+    }
+  end
+
+  defp agentic_planner_json(nil), do: nil
+
+  defp agentic_planner_json(m) when is_map(m) do
+    %{
+      "tasks" => m.tasks,
+      "provider_reported_tasks" => m.provider_reported_tasks,
+      "total_prompt_tokens" => m.total_prompt_tokens,
+      "total_completion_tokens" => m.total_completion_tokens,
+      "total_prompt_bytes" => m.total_prompt_bytes,
+      "total_completion_bytes" => m.total_completion_bytes,
+      "estimated_total_tokens" => m.estimated_total_tokens
+    }
+  end
+
   defp stringify_keys(map) when is_map(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
@@ -571,12 +632,17 @@ defmodule PtcRunnerMcp.DebugTool do
     do_shrink_recent(sc, calls, cap)
   end
 
-  # `stats`: drop the heaviest optional sections (by_server first,
-  # then per-tool duration detail), mark truncated.
+  # `stats`: drop the heaviest optional sections, mark truncated. Per
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §6 (Phase C) the
+  # `payload_reduction.top_reducers` list goes first, then the whole
+  # `payload_reduction` block, BEFORE we touch `by_server` / `by_tool`
+  # (the pre-existing trim order).
   defp shrink(sc, :stats, cap) do
     sc = Map.put(sc, "truncated", true)
 
     steps = [
+      fn s -> drop_payload_reduction_top_reducers(s) end,
+      fn s -> Map.drop(s, ["payload_reduction"]) end,
       fn s -> drop_by_server(s) end,
       fn s -> drop_tool_durations(s) end,
       fn s -> Map.drop(s, ["by_tool"]) end,
@@ -621,6 +687,12 @@ defmodule PtcRunnerMcp.DebugTool do
         do_shrink_recent(sc, Enum.drop(calls, -1), cap)
     end
   end
+
+  defp drop_payload_reduction_top_reducers(%{"payload_reduction" => pr} = sc) when is_map(pr) do
+    Map.put(sc, "payload_reduction", Map.drop(pr, ["top_reducers"]))
+  end
+
+  defp drop_payload_reduction_top_reducers(sc), do: sc
 
   defp drop_by_server(%{"upstream_calls" => uc} = sc) when is_map(uc) do
     Map.put(sc, "upstream_calls", Map.drop(uc, ["by_server"]))
@@ -727,6 +799,10 @@ defmodule PtcRunnerMcp.DebugTool do
               "errors" => %{"type" => "object"},
               "upstream_calls" => %{"type" => ["object", "null"]},
               "agentic" => %{"type" => ["object", "null"]},
+              # `Plans/ptc-runner-mcp-payload-reduction.md` §4.4 / §5 —
+              # optional payload-reduction aggregate (`null` when the
+              # window has no call carrying `ptc_metrics`).
+              "payload_reduction" => %{"type" => ["object", "null"]},
               "truncated" => %{"type" => "boolean"}
             })
         },

@@ -30,6 +30,13 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
           optional(:completed_at) => DateTime.t(),
           optional(:duration_ms) => non_neg_integer(),
           optional(:result_bytes) => non_neg_integer(),
+          # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1: `true`
+          # iff the upstream response exceeded
+          # `--max-upstream-response-bytes` (the program received an
+          # error tag, not the data). Defaults to `false` on
+          # completion; only the `response_too_large` world-fault sets
+          # it `true`.
+          optional(:oversize) => boolean(),
           optional(:error_reason) => String.t(),
           optional(:error) => String.t()
         }
@@ -109,6 +116,7 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
           entry
           |> Map.put(:status, status)
           |> Map.put(:completed_at, now)
+          |> Map.put(:oversize, Keyword.get(opts, :oversize, false) == true)
           |> maybe_put(:duration_ms, Keyword.get(opts, :duration_ms))
           |> maybe_put(:result_bytes, Keyword.get(opts, :result_bytes))
           |> maybe_put(:error_reason, Keyword.get(opts, :error_reason))

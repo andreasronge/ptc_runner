@@ -8,7 +8,8 @@ defmodule PtcRunnerMcp.Agentic do
   alias PtcRunnerMcp.{
     AgenticConfig,
     Envelope,
-    Limits
+    Limits,
+    PayloadMetrics
   }
 
   alias PtcRunnerMcp.Agentic.{
@@ -254,11 +255,14 @@ defmodule PtcRunnerMcp.Agentic do
       |> Map.put("duration_ms", get_in(step.usage, [:duration_ms]) || 0)
       |> Map.put("turn_count", length(step.turns || []))
 
+    answer = rendered["answer"]
+    structured_result = rendered["structured_result"]
+
     payload =
       %{
         "status" => "ok",
-        "answer" => rendered["answer"],
-        "structured_result" => rendered["structured_result"],
+        "answer" => answer,
+        "structured_result" => structured_result,
         "warnings" => validated.warnings ++ render_warnings,
         "planner" => planner,
         "execution" => execution,
@@ -266,6 +270,7 @@ defmodule PtcRunnerMcp.Agentic do
         "trace_id" => step.trace_id
       }
       |> maybe_put_program(final_program(step), cfg)
+      |> put_ptc_metrics(final_result_bytes_for(answer, structured_result), calls, planner_log)
 
     Envelope.success(payload)
   end
@@ -273,6 +278,7 @@ defmodule PtcRunnerMcp.Agentic do
   defp project_subagent_result({:error, step}, ledger, planner_log, _validated, cfg) do
     planner = planner_payload(planner_log)
     side_effecting_attempted? = Ledger.side_effecting_attempted?(ledger)
+    calls = ledger_payload(ledger)
 
     partial = %{
       "planner" => planner,
@@ -280,9 +286,13 @@ defmodule PtcRunnerMcp.Agentic do
         "duration_ms" => get_in(step.usage, [:duration_ms]) || 0,
         "turn_count" => length(step.turns || [])
       },
-      "upstream_calls" => ledger_payload(ledger),
+      "upstream_calls" => calls,
       "program" => final_program(step),
-      "trace_id" => step.trace_id
+      "trace_id" => step.trace_id,
+      # On error `final_result_bytes` is 0 and the ratio is `null`
+      # (`Plans/ptc-runner-mcp-payload-reduction.md` §4.3 / §7 #9); the
+      # planner ran regardless, so the block is still attached.
+      "ptc_metrics" => task_ptc_metrics(0, calls, planner_log)
     }
 
     Envelope.error_envelope(
@@ -300,6 +310,119 @@ defmodule PtcRunnerMcp.Agentic do
     |> Ledger.entries()
     |> Projection.ledger_entries()
   end
+
+  # ----------------------------------------------------------------
+  # `ptc_metrics` decoration (Plans/ptc-runner-mcp-payload-reduction.md §4.3)
+  # ----------------------------------------------------------------
+
+  # `ptc_task`'s `final_result_bytes` is the JSON byte size of the
+  # user-facing answer subset `{answer, structured_result}` (§4.3 /
+  # §7 #9). Encode failures (vanishingly rare for already-rendered
+  # JSON) collapse to 0 — the ratio then degrades to `null`, which is
+  # the correct honest answer.
+  defp final_result_bytes_for(answer, structured_result) do
+    case Jason.encode(%{"answer" => answer, "structured_result" => structured_result}) do
+      {:ok, json} -> byte_size(json)
+      {:error, _} -> 0
+    end
+  end
+
+  defp put_ptc_metrics(payload, final_result_bytes, calls, planner_log) do
+    Map.put(payload, "ptc_metrics", task_ptc_metrics(final_result_bytes, calls, planner_log))
+  end
+
+  defp task_ptc_metrics(final_result_bytes, calls, planner_log) do
+    # `prints_bytes: 0` — `ptc_task` has no `prints` array; the 0 is
+    # shape parity with the `ptc_lisp_execute` block (§4.3).
+    PayloadMetrics.build(final_result_bytes, 0, calls,
+      server_side_llm: server_side_llm_input(planner_log)
+    )
+  end
+
+  # Aggregates per-call planner meta into the `server_side_llm` input
+  # the §4.3 block needs. `provider_reported` is `true` only when
+  # *every* planner call (that returned content) carried a real
+  # provider token count; otherwise the `*_tokens` fields collapse to
+  # `nil` and clients fall back to the byte estimates. The `*_bytes`
+  # figures are always summed.
+  defp server_side_llm_input(planner_log) do
+    metas = Agent.get(planner_log, &Enum.reverse/1)
+    planner_calls = length(metas)
+
+    prompt_bytes = sum_meta(metas, "prompt_bytes")
+    completion_bytes = sum_meta(metas, ["completion_bytes", "output_bytes"])
+
+    {provider_reported?, prompt_tokens, completion_tokens, total_tokens} =
+      aggregate_provider_tokens(metas)
+
+    %{
+      provider_reported: provider_reported?,
+      planner_calls: planner_calls,
+      prompt_tokens: prompt_tokens,
+      completion_tokens: completion_tokens,
+      total_tokens: total_tokens,
+      prompt_bytes: prompt_bytes,
+      completion_bytes: completion_bytes
+    }
+  end
+
+  # Sum a numeric field across planner-call metas, accepting a list of
+  # candidate keys (first hit per meta wins). Missing / non-numeric
+  # values contribute 0.
+  defp sum_meta(metas, key) when is_binary(key), do: sum_meta(metas, [key])
+
+  defp sum_meta(metas, keys) when is_list(keys) do
+    Enum.reduce(metas, 0, fn meta, acc ->
+      acc + first_non_neg_int(meta, keys)
+    end)
+  end
+
+  defp first_non_neg_int(meta, keys) do
+    Enum.find_value(keys, 0, fn key ->
+      case Map.get(meta, key) do
+        n when is_integer(n) and n >= 0 -> n
+        _ -> nil
+      end
+    end)
+  end
+
+  # `provider_reported` is true iff there is ≥ 1 planner-call meta AND
+  # every meta's `"tokens"` carries a positive `:input`/`:output` (the
+  # `PtcRunner.LLM` adapter shape — `%{input: .., output: ..}`). When
+  # so, sum input/output across calls; else `nil` everywhere.
+  defp aggregate_provider_tokens([]), do: {false, nil, nil, nil}
+
+  defp aggregate_provider_tokens(metas) do
+    tokens_list = Enum.map(metas, fn meta -> Map.get(meta, "tokens") end)
+
+    if Enum.all?(tokens_list, &provider_tokens?/1) do
+      prompt = Enum.reduce(tokens_list, 0, &(token_field(&1, :input) + &2))
+      completion = Enum.reduce(tokens_list, 0, &(token_field(&1, :output) + &2))
+      {true, prompt, completion, prompt + completion}
+    else
+      {false, nil, nil, nil}
+    end
+  end
+
+  # A planner call's `"tokens"` carries real provider usage when it is
+  # a map with a positive `:input` or `:output` count. ReqLLM's
+  # adapter populates `%{input: n, output: m}` (0 when the provider
+  # didn't surface usage); a stub that returns `%{}` or omits it is
+  # "not reported".
+  defp provider_tokens?(%{} = tokens) do
+    token_field(tokens, :input) > 0 or token_field(tokens, :output) > 0
+  end
+
+  defp provider_tokens?(_), do: false
+
+  defp token_field(tokens, key) when is_map(tokens) do
+    case Map.get(tokens, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp token_field(_tokens, _key), do: 0
 
   defp planner_payload(planner_log) do
     calls = Agent.get(planner_log, &Enum.reverse/1)
@@ -365,7 +488,17 @@ defmodule PtcRunnerMcp.Agentic do
     }
     |> maybe_put_program(Map.get(partial, "program"), cfg)
     |> maybe_put_trace_id(Map.get(partial, "trace_id"))
+    |> maybe_put_ptc_metrics(Map.get(partial, "ptc_metrics"))
   end
+
+  # `ptc_metrics` is attached on error envelopes only when the planner
+  # ran (the `project_subagent_result/5` error path supplies it).
+  # Early-abort errors (args validation, no budget) never ran the
+  # planner, so they don't supply it and the key is absent (§7 #8).
+  defp maybe_put_ptc_metrics(payload, metrics) when is_map(metrics),
+    do: Map.put(payload, "ptc_metrics", metrics)
+
+  defp maybe_put_ptc_metrics(payload, _metrics), do: payload
 
   defp maybe_put_trace_id(payload, trace_id) when is_binary(trace_id),
     do: Map.put(payload, "trace_id", trace_id)
@@ -491,7 +624,33 @@ defmodule PtcRunnerMcp.Agentic do
     }
   end
 
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §5: the `ptc_task`
+  # `outputSchema` gains an optional `ptc_metrics` object and the
+  # `upstream_calls[]` items document the new `result_bytes` /
+  # `oversize` fields. Both are additive — no `additionalProperties`
+  # constraint — so older clients are unaffected.
+  @upstream_calls_item_schema %{
+    "type" => "object",
+    "properties" => %{
+      "server" => %{"type" => "string"},
+      "tool" => %{"type" => "string"},
+      "status" => %{"type" => "string"},
+      "duration_ms" => %{"type" => "integer", "minimum" => 0},
+      "effect" => %{"type" => "string"},
+      "turn" => %{"type" => "integer"},
+      "args_hash" => %{"type" => "string"},
+      "result_bytes" => %{"type" => ["integer", "null"], "minimum" => 0},
+      "oversize" => %{"type" => "boolean"},
+      "reason" => %{"type" => "string"},
+      "error" => %{"type" => "string"}
+    }
+  }
+
+  @ptc_metrics_property %{"type" => ["object", "null"]}
+
   defp output_schema do
+    upstream_calls_schema = %{"type" => "array", "items" => @upstream_calls_item_schema}
+
     %{
       "type" => "object",
       "oneOf" => [
@@ -505,7 +664,11 @@ defmodule PtcRunnerMcp.Agentic do
             "planner",
             "execution",
             "upstream_calls"
-          ]
+          ],
+          "properties" => %{
+            "upstream_calls" => upstream_calls_schema,
+            "ptc_metrics" => @ptc_metrics_property
+          }
         },
         %{
           "type" => "object",
@@ -517,7 +680,11 @@ defmodule PtcRunnerMcp.Agentic do
             "planner",
             "execution",
             "upstream_calls"
-          ]
+          ],
+          "properties" => %{
+            "upstream_calls" => upstream_calls_schema,
+            "ptc_metrics" => @ptc_metrics_property
+          }
         }
       ]
     }

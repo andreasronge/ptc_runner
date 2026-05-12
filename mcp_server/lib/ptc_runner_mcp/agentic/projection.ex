@@ -24,6 +24,12 @@ defmodule PtcRunnerMcp.Agentic.Projection do
   end
 
   defp ledger_entry(entry) do
+    # `result_bytes` (`integer | null`) and `oversize` (`boolean`) per
+    # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 — always present
+    # on the projection so the `ptc_task` `upstream_calls[]` shape
+    # matches the `ptc_lisp_execute` one. An `:attempted`-only entry
+    # (interrupted before completion) has neither key in the ledger →
+    # `result_bytes: null`, `oversize: false`.
     %{
       "server" => Map.fetch!(entry, :server),
       "tool" => Map.fetch!(entry, :tool),
@@ -31,12 +37,16 @@ defmodule PtcRunnerMcp.Agentic.Projection do
       "duration_ms" => Map.get(entry, :duration_ms, 0),
       "effect" => Atom.to_string(Map.fetch!(entry, :effect)),
       "turn" => Map.fetch!(entry, :turn),
-      "args_hash" => Map.fetch!(entry, :args_hash)
+      "args_hash" => Map.fetch!(entry, :args_hash),
+      "result_bytes" => normalize_result_bytes(Map.get(entry, :result_bytes)),
+      "oversize" => Map.get(entry, :oversize, false) == true
     }
-    |> maybe_put("result_bytes", Map.get(entry, :result_bytes))
     |> maybe_put("reason", Map.get(entry, :error_reason))
     |> maybe_put("error", Map.get(entry, :error))
   end
+
+  defp normalize_result_bytes(n) when is_integer(n) and n >= 0, do: n
+  defp normalize_result_bytes(_), do: nil
 
   defp status_string(:attempted), do: "attempted"
   defp status_string(:ok), do: "ok"
