@@ -966,8 +966,17 @@ defmodule PtcRunnerMcp.Tools do
 
   # Mutual exclusivity gate: if both `output_schema` and `signature`
   # are supplied, reject before either is parsed.
+  # `signature: "any"` normalizes to nil in validate_signature/1, so it
+  # must not trigger this gate — treat it as absent here too.
   defp validate_output_contract(args) do
-    sig_present = match?({:ok, v} when not is_nil(v), Map.fetch(args, "signature"))
+    sig_present =
+      case Map.fetch(args, "signature") do
+        {:ok, nil} -> false
+        {:ok, v} when is_binary(v) -> String.trim(v) != "any"
+        {:ok, _} -> true
+        :error -> false
+      end
+
     schema_present = match?({:ok, v} when not is_nil(v), Map.fetch(args, "output_schema"))
 
     cond do

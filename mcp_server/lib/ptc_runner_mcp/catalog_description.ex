@@ -127,27 +127,13 @@ defmodule PtcRunnerMcp.CatalogDescription do
     "Configured upstream MCP servers:\n" <> server_blocks
   end
 
-  defp render_inline_server(%{name: name, tools: nil} = entry) do
-    desc = server_description(entry)
-    "- #{name}: #{desc}Catalog loads on first use."
-  end
-
-  defp render_inline_server(%{name: name, tools: []} = entry) do
-    desc = server_description(entry)
-    "- #{name}: #{desc}0 tools."
-  end
-
-  defp render_inline_server(%{name: name, tools: tools} = entry) when is_list(tools) do
-    desc = server_description(entry)
-    capabilities = server_capabilities(entry)
-    tool_count = length(tools)
-
-    header = "- #{name}: #{desc}#{tool_count} tools.#{capabilities}"
-
+  defp render_inline_server(%{tools: tools} = entry) when is_list(tools) and tools != [] do
+    header = render_server_header(entry)
     tool_lines = Enum.map_join(tools, "\n", &render_inline_tool/1)
-
     header <> "\n  Tools:\n" <> tool_lines
   end
+
+  defp render_inline_server(entry), do: render_server_header(entry)
 
   defp render_inline_tool(tool) do
     name = tool_field(tool, :name, "unknown")
@@ -170,17 +156,19 @@ defmodule PtcRunnerMcp.CatalogDescription do
       render_discovery_block()
   end
 
-  defp render_lazy_server(%{name: name, tools: nil} = entry) do
+  defp render_lazy_server(entry), do: render_server_header(entry)
+
+  defp render_server_header(%{name: name, tools: nil} = entry) do
     desc = server_description(entry)
     "- #{name}: #{desc}Catalog loads on first use."
   end
 
-  defp render_lazy_server(%{name: name, tools: []} = entry) do
+  defp render_server_header(%{name: name, tools: []} = entry) do
     desc = server_description(entry)
     "- #{name}: #{desc}0 tools."
   end
 
-  defp render_lazy_server(%{name: name, tools: tools} = entry) when is_list(tools) do
+  defp render_server_header(%{name: name, tools: tools} = entry) when is_list(tools) do
     desc = server_description(entry)
     capabilities = server_capabilities(entry)
     tool_count = length(tools)

@@ -180,7 +180,7 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
       assert output[:env] == %{"GITHUB_TOKEN" => "abc", "FOO" => "bar"}
     end
 
-    test "preserves :handshake_timeout_ms (codex [P2] #2 regression)" do
+    test "preserves :handshake_timeout_ms (codex [P2] #2 regression)", %{tmp_dir: tmp_dir} do
       # Codex review of `0f6c1cd` flagged that
       # `:handshake_timeout_ms` was missing from the whitelist —
       # `Upstream.Stdio` reads `Map.get(config, :handshake_timeout_ms, 10_000)`
@@ -205,24 +205,18 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
 
       # And the full JSON-load path also preserves it (sanity floor:
       # the boundary normalize is invoked by `parse_upstreams_body/2`).
-      tmp_dir =
-        Path.join(System.tmp_dir!(), "phase1b-hs-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(tmp_dir)
-      on_exit(fn -> File.rm_rf(tmp_dir) end)
-      cfg_path = Path.join(tmp_dir, "upstreams.json")
-
-      File.write!(
-        cfg_path,
-        Jason.encode!(%{
-          "upstreams" => %{
-            "slow" => %{
-              "command" => "npx",
-              "handshake_timeout_ms" => 30_000
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "slow" => %{
+                "command" => "npx",
+                "handshake_timeout_ms" => 30_000
+              }
             }
-          }
-        })
-      )
+          })
+        )
 
       args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
 
@@ -251,27 +245,21 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
   end
 
   describe "upstream metadata preservation (§6.1.1)" do
-    test "stdio entry preserves description and capabilities in metadata" do
-      json =
-        Jason.encode!(%{
-          "upstreams" => %{
-            "github" => %{
-              "command" => "npx",
-              "args" => ["-y", "@modelcontextprotocol/server-github"],
-              "description" => "GitHub MCP server",
-              "capabilities" => ["issues", "pull_requests"]
+    test "stdio entry preserves description and capabilities in metadata", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "github" => %{
+                "command" => "npx",
+                "args" => ["-y", "@modelcontextprotocol/server-github"],
+                "description" => "GitHub MCP server",
+                "capabilities" => ["issues", "pull_requests"]
+              }
             }
-          }
-        })
-
-      tmp_dir =
-        Path.join(System.tmp_dir!(), "phase1b-meta-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(tmp_dir)
-      on_exit(fn -> File.rm_rf(tmp_dir) end)
-
-      cfg_path = Path.join(tmp_dir, "upstreams.json")
-      File.write!(cfg_path, json)
+          })
+        )
 
       args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
       [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
@@ -286,24 +274,18 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
       refute Map.has_key?(entry.config, "description")
     end
 
-    test "metadata defaults to empty map when not provided" do
-      json =
-        Jason.encode!(%{
-          "upstreams" => %{
-            "bare" => %{
-              "command" => "npx"
+    test "metadata defaults to empty map when not provided", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "bare" => %{
+                "command" => "npx"
+              }
             }
-          }
-        })
-
-      tmp_dir =
-        Path.join(System.tmp_dir!(), "phase1b-nometa-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(tmp_dir)
-      on_exit(fn -> File.rm_rf(tmp_dir) end)
-
-      cfg_path = Path.join(tmp_dir, "upstreams.json")
-      File.write!(cfg_path, json)
+          })
+        )
 
       args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
       [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
@@ -311,31 +293,54 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
       assert entry.metadata == %{}
     end
 
-    test "partial metadata (description only) preserves what's present" do
-      json =
-        Jason.encode!(%{
-          "upstreams" => %{
-            "linear" => %{
-              "command" => "npx",
-              "description" => "Linear tracker"
+    test "partial metadata (description only) preserves what's present", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "linear" => %{
+                "command" => "npx",
+                "description" => "Linear tracker"
+              }
             }
-          }
-        })
-
-      tmp_dir =
-        Path.join(System.tmp_dir!(), "phase1b-partial-#{System.unique_integer([:positive])}")
-
-      File.mkdir_p!(tmp_dir)
-      on_exit(fn -> File.rm_rf(tmp_dir) end)
-
-      cfg_path = Path.join(tmp_dir, "upstreams.json")
-      File.write!(cfg_path, json)
+          })
+        )
 
       args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
       [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
 
       assert entry.metadata == %{description: "Linear tracker"}
       refute Map.has_key?(entry.metadata, :capabilities)
+    end
+
+    test "http entry preserves description and capabilities in metadata", %{tmp_dir: tmp_dir} do
+      cfg_path =
+        write_config(
+          tmp_dir,
+          Jason.encode!(%{
+            "upstreams" => %{
+              "example" => %{
+                "transport" => "http",
+                "url" => "https://api.example.test",
+                "description" => "Example HTTP server",
+                "capabilities" => ["search", "files"]
+              }
+            }
+          })
+        )
+
+      args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
+      [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
+
+      assert entry.metadata == %{
+               description: "Example HTTP server",
+               capabilities: ["search", "files"]
+             }
+
+      assert entry.config[:url] == "https://api.example.test"
+      refute Map.has_key?(entry.config, :description)
+      refute Map.has_key?(entry.config, "description")
     end
   end
 
