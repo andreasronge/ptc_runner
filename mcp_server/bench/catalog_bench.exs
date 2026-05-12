@@ -7,6 +7,11 @@
 #
 # Spec: `Plans/ptc-runner-mcp-catalog-exposure.md` §13.
 #
+# §13 coverage:
+#   Covered here: description size (chars), rendering latency (median/p99).
+#   Deferred (require real model/API access): approximate token cost,
+#   first-shot program correctness, failure modes in lazy mode.
+#
 # Usage (from repo root):
 #
 #   mix run mcp_server/bench/catalog_bench.exs
@@ -51,7 +56,6 @@ defmodule CatalogBench.Helpers do
       %{
         name: "server_#{i}",
         tools: make_tools(count, "server_#{i}"),
-        impl: PtcRunnerMcp.Upstream.Stdio,
         metadata: %{
           description: "Test server #{i} for benchmarking catalog rendering",
           capabilities: ["capability_a", "capability_b"]
