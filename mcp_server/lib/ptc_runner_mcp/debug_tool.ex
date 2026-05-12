@@ -15,7 +15,14 @@ defmodule PtcRunnerMcp.DebugTool do
   All operations are read-only.
   """
 
-  alias PtcRunnerMcp.{DebugBuffer, DebugConfig, Envelope, TraceConfig, TraceFile}
+  alias PtcRunnerMcp.{
+    Credentials.Redactor,
+    DebugBuffer,
+    DebugConfig,
+    Envelope,
+    TraceConfig,
+    TraceFile
+  }
 
   @tool_name "ptc_debug"
 
@@ -242,6 +249,10 @@ defmodule PtcRunnerMcp.DebugTool do
     result =
       case trace_file_lookup(request_id) do
         {:ok, lines} ->
+          # Only reached when `--trace-payloads` is currently `full`, so the
+          # inlined trace is at `full` fidelity and `payload_policy` (`"full"`)
+          # in `base` matches what's returned. `lines` were re-scrubbed for the
+          # current credential set in `read_jsonl/1`.
           Map.merge(base, %{"found" => true, "source" => "trace_file", "record" => lines})
 
         {:too_large, basename} ->
@@ -255,6 +266,30 @@ defmodule PtcRunnerMcp.DebugTool do
             "note" =>
               "trace file #{basename} exceeds --max-debug-response-bytes; read it directly under --trace-dir"
           })
+
+        {:not_inlined, basename} ->
+          # A trace file exists, but the current `--trace-payloads` is stricter
+          # than `full`: inlining a trace written by an earlier run / at a more
+          # permissive policy would leak data the current policy forbids. Prefer
+          # this run's ring record (redacted per the *current* policy); else just
+          # point at the file.
+          note =
+            "an on-disk trace exists (#{basename}) under --trace-dir; not inlined " <>
+              "under --trace-payloads=#{payload_policy()} — read it there, or " <>
+              "restart with --trace-payloads full to inline it here"
+
+          case DebugBuffer.get(request_id) do
+            {:ok, rec} ->
+              Map.merge(base, %{
+                "found" => true,
+                "source" => "ring_buffer",
+                "record" => full_record_json(rec),
+                "note" => note
+              })
+
+            :not_found ->
+              Map.merge(base, %{"found" => true, "source" => "trace_file", "note" => note})
+          end
 
         :no_trace_file ->
           case DebugBuffer.get(request_id) do
@@ -282,9 +317,16 @@ defmodule PtcRunnerMcp.DebugTool do
 
   # One bounded directory listing of `<trace_dir>`, filtered to
   # `*-<hash8>-*.jsonl`. On a same-millisecond hash collision, pick the newest
-  # by mtime. Miss / no `--trace-dir` / read failure → `:no_trace_file` (ring
-  # fallback); a file bigger than the response cap → `{:too_large, basename}`
-  # (not read).
+  # by mtime. Outcomes:
+  #   * `:no_trace_file` — no `--trace-dir`, no match, or read failure (→ ring).
+  #   * `{:not_inlined, basename}` — a match exists but the *current*
+  #     `--trace-payloads` is stricter than `full`, so inlining it could leak
+  #     data the current policy forbids (the file may be from an earlier run or
+  #     a more permissive policy). The caller points at the file instead.
+  #   * `{:too_large, basename}` — a match exists but is bigger than the
+  #     response cap; not read (a single `File.stat`).
+  #   * `{:ok, lines}` — inlined (only when current policy is `full`),
+  #     re-scrubbed for the current credential set.
   defp trace_file_lookup(request_id) do
     case TraceConfig.get().trace_dir do
       dir when is_binary(dir) and dir != "" ->
@@ -295,7 +337,13 @@ defmodule PtcRunnerMcp.DebugTool do
             :no_trace_file
 
           paths ->
-            read_trace_file(newest_by_mtime(paths))
+            path = newest_by_mtime(paths)
+
+            if TraceConfig.trace_payloads() == :full do
+              read_trace_file(path)
+            else
+              {:not_inlined, Path.basename(path)}
+            end
         end
 
       _ ->
@@ -375,6 +423,10 @@ defmodule PtcRunnerMcp.DebugTool do
               {:error, _} -> %{"_raw" => line}
             end
           end)
+          # Defence in depth: the trace was scrubbed for the credentials active
+          # when it was written; re-scrub every binary leaf for the current set
+          # too (handles the rare case where credentials changed between runs).
+          |> Redactor.scrub_deep()
 
         {:ok, lines}
 
