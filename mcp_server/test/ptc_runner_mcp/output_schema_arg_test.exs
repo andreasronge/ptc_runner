@@ -372,6 +372,107 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "validation_error"
     end
+
+    test "additionalProperties: false rejects an undeclared field" do
+      env =
+        call(%{
+          "program" => ~s|{:x 1 :extra 2}|,
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"x" => %{"type" => "integer"}},
+            "required" => ["x"],
+            "additionalProperties" => false
+          }
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "validation_error"
+      assert sc["message"] =~ "unexpected field"
+    end
+
+    test "additionalProperties: false still accepts an exact match" do
+      env =
+        call(%{
+          "program" => ~s|{:x 1}|,
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"x" => %{"type" => "integer"}},
+            "required" => ["x"],
+            "additionalProperties" => false
+          }
+        })
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["validated"] == %{"x" => 1}
+    end
+
+    test "absent additionalProperties tolerates extra fields" do
+      env =
+        call(%{
+          "program" => ~s|{:x 1 :extra 2}|,
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"x" => %{"type" => "integer"}},
+            "required" => ["x"]
+          }
+        })
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["validated"] == %{"x" => 1, "extra" => 2}
+    end
+  end
+
+  describe "required validation" do
+    test "required entry not declared as a property is an args_error" do
+      env =
+        call(%{
+          "program" => "1",
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"x" => %{"type" => "integer"}},
+            "required" => ["missing"]
+          }
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "args_error"
+      assert sc["message"] =~ "missing"
+    end
+
+    test "non-string required entry is an args_error" do
+      env =
+        call(%{
+          "program" => "1",
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"x" => %{"type" => "integer"}},
+            "required" => [123]
+          }
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "args_error"
+    end
+
+    test "non-boolean additionalProperties is an args_error" do
+      env =
+        call(%{
+          "program" => "1",
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{},
+            "additionalProperties" => %{"type" => "string"}
+          }
+        })
+
+      assert env["isError"] == true
+      sc = env["structuredContent"]
+      assert sc["reason"] == "args_error"
+      assert sc["message"] =~ "additionalProperties"
+    end
   end
 
   describe "description anchors" do

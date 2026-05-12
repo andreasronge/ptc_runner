@@ -275,6 +275,26 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
     {:error, "cannot coerce to map"}
   end
 
+  # Closed maps reject undeclared keys. `coerce_map` already drops anything
+  # not declared, so a non-empty difference between the input keys and the
+  # coerced keys means the caller passed fields the schema excluded.
+  defp coerce_impl(value, {:closed_map, fields}) when is_map(value) do
+    with {:ok, coerced, warnings} <- coerce_map(value, fields, %{}, []) do
+      case Map.keys(value) -- Map.keys(coerced) do
+        [] ->
+          {:ok, coerced, warnings}
+
+        extra ->
+          {:error,
+           "unexpected field(s): #{Enum.map_join(Enum.sort_by(extra, &inspect/1), ", ", &inspect/1)}"}
+      end
+    end
+  end
+
+  defp coerce_impl(_value, {:closed_map, _fields}) do
+    {:error, "cannot coerce to map"}
+  end
+
   # Catch-all for unknown types
   defp coerce_impl(_value, _type) do
     {:error, "unsupported type"}
