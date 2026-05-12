@@ -65,6 +65,23 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     end
   end
 
+  # Fetches from an upstream whose envelope is `isError: true` (a
+  # tool-level error — the JSON-RPC call succeeded). The program reads
+  # the world-fault tag and returns a fallback, so the envelope is a
+  # success — but those bytes must land in `upstream_error_bytes`.
+  defmodule IsErrorFetchPlanner do
+    def call(_model, _prompt, _opts) do
+      {:ok,
+       ~S|(let [r (tool/mcp-call {:server "alpha" :tool "err" :args {}})] (return {:fallback (:reason r)}))|,
+       %{
+         "model" => "stub:model",
+         "prompt_bytes" => 30,
+         "completion_bytes" => 9,
+         "output_bytes" => 9
+       }}
+    end
+  end
+
   # An LLM adapter that records the request it received and reports
   # provider `usage`. Drives the *real* `Planner.call/3` so
   # `prompt_bytes` is computed from the actual system+prompt content.
@@ -225,6 +242,41 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
              byte_size(Jason.encode!(%{"big" => String.duplicate("z", 2_000)}))
 
     assert is_map(m["server_side_llm"])
+  end
+
+  # Regression for codex review round 1 [P2]: a tool-level `isError`
+  # upstream envelope's bytes must land in `upstream_error_bytes` (the
+  # program received the full payload) — not be dropped to `null`,
+  # which would underreport errored tool payloads relative to the
+  # `ptc_lisp_execute` aggregator path.
+  test "ptc_task counts isError upstream envelope bytes in upstream_error_bytes" do
+    is_error_envelope = %{
+      "isError" => true,
+      "content" => [%{"type" => "text", "text" => String.duplicate("E", 1_500)}]
+    }
+
+    encoded_size = byte_size(Jason.encode!(is_error_envelope))
+    :ok = put_fake("alpha", %{"err" => fn _, _ -> {:ok, is_error_envelope} end})
+    :ok = AggregatorConfig.set(%{read_only: true})
+    Application.put_env(:ptc_runner_mcp, :agentic_planner, IsErrorFetchPlanner)
+
+    env = call_task("fetch from a failing tool")
+    assert env["isError"] == false
+    sc = env["structuredContent"]
+    # The ledger entry is `status: "error"` with the byte count.
+    [entry] = sc["upstream_calls"]
+    assert entry["status"] == "error"
+    assert entry["reason"] == "upstream_error"
+    assert entry["result_bytes"] == encoded_size
+    assert entry["oversize"] == false
+
+    m = metrics(env)
+    assert m["upstream_error_count"] == 1
+    assert m["upstream_ok_count"] == 0
+    assert m["upstream_error_bytes"] == encoded_size
+    # Those bytes do NOT count toward useful payload reduction.
+    assert m["upstream_result_bytes"] == 0
+    assert m["payload_reduction_ratio"] == nil
   end
 
   # ============================================================
