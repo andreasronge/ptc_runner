@@ -45,6 +45,7 @@ defmodule PtcRunnerMcp.Upstream.Registry do
   @type upstream_entry :: %{
           impl: module(),
           config: map(),
+          metadata: map(),
           connection_pid: pid() | nil,
           status: :not_started | :started,
           cached_tools: [Upstream.tool_schema()] | nil,
@@ -245,12 +246,14 @@ defmodule PtcRunnerMcp.Upstream.Registry do
       |> Keyword.get(:upstreams, [])
       |> Enum.into(%{}, fn entry ->
         %{name: name, impl: impl, config: config} = entry
+        metadata = Map.get(entry, :metadata, %{})
         {:ok, _pid} = start_connection(sup, routing_id, name, impl, config, self())
 
         {name,
          %{
            impl: impl,
            config: config,
+           metadata: metadata,
            routing_id: routing_id
          }}
       end)
@@ -307,7 +310,7 @@ defmodule PtcRunnerMcp.Upstream.Registry do
     {:ok, _pid} =
       start_connection(state.connection_supervisor, state.routing_id, name, Fake, config, self())
 
-    entry = %{impl: Fake, config: config, routing_id: state.routing_id}
+    entry = %{impl: Fake, config: config, metadata: %{}, routing_id: state.routing_id}
 
     {:reply, :ok, %{state | upstreams: Map.put(state.upstreams, name, entry)}}
   end

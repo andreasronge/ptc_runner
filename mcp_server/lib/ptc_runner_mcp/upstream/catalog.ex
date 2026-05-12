@@ -118,7 +118,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   Returns the structured catalog snapshot for a routing `Registry`.
 
   The shape is the same input accepted by `render_entries/1`:
-  `%{name: String.t(), tools: list() | nil, impl: module() | nil}`.
+  `%{name: String.t(), tools: list() | nil, impl: module() | nil, metadata: map()}`.
   `ptc_task` capability summaries use this structured snapshot instead of
   parsing the human-oriented rendered catalog string.
   """
@@ -126,7 +126,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]
   def snapshot(registry) when is_atom(registry) or is_pid(registry) do
@@ -152,7 +153,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]) :: String.t()
   def render_entries([]), do: ""
@@ -187,7 +189,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]
   def frozen_snapshot do
@@ -250,7 +253,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           pid -> safe_cached_tools(pid)
         end
 
-      %{name: name, tools: tools, impl: Map.get(routing, :impl)}
+      %{
+        name: name,
+        tools: tools,
+        impl: Map.get(routing, :impl),
+        metadata: Map.get(routing, :metadata, %{})
+      }
     end)
     |> Enum.sort_by(& &1.name)
   end

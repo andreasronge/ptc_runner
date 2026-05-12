@@ -46,6 +46,7 @@ defmodule PtcRunnerMcp.Application do
   alias PtcRunnerMcp.{
     AgenticConfig,
     AggregatorConfig,
+    CatalogConfig,
     ConcurrencyGate,
     Credentials,
     DebugConfig,
@@ -65,6 +66,7 @@ defmodule PtcRunnerMcp.Application do
 
     %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
     apply_aggregator_config(args)
+    apply_catalog_config(args)
     apply_agentic_config(args)
     apply_debug_config(args)
     apply_response_profile(args)
@@ -143,6 +145,11 @@ defmodule PtcRunnerMcp.Application do
           max_upstream_response_bytes: :integer,
           max_upstream_calls_per_program: :integer,
           aggregator_read_only: :boolean,
+          catalog_mode: :string,
+          catalog_inline_max_chars: :integer,
+          catalog_inline_max_tools: :integer,
+          max_catalog_ops_per_program: :integer,
+          max_catalog_result_bytes: :integer,
           agentic: :boolean,
           agentic_model: :string,
           agentic_task_timeout_ms: :integer,
@@ -187,6 +194,72 @@ defmodule PtcRunnerMcp.Application do
           AggregatorConfig.defaults().read_only
         )
     })
+  end
+
+  @doc false
+  @spec apply_catalog_config(map()) :: :ok
+  def apply_catalog_config(args) when is_map(args) do
+    defaults = CatalogConfig.defaults()
+
+    catalog_mode = parse_catalog_mode(args, defaults.catalog_mode)
+
+    CatalogConfig.set(%{
+      catalog_mode: catalog_mode,
+      catalog_inline_max_chars:
+        read_int(
+          args,
+          :catalog_inline_max_chars,
+          "PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS",
+          defaults.catalog_inline_max_chars
+        ),
+      catalog_inline_max_tools:
+        read_int(
+          args,
+          :catalog_inline_max_tools,
+          "PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS",
+          defaults.catalog_inline_max_tools
+        ),
+      max_catalog_ops_per_program:
+        read_int(
+          args,
+          :max_catalog_ops_per_program,
+          "PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM",
+          defaults.max_catalog_ops_per_program
+        ),
+      max_catalog_result_bytes:
+        read_int(
+          args,
+          :max_catalog_result_bytes,
+          "PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES",
+          defaults.max_catalog_result_bytes
+        )
+    })
+  end
+
+  defp parse_catalog_mode(args, default) do
+    raw = env_or(args, :catalog_mode, "PTC_RUNNER_MCP_CATALOG_MODE", nil)
+
+    case raw do
+      nil ->
+        default
+
+      value when is_binary(value) ->
+        case CatalogConfig.parse_mode(value) do
+          {:ok, mode} ->
+            mode
+
+          :error ->
+            Log.log(:warn, "catalog_mode_invalid", %{
+              value: value,
+              fallback: "auto"
+            })
+
+            :auto
+        end
+
+      _ ->
+        default
+    end
   end
 
   # Public-but-undocumented seam used by tests to verify CLI > env >
@@ -762,7 +835,9 @@ defmodule PtcRunnerMcp.Application do
   # Returns just the upstreams list. Callers that need the parsed
   # `credentials:` block use `load_aggregator_config/1` instead.
   @doc false
-  @spec load_upstreams_config(map()) :: [%{name: String.t(), impl: module(), config: map()}]
+  @spec load_upstreams_config(map()) :: [
+          %{name: String.t(), impl: module(), config: map(), metadata: map()}
+        ]
   def load_upstreams_config(args) do
     load_aggregator_config(args).upstreams
   end
@@ -775,7 +850,7 @@ defmodule PtcRunnerMcp.Application do
   # never sees a config that points at an unknown binding.
   @doc false
   @spec load_aggregator_config(map()) :: %{
-          upstreams: [%{name: String.t(), impl: module(), config: map()}],
+          upstreams: [%{name: String.t(), impl: module(), config: map(), metadata: map()}],
           credentials: %{String.t() => Credentials.Binding.t()}
         }
   def load_aggregator_config(args) do
@@ -885,19 +960,13 @@ defmodule PtcRunnerMcp.Application do
   end
 
   defp stdio_entry(name, config) do
+    {metadata, transport_config} = extract_upstream_metadata(config)
+
     %{
       name: name,
       impl: PtcRunnerMcp.Upstream.Stdio,
-      # Normalize at the boundary: Jason returns string-keyed
-      # maps, but `Upstream.Stdio` (and tests / `put_fake/2`)
-      # use atom-keyed shapes (`:command`, `:args`, `:env`,
-      # `:cd`). Doing the conversion HERE means every layer
-      # below this point — Registry, Connection, Stdio,
-      # Upstream behaviour conformance — sees one canonical
-      # shape. Leaking string keys into Stdio caused a [P1]
-      # codex finding (`config[:args]` silently `nil`,
-      # subprocess launched with no args).
-      config: normalize_stdio_config_with_env_resolution(config)
+      config: normalize_stdio_config_with_env_resolution(transport_config),
+      metadata: metadata
     }
   end
 
@@ -955,9 +1024,12 @@ defmodule PtcRunnerMcp.Application do
   @spec parse_http_upstream(String.t(), map(), String.t()) :: %{
           name: String.t(),
           impl: module(),
-          config: map()
+          config: map(),
+          metadata: map()
         }
   def parse_http_upstream(name, config, path) when is_map(config) do
+    {metadata, config} = extract_upstream_metadata(config)
+
     allow_insecure_http = bool_field!(config, "allow_insecure_http", false, name, path)
     allow_insecure_auth = bool_field!(config, "allow_insecure_auth", false, name, path)
 
@@ -1033,7 +1105,8 @@ defmodule PtcRunnerMcp.Application do
     %{
       name: name,
       impl: PtcRunnerMcp.Upstream.Http,
-      config: out_config
+      config: out_config,
+      metadata: metadata
     }
   end
 
@@ -1746,6 +1819,48 @@ defmodule PtcRunnerMcp.Application do
   # Narrowing keeps `${VAR}` from accidentally expanding inside future
   # HTTP config keys where the resulting plaintext would land in
   # logs / `inspect/1` of upstream config.
+  @metadata_keys ["description", "capabilities"]
+
+  defp extract_upstream_metadata(config) when is_map(config) do
+    description = validate_metadata_description(Map.get(config, "description"))
+    capabilities = validate_metadata_capabilities(Map.get(config, "capabilities"))
+
+    metadata =
+      %{}
+      |> maybe_put(:description, description)
+      |> maybe_put(:capabilities, capabilities)
+
+    transport_config = Map.drop(config, @metadata_keys)
+    {metadata, transport_config}
+  end
+
+  defp validate_metadata_description(nil), do: nil
+  defp validate_metadata_description(value) when is_binary(value), do: value
+
+  defp validate_metadata_description(value) do
+    Log.log(:warn, "upstream_metadata_invalid", %{
+      field: "description",
+      reason: "expected string, got #{inspect(value)}"
+    })
+
+    nil
+  end
+
+  defp validate_metadata_capabilities(nil), do: nil
+  defp validate_metadata_capabilities(value) when is_list(value), do: value
+
+  defp validate_metadata_capabilities(value) do
+    Log.log(:warn, "upstream_metadata_invalid", %{
+      field: "capabilities",
+      reason: "expected array, got #{inspect(value)}"
+    })
+
+    []
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   defp normalize_stdio_config_with_env_resolution(config) when is_map(config) do
     config
     |> resolve_stdio_env_placeholders()
