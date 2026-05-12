@@ -100,6 +100,25 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       assert tool["annotations"]["openWorldHint"] == false
     end
 
+    test "release start forwards app CLI flags through env.sh" do
+      frames = [
+        ReleaseRunner.init_request(1),
+        ReleaseRunner.initialized_notif(),
+        ReleaseRunner.tools_list_request(2),
+        ReleaseRunner.exit_notif()
+      ]
+
+      assert {:ok, replies, 0, _stderr} =
+               ReleaseRunner.run_session(frames, args: ["start", "--debug-tool"])
+
+      list_reply = Enum.find(replies, &(&1["id"] == 2))
+      tools = list_reply["result"]["tools"]
+      names = Enum.map(tools, & &1["name"])
+
+      assert "ptc_lisp_execute" in names
+      assert "ptc_debug" in names
+    end
+
     test "initialize with compatibility-floor 2025-06-18 negotiates to 2025-06-18" do
       init_request =
         Map.put(ReleaseRunner.init_request(1), "params", %{

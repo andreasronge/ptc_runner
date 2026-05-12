@@ -33,6 +33,7 @@ defmodule PtcRunnerMcp.MixProject do
     [
       ptc_runner_mcp: [
         include_executables_for: [:unix, :windows],
+        rel_templates_path: "rel",
         applications: [
           ptc_runner: :permanent,
           ptc_runner_mcp: :permanent
