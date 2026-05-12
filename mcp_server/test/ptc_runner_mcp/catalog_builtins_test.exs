@@ -250,6 +250,224 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   end
 
   # ============================================================
+  # catalog/search-tools
+  # ============================================================
+
+  describe "search_tools" do
+    test "returns tool-level matches for loaded servers" do
+      put_fake("github", [
+        {"search_issues", fn _ -> "ok" end},
+        {"search_repos", fn _ -> "ok" end},
+        {"get_issue", fn _ -> "ok" end}
+      ])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search"])
+
+      assert is_list(result)
+      assert length(result) >= 2
+
+      tool_names = Enum.map(result, & &1["tool"])
+      assert "search_issues" in tool_names
+      assert "search_repos" in tool_names
+    end
+
+    test "deterministic ordering: same query always produces same order" do
+      put_fake("alpha", [
+        {"find_items", fn _ -> "ok" end},
+        {"find_users", fn _ -> "ok" end}
+      ])
+
+      put_fake("beta", [
+        {"find_records", fn _ -> "ok" end}
+      ])
+
+      {exec, _ctx} = build_exec()
+
+      {:ok, result1} = exec.(:search_tools, ["find"])
+      {:ok, result2} = exec.(:search_tools, ["find"])
+
+      assert result1 == result2
+    end
+
+    test "exact match scores higher than substring" do
+      put_fake("srv", [
+        {"search", fn _ -> "ok" end},
+        {"research_data", fn _ -> "ok" end}
+      ])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search"])
+
+      assert [first | _] = result
+      assert first["tool"] == "search"
+    end
+
+    test "tool name matches rank higher than description-only matches" do
+      put_fake(
+        "srv",
+        [
+          {"list_users", fn _ -> "ok" end},
+          {"get_data", fn _ -> "ok" end}
+        ],
+        metadata: %{description: "Server for users"}
+      )
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["users"])
+
+      assert [first | _] = result
+      assert first["tool"] == "list_users"
+    end
+
+    test "empty query is programmer fault" do
+      put_fake("srv", [{"t", fn _ -> "ok" end}])
+      {exec, _ctx} = build_exec()
+
+      assert {:programmer_fault, msg} = exec.(:search_tools, [""])
+      assert msg =~ "non-empty string"
+    end
+
+    test "whitespace-only query is programmer fault" do
+      put_fake("srv", [{"t", fn _ -> "ok" end}])
+      {exec, _ctx} = build_exec()
+
+      assert {:programmer_fault, msg} = exec.(:search_tools, ["   "])
+      assert msg =~ "non-empty string"
+    end
+
+    test "invalid limit is programmer fault" do
+      put_fake("srv", [{"t", fn _ -> "ok" end}])
+      {exec, _ctx} = build_exec()
+
+      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: 100}])
+      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: 0}])
+      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: "five"}])
+    end
+
+    test "invalid load option is programmer fault" do
+      put_fake("srv", [{"t", fn _ -> "ok" end}])
+      {exec, _ctx} = build_exec()
+
+      assert {:programmer_fault, msg} = exec.(:search_tools, ["q", %{load: "yes"}])
+      assert msg =~ ":load must be a boolean"
+    end
+
+    test "respects :limit option" do
+      tools = Enum.map(1..20, fn i -> {"tool_#{i}", fn _ -> "ok" end} end)
+      put_fake("big", tools)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["tool", %{limit: 3}])
+      assert length(result) <= 3
+    end
+
+    test "no matching results returns empty list" do
+      put_fake("srv", [{"alpha", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["zzzznonexistent"])
+      assert result == []
+    end
+
+    test "server-level matches for unloaded upstreams" do
+      config = tools_config(%{"t" => fn _ -> "ok" end})
+
+      :ok =
+        Registry.put_fake(
+          "github",
+          Map.put(config, :metadata, %{description: "GitHub API"}),
+          @registry_name
+        )
+
+      # Don't ensure_started — stays unloaded
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["github"])
+
+      assert [_ | _] = result
+      server_match = Enum.find(result, &(&1["tool"] == nil))
+      assert server_match != nil
+      assert server_match["server"] == "github"
+      assert server_match["catalog_loaded"] == false
+      assert server_match["next"] =~ "catalog/list-tools"
+    end
+
+    test ":load true loads catalogs and returns tool-level matches" do
+      config = tools_config(%{"search_issues" => fn _ -> "ok" end})
+
+      :ok =
+        Registry.put_fake(
+          "github",
+          Map.put(config, :metadata, %{description: "GitHub"}),
+          @registry_name
+        )
+
+      # Don't ensure_started — stays unloaded until :load true
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search", %{load: true}])
+
+      assert [_ | _] = result
+      tool_match = Enum.find(result, &(&1["tool"] == "search_issues"))
+      assert tool_match != nil
+      assert tool_match["catalog_loaded"] == true
+    end
+
+    test "multi-server search returns results from all loaded servers" do
+      put_fake("github", [{"search_issues", fn _ -> "ok" end}])
+      put_fake("linear", [{"search_tickets", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search"])
+
+      servers = Enum.map(result, & &1["server"]) |> Enum.uniq()
+      assert "github" in servers
+      assert "linear" in servers
+    end
+
+    test "result includes catalog_loaded field" do
+      put_fake("srv", [{"tool_a", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["tool"])
+
+      assert [first | _] = result
+      assert first["catalog_loaded"] == true
+    end
+
+    test "result-size truncation via max_catalog_result_bytes" do
+      tools = Enum.map(1..20, fn i -> {"search_tool_#{i}", fn _ -> "ok" end} end)
+      put_fake("big", tools)
+
+      CatalogConfig.set(%{max_catalog_result_bytes: 500})
+      {exec, _ctx} = build_exec()
+      result = exec.(:search_tools, ["search"])
+
+      case result do
+        {:ok, items} ->
+          assert length(items) < 20
+
+        {:world_fault, :catalog_result_too_large} ->
+          :ok
+      end
+    end
+
+    test "camelCase tool names are tokenized correctly" do
+      put_fake("srv", [
+        {"getIssueComments", fn _ -> "ok" end},
+        {"listPullRequests", fn _ -> "ok" end}
+      ])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["issue"])
+
+      assert [first | _] = result
+      assert first["tool"] == "getIssueComments"
+    end
+  end
+
+  # ============================================================
   # catalog/describe-tool
   # ============================================================
 

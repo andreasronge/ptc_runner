@@ -100,7 +100,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # ============================================================
   # Catalog builtins: catalog/summary, catalog/list-servers,
-  #   catalog/list-tools, catalog/describe-tool
+  #   catalog/list-tools, catalog/describe-tool, catalog/search-tools
   # ============================================================
 
   defp do_eval({:catalog_summary}, %EvalContext{} = eval_ctx) do
@@ -121,6 +121,13 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:catalog_describe_tool, arg_asts}, %EvalContext{} = eval_ctx) do
     case eval_all(arg_asts, eval_ctx) do
       {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :describe_tool, args)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp do_eval({:catalog_search_tools, arg_asts}, %EvalContext{} = eval_ctx) do
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :search_tools, args)
       {:error, _} = err -> err
     end
   end
@@ -1394,5 +1401,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp catalog_op_args(:list_tools, [server]), do: %{server: server}
   defp catalog_op_args(:list_tools, [server, opts]), do: %{server: server, opts: opts}
   defp catalog_op_args(:describe_tool, [server, tool]), do: %{server: server, tool: tool}
+  defp catalog_op_args(:search_tools, [query]), do: %{query: query}
+  defp catalog_op_args(:search_tools, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(_, args), do: %{args: args}
 end

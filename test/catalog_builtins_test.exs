@@ -103,6 +103,32 @@ defmodule PtcRunner.CatalogBuiltinsTest do
               result
           end
 
+        {:search_tools, [query]} ->
+          {:ok,
+           Map.get(overrides, {:search_tools, query}, [
+             %{
+               "server" => "github",
+               "tool" => "search",
+               "summary" => "Search things",
+               "arg_keys" => ["query"],
+               "read_only" => true,
+               "catalog_loaded" => true
+             }
+           ])}
+
+        {:search_tools, [query, _opts]} ->
+          {:ok,
+           Map.get(overrides, {:search_tools, query}, [
+             %{
+               "server" => "github",
+               "tool" => "search",
+               "summary" => "Search things",
+               "arg_keys" => ["query"],
+               "read_only" => true,
+               "catalog_loaded" => true
+             }
+           ])}
+
         _ ->
           {:programmer_fault, "unknown operation: #{inspect(operation)}"}
       end
@@ -154,10 +180,43 @@ defmodule PtcRunner.CatalogBuiltinsTest do
       assert step.return["tool"] == "search"
     end
 
+    test "catalog/search-tools with 1 arg (query)" do
+      {:ok, step} =
+        Lisp.run(~s|(catalog/search-tools "github")|, catalog_exec: mock_catalog_exec())
+
+      assert is_list(step.return)
+    end
+
+    test "catalog/search-tools with 2 args (query + opts)" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(catalog/search-tools "github" {:limit 5})|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert is_list(step.return)
+    end
+
+    test "catalog/search-tools with 0 args produces arity error" do
+      {:error, step} = Lisp.run("(catalog/search-tools)", catalog_exec: mock_catalog_exec())
+      assert step.fail.message =~ "catalog/search-tools"
+    end
+
+    test "catalog/search-tools with 3 args produces arity error" do
+      {:error, step} =
+        Lisp.run(
+          ~s|(catalog/search-tools "a" "b" "c")|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert step.fail.message =~ "catalog/search-tools"
+    end
+
     test "unknown catalog member produces error" do
       {:error, step} = Lisp.run("(catalog/foo)", catalog_exec: mock_catalog_exec())
       assert step.fail.message =~ "Unknown catalog function: catalog/foo"
       assert step.fail.message =~ "catalog/summary"
+      assert step.fail.message =~ "catalog/search-tools"
     end
 
     test "catalog/summary with args produces arity error" do
@@ -225,6 +284,11 @@ defmodule PtcRunner.CatalogBuiltinsTest do
 
     test "catalog/describe-tool without catalog_exec raises programmer fault" do
       {:error, step} = Lisp.run(~s|(catalog/describe-tool "github" "search")|)
+      assert step.fail.message =~ "aggregator mode"
+    end
+
+    test "catalog/search-tools without catalog_exec raises programmer fault" do
+      {:error, step} = Lisp.run(~s|(catalog/search-tools "github")|)
       assert step.fail.message =~ "aggregator mode"
     end
   end
@@ -295,6 +359,16 @@ defmodule PtcRunner.CatalogBuiltinsTest do
         )
 
       assert step.return == ["search", "get"]
+    end
+
+    test "catalog/search-tools results can be mapped" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(map :tool (catalog/search-tools "github"))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert is_list(step.return)
     end
 
     test "catalog results survive nil check with or" do

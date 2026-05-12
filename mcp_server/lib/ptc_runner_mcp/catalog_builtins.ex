@@ -97,6 +97,15 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
+  defp dispatch(:search_tools, [query | rest], call_context, registry, catalog_config) do
+    opts = parse_search_tools_opts(rest)
+
+    with :ok <- validate_query_string(query),
+         :ok <- validate_search_tools_opts(opts) do
+      do_search_tools(query, opts, call_context, registry, catalog_config)
+    end
+  end
+
   defp dispatch(operation, _args, _call_context, _registry, _catalog_config) do
     {:programmer_fault, "unknown catalog operation: #{operation}"}
   end
@@ -144,6 +153,165 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       {:world_fault, _} = wf ->
         wf
     end
+  end
+
+  # ----------------------------------------------------------------
+  # search-tools implementation
+  # ----------------------------------------------------------------
+
+  defp do_search_tools(query, opts, call_context, registry, catalog_config) do
+    limit = Map.get(opts, :limit, 8)
+    load? = Map.get(opts, :load, false)
+    query_tokens = tokenize(query)
+
+    all_info = all_server_info(registry)
+
+    {loaded_servers, unloaded_servers} =
+      Enum.split_with(all_info, & &1.catalog_loaded)
+
+    loaded_results =
+      Enum.flat_map(loaded_servers, fn info ->
+        case Registry.cached_tools(info.name, registry) do
+          tools when is_list(tools) ->
+            score_tools(info, tools, query_tokens)
+
+          nil ->
+            []
+        end
+      end)
+
+    {extra_loaded_results, unloaded_results} =
+      if load? do
+        newly_loaded =
+          Enum.flat_map(unloaded_servers, fn info ->
+            case get_tools_for_server(info.name, call_context, registry) do
+              {:ok, tools} -> score_tools(info, tools, query_tokens)
+              {:world_fault, _} -> []
+            end
+          end)
+
+        {newly_loaded, []}
+      else
+        server_level =
+          unloaded_servers
+          |> Enum.map(fn info -> score_server_level(info, query_tokens) end)
+          |> Enum.filter(fn {score, _entry} -> score > 0 end)
+          |> Enum.map(fn {score, entry} -> {score, entry} end)
+
+        {[], server_level}
+      end
+
+    all_results =
+      (loaded_results ++ extra_loaded_results ++ unloaded_results)
+      |> Enum.sort_by(fn {score, entry} ->
+        {-score, entry["server"] || "", entry["tool"] || ""}
+      end)
+      |> Enum.take(limit)
+      |> Enum.map(fn {_score, entry} -> entry end)
+
+    maybe_cap_list_result(all_results, catalog_config.max_catalog_result_bytes)
+  end
+
+  defp score_tools(server_info, tools, query_tokens) do
+    server_tokens = tokenize(server_info.name)
+
+    server_desc_tokens =
+      tokenize(server_info.description || "") ++
+        tokenize_capabilities(server_info.capabilities)
+
+    Enum.map(tools, fn tool ->
+      tool_name = tool_name_of(tool)
+      tool_desc = tool_description(tool)
+      arg_keys = tool_arg_keys(tool)
+      annotations = tool_annotations(tool)
+
+      tool_name_tokens = tokenize(tool_name)
+      tool_desc_tokens = tokenize(tool_desc)
+      arg_tokens = Enum.flat_map(arg_keys, &tokenize/1)
+      annotation_tokens = tokenize_annotations(annotations)
+
+      name_score =
+        score_tokens(query_tokens, server_tokens, 2) +
+          score_tokens(query_tokens, tool_name_tokens, 2)
+
+      desc_score =
+        score_tokens(query_tokens, server_desc_tokens, 0) +
+          score_tokens(query_tokens, tool_desc_tokens, 0) +
+          score_tokens(query_tokens, arg_tokens, 0) +
+          score_tokens(query_tokens, annotation_tokens, 0)
+
+      total = name_score + desc_score
+
+      entry = compact_tool_entry(server_info.name, tool) |> Map.put("catalog_loaded", true)
+      {total, entry}
+    end)
+    |> Enum.filter(fn {score, _} -> score > 0 end)
+  end
+
+  defp score_server_level(server_info, query_tokens) do
+    server_tokens = tokenize(server_info.name)
+
+    desc_tokens =
+      tokenize(server_info.description || "") ++
+        tokenize_capabilities(server_info.capabilities)
+
+    name_score = score_tokens(query_tokens, server_tokens, 2)
+    desc_score = score_tokens(query_tokens, desc_tokens, 0)
+    total = name_score + desc_score
+
+    entry = %{
+      "server" => server_info.name,
+      "tool" => nil,
+      "summary" => "#{server_info.description || server_info.name}. Catalog not loaded.",
+      "catalog_loaded" => false,
+      "next" => "(catalog/list-tools \"#{server_info.name}\" {:limit 20})"
+    }
+
+    {total, entry}
+  end
+
+  defp score_tokens(query_tokens, target_tokens, name_boost) do
+    Enum.reduce(query_tokens, 0, fn qt, acc ->
+      best =
+        Enum.reduce(target_tokens, 0, fn tt, best ->
+          cond do
+            qt == tt -> max(best, 10 + name_boost)
+            String.starts_with?(tt, qt) -> max(best, 5 + name_boost)
+            String.contains?(tt, qt) -> max(best, 2 + name_boost)
+            true -> best
+          end
+        end)
+
+      acc + best
+    end)
+  end
+
+  defp tokenize(text) when is_binary(text) do
+    text
+    |> split_camel_case()
+    |> String.replace(~r/[_\-\s]+/, " ")
+    |> String.downcase()
+    |> String.split()
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp tokenize(_), do: []
+
+  defp split_camel_case(text) do
+    Regex.replace(~r/([a-z])([A-Z])/, text, "\\1 \\2")
+  end
+
+  defp tokenize_capabilities(caps) when is_list(caps) do
+    Enum.flat_map(caps, &tokenize(to_string(&1)))
+  end
+
+  defp tokenize_capabilities(_), do: []
+
+  defp tokenize_annotations(annotations) do
+    annotations
+    |> Enum.flat_map(fn {k, v} ->
+      tokenize(to_string(k)) ++ tokenize(to_string(v))
+    end)
   end
 
   # ----------------------------------------------------------------
@@ -241,11 +409,50 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
+  defp parse_search_tools_opts([]), do: %{}
+
+  defp parse_search_tools_opts([opts]) when is_map(opts) do
+    Map.new(opts, fn
+      {k, v} when is_atom(k) -> {k, v}
+      {k, v} when is_binary(k) -> {safe_to_atom(k), v}
+      kv -> kv
+    end)
+  end
+
+  defp parse_search_tools_opts(_), do: %{}
+
+  defp validate_search_tools_opts(opts) do
+    limit = Map.get(opts, :limit, 8)
+    load = Map.get(opts, :load, false)
+
+    cond do
+      not is_integer(limit) or limit < 1 or limit > 50 ->
+        {:programmer_fault,
+         "catalog/search-tools :limit must be an integer 1..50, got #{inspect(limit)}"}
+
+      not is_boolean(load) ->
+        {:programmer_fault, "catalog/search-tools :load must be a boolean, got #{inspect(load)}"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_query_string(value) do
+    if is_binary(value) and String.trim(value) != "" do
+      :ok
+    else
+      {:programmer_fault,
+       "catalog/search-tools requires query (non-empty string), got #{inspect(value)}"}
+    end
+  end
+
   defp validate_string_arg(value, form, arg_name) do
     if is_binary(value) and value != "" do
       :ok
     else
-      {:programmer_fault, "#{form} requires #{arg_name} (non-empty string), got #{inspect(value)}"}
+      {:programmer_fault,
+       "#{form} requires #{arg_name} (non-empty string), got #{inspect(value)}"}
     end
   end
 
@@ -363,7 +570,8 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "tool" => tool_name_of(tool),
       "summary" => tool_description(tool),
       "arg_keys" => tool_arg_keys(tool),
-      "read_only" => Map.get(annotations, "readOnlyHint", Map.get(annotations, :readOnlyHint, true))
+      "read_only" =>
+        Map.get(annotations, "readOnlyHint", Map.get(annotations, :readOnlyHint, true))
     }
   end
 
@@ -387,8 +595,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "input_schema" => input_schema,
       "arg_keys" => arg_keys,
       "annotations" => annotations,
-      "call_example" =>
-        "(tool/mcp-call {:server \"#{server}\" :tool \"#{name}\"#{call_args}})",
+      "call_example" => "(tool/mcp-call {:server \"#{server}\" :tool \"#{name}\"#{call_args}})",
       "response_notes" =>
         "Returns an MCP content envelope. Use mcp/text or mcp/json helpers according to the upstream result shape."
     }
