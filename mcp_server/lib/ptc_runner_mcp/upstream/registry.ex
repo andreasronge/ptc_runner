@@ -59,8 +59,8 @@ defmodule PtcRunnerMcp.Upstream.Registry do
 
   @doc """
   Starts the Registry. Accepts `:upstreams` (a list of
-  `%{name: ..., impl: ..., config: ...}` entries used to bootstrap
-  the routing table; one Connection is started per entry) and
+  `%{name: ..., impl: ..., config: ..., metadata: ...}` entries used to
+  bootstrap the routing table; one Connection is started per entry) and
   `:name` (defaults to `__MODULE__`).
   """
   @spec start_link(keyword()) :: GenServer.on_start()

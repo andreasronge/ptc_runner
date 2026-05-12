@@ -138,12 +138,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   Renders the catalog from an explicit list of upstream snapshots.
 
   Each entry is
-  `%{name: String.t(), tools: [Upstream.tool_schema()] | nil, impl: module() | nil}`.
-  The `:impl` key is optional — when absent or `nil` the per-server
-  header has no `[transport: …]` annotation. When present and the
-  module is one of the recognised transports (`Upstream.Stdio` /
-  `Upstream.Http`), the header gains a `[transport: stdio|http]` tag
-  per §9.1.
+  `%{name: String.t(), tools: [Upstream.tool_schema()] | nil, impl: module() | nil, metadata: map()}`.
+  The `:impl` and `:metadata` keys are optional. When `:impl` is absent
+  or `nil` the per-server header has no `[transport: …]` annotation; when
+  present and the module is one of the recognised transports
+  (`Upstream.Stdio` / `Upstream.Http`), the header gains a
+  `[transport: stdio|http]` tag per §9.1.
 
   Used directly by tests to exercise the rendering rules without
   spinning up a Registry. `nil` for `:tools` means "no cached tools

@@ -820,8 +820,8 @@ defmodule PtcRunnerMcp.Application do
   end
 
   # Resolve the upstreams config per §5.1: flag → env → XDG default.
-  # Returns a list of `%{name: ..., impl: ..., config: ...}` entries,
-  # or `[]` when no source is found / the file is empty.
+  # Returns a list of `%{name: ..., impl: ..., config: ..., metadata: ...}`
+  # entries, or `[]` when no source is found / the file is empty.
   #
   # Phase 1a parses the config file but Phase 1a's only impl is the
   # in-process Fake — production users without upstreams configured
