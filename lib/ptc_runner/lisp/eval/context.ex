@@ -29,6 +29,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :user_ns,
     :env,
     :tool_exec,
+    :catalog_exec,
     :turn_history,
     :budget,
     :trace_context,
@@ -43,6 +44,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     prints: [],
     tool_calls: [],
     pmap_calls: [],
+    catalog_ops: [],
     tool_cache: %{},
     tools_meta: %{},
     locals: MapSet.new(),
@@ -116,11 +118,30 @@ defmodule PtcRunner.Lisp.Eval.Context do
           error_count: non_neg_integer()
         }
 
+  @typedoc """
+  Catalog operation record for tracing.
+
+  Fields:
+  - `operation`: Which catalog builtin was called
+  - `args`: Arguments passed to the builtin
+  - `outcome`: `:ok`, `:nil_world_fault`, or `:error`
+  - `reason`: Reason for nil/error outcome (e.g., `:catalog_cap_exhausted`)
+  - `duration_ms`: How long the operation took
+  """
+  @type catalog_op :: %{
+          operation: atom(),
+          args: map(),
+          outcome: :ok | :nil_world_fault | :error,
+          reason: atom() | nil,
+          duration_ms: non_neg_integer()
+        }
+
   @type t :: %__MODULE__{
           ctx: map(),
           user_ns: map(),
           env: map(),
           tool_exec: (String.t(), map() -> term()),
+          catalog_exec: (atom(), list() -> term()) | nil,
           turn_history: list(),
           budget: map() | nil,
           trace_context: trace_context(),
@@ -135,6 +156,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
+          catalog_ops: [catalog_op()],
           tool_cache: map(),
           tools_meta: %{String.t() => %{cache: boolean()}},
           strict_data: boolean()
@@ -177,6 +199,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
+      catalog_exec: Keyword.get(opts, :catalog_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
@@ -191,7 +214,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       strict_data: Keyword.get(opts, :strict_data, false),
       prints: [],
       tool_calls: [],
-      pmap_calls: []
+      pmap_calls: [],
+      catalog_ops: []
     }
   end
 
@@ -226,6 +250,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec append_pmap_call(t(), pmap_call()) :: t()
   def append_pmap_call(%__MODULE__{pmap_calls: pmap_calls} = context, pmap_call) do
     %{context | pmap_calls: [pmap_call | pmap_calls]}
+  end
+
+  @doc """
+  Appends a catalog operation record to the context.
+  """
+  @spec append_catalog_op(t(), catalog_op()) :: t()
+  def append_catalog_op(%__MODULE__{catalog_ops: catalog_ops} = context, catalog_op) do
+    %{context | catalog_ops: [catalog_op | catalog_ops]}
   end
 
   @doc """

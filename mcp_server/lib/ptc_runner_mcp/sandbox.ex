@@ -153,6 +153,7 @@ defmodule PtcRunnerMcp.Sandbox do
     #     `:mcp_no_tools`; Phase 1a flips it to `:mcp_aggregator` from
     #     an aggregator-mode handler.
     tools = Keyword.get(opts, :tools, [])
+    catalog_exec = Keyword.get(opts, :catalog_exec)
 
     # Phase 1a (`Plans/ptc-runner-mcp-aggregator.md` §10 / §11.5): the
     # aggregator request handler passes `profile: :mcp_aggregator` so
@@ -186,24 +187,28 @@ defmodule PtcRunnerMcp.Sandbox do
         div(Limits.program_memory_limit_bytes(), @bytes_per_word)
       )
 
-    base = [
-      caller: :mcp,
-      profile: profile,
-      memory: %{},
-      tools: tools,
-      tool_cache: %{},
-      context: context,
-      timeout: timeout_ms,
-      max_heap: max_heap_words,
-      # § 9.3: a `data/<key>` reference for an absent key must produce
-      # a runtime_error naming the binding, not silently return nil.
-      strict_data: true
-      # No :signature passed to Lisp.run/2 — MCP performs signature
-      # validation post-hoc via `PtcToolProtocol.validate_return/2` so
-      # parse errors are caught before permit acquisition (§ 9.4) and
-      # validation errors render through the MCP `validation_error`
-      # path with `to_json_value/1` for the `validated` field (§ 13).
-    ]
+    base =
+      [
+        caller: :mcp,
+        profile: profile,
+        memory: %{},
+        tools: tools,
+        tool_cache: %{},
+        context: context,
+        timeout: timeout_ms,
+        max_heap: max_heap_words,
+        # § 9.3: a `data/<key>` reference for an absent key must produce
+        # a runtime_error naming the binding, not silently return nil.
+        strict_data: true
+        # No :signature passed to Lisp.run/2 — MCP performs signature
+        # validation post-hoc via `PtcToolProtocol.validate_return/2` so
+        # parse errors are caught before permit acquisition (§ 9.4) and
+        # validation errors render through the MCP `validation_error`
+        # path with `to_json_value/1` for the `validated` field (§ 13).
+      ]
+      |> then(fn opts ->
+        if catalog_exec, do: Keyword.put(opts, :catalog_exec, catalog_exec), else: opts
+      end)
 
     # Phase 4: when called from a per-call worker (Stdio), `link: true`
     # tells the inner `PtcRunner.Sandbox` to spawn its child linked

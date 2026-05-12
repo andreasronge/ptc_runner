@@ -99,6 +99,33 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # ============================================================
+  # Catalog builtins: catalog/summary, catalog/list-servers,
+  #   catalog/list-tools, catalog/describe-tool
+  # ============================================================
+
+  defp do_eval({:catalog_summary}, %EvalContext{} = eval_ctx) do
+    invoke_catalog(eval_ctx, :summary, [])
+  end
+
+  defp do_eval({:catalog_list_servers}, %EvalContext{} = eval_ctx) do
+    invoke_catalog(eval_ctx, :list_servers, [])
+  end
+
+  defp do_eval({:catalog_list_tools, arg_asts}, %EvalContext{} = eval_ctx) do
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :list_tools, args)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp do_eval({:catalog_describe_tool, arg_asts}, %EvalContext{} = eval_ctx) do
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :describe_tool, args)
+      {:error, _} = err -> err
+    end
+  end
+
+  # ============================================================
   # Literals
   # ============================================================
 
@@ -1316,4 +1343,56 @@ defmodule PtcRunner.Lisp.Eval do
       end
     end)
   end
+
+  # ============================================================
+  # Catalog builtin dispatch
+  # ============================================================
+
+  defp invoke_catalog(%EvalContext{catalog_exec: nil}, _operation, _args) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "catalog/ builtins are only available in aggregator mode with configured upstreams"
+  end
+
+  defp invoke_catalog(%EvalContext{catalog_exec: catalog_exec} = eval_ctx, operation, args) do
+    start_time = System.monotonic_time(:millisecond)
+
+    case catalog_exec.(operation, args) do
+      {:ok, result} ->
+        duration_ms = System.monotonic_time(:millisecond) - start_time
+
+        op_record = %{
+          operation: operation,
+          args: catalog_op_args(operation, args),
+          outcome: :ok,
+          reason: nil,
+          duration_ms: duration_ms
+        }
+
+        {:ok, result, EvalContext.append_catalog_op(eval_ctx, op_record)}
+
+      {:world_fault, reason} ->
+        duration_ms = System.monotonic_time(:millisecond) - start_time
+
+        op_record = %{
+          operation: operation,
+          args: catalog_op_args(operation, args),
+          outcome: :nil_world_fault,
+          reason: reason,
+          duration_ms: duration_ms
+        }
+
+        {:ok, nil, EvalContext.append_catalog_op(eval_ctx, op_record)}
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp catalog_op_args(:summary, []), do: %{}
+  defp catalog_op_args(:list_servers, []), do: %{}
+  defp catalog_op_args(:list_tools, [server]), do: %{server: server}
+  defp catalog_op_args(:list_tools, [server, opts]), do: %{server: server, opts: opts}
+  defp catalog_op_args(:describe_tool, [server, tool]), do: %{server: server, tool: tool}
+  defp catalog_op_args(_, args), do: %{args: args}
 end

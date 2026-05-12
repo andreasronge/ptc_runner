@@ -310,7 +310,8 @@ defmodule PtcRunnerMcp.Upstream.Registry do
     {:ok, _pid} =
       start_connection(state.connection_supervisor, state.routing_id, name, Fake, config, self())
 
-    entry = %{impl: Fake, config: config, metadata: %{}, routing_id: state.routing_id}
+    metadata = Map.get(config, :metadata, %{})
+    entry = %{impl: Fake, config: config, metadata: metadata, routing_id: state.routing_id}
 
     {:reply, :ok, %{state | upstreams: Map.put(state.upstreams, name, entry)}}
   end
