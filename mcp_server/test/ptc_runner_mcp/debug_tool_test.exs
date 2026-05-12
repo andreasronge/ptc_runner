@@ -335,7 +335,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :full, trace_max_files: 1000})
     :ok = TraceHandler.attach()
     :ok = enable_debug()
 
@@ -351,7 +351,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     # An id with a ring record but no matching trace file → ring fallback.
     # (Stop the trace handler so the next call leaves no file, but the
     # ring still records it.)
-    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :full, trace_max_files: 1000})
     _ = call_execute("no-file-here", %{"program" => "(+ 9 9)"})
     # Manually remove any file that may have been written for it.
     hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("no-file-here")
@@ -368,7 +368,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :full, trace_max_files: 1000})
     :ok = enable_debug()
 
     hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("colliding")
@@ -435,7 +435,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
 
-    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :full, trace_max_files: 1000})
     :ok = enable_debug()
 
     hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("meta-id")
@@ -449,6 +449,35 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert g["found"] == true
     assert g["source"] == "trace_file"
     assert g["record"] == [%{"ok" => true}]
+  end
+
+  test "get: a trace from an earlier run is NOT inlined under a stricter --trace-payloads" do
+    dir = Path.join(System.tmp_dir!(), "ptc_dbg_stale_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    # Simulate a trace written by an earlier run at `--trace-payloads full`,
+    # carrying data a `none` server would never emit.
+    secret = "PRIOR_RUN_SECRET_xyz789"
+    hash8 = PtcRunnerMcp.TraceFile.request_id_hash8("stale-id")
+
+    File.write!(
+      Path.join(dir, "2026-05-11T00-00-00.000Z-#{hash8}-ok.jsonl"),
+      Jason.encode!(%{"program" => "(do #{secret})", "context" => %{"token" => secret}}) <> "\n"
+    )
+
+    # This run is at the strictest policy.
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :none, trace_max_files: 1000})
+    :ok = enable_debug()
+
+    env = call_debug(10, %{"op" => "get", "request_id" => "stale-id"})
+    g = sc(env)
+    assert g["found"] == true
+    assert g["source"] == "trace_file"
+    refute Map.has_key?(g, "record")
+    assert g["note"] =~ "not inlined"
+    # The prior-run payload is never read, so it cannot leak through ptc_debug.
+    refute Jason.encode!(env) =~ secret
   end
 
   test "the response cap accounts for the JSON-RPC frame (large request id)" do
