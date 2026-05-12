@@ -5,7 +5,8 @@ PTC-Lisp is a deterministic, sandboxed subset of Clojure with a small Java-inter
 ## Non-obvious bits
 
 - **`context` keys are bound under the `data/` namespace.** Pass `{"records": [...]}`, reference as `data/records` inside the program. There is no `context` binding.
-- **`signature`** is a return-type schema, e.g. `() -> {count :int}` or `() -> [{name :string, score :int}]`. Supplying it makes the response carry a structured `validated` JSON value — the only path for a caller to receive programmatic data. Without it, the response only contains an LLM-readable preview.
+- **`output_schema`** is a JSON Schema for the return type. Supplying it makes the response carry a structured `validated` JSON value — the only path for a caller to receive programmatic data. Without it, the response only contains an LLM-readable preview. Supported types: `string`, `integer`, `number`, `boolean`, `array` (with `items`), `object` (with `properties`/`required`).
+- **`signature`** (advanced/legacy) is the PTC-internal return-type syntax, e.g. `() -> {count :int}`. Prefer `output_schema` above. Mutually exclusive with `output_schema`.
 - **`(fail v)`** terminates with an error value when you want to surface a domain failure to the caller.
 - **JSON**: `(json/parse-string s)` / `(json/generate-string v)` are available; `nil` on failure.
 
@@ -21,8 +22,8 @@ If you reach for something that isn't there, the response will say so clearly �
 ## Example
 
 ```
-;; context:   {"orders": [{"total": 12}, {"total": 7}, {"total": 33}]}
-;; signature: "() -> {count :int, sum :int}"
+;; context:       {"orders": [{"total": 12}, {"total": 7}, {"total": 33}]}
+;; output_schema: {"type": "object", "properties": {"count": {"type": "integer"}, "sum": {"type": "integer"}}, "required": ["count", "sum"]}
 (let [big (filter #(> (get % "total") 10) data/orders)]
   {:count (count big)
    :sum   (reduce + (map #(get % "total") big))})

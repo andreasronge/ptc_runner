@@ -197,6 +197,123 @@ defmodule PtcRunner.SubAgent.Signature do
   def returns_list?({:signature, _params, {:list, _}}), do: true
   def returns_list?(_), do: false
 
+  @supported_scalar_keys MapSet.new(~w(type description))
+  @supported_array_keys MapSet.new(~w(type description items))
+  @supported_object_keys MapSet.new(~w(type description properties required additionalProperties))
+
+  @doc """
+  Convert a JSON Schema subset map to a PTC signature return type.
+
+  Inverse of `type_to_json_schema/1`. Supports scalar types (`string`,
+  `integer`, `number`, `boolean`), `array` with `items`, and `object`
+  with `properties`/`required`. Unsupported JSON Schema features
+  (combinators, `$ref`, `enum`, `pattern`, etc.) return `{:error, reason}`.
+
+  ## Examples
+
+      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "integer"})
+      {:ok, :int}
+
+      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "array", "items" => %{"type" => "string"}})
+      {:ok, {:list, :string}}
+
+      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"count" => %{"type" => "integer"}}, "required" => ["count"]})
+      {:ok, {:map, [{"count", :int}]}}
+
+      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}})
+      {:ok, {:map, [{"name", {:optional, :string}}]}}
+
+  """
+  @spec from_json_schema(map()) :: {:ok, type()} | {:error, String.t()}
+  def from_json_schema(%{"type" => "string"} = s), do: check_scalar_keys(s, :string)
+  def from_json_schema(%{"type" => "integer"} = s), do: check_scalar_keys(s, :int)
+  def from_json_schema(%{"type" => "number"} = s), do: check_scalar_keys(s, :float)
+  def from_json_schema(%{"type" => "boolean"} = s), do: check_scalar_keys(s, :bool)
+  def from_json_schema(%{"type" => "array"} = s), do: convert_array_schema(s)
+  def from_json_schema(%{"type" => "object"} = s), do: convert_object_schema(s)
+
+  def from_json_schema(%{"type" => type}) when is_binary(type),
+    do: {:error, "unsupported type: #{inspect(type)}"}
+
+  def from_json_schema(schema) when is_map(schema),
+    do: {:error, "schema must have a \"type\" key"}
+
+  def from_json_schema(other),
+    do: {:error, "schema must be a JSON object, got #{inspect(other)}"}
+
+  defp check_scalar_keys(schema, type) do
+    case check_unsupported_keys(schema, @supported_scalar_keys) do
+      :ok -> {:ok, type}
+      error -> error
+    end
+  end
+
+  defp convert_array_schema(schema) do
+    with :ok <- check_unsupported_keys(schema, @supported_array_keys) do
+      case Map.fetch(schema, "items") do
+        {:ok, items} when is_map(items) ->
+          case from_json_schema(items) do
+            {:ok, inner} -> {:ok, {:list, inner}}
+            error -> error
+          end
+
+        {:ok, _} ->
+          {:error, "array \"items\" must be a JSON object"}
+
+        :error ->
+          {:error, "array type requires an \"items\" key"}
+      end
+    end
+  end
+
+  defp convert_object_schema(schema) do
+    with :ok <- check_unsupported_keys(schema, @supported_object_keys) do
+      case Map.fetch(schema, "properties") do
+        {:ok, properties} when is_map(properties) ->
+          required = Map.get(schema, "required", [])
+          convert_object_fields(properties, required)
+
+        {:ok, _} ->
+          {:error, "object \"properties\" must be a JSON object"}
+
+        :error ->
+          {:ok, :map}
+      end
+    end
+  end
+
+  defp convert_object_fields(properties, required) when is_list(required) do
+    properties
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, []}, fn {name, sub_schema}, {:ok, acc} ->
+      case from_json_schema(sub_schema) do
+        {:ok, type} ->
+          field_type = if name in required, do: type, else: {:optional, type}
+          {:cont, {:ok, [{name, field_type} | acc]}}
+
+        {:error, reason} ->
+          {:halt, {:error, "property #{inspect(name)}: #{reason}"}}
+      end
+    end)
+    |> case do
+      {:ok, fields} -> {:ok, {:map, Enum.reverse(fields)}}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp convert_object_fields(_properties, _required),
+    do: {:error, "\"required\" must be an array of strings"}
+
+  defp check_unsupported_keys(schema, allowed) do
+    extra = schema |> Map.keys() |> Enum.reject(&MapSet.member?(allowed, &1))
+
+    if extra == [] do
+      :ok
+    else
+      {:error, "unsupported JSON Schema key(s): #{Enum.join(Enum.sort(extra), ", ")}"}
+    end
+  end
+
   @doc false
   @spec type_to_json_schema(type()) :: map()
   def type_to_json_schema(:string), do: %{"type" => "string"}
