@@ -933,4 +933,40 @@ defmodule PtcRunnerMcp.CatalogTest do
       assert Catalog.frozen() == ""
     end
   end
+
+  describe "metadata in snapshot entries" do
+    test "render_entries/1 ignores metadata (no rendering change in this phase)" do
+      entries = [
+        %{
+          name: "github",
+          tools: [%{name: "search", input_schema: %{}, description: "Search"}],
+          impl: PtcRunnerMcp.Upstream.Stdio,
+          metadata: %{description: "GitHub MCP server", capabilities: ["issues"]}
+        }
+      ]
+
+      output = Catalog.render_entries(entries)
+      assert output =~ "github [transport: stdio]:"
+      assert output =~ "search()"
+    end
+
+    test "frozen_snapshot preserves metadata" do
+      entries = [
+        %{
+          name: "linear",
+          tools: [],
+          impl: PtcRunnerMcp.Upstream.Http,
+          metadata: %{description: "Linear tracker", capabilities: ["issues", "projects"]}
+        }
+      ]
+
+      Catalog.freeze_snapshot(entries)
+      [snapshot_entry] = Catalog.frozen_snapshot()
+
+      assert snapshot_entry.metadata == %{
+               description: "Linear tracker",
+               capabilities: ["issues", "projects"]
+             }
+    end
+  end
 end
