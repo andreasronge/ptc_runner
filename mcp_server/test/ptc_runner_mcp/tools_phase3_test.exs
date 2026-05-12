@@ -62,21 +62,19 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       assert is_pid(pid)
       {:ok, _} = Connection.ensure_started(pid)
 
-      # Production boot freezes the catalog after eager-start; tests
-      # do the same explicitly because they bypass the full supervisor.
+      # Production boot freezes both the rendered string and the
+      # structured snapshot; tests do the same explicitly because
+      # they bypass the full supervisor.
+      snapshot = Catalog.snapshot(@registry_name)
       :ok = Catalog.freeze(Catalog.render(@registry_name))
+      :ok = Catalog.freeze_snapshot(snapshot)
 
       entry = Tools.tool_entry()
       description = entry["description"]
 
       assert is_binary(description)
-      assert description =~ "alpha:"
-      assert description =~ "ping(msg: string) -> :unknown_content - Ping the upstream"
-
-      assert String.trim_trailing(description)
-             |> String.ends_with?(
-               "alpha:\n  ping(msg: string) -> :unknown_content - Ping the upstream"
-             )
+      assert description =~ "- alpha:"
+      assert description =~ "- ping: Ping the upstream"
     end
 
     test "aggregator-mode tool_entry uses the aggregator outputSchema/annotations" do
@@ -148,12 +146,14 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       # The "frozen at boot" snapshot captures cached_tools=nil for this
       # case — the eager-start branch failed and we still froze.
       :ok = UpstreamRegistry.put_fake("beta", %{tools: %{}}, @registry_name)
+      snapshot = Catalog.snapshot(@registry_name)
       :ok = Catalog.freeze(Catalog.render(@registry_name))
+      :ok = Catalog.freeze_snapshot(snapshot)
 
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert description =~ "beta:\n  (unavailable at startup)"
+      assert description =~ "Catalog loads on first use."
     end
   end
 
@@ -168,11 +168,13 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       {:ok, _} = Connection.ensure_started(pid_a)
       {:ok, _} = Connection.ensure_started(pid_b)
 
+      catalog_snapshot = Catalog.snapshot(@registry_name)
       :ok = Catalog.freeze(Catalog.render(@registry_name))
+      :ok = Catalog.freeze_snapshot(catalog_snapshot)
 
       snapshot = Tools.tool_entry()["description"]
-      assert snapshot =~ "alpha:"
-      assert snapshot =~ "beta:"
+      assert snapshot =~ "- alpha:"
+      assert snapshot =~ "- beta:"
 
       # Kill the underlying impl pid for `beta`. Pre-fix: the live
       # `Catalog.render` path would observe `cached_tools = nil` for
