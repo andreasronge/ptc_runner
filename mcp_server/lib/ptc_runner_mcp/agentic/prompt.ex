@@ -41,7 +41,7 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
       agentic_preamble(opts),
       optional_section(prefix),
       dialect_authoring_card(),
-      mcp_call_card(),
+      mcp_call_card(catalog),
       upstream_catalog(catalog),
       optional_section(suffix),
       final_recap()
@@ -138,19 +138,31 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
     |> String.trim()
   end
 
-  defp mcp_call_card do
+  defp mcp_call_card(catalog) do
     """
     ptc_task MCP-call contract:
     Call upstream tools with `(tool/mcp-call {:server "<configured-name>" :tool "<upstream-tool>" :args {}})`.
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
     In `ptc_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is the upstream MCP envelope. Apply `(mcp/text ...)` or `(mcp/json ...)` to `(:value r)`, not to `r`.
-    Prefer `(mcp/text ...)` for human-readable upstream text. Use `(mcp/json ...)` only when the catalog, output hint, or tool description says JSON or structured data.
+    Prefer `(mcp/text ...)` for human-readable upstream text and use string helpers on it. Do not parse `mcp/text` as JSON unless the text itself is JSON.
+    Use `(mcp/json ...)` only when the catalog, output hint, or tool description says JSON or structured data.
+    #{unknown_content_guidance(catalog)}
     If `(mcp/json ...)` returns nil or an unexpected shape, inspect `(mcp/text ...)` before failing.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.
     Programmer faults such as malformed arguments, unknown servers, or unknown tools terminate the generated program.
     """
     |> String.trim()
   end
+
+  defp unknown_content_guidance(catalog) when is_binary(catalog) do
+    if String.contains?(catalog, "-> :unknown_content") do
+      "For `-> :unknown_content` tools, inspect the MCP envelope before assuming JSON."
+    else
+      ""
+    end
+  end
+
+  defp unknown_content_guidance(_), do: ""
 
   defp upstream_catalog(""), do: "Upstream catalog:\n(no upstream catalog frozen)"
   defp upstream_catalog(catalog), do: "Upstream catalog:\n#{catalog}"

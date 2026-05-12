@@ -84,7 +84,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       output = Catalog.render_entries([%{name: "github", tools: tools}])
 
       assert output ==
-               "github:\n  search_repos(query: string, limit: integer?) - Search repositories"
+               "github:\n  search_repos(query: string, limit: integer?) -> :unknown_content - Search repositories"
     end
 
     test "all-required args render with no `?`" do
@@ -181,7 +181,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       assert output =~ "lst: array?"
     end
 
-    test "schema with no properties renders as `tool_name() - description`" do
+    test "schema with no properties renders as `tool_name() -> :unknown_content - description`" do
       tools = [
         %{
           name: "ping",
@@ -192,7 +192,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       output = Catalog.render_entries([%{name: "fs", tools: tools}])
 
-      assert output == "fs:\n  ping() - Ping the server"
+      assert output == "fs:\n  ping() -> :unknown_content - Ping the server"
     end
 
     test "renders compact PTC-Lisp output hints when output_schema is available" do
@@ -222,7 +222,7 @@ defmodule PtcRunnerMcp.CatalogTest do
                "fs:\n  list_entries(path: string) -> {entries [:string], truncated :bool?} - List entries"
     end
 
-    test "does not invent output hints when output_schema is absent" do
+    test "marks unknown content when output_schema is absent" do
       tools = [
         %{
           name: "list_directory",
@@ -238,7 +238,44 @@ defmodule PtcRunnerMcp.CatalogTest do
       output = Catalog.render_entries([%{name: "fs", tools: tools}])
 
       assert output ==
-               "fs:\n  list_directory(path: string) - Results use [FILE] and [DIR] prefixes"
+               "fs:\n  list_directory(path: string) -> :unknown_content - Results use [FILE] and [DIR] prefixes"
+    end
+
+    test "marks nil or malformed output schemas as unknown content" do
+      tools = [
+        %{
+          name: "nil_schema",
+          input_schema: %{},
+          output_schema: nil,
+          description: ""
+        },
+        %{
+          name: "string_schema",
+          input_schema: %{},
+          output_schema: "not-a-schema",
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "fs", tools: tools}])
+
+      assert output =~ "nil_schema() -> :unknown_content"
+      assert output =~ "string_schema() -> :unknown_content"
+    end
+
+    test "empty output schema remains a schema-backed unknown type" do
+      tools = [
+        %{
+          name: "empty_schema",
+          input_schema: %{},
+          output_schema: %{},
+          description: ""
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "fs", tools: tools}])
+
+      assert output == "fs:\n  empty_schema() -> :any"
     end
   end
 
@@ -272,7 +309,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       output = Catalog.render_entries([%{name: "linear", tools: tools}])
 
       assert output ==
-               "linear:\n  list_tickets(status: enum<string>) - List tickets"
+               "linear:\n  list_tickets(status: enum<string>) -> :unknown_content - List tickets"
     end
 
     test "schema with type+const renders as `const<json-encoded-value>`" do
@@ -298,7 +335,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       # number / boolean consts that render bare.
       assert output ==
                ~S|fs:
-  set_mode(mode: const<"fixed">) - Set the fixed mode|
+  set_mode(mode: const<"fixed">) -> :unknown_content - Set the fixed mode|
     end
 
     test "heterogeneous enum renders as bare `enum` (no `<type>` subscript)" do
@@ -320,7 +357,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       # Mixed-type enum cannot be summarized with one primitive
       # subscript without lying. Bare `enum` is the honest label.
-      assert output == "u:\n  x(v: enum) - Mixed-type enum"
+      assert output == "u:\n  x(v: enum) -> :unknown_content - Mixed-type enum"
     end
 
     test "enum constraint without an explicit `type` field still renders as `enum<type>`" do
@@ -468,7 +505,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       output = Catalog.render_entries([%{name: "u", tools: tools}])
 
-      assert output == "u:\n  short() - Hello world"
+      assert output == "u:\n  short() -> :unknown_content - Hello world"
     end
 
     test "description longer than 80 chars hard-truncates with ellipsis suffix" do
@@ -523,7 +560,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       output = Catalog.render_entries([%{name: "u", tools: tools}])
 
-      assert output == "u:\n  no_desc(x: string)"
+      assert output == "u:\n  no_desc(x: string) -> :unknown_content"
     end
   end
 
@@ -585,11 +622,11 @@ defmodule PtcRunnerMcp.CatalogTest do
       expected =
         """
         github:
-          search_repos(query: string, limit: integer?) - Search repositories
-          get_pr(owner: string, repo: string, number: integer) - Get a pull request
+          search_repos(query: string, limit: integer?) -> :unknown_content - Search repositories
+          get_pr(owner: string, repo: string, number: integer) -> :unknown_content - Get a pull request
 
         linear:
-          list_tickets(project: string?, status: string?) - List Linear tickets
+          list_tickets(project: string?, status: string?) -> :unknown_content - List Linear tickets
         """
         |> String.trim_trailing()
 
@@ -611,7 +648,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       output = Catalog.render_entries([%{name: "u", tools: tools}])
 
-      assert output == "u:\n  x(q: string) - x"
+      assert output == "u:\n  x(q: string) -> :unknown_content - x"
     end
 
     test "empty cached_tools mixes with populated ones — placeholder only for the bad upstream" do
@@ -628,7 +665,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       output = Catalog.render_entries(entries)
 
       assert output ==
-               "alpha:\n  ping() - Ping\n\nbeta:\n  (unavailable at startup)"
+               "alpha:\n  ping() -> :unknown_content - Ping\n\nbeta:\n  (unavailable at startup)"
     end
   end
 
@@ -665,7 +702,7 @@ defmodule PtcRunnerMcp.CatalogTest do
         ])
 
       assert output =~ "fs [transport: stdio]:"
-      assert output =~ "ping() - Ping"
+      assert output =~ "ping() -> :unknown_content - Ping"
     end
 
     test "single http upstream gets `[transport: http]`" do
@@ -677,7 +714,7 @@ defmodule PtcRunnerMcp.CatalogTest do
         ])
 
       assert output =~ "github [transport: http]:"
-      assert output =~ "search_repos() - Search"
+      assert output =~ "search_repos() -> :unknown_content - Search"
     end
 
     test "Fake impl renders WITHOUT a transport tag" do
@@ -695,7 +732,7 @@ defmodule PtcRunnerMcp.CatalogTest do
           %{name: "u", tools: tools, impl: PtcRunnerMcp.Upstream.Fake}
         ])
 
-      assert output == "u:\n  ping() - Ping"
+      assert output == "u:\n  ping() -> :unknown_content - Ping"
       refute output =~ "[transport:"
     end
 
@@ -708,7 +745,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
       output = Catalog.render_entries([%{name: "u", tools: tools}])
 
-      assert output == "u:\n  ping() - Ping"
+      assert output == "u:\n  ping() -> :unknown_content - Ping"
     end
 
     test "explicit nil :impl renders WITHOUT a transport tag" do
@@ -717,7 +754,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       output =
         Catalog.render_entries([%{name: "u", tools: tools, impl: nil}])
 
-      assert output == "u:\n  ping() - Ping"
+      assert output == "u:\n  ping() -> :unknown_content - Ping"
     end
 
     test "unknown impl module renders WITHOUT a transport tag" do
@@ -726,7 +763,7 @@ defmodule PtcRunnerMcp.CatalogTest do
       output =
         Catalog.render_entries([%{name: "u", tools: tools, impl: SomeOther.Module}])
 
-      assert output == "u:\n  ping() - Ping"
+      assert output == "u:\n  ping() -> :unknown_content - Ping"
     end
 
     test "transport tag appears ONLY on the per-server header — not on tool description lines" do

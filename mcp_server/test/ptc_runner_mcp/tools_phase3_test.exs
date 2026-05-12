@@ -71,10 +71,12 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert is_binary(description)
       assert description =~ "alpha:"
-      assert description =~ "ping(msg: string) - Ping the upstream"
+      assert description =~ "ping(msg: string) -> :unknown_content - Ping the upstream"
 
       assert String.trim_trailing(description)
-             |> String.ends_with?("alpha:\n  ping(msg: string) - Ping the upstream")
+             |> String.ends_with?(
+               "alpha:\n  ping(msg: string) -> :unknown_content - Ping the upstream"
+             )
     end
 
     test "aggregator-mode tool_entry uses the aggregator outputSchema/annotations" do

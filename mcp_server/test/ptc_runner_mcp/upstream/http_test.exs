@@ -113,6 +113,24 @@ defmodule PtcRunnerMcp.Upstream.HttpTest do
       assert ["initialize", "notifications/initialized", "tools/list", "tools/call" | _] =
                methods
     end
+
+    test "preserves an advertised empty outputSchema as schema-present" do
+      toolset = [
+        %{
+          "name" => "empty_schema",
+          "inputSchema" => %{"type" => "object"},
+          "outputSchema" => %{}
+        }
+      ]
+
+      %{port: port} = boot_fake(:handshake_success, %{toolset: toolset})
+
+      name = unique_name("http-empty-output-schema")
+      assert {:ok, _pid} = Http.start_link(name, config(port))
+      on_exit(fn -> safe_stop(name) end)
+
+      assert {:ok, [%{name: "empty_schema", output_schema: %{}}]} = Http.list_tools(name)
+    end
   end
 
   # ───────── Handshake failure paths ─────────

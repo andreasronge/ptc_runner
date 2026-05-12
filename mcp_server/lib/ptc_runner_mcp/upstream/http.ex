@@ -644,7 +644,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
 
       base
       |> maybe_put_description(Map.get(t, "description"))
-      |> maybe_put_map(:output_schema, Map.get(t, "outputSchema") || Map.get(t, "output_schema"))
+      |> maybe_put_output_schema(Map.get(t, "outputSchema") || Map.get(t, "output_schema"))
       |> maybe_put_map(:annotations, Map.get(t, "annotations"))
     end)
   end
@@ -658,6 +658,13 @@ defmodule PtcRunnerMcp.Upstream.Http do
     do: Map.put(tool, :description, description)
 
   defp maybe_put_description(tool, _description), do: tool
+
+  defp maybe_put_output_schema(tool, nil), do: tool
+
+  defp maybe_put_output_schema(tool, value) when is_map(value),
+    do: Map.put(tool, :output_schema, value)
+
+  defp maybe_put_output_schema(tool, _value), do: tool
 
   defp maybe_put_map(tool, _key, value) when value in [nil, %{}], do: tool
   defp maybe_put_map(tool, key, value) when is_map(value), do: Map.put(tool, key, value)
