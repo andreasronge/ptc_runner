@@ -3353,6 +3353,7 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 | `catalog/list-servers` | `(catalog/list-servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
 | `catalog/list-tools` | `(catalog/list-tools server)` / `(catalog/list-tools server opts)` | List of compact tool maps (`server`, `tool`, `summary`, `arg_keys`, `read_only`), sorted by tool name. `opts` is a map with `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0) for pagination. |
 | `catalog/describe-tool` | `(catalog/describe-tool server tool)` | Detailed tool map (`input_schema`, `arg_keys`, `annotations`, `call_example`, `response_notes`, …). |
+| `catalog/search-tools` | `(catalog/search-tools query)` / `(catalog/search-tools query opts)` | Deterministic lexical search across upstream tool catalogs: a list of compact tool maps (`server`, `tool`, `summary`, `arg_keys`, `read_only`, `catalog_loaded`) ranked by relevance, with `{server, tool}` tie-breaking. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false — when false, an unloaded server contributes a server-level placeholder map with a `next` hint instead of triggering `ensure_started`). |
 
 **Error model** (same split as `tool/mcp-call`):
 - *World faults* — an upstream that can't be started, an oversized catalog result, or an exhausted per-program catalog op budget — make the form return `nil`. The program continues.
@@ -3363,6 +3364,9 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 (let [servers (catalog/list-servers)]
   (when (some (where :name "github") servers)
     (catalog/describe-tool "github" "search_repos")))
+
+;; Find tools related to "read" across every configured upstream
+(map :tool (catalog/search-tools "read"))
 ```
 
 The `catalog/` op budget is separate from the `tool/mcp-call` budget; catalog discovery never consumes upstream-call quota.
@@ -4250,7 +4254,7 @@ When the interpreter encounters a symbol, it resolves in this order:
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
-| `catalog/summary`, `catalog/list-servers`, `catalog/list-tools`, `catalog/describe-tool` | Upstream catalog discovery (MCP aggregator mode) |
+| `catalog/summary`, `catalog/list-servers`, `catalog/list-tools`, `catalog/describe-tool`, `catalog/search-tools` | Upstream catalog discovery (MCP aggregator mode) |
 | `foo` | Local binding or built-in |
 
 ### Example

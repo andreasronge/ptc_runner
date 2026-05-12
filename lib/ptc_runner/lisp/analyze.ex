@@ -236,7 +236,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Catalog builtins in symbol position (e.g., passing catalog/summary as a value)
   defp do_analyze({:ns_symbol, :catalog, name}, _tail?)
-       when name in [:summary, :"list-servers", :"list-tools", :"describe-tool"] do
+       when name in [:summary, :"list-servers", :"list-tools", :"describe-tool", :"search-tools"] do
     {:ok, {catalog_core_ast_tag(name)}}
   end
 
@@ -244,7 +244,7 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error,
      {:invalid_form,
       "Unknown catalog function: catalog/#{other}. Available: " <>
-        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool"}}
+        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool, catalog/search-tools"}}
   end
 
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
@@ -452,11 +452,35 @@ defmodule PtcRunner.Lisp.Analyze do
       "(catalog/describe-tool server tool) requires exactly 2 arguments, got #{length(args)}"}}
   end
 
+  defp dispatch_list_form({:ns_symbol, :catalog, :"search-tools"}, [query_ast], _list, _tail?) do
+    with {:ok, query} <- do_analyze(query_ast, false) do
+      {:ok, {:catalog_search_tools, [query]}}
+    end
+  end
+
+  defp dispatch_list_form(
+         {:ns_symbol, :catalog, :"search-tools"},
+         [query_ast, opts_ast],
+         _list,
+         _tail?
+       ) do
+    with {:ok, query} <- do_analyze(query_ast, false),
+         {:ok, opts} <- do_analyze(opts_ast, false) do
+      {:ok, {:catalog_search_tools, [query, opts]}}
+    end
+  end
+
+  defp dispatch_list_form({:ns_symbol, :catalog, :"search-tools"}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :"catalog/search-tools",
+      "(catalog/search-tools query) or (catalog/search-tools query opts) — got #{length(args)} args"}}
+  end
+
   defp dispatch_list_form({:ns_symbol, :catalog, other}, _rest, _list, _tail?) do
     {:error,
      {:invalid_form,
       "Unknown catalog function: catalog/#{other}. Available: " <>
-        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool"}}
+        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool, catalog/search-tools"}}
   end
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
@@ -1299,6 +1323,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp catalog_core_ast_tag(:"list-servers"), do: :catalog_list_servers
   defp catalog_core_ast_tag(:"list-tools"), do: :catalog_list_tools
   defp catalog_core_ast_tag(:"describe-tool"), do: :catalog_describe_tool
+  defp catalog_core_ast_tag(:"search-tools"), do: :catalog_search_tools
 
   # ============================================================
   # Placeholder detection

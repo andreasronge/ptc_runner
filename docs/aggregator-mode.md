@@ -402,9 +402,10 @@ upstream state.
 The inline catalog above is a static, truncated snapshot baked
 into the tool description. For programs that need to *inspect*
 the configured upstreams at runtime — enumerate servers, page
-through a server's tools, or read a tool's full input schema —
-aggregator mode also exposes a `catalog/` namespace with four
-builtins. (Outside aggregator mode these forms do not exist.)
+through a server's tools, search across catalogs, or read a tool's
+full input schema — aggregator mode also exposes a `catalog/`
+namespace with five builtins. (Outside aggregator mode these forms
+do not exist.)
 
 | Form | Signature | Returns |
 |------|-----------|---------|
@@ -412,15 +413,28 @@ builtins. (Outside aggregator mode these forms do not exist.)
 | `catalog/list-servers` | `(catalog/list-servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
 | `catalog/list-tools` | `(catalog/list-tools server)`<br>`(catalog/list-tools server opts)` | A list of compact tool maps — `{"server" "tool" "summary" "arg_keys" "read_only"}` — for `server`, sorted by tool name. `opts` is a map: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
 | `catalog/describe-tool` | `(catalog/describe-tool server tool)` | A detailed map for one tool: `"server"`, `"tool"`, `"summary"`, `"description"` (untruncated), `"input_schema"` (the upstream's JSON Schema), `"arg_keys"`, `"annotations"`, `"call_example"` (a ready-to-edit `(tool/mcp-call …)` snippet) and `"response_notes"`. |
+| `catalog/search-tools` | `(catalog/search-tools query)`<br>`(catalog/search-tools query opts)` | A list of compact tool maps — `{"server" "tool" "summary" "arg_keys" "read_only" "catalog_loaded"}` — ranked by lexical relevance to `query` (scoring described below). `opts` is a map: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` a server whose catalog isn't cached contributes a single server-level placeholder — `{"server" <name> "tool" nil "summary" "<desc>. Catalog not loaded." "catalog_loaded" false "next" "(catalog/list-tools \"<name>\" {:limit 20})"}` — instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
 
-`catalog/list-tools` and `catalog/describe-tool` trigger a lazy
-`ensure_started/1` for the target upstream if its tools aren't
-cached yet — using the same per-program failure cache and ensure
-locks as `(tool/mcp-call ...)`, so concurrent `pmap` children
-cooperate instead of stampeding. Result maps are size-capped at
-`--max-catalog-result-bytes` (default 256 KiB) of JSON: an
-over-cap `list-tools` page is truncated entry-by-entry, an
-over-cap `describe-tool` result becomes a world fault.
+`catalog/search-tools` ranks each candidate with a deterministic
+lexical score: `query` tokens are matched against the tokenized
+server/tool names (boosted) and the tokenized
+descriptions/arg-keys/annotations (unboosted), scoring `10` for an
+exact token match, `5` for a prefix match, `2` for a substring
+match, plus a `+2` boost on the name fields. Tokenization splits
+camelCase, snake_case, and kebab-case. Only positive-scoring
+entries are returned; ties break on `{server, tool}` so ordering
+is stable across runs.
+
+`catalog/list-tools` and `catalog/describe-tool` (and
+`catalog/search-tools` when called with `:load true`) trigger a
+lazy `ensure_started/1` for the target upstream if its tools
+aren't cached yet — using the same per-program failure cache and
+ensure locks as `(tool/mcp-call ...)`, so concurrent `pmap`
+children cooperate instead of stampeding. Result lists are
+size-capped at `--max-catalog-result-bytes` (default 256 KiB) of
+JSON: an over-cap `list-tools` / `search-tools` list is truncated
+entry-by-entry, an over-cap `describe-tool` result becomes a world
+fault.
 
 **Error model** — identical split to `(tool/mcp-call ...)`:
 
@@ -429,8 +443,8 @@ over-cap `describe-tool` result becomes a world fault.
   exhausted. The program keeps running.
 - **Programmer fault → program raises**: `server` not configured,
   `tool` not found on that server, or a bad argument (e.g.
-  `:limit` outside `1..200`, `server`/`tool` not a non-empty
-  string).
+  `:limit` out of range, `:load` not a boolean, an empty `query`,
+  `server`/`tool` not a non-empty string).
 
 The catalog op budget is a **separate** atomics counter from the
 `(tool/mcp-call ...)` budget — discovery calls never eat into a
@@ -445,6 +459,11 @@ program's upstream-call quota.
 ;; Only describe a tool if its server is actually configured
 (when (some (where :name "fs") (catalog/list-servers))
   (catalog/describe-tool "fs" "read_text_file"))
+
+;; Search every configured upstream for "read"-related tools,
+;; loading any cold catalogs so only tool-level matches come back
+(map (juxt :server :tool)
+     (catalog/search-tools "read" {:limit 20 :load true}))
 ```
 
 ## Three example programs
