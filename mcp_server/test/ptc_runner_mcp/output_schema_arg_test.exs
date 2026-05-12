@@ -153,6 +153,22 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
       assert env["isError"] == false
       assert env["structuredContent"]["validated"] == %{"count" => 1}
     end
+
+    test ~S|signature: "any" with output_schema is accepted ("any" means absent)| do
+      env =
+        call(%{
+          "program" => "{:count 1}",
+          "output_schema" => %{
+            "type" => "object",
+            "properties" => %{"count" => %{"type" => "integer"}},
+            "required" => ["count"]
+          },
+          "signature" => "any"
+        })
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["validated"] == %{"count" => 1}
+    end
   end
 
   describe "successful schema → validated field" do
