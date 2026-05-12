@@ -170,6 +170,35 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       assert m["upstream_result_bytes"] == byte_size(Jason.encode!(big))
     end
 
+    # Regression for codex review round 2 [P2]: a `(fail ...)` error
+    # payload carries a `result` *preview* of the failed value; that
+    # preview must NOT count as `final_result_bytes` — the contract is
+    # `final_result_bytes: 0` / `payload_reduction_ratio: null` on every
+    # error envelope (§7 #9), not just runtime-error ones.
+    test "a (fail ...) error envelope after upstream calls still reports final_result_bytes: 0" do
+      big = %{"items" => Enum.map(1..100, fn i -> %{"id" => i} end)}
+      put_fake("alpha", %{"get" => fn _args, _ -> {:ok, big} end})
+
+      env =
+        call(~S|
+          (do
+            (tool/mcp-call {:server "alpha" :tool "get" :args {}})
+            (fail {:reason :on-purpose :detail "a long-ish failure preview here"}))
+        |)
+
+      assert env["isError"] == true
+      sc = structured(env)
+      assert sc["status"] == "error"
+      assert sc["reason"] == "fail"
+      # The error payload DOES carry a `result` preview...
+      assert is_binary(sc["result"])
+      # ...but `ptc_metrics` ignores it: error → 0, ratio → null.
+      m = metrics(env)
+      assert m["final_result_bytes"] == 0
+      assert m["payload_reduction_ratio"] == nil
+      assert m["upstream_result_bytes"] == byte_size(Jason.encode!(big))
+    end
+
     test "a pure-compute program with 0 upstream calls has NO ptc_metrics" do
       put_fake("alpha", %{"noop" => fn _args, _ -> {:ok, %{}} end})
       env = call(~S|(+ 1 2 3)|)
