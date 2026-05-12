@@ -250,6 +250,95 @@ defmodule PtcRunnerMcp.ApplicationPhase1bTest do
     end
   end
 
+  describe "upstream metadata preservation (§6.1.1)" do
+    test "stdio entry preserves description and capabilities in metadata" do
+      json =
+        Jason.encode!(%{
+          "upstreams" => %{
+            "github" => %{
+              "command" => "npx",
+              "args" => ["-y", "@modelcontextprotocol/server-github"],
+              "description" => "GitHub MCP server",
+              "capabilities" => ["issues", "pull_requests"]
+            }
+          }
+        })
+
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "phase1b-meta-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      cfg_path = Path.join(tmp_dir, "upstreams.json")
+      File.write!(cfg_path, json)
+
+      args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
+      [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
+
+      assert entry.metadata == %{
+               description: "GitHub MCP server",
+               capabilities: ["issues", "pull_requests"]
+             }
+
+      assert entry.config[:command] == "npx"
+      refute Map.has_key?(entry.config, :description)
+      refute Map.has_key?(entry.config, "description")
+    end
+
+    test "metadata defaults to empty map when not provided" do
+      json =
+        Jason.encode!(%{
+          "upstreams" => %{
+            "bare" => %{
+              "command" => "npx"
+            }
+          }
+        })
+
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "phase1b-nometa-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      cfg_path = Path.join(tmp_dir, "upstreams.json")
+      File.write!(cfg_path, json)
+
+      args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
+      [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
+
+      assert entry.metadata == %{}
+    end
+
+    test "partial metadata (description only) preserves what's present" do
+      json =
+        Jason.encode!(%{
+          "upstreams" => %{
+            "linear" => %{
+              "command" => "npx",
+              "description" => "Linear tracker"
+            }
+          }
+        })
+
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "phase1b-partial-#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp_dir)
+      on_exit(fn -> File.rm_rf(tmp_dir) end)
+
+      cfg_path = Path.join(tmp_dir, "upstreams.json")
+      File.write!(cfg_path, json)
+
+      args_map = PtcRunnerMcp.Application.parse_args(["--upstreams-config", cfg_path])
+      [entry] = PtcRunnerMcp.Application.load_upstreams_config(args_map)
+
+      assert entry.metadata == %{description: "Linear tracker"}
+      refute Map.has_key?(entry.metadata, :capabilities)
+    end
+  end
+
   describe "self-as-upstream rejection (§5.3, codex [P2] #3 regression)" do
     test "JSON config whose command path matches the PtcRunner release raises at load time" do
       # Spec §5.3: "If the config loader detects PtcRunner configured

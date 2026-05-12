@@ -118,7 +118,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   Returns the structured catalog snapshot for a routing `Registry`.
 
   The shape is the same input accepted by `render_entries/1`:
-  `%{name: String.t(), tools: list() | nil, impl: module() | nil}`.
+  `%{name: String.t(), tools: list() | nil, impl: module() | nil, metadata: map()}`.
   `ptc_task` capability summaries use this structured snapshot instead of
   parsing the human-oriented rendered catalog string.
   """
@@ -126,7 +126,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]
   def snapshot(registry) when is_atom(registry) or is_pid(registry) do
@@ -137,12 +138,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   Renders the catalog from an explicit list of upstream snapshots.
 
   Each entry is
-  `%{name: String.t(), tools: [Upstream.tool_schema()] | nil, impl: module() | nil}`.
-  The `:impl` key is optional — when absent or `nil` the per-server
-  header has no `[transport: …]` annotation. When present and the
-  module is one of the recognised transports (`Upstream.Stdio` /
-  `Upstream.Http`), the header gains a `[transport: stdio|http]` tag
-  per §9.1.
+  `%{name: String.t(), tools: [Upstream.tool_schema()] | nil, impl: module() | nil, metadata: map()}`.
+  The `:impl` and `:metadata` keys are optional. When `:impl` is absent
+  or `nil` the per-server header has no `[transport: …]` annotation; when
+  present and the module is one of the recognised transports
+  (`Upstream.Stdio` / `Upstream.Http`), the header gains a
+  `[transport: stdio|http]` tag per §9.1.
 
   Used directly by tests to exercise the rendering rules without
   spinning up a Registry. `nil` for `:tools` means "no cached tools
@@ -152,7 +153,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]) :: String.t()
   def render_entries([]), do: ""
@@ -187,7 +189,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           %{
             required(:name) => String.t(),
             required(:tools) => [Upstream.tool_schema()] | nil,
-            optional(:impl) => module() | nil
+            optional(:impl) => module() | nil,
+            optional(:metadata) => map()
           }
         ]
   def frozen_snapshot do
@@ -250,7 +253,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
           pid -> safe_cached_tools(pid)
         end
 
-      %{name: name, tools: tools, impl: Map.get(routing, :impl)}
+      %{
+        name: name,
+        tools: tools,
+        impl: Map.get(routing, :impl),
+        metadata: Map.get(routing, :metadata, %{})
+      }
     end)
     |> Enum.sort_by(& &1.name)
   end
