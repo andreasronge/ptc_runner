@@ -418,6 +418,14 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
     case result do
       {:ok, value} ->
+        # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 / §7: record
+        # the upstream response size **as received** — measured on the
+        # raw `value` here, before `maybe_auto_decode/3` mutates it,
+        # before any `--trace-payloads` redaction downstream, and
+        # before any envelope size cap. This is the byte size a no-PTC
+        # client would have seen.
+        result_bytes = response_bytes(value)
+
         # Phase 4 hardening (Plans/ptc-runner-mcp-aggregator.md §16
         # entry 2): an upstream `tools/call` that returns
         # `{:ok, %{"isError" => true, ...}}` is a *tool-level* error
@@ -437,8 +445,14 @@ defmodule PtcRunnerMcp.AggregatorTools do
           :upstream_error ->
             detail = extract_is_error_detail(value)
 
+            # A tool-level error envelope's bytes are NOT useful
+            # compression (§4.1) — they go into `upstream_error_bytes`,
+            # so we still record the size for diagnostics but the entry
+            # is `status: "error"`.
             entry =
-              UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration)
+              UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration,
+                result_bytes: result_bytes
+              )
 
             UpstreamCalls.record(call_context, entry)
             {:world_fault, :upstream_error, detail, durations}
@@ -466,13 +480,24 @@ defmodule PtcRunnerMcp.AggregatorTools do
             # succeed" meaning. Nested nils are unchanged.
             rewritten = if is_nil(promoted), do: :"json-null", else: promoted
 
-            entry = UpstreamCalls.success_entry(server, tool, total_duration)
+            entry =
+              UpstreamCalls.success_entry(server, tool, total_duration,
+                result_bytes: result_bytes
+              )
+
             UpstreamCalls.record(call_context, entry)
             {:ok, rewritten, durations}
         end
 
       {:error, reason, detail}
       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
+        # `:response_too_large` → `oversize: true` (set by
+        # `error_entry/6` from the reason). `result_bytes` is left
+        # `nil`: the overflow paths abort without retaining an exact
+        # count, and `Plans/ptc-runner-mcp-payload-reduction.md` §4.1
+        # forbids parsing the human-readable detail string to recover
+        # one. The same applies to the other world-faults — no partial
+        # byte count is retained, so `result_bytes` is `nil`.
         entry = UpstreamCalls.error_entry(server, tool, reason, detail, total_duration)
         UpstreamCalls.record(call_context, entry)
         {:world_fault, reason, detail, durations}
@@ -486,6 +511,20 @@ defmodule PtcRunnerMcp.AggregatorTools do
         entry = UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration)
         UpstreamCalls.record(call_context, entry)
         {:world_fault, :upstream_error, detail, durations}
+    end
+  end
+
+  # Byte size of an upstream response payload, measured the way a
+  # no-PTC client would have observed it: `byte_size(Jason.encode!/1)`.
+  # The value has already passed the upstream impl's
+  # `:max_response_bytes` check, so this is bounded. A re-encode
+  # failure (vanishingly rare for already-decoded JSON) collapses to
+  # `nil` rather than crashing the program — the metric is best-effort
+  # accounting, not a correctness invariant.
+  defp response_bytes(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> byte_size(json)
+      {:error, _} -> nil
     end
   end
 

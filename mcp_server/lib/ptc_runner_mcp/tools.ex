@@ -35,6 +35,7 @@ defmodule PtcRunnerMcp.Tools do
     ConcurrencyGate,
     Envelope,
     Limits,
+    PayloadMetrics,
     Sandbox,
     UpstreamCalls
   }
@@ -147,6 +148,10 @@ defmodule PtcRunnerMcp.Tools do
   #     HTTP response (4xx / 5xx / 429).
   #
   # Both are optional; stdio entries are byte-for-byte unchanged.
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 / §5: per-entry
+  # `result_bytes` (`integer | null`) and `oversize` (`boolean`) — both
+  # additive, both optional in the item schema (older entries lacked
+  # them).
   @upstream_calls_schema %{
     "type" => "array",
     "items" => %{
@@ -168,6 +173,8 @@ defmodule PtcRunnerMcp.Tools do
           ]
         },
         "error" => %{"type" => "string"},
+        "result_bytes" => %{"type" => ["integer", "null"], "minimum" => 0},
+        "oversize" => %{"type" => "boolean"},
         "auth" => %{
           "type" => "object",
           "required" => ["scheme", "binding"],
@@ -181,12 +188,21 @@ defmodule PtcRunnerMcp.Tools do
     }
   }
 
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §5: the aggregator
+  # schema also advertises an optional `ptc_metrics` object. A generic
+  # `{"type": ["object", "null"]}` is sufficient — the block is pure
+  # counts/ratios, never load-bearing for clients, and the discriminated
+  # `oneOf` stays keyed on `status`.
+  @ptc_metrics_schema %{"type" => ["object", "null"]}
+
   @aggregator_output_schema %{
     "type" => "object",
     "oneOf" =>
       Enum.map(@output_schema["oneOf"], fn branch ->
         Map.update!(branch, "properties", fn props ->
-          Map.put(props, "upstream_calls", @upstream_calls_schema)
+          props
+          |> Map.put("upstream_calls", @upstream_calls_schema)
+          |> Map.put("ptc_metrics", @ptc_metrics_schema)
         end)
       end)
   }
@@ -649,14 +665,56 @@ defmodule PtcRunnerMcp.Tools do
   defp decorate_and_wrap({:ok, payload}, entries) when is_map(payload) do
     payload
     |> UpstreamCalls.decorate(entries)
+    |> decorate_ptc_metrics(entries)
     |> Envelope.success()
   end
 
   defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
     payload
     |> UpstreamCalls.decorate(entries)
+    |> decorate_ptc_metrics(entries)
     |> Envelope.error_envelope()
   end
+
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §4.2 / §7 #8: attach
+  # `ptc_metrics` only in the `:mcp_aggregator` profile (this code path
+  # is aggregator-only) and only when the program made ≥ 1 upstream
+  # call — a pure-compute program has nothing to measure. On error the
+  # `result` field is absent, so `final_result_bytes` is 0 and the
+  # ratio degrades to `null` (§7 #2, #9).
+  defp decorate_ptc_metrics(payload, []) when is_map(payload), do: payload
+
+  defp decorate_ptc_metrics(payload, entries) when is_map(payload) and is_list(entries) do
+    final_result_bytes = result_field_bytes(payload)
+    prints_bytes = prints_field_bytes(payload)
+
+    Map.put(
+      payload,
+      "ptc_metrics",
+      PayloadMetrics.build(final_result_bytes, prints_bytes, entries)
+    )
+  end
+
+  # `final_result_bytes`: byte size of the `result` field returned to
+  # the client (a string preview of the program's answer; absent on
+  # error or when both the rendered value and the program's return are
+  # `nil` — see `PtcRunner.PtcToolProtocol.render_success/2`). 0 in
+  # those cases.
+  defp result_field_bytes(%{"result" => r}) when is_binary(r), do: byte_size(r)
+  defp result_field_bytes(_), do: 0
+
+  # `prints_bytes`: byte size of the serialized `prints` array, kept
+  # separate so the headline ratio isn't muddied by debug prints.
+  # Re-encode failure (vanishingly rare for an already-decoded list)
+  # collapses to 0.
+  defp prints_field_bytes(%{"prints" => p}) when is_list(p) do
+    case Jason.encode(p) do
+      {:ok, json} -> byte_size(json)
+      {:error, _} -> 0
+    end
+  end
+
+  defp prints_field_bytes(_), do: 0
 
   # Phase 0 §11.3 decoration seam: `Sandbox.execute/4` returns the
   # **unwrapped** v1 structured payload as `{:ok | :error, payload}`.

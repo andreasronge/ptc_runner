@@ -493,6 +493,78 @@ MCP tool-result envelope, not always the direct business value. Prefer
 `(mcp/text result)` for text content and `(mcp/json result)` for JSON
 payloads instead of hand-rolled `get-in` chains.
 
+### Payload reduction
+
+The whole point of programmatic tool calling is that the program
+fetches from upstream MCP tools and **collapses** the results down to
+a small answer before handing it back. Aggregator-mode responses
+(`ptc_lisp_execute` with ≥ 1 upstream call, and every `ptc_task`)
+carry a deterministic accounting of that, in a `ptc_metrics` block on
+the `structuredContent` envelope plus `result_bytes` / `oversize` on
+each `upstream_calls[]` entry:
+
+```jsonc
+// structuredContent (abridged) — ptc_lisp_execute, aggregator mode
+{
+  "result": "…the program's answer (812 bytes)…",
+  "upstream_calls": [ { "server": "github", "tool": "search_issues",
+                        "status": "ok", "duration_ms": 142,
+                        "result_bytes": 48122, "oversize": false } ],
+  "ptc_metrics": {
+    "schema_version": 1,
+    "final_result_bytes": 812,           // byte size of the `result` field (the answer; not prints/feedback)
+    "prints_bytes": 0,
+    "upstream_call_count": 3, "upstream_ok_count": 3,
+    "upstream_error_count": 0, "upstream_oversize_count": 0,
+    "upstream_result_bytes": 48122,      // Σ result_bytes over status==ok, non-oversize calls — the denominator
+    "upstream_error_bytes": 0, "upstream_oversize_bytes": 0,
+    "payload_reduction_ratio": 59.26,    // round(upstream_result_bytes / max(final_result_bytes, 1), 2); null when either side is 0
+    "estimated_final_result_tokens": 203, "estimated_upstream_result_tokens": 12031,
+    "token_estimate_method": "utf8_bytes_div_4",
+    "baseline": {
+      "conservative": { "name": "successful_upstream_results_only", "bytes": 48122, "ratio": 59.26, "note": "…" },
+      "optimistic":   { "name": "no_ptc_direct_llm_workflow", "available": false, "note": "…" }
+    }
+  }
+}
+```
+
+**Honest framing.** `payload_reduction_ratio` is "how much upstream
+tool-result payload the program collapsed into its answer" — a real
+number the server can measure. It is **not** "tokens saved by PTC"
+(that needs the no-PTC counterfactual and the server-side LLM usage,
+neither of which the server can know), and it is **not** the literal
+reduction in the MCP response the client receives — the envelope
+mirrors the full structured payload (`ptc_metrics`, `upstream_calls`,
+`prints`, `feedback`) into `content[0].text`, so the actual response
+is larger than `final_result_bytes`. Bytes are primary and exact;
+token figures are explicitly estimates (`utf8_bytes_div_4`) — clients
+that care tokenize themselves. Only `status: "ok"`, non-`oversize`
+upstream calls count toward `upstream_result_bytes`; failed-call and
+oversize bytes are reported separately and never inflate the ratio.
+On an error envelope, `final_result_bytes` is `0` and the ratio is
+`null` (the bytes fetched before the failure are still reported). The
+optimistic baseline is always `{ "available": false }` — the server
+never invents it.
+
+**`ptc_task` planner cost.** A `ptc_task` response's `ptc_metrics`
+also carries a `server_side_llm` line item — the planner LLM's
+prompt/completion byte sizes (always available) and provider token
+counts (`provider_reported: true` with real numbers when the LLM
+adapter surfaces `usage`, else `null` + byte estimates). The
+`payload_reduction_ratio` for `ptc_task` is answer/result-payload
+reduction *only*; an `efficiency_note` states verbatim that it
+excludes the planner cost.
+
+When `--debug-tool` is enabled, `ptc_debug op=stats` rolls these
+per-call blocks up into a `payload_reduction` aggregate — totals,
+p50/p95/max/weighted ratio (skipping `null`s), the top-N reducers,
+and (for windows containing `ptc_task` calls) an `agentic_planner`
+sub-block with the summed planner tokens/bytes. `ptc_debug recent` /
+`get` records carry the per-call `ptc_metrics`. See
+[Diagnostics](#diagnostics-the-ptc_debug-tool). The full contract is
+in `Plans/ptc-runner-mcp-payload-reduction.md`.
+
 ## Agentic mode
 
 Agentic mode is an experimental layer on top of aggregator mode. It
@@ -717,7 +789,7 @@ Three operations (`op` is required):
 
 | `op` | What it returns |
 |---|---|
-| `stats` | Aggregate health: per-tool call counts / success-error rates / latency percentiles, an error-reason histogram, upstream-call outcomes (`total`/`ok`/`by_reason`/`by_server`), agentic planner stats, plus a self-description (`ring_size`, `ring_count`, `trace_dir_enabled`, `payload_policy`, time `window`). |
+| `stats` | Aggregate health: per-tool call counts / success-error rates / latency percentiles, an error-reason histogram, upstream-call outcomes (`total`/`ok`/`by_reason`/`by_server`), agentic planner stats, a `payload_reduction` aggregate (totals, p50/p95/max/weighted ratio, top-N reducers, planner-token sub-block — see [Payload reduction](#payload-reduction)), plus a self-description (`ring_size`, `ring_count`, `trace_dir_enabled`, `payload_policy`, time `window`). |
 | `recent` | The last `limit` (≤ 200, default 20) call records, newest first. `errors_only: true` restricts to failures; `since_seconds` windows by age. |
 | `get` | The full redacted record for one `request_id`. When `--trace-dir` is set, returns the on-disk JSONL trace (`source: "trace_file"`); otherwise the ring record (`source: "ring_buffer"`). |
 

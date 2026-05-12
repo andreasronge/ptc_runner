@@ -345,6 +345,14 @@ The implementer pulls both exact string sets from the existing code/specs rather
 than re-deriving them here; `by_reason` is open-ended (unknown reasons pass
 through verbatim) so a vocabulary change doesn't silently drop data.
 
+`stats` also carries an optional `payload_reduction` aggregate (omitted / `null`
+when the window has no call carrying a `ptc_metrics` block; `recent` / `get`
+records carry the per-call `ptc_metrics`, and `get`'s per-entry `upstream_calls`
+include `result_bytes` / `oversize`) — see
+`ptc-runner-mcp-payload-reduction.md` for the `payload_reduction` stats section,
+the `ptc_metrics` envelope block, and the `upstream_calls[]` byte-field
+additions.
+
 **`op: "recent"`:**
 
 ```json
@@ -392,8 +400,10 @@ unrelated surface) bounds the **whole JSON-RPC reply frame**, not just
 wrapper — including the client-chosen `id` — counts against it, and the payload
 budget is the cap net of that wrapper. On overflow: `recent` drops oldest
 records until it fits and sets `"truncated": true`; `stats` drops the heaviest
-optional sections (`by_server` first, then per-tool `duration_ms` detail) and
-sets `"truncated": true`; `get` drops the record body and returns
+optional sections — `payload_reduction.top_reducers` first, then the whole
+`payload_reduction` block, then `by_server`, then per-tool `duration_ms`
+detail (see `ptc-runner-mcp-payload-reduction.md`) — and sets
+`"truncated": true`; `get` drops the record body and returns
 `{ "found": true, "truncated": true, "note": "record exceeds --max-debug-response-bytes; set --trace-dir and read the trace file directly" }`.
 
 Two irreducible floors the cap cannot beat (and shouldn't try to): (1) a valid

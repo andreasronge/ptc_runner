@@ -249,15 +249,25 @@ defmodule PtcRunnerMcp.UpstreamCalls do
 
   @doc """
   Builds a successful-call entry (§8.5).
+
+  Per `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 the entry also
+  carries `result_bytes` — the byte size of the upstream response *as
+  the aggregator received it*, before any `--trace-payloads`
+  redaction — and `oversize` (always `false` for a successful call).
+  Pass `:result_bytes` in `opts`; omit it (or pass `nil`) when the
+  size is not cheaply known.
   """
-  @spec success_entry(String.t(), String.t(), non_neg_integer()) :: entry()
-  def success_entry(server, tool, duration_ms)
-      when is_binary(server) and is_binary(tool) and is_integer(duration_ms) and duration_ms >= 0 do
+  @spec success_entry(String.t(), String.t(), non_neg_integer(), keyword()) :: entry()
+  def success_entry(server, tool, duration_ms, opts \\ [])
+      when is_binary(server) and is_binary(tool) and is_integer(duration_ms) and duration_ms >= 0 and
+             is_list(opts) do
     %{
       "server" => server,
       "tool" => tool,
       "status" => "ok",
-      "duration_ms" => duration_ms
+      "duration_ms" => duration_ms,
+      "result_bytes" => normalize_result_bytes(Keyword.get(opts, :result_bytes)),
+      "oversize" => false
     }
   end
 
@@ -270,11 +280,20 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   pass `0` for `:cap_exhausted` and recovery-window
   `:upstream_unavailable` rejections, otherwise the wall-clock
   duration of the operation up to failure.
+
+  Per `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 the entry also
+  carries `result_bytes` (bytes received before the failure if any —
+  usually `nil`, never counted as useful compression) and `oversize`
+  (`true` iff `reason == :response_too_large`; for that path
+  `result_bytes` is the exact size only if cheaply known — `nil` is
+  acceptable and expected, do **not** parse the detail string to
+  recover a number).
   """
-  @spec error_entry(String.t(), String.t(), atom(), String.t(), non_neg_integer()) :: entry()
-  def error_entry(server, tool, reason, detail, duration_ms)
+  @spec error_entry(String.t(), String.t(), atom(), String.t(), non_neg_integer(), keyword()) ::
+          entry()
+  def error_entry(server, tool, reason, detail, duration_ms, opts \\ [])
       when is_binary(server) and is_binary(tool) and is_atom(reason) and is_binary(detail) and
-             is_integer(duration_ms) and duration_ms >= 0 do
+             is_integer(duration_ms) and duration_ms >= 0 and is_list(opts) do
     # Per `Plans/http-transport-credentials.md` §7.5.1: scrub the
     # `error` field (and `args_truncated` when added in a later
     # phase) at record-construction time, BEFORE the entry reaches
@@ -287,9 +306,17 @@ defmodule PtcRunnerMcp.UpstreamCalls do
       "status" => "error",
       "duration_ms" => duration_ms,
       "reason" => Atom.to_string(reason),
-      "error" => Redactor.scrub(detail)
+      "error" => Redactor.scrub(detail),
+      "result_bytes" => normalize_result_bytes(Keyword.get(opts, :result_bytes)),
+      "oversize" => reason == :response_too_large
     }
   end
+
+  # `result_bytes` is a non-negative integer or `nil` (JSON `null`).
+  # Anything else (a stray negative, a non-integer) collapses to `nil`
+  # rather than leaking a bogus count into the metrics — §4.1 / §7.
+  defp normalize_result_bytes(n) when is_integer(n) and n >= 0, do: n
+  defp normalize_result_bytes(_), do: nil
 
   @doc """
   Drains all `{:upstream_call_recorded, ref, entry}` messages from

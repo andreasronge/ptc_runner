@@ -121,6 +121,13 @@ defmodule PtcRunnerMcp.DebugRecorder do
       signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
       protocol_version: protocol_version(),
       upstream_calls: redacted_upstream_calls(sc),
+      # `Plans/ptc-runner-mcp-payload-reduction.md` §4.5: copy the
+      # envelope's `ptc_metrics` block verbatim (string-keyed) into the
+      # ring record. It's pure counts/ratios — no payload — so no extra
+      # redaction is needed. `nil` when the envelope had no
+      # `ptc_metrics` (no-tools `ptc_lisp_execute`, or a pure-compute
+      # aggregator program with 0 upstream calls).
+      ptc_metrics: ptc_metrics(sc),
       agentic: if(tool == "ptc_task", do: agentic_block(sc, args))
     }
 
@@ -159,12 +166,22 @@ defmodule PtcRunnerMcp.DebugRecorder do
   defp prints_count(%{"prints" => p}) when is_list(p), do: length(p)
   defp prints_count(_), do: nil
 
+  # The envelope's `ptc_metrics` block (string-keyed) or `nil`. Pure
+  # counts/ratios — `Plans/ptc-runner-mcp-payload-reduction.md` §4.5
+  # says no extra redaction is needed; it never carries payload text.
+  defp ptc_metrics(%{"ptc_metrics" => m}) when is_map(m), do: m
+  defp ptc_metrics(_), do: nil
+
   # Keep only the structurally-scalar, non-secret-bearing fields of
   # each `upstream_calls[]` entry. `error` (a free-text detail string)
   # is already `Redactor.scrub/1`-ed at construction time
-  # (`UpstreamCalls.error_entry/5` / `Ledger`), but we drop it here
+  # (`UpstreamCalls.error_entry/6` / `Ledger`), but we drop it here
   # anyway — `ptc_debug` surfaces *reasons*, not raw error text — to
   # keep the redaction surface minimal (spec § 8 "residual leakage").
+  # `result_bytes` (`integer | null`) and `oversize` (`boolean`) are
+  # pure numbers/flags per `Plans/ptc-runner-mcp-payload-reduction.md`
+  # §4.1 / §4.5 and are kept so `ptc_debug stats.payload_reduction`
+  # and `get` can surface them.
   defp redacted_upstream_calls(sc) do
     case Map.get(sc, "upstream_calls") do
       list when is_list(list) ->
@@ -174,7 +191,9 @@ defmodule PtcRunnerMcp.DebugRecorder do
             "tool" => Map.get(entry, "tool"),
             "status" => Map.get(entry, "status"),
             "duration_ms" => Map.get(entry, "duration_ms"),
-            "reason" => Map.get(entry, "reason")
+            "reason" => Map.get(entry, "reason"),
+            "result_bytes" => normalize_result_bytes(Map.get(entry, "result_bytes")),
+            "oversize" => Map.get(entry, "oversize") == true
           }
         end)
 
@@ -182,6 +201,9 @@ defmodule PtcRunnerMcp.DebugRecorder do
         []
     end
   end
+
+  defp normalize_result_bytes(n) when is_integer(n) and n >= 0, do: n
+  defp normalize_result_bytes(_), do: nil
 
   # Build the `agentic` sub-map for an executed `ptc_task` call from
   # the envelope's `planner` / `execution` fields. For validation-error

@@ -326,7 +326,17 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   end
 
   defp complete_and_tag({:world_fault, reason, detail, duration}, ledger, id, _started_at) do
-    :ok = Ledger.complete_error(ledger, id, reason_string(reason), detail, duration_ms: duration)
+    # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1: only the
+    # `response_too_large` world-fault is `oversize`. No partial byte
+    # count is retained for any world-fault, so `result_bytes` is left
+    # unset (→ `nil` in the projection). `reason` is always one of the
+    # `Upstream.reason/0` atoms (plus `:cap_exhausted`).
+    :ok =
+      Ledger.complete_error(ledger, id, reason_string(reason), detail,
+        duration_ms: duration,
+        oversize: reason == :response_too_large
+      )
+
     tagged_error(reason, detail)
   end
 
