@@ -152,9 +152,10 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   defp tool_label(tool) do
     name = tool_name(tool)
 
-    case output_type(tool) do
-      "" -> name
-      type -> "#{name}->#{type}"
+    if name == "" do
+      ""
+    else
+      "#{name}->#{output_type(tool)}"
     end
   end
 
@@ -165,7 +166,7 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   defp output_type(%{output_schema: schema}), do: signature_type(schema)
   defp output_type(%{"output_schema" => schema}), do: signature_type(schema)
   defp output_type(%{"outputSchema" => schema}), do: signature_type(schema)
-  defp output_type(_), do: ""
+  defp output_type(_), do: ":unknown_content"
 
   defp signature_type(%{"type" => "string"}), do: ":string"
   defp signature_type(%{"type" => "integer"}), do: ":int"
@@ -190,7 +191,8 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   end
 
   defp signature_type(%{"type" => "object"}), do: ":map"
-  defp signature_type(_), do: ":any"
+  defp signature_type(schema) when is_map(schema), do: ":any"
+  defp signature_type(_), do: ":unknown_content"
 
   defp maybe_append_more_upstreams(lines, omitted, max_bytes) when omitted > 0 do
     marker = "- (+#{omitted} more upstreams)"

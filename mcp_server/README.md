@@ -627,9 +627,11 @@ These hints are planner guidance, not runtime validation of upstream
 results. Supported conversions include JSON Schema `string`,
 `integer`, `number`, `boolean`, arrays with `items`, and objects with
 `properties`; unknown or complex schemas fall back to `:any` or
-`:map`. If an upstream omits `outputSchema`, the server does not invent
-a hard output type. The tool description remains the only shape hint
-for text-shaped tools such as `filesystem.list_directory`.
+`:map`. If an upstream omits `outputSchema`, the generated catalog marks
+the tool as `-> :unknown_content`. That means the upstream did not
+advertise a domain output schema; the planner should inspect the MCP
+envelope with `(mcp/text result)` or `(mcp/json result)` based on the
+actual content and tool description instead of assuming JSON.
 
 ### Real-provider smoke
 

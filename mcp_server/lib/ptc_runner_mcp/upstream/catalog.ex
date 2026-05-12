@@ -292,7 +292,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   defp render_tool(tool) do
     name = tool_field(tool, :name)
     schema = tool_field(tool, :input_schema, %{})
-    output_schema = tool_field(tool, :output_schema, nil)
+    output_schema = tool_output_schema(tool)
     description = tool_field(tool, :description, "")
 
     args = render_args(schema)
@@ -309,7 +309,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
     end
   end
 
-  defp render_output(_), do: ""
+  defp render_output(_), do: " -> :unknown_content"
 
   # Argument ordering rule: required args first in the order they
   # appear in the schema's `required` array, then optional args
@@ -601,4 +601,9 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
       _ -> Map.get(tool, to_string(key), default)
     end
   end
+
+  defp tool_output_schema(%{output_schema: schema}), do: schema
+  defp tool_output_schema(%{"output_schema" => schema}), do: schema
+  defp tool_output_schema(%{"outputSchema" => schema}), do: schema
+  defp tool_output_schema(_), do: nil
 end

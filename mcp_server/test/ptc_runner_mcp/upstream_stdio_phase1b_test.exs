@@ -76,6 +76,15 @@ defmodule PtcRunnerMcp.UpstreamStdioPhase1bTest do
     end
 
     @tag timeout: 30_000
+    test "preserves an advertised empty outputSchema as schema-present" do
+      name = unique_name("empty-output-schema")
+      _pid = start_stdio!(name, base_config(%{"MOCK_EMPTY_OUTPUT_SCHEMA" => "1"}))
+
+      assert {:ok, schemas} = Stdio.list_tools(name)
+      assert %{output_schema: %{}} = Enum.find(schemas, &(&1.name == "echo"))
+    end
+
+    @tag timeout: 30_000
     test "subprocess that requires notifications/initialized: handshake satisfies it" do
       # `MOCK_REQUIRE_INITIALIZED=1` rejects any `tools/call` until
       # the notification has been observed. If our handshake sent

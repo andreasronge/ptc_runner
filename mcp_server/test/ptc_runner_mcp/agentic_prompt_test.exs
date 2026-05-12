@@ -51,11 +51,28 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert count(prompt, "ptc_task MCP-call contract:") == 1
     assert count(prompt, "In `ptc_task`, `tool/mcp-call` returns a tagged map") == 1
     assert prompt =~ "Prefer `(mcp/text ...)` for human-readable upstream text"
+    assert prompt =~ "Do not parse `mcp/text` as JSON unless the text itself is JSON"
     assert prompt =~ "unexpected shape, inspect `(mcp/text ...)`"
     assert prompt =~ "inspect `:ok`"
     refute prompt =~ ":tag"
     refute prompt =~ "returns `nil`"
     refute prompt =~ "tool/mcp-call returns nil"
+  end
+
+  test "prompt includes unknown-content guidance only when catalog has unknown outputs" do
+    prompt =
+      Prompt.system_prompt(
+        catalog:
+          "fs:\n  list_directory(path: string) -> :unknown_content - Results use [FILE] prefixes"
+      )
+
+    assert prompt =~
+             "For `-> :unknown_content` tools, inspect the MCP envelope before assuming JSON."
+
+    typed_prompt =
+      Prompt.system_prompt(catalog: "docs:\n  search(q: string) -> {items [:string]}")
+
+    refute typed_prompt =~ "For `-> :unknown_content` tools"
   end
 
   test "assemble returns user message and generic tool-rendering suppression data" do

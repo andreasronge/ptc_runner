@@ -127,7 +127,8 @@ defmodule MockServer do
             "name" => "echo",
             "description" => "echoes its args",
             "inputSchema" => %{"type" => "object"}
-          },
+          }
+          |> maybe_put_empty_output_schema(),
           %{
             "name" => "slow",
             "inputSchema" => %{"type" => "object"}
@@ -170,6 +171,14 @@ defmodule MockServer do
   end
 
   defp handle_frame(_other), do: :ok
+
+  defp maybe_put_empty_output_schema(tool) do
+    if env_flag?("MOCK_EMPTY_OUTPUT_SCHEMA") do
+      Map.put(tool, "outputSchema", %{})
+    else
+      tool
+    end
+  end
 
   defp handle_tool_call(id, params) do
     cond do

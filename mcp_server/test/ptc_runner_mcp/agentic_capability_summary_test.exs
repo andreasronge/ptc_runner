@@ -18,7 +18,7 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
     assert CapabilitySummary.generate([]) == ""
   end
 
-  test "sorts upstreams and tool names deterministically without schemas" do
+  test "sorts upstreams and marks tools without schemas as unknown content" do
     entries = [
       %{
         name: "github",
@@ -31,7 +31,7 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
     ]
 
     assert CapabilitySummary.generate(entries) ==
-             "- docs: get_page, search\n- github: get_issue, search_code"
+             "- docs: get_page->:unknown_content, search->:unknown_content\n- github: get_issue->:unknown_content, search_code->:unknown_content"
 
     refute CapabilitySummary.generate(entries) =~ "input_schema"
     refute CapabilitySummary.generate(entries) =~ "properties"
@@ -58,13 +58,31 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
     assert CapabilitySummary.generate(entries) == "- docs: search->{items [:string]}"
   end
 
+  test "distinguishes malformed and empty output schemas" do
+    entries = [
+      %{
+        name: "alpha",
+        tools: [
+          %{name: "missing"},
+          %{name: "nil_schema", output_schema: nil},
+          %{name: "bad_schema", output_schema: "not-a-schema"},
+          %{name: "empty_schema", output_schema: %{}}
+        ]
+      }
+    ]
+
+    assert CapabilitySummary.generate(entries) ==
+             "- alpha: bad_schema->:unknown_content, empty_schema->:any, missing->:unknown_content, nil_schema->:unknown_content"
+  end
+
   test "uses the frozen structured snapshot" do
     Catalog.freeze_snapshot([
       %{name: "zeta", tools: [%{name: "last"}]},
       %{name: "alpha", tools: [%{name: "first"}]}
     ])
 
-    assert CapabilitySummary.from_frozen() == "- alpha: first\n- zeta: last"
+    assert CapabilitySummary.from_frozen() ==
+             "- alpha: first->:unknown_content\n- zeta: last->:unknown_content"
   end
 
   test "clips tool lists and never exceeds max bytes" do
@@ -85,7 +103,7 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
     summary = CapabilitySummary.generate(entries, max_bytes: 35)
 
     assert byte_size(summary) <= 35
-    assert summary =~ "(+4 more)"
+    assert summary =~ "(+5 more)"
     refute summary =~ "beta_long"
   end
 
@@ -98,7 +116,7 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
 
     summary = CapabilitySummary.generate(entries, max_bytes: 37)
 
-    assert summary == "- a: one\n- (+2 more upstreams)"
+    assert summary == "- a: one->:unknown_content"
     assert byte_size(summary) <= 37
   end
 
