@@ -209,18 +209,14 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, envelope), :drain}
 
-      Map.get(params, "name") == DebugTool.tool_name() ->
-        # `ptc_debug`: handled synchronously, NO concurrency permit,
-        # NOT through the async `Tools.call/1` path, and NEVER written
-        # to the ring (no self-noise, no recursion). Gated on
-        # `--debug-tool`; when disabled it is an unknown tool, mirroring
-        # the `ptc_task` gate on `Tools.agentic_advertised?/0`.
-        envelope =
-          if DebugConfig.enabled?() do
-            DebugTool.call(params, success_frame_overhead(id))
-          else
-            Envelope.unknown_tool(DebugTool.tool_name())
-          end
+      DebugConfig.enabled?() and Map.get(params, "name") == DebugTool.tool_name() ->
+        # `ptc_debug` (only when `--debug-tool` is set): handled synchronously,
+        # NO concurrency permit, NOT through the async `Tools.call/1` path, and
+        # NEVER written to the ring (no self-noise, no recursion). When
+        # `--debug-tool` is *off*, `ptc_debug` is just an unknown tool and
+        # falls through to the generic unknown-tool branch below — so it gets
+        # the same trace/telemetry treatment as any other unknown tool name.
+        envelope = DebugTool.call(params, success_frame_overhead(id))
 
         Log.log(:info, "tools_call_stop", %{
           request_id: id,

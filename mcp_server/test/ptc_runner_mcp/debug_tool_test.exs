@@ -187,6 +187,21 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert byte_size(Jason.encode!(recent_reply)) < 2_000
   end
 
+  test "a pathologically large JSON-RPC id is truncated before being stored in the ring" do
+    :ok = enable_debug()
+
+    big_id = String.duplicate("Z", 5_000)
+    _ = call_execute(big_id, %{"program" => "(+ 1 2)"})
+    _ = flush_ring()
+
+    recent_reply = call_debug(10, %{"op" => "recent"})
+    [call] = sc(recent_reply)["calls"]
+    assert byte_size(call["request_id"]) <= 256
+    assert call["request_id"] =~ "truncated"
+    # And the 5 KB id didn't bloat the diagnostics response either.
+    assert byte_size(Jason.encode!(recent_reply)) < 2_000
+  end
+
   test "busy rejection is recorded and shows in stats.errors.by_reason and recent" do
     :ok = enable_debug()
     Limits.set(Map.put(Limits.defaults(), :max_concurrent_calls, 1))
@@ -557,6 +572,29 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert sc(env)["reason"] == "unknown_tool"
 
     assert Process.whereis(DebugBuffer) == nil
+  end
+
+  test "without --debug-tool: a ptc_debug call goes through the generic unknown-tool trace path" do
+    dir = Path.join(System.tmp_dir!(), "ptc_dbg_unk_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
+    :ok = TraceHandler.attach()
+    disable_debug()
+
+    env = call_debug(1, %{"op" => "stats"})
+    assert sc(env)["reason"] == "unknown_tool"
+
+    # Like any other unknown tool, the call is traced: a per-call JSONL file
+    # under --trace-dir for this request id (no special-casing of ptc_debug).
+    hash8 = PtcRunnerMcp.TraceFile.request_id_hash8(1)
+
+    files =
+      File.ls!(dir)
+      |> Enum.filter(&(String.ends_with?(&1, ".jsonl") and String.contains?(&1, "-#{hash8}-")))
+
+    assert files != []
   end
 
   test "with --debug-tool: ptc_debug present in tools/list with read-only annotations" do

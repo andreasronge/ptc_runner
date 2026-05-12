@@ -18,6 +18,14 @@ defmodule PtcRunnerMcp.DebugRecorder do
 
   @recognized_tools ["ptc_lisp_execute", "ptc_task"]
 
+  # JSON-RPC `id` is client-controlled and bounded only by `--max-frame-bytes`
+  # (default 8 MiB). The ring is bounded by *count*, not bytes, so storing a
+  # multi-MiB id per entry would retain hundreds of MiB. Cap what we keep —
+  # 256 bytes matches `ptc_debug get`'s own `request_id` limit, so anything we
+  # keep verbatim is still a usable lookup key (a longer id can't be passed to
+  # `get` anyway).
+  @max_stored_request_id_bytes 256
+
   @doc """
   Build and record a call record for a recognized-tool `tools/call`.
 
@@ -96,7 +104,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
     context = if executed?, do: Map.get(args, "context")
 
     record = %{
-      request_id: to_string(request_id || ""),
+      request_id: bounded_request_id(request_id),
       ts: DateTime.utc_now(),
       tool: tool,
       status: status,
@@ -122,6 +130,19 @@ defmodule PtcRunnerMcp.DebugRecorder do
 
   defp extract_arguments(%{"arguments" => args}) when is_map(args), do: args
   defp extract_arguments(_), do: %{}
+
+  # Cap the stored JSON-RPC `id` (see `@max_stored_request_id_bytes`). For a
+  # pathologically large id, keep a short codepoint-safe prefix plus a size
+  # marker rather than retaining megabytes per ring entry.
+  defp bounded_request_id(id) do
+    s = to_string(id || "")
+
+    if byte_size(s) > @max_stored_request_id_bytes do
+      String.slice(s, 0, 64) <> "…(#{byte_size(s)}B id, truncated)"
+    else
+      s
+    end
+  end
 
   defp status_and_reason(sc, is_error) do
     case sc do
