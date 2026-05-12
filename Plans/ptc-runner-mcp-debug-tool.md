@@ -223,15 +223,33 @@ storage):
 
 ### 5.3 `--trace-dir` enrichment
 
-When `--trace-dir` is configured, `op=get` performs a single bounded
-`Path.wildcard("<trace_dir>/*-<hash8>-*.jsonl")`, where `<hash8>` is
-`TraceFile.request_id_hash8(request_id)`. That is one directory read over a
-directory the server already FIFO-caps at `--trace-max-files`, and it is the only
-disk access `ptc_debug` ever makes. If exactly one file matches, `get` returns
-its (already-redacted) JSONL lines tagged `source: "trace_file"`. If `--trace-dir`
-is unset, nothing matches, or several match (a same-millisecond hash collision —
-pick the newest by mtime), `get` falls back to the ring record tagged
-`source: "ring_buffer"`, noting that the full on-disk trace requires `--trace-dir`.
+When `--trace-dir` is configured, `op=get` lists the directory once (via
+`File.ls/1` — not `Path.wildcard`, so a `--trace-dir` containing glob
+metacharacters is treated literally) and selects files named
+`*-<hash8>-*.jsonl`, where `<hash8>` is `TraceFile.request_id_hash8(request_id)`.
+On a same-millisecond hash collision it picks the newest by mtime. Then:
+
+- **Inline (`source: "trace_file"`, `record: <lines>`)** — *only* when the
+  *current* `--trace-payloads` is `full`. Inlining returns a trace at `full`
+  fidelity; a trace written by an earlier run (or at a more permissive policy)
+  must not be served at full fidelity through a server now running at `summary`
+  / `none`. The loaded lines are re-run through `Credentials.Redactor.scrub_deep/1`
+  for the current credential set (defence in depth — the trace was already
+  scrubbed for the credentials active when it was written).
+- **Pointer (`source: "trace_file"`, no `record`, `note: "…not inlined under
+  --trace-payloads=<policy>…"`)** — when a file matches but the current policy
+  is `summary` / `none`. If this run's ring also has the record, that is
+  returned instead (`source: "ring_buffer"`, redacted per the current policy)
+  with the same note appended.
+- **`{found: true, truncated: true, note: "…exceeds --max-debug-response-bytes…"}`**
+  — when the matching file (at `full`) is larger than `--max-debug-response-bytes`;
+  a single `File.stat` decides this, the file body is never read.
+- **Ring fallback / `found: false`** — no `--trace-dir`, no match, or read
+  failure.
+
+This is the only disk access `ptc_debug` ever makes: one `File.ls` plus, when
+inlining, one `File.stat` and one bounded `File.read` (the file is at most
+`--max-debug-response-bytes`).
 
 `stats` / `recent` read **only** the ring buffer in v1 — no directory scan, no
 file reads — keeping them O(ring_size) and side-effect free. A capped, opt-in
