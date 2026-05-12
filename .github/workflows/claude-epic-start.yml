@@ -24,11 +24,38 @@ jobs:
         run: |
           echo "Epic #$EPIC_NUMBER activated, finding first unblocked issue..."
 
-          # Get all open issues with epic:* labels, sorted by number ascending
-          # (so earlier issues/phases are checked first)
+          # Resolve the active epic's specific epic:* label. There may be
+          # multiple epics in the repository, so scanning for any epic:* label
+          # can incorrectly start work from another epic.
+          EPIC_LABEL=$(gh issue view "$EPIC_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --json labels \
+            --jq '[.labels[].name | select(startswith("epic:"))][0]')
+
+          if [ -z "$EPIC_LABEL" ] || [ "$EPIC_LABEL" = "null" ]; then
+            echo "::warning::Epic #$EPIC_NUMBER has no epic:* label"
+            gh issue comment "$EPIC_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
+          ## ⚠️ Missing Epic Label
+
+          This epic was activated but has no \`epic:*\` label.
+
+          **To fix:**
+          1. Add an epic label to this issue, e.g. \`epic:your-epic-name\`
+          2. Add the same label to child issues
+          3. Remove and re-add \`status:active\` to retry
+          EOF
+          )"
+            exit 0
+          fi
+
+          echo "Active epic label: $EPIC_LABEL"
+
+          # Get open issues for this exact epic label, sorted by number
+          # ascending (so earlier issues/phases are checked first).
           EPIC_ISSUES=$(gh issue list \
             --repo "${{ github.repository }}" \
             --state open \
+            --label "$EPIC_LABEL" \
             --json number,body,labels \
             --limit 100 \
             | jq 'sort_by(.number)')
@@ -50,8 +77,8 @@ jobs:
             # Skip if this is the epic itself
             [ "$ISSUE_NUMBER" = "$EPIC_NUMBER" ] && continue
 
-            # Check if issue has an epic:* label
-            HAS_EPIC_LABEL=$(echo "$row" | jq '[.labels[].name | select(startswith("epic:"))] | length')
+            # Check if issue has this epic's exact label.
+            HAS_EPIC_LABEL=$(echo "$row" | jq --arg label "$EPIC_LABEL" '[.labels[].name | select(. == $label)] | length')
             [ "$HAS_EPIC_LABEL" -eq 0 ] && continue
 
             EPIC_ISSUE_COUNT=$((EPIC_ISSUE_COUNT + 1))
@@ -121,15 +148,15 @@ jobs:
           # Post warning to epic if no unblocked issues found
           if [ -z "$FOUND_UNBLOCKED" ]; then
             if [ "$EPIC_ISSUE_COUNT" -eq 0 ]; then
-              echo "::warning::No issues found with epic:* labels"
+              echo "::warning::No issues found with epic label $EPIC_LABEL"
               gh issue comment "$EPIC_NUMBER" --repo "${{ github.repository }}" --body "$(cat <<EOF
           ## ⚠️ No Epic Issues Found
 
-          This epic was activated but no open issues with \`epic:*\` labels were found.
+          This epic was activated but no open issues with \`$EPIC_LABEL\` were found.
 
           **To fix:**
           1. Create issues for this epic
-          2. Add \`epic:your-epic-name\` label to each issue
+          2. Add \`$EPIC_LABEL\` label to each issue
           3. Remove and re-add \`status:active\` to retry
           EOF
           )"
