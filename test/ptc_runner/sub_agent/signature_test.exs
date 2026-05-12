@@ -1,6 +1,8 @@
 defmodule PtcRunner.SubAgent.SignatureTest do
   use ExUnit.Case
 
+  doctest PtcRunner.SubAgent.Signature
+
   alias PtcRunner.SubAgent.Signature
 
   describe "parse/1" do

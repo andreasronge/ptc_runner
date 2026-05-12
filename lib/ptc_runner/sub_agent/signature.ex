@@ -19,11 +19,11 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> {:ok, sig} = Signature.parse("(name :string) -> {greeting :string}")
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("(name :string) -> {greeting :string}")
       iex> sig
       {:signature, [{"name", :string}], {:map, [{"greeting", :string}]}}
 
-      iex> {:ok, sig} = Signature.parse("{count :int}")
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("{count :int}")
       iex> sig
       {:signature, [], {:map, [{"count", :int}]}}
 
@@ -66,17 +66,17 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> Signature.parse("(id :int) -> {name :string}")
+      iex> PtcRunner.SubAgent.Signature.parse("(id :int) -> {name :string}")
       {:ok, {:signature, [{"id", :int}], {:map, [{"name", :string}]}}}
 
-      iex> Signature.parse("() -> :string")
+      iex> PtcRunner.SubAgent.Signature.parse("() -> :string")
       {:ok, {:signature, [], :string}}
 
-      iex> Signature.parse("{count :int}")
+      iex> PtcRunner.SubAgent.Signature.parse("{count :int}")
       {:ok, {:signature, [], {:map, [{"count", :int}]}}}
 
-      iex> Signature.parse("invalid")
-      {:error, "..."}
+      iex> match?({:error, _}, PtcRunner.SubAgent.Signature.parse("invalid"))
+      true
   """
   @spec parse(String.t()) :: {:ok, signature()} | {:error, String.t()}
   def parse(input) when is_binary(input) do
@@ -94,12 +94,12 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> {:ok, sig} = Signature.parse("() -> {count :int, items [:string]}")
-      iex> Signature.validate(sig, %{count: 5, items: ["a", "b"]})
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> {count :int, items [:string]}")
+      iex> PtcRunner.SubAgent.Signature.validate(sig, %{count: 5, items: ["a", "b"]})
       :ok
 
-      iex> {:ok, sig} = Signature.parse("() -> :int")
-      iex> Signature.validate(sig, "not an int")
+      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> :int")
+      iex> PtcRunner.SubAgent.Signature.validate(sig, "not an int")
       {:error, [%{path: [], message: "expected int, got string"}]}
   """
   @spec validate(signature(), term()) :: :ok | {:error, [validation_error()]}
