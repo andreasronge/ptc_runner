@@ -103,20 +103,7 @@ defmodule PtcRunner.CatalogBuiltinsTest do
               result
           end
 
-        {:search_tools, [query]} ->
-          {:ok,
-           Map.get(overrides, {:search_tools, query}, [
-             %{
-               "server" => "github",
-               "tool" => "search",
-               "summary" => "Search things",
-               "arg_keys" => ["query"],
-               "read_only" => true,
-               "catalog_loaded" => true
-             }
-           ])}
-
-        {:search_tools, [query, _opts]} ->
+        {:search_tools, [query | _rest]} ->
           {:ok,
            Map.get(overrides, {:search_tools, query}, [
              %{

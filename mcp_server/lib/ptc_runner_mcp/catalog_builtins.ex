@@ -196,7 +196,6 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           unloaded_servers
           |> Enum.map(fn info -> score_server_level(info, query_tokens) end)
           |> Enum.filter(fn {score, _entry} -> score > 0 end)
-          |> Enum.map(fn {score, entry} -> {score, entry} end)
 
         {[], server_level}
       end
