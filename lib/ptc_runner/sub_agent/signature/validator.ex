@@ -124,6 +124,17 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end
   end
 
+  # Closed maps (from a JSON Schema `additionalProperties: false`): every
+  # declared field is validated as usual *and* any undeclared key is an
+  # error, so fields the caller explicitly excluded can't leak through.
+  defp validate_type(data, {:closed_map, fields}, path) do
+    if is_map(data) do
+      validate_map_fields(data, fields, path) ++ validate_no_extra_fields(data, fields, path)
+    else
+      [error_at(path, "expected map, got #{type_name(data)}")]
+    end
+  end
+
   # ============================================================
   # Map Field Validation
   # ============================================================
@@ -144,6 +155,31 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
       end
     end)
   end
+
+  # Compare data keys against declared field names, normalizing both sides
+  # (atom→string, hyphen→underscore) so a Clojure-style `:user-id` data key
+  # still counts as covering a declared `"user_id"` field. Anything left over
+  # is an undeclared field.
+  defp validate_no_extra_fields(data, fields, path) do
+    declared =
+      fields
+      |> Enum.map(fn {name, _type} -> KeyNormalizer.normalize_key(name) end)
+      |> MapSet.new()
+
+    data
+    |> Map.keys()
+    |> Enum.reject(fn key -> MapSet.member?(declared, KeyNormalizer.normalize_key(key)) end)
+    |> Enum.sort_by(&inspect/1)
+    |> Enum.map(fn key ->
+      error_at(
+        path ++ [path_segment(key)],
+        "unexpected field — schema disallows additional properties"
+      )
+    end)
+  end
+
+  defp path_segment(key) when is_binary(key) or is_atom(key), do: to_string(key)
+  defp path_segment(key), do: inspect(key)
 
   # Try several key forms so signature field names match regardless of which
   # convention the data uses (Clojure-style `:user-id`, JSON-style `"user-id"`,
