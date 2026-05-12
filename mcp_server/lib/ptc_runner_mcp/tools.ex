@@ -27,6 +27,7 @@ defmodule PtcRunnerMcp.Tools do
   """
 
   alias PtcRunner.PtcToolProtocol
+  alias PtcRunner.SubAgent.Signature
 
   alias PtcRunnerMcp.{
     Agentic,
@@ -482,7 +483,7 @@ defmodule PtcRunnerMcp.Tools do
   def validate(args) when is_map(args) do
     with {:ok, program} <- validate_program(args),
          {:ok, context} <- validate_context(args),
-         {:ok, parsed_signature} <- validate_signature(args) do
+         {:ok, parsed_signature} <- validate_output_contract(args) do
       {:ok, program, context, parsed_signature}
     else
       {:error, message} -> {:error, Envelope.render_error(:args_error, message)}
@@ -851,6 +852,41 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
+  # Mutual exclusivity gate: if both `output_schema` and `signature`
+  # are supplied, reject before either is parsed.
+  defp validate_output_contract(args) do
+    sig_present = match?({:ok, v} when not is_nil(v), Map.fetch(args, "signature"))
+    schema_present = match?({:ok, v} when not is_nil(v), Map.fetch(args, "output_schema"))
+
+    cond do
+      sig_present and schema_present ->
+        {:error,
+         "arguments `output_schema` and `signature` are mutually exclusive — provide one or neither"}
+
+      schema_present ->
+        validate_output_schema(args)
+
+      true ->
+        validate_signature(args)
+    end
+  end
+
+  defp validate_output_schema(args) do
+    case Map.fetch(args, "output_schema") do
+      {:ok, value} when not is_map(value) or is_struct(value) ->
+        {:error, "argument `output_schema` must be a JSON object, got #{type_label(value)}"}
+
+      {:ok, value} ->
+        case Signature.from_json_schema(value) do
+          {:ok, return_type} -> {:ok, {:signature, [], return_type}}
+          {:error, reason} -> {:error, "argument `output_schema` is invalid: #{reason}"}
+        end
+
+      :error ->
+        {:ok, nil}
+    end
+  end
+
   defp type_label(v) when is_struct(v), do: "struct"
   defp type_label(v) when is_map(v), do: "object"
   defp type_label(v) when is_list(v), do: "array"
@@ -875,6 +911,10 @@ defmodule PtcRunnerMcp.Tools do
               "Keys are strings; values are JSON-encodable.",
           "additionalProperties" => true
         },
+        "output_schema" => %{
+          "type" => "object",
+          "description" => output_schema_description_for(profile)
+        },
         "signature" => %{
           "type" => "string",
           "description" => signature_description_for(profile)
@@ -884,15 +924,29 @@ defmodule PtcRunnerMcp.Tools do
     }
   end
 
+  defp output_schema_description_for(:mcp_no_tools) do
+    ~s|Optional JSON Schema for return validation. The response carries a structured | <>
+      ~s|`validated` JSON value when supplied. Supported types: string, integer, number, | <>
+      ~s|boolean, array (with items), object (with properties/required). | <>
+      ~s|Example: {"type": "object", "properties": {"count": {"type": "integer"}}, | <>
+      ~s|"required": ["count"]}. Mutually exclusive with `signature`.|
+  end
+
+  defp output_schema_description_for(:mcp_aggregator) do
+    "Optional JSON Schema for return validation. Omit for exploratory upstream calls. " <>
+      "Supported types: string, integer, number, boolean, array (with items), " <>
+      "object (with properties/required). Mutually exclusive with `signature`."
+  end
+
   defp signature_description_for(:mcp_no_tools) do
-    "Optional PTC signature for return validation, e.g. '() -> {count :int}'. " <>
-      "The '() ->' prefix is shorthand-optional — a bare type like '{count :int}' " <>
-      "is equivalent and accepted. See docs/signature-syntax.md."
+    "Advanced/legacy. PTC signature syntax for return validation, e.g. " <>
+      "'() -> {count :int}'. Prefer `output_schema` (JSON Schema) for typed output. " <>
+      "Mutually exclusive with `output_schema`."
   end
 
   defp signature_description_for(:mcp_aggregator) do
-    "Usually omit in aggregator mode. Do not pass for exploratory upstream calls. " <>
-      "Only use when the user explicitly needs validated output and you know the exact " <>
-      "PTC signature syntax, e.g. '() -> {count :int}'."
+    "Advanced/legacy. Usually omit in aggregator mode. Prefer `output_schema` for " <>
+      "typed output. Only use when you know the exact PTC signature syntax, " <>
+      "e.g. '() -> {count :int}'. Mutually exclusive with `output_schema`."
   end
 end

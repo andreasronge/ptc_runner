@@ -5,7 +5,7 @@
     "openWorldHint": false,
     "readOnlyHint": true
   },
-  "description": "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, or multi-step data transformation. No app tools are available inside the program. Pass external data via the `context` argument; each invocation is independent — there is no memory of prior calls.\n\n# PTC-Lisp authoring\n\nPTC-Lisp is a deterministic, sandboxed subset of Clojure with a small Java-interop surface (Date/Time + String methods). A program is one or more top-level expressions; the last expression's value is the result.\n\n## Non-obvious bits\n\n- **`context` keys are bound under the `data/` namespace.** Pass `{\"records\": [...]}`, reference as `data/records` inside the program. There is no `context` binding.\n- **`signature`** is a return-type schema, e.g. `() -> {count :int}` or `() -> [{name :string, score :int}]`. Supplying it makes the response carry a structured `validated` JSON value — the only path for a caller to receive programmatic data. Without it, the response only contains an LLM-readable preview.\n- **`(fail v)`** terminates with an error value when you want to surface a domain failure to the caller.\n- **JSON**: `(json/parse-string s)` / `(json/generate-string v)` are available; `nil` on failure.\n\n## Restrictions\n\n- No mutable state: `atom`, `swap!`, `reset!`, `@deref` are absent — use `reduce` / `map` / `filter`.\n- No I/O except `println`. No filesystem, no network. No general Java interop.\n- No state across calls — each invocation is independent.\n- 1 s wall-clock, 10 MB memory, 64 KB program, 4 MB context.\n\nIf you reach for something that isn't there, the response will say so clearly — adjust and retry.\n\n## Example\n\n```\n;; context:   {\"orders\": [{\"total\": 12}, {\"total\": 7}, {\"total\": 33}]}\n;; signature: \"() -> {count :int, sum :int}\"\n(let [big (filter #(> (get % \"total\") 10) data/orders)]\n  {:count (count big)\n   :sum   (reduce + (map #(get % \"total\") big))})\n```\n\nFull reference: https://hexdocs.pm/ptc_runner.\n",
+  "description": "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, or multi-step data transformation. No app tools are available inside the program. Pass external data via the `context` argument; each invocation is independent — there is no memory of prior calls.\n\n# PTC-Lisp authoring\n\nPTC-Lisp is a deterministic, sandboxed subset of Clojure with a small Java-interop surface (Date/Time + String methods). A program is one or more top-level expressions; the last expression's value is the result.\n\n## Non-obvious bits\n\n- **`context` keys are bound under the `data/` namespace.** Pass `{\"records\": [...]}`, reference as `data/records` inside the program. There is no `context` binding.\n- **`output_schema`** is a JSON Schema for the return type. Supplying it makes the response carry a structured `validated` JSON value — the only path for a caller to receive programmatic data. Without it, the response only contains an LLM-readable preview. Supported types: `string`, `integer`, `number`, `boolean`, `array` (with `items`), `object` (with `properties`/`required`).\n- **`signature`** (advanced/legacy) is the PTC-internal return-type syntax, e.g. `() -> {count :int}`. Prefer `output_schema` above. Mutually exclusive with `output_schema`.\n- **`(fail v)`** terminates with an error value when you want to surface a domain failure to the caller.\n- **JSON**: `(json/parse-string s)` / `(json/generate-string v)` are available; `nil` on failure.\n\n## Restrictions\n\n- No mutable state: `atom`, `swap!`, `reset!`, `@deref` are absent — use `reduce` / `map` / `filter`.\n- No I/O except `println`. No filesystem, no network. No general Java interop.\n- No state across calls — each invocation is independent.\n- 1 s wall-clock, 10 MB memory, 64 KB program, 4 MB context.\n\nIf you reach for something that isn't there, the response will say so clearly — adjust and retry.\n\n## Example\n\n```\n;; context:       {\"orders\": [{\"total\": 12}, {\"total\": 7}, {\"total\": 33}]}\n;; output_schema: {\"type\": \"object\", \"properties\": {\"count\": {\"type\": \"integer\"}, \"sum\": {\"type\": \"integer\"}}, \"required\": [\"count\", \"sum\"]}\n(let [big (filter #(> (get % \"total\") 10) data/orders)]\n  {:count (count big)\n   :sum   (reduce + (map #(get % \"total\") big))})\n```\n\nFull reference: https://hexdocs.pm/ptc_runner.\n",
   "inputSchema": {
     "properties": {
       "context": {
@@ -13,12 +13,16 @@
         "description": "Optional map of named values bound under data/ in the program. Keys are strings; values are JSON-encodable.",
         "type": "object"
       },
+      "output_schema": {
+        "description": "Optional JSON Schema for return validation. The response carries a structured `validated` JSON value when supplied. Supported types: string, integer, number, boolean, array (with items), object (with properties/required). Example: {\"type\": \"object\", \"properties\": {\"count\": {\"type\": \"integer\"}}, \"required\": [\"count\"]}. Mutually exclusive with `signature`.",
+        "type": "object"
+      },
       "program": {
         "description": "PTC-Lisp source code. Must be non-empty after trimming whitespace.",
         "type": "string"
       },
       "signature": {
-        "description": "Optional PTC signature for return validation, e.g. '() -> {count :int}'. The '() ->' prefix is shorthand-optional — a bare type like '{count :int}' is equivalent and accepted. See docs/signature-syntax.md.",
+        "description": "Advanced/legacy. PTC signature syntax for return validation, e.g. '() -> {count :int}'. Prefer `output_schema` (JSON Schema) for typed output. Mutually exclusive with `output_schema`.",
         "type": "string"
       }
     },
@@ -102,3 +106,4 @@
     "type": "object"
   }
 }
+

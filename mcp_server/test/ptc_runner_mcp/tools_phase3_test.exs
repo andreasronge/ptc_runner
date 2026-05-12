@@ -118,7 +118,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
         |> get_in(["inputSchema", "properties", "signature", "description"])
 
       assert description =~ "Usually omit in aggregator mode"
-      assert description =~ "Do not pass for exploratory upstream calls"
+      assert description =~ "Advanced/legacy"
       refute description =~ "shorthand-optional"
     end
 
