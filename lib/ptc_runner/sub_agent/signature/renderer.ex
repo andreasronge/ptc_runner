@@ -117,4 +117,8 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
 
     "{#{fields_str}}"
   end
+
+  # The PTC signature DSL has no closed-map syntax; render it like a plain
+  # map (the "closed" semantics only affect validation, not display).
+  def render_type({:closed_map, fields}, opts), do: render_type({:map, fields}, opts)
 end

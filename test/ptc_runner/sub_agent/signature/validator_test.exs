@@ -347,4 +347,51 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
                )
     end
   end
+
+  describe "validate/2 - closed maps" do
+    test "accepts a map with exactly the declared fields" do
+      assert :ok = Validator.validate(%{"x" => 1}, {:closed_map, [{"x", :int}]})
+    end
+
+    test "rejects an undeclared field" do
+      assert {:error, [%{path: ["extra"], message: msg}]} =
+               Validator.validate(%{"x" => 1, "extra" => 2}, {:closed_map, [{"x", :int}]})
+
+      assert msg =~ "unexpected field"
+    end
+
+    test "still reports declared-field type errors alongside extras" do
+      assert {:error, errors} =
+               Validator.validate(
+                 %{"x" => "nope", "extra" => 2},
+                 {:closed_map, [{"x", :int}]}
+               )
+
+      assert Enum.any?(errors, &(&1.path == ["x"] and &1.message =~ "expected int"))
+      assert Enum.any?(errors, &(&1.path == ["extra"] and &1.message =~ "unexpected field"))
+    end
+
+    test "missing optional fields are fine; missing required fields still fail" do
+      assert :ok = Validator.validate(%{}, {:closed_map, [{"x", {:optional, :int}}]})
+
+      assert {:error, [%{path: ["x"]}]} =
+               Validator.validate(%{}, {:closed_map, [{"x", :int}]})
+    end
+
+    test "treats hyphenated atom keys as covering underscored field names" do
+      assert :ok =
+               Validator.validate(
+                 %{:"user-id" => 1},
+                 {:closed_map, [{"user_id", :int}]}
+               )
+    end
+
+    test "enforces closedness for nested closed maps" do
+      assert {:error, [%{path: ["user", "extra"]}]} =
+               Validator.validate(
+                 %{"user" => %{"name" => "A", "extra" => 1}},
+                 {:closed_map, [{"user", {:closed_map, [{"name", :string}]}}]}
+               )
+    end
+  end
 end

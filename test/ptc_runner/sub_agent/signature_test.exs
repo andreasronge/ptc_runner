@@ -344,4 +344,112 @@ defmodule PtcRunner.SubAgent.SignatureTest do
       assert schema["properties"]["who"] == %{"type" => "string"}
     end
   end
+
+  describe "from_json_schema/1 - additionalProperties" do
+    test "additionalProperties: false yields a closed map" do
+      assert {:ok, {:closed_map, [{"x", :int}]}} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => ["x"],
+                 "additionalProperties" => false
+               })
+    end
+
+    test "additionalProperties: true yields an open map" do
+      assert {:ok, {:map, [{"x", :int}]}} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => ["x"],
+                 "additionalProperties" => true
+               })
+    end
+
+    test "absent additionalProperties yields an open map" do
+      assert {:ok, {:map, [{"x", :int}]}} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => ["x"]
+               })
+    end
+
+    test "additionalProperties: false with no properties is a closed empty object" do
+      assert {:ok, {:closed_map, []}} =
+               Signature.from_json_schema(%{"type" => "object", "additionalProperties" => false})
+    end
+
+    test "non-boolean additionalProperties is rejected" do
+      assert {:error, msg} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{},
+                 "additionalProperties" => %{"type" => "string"}
+               })
+
+      assert msg =~ "additionalProperties"
+    end
+
+    test "closedness propagates to nested objects" do
+      assert {:ok, {:closed_map, [{"user", {:closed_map, [{"name", :string}]}}]}} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{
+                   "user" => %{
+                     "type" => "object",
+                     "properties" => %{"name" => %{"type" => "string"}},
+                     "required" => ["name"],
+                     "additionalProperties" => false
+                   }
+                 },
+                 "required" => ["user"],
+                 "additionalProperties" => false
+               })
+    end
+  end
+
+  describe "from_json_schema/1 - required validation" do
+    test "rejects a required entry that is not a declared property" do
+      assert {:error, msg} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => ["missing"]
+               })
+
+      assert msg =~ "missing"
+    end
+
+    test "rejects a non-string required entry" do
+      assert {:error, msg} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => [123]
+               })
+
+      assert msg =~ "must be strings"
+    end
+
+    test "rejects required entries when no properties are declared" do
+      assert {:error, _} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{},
+                 "required" => ["x"]
+               })
+    end
+
+    test "still rejects non-list required" do
+      assert {:error, msg} =
+               Signature.from_json_schema(%{
+                 "type" => "object",
+                 "properties" => %{"x" => %{"type" => "integer"}},
+                 "required" => "x"
+               })
+
+      assert msg =~ "array of strings"
+    end
+  end
 end

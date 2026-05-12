@@ -49,6 +49,7 @@ defmodule PtcRunner.SubAgent.Signature do
           | {:optional, type()}
           | {:list, type()}
           | {:map, [field()]}
+          | {:closed_map, [field()]}
 
   @type field :: {String.t(), type()}
 
@@ -197,17 +198,24 @@ defmodule PtcRunner.SubAgent.Signature do
   def returns_list?({:signature, _params, {:list, _}}), do: true
   def returns_list?(_), do: false
 
-  @supported_scalar_keys MapSet.new(~w(type description))
-  @supported_array_keys MapSet.new(~w(type description items))
-  @supported_object_keys MapSet.new(~w(type description properties required additionalProperties))
+  @supported_scalar_keys ~w(type description)
+  @supported_array_keys ~w(type description items)
+  @supported_object_keys ~w(type description properties required additionalProperties)
 
   @doc """
   Convert a JSON Schema subset map to a PTC signature return type.
 
   Inverse of `type_to_json_schema/1`. Supports scalar types (`string`,
   `integer`, `number`, `boolean`), `array` with `items`, and `object`
-  with `properties`/`required`. Unsupported JSON Schema features
-  (combinators, `$ref`, `enum`, `pattern`, etc.) return `{:error, reason}`.
+  with `properties`/`required`/`additionalProperties`. Unsupported JSON
+  Schema features (combinators, `$ref`, `enum`, `pattern`, etc.) return
+  `{:error, reason}`.
+
+  `additionalProperties: false` produces a closed map (`{:closed_map, ...}`)
+  whose validation rejects undeclared fields. `additionalProperties: true`
+  (or its absence) produces an open `{:map, ...}` that tolerates extras.
+  Every `required` entry must be a string naming a declared property,
+  otherwise an `{:error, reason}` is returned.
 
   ## Examples
 
@@ -222,6 +230,12 @@ defmodule PtcRunner.SubAgent.Signature do
 
       iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}})
       {:ok, {:map, [{"name", {:optional, :string}}]}}
+
+      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"x" => %{"type" => "integer"}}, "required" => ["x"], "additionalProperties" => false})
+      {:ok, {:closed_map, [{"x", :int}]}}
+
+      iex> match?({:error, _}, PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{}, "required" => ["missing"]}))
+      true
 
   """
   @spec from_json_schema(map()) :: {:ok, type()} | {:error, String.t()}
@@ -267,22 +281,70 @@ defmodule PtcRunner.SubAgent.Signature do
   end
 
   defp convert_object_schema(schema) do
-    with :ok <- check_unsupported_keys(schema, @supported_object_keys) do
+    with :ok <- check_unsupported_keys(schema, @supported_object_keys),
+         {:ok, mode} <- additional_properties_mode(schema) do
+      required = Map.get(schema, "required", [])
+
       case Map.fetch(schema, "properties") do
         {:ok, properties} when is_map(properties) ->
-          required = Map.get(schema, "required", [])
-          convert_object_fields(properties, required)
+          with :ok <- validate_required_entries(required, properties) do
+            convert_object_fields(properties, required, mode)
+          end
 
         {:ok, _} ->
           {:error, "object \"properties\" must be a JSON object"}
 
         :error ->
-          {:ok, :map}
+          with :ok <- validate_required_entries(required, %{}) do
+            {:ok, empty_object_type(mode)}
+          end
       end
     end
   end
 
-  defp convert_object_fields(properties, required) when is_list(required) do
+  # `additionalProperties` controls whether undeclared fields survive
+  # validation. We only honour the boolean form of the keyword; the
+  # schema-valued form (`additionalProperties: {...}`) is rejected as
+  # unsupported so it can never be silently dropped.
+  defp additional_properties_mode(schema) do
+    case Map.fetch(schema, "additionalProperties") do
+      :error ->
+        {:ok, :open}
+
+      {:ok, true} ->
+        {:ok, :open}
+
+      {:ok, false} ->
+        {:ok, :closed}
+
+      {:ok, other} ->
+        {:error, ~s|"additionalProperties" must be true or false, got #{inspect(other)}|}
+    end
+  end
+
+  defp empty_object_type(:closed), do: {:closed_map, []}
+  defp empty_object_type(:open), do: :map
+
+  defp validate_required_entries(required, _properties) when not is_list(required),
+    do: {:error, ~s|"required" must be an array of strings|}
+
+  defp validate_required_entries(required, properties) do
+    declared = Map.keys(properties)
+
+    Enum.reduce_while(required, :ok, fn
+      entry, :ok when is_binary(entry) ->
+        if entry in declared do
+          {:cont, :ok}
+        else
+          {:halt, {:error, ~s|"required" entry #{inspect(entry)} is not a declared property|}}
+        end
+
+      entry, :ok ->
+        {:halt, {:error, ~s|"required" entries must be strings, got #{inspect(entry)}|}}
+    end)
+  end
+
+  defp convert_object_fields(properties, required, mode) do
     properties
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.reduce_while({:ok, []}, fn {name, sub_schema}, {:ok, acc} ->
@@ -296,16 +358,16 @@ defmodule PtcRunner.SubAgent.Signature do
       end
     end)
     |> case do
-      {:ok, fields} -> {:ok, {:map, Enum.reverse(fields)}}
+      {:ok, fields} -> {:ok, build_object_type(mode, Enum.reverse(fields))}
       {:error, _} = err -> err
     end
   end
 
-  defp convert_object_fields(_properties, _required),
-    do: {:error, "\"required\" must be an array of strings"}
+  defp build_object_type(:closed, fields), do: {:closed_map, fields}
+  defp build_object_type(:open, fields), do: {:map, fields}
 
   defp check_unsupported_keys(schema, allowed) do
-    extra = schema |> Map.keys() |> Enum.reject(&MapSet.member?(allowed, &1))
+    extra = schema |> Map.keys() |> Enum.reject(&Enum.member?(allowed, &1))
 
     if extra == [] do
       :ok
@@ -361,6 +423,11 @@ defmodule PtcRunner.SubAgent.Signature do
       "additionalProperties" => false
     }
   end
+
+  # Closed maps already advertise `additionalProperties: false` via the
+  # `{:map, ...}` branch above — the only difference is enforcement at
+  # validation time, which the JSON Schema can't express any further.
+  def type_to_json_schema({:closed_map, fields}), do: type_to_json_schema({:map, fields})
 
   @doc false
   @spec unwrap_optional(type()) :: {type(), boolean()}
