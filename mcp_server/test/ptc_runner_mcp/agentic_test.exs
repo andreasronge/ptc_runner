@@ -1,6 +1,8 @@
 defmodule PtcRunnerMcp.AgenticTest do
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{
     AgenticConfig,
     AggregatorConfig,
@@ -82,7 +84,7 @@ defmodule PtcRunnerMcp.AgenticTest do
   end
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
     Catalog.clear_frozen()
     AgenticConfig.set(AgenticConfig.defaults())
     AggregatorConfig.set(AggregatorConfig.defaults())
@@ -93,7 +95,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     original_trace = TraceConfig.get()
 
     on_exit(fn ->
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       Catalog.clear_frozen()
       AgenticConfig.set(AgenticConfig.defaults())
       AggregatorConfig.set(AggregatorConfig.defaults())
@@ -697,21 +699,4 @@ defmodule PtcRunnerMcp.AgenticTest do
 
   defp restore_ptc_env(key, nil), do: Elixir.Application.delete_env(:ptc_runner, key)
   defp restore_ptc_env(key, value), do: Elixir.Application.put_env(:ptc_runner, key, value)
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
-    end
-  end
 end

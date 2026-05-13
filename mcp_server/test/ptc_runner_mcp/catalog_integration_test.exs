@@ -16,13 +16,15 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{AggregatorConfig, CatalogConfig, Limits, Tools}
   alias PtcRunnerMcp.Upstream.{Catalog, Registry}
 
   @registry_name PtcRunnerMcp.Upstream.Registry
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
 
     {:ok, _pid} = Registry.start_link(name: @registry_name)
     Limits.set(Limits.defaults())
@@ -30,7 +32,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
     CatalogConfig.set(CatalogConfig.defaults())
 
     on_exit(fn ->
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       Limits.set(Limits.defaults())
       AggregatorConfig.set(AggregatorConfig.defaults())
       CatalogConfig.set(CatalogConfig.defaults())
@@ -222,23 +224,6 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   # ============================================================
   # Helpers
   # ============================================================
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
-    end
-  end
 
   defp put_fake_with_tools(name, count, description, capabilities, opts \\ []) do
     handler_fn =

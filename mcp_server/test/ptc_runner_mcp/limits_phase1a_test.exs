@@ -13,6 +13,8 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{Application, Limits, Tools}
   alias PtcRunnerMcp.Upstream.Registry
 
@@ -151,9 +153,9 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
   describe "upstream_call_timeout_ms is consumed by the executor" do
     setup do
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       {:ok, _pid} = Registry.start_link(name: @registry_name)
-      on_exit(fn -> stop_existing_registry() end)
+      on_exit(fn -> stop_existing_registry(@registry_name) end)
       :ok
     end
 
@@ -185,9 +187,9 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
   describe "max_upstream_response_bytes is consumed by the executor" do
     setup do
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       {:ok, _pid} = Registry.start_link(name: @registry_name)
-      on_exit(fn -> stop_existing_registry() end)
+      on_exit(fn -> stop_existing_registry(@registry_name) end)
       :ok
     end
 
@@ -219,9 +221,9 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
   describe "max_upstream_calls_per_program is consumed by the executor" do
     setup do
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       {:ok, _pid} = Registry.start_link(name: @registry_name)
-      on_exit(fn -> stop_existing_registry() end)
+      on_exit(fn -> stop_existing_registry(@registry_name) end)
       :ok
     end
 
@@ -257,23 +259,6 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
       assert ok_count == 2
       assert cap_count == 2
-    end
-  end
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
     end
   end
 end
