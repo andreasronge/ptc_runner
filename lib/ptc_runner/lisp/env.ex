@@ -381,7 +381,7 @@ defmodule PtcRunner.Lisp.Env do
       # reach for Clojure's `list`. Returning a vector keeps semantics uniform.
       {:list, {:collect, &Function.identity/1}},
       {:"hash-map", {:collect, &Runtime.hash_map/1}},
-      {:"array-map", {:collect, &Runtime.hash_map/1}},
+      {:"array-map", {:collect, &Runtime.array_map/1}},
       {:"hash-set", {:collect, &Runtime.hash_set/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},

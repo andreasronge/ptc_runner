@@ -166,6 +166,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate reduce_kv(f, init, m), to: MapOps
   defdelegate zipmap(keys, vals), to: MapOps
   defdelegate hash_map(args), to: MapOps
+  defdelegate array_map(args), to: MapOps
 
   # ============================================================
   # Arithmetic

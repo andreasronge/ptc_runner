@@ -372,7 +372,7 @@
       see_also: ["="],
       clojure_var: "==",
       divergences:
-        "DIV-03: strictly 2-arity; chained equality like (== 1 1 1) is rejected. See docs/clojure-conformance-gaps.md."
+        "DIV-03: strictly 2-arity; chained equality like (== 1 1 1) is rejected. See docs/clojure-conformance-gaps.md. DIV-10: Clojure's == throws ClassCastException for non-numeric arguments; PTC-Lisp accepts any type and returns true/false (consistent with no-exception design)."
     },
     %{
       name: ">",
