@@ -141,19 +141,8 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   # ============================================================
 
   defp validate_map_fields(data, fields, path) do
-    Enum.flat_map(fields, fn {field_name, field_type} ->
-      case get_field(data, field_name) do
-        {:ok, _key, value} ->
-          validate_type(value, field_type, path ++ [field_name])
-
-        :missing ->
-          if optional?(field_type) do
-            []
-          else
-            [error_at(path ++ [field_name], "expected field, got nil")]
-          end
-      end
-    end)
+    {errors, _consumed} = validate_map_fields_tracking(data, fields, path)
+    errors
   end
 
   # Like validate_map_fields/3 but also returns the set of consumed data keys
