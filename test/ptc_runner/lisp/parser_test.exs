@@ -76,6 +76,11 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:symbol, :>=}} = Parser.parse(">=")
     end
 
+    test "symbols can end with apostrophe" do
+      assert {:ok, {:symbol, :"inc'"}} = Parser.parse("inc'")
+      assert {:ok, {:symbol, :"+'"}} = Parser.parse("+'")
+    end
+
     test "namespaced symbols" do
       assert {:ok, {:ns_symbol, :data, :input}} = Parser.parse("data/input")
       assert {:ok, {:ns_symbol, :tool, :search}} = Parser.parse("tool/search")

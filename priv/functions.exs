@@ -17,6 +17,22 @@
       divergences: nil
     },
     %{
+      name: "*'",
+      description: "Arbitrary precision multiplication alias",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(*' x y ...)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `*`; BEAM integers are already arbitrary precision.",
+      see_also: ["*"],
+      clojure_var: "*'",
+      divergences: nil
+    },
+    %{
       name: "+",
       description: "Addition",
       binding: :variadic,
@@ -33,6 +49,22 @@
       divergences: nil
     },
     %{
+      name: "+'",
+      description: "Arbitrary precision addition alias",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(+' x y ...)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `+`; BEAM integers are already arbitrary precision.",
+      see_also: ["+"],
+      clojure_var: "+'",
+      divergences: nil
+    },
+    %{
       name: "-",
       description: "Subtraction",
       binding: :variadic,
@@ -46,6 +78,22 @@
       notes: nil,
       see_also: [],
       clojure_var: "-",
+      divergences: nil
+    },
+    %{
+      name: "-'",
+      description: "Arbitrary precision subtraction alias",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(-' x y ...)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `-`; BEAM integers are already arbitrary precision.",
+      see_also: ["-"],
+      clojure_var: "-'",
       divergences: nil
     },
     %{
@@ -308,6 +356,23 @@
       clojure_var: "=",
       divergences:
         "DIV-03: strictly 2-arity; chained equality like (= 1 1 1) is rejected. See docs/clojure-conformance-gaps.md."
+    },
+    %{
+      name: "==",
+      description: "Type-independent numeric equality",
+      binding: :normal,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(== x y)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for PTC-Lisp `=` numeric equality.",
+      see_also: ["="],
+      clojure_var: "==",
+      divergences:
+        "DIV-03: strictly 2-arity; chained equality like (== 1 1 1) is rejected. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: ">",
@@ -1021,6 +1086,22 @@
       divergences: nil
     },
     %{
+      name: "dec'",
+      description: "Arbitrary precision decrement alias",
+      binding: :normal,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(dec' x)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `dec`; BEAM integers are already arbitrary precision.",
+      see_also: ["dec"],
+      clojure_var: "dec'",
+      divergences: nil
+    },
+    %{
       name: "decimal?",
       description: "",
       binding: :normal,
@@ -1211,6 +1292,38 @@
       notes: nil,
       see_also: [],
       clojure_var: "drop",
+      divergences: nil
+    },
+    %{
+      name: "nthnext",
+      description: "Drop n items and return seq or nil",
+      binding: :normal,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(nthnext coll n)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Equivalent to `(seq (drop n coll))`.",
+      see_also: ["drop", "seq"],
+      clojure_var: "nthnext",
+      divergences: nil
+    },
+    %{
+      name: "nthrest",
+      description: "Drop n items",
+      binding: :normal,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(nthrest coll n)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `drop`.",
+      see_also: ["drop"],
+      clojure_var: "nthrest",
       divergences: nil
     },
     %{
@@ -1729,6 +1842,22 @@
       notes: nil,
       see_also: [],
       clojure_var: "inc",
+      divergences: nil
+    },
+    %{
+      name: "inc'",
+      description: "Arbitrary precision increment alias",
+      binding: :normal,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(inc' x)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Alias for `inc`; BEAM integers are already arbitrary precision.",
+      see_also: ["inc"],
+      clojure_var: "inc'",
       divergences: nil
     },
     %{
@@ -2681,6 +2810,26 @@
         "Unlike Java's LocalDate.parse, accepts strings with a time component and returns a DateTime instead of raising — more useful for LLM timestamp comparisons. See docs/java-interop.md."
     },
     %{
+      name: "parse-boolean",
+      description: "Parse string to boolean",
+      binding: :normal,
+      category: :string,
+      dispatch: :env,
+      signatures: ["(parse-boolean s)"],
+      since: nil,
+      section: "String Functions",
+      ptc_extension?: false,
+      examples: [
+        {~S|(parse-boolean "true")|, "true"},
+        {~S|(parse-boolean "false")|, "false"}
+      ],
+      notes: ~S|Returns nil for values other than "true" or "false".|,
+      see_also: ["parse-long", "parse-double"],
+      clojure_var: "parse-boolean",
+      divergences:
+        "DIV-18: returns nil on non-string input instead of raising IllegalArgumentException. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
+    },
+    %{
       name: "parse-double",
       description: "",
       binding: :normal,
@@ -3359,6 +3508,24 @@
       divergences: nil
     },
     %{
+      name: "hash-set",
+      description: "Create set from arguments",
+      binding: :collect,
+      category: :set,
+      dispatch: :env,
+      signatures: ["(hash-set & items)"],
+      since: nil,
+      section: "Set Operations",
+      ptc_extension?: false,
+      examples: [
+        {"(hash-set 1 1 2)", ~S|#{1 2}|}
+      ],
+      notes: "Constructs a PTC-Lisp set from variadic arguments.",
+      see_also: ["set"],
+      clojure_var: "hash-set",
+      divergences: nil
+    },
+    %{
       name: "set?",
       description: "Returns true if x is a set",
       binding: :normal,
@@ -4002,6 +4169,26 @@
       notes: "Requires an even number of arguments. Equivalent to map literal `{:a 1 :b 2}`.",
       see_also: ["assoc", "zipmap"],
       clojure_var: "hash-map",
+      divergences: nil
+    },
+    %{
+      name: "array-map",
+      description: "Create map from alternating key-value pairs",
+      binding: :collect,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(array-map & kvs)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [
+        {"(array-map)", "%{}"},
+        {"(array-map :a 1 :b 2)", "{:a 1, :b 2}"}
+      ],
+      notes:
+        "Alias for `hash-map`; PTC-Lisp does not expose Clojure's small-map implementation detail.",
+      see_also: ["hash-map"],
+      clojure_var: "array-map",
       divergences: nil
     },
     %{

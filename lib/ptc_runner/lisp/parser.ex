@@ -32,7 +32,8 @@ defmodule PtcRunner.Lisp.Parser do
   # Character classes for lookahead
   # Note: . is allowed for Clojure-style namespaces like clojure.string/join
   # Note: & is allowed for rest pattern destructuring [a & rest]
-  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
+  # Note: ' is allowed after the first character for Clojure core names like inc'
+  symbol_rest = [?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&, ?']
 
   nil_literal =
     string("nil")

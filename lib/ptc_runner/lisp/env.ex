@@ -184,6 +184,8 @@ defmodule PtcRunner.Lisp.Env do
       {:nnext, {:normal, &Runtime.nnext/1}},
       {:take, {:normal, &Runtime.take/2}},
       {:drop, {:normal, &Runtime.drop/2}},
+      {:nthrest, {:normal, &Runtime.nthrest/2}},
+      {:nthnext, {:normal, &Runtime.nthnext/2}},
       {:"take-while", {:normal, &Runtime.take_while/2}},
       {:"drop-while", {:normal, &Runtime.drop_while/2}},
       {:"take-last", {:normal, &Runtime.take_last/2}},
@@ -292,6 +294,11 @@ defmodule PtcRunner.Lisp.Env do
       {:quot, {:normal, &Runtime.Math.quot/2}},
       {:inc, {:normal, &Runtime.inc/1}},
       {:dec, {:normal, &Runtime.dec/1}},
+      {:"+'", {:collect, &Runtime.Math.add/1}},
+      {:"-'", {:collect, &Runtime.Math.subtract/1}},
+      {:"*'", {:collect, &Runtime.Math.multiply/1}},
+      {:"inc'", {:normal, &Runtime.inc/1}},
+      {:"dec'", {:normal, &Runtime.dec/1}},
       {:abs, {:normal, &Runtime.abs/1}},
       {:max, {:variadic_nonempty, :max, &Runtime.Math.max/2}},
       {:min, {:variadic_nonempty, :min, &Runtime.Math.min/2}},
@@ -324,6 +331,7 @@ defmodule PtcRunner.Lisp.Env do
       # Comparison — normal (binary)
       # ============================================================
       {:=, {:normal, &Runtime.Math.eq/2}},
+      {:==, {:normal, &Runtime.Math.eq/2}},
       {:"not=", {:normal, &Runtime.Math.not_eq/2}},
       {:>, {:normal, &Runtime.gt/2}},
       {:<, {:normal, &Runtime.lt/2}},
@@ -373,6 +381,8 @@ defmodule PtcRunner.Lisp.Env do
       # reach for Clojure's `list`. Returning a vector keeps semantics uniform.
       {:list, {:collect, &Function.identity/1}},
       {:"hash-map", {:collect, &Runtime.hash_map/1}},
+      {:"array-map", {:collect, &Runtime.hash_map/1}},
+      {:"hash-set", {:collect, &Runtime.hash_set/1}},
       {:map?, {:normal, &Runtime.map?/1}},
       {:coll?, {:normal, &Runtime.coll?/1}},
       {:sequential?, {:normal, &Runtime.sequential?/1}},
@@ -418,6 +428,7 @@ defmodule PtcRunner.Lisp.Env do
       {:"parse-long", {:normal, &Runtime.parse_long/1}},
       {:"parse-int", {:normal, &Runtime.parse_long/1}},
       {:"parse-double", {:normal, &Runtime.parse_double/1}},
+      {:"parse-boolean", {:normal, &Runtime.parse_boolean/1}},
 
       # ============================================================
       # JSON builtins (Plans/json-support.md §4)

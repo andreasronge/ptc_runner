@@ -87,6 +87,19 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "arbitrary precision Clojure aliases" do
+    test "arithmetic prime forms reuse BEAM integer arithmetic" do
+      assert_lisp("(+' 1 2 3)", 6)
+      assert_lisp("(-' 10 3 2)", 5)
+      assert_lisp("(*' 2 3 4)", 24)
+    end
+
+    test "inc' and dec' alias inc and dec" do
+      assert_lisp("(inc' 41)", 42)
+      assert_lisp("(dec' 43)", 42)
+    end
+  end
+
   describe "pow - exponentiation" do
     test "square" do
       assert_lisp("(pow 2 3)", 8.0)

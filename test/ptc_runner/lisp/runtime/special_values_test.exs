@@ -73,6 +73,16 @@ defmodule PtcRunner.Lisp.Runtime.SpecialValuesTest do
       assert LispString.parse_double("1.5") == 1.5
     end
 
+    test "parse_boolean" do
+      assert LispString.parse_boolean("true") == true
+      assert LispString.parse_boolean("false") == false
+      assert LispString.parse_boolean("TRUE") == nil
+      assert LispString.parse_boolean(nil) == nil
+
+      assert {:ok, step} = PtcRunner.Lisp.run(~S|(parse-boolean "true")|, context: %{})
+      assert step.return == true
+    end
+
     test "str (to_str)" do
       assert LispString.to_str(:infinity) == "Infinity"
       assert LispString.to_str(:negative_infinity) == "-Infinity"
@@ -86,6 +96,14 @@ defmodule PtcRunner.Lisp.Runtime.SpecialValuesTest do
       assert Math.eq(:infinity, :infinity)
       assert Math.eq(:negative_infinity, :negative_infinity)
       refute Math.eq(:infinity, :negative_infinity)
+    end
+
+    test "PTC-Lisp == aliases numeric equality" do
+      assert {:ok, step} = PtcRunner.Lisp.run("(== 1 1.0)", context: %{})
+      assert step.return == true
+
+      assert {:ok, step} = PtcRunner.Lisp.run("(== ##NaN ##NaN)", context: %{})
+      assert step.return == false
     end
 
     test "comparison" do
