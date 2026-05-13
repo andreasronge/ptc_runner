@@ -576,12 +576,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     annotations = tool_annotations(tool)
     input_schema = tool_input_schema(tool)
     arg_keys = tool_arg_keys(tool)
-
-    call_args =
-      case arg_keys do
-        [] -> ""
-        [first | _] -> " :args {:#{first} ...}"
-      end
+    required = tool_required_keys(tool)
 
     %{
       "server" => server,
@@ -590,11 +585,33 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "description" => tool_full_description(tool),
       "input_schema" => input_schema,
       "arg_keys" => arg_keys,
+      "required" => required,
       "annotations" => annotations,
-      "call_example" => "(tool/mcp-call {:server \"#{server}\" :tool \"#{name}\"#{call_args}})",
+      "call_example" => build_call_example(server, name, arg_keys, required),
       "response_notes" =>
         "Returns an MCP content envelope. Use mcp/text or mcp/json helpers according to the upstream result shape."
     }
+  end
+
+  defp build_call_example(server, name, arg_keys, required) do
+    placeholders =
+      cond do
+        required != [] -> required
+        arg_keys != [] -> Enum.take(arg_keys, 1)
+        true -> []
+      end
+
+    args_clause =
+      case placeholders do
+        [] ->
+          " :args {}"
+
+        keys ->
+          inner = Enum.map_join(keys, " ", fn k -> ":#{k} ..." end)
+          " :args {#{inner}}"
+      end
+
+    "(tool/mcp-call {:server \"#{server}\" :tool \"#{name}\"#{args_clause}})"
   end
 
   # ----------------------------------------------------------------
@@ -613,6 +630,8 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp tool_full_description(%{"description" => d}) when is_binary(d), do: d
   defp tool_full_description(_), do: ""
 
+  defp tool_input_schema(%{input_schema: s}) when is_map(s), do: s
+  defp tool_input_schema(%{"input_schema" => s}) when is_map(s), do: s
   defp tool_input_schema(%{inputSchema: s}) when is_map(s), do: s
   defp tool_input_schema(%{"inputSchema" => s}) when is_map(s), do: s
   defp tool_input_schema(_), do: %{}
@@ -631,6 +650,23 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     |> Map.keys()
     |> Enum.map(&to_string/1)
     |> Enum.sort()
+  end
+
+  defp tool_required_keys(tool) do
+    schema = tool_input_schema(tool)
+
+    required =
+      Map.get(schema, "required", Map.get(schema, :required, []))
+
+    case required do
+      list when is_list(list) ->
+        list
+        |> Enum.map(&to_string/1)
+        |> Enum.uniq()
+
+      _ ->
+        []
+    end
   end
 
   defp safe_to_atom(str) when is_binary(str) do
