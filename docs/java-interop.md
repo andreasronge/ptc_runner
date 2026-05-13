@@ -8,7 +8,7 @@ PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **no
 
 17 interop entries across 7 classes.
 
-See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Design Guidelines](ptc-lisp-design-guidelines.md)
+See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
 
 ### java.lang.Double
 

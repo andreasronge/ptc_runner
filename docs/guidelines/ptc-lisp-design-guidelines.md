@@ -4,7 +4,7 @@ Rules for deciding what belongs in PTC-Lisp and when it should diverge from Cloj
 
 PTC-Lisp is a Clojure-shaped language for LLM-generated, sandboxed programs. Clojure conformance is valuable because models already know Clojure idioms and conformance tests catch subtle behavior bugs. It is not the top-level goal. The top-level goal is deterministic, bounded, recoverable data transformation inside an agent loop.
 
-See also: [PTC-Lisp Specification](ptc-lisp-specification.md), [Function Reference](function-reference.md), and [Clojure Conformance Gaps](clojure-conformance-gaps.md).
+See also: [PTC-Lisp Specification](../ptc-lisp-specification.md), [Function Reference](../function-reference.md), and [Clojure Conformance Gaps](../clojure-conformance-gaps.md).
 
 ## Design Priorities
 
@@ -104,7 +104,7 @@ Return signal values for world faults and expected data misses:
 
 This split is part of the language contract: program bugs should be loud; messy data should be composable.
 
-Callers should convert a signal into `(fail ...)` when the missing or invalid value means the agent cannot complete the requested task. Otherwise, guard or filter the signal locally. See [Getting Started](guides/subagent-getting-started.md) for the multi-turn `return` / `fail` flow.
+Callers should convert a signal into `(fail ...)` when the missing or invalid value means the agent cannot complete the requested task. Otherwise, guard or filter the signal locally. See [Getting Started](../guides/subagent-getting-started.md) for the multi-turn `return` / `fail` flow.
 
 ## Java-Named Methods
 

@@ -11,7 +11,7 @@ it was verified.
 ## PTC-Lisp Changes
 
 When changing PTC-Lisp syntax, builtins, Java interop, or Clojure
-conformance behavior, read `docs/ptc-lisp-design-guidelines.md` first.
+conformance behavior, read `docs/guidelines/ptc-lisp-design-guidelines.md` first.
 Clojure compatibility is the default, but sandbox safety and recoverable
 signal values take precedence for Clojure-named functions where Clojure
 would raise; Java-named dot methods keep Java semantics.
