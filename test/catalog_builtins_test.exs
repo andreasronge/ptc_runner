@@ -405,6 +405,45 @@ defmodule PtcRunner.CatalogBuiltinsTest do
       assert op3.operation == :summary
     end
 
+    test "ops before recur in a loop are preserved" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(loop [i 0] (if (< i 2) (do (catalog/list-tools "github") (recur (inc i))) i))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert step.return == 2
+      assert [:list_tools, :list_tools] = Enum.map(step.catalog_ops, & &1.operation)
+    end
+
+    test "ops before recur in a tail-recursive function are preserved" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(do (def collect (fn [i] (if (< i 2) (do (catalog/list-tools "github") (recur (inc i))) i))) (collect 0))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert step.return == 2
+      assert [:list_tools, :list_tools] = Enum.map(step.catalog_ops, & &1.operation)
+    end
+
+    test "ops across recurring and terminating iterations stay chronological" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(loop [i 0] (if (< i 3) (do (catalog/list-tools (str "server-" i)) (recur (inc i))) (do (catalog/summary) i)))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert step.return == 3
+
+      assert [
+               %{operation: :list_tools, args: %{server: "server-0"}},
+               %{operation: :list_tools, args: %{server: "server-1"}},
+               %{operation: :list_tools, args: %{server: "server-2"}},
+               %{operation: :summary}
+             ] = step.catalog_ops
+    end
+
     test "world fault produces :nil_world_fault record with reason" do
       exec = fn _op, _args -> {:world_fault, :upstream_unavailable} end
 
