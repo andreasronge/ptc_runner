@@ -17,6 +17,9 @@ Many packages have usage rules, which you should *thoroughly* consult before tak
 action. These usage rules contain guidelines and rules *directly from the package authors*.
 They are your best source of knowledge for making decisions.
 
+Run `mix usage_rules.*` tasks from the repo root by default. Some nested Mix projects, such as
+`mcp_server/`, may not define these tasks; if a task is unavailable there, retry from the repo root.
+
 ## Modules & functions in the current app and dependencies
 
 When looking for docs for modules & functions that are dependencies of the current project,
