@@ -800,6 +800,28 @@ The smoke starts a local filesystem upstream and exercises `ptc_task`
 through the real planner provider. It exits non-zero on failures and
 prints the generated program for failed cases.
 
+### Real-provider eval
+
+Issue #931's tier-2 harness runs a small real-LLM eval matrix against
+OpenRouter and the local filesystem MCP upstream:
+
+```bash
+mix run --no-start bench/agentic_real_eval.exs \
+  --runs=1 \
+  --models=gemini-flash-lite \
+  --catalog-modes=inline,lazy \
+  --json-out=../tmp/agentic_real_eval.json \
+  --md-out=../tmp/agentic_real_eval.md \
+  --fail-on-skip
+```
+
+This is not deterministic and is not a default CI check. It exits
+non-zero when any eval cell fails, writes JSON plus Markdown reports,
+and records planner prompt/completion bytes, provider token counts,
+upstream-call counts, and inferred catalog-operation mentions. Current
+findings are checked in at
+[`bench/agentic_real_eval_findings.md`](bench/agentic_real_eval_findings.md).
+
 ## Tracing for power users
 
 Setting `--trace-dir /tmp/ptc-traces` writes one JSONL file per

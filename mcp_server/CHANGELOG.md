@@ -20,6 +20,13 @@ revisions.
   and `--agentic-capability-summary-max-bytes` sensitivity rows. It
   makes zero LLM/provider calls, supports `--runs` stability checks and
   `--out` JSON output, and is documented in README "Agentic mode".
+- Agentic real-provider eval harness (`bench/agentic_real_eval.exs`) for
+  issue #931. The tier-2 script runs `ptc_task` through OpenRouter
+  against a local filesystem MCP upstream, covers single-read,
+  multi-file aggregation, lazy catalog discovery, error recovery, and
+  negative-capability cases, and writes JSON plus Markdown findings.
+  The initial Gemini Flash Lite findings are documented in
+  `bench/agentic_real_eval_findings.md`.
 - PTC payload-reduction metrics
   (`Plans/ptc-runner-mcp-payload-reduction.md`). Aggregator-mode
   responses (`ptc_lisp_execute` with ≥ 1 upstream call, and every
