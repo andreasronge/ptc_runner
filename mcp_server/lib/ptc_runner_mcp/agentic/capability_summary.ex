@@ -6,9 +6,24 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   parsing the human-oriented upstream catalog text.
   """
 
+  alias PtcRunnerMcp.CatalogConfig
   alias PtcRunnerMcp.Upstream.Catalog
 
   @default_max_bytes 800
+
+  # This pointer is shown to MCP clients in the `ptc_task` tool
+  # description. `ptc_task` callers describe what they want in plain
+  # English — they do not write PTC-Lisp themselves. The pointer
+  # therefore stays on the agentic surface: it tells the calling LLM
+  # that the catalog is loaded lazily by the internal planner, so it
+  # should still ask `ptc_task` (no need to pre-discover servers).
+  # The planner's own system prompt has a separate lazy block (in
+  # `PtcRunnerMcp.Agentic.Prompt`) that does instruct it to call
+  # `(catalog/...)` from inside the generated PTC-Lisp program.
+  @lazy_pointer "Upstream catalog is loaded lazily (catalog mode: lazy); " <>
+                  "ptc_task's internal planner discovers configured upstream servers " <>
+                  "and their tools at runtime. Describe the task you want in plain English " <>
+                  "and the planner will pick the right upstream calls."
 
   @type entry :: %{
           required(:name) => String.t(),
@@ -18,6 +33,11 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
 
   @doc """
   Generates a deterministic capability summary from the frozen catalog snapshot.
+
+  Honors `CatalogConfig.get().catalog_mode` (override with `:catalog_mode`
+  in `opts`): `:lazy` returns a short pointer telling the planner to
+  use `(catalog/*)` at runtime; `:inline` and `:auto` render the
+  snapshot (subject to `:max_bytes` for `:auto`).
   """
   @spec from_frozen(keyword()) :: String.t()
   def from_frozen(opts \\ []) do
@@ -27,16 +47,45 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   @doc """
   Generates a deterministic capability summary from explicit catalog entries.
 
-  Output never exceeds `:max_bytes`. Empty input returns an empty string.
+  - `:catalog_mode` — `:auto` (default — render with `:max_bytes` budget,
+    clipping entries that don't fit), `:inline` (render every entry,
+    ignoring `:max_bytes`), or `:lazy` (return the runtime-discovery
+    pointer instead). Defaults to `CatalogConfig.get().catalog_mode`.
+  - `:max_bytes` — byte cap for `:auto` mode (default 800).
+
+  Empty input returns an empty string in `:auto` / `:inline`; `:lazy`
+  still returns the pointer when something is configured (and an empty
+  string when nothing is).
   """
   @spec generate([entry()], keyword()) :: String.t()
   def generate(entries, opts \\ []) when is_list(entries) do
     max_bytes = Keyword.get(opts, :max_bytes, @default_max_bytes)
 
-    entries
-    |> normalize_entries()
-    |> render_budgeted(max_bytes)
+    mode =
+      Keyword.get_lazy(opts, :catalog_mode, fn -> CatalogConfig.get().catalog_mode end)
+
+    normalized = normalize_entries(entries)
+
+    case {mode, normalized} do
+      {_mode, []} ->
+        ""
+
+      {:lazy, _entries} ->
+        @lazy_pointer
+
+      {:inline, entries} ->
+        render_unbounded(entries)
+
+      {_auto_or_unknown, entries} ->
+        render_budgeted(entries, max_bytes)
+    end
   end
+
+  @doc """
+  Returns the runtime-discovery pointer used in `:lazy` mode.
+  """
+  @spec lazy_pointer() :: String.t()
+  def lazy_pointer, do: @lazy_pointer
 
   @doc """
   Reads an operator-supplied override summary without truncating it.
@@ -78,8 +127,12 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   defp entry_tools(%{"tools" => tools}), do: tools
   defp entry_tools(_), do: []
 
-  defp render_budgeted([], _max_bytes), do: ""
+  defp render_unbounded(entries) do
+    Enum.map_join(entries, "\n", &full_bullet/1)
+  end
 
+  # The `[]` head used to live here, but `generate/2` now short-circuits
+  # empty input upstream, so dialyzer flagged the clause as unreachable.
   defp render_budgeted(_entries, max_bytes) when not is_integer(max_bytes) or max_bytes <= 0,
     do: ""
 

@@ -7,9 +7,12 @@ defmodule PtcRunnerMcp.Agentic do
 
   alias PtcRunnerMcp.{
     AgenticConfig,
+    CatalogBuiltins,
+    CatalogConfig,
     Envelope,
     Limits,
-    PayloadMetrics
+    PayloadMetrics,
+    UpstreamCalls
   }
 
   alias PtcRunnerMcp.Agentic.{
@@ -21,6 +24,8 @@ defmodule PtcRunnerMcp.Agentic do
     Prompt,
     Renderer
   }
+
+  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "ptc_task"
 
@@ -148,7 +153,34 @@ defmodule PtcRunnerMcp.Agentic do
       llm: llm,
       context: validated.context,
       continuation_guard: continuation_guard(ledger),
-      trace_context: %{request_id: request_id}
+      trace_context: %{request_id: request_id},
+      catalog_exec: build_catalog_exec()
+    )
+  end
+
+  # Build a `catalog/*` executor closure for the planner's generated
+  # PTC-Lisp program. Mirrors the wiring in
+  # `Tools.execute_with_aggregator/4` but with a dedicated call_context
+  # whose budget is independent from the agentic `tool/mcp-call`
+  # counter (`McpCall.build/2` owns its own `:atomics`). Catalog ops
+  # therefore never consume the upstream-call quota.
+  defp build_catalog_exec do
+    catalog_config = CatalogConfig.get()
+
+    call_context =
+      UpstreamCalls.new_call_context(
+        collector_pid: self(),
+        collector_ref: make_ref(),
+        max_calls: Limits.max_upstream_calls_per_program(),
+        max_catalog_ops: catalog_config.max_catalog_ops_per_program,
+        call_timeout_ms: Limits.upstream_call_timeout_ms(),
+        max_response_bytes: Limits.max_upstream_response_bytes(),
+        max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
+      )
+
+    CatalogBuiltins.build(call_context,
+      registry: UpstreamRegistry,
+      catalog_config: catalog_config
     )
   end
 

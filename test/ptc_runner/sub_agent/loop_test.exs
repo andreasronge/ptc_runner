@@ -636,4 +636,32 @@ defmodule PtcRunner.SubAgent.LoopTest do
       assert preview.user =~ "maximum 5 tool calls"
     end
   end
+
+  describe "run/2 with :catalog_exec" do
+    test "threads catalog_exec into Lisp.run so (catalog/...) is callable from the program" do
+      agent =
+        SubAgent.new(
+          prompt: "list the upstream servers",
+          tools: %{},
+          max_turns: 2
+        )
+
+      llm = fn %{messages: _} ->
+        {:ok, ~S|```clojure
+(return (catalog/summary))
+```|}
+      end
+
+      catalog_exec = fn
+        :summary, [] ->
+          {:ok, %{"mode" => "test-from-catalog-exec", "servers" => []}}
+      end
+
+      {:ok, step} =
+        Loop.run(agent, llm: llm, context: %{}, catalog_exec: catalog_exec)
+
+      assert step.return == %{"mode" => "test-from-catalog-exec", "servers" => []}
+      assert step.fail == nil
+    end
+  end
 end

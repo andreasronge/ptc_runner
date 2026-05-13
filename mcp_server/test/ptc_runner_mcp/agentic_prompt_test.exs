@@ -93,6 +93,37 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
            }
   end
 
+  describe "catalog_mode" do
+    test ":lazy replaces the inline upstream catalog with a runtime-discovery block" do
+      Catalog.freeze("alpha:\n  ping()")
+
+      prompt = Prompt.system_prompt(catalog_mode: :lazy)
+
+      assert prompt =~ "Upstream catalog: not inlined (catalog mode: lazy)."
+      assert prompt =~ "(catalog/list-servers)"
+      assert prompt =~ "(catalog/search-tools"
+      assert prompt =~ "(catalog/list-tools"
+      assert prompt =~ "(catalog/describe-tool"
+      # The detailed frozen catalog body must not leak through.
+      refute prompt =~ "alpha:\n  ping()"
+    end
+
+    test ":auto preserves the existing inlined catalog body" do
+      Catalog.freeze("alpha:\n  ping()")
+
+      prompt = Prompt.system_prompt(catalog_mode: :auto)
+
+      assert prompt =~ "Upstream catalog:\nalpha:\n  ping()"
+      refute prompt =~ "Upstream catalog: not inlined"
+    end
+
+    test ":inline behaves like :auto for the planner system prompt" do
+      Catalog.freeze("alpha:\n  ping()")
+
+      assert Prompt.system_prompt(catalog_mode: :inline) =~ "Upstream catalog:\nalpha:\n  ping()"
+    end
+  end
+
   defp assert_order(text, markers) do
     {_last, _text} =
       Enum.reduce(markers, {-1, text}, fn marker, {previous, whole} ->
