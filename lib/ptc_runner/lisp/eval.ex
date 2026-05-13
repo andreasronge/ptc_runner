@@ -365,8 +365,8 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, loop_ctx} ->
         case execute_loop(body, loop_ctx, bindings) do
           {:ok, value, final_ctx} ->
-            # Restore the original environment from before the loop
-            {:ok, value, %{final_ctx | env: eval_ctx.env}}
+            # Restore the original environment AND locals from before the loop
+            {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
 
           {:error, _} = err ->
             err
@@ -395,16 +395,21 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:fn, params, body}, %EvalContext{} = eval_ctx) do
-    # Capture the current environment and turn history (lexical scoping)
-    # Metadata starts empty; return_type is populated when closure is called
-    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history, %{}}, eval_ctx}
+    # Capture only the *user-visible* slice of the env — let/fn-param locals
+    # plus any caller-injected env entries (anything that isn't in the
+    # canonical builtin set). Builtins are resolved at call time via the
+    # Env.builtin? fallback in (:var ...), so carrying them in the closure
+    # would inflate session memory by ~18 KB per closure.
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
+    meta = locals_meta(captured_locals, %{})
+    {:ok, {:closure, params, body, captured_env, eval_ctx.turn_history, meta}, eval_ctx}
   end
 
   # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
   defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
-    # Store fn_name in metadata; execute_closure will bind the name at call time
-    {:ok, {:closure, params, body, eval_ctx.env, eval_ctx.turn_history, %{fn_name: name}},
-     eval_ctx}
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
+    meta = locals_meta(captured_locals, %{fn_name: name})
+    {:ok, {:closure, params, body, captured_env, eval_ctx.turn_history, meta}, eval_ctx}
   end
 
   # ============================================================
@@ -1230,9 +1235,11 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Convert a closure to a zero-arity Erlang function for use in pcalls
   defp pcalls_fn_to_erlang(
-         {:closure, [], body, closure_env, turn_history, _metadata},
+         {:closure, [], body, closure_env, turn_history, metadata} = closure,
          %EvalContext{} = eval_ctx
        ) do
+    closure_env = Apply.bind_self_recursion(closure_env, metadata, closure)
+
     fn ->
       ctx =
         EvalContext.new(
@@ -1245,7 +1252,8 @@ defmodule PtcRunner.Lisp.Eval do
 
       ctx = %{
         ctx
-        | loop_limit: eval_ctx.loop_limit,
+        | locals: Apply.closure_locals(metadata, %{}),
+          loop_limit: eval_ctx.loop_limit,
           prints: eval_ctx.prints,
           max_print_length: eval_ctx.max_print_length,
           pmap_timeout: eval_ctx.pmap_timeout,
@@ -1373,4 +1381,43 @@ defmodule PtcRunner.Lisp.Eval do
   defp catalog_op_args(:search_tools, [query]), do: %{query: query}
   defp catalog_op_args(:search_tools, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(_, args), do: %{args: args}
+
+  # ============================================================
+  # Closure capture helpers
+  # ============================================================
+
+  defp capture_lexical_scope(%EvalContext{env: env, locals: locals}) do
+    initial = Env.initial()
+
+    # Keep an entry if EITHER:
+    #   * its key is in `locals` (let/fn-param, possibly shadowing a builtin
+    #     like `count` — must preserve so the shadow survives in the closure)
+    #   * its key isn't a builtin at all (caller-injected env entries, e.g.
+    #     test harness pre-populating env)
+    # Builtins that the user didn't shadow are stripped; they resolve at
+    # call time via the Env.builtin? fallback in (:var ...). This is the
+    # whole point of the optimization — each closure would otherwise drag
+    # the full ~18 KB builtin map around.
+    captured_env =
+      :maps.filter(
+        fn key, _value ->
+          MapSet.member?(locals, key) or not Map.has_key?(initial, key)
+        end,
+        env
+      )
+
+    # `locals` is NOT widened to include caller-injected env keys —
+    # promoting them would invert the documented precedence
+    # (locals > user_ns > env). They stay accessible via the env path.
+    {captured_env, locals}
+  end
+
+  # Only embed captured_locals in meta when non-empty — keeps closure size
+  # tiny for top-level (defn ...) without enclosing scope.
+  defp locals_meta(%MapSet{} = locals, base) do
+    case MapSet.size(locals) do
+      0 -> base
+      _ -> Map.put(base, :captured_locals, locals)
+    end
+  end
 end
