@@ -249,6 +249,3 @@ mix ptc.viewer --trace-dir /tmp/ptc-traces
   the PTC-Lisp language reference (a Clojure subset).
 - [`docs/function-reference.md`](../function-reference.md) — every
   built-in function with its signature.
-- [`Plans/ptc-runner-mcp-server.md`](../../Plans/ptc-runner-mcp-server.md)
-  — the full v1 specification, including the request / response
-  contracts and the closed list of error reasons.

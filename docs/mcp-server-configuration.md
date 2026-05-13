@@ -1,0 +1,163 @@
+# MCP Server Configuration Reference
+
+Canonical reference for every flag, environment variable, response profile, catalog mode, tracing setting, and lifecycle command exposed by `ptc_runner_mcp`. For installation and client wiring see [`../mcp_server/README.md`](../mcp_server/README.md); for the conceptual overview (when to use the server, security model, architecture) see [`mcp-server.md`](mcp-server.md). Aggregator concepts live in [`aggregator-mode.md`](aggregator-mode.md), agentic mode in [`agentic-mode.md`](agentic-mode.md), and `ptc_debug` in [`mcp-debug.md`](mcp-debug.md).
+
+## Boot-time configuration model
+
+All configuration is read once at boot, either from a CLI flag or the equivalent environment variable. CLI flags win when both are set. Aggregator-mode defaults only apply when no explicit value is given. To pass flags through Claude Desktop / Cline / Cursor, append them to the `args` array, for example:
+
+```json
+"args": ["start", "--max-frame-bytes", "8388608"]
+```
+
+## Core flags
+
+| Flag | Env var | Default | Meaning |
+|---|---|---|---|
+| `--max-frame-bytes` | `PTC_RUNNER_MCP_MAX_FRAME_BYTES` | `8388608` (8 MiB) | Hard cap on a single NDJSON frame. |
+| `--max-program-bytes` | `PTC_RUNNER_MCP_MAX_PROGRAM_BYTES` | `65536` (64 KiB) | Hard cap on the `program` argument. |
+| `--max-context-bytes` | `PTC_RUNNER_MCP_MAX_CONTEXT_BYTES` | `4194304` (4 MiB) | Hard cap on the `context` argument. |
+| `--max-concurrent-calls` | `PTC_RUNNER_MCP_MAX_CONCURRENT_CALLS` | `8` | Concurrency gate; excess calls return `:busy`. |
+| `--log-level` | `PTC_RUNNER_MCP_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. |
+| `--trace-dir` | `PTC_RUNNER_MCP_TRACE_DIR` | unset | Directory for per-call JSONL trace files. Tracing is OFF unless this is set. |
+| `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
+| `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
+| `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
+| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `ptc_task` tool when aggregator mode is active. |
+| `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
+| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `ptc_task` request. |
+| `--agentic-planner-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS` | `15000` | Per-planner-call timeout. |
+| `--agentic-max-output-tokens` | `PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS` | `1200` | Planner output token cap. |
+| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `ptc_task` response. |
+| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `ptc_task` responses. |
+| `--agentic-trace-prompts` | `PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS` | `false` | Include agentic prompt snapshots in traces. Use only for local debugging. |
+| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `ptc_task`. |
+| `--agentic-retry-turns` | `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS` | `0` | Additional retry turns after parser/runtime/validation feedback. |
+| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `ptc_task` in write-capable or unknown-effect aggregator configurations. |
+| `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
+| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
+| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
+| `--sessions` | `PTC_RUNNER_MCP_SESSIONS` | `false` | Expose opt-in stateful PTC-Lisp session tools. |
+| `--max-sessions` | `PTC_RUNNER_MCP_MAX_SESSIONS` | `64` | Maximum live sessions per MCP server process. |
+| `--max-sessions-per-owner` | `PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER` | `16` | Maximum live sessions per owner. |
+| `--session-ttl-ms` | `PTC_RUNNER_MCP_SESSION_TTL_MS` | `1800000` (30 min) | Maximum lifetime for a session. |
+| `--session-idle-timeout-ms` | `PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS` | `900000` (15 min) | Close a session after this much idle time. |
+| `--max-session-memory-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES` | `1048576` (1 MiB) | Persisted Lisp memory cap per session. |
+| `--max-session-binding-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES` | `262144` (256 KiB) | Per-binding persisted memory cap. |
+| `--max-session-bindings` | `PTC_RUNNER_MCP_MAX_SESSION_BINDINGS` | `200` | Maximum persisted bindings per session. |
+| `--max-session-history-entry-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES` | `65536` (64 KiB) | Per-result cap for `*1` / `*2` / `*3`; oversized values become preview markers. |
+| `--max-session-print-entries` | `PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES` | `50` | Maximum persisted `println` entries. |
+| `--max-session-print-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES` | `65536` (64 KiB) | Persisted print-history byte cap. |
+| `--max-session-tool-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES` | `50` | Maximum persisted tool-call history entries. |
+| `--max-session-tool-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES` | `131072` (128 KiB) | Persisted tool-call history byte cap. |
+| `--max-session-upstream-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES` | `50` | Maximum persisted upstream-call history entries. |
+| `--max-session-upstream-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES` | `131072` (128 KiB) | Persisted upstream-call history byte cap. |
+| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `ptc_lisp_execute` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
+| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
+| `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
+| `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `ptc_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
+
+## Response profiles
+
+`ptc_lisp_execute` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.
+
+| Profile | `content[0].text` | `structuredContent` | `outputSchema` advertised | Observability fields |
+|---|---|---|---|---|
+| **`slim`** *(default)* | concise human-readable text / the value | — | no | omitted everywhere — no `ptc_metrics`, no `upstream_calls`, no empty `prints`/`feedback`, no default `truncated` |
+| **`structured`** | concise text | compact `{status, result, …}` (errors add `reason`/`message`/`feedback` and a trimmed error-only `upstream_calls`) | yes (compact) | `ptc_metrics` omitted; `upstream_calls` carried *only* on errors and trimmed to the failed entries (no `duration_ms` / `result_bytes` / per-entry observability), so the model still has enough to repair the program |
+| **`debug`** | the result, mirrored | full payload (also mirrored as text) | yes (full) | full `ptc_metrics`, full `upstream_calls` (all entries with timings/byte counts), and the rest of the verbose payload |
+
+`--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. If you combine `--debug-tool --response-profile slim`, the client-facing response stays slim while the `ptc_debug` recorder still gets the full pre-slim payload internally.
+
+**Why `slim` by default — wire cost.** Measured by the local payload bench (drives a real `@modelcontextprotocol/server-filesystem` upstream; bytes ÷ 4 ≈ tokens; deterministic frame-byte counting, *not* LLM authoring cost):
+
+| Per `ptc_lisp_execute` call | `slim` | `structured` | `debug` | native MCP, direct |
+|---|---|---|---|---|
+| read one file, return it whole | ~67 t | ~123 t | ~873 t | ~105 t |
+| return the first line of 3 files (1 program vs 3 round-trips) | ~36 t | ~60 t | ~924 t | ~284 t |
+| return one matched line out of a file | ~29 t | ~46 t | ~790 t | ~105 t |
+
+`slim` is approximately 13–28x smaller than `debug` per call — debug's mirrored payload + `ptc_metrics` + `upstream_calls` is a roughly *fixed* ~800–950-token tax regardless of result size, which is exactly why it's opt-in (`--debug-tool`). Versus calling the upstream MCP tool directly, `slim` wins whenever the program collapses several calls into one and/or filters the result down (here: ~8x on the 3-file case, 1 round-trip instead of 3; ~4x on the one-line grep), and is about break-even for a single verbatim pass-through. The one-time `tools/list` ("cold") cost is comparable to a native server's (~2.7 K vs ~3.1 K tokens here); `debug` adds ~1.2 K tokens of `outputSchema` there. These ratios are illustrative — actual savings scale with payload size and how much the program reduces it; see [`aggregator-mode.md`](aggregator-mode.md) for the honest framing of what the server can and cannot measure, and re-run the bench against your own fixtures.
+
+## Catalog modes
+
+The `--catalog-mode` flag (env: `PTC_RUNNER_MCP_CATALOG_MODE`) controls how upstream tools are exposed. Default is `auto`.
+
+| Mode | Description |
+|---|---|
+| `inline` | Full catalog inlined in `ptc_lisp_execute` description. Best for small fleets. |
+| `lazy` | Compact server listing; tools discovered at runtime via `catalog/*` builtins. Best for large fleets or cost-conscious setups. |
+| `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and ≤ `--catalog-inline-max-chars` (12000); lazy otherwise. |
+
+In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp builtins that run inside `ptc_lisp_execute` — no extra MCP tool calls:
+
+| Builtin | Purpose |
+|---|---|
+| `(catalog/summary)` | Current mode, servers, load status |
+| `(catalog/list-servers)` | All servers with tool counts |
+| `(catalog/list-tools "server" {:limit 50})` | Tools for one server |
+| `(catalog/describe-tool "server" "tool")` | Full schema + call example |
+| `(catalog/search-tools "query" {:limit 8})` | Cross-server lexical search |
+
+Catalog builtins have a separate budget from upstream calls: `--max-catalog-ops-per-program` (default 25) and `--max-catalog-result-bytes` (default 256 KiB).
+
+| Flag | Env var | Default | Meaning |
+|---|---|---|---|
+| `--catalog-mode` | `PTC_RUNNER_MCP_CATALOG_MODE` | `auto` | `auto` \| `inline` \| `lazy` |
+| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `12000` | Auto→lazy threshold (rendered chars) |
+| `--catalog-inline-max-tools` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS` | `40` | Auto→lazy threshold (tool count) |
+| `--max-catalog-ops-per-program` | `PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM` | `25` | `catalog/*` call budget per program |
+| `--max-catalog-result-bytes` | `PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES` | `262144` (256 KiB) | Per-builtin result cap |
+
+## Aggregator-mode flags
+
+These come into effect when at least one upstream is configured. The first two override the v1 1 s / 10 MB defaults to be more realistic for programs that orchestrate real subprocess upstreams. See [`aggregator-mode.md`](aggregator-mode.md) for the conceptual reference (PTC-Lisp authoring against `tool/mcp-call`, catalog format, error model, example programs).
+
+| Flag | Env var | Default (aggregator) | Meaning |
+|---|---|---|---|
+| `--upstreams-config` | `PTC_RUNNER_MCP_UPSTREAMS` | (XDG default) | Path to upstreams JSON. Aggregator mode is enabled iff at least one upstream is configured. |
+| `--program-timeout-ms` | `PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS` | `10_000` (10 s) | Outer wall-clock cap on the PTC-Lisp program (replaces v1's 1 s). |
+| `--program-memory-limit-bytes` | `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES` | `100 * 1024 * 1024` (100 MB) | Sandbox heap cap (replaces v1's 10 MB). |
+| `--upstream-call-timeout-ms` | `PTC_RUNNER_MCP_UPSTREAM_CALL_TIMEOUT_MS` | `5_000` (5 s) | Per-upstream-call wall-clock cap. Exceeded → call returns `nil` + entry with reason `timeout`. |
+| `--max-upstream-response-bytes` | `PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES` | `2 * 1024 * 1024` (2 MB) | Per-response size cap, enforced pre-decode. Exceeded → `nil` + `response_too_large`. |
+| `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` | `50` | Total `tool/mcp-call` budget per program. Exceeded → `nil` + `cap_exhausted`. Stops `pmap` over an unbounded list from runaway-firing. |
+| `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Advertise aggregator mode as read-only/non-destructive for clients like Codex when upstreams enforce read-only behavior. |
+
+CLI flag wins over env var; aggregator-mode defaults only apply when no explicit value is given.
+
+## Tracing
+
+Setting `--trace-dir /tmp/ptc-traces` writes one JSONL file per `tools/call` invocation under that directory. Each file contains the lifecycle telemetry events (`lisp.execute.start`, `lisp.execute.success` / `lisp.execute.fail`, plus per-tool-call rows when relevant) emitted by `:ptc_runner`. Tracing is opt-in and OFF by default — there is zero overhead when `--trace-dir` is unset.
+
+`--trace-payloads full` includes the verbatim `program`, `context`, and rendered `result` bytes; `summary` (the default when tracing is on) records sizes and SHA-256 digests only. Pick `summary` unless you are actively debugging a specific call.
+
+For local evaluation of aggregator benefits, run with:
+
+```bash
+--trace-dir /tmp/ptc-traces --trace-payloads full
+```
+
+Then inspect the JSONL trace file to see the generated PTC-Lisp program, `program_bytes`, total call duration, and result size. The MCP response's `upstream_calls` array records each upstream call's server, tool, status, reason on failure, and duration. To estimate token savings, compare:
+
+- aggregator `tools/list` bytes vs the sum of native upstream `tools/list` bytes;
+- aggregator final result bytes vs the sum of native upstream raw result bytes.
+
+Use `--trace-payloads full` only for local debugging or measurement; it records source programs and payload values. Use `summary` or `none` for normal operation.
+
+### Reading traces without writing code
+
+With `--trace-dir` set you do not need a bespoke trace reader: point a generic **filesystem MCP server** (e.g. `@modelcontextprotocol/server-filesystem`) at the trace directory and let the client read the raw per-call JSONL. The zero-code escape hatch — fine for ad-hoc digging, but `ptc_debug` (see [`mcp-debug.md`](mcp-debug.md)) is the purpose-built interface, and `ptc_viewer` (`mix ptc.viewer` in the repo) is the human-facing web UI for the same trace files.
+
+## Lifecycle commands
+
+The release binary supports the standard Mix release lifecycle:
+
+```bash
+ptc_runner_mcp start      # foreground, stdio attached (what MCP clients use)
+ptc_runner_mcp daemon     # background
+ptc_runner_mcp stop
+ptc_runner_mcp restart
+ptc_runner_mcp remote     # IEx attached to a running node
+ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
+ptc_runner_mcp eval "..."  # run an expression in a one-shot VM
+```
