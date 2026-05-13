@@ -129,7 +129,8 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   # error, so fields the caller explicitly excluded can't leak through.
   defp validate_type(data, {:closed_map, fields}, path) do
     if is_map(data) do
-      validate_map_fields(data, fields, path) ++ validate_no_extra_fields(data, fields, path)
+      {field_errors, consumed_keys} = validate_map_fields_tracking(data, fields, path)
+      field_errors ++ validate_no_extra_fields(data, consumed_keys, path)
     else
       [error_at(path, "expected map, got #{type_name(data)}")]
     end
@@ -142,11 +143,10 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   defp validate_map_fields(data, fields, path) do
     Enum.flat_map(fields, fn {field_name, field_type} ->
       case get_field(data, field_name) do
-        {:ok, value} ->
+        {:ok, _key, value} ->
           validate_type(value, field_type, path ++ [field_name])
 
         :missing ->
-          # Check if field is optional
           if optional?(field_type) do
             []
           else
@@ -156,19 +156,33 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end)
   end
 
-  # Compare data keys against declared field names, normalizing both sides
-  # (atom→string, hyphen→underscore) so a Clojure-style `:user-id` data key
-  # still counts as covering a declared `"user_id"` field. Anything left over
-  # is an undeclared field.
-  defp validate_no_extra_fields(data, fields, path) do
-    declared =
-      fields
-      |> Enum.map(fn {name, _type} -> KeyNormalizer.normalize_key(name) end)
-      |> MapSet.new()
+  # Like validate_map_fields/3 but also returns the set of consumed data keys
+  # so validate_no_extra_fields can flag unconsumed ones directly.
+  defp validate_map_fields_tracking(data, fields, path) do
+    {errors, consumed} =
+      Enum.reduce(fields, {[], MapSet.new()}, fn {field_name, field_type}, {errs, keys} ->
+        case get_field(data, field_name) do
+          {:ok, matched_key, value} ->
+            field_errors = validate_type(value, field_type, path ++ [field_name])
+            {errs ++ field_errors, MapSet.put(keys, matched_key)}
 
+          :missing ->
+            if optional?(field_type) do
+              {errs, keys}
+            else
+              {errs ++ [error_at(path ++ [field_name], "expected field, got nil")], keys}
+            end
+        end
+      end)
+
+    {errors, consumed}
+  end
+
+  # Flag every data key that was not consumed by a declared field.
+  defp validate_no_extra_fields(data, consumed_keys, path) do
     data
     |> Map.keys()
-    |> Enum.reject(fn key -> MapSet.member?(declared, KeyNormalizer.normalize_key(key)) end)
+    |> Enum.reject(&MapSet.member?(consumed_keys, &1))
     |> Enum.sort_by(&inspect/1)
     |> Enum.map(fn key ->
       error_at(
@@ -198,7 +212,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
 
     Enum.reduce_while(candidates, :missing, fn key, _acc ->
       case try_key(data, key) do
-        {:ok, _} = result -> {:halt, result}
+        {:ok, _matched_key, _value} = result -> {:halt, result}
         :missing -> {:cont, :missing}
       end
     end)
@@ -208,20 +222,19 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     :missing
   end
 
-  # Look up a string key by trying it both as a string and as an existing atom.
   defp try_key(data, key) when is_binary(key) do
     case try_existing_atom_key(data, key) do
-      {:ok, _} = result ->
+      {:ok, _matched_key, _value} = result ->
         result
 
       :missing ->
-        if Map.has_key?(data, key), do: {:ok, Map.get(data, key)}, else: :missing
+        if Map.has_key?(data, key), do: {:ok, key, Map.get(data, key)}, else: :missing
     end
   end
 
   defp try_existing_atom_key(data, field_name) do
     atom_key = String.to_existing_atom(field_name)
-    if Map.has_key?(data, atom_key), do: {:ok, Map.get(data, atom_key)}, else: :missing
+    if Map.has_key?(data, atom_key), do: {:ok, atom_key, Map.get(data, atom_key)}, else: :missing
   rescue
     ArgumentError -> :missing
   end
