@@ -96,7 +96,7 @@ defmodule PtcRunnerMcp.MixProject do
       maintainers: ["Andreas Ronge"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib priv mix.exs README.md LICENSE CHANGELOG.md)
+      files: ~w(bench lib priv mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
