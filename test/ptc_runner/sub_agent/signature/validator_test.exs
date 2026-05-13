@@ -346,6 +346,17 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
                  {:map, [{"at", :datetime}]}
                )
     end
+
+    test ":datetime inside closed_map gets coercion via JsonHandler.atomize_value" do
+      alias PtcRunner.SubAgent.Loop.JsonHandler
+
+      iso = "2026-05-03T09:14:00Z"
+      schema = {:closed_map, [{"at", :datetime}]}
+
+      atomized = JsonHandler.atomize_value(%{"at" => iso}, schema)
+      assert %{at: %DateTime{}} = atomized
+      assert :ok = Validator.validate(atomized, schema)
+    end
   end
 
   describe "validate/2 - closed maps" do
@@ -392,6 +403,22 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
                  %{"user" => %{"name" => "A", "extra" => 1}},
                  {:closed_map, [{"user", {:closed_map, [{"name", :string}]}}]}
                )
+    end
+
+    test "rejects alias key alongside canonical key (bypass via dual keys)" do
+      data = %{"user_id" => 1, "user-id" => "bad"}
+      schema = {:closed_map, [{"user_id", :int}]}
+
+      assert {:error, errors} = Validator.validate(data, schema)
+      assert Enum.any?(errors, &(&1.message =~ "unexpected field"))
+    end
+
+    test "rejects atom alias key alongside string canonical key" do
+      data = %{"user_id" => 1, :"user-id" => "bad"}
+      schema = {:closed_map, [{"user_id", :int}]}
+
+      assert {:error, errors} = Validator.validate(data, schema)
+      assert Enum.any?(errors, &(&1.message =~ "unexpected field"))
     end
   end
 end
