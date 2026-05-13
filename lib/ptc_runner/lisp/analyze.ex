@@ -14,7 +14,6 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Analyze.Definitions
   alias PtcRunner.Lisp.Analyze.Iteration
   alias PtcRunner.Lisp.Analyze.Patterns
-  alias PtcRunner.Lisp.Analyze.Predicates
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
@@ -54,8 +53,6 @@ defmodule PtcRunner.Lisp.Analyze do
   @type error_reason ::
           {:invalid_form, String.t()}
           | {:invalid_arity, atom(), String.t()}
-          | {:invalid_where_form, String.t()}
-          | {:invalid_where_operator, atom()}
           | {:invalid_cond_form, String.t()}
           | {:invalid_thread_form, atom(), String.t()}
           | {:unsupported_pattern, term()}
@@ -108,10 +105,6 @@ defmodule PtcRunner.Lisp.Analyze do
       :comment,
       :and,
       :or,
-      :where,
-      :"all-of",
-      :"any-of",
-      :"none-of",
       :juxt,
       :pmap,
       :pcalls,
@@ -341,17 +334,6 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :comment}, _rest, _list, _tail?), do: {:ok, nil}
   defp dispatch_list_form({:symbol, :and}, rest, _list, tail?), do: analyze_and(rest, tail?)
   defp dispatch_list_form({:symbol, :or}, rest, _list, tail?), do: analyze_or(rest, tail?)
-  defp dispatch_list_form({:symbol, :where}, rest, _list, tail?), do: analyze_where(rest, tail?)
-
-  defp dispatch_list_form({:symbol, :"all-of"}, rest, _list, tail?),
-    do: analyze_pred_comb(:all_of, rest, tail?)
-
-  defp dispatch_list_form({:symbol, :"any-of"}, rest, _list, tail?),
-    do: analyze_pred_comb(:any_of, rest, tail?)
-
-  defp dispatch_list_form({:symbol, :"none-of"}, rest, _list, tail?),
-    do: analyze_pred_comb(:none_of, rest, tail?)
-
   defp dispatch_list_form({:symbol, :juxt}, rest, _list, tail?), do: analyze_juxt(rest, tail?)
   defp dispatch_list_form({:symbol, :pmap}, rest, _list, tail?), do: analyze_pmap(rest, tail?)
   defp dispatch_list_form({:symbol, :pcalls}, rest, _list, tail?), do: analyze_pcalls(rest, tail?)
@@ -970,17 +952,6 @@ defmodule PtcRunner.Lisp.Analyze do
     do: {:error, {:invalid_form, "recur must be in tail position"}}
 
   defp resolve_call_or_recur(f, args, _tail?), do: {:ok, {:call, f, args}}
-
-  # ============================================================
-  # Predicates: where and combinators
-  # Delegated to PtcRunner.Lisp.Analyze.Predicates
-  # ============================================================
-
-  defp analyze_where(args, _tail?),
-    do: Predicates.analyze_where(args, fn ast -> do_analyze(ast, false) end)
-
-  defp analyze_pred_comb(kind, args, _tail?),
-    do: Predicates.analyze_pred_comb(kind, args, &analyze_list/1)
 
   # ============================================================
   # Function combinator: juxt

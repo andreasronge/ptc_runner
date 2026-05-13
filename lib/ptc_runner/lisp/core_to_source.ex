@@ -183,26 +183,6 @@ defmodule PtcRunner.Lisp.CoreToSource do
     "(turn-history #{format(n)})"
   end
 
-  # Predicates
-  def format({:where, {:field, segments}, op, nil}) do
-    "(where #{format_field_path(segments)} #{format_where_op(op)})"
-  end
-
-  def format({:where, {:field, segments}, op, value}) do
-    "(where #{format_field_path(segments)} #{format_where_op(op)} #{format(value)})"
-  end
-
-  def format({:pred_combinator, kind, predicates}) do
-    name =
-      case kind do
-        :all_of -> "all-of"
-        :any_of -> "any-of"
-        :none_of -> "none-of"
-      end
-
-    "(#{name} #{format_list(predicates)})"
-  end
-
   # Parallel operations
   def format({:pmap, fn_expr, coll_expr}) do
     "(pmap #{format(fn_expr)} #{format(coll_expr)})"
@@ -497,21 +477,4 @@ defmodule PtcRunner.Lisp.CoreToSource do
     |> String.replace("\t", "\\t")
     |> String.replace("\r", "\\r")
   end
-
-  defp format_field_path(segments) do
-    Enum.map_join(segments, ".", fn
-      {:keyword, k} -> ":#{k}"
-      {:string, s} -> ~s("#{escape_string(s)}")
-    end)
-  end
-
-  defp format_where_op(:eq), do: "="
-  defp format_where_op(:not_eq), do: "!="
-  defp format_where_op(:gt), do: ">"
-  defp format_where_op(:lt), do: "<"
-  defp format_where_op(:gte), do: ">="
-  defp format_where_op(:lte), do: "<="
-  defp format_where_op(:includes), do: "includes"
-  defp format_where_op(:in), do: "in"
-  defp format_where_op(:truthy), do: "truthy"
 end

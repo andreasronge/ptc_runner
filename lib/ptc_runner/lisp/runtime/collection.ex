@@ -7,7 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   Selection operations (filter, remove, find, some, every?, not_any?,
   take_while, drop_while) are implemented in `Collection.Select`.
 
-  Transformation operations (map, mapv, mapcat, keep, map_indexed, pluck)
+  Transformation operations (map, mapv, mapcat, keep, map_indexed)
   are implemented in `Collection.Transform`.
   """
 
@@ -46,7 +46,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defdelegate keep(f, coll), to: Transform
   defdelegate keep_indexed(f, coll), to: Transform
   defdelegate map_indexed(f, coll), to: Transform
-  defdelegate pluck(key, coll), to: Transform
 
   # ============================================================
   # Private helpers used by remaining operations

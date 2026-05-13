@@ -4,7 +4,6 @@ defmodule PtcRunner.Lisp.AnalyzeBindingsTest do
   alias PtcRunner.Lisp.Analyze
 
   doctest PtcRunner.Lisp.Analyze.Patterns
-  doctest PtcRunner.Lisp.Analyze.Predicates
 
   describe "let bindings" do
     test "simple bindings" do

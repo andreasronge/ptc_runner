@@ -2811,22 +2811,6 @@
       divergences: nil
     },
     %{
-      name: "pluck",
-      description: "Extract single field from each item",
-      binding: :normal,
-      category: :core,
-      dispatch: :env,
-      signatures: ["(pluck key coll)"],
-      since: nil,
-      section: "Core",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: "pluck",
-      divergences: nil
-    },
-    %{
       name: "pop",
       description: "Return collection without last element",
       binding: :normal,
@@ -4133,22 +4117,6 @@
       divergences: nil
     },
     %{
-      name: "all-of",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(all-of ...)"],
-      since: nil,
-      section: "Predicate Builders",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
       name: "and",
       description: "Logical AND (short-circuits)",
       binding: nil,
@@ -4162,22 +4130,6 @@
       notes: nil,
       see_also: [],
       clojure_var: "and",
-      divergences: nil
-    },
-    %{
-      name: "any-of",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(any-of ...)"],
-      since: nil,
-      section: "Predicate Builders",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -4537,22 +4489,6 @@
         "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
     },
     %{
-      name: "none-of",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(none-of ...)"],
-      since: nil,
-      section: "Predicate Builders",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
       name: "or",
       description: "Logical OR (short-circuits)",
       binding: nil,
@@ -4792,22 +4728,6 @@
       notes: nil,
       see_also: [],
       clojure_var: "when-some",
-      divergences: nil
-    },
-    %{
-      name: "where",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(where ...)"],
-      since: nil,
-      section: "Predicate Builders",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
       divergences: nil
     }
   ],

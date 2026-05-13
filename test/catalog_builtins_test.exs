@@ -331,7 +331,7 @@ defmodule PtcRunner.CatalogBuiltinsTest do
     test "catalog/list-servers result can be filtered" do
       {:ok, step} =
         Lisp.run(
-          ~s|(count (filter (where :catalog_loaded = true) (catalog/list-servers)))|,
+          ~s|(count (filter (fn [s] (= (:catalog_loaded s) true)) (catalog/list-servers)))|,
           catalog_exec: mock_catalog_exec()
         )
 

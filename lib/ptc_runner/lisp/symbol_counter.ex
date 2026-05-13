@@ -34,10 +34,6 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :"cond->>",
                   :"some->",
                   :"some->>",
-                  :where,
-                  :"all-of",
-                  :"any-of",
-                  :"none-of",
                   :return,
                   :fail,
                   # Comparison operators

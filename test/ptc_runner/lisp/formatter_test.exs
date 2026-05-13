@@ -175,10 +175,10 @@ defmodule PtcRunner.Lisp.FormatterTest do
                {:list,
                 [
                   {:symbol, :filter},
-                  {:list, [{:symbol, :where}, {:keyword, :active}, {:symbol, :=}, true]},
+                  {:list, [{:symbol, :fn}, {:vector, [{:symbol, :m}]}, {:keyword, :active}]},
                   {:symbol, :users}
                 ]}
-             ) == "(filter (where :active = true) users)"
+             ) == "(filter (fn [m] :active) users)"
     end
   end
 
