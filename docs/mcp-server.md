@@ -2,9 +2,9 @@
 
 `ptc_runner_mcp` is a long-running process that speaks
 [Model Context Protocol](https://modelcontextprotocol.io/) over stdio
-JSON-RPC and exposes one tool — `ptc_lisp_execute` — to any MCP client
-(Claude Desktop, Cursor, Cline, Claude Code, MCP Inspector, …). The
-tool accepts a PTC-Lisp program plus optional `context` and
+JSON-RPC and exposes `ptc_lisp_execute` to any MCP client (Claude
+Desktop, Cursor, Cline, Claude Code, MCP Inspector, …). The tool
+accepts a PTC-Lisp program plus optional `context` and
 `signature`, runs it in an isolated BEAM sandbox, and returns a
 structured result.
 
@@ -12,7 +12,8 @@ The server has no LLM of its own. The MCP client's LLM does the
 reasoning; PtcRunner is invoked only when deterministic computation is
 useful — counting, filtering, JSON shape validation, signature-driven
 extraction. State does not persist between calls; each `tools/call` is
-independent.
+independent unless the server is started with the optional session
+tools enabled.
 
 This document is the conceptual overview. For install + client
 configuration, see
@@ -46,9 +47,10 @@ Concrete cases:
   in the conversation. A small PTC-Lisp program is cheaper and more
   reliable than a long natural-language transformation.
 
-It is **not** the right fit when the work needs filesystem access,
-network access, or stateful sessions across calls. PTC-Lisp programs
-have none of those, by construction.
+It is **not** the right fit when the work needs filesystem access or
+direct network access. PTC-Lisp programs have none of those, by
+construction. If the work needs REPL-like memory across calls, the MCP
+server can optionally expose stateful PTC-Lisp session tools.
 
 ## Comparison with Python / JS execution servers
 
@@ -92,7 +94,7 @@ cannot leak in the first place.
                   │              │                          │
                   │              ▼                          │
                   │   Per-call worker  ◄── concurrency      │
-                  │   (Phase 4)            semaphore        │
+                  │   process              semaphore        │
                   │              │                          │
                   │              ▼                          │
                   │   PtcToolProtocol.lisp_run/2            │
@@ -134,6 +136,32 @@ Each `tools/call` request flows top-to-bottom:
 
 `notifications/cancelled` from the client kills the in-flight sandbox
 process. stdin EOF cancels every in-flight call and exits cleanly.
+
+## Stateful Sessions
+
+By default, `ptc_lisp_execute` is stateless: every call starts with
+empty Lisp memory and an empty tool cache. Starting the server with
+`--sessions` or `PTC_RUNNER_MCP_SESSIONS=true` adds explicit session
+tools:
+
+- `ptc_session_start`
+- `ptc_session_eval`
+- `ptc_session_inspect`
+- `ptc_session_forget`
+- `ptc_session_close`
+
+Session evals persist explicit `(def ...)` and `(defn ...)` bindings,
+the last three successful eval results (`*1`, `*2`, `*3`), captured
+`println` output, and bounded/redacted tool-call history. `let`
+bindings and ordinary intermediate values do not persist. Use
+`ptc_session_forget` to remove stale or large bindings and clear
+bounded histories.
+
+Sessions are in-memory, owner-scoped, disabled by default, TTL/idle
+bounded, and allow at most one eval in a given session at a time.
+`ptc_session_eval` uses the same global concurrency gate as
+`ptc_lisp_execute`; a second eval on the same session returns
+`session_busy` rather than queueing.
 
 ## Security model
 
@@ -218,7 +246,7 @@ as structured tool-result errors (`args_error`, `busy`, `timeout`,
   walkthrough from install to first signature-validated call.
 - [`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md)
   — the full v1 specification (handshake, request / response
-  contracts, phase plan).
+  contracts, implementation plan).
 - [`docs/ptc-lisp-specification.md`](ptc-lisp-specification.md) — the
   PTC-Lisp language reference.
 - [`docs/function-reference.md`](function-reference.md) — every

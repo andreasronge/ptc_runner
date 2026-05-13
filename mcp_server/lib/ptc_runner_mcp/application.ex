@@ -53,9 +53,12 @@ defmodule PtcRunnerMcp.Application do
     Limits,
     Log,
     ResponseProfile,
+    Sessions,
     TraceConfig,
     TraceHandler
   }
+
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   @impl Application
   def start(_type, _args) do
@@ -70,6 +73,7 @@ defmodule PtcRunnerMcp.Application do
     apply_agentic_config(args)
     apply_debug_config(args)
     apply_response_profile(args)
+    apply_sessions_config(args)
     validate_agentic_boot!(upstreams)
     apply_limits(args, aggregator?: upstreams != [])
     apply_trace_config(args)
@@ -122,6 +126,7 @@ defmodule PtcRunnerMcp.Application do
   def build_children(upstreams, bindings, args) do
     [{Credentials, [bindings: bindings]}] ++
       aggregator_children(upstreams) ++
+      session_children() ++
       stdio_children(args)
   end
 
@@ -165,6 +170,21 @@ defmodule PtcRunnerMcp.Application do
           agentic_capability_summary_max_bytes: :integer,
           agentic_capability_summary: :string,
           upstreams_config: :string,
+          sessions: :boolean,
+          max_sessions: :integer,
+          max_sessions_per_owner: :integer,
+          session_ttl_ms: :integer,
+          session_idle_timeout_ms: :integer,
+          max_session_memory_bytes: :integer,
+          max_session_binding_bytes: :integer,
+          max_session_bindings: :integer,
+          max_session_history_entry_bytes: :integer,
+          max_session_print_entries: :integer,
+          max_session_print_bytes: :integer,
+          max_session_tool_call_entries: :integer,
+          max_session_tool_call_bytes: :integer,
+          max_session_upstream_call_entries: :integer,
+          max_session_upstream_call_bytes: :integer,
           log_level: :string,
           trace_dir: :string,
           trace_payloads: :string,
@@ -478,6 +498,104 @@ defmodule PtcRunnerMcp.Application do
       true ->
         :ok
     end
+  end
+
+  @doc false
+  @spec apply_sessions_config(map()) :: :ok
+  def apply_sessions_config(args) when is_map(args) do
+    defaults = SessionsConfig.defaults()
+
+    SessionsConfig.set(%{
+      enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
+      max_sessions:
+        read_int(args, :max_sessions, "PTC_RUNNER_MCP_MAX_SESSIONS", defaults.max_sessions),
+      max_sessions_per_owner:
+        read_int(
+          args,
+          :max_sessions_per_owner,
+          "PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER",
+          defaults.max_sessions_per_owner
+        ),
+      session_ttl_ms:
+        read_int(args, :session_ttl_ms, "PTC_RUNNER_MCP_SESSION_TTL_MS", defaults.session_ttl_ms),
+      session_idle_timeout_ms:
+        read_int(
+          args,
+          :session_idle_timeout_ms,
+          "PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS",
+          defaults.session_idle_timeout_ms
+        ),
+      max_session_memory_bytes:
+        read_int(
+          args,
+          :max_session_memory_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES",
+          defaults.max_session_memory_bytes
+        ),
+      max_session_binding_bytes:
+        read_int(
+          args,
+          :max_session_binding_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES",
+          defaults.max_session_binding_bytes
+        ),
+      max_session_bindings:
+        read_int(
+          args,
+          :max_session_bindings,
+          "PTC_RUNNER_MCP_MAX_SESSION_BINDINGS",
+          defaults.max_session_bindings
+        ),
+      max_session_history_entry_bytes:
+        read_int(
+          args,
+          :max_session_history_entry_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES",
+          defaults.max_session_history_entry_bytes
+        ),
+      max_session_print_entries:
+        read_int(
+          args,
+          :max_session_print_entries,
+          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES",
+          defaults.max_session_print_entries
+        ),
+      max_session_print_bytes:
+        read_int(
+          args,
+          :max_session_print_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES",
+          defaults.max_session_print_bytes
+        ),
+      max_session_tool_call_entries:
+        read_int(
+          args,
+          :max_session_tool_call_entries,
+          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES",
+          defaults.max_session_tool_call_entries
+        ),
+      max_session_tool_call_bytes:
+        read_int(
+          args,
+          :max_session_tool_call_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES",
+          defaults.max_session_tool_call_bytes
+        ),
+      max_session_upstream_call_entries:
+        read_int(
+          args,
+          :max_session_upstream_call_entries,
+          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES",
+          defaults.max_session_upstream_call_entries
+        ),
+      max_session_upstream_call_bytes:
+        read_int(
+          args,
+          :max_session_upstream_call_bytes,
+          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES",
+          defaults.max_session_upstream_call_bytes
+        )
+    })
   end
 
   # Public-but-undocumented seam used by `Application.start/2` and by
@@ -802,6 +920,14 @@ defmodule PtcRunnerMcp.Application do
   defp debug_children do
     if DebugConfig.enabled?() do
       [{PtcRunnerMcp.DebugBuffer, [ring_size: DebugConfig.ring_size()]}]
+    else
+      []
+    end
+  end
+
+  defp session_children do
+    if SessionsConfig.enabled?() do
+      Sessions.child_specs()
     else
       []
     end

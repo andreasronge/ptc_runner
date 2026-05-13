@@ -96,7 +96,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => program}}
     }
 
-    {:async_call, ^id, work_fn, _on_busy, _} = JsonRpc.dispatch({:ok, frame})
+    {:async_call, ^id, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
     work_fn.()
   end
 
@@ -108,7 +108,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       "params" => %{"name" => "ptc_task", "arguments" => %{"task" => task}}
     }
 
-    {:async_call, ^id, work_fn, _on_busy, _} = JsonRpc.dispatch({:ok, frame})
+    {:async_call, ^id, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
     work_fn.()
   end
 

@@ -50,7 +50,9 @@ defmodule PtcRunnerMcp.Stdio do
             exited: boolean(),
             auto_read: boolean(),
             observer: pid() | nil,
-            in_flight: %{optional(term()) => %{pid: pid(), ref: reference()}},
+            in_flight: %{
+              optional(term()) => %{pid: pid(), ref: reference(), on_discard: (-> any())}
+            },
             workers: %{optional(pid()) => term()},
             exit_pending: boolean(),
             reader: {pid(), reference()} | nil,
@@ -520,10 +522,10 @@ defmodule PtcRunnerMcp.Stdio do
       {:noreply, lifecycle} ->
         apply_lifecycle(state, lifecycle)
 
-      {:async_call, request_id, work_fn, on_busy, lifecycle} ->
+      {:async_call, request_id, work_fn, on_busy, on_discard, lifecycle} ->
         state
         |> apply_lifecycle(lifecycle)
-        |> handle_async_call(request_id, work_fn, on_busy)
+        |> handle_async_call(request_id, work_fn, on_busy, on_discard)
 
       {:cancel, request_id, lifecycle} ->
         state
@@ -615,9 +617,10 @@ defmodule PtcRunnerMcp.Stdio do
   #
   # Returns updated state.
   @doc false
-  @spec handle_async_call(State.t(), term(), (-> map()), (map() -> any())) :: State.t()
-  def handle_async_call(%State{} = state, request_id, work_fn, on_busy)
-      when is_function(work_fn, 0) and is_function(on_busy, 1) do
+  @spec handle_async_call(State.t(), term(), (-> map()), (map() -> any()), (-> any())) ::
+          State.t()
+  def handle_async_call(%State{} = state, request_id, work_fn, on_busy, on_discard)
+      when is_function(work_fn, 0) and is_function(on_busy, 1) and is_function(on_discard, 0) do
     if Map.has_key?(state.in_flight, request_id) do
       # JSON-RPC 2.0 § 4: a client MUST use unique ids for outstanding
       # requests. A duplicate id while the previous one is still in
@@ -636,18 +639,19 @@ defmodule PtcRunnerMcp.Stdio do
       }
 
       write_reply(state, reply)
+      safe_invoke(on_discard)
       state
     else
-      try_acquire_and_spawn(state, request_id, work_fn, on_busy)
+      try_acquire_and_spawn(state, request_id, work_fn, on_busy, on_discard)
     end
   end
 
-  defp try_acquire_and_spawn(state, request_id, work_fn, on_busy) do
+  defp try_acquire_and_spawn(state, request_id, work_fn, on_busy, on_discard) do
     cap = Limits.max_concurrent_calls()
 
     case ConcurrencyGate.try_acquire(cap) do
       :ok ->
-        spawn_worker(state, request_id, work_fn)
+        spawn_worker(state, request_id, work_fn, on_discard)
 
       :full ->
         # Cap reached — emit `busy` synchronously, no worker spawned.
@@ -677,7 +681,15 @@ defmodule PtcRunnerMcp.Stdio do
     _, _ -> :ok
   end
 
-  defp spawn_worker(state, request_id, work_fn) do
+  defp safe_invoke(fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp spawn_worker(state, request_id, work_fn, on_discard) do
     parent = self()
 
     {worker_pid, ref} =
@@ -709,7 +721,12 @@ defmodule PtcRunnerMcp.Stdio do
 
     %{
       state
-      | in_flight: Map.put(state.in_flight, request_id, %{pid: worker_pid, ref: ref}),
+      | in_flight:
+          Map.put(state.in_flight, request_id, %{
+            pid: worker_pid,
+            ref: ref,
+            on_discard: on_discard
+          }),
         workers: Map.put(state.workers, worker_pid, request_id)
     }
   end
@@ -719,7 +736,8 @@ defmodule PtcRunnerMcp.Stdio do
       {nil, _} ->
         state
 
-      {%{pid: pid}, in_flight} ->
+      {%{pid: pid, on_discard: on_discard}, in_flight} ->
+        safe_invoke(on_discard)
         ConcurrencyGate.release()
 
         %{
@@ -734,9 +752,10 @@ defmodule PtcRunnerMcp.Stdio do
   # reply. § 6.4 row 4: unknown request_id is a silent no-op.
   defp cancel_request(state, request_id) do
     case Map.fetch(state.in_flight, request_id) do
-      {:ok, %{pid: pid, ref: ref}} ->
+      {:ok, %{pid: pid, ref: ref, on_discard: on_discard}} ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
+        safe_invoke(on_discard)
 
         Log.log(:info, "cancelled_in_flight", %{request_id: request_id})
 
@@ -763,9 +782,12 @@ defmodule PtcRunnerMcp.Stdio do
   # the DOWN message that arrives later is ignored). No replies
   # written.
   defp cancel_all_workers(state, _reason) do
-    Enum.reduce(state.in_flight, state, fn {request_id, %{pid: pid, ref: ref}}, acc ->
+    Enum.reduce(state.in_flight, state, fn {request_id,
+                                            %{pid: pid, ref: ref, on_discard: on_discard}},
+                                           acc ->
       Process.demonitor(ref, [:flush])
       Process.exit(pid, :kill)
+      safe_invoke(on_discard)
       ConcurrencyGate.release()
 
       %{

@@ -657,7 +657,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     }
 
     case JsonRpc.dispatch({:ok, frame}) do
-      {:async_call, ^id, work_fn, _on_busy, _} ->
+      {:async_call, ^id, work_fn, _on_busy, _on_discard, _} ->
         envelope = work_fn.()
         %{"jsonrpc" => "2.0", "id" => id, "result" => envelope}
 
