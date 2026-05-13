@@ -12,9 +12,9 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 
 | Status | Count |
 |--------|-------|
-| Supported | 223 |
-| Candidate | 58 |
-| Not Relevant | 253 |
+| Supported | 234 |
+| Candidate | 14 |
+| Not Relevant | 286 |
 | Not Classified | 0 |
 | **Total** | **534** |
 
@@ -23,11 +23,11 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
 | `*` | ✅ supported | Multiplies numbers; returns 1 with no args |  |
-| `*'` | 🔲 candidate | Multiplies numbers with arbitrary precision | pure numerical operation |
+| `*'` | ✅ supported | Multiplies numbers with arbitrary precision | alias for *; BEAM integers are already arbitrary precision |
 | `+` | ✅ supported | Adds numbers; returns 0 with no args |  |
-| `+'` | 🔲 candidate | Adds numbers with arbitrary precision | pure numerical operation |
+| `+'` | ✅ supported | Adds numbers with arbitrary precision | alias for +; BEAM integers are already arbitrary precision |
 | `-` | ✅ supported | Subtracts numbers or negates single argument |  |
-| `-'` | 🔲 candidate | Subtracts numbers with arbitrary precision | pure numerical operation |
+| `-'` | ✅ supported | Subtracts numbers with arbitrary precision | alias for -; BEAM integers are already arbitrary precision |
 | `->` | ✅ supported | Threads expression as second argument through forms |  |
 | `->>` | ✅ supported | Threads expression as last argument through forms |  |
 | `.` | ❌ not_relevant | Java member access and method calls | Java interop |
@@ -36,11 +36,11 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `<` | ✅ supported | Returns true if numbers monotonically increase |  |
 | `<=` | ✅ supported | Returns true if numbers non-decreasing |  |
 | `=` | ✅ supported | Equality comparison |  |
-| `==` | 🔲 candidate | Type-independent numeric equality | pure numeric predicate |
+| `==` | ✅ supported | Type-independent numeric equality | alias for numeric equality |
 | `>` | ✅ supported | Returns true if numbers monotonically decrease |  |
 | `>=` | ✅ supported | Returns true if numbers non-increasing |  |
 | `abs` | ✅ supported | Returns absolute value of number |  |
-| `accessor` | 🔲 candidate | Returns function accessing structmap value at key | pure functional access to data |
+| `accessor` | ❌ not_relevant | Returns function accessing structmap value at key | legacy structmap helper; structmaps are not supported |
 | `aclone` | ❌ not_relevant | Returns clone of Java array | Java array manipulation |
 | `add-tap` | ❌ not_relevant | Adds function to receive tap> values | I/O and global state side effects |
 | `add-watch` | ❌ not_relevant | Adds watch function to reference | mutable state and referencing |
@@ -59,7 +59,7 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `any?` | 🔲 candidate | Returns true for any argument | pure predicate function |
 | `apply` | ✅ supported | Applies function to argument sequence |  |
 | `areduce` | ❌ not_relevant | Reduces expression across Java array | relies on Java array interoperability |
-| `array-map` | 🔲 candidate | Constructs array-map from key-value pairs | pure constructor for map data structure |
+| `array-map` | ✅ supported | Constructs array-map from key-value pairs | alias for hash-map; no separate small-map representation |
 | `as->` | ✅ supported | Binds name to expr, threads through forms |  |
 | `aset` | ❌ not_relevant | Sets value in Java array at index | performs mutable operations on Java arrays |
 | `assert` | ❌ not_relevant | Throws AssertionError if expr false | relies on exception handling/throwing |
@@ -72,9 +72,9 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `await-for` | ❌ not_relevant | Blocks with timeout for agent actions | relies on agent state |
 | `bases` | ❌ not_relevant | Returns immediate superclass and interfaces | Java interop and class inspection |
 | `bean` | ❌ not_relevant | Returns map based on JavaBean properties | Java interop (JavaBeans) |
-| `bigdec` | 🔲 candidate | Coerces to BigDecimal | pure numerical coercion |
-| `bigint` | 🔲 candidate | Coerces to BigInt | pure numerical coercion |
-| `biginteger` | 🔲 candidate | Coerces to BigInteger | pure numerical coercion |
+| `bigdec` | ❌ not_relevant | Coerces to BigDecimal | BEAM runtime has no BigDecimal type in PTC-Lisp |
+| `bigint` | ❌ not_relevant | Coerces to BigInt | BEAM integers are already arbitrary precision |
+| `biginteger` | ❌ not_relevant | Coerces to BigInteger | JVM-specific BigInteger coercion; BEAM integers are already arbitrary precision |
 | `binding` | ❌ not_relevant | Binds vars to new values for body duration | relies on thread-local var binding mechanism |
 | `bit-and` | ✅ supported | Bitwise AND | integers only |
 | `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only |
@@ -96,14 +96,14 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `bound?` | ❌ not_relevant | Returns true if all vars have bound value | relies on dynamic var binding state |
 | `bounded-count` | ❌ not_relevant | Counts up to n elements | designed for lazy sequences |
 | `butlast` | ✅ supported | Returns all but last item |  |
-| `byte` | 🔲 candidate | Coerces to byte | pure numerical type coercion |
+| `byte` | ❌ not_relevant | Coerces to byte | JVM primitive width coercion |
 | `byte-array` | ❌ not_relevant | Creates byte Java array | Java array creation |
 | `bytes` | ❌ not_relevant | Casts to byte array | Java array casting |
 | `bytes?` | ❌ not_relevant | Returns true if value is byte array | Java array type check |
 | `case` | ✅ supported | Constant-time dispatch on expression value |  |
 | `cast` | ❌ not_relevant | Throws ClassCastException if not instance | relies on Java type system and exception handling |
-| `cat` | 🔲 candidate | Transducer concatenating input collections | pure transducer for collection transformation |
-| `char` | 🔲 candidate | Coerces to char | pure data type coercion |
+| `cat` | ❌ not_relevant | Transducer concatenating input collections | transducers are not supported |
+| `char` | ❌ not_relevant | Coerces to char | JVM character coercion; PTC-Lisp strings are UTF-8 binaries |
 | `char-array` | ❌ not_relevant | Creates char Java array | creates Java array |
 | `char?` | ✅ supported | Returns true if value is Character |  |
 | `chars` | ❌ not_relevant | Casts to char array | relies on Java char array types |
@@ -136,7 +136,7 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `create-struct` | ❌ not_relevant | Returns structure basis object | relies on legacy fixed-key structure system |
 | `cycle` | ❌ not_relevant | Returns infinite lazy seq repeating collection | relies on lazy sequences |
 | `dec` | ✅ supported | Returns number minus one |  |
-| `dec'` | 🔲 candidate | Decrements with arbitrary precision | pure arithmetic function |
+| `dec'` | ✅ supported | Decrements with arbitrary precision | alias for dec; BEAM integers are already arbitrary precision |
 | `decimal?` | ✅ supported | Returns true if BigDecimal |  |
 | `declare` | ❌ not_relevant | Defines var names with no bindings | relies on namespace/var system |
 | `dedupe` | ✅ supported | Removes consecutive duplicates |  |
@@ -155,7 +155,7 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `delay` | ❌ not_relevant | Defers expression evaluation | lazy evaluation/stateful caching |
 | `delay?` | ❌ not_relevant | Returns true if value is delay | relies on delay/concurrency which is not supported |
 | `deliver` | ❌ not_relevant | Delivers result to promise | relies on promise/mutable state |
-| `denominator` | 🔲 candidate | Returns denominator of ratio | pure math operation |
+| `denominator` | ❌ not_relevant | Returns denominator of ratio | ratio values are not supported |
 | `deref` | ❌ not_relevant | Dereferences ref/delay/future/promise | relies on mutable state/concurrency types |
 | `derive` | ❌ not_relevant | Establishes hierarchical relationship | relies on global namespace/hierarchy state |
 | `descendants` | ❌ not_relevant | Returns all descendants of tag | relies on global namespace/hierarchy state |
@@ -239,12 +239,12 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `get-validator` | ❌ not_relevant | Returns reference validator | mutable state validator |
 | `group-by` | ✅ supported | Groups items by function result |  |
 | `halt-when` | ❌ not_relevant | Transducer halting on predicate | relies on transducers which often involve stateful reduction and lazy-like sequence processing |
-| `hash` | 🔲 candidate | Returns hash code | pure function computing a value from data |
+| `hash` | ❌ not_relevant | Returns hash code | runtime-specific hash values are not stable across hosts |
 | `hash-map` | ✅ supported | Creates hash map from pairs |  |
-| `hash-ordered-coll` | 🔲 candidate | Returns hash of ordered collection | pure function computing a hash |
-| `hash-set` | 🔲 candidate | Creates hash set from items | pure function creating a hash set data structure |
-| `hash-unordered-coll` | 🔲 candidate | Returns hash of unordered collection | pure function computing a hash |
-| `ident?` | 🔲 candidate | Returns true if keyword or symbol | pure predicate for data types |
+| `hash-ordered-coll` | ❌ not_relevant | Returns hash of ordered collection | Clojure hashing internals; not stable across PTC-Lisp hosts |
+| `hash-set` | ✅ supported | Creates hash set from items | constructs a PTC-Lisp set from variadic arguments |
+| `hash-unordered-coll` | ❌ not_relevant | Returns hash of unordered collection | Clojure hashing internals; not stable across PTC-Lisp hosts |
+| `ident?` | ❌ not_relevant | Returns true if keyword or symbol | PTC-Lisp has keywords but no first-class symbol or namespaced identifier values |
 | `identical?` | ❌ not_relevant | Returns true if same object | relies on object identity which is not meaningful for serializable data in a BEAM-based environment |
 | `identity` | ✅ supported | Returns argument unchanged |  |
 | `if` | ✅ supported | Conditional branch |  |
@@ -255,11 +255,11 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `import` | ❌ not_relevant | Imports Java classes | relies on Java interop |
 | `in-ns` | ❌ not_relevant | Changes current namespace | relies on namespace support |
 | `inc` | ✅ supported | Returns number plus one |  |
-| `inc'` | 🔲 candidate | Increments with arbitrary precision | pure mathematical transformation |
+| `inc'` | ✅ supported | Increments with arbitrary precision | alias for inc; BEAM integers are already arbitrary precision |
 | `indexed?` | ✅ supported | Returns true if supports indexed access |  |
 | `infinite?` | ✅ supported | Returns true if number infinite |  |
-| `inst-ms` | 🔲 candidate | Milliseconds since epoch for instant | pure data extraction from date object |
-| `inst?` | 🔲 candidate | Returns true if instant | pure type predicate |
+| `inst-ms` | ❌ not_relevant | Milliseconds since epoch for instant | covered by existing temporal interop .getTime |
+| `inst?` | ❌ not_relevant | Returns true if instant | Clojure instant predicate; PTC-Lisp temporal interop uses host date structs |
 | `instance?` | ❌ not_relevant | Returns true if instance of class | relies on Java class system |
 | `int` | ✅ supported | Coerces to int |  |
 | `int-array` | ❌ not_relevant | Creates int Java array | relies on Java array/mutability |
@@ -286,17 +286,17 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `lazy-cat` | ❌ not_relevant | Lazy concatenation of expressions | relies on lazy sequences |
 | `lazy-seq` | ❌ not_relevant | Creates lazy sequence from expression | relies on lazy sequences |
 | `let` | ✅ supported | Local variable bindings |  |
-| `letfn` | 🔲 candidate | Binds function names for mutual recursion | pure binding of functions for recursion |
+| `letfn` | ❌ not_relevant | Binds function names for mutual recursion | mutual recursion binding form is outside PTC-Lisp's small evaluator surface |
 | `line-seq` | ❌ not_relevant | Lazy seq of lines from reader | relies on lazy sequences and reader I/O |
 | `list` | ✅ supported | Alias for vector (PTC-Lisp is vector-first) | implemented as alias for vector |
-| `list*` | 🔲 candidate | Creates list with seq appended | pure list constructor |
-| `list?` | 🔲 candidate | Returns true if list | pure predicate |
+| `list*` | ❌ not_relevant | Creates list with seq appended | PTC-Lisp is vector-first and has no separate list runtime type |
+| `list?` | ❌ not_relevant | Returns true if list | PTC-Lisp is vector-first and has no separate list runtime type |
 | `load` | ❌ not_relevant | Loads Clojure file from classpath | relies on file I/O and classpath |
 | `load-file` | ❌ not_relevant | Loads Clojure file from path | relies on file I/O |
 | `load-reader` | ❌ not_relevant | Loads code from reader | relies on reader I/O |
 | `load-string` | ❌ not_relevant | Loads code from string | evaluates code/REPL feature |
 | `locking` | ❌ not_relevant | Acquires monitor lock, executes body | concurrency primitive/locking |
-| `long` | 🔲 candidate | Coerces to long | type coercion, pure |
+| `long` | ❌ not_relevant | Coerces to long | JVM primitive width coercion; use int for integer coercion |
 | `long-array` | ❌ not_relevant | Creates long Java array | Java interop/primitive array |
 | `longs` | ❌ not_relevant | Casts to long array | Java interop/primitive array |
 | `loop` | ✅ supported | Loop with recur for tail recursion |  |
@@ -337,19 +337,19 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `not-every?` | ✅ supported | Returns true if pred false for some |  |
 | `not=` | ✅ supported | Returns true if not equal |  |
 | `nth` | ✅ supported | Returns item at index |  |
-| `nthnext` | 🔲 candidate | Returns nth next | pure list/sequence navigation |
-| `nthrest` | 🔲 candidate | Returns rest after nth item | pure list/sequence navigation |
-| `num` | 🔲 candidate | Coerces to number | pure numeric coercion |
+| `nthnext` | ✅ supported | Returns nth next | implemented as seq after nthrest |
+| `nthrest` | ✅ supported | Returns rest after nth item | implemented as drop alias with Clojure argument order |
+| `num` | ❌ not_relevant | Coerces to number | JVM Number coercion; parse-long/parse-double cover string parsing |
 | `number?` | ✅ supported | Returns true if number |  |
-| `numerator` | 🔲 candidate | Returns numerator of ratio | pure mathematical operation on ratios |
+| `numerator` | ❌ not_relevant | Returns numerator of ratio | ratio values are not supported |
 | `object-array` | ❌ not_relevant | Creates object Java array | relies on Java interop and host arrays |
 | `odd?` | ✅ supported | Returns true if number odd |  |
 | `or` | ✅ supported | Short-circuit logical OR |  |
 | `parents` | ❌ not_relevant | Returns immediate parents of tag | metadata/hierarchy manipulation not supported in PTC-Lisp |
-| `parse-boolean` | 🔲 candidate | Parses string to boolean | pure string-to-data transformation |
+| `parse-boolean` | ✅ supported | Parses string to boolean | returns true, false, or nil |
 | `parse-double` | ✅ supported | Parses string to double |  |
 | `parse-long` | ✅ supported | Parses string to long |  |
-| `parse-uuid` | 🔲 candidate | Parses string to UUID | pure string-to-data transformation |
+| `parse-uuid` | ❌ not_relevant | Parses string to UUID | no UUID runtime type; keep UUIDs as strings |
 | `partial` | ✅ supported | Fixes supplied arguments to function |  |
 | `partition` | ✅ supported | Partitions items into groups of n |  |
 | `partition-all` | ✅ supported | Partitions without dropping partial group |  |
@@ -373,12 +373,12 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `promise` | ❌ not_relevant | Creates promise | concurrency primitive |
 | `proxy` | ❌ not_relevant | Creates proxy implementing interfaces | Java interop |
 | `push-thread-bindings` | ❌ not_relevant | Installs thread-local bindings | thread-local mutability/state |
-| `qualified-ident?` | 🔲 candidate | Returns true if ident has namespace | pure predicate for data inspection |
-| `qualified-keyword?` | 🔲 candidate | Returns true if keyword has namespace | pure predicate for data inspection |
-| `qualified-symbol?` | 🔲 candidate | Returns true if symbol has namespace | pure predicate for data inspection |
+| `qualified-ident?` | ❌ not_relevant | Returns true if ident has namespace | namespaced identifiers are not supported as runtime values |
+| `qualified-keyword?` | ❌ not_relevant | Returns true if keyword has namespace | namespaced keywords are not supported |
+| `qualified-symbol?` | ❌ not_relevant | Returns true if symbol has namespace | symbols are not supported as runtime values |
 | `quot` | ✅ supported | Returns integer division quotient |  |
-| `quote` | 🔲 candidate | Returns form unevaluated | fundamental Lisp evaluation control |
-| `rand` | 🔲 candidate | Returns random float 0-1 | pure data-generating function (if implemented as a pure seeded RNG) |
+| `quote` | ❌ not_relevant | Returns form unevaluated | quote syntax is intentionally unsupported; use vectors and data literals directly |
+| `rand` | ❌ not_relevant | Returns random float 0-1 | non-deterministic randomness contradicts sandbox determinism |
 | `rand-int` | ❌ not_relevant | Returns random int less than arg | relies on non-deterministic side effects/state |
 | `rand-nth` | ❌ not_relevant | Returns random item from seq | relies on non-deterministic side effects/state |
 | `random-sample` | ❌ not_relevant | Returns random sample of items | relies on non-deterministic side effects/state |
@@ -386,9 +386,9 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `range` | ✅ supported | Returns sequence of numbers |  |
 | `ratio?` | ✅ supported | Returns true if ratio |  |
 | `rational?` | ✅ supported | Returns true if rational number |  |
-| `rationalize` | 🔲 candidate | Coerces to ratio | pure mathematical transformation |
+| `rationalize` | ❌ not_relevant | Coerces to ratio | ratio values are not supported |
 | `re-find` | ✅ supported | Returns first regex match |  |
-| `re-groups` | 🔲 candidate | Returns regex match groups | pure string processing function |
+| `re-groups` | ❌ not_relevant | Returns regex match groups | capture groups are returned directly by re-find, re-matches, and re-seq |
 | `re-matcher` | ❌ not_relevant | Returns matcher for pattern | returns an object maintaining mutable state/matcher position |
 | `re-matches` | ✅ supported | Returns full regex match or nil |  |
 | `re-pattern` | ✅ supported | Returns compiled regex pattern |  |
@@ -444,14 +444,14 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `set` | ✅ supported | Creates set from items |  |
 | `set!` | ❌ not_relevant | Sets thread-local var value | relies on mutable state |
 | `set?` | ✅ supported | Returns true if set |  |
-| `short` | 🔲 candidate | Coerces to short | pure numerical type coercion |
+| `short` | ❌ not_relevant | Coerces to short | JVM primitive width coercion |
 | `short-array` | ❌ not_relevant | Creates short Java array | relies on Java array instantiation |
 | `shorts` | ❌ not_relevant | Casts to short array | relies on Java array interaction |
 | `shuffle` | ❌ not_relevant | Returns items in random order | relies on non-deterministic side effects (randomness) |
 | `shutdown-agents` | ❌ not_relevant | Shuts down agent thread pool | manages thread pools which is unsupported |
-| `simple-ident?` | 🔲 candidate | Returns true if ident has no namespace | pure predicate for data validation |
-| `simple-keyword?` | 🔲 candidate | Returns true if keyword has no ns | pure predicate for data validation |
-| `simple-symbol?` | 🔲 candidate | Returns true if symbol has no ns | pure predicate for data validation |
+| `simple-ident?` | ❌ not_relevant | Returns true if ident has no namespace | PTC-Lisp has keywords but no first-class symbol or namespaced identifier values |
+| `simple-keyword?` | ❌ not_relevant | Returns true if keyword has no ns | namespaced keywords are not supported |
+| `simple-symbol?` | ❌ not_relevant | Returns true if symbol has no ns | symbols are not supported as runtime values |
 | `slurp` | ❌ not_relevant | Reads entire contents of file/URL | involves file/network I/O |
 | `some` | ✅ supported | Returns first truthy result or nil |  |
 | `some->` | ✅ supported | Threads through forms while non-nil |  |
@@ -490,7 +490,7 @@ See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-
 | `time` | ❌ not_relevant | Evaluates and prints elapsed time | side-effecting I/O and timing |
 | `to-array` | ❌ not_relevant | Converts to object array | Java interop for array creation |
 | `to-array-2d` | ❌ not_relevant | Converts to 2D array | Java interop for array creation |
-| `trampoline` | 🔲 candidate | Mutual recursion without stack overflow | Pure mutual recursion utility |
+| `trampoline` | ❌ not_relevant | Mutual recursion without stack overflow | lazy/mutual-recursion utility outside PTC-Lisp's small evaluator surface |
 | `transduce` | 🔲 candidate | Reduces with transducer | Pure data transformation utility |
 | `transient` | ❌ not_relevant | Creates transient collection | Mutable state/transients are not supported |
 | `tree-seq` | ✅ supported | Depth-first seq from root |  |

@@ -527,6 +527,14 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   def parse_double(_), do: nil
 
+  @doc """
+  Parse string to boolean. Returns nil on failure.
+  Matches Clojure 1.11+ parse-boolean behavior.
+  """
+  def parse_boolean("true"), do: true
+  def parse_boolean("false"), do: false
+  def parse_boolean(_), do: nil
+
   # ============================================================
   # Format
   # ============================================================

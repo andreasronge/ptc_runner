@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
@@ -263,6 +264,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     push_side_effect_stash()
     result = fun.(converted_args)
     {:ok, result, pop_side_effects(eval_ctx)}
+  rescue
+    e in ExecutionError ->
+      pop_side_effects(eval_ctx)
+      {:error, execution_error_tuple(e)}
   end
 
   # Multi-arity builtins: select function based on argument count
@@ -677,6 +682,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_ctx
     end
   end
+
+  defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: nil}),
+    do: {reason, message}
+
+  defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: data}),
+    do: {reason, message, data}
 
   # ============================================================
   # Closure Execution Helpers

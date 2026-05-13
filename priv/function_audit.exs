@@ -8,9 +8,9 @@
     },
     %{
       name: "*'",
-      status: :candidate,
+      status: :supported,
       description: "Multiplies numbers with arbitrary precision",
-      notes: "pure numerical operation"
+      notes: "alias for *; BEAM integers are already arbitrary precision"
     },
     %{
       name: "+",
@@ -20,9 +20,9 @@
     },
     %{
       name: "+'",
-      status: :candidate,
+      status: :supported,
       description: "Adds numbers with arbitrary precision",
-      notes: "pure numerical operation"
+      notes: "alias for +; BEAM integers are already arbitrary precision"
     },
     %{
       name: "-",
@@ -32,9 +32,9 @@
     },
     %{
       name: "-'",
-      status: :candidate,
+      status: :supported,
       description: "Subtracts numbers with arbitrary precision",
-      notes: "pure numerical operation"
+      notes: "alias for -; BEAM integers are already arbitrary precision"
     },
     %{
       name: "->",
@@ -76,9 +76,9 @@
     %{name: "=", status: :supported, description: "Equality comparison", notes: ""},
     %{
       name: "==",
-      status: :candidate,
+      status: :supported,
       description: "Type-independent numeric equality",
-      notes: "pure numeric predicate"
+      notes: "alias for numeric equality"
     },
     %{
       name: ">",
@@ -100,9 +100,9 @@
     },
     %{
       name: "accessor",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns function accessing structmap value at key",
-      notes: "pure functional access to data"
+      notes: "legacy structmap helper; structmaps are not supported"
     },
     %{
       name: "aclone",
@@ -209,9 +209,9 @@
     },
     %{
       name: "array-map",
-      status: :candidate,
+      status: :supported,
       description: "Constructs array-map from key-value pairs",
-      notes: "pure constructor for map data structure"
+      notes: "alias for hash-map; no separate small-map representation"
     },
     %{
       name: "as->",
@@ -287,21 +287,21 @@
     },
     %{
       name: "bigdec",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to BigDecimal",
-      notes: "pure numerical coercion"
+      notes: "BEAM runtime has no BigDecimal type in PTC-Lisp"
     },
     %{
       name: "bigint",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to BigInt",
-      notes: "pure numerical coercion"
+      notes: "BEAM integers are already arbitrary precision"
     },
     %{
       name: "biginteger",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to BigInteger",
-      notes: "pure numerical coercion"
+      notes: "JVM-specific BigInteger coercion; BEAM integers are already arbitrary precision"
     },
     %{
       name: "binding",
@@ -421,9 +421,9 @@
     %{name: "butlast", status: :supported, description: "Returns all but last item", notes: ""},
     %{
       name: "byte",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to byte",
-      notes: "pure numerical type coercion"
+      notes: "JVM primitive width coercion"
     },
     %{
       name: "byte-array",
@@ -457,15 +457,15 @@
     },
     %{
       name: "cat",
-      status: :candidate,
+      status: :not_relevant,
       description: "Transducer concatenating input collections",
-      notes: "pure transducer for collection transformation"
+      notes: "transducers are not supported"
     },
     %{
       name: "char",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to char",
-      notes: "pure data type coercion"
+      notes: "JVM character coercion; PTC-Lisp strings are UTF-8 binaries"
     },
     %{
       name: "char-array",
@@ -651,9 +651,9 @@
     %{name: "dec", status: :supported, description: "Returns number minus one", notes: ""},
     %{
       name: "dec'",
-      status: :candidate,
+      status: :supported,
       description: "Decrements with arbitrary precision",
-      notes: "pure arithmetic function"
+      notes: "alias for dec; BEAM integers are already arbitrary precision"
     },
     %{name: "decimal?", status: :supported, description: "Returns true if BigDecimal", notes: ""},
     %{
@@ -750,9 +750,9 @@
     },
     %{
       name: "denominator",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns denominator of ratio",
-      notes: "pure math operation"
+      notes: "ratio values are not supported"
     },
     %{
       name: "deref",
@@ -1190,9 +1190,9 @@
     },
     %{
       name: "hash",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns hash code",
-      notes: "pure function computing a value from data"
+      notes: "runtime-specific hash values are not stable across hosts"
     },
     %{
       name: "hash-map",
@@ -1202,27 +1202,27 @@
     },
     %{
       name: "hash-ordered-coll",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns hash of ordered collection",
-      notes: "pure function computing a hash"
+      notes: "Clojure hashing internals; not stable across PTC-Lisp hosts"
     },
     %{
       name: "hash-set",
-      status: :candidate,
+      status: :supported,
       description: "Creates hash set from items",
-      notes: "pure function creating a hash set data structure"
+      notes: "constructs a PTC-Lisp set from variadic arguments"
     },
     %{
       name: "hash-unordered-coll",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns hash of unordered collection",
-      notes: "pure function computing a hash"
+      notes: "Clojure hashing internals; not stable across PTC-Lisp hosts"
     },
     %{
       name: "ident?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if keyword or symbol",
-      notes: "pure predicate for data types"
+      notes: "PTC-Lisp has keywords but no first-class symbol or namespaced identifier values"
     },
     %{
       name: "identical?",
@@ -1252,9 +1252,9 @@
     %{name: "inc", status: :supported, description: "Returns number plus one", notes: ""},
     %{
       name: "inc'",
-      status: :candidate,
+      status: :supported,
       description: "Increments with arbitrary precision",
-      notes: "pure mathematical transformation"
+      notes: "alias for inc; BEAM integers are already arbitrary precision"
     },
     %{
       name: "indexed?",
@@ -1270,15 +1270,15 @@
     },
     %{
       name: "inst-ms",
-      status: :candidate,
+      status: :not_relevant,
       description: "Milliseconds since epoch for instant",
-      notes: "pure data extraction from date object"
+      notes: "covered by existing temporal interop .getTime"
     },
     %{
       name: "inst?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if instant",
-      notes: "pure type predicate"
+      notes: "Clojure instant predicate; PTC-Lisp temporal interop uses host date structs"
     },
     %{
       name: "instance?",
@@ -1393,9 +1393,9 @@
     %{name: "let", status: :supported, description: "Local variable bindings", notes: ""},
     %{
       name: "letfn",
-      status: :candidate,
+      status: :not_relevant,
       description: "Binds function names for mutual recursion",
-      notes: "pure binding of functions for recursion"
+      notes: "mutual recursion binding form is outside PTC-Lisp's small evaluator surface"
     },
     %{
       name: "line-seq",
@@ -1411,15 +1411,15 @@
     },
     %{
       name: "list*",
-      status: :candidate,
+      status: :not_relevant,
       description: "Creates list with seq appended",
-      notes: "pure list constructor"
+      notes: "PTC-Lisp is vector-first and has no separate list runtime type"
     },
     %{
       name: "list?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if list",
-      notes: "pure predicate"
+      notes: "PTC-Lisp is vector-first and has no separate list runtime type"
     },
     %{
       name: "load",
@@ -1453,9 +1453,9 @@
     },
     %{
       name: "long",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to long",
-      notes: "type coercion, pure"
+      notes: "JVM primitive width coercion; use int for integer coercion"
     },
     %{
       name: "long-array",
@@ -1634,28 +1634,28 @@
     %{name: "nth", status: :supported, description: "Returns item at index", notes: ""},
     %{
       name: "nthnext",
-      status: :candidate,
+      status: :supported,
       description: "Returns nth next",
-      notes: "pure list/sequence navigation"
+      notes: "implemented as seq after nthrest"
     },
     %{
       name: "nthrest",
-      status: :candidate,
+      status: :supported,
       description: "Returns rest after nth item",
-      notes: "pure list/sequence navigation"
+      notes: "implemented as drop alias with Clojure argument order"
     },
     %{
       name: "num",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to number",
-      notes: "pure numeric coercion"
+      notes: "JVM Number coercion; parse-long/parse-double cover string parsing"
     },
     %{name: "number?", status: :supported, description: "Returns true if number", notes: ""},
     %{
       name: "numerator",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns numerator of ratio",
-      notes: "pure mathematical operation on ratios"
+      notes: "ratio values are not supported"
     },
     %{
       name: "object-array",
@@ -1673,9 +1673,9 @@
     },
     %{
       name: "parse-boolean",
-      status: :candidate,
+      status: :supported,
       description: "Parses string to boolean",
-      notes: "pure string-to-data transformation"
+      notes: "returns true, false, or nil"
     },
     %{
       name: "parse-double",
@@ -1686,9 +1686,9 @@
     %{name: "parse-long", status: :supported, description: "Parses string to long", notes: ""},
     %{
       name: "parse-uuid",
-      status: :candidate,
+      status: :not_relevant,
       description: "Parses string to UUID",
-      notes: "pure string-to-data transformation"
+      notes: "no UUID runtime type; keep UUIDs as strings"
     },
     %{
       name: "partial",
@@ -1820,21 +1820,21 @@
     },
     %{
       name: "qualified-ident?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if ident has namespace",
-      notes: "pure predicate for data inspection"
+      notes: "namespaced identifiers are not supported as runtime values"
     },
     %{
       name: "qualified-keyword?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if keyword has namespace",
-      notes: "pure predicate for data inspection"
+      notes: "namespaced keywords are not supported"
     },
     %{
       name: "qualified-symbol?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if symbol has namespace",
-      notes: "pure predicate for data inspection"
+      notes: "symbols are not supported as runtime values"
     },
     %{
       name: "quot",
@@ -1844,15 +1844,15 @@
     },
     %{
       name: "quote",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns form unevaluated",
-      notes: "fundamental Lisp evaluation control"
+      notes: "quote syntax is intentionally unsupported; use vectors and data literals directly"
     },
     %{
       name: "rand",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns random float 0-1",
-      notes: "pure data-generating function (if implemented as a pure seeded RNG)"
+      notes: "non-deterministic randomness contradicts sandbox determinism"
     },
     %{
       name: "rand-int",
@@ -1888,16 +1888,16 @@
     },
     %{
       name: "rationalize",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to ratio",
-      notes: "pure mathematical transformation"
+      notes: "ratio values are not supported"
     },
     %{name: "re-find", status: :supported, description: "Returns first regex match", notes: ""},
     %{
       name: "re-groups",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns regex match groups",
-      notes: "pure string processing function"
+      notes: "capture groups are returned directly by re-find, re-matches, and re-seq"
     },
     %{
       name: "re-matcher",
@@ -2196,9 +2196,9 @@
     %{name: "set?", status: :supported, description: "Returns true if set", notes: ""},
     %{
       name: "short",
-      status: :candidate,
+      status: :not_relevant,
       description: "Coerces to short",
-      notes: "pure numerical type coercion"
+      notes: "JVM primitive width coercion"
     },
     %{
       name: "short-array",
@@ -2226,21 +2226,21 @@
     },
     %{
       name: "simple-ident?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if ident has no namespace",
-      notes: "pure predicate for data validation"
+      notes: "PTC-Lisp has keywords but no first-class symbol or namespaced identifier values"
     },
     %{
       name: "simple-keyword?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if keyword has no ns",
-      notes: "pure predicate for data validation"
+      notes: "namespaced keywords are not supported"
     },
     %{
       name: "simple-symbol?",
-      status: :candidate,
+      status: :not_relevant,
       description: "Returns true if symbol has no ns",
-      notes: "pure predicate for data validation"
+      notes: "symbols are not supported as runtime values"
     },
     %{
       name: "slurp",
@@ -2417,9 +2417,9 @@
     },
     %{
       name: "trampoline",
-      status: :candidate,
+      status: :not_relevant,
       description: "Mutual recursion without stack overflow",
-      notes: "Pure mutual recursion utility"
+      notes: "lazy/mutual-recursion utility outside PTC-Lisp's small evaluator surface"
     },
     %{
       name: "transduce",

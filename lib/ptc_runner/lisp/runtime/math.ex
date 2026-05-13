@@ -29,6 +29,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   def add(x, y), do: add([x, y])
 
+  def subtract([]), do: arity_error("-'")
+
   def subtract([x]) do
     case x do
       :nan -> :nan

@@ -398,7 +398,7 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 
 **Rationale:** Matches Clojure. Ambiguous which `%` refers to which scope.
 
-### DIV-18: `parse-long`/`parse-double` return `nil` for non-string input
+### DIV-18: `parse-long`/`parse-double`/`parse-boolean` return `nil` for non-string input
 
 | Field | Value |
 |-------|-------|
@@ -408,10 +408,14 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 
 ```clojure
 ;; Clojure 1.11+
-(parse-long 42)   ;=> IllegalArgumentException
+(parse-long 42)      ;=> IllegalArgumentException
+(parse-double 42)    ;=> IllegalArgumentException
+(parse-boolean 42)   ;=> IllegalArgumentException
 
 ;; PTC-Lisp
-(parse-long 42)   ;=> nil
+(parse-long 42)      ;=> nil
+(parse-double 42)    ;=> nil
+(parse-boolean 42)   ;=> nil
 ```
 
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
