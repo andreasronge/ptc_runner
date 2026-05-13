@@ -14,13 +14,15 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{Limits, Tools}
   alias PtcRunnerMcp.Upstream.Registry
 
   @registry_name PtcRunnerMcp.Upstream.Registry
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
     {:ok, _pid} = Registry.start_link(name: @registry_name)
     Limits.set(Limits.defaults())
 
@@ -44,7 +46,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
     on_exit(fn ->
       :telemetry.detach(handler_id)
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       Limits.set(Limits.defaults())
     end)
 
@@ -209,23 +211,6 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :start], _, start_meta}
       assert start_meta.request_id == nil
-    end
-  end
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
     end
   end
 end
