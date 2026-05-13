@@ -59,6 +59,18 @@ Programs that don't care about the distinction can treat `:json-null` as truthy 
 - Keep returned strings short; long previews truncate. Prefer fewer items/fields over `println`.
 - For typed output, use `output_schema` (JSON Schema) instead of `signature`. Omit both for exploratory aggregator calls.
 
+## Catalog discovery (`catalog/`)
+
+When the inline upstream catalog above is missing, truncated, or you need a tool's full input schema, query the catalog at runtime from inside the program. All forms are aggregator-mode only.
+
+- `(catalog/list-servers)` — list `{name, description, tool_count, catalog_loaded}` for every configured upstream, sorted by name.
+- `(catalog/list-tools "<server>" {:limit 50 :offset 0})` — paginated compact tool entries (`server`, `tool`, `summary`, `arg_keys`, `read_only`) for one upstream.
+- `(catalog/search-tools "<query>" {:limit 8 :load false})` — deterministic lexical ranking across upstreams (exact > prefix > substring, name fields boosted). With `:load false`, uncached upstreams contribute one server-level placeholder with a `next` hint instead of triggering a load.
+- `(catalog/describe-tool "<server>" "<tool>")` — detailed view of one tool including `input_schema`, `arg_keys`, `annotations`, and a ready-to-edit `call_example`.
+- `(catalog/summary)` — overview map: catalog mode, per-server `{name, description, tool_count, capabilities}`, and a `catalogs_loaded` flag.
+
+Same world-fault → `nil` / programmer-fault → raise split as `(tool/mcp-call ...)`. Catalog ops run on a separate per-program budget; they never consume the upstream-call quota.
+
 ## Response envelope
 
 Each call to `ptc_lisp_execute` returns a structured payload that may include an `upstream_calls` array — one entry per `(tool/mcp-call ...)` invocation, in completion order, recording `server`, `tool`, `status`, `duration_ms`, and (on error) `reason` and `error`. The field is omitted when no upstream calls were made.

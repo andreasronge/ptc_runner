@@ -611,7 +611,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         new_env,
         eval_context.tool_exec,
         closure_turn_history,
-        pmap_timeout: eval_context.pmap_timeout
+        pmap_timeout: eval_context.pmap_timeout,
+        catalog_exec: eval_context.catalog_exec
       )
 
     case do_eval_fn.(body, eval_ctx) do
@@ -715,7 +716,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             pmap_calls: caller_ctx.pmap_calls,
             tool_cache: caller_ctx.tool_cache,
             summaries: caller_ctx.summaries,
-            journal: caller_ctx.journal
+            journal: caller_ctx.journal,
+            catalog_exec: caller_ctx.catalog_exec
         }
 
         case do_eval_fn.(body, closure_ctx) do

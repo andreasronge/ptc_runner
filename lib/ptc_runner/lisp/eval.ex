@@ -1279,7 +1279,8 @@ defmodule PtcRunner.Lisp.Eval do
         | loop_limit: eval_ctx.loop_limit,
           prints: eval_ctx.prints,
           max_print_length: eval_ctx.max_print_length,
-          pmap_timeout: eval_ctx.pmap_timeout
+          pmap_timeout: eval_ctx.pmap_timeout,
+          catalog_exec: eval_ctx.catalog_exec
       }
 
       case do_eval(body, ctx) do
