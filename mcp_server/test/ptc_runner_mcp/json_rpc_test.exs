@@ -86,7 +86,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
   describe "tools/call" do
     test "ptc_lisp_execute (+ 1 2) returns success envelope (isError=false)" do
       # Phase 4: tools/call dispatch is async. JsonRpc returns an
-      # `{:async_call, id, work_fn, on_busy, lifecycle}` outcome; the
+      # `{:async_call, id, work_fn, on_busy, on_discard, lifecycle}` outcome; the
       # work_fn is the body that Stdio runs in a per-call worker. We
       # invoke it inline here to assert the envelope shape end-to-end.
       frame = %{
@@ -96,7 +96,8 @@ defmodule PtcRunnerMcp.JsonRpcTest do
         "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => "(+ 1 2)"}}
       }
 
-      assert {:async_call, 3, work_fn, _on_busy, :continue} = JsonRpc.dispatch({:ok, frame})
+      assert {:async_call, 3, work_fn, _on_busy, _on_discard, :continue} =
+               JsonRpc.dispatch({:ok, frame})
 
       env = work_fn.()
       assert env["isError"] == false

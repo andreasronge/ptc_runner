@@ -159,7 +159,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
       }
     }
 
-    {:async_call, 123, work_fn, _on_busy, _} = JsonRpc.dispatch({:ok, frame})
+    {:async_call, 123, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
     env = work_fn.()
 
     refute Map.has_key?(env, "structuredContent")

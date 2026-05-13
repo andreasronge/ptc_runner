@@ -201,6 +201,21 @@ them to the `args` array, e.g.:
 | `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
 | `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
 | `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
+| `--sessions` | `PTC_RUNNER_MCP_SESSIONS` | `false` | Expose opt-in stateful PTC-Lisp session tools. |
+| `--max-sessions` | `PTC_RUNNER_MCP_MAX_SESSIONS` | `64` | Maximum live sessions per MCP server process. |
+| `--max-sessions-per-owner` | `PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER` | `16` | Maximum live sessions per owner. |
+| `--session-ttl-ms` | `PTC_RUNNER_MCP_SESSION_TTL_MS` | `1800000` (30 min) | Maximum lifetime for a session. |
+| `--session-idle-timeout-ms` | `PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS` | `900000` (15 min) | Close a session after this much idle time. |
+| `--max-session-memory-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES` | `1048576` (1 MiB) | Persisted Lisp memory cap per session. |
+| `--max-session-binding-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES` | `262144` (256 KiB) | Per-binding persisted memory cap. |
+| `--max-session-bindings` | `PTC_RUNNER_MCP_MAX_SESSION_BINDINGS` | `200` | Maximum persisted bindings per session. |
+| `--max-session-history-entry-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES` | `65536` (64 KiB) | Per-result cap for `*1` / `*2` / `*3`; oversized values become preview markers. |
+| `--max-session-print-entries` | `PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES` | `50` | Maximum persisted `println` entries. |
+| `--max-session-print-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES` | `65536` (64 KiB) | Persisted print-history byte cap. |
+| `--max-session-tool-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES` | `50` | Maximum persisted tool-call history entries. |
+| `--max-session-tool-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES` | `131072` (128 KiB) | Persisted tool-call history byte cap. |
+| `--max-session-upstream-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES` | `50` | Maximum persisted upstream-call history entries. |
+| `--max-session-upstream-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES` | `131072` (128 KiB) | Persisted upstream-call history byte cap. |
 | `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `ptc_lisp_execute` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
 | `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [Diagnostics](#diagnostics-the-ptc_debug-tool)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
@@ -249,6 +264,31 @@ ratios are illustrative — actual savings scale with payload size and how
 much the program reduces it; see [Payload reduction](#payload-reduction)
 for the honest framing of what the server can and cannot measure, and
 re-run `bench/local_payload_bench.py` against your own fixtures.
+
+## Stateful sessions
+
+Sessions are off by default. Start the server with `--sessions` or
+`PTC_RUNNER_MCP_SESSIONS=true` to advertise the explicit session tools:
+
+- `ptc_session_start`
+- `ptc_session_eval`
+- `ptc_session_inspect`
+- `ptc_session_forget`
+- `ptc_session_close`
+
+`ptc_lisp_execute` remains stateless.
+
+A session persists explicit `(def ...)` and `(defn ...)` bindings, the
+last three successful results via `*1`, `*2`, and `*3`, captured
+`println` output, and bounded/redacted tool and upstream call history.
+`let` bindings and ordinary intermediate values do not persist.
+
+Sessions are in-memory and owner-scoped. They close on TTL or idle
+timeout and are never durable by default. Only one eval can run per
+session; concurrent evals for the same session return `session_busy`.
+
+Use `ptc_session_forget` to remove stale or large bindings and clear
+histories. Use `ptc_session_close` when the session is done.
 
 ## Aggregator mode
 
@@ -428,12 +468,15 @@ directories, or upstream-specific read-only modes).
 
 ### What the LLM sees
 
-Even with N upstreams configured, the client's `tools/list` returns
-**exactly one tool**, `ptc_lisp_execute`. Upstream tools are not
-re-advertised individually — they're folded into that tool's
-`description` field as a compact, deterministic catalog rendered
-once at server boot from each upstream's own `tools/list` response
-(cached in `:persistent_term`; rebuilt only on PtcRunner restart).
+Even with N upstreams configured, aggregator mode does not re-advertise
+upstream tools individually. In an aggregator-only configuration, the
+client's `tools/list` returns `ptc_lisp_execute`; optional server
+features such as sessions, diagnostics, or agentic tools may add their
+own top-level tools. Upstream tools are folded into the
+`ptc_lisp_execute` `description` field as a compact, deterministic
+catalog rendered once at server boot from each upstream's own
+`tools/list` response (cached in `:persistent_term`; rebuilt only on
+PtcRunner restart).
 
 The `description` string concatenates three sections:
 
