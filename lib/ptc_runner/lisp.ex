@@ -497,6 +497,7 @@ defmodule PtcRunner.Lisp do
             prints: eval_ctx.prints,
             tool_calls: cleaned_tool_calls,
             pmap_calls: cleaned_pmap_calls,
+            catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
             child_traces: child_traces,
             child_steps: child_steps,
             journal: eval_ctx.journal,
@@ -668,6 +669,7 @@ defmodule PtcRunner.Lisp do
       prints: Enum.reverse(ctx.prints),
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
+      catalog_ops: Enum.reverse(ctx.catalog_ops),
       child_traces: child_traces,
       child_steps: child_steps
     }

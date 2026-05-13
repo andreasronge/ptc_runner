@@ -327,6 +327,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       | prints: ctx2.prints ++ ctx1.prints,
         tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
         pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
+        catalog_ops: ctx2.catalog_ops ++ ctx1.catalog_ops,
         user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
         iteration_count: ctx1.iteration_count + ctx2.iteration_count,
         summaries: Map.merge(ctx1.summaries, ctx2.summaries),
