@@ -193,6 +193,7 @@ defmodule PtcRunner.Step do
     :prints,
     :tool_calls,
     :pmap_calls,
+    :catalog_ops,
     :child_traces,
     :child_steps,
     :messages,
@@ -300,6 +301,30 @@ defmodule PtcRunner.Step do
           error_count: non_neg_integer()
         }
 
+  @typedoc """
+  PTC-Lisp `catalog/` builtin invocation record (aggregator mode).
+
+  Captured for each `catalog/summary`, `catalog/list-servers`,
+  `catalog/list-tools`, `catalog/describe-tool`, and
+  `catalog/search-tools` call dispatched through `catalog_exec`.
+
+  Fields:
+  - `operation`: The builtin variant (`:summary`, `:list_servers`,
+    `:list_tools`, `:describe_tool`, `:search_tools`)
+  - `args`: Normalized argument map (shape depends on operation)
+  - `outcome`: `:ok` on success, `:nil_world_fault` when a world fault
+    was swallowed to `nil`, `:error` on programmer faults that raised
+  - `reason`: World-fault reason atom when `outcome == :nil_world_fault`
+  - `duration_ms`: How long the catalog dispatch took
+  """
+  @type catalog_op :: %{
+          operation: atom(),
+          args: map(),
+          outcome: :ok | :nil_world_fault | :error,
+          reason: atom() | nil,
+          duration_ms: non_neg_integer()
+        }
+
   @type t :: %__MODULE__{
           return: term() | nil,
           fail: fail() | nil,
@@ -314,6 +339,7 @@ defmodule PtcRunner.Step do
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
+          catalog_ops: [catalog_op()],
           child_traces: [String.t()],
           child_steps: [t()],
           messages: [message()] | nil,
@@ -350,6 +376,7 @@ defmodule PtcRunner.Step do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
+      catalog_ops: [],
       child_traces: [],
       child_steps: []
     }
@@ -428,6 +455,7 @@ defmodule PtcRunner.Step do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
+      catalog_ops: [],
       child_traces: [],
       child_steps: []
     }

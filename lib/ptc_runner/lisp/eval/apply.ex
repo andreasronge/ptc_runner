@@ -638,7 +638,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp push_side_effect_stash do
     stack = Process.get(:__ptc_hof_stack, [])
-    Process.put(:__ptc_hof_stack, [%{tool_calls: [], prints: []} | stack])
+    Process.put(:__ptc_hof_stack, [%{tool_calls: [], prints: [], catalog_ops: []} | stack])
   end
 
   defp stash_side_effects(%EvalContext{} = ctx) do
@@ -649,7 +649,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # then previous invocations'.
         updated = %{
           tool_calls: ctx.tool_calls ++ top.tool_calls,
-          prints: ctx.prints ++ top.prints
+          prints: ctx.prints ++ top.prints,
+          catalog_ops: ctx.catalog_ops ++ top.catalog_ops
         }
 
         Process.put(:__ptc_hof_stack, [updated | rest])
@@ -670,6 +671,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_ctx
         |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
         |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
+        |> Map.update!(:catalog_ops, fn existing -> top.catalog_ops ++ existing end)
 
       [] ->
         eval_ctx
@@ -717,7 +719,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             tool_cache: caller_ctx.tool_cache,
             summaries: caller_ctx.summaries,
             journal: caller_ctx.journal,
-            catalog_exec: caller_ctx.catalog_exec
+            catalog_exec: caller_ctx.catalog_exec,
+            catalog_ops: caller_ctx.catalog_ops
         }
 
         case do_eval_fn.(body, closure_ctx) do

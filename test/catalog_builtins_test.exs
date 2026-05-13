@@ -370,4 +370,56 @@ defmodule PtcRunner.CatalogBuiltinsTest do
       assert step.return == []
     end
   end
+
+  # ============================================================
+  # catalog_ops tracing is surfaced on Step (#920)
+  # ============================================================
+
+  describe "step.catalog_ops" do
+    test "successful op produces one ok record in execution order" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(catalog/describe-tool "github" "search")|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert [op] = step.catalog_ops
+      assert op.operation == :describe_tool
+      assert op.outcome == :ok
+      assert op.reason == nil
+      assert op.args == %{server: "github", tool: "search"}
+      assert is_integer(op.duration_ms) and op.duration_ms >= 0
+    end
+
+    test "multiple ops appear in chronological (not reverse) order" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(do (catalog/list-servers) (catalog/list-tools "github") (catalog/summary))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert [op1, op2, op3] = step.catalog_ops
+      assert op1.operation == :list_servers
+      assert op2.operation == :list_tools
+      assert op2.args == %{server: "github"}
+      assert op3.operation == :summary
+    end
+
+    test "world fault produces :nil_world_fault record with reason" do
+      exec = fn _op, _args -> {:world_fault, :upstream_unavailable} end
+
+      {:ok, step} =
+        Lisp.run(~s|(or (catalog/list-tools "github") [])|, catalog_exec: exec)
+
+      assert [op] = step.catalog_ops
+      assert op.operation == :list_tools
+      assert op.outcome == :nil_world_fault
+      assert op.reason == :upstream_unavailable
+    end
+
+    test "step from a program without catalog calls has empty catalog_ops" do
+      {:ok, step} = Lisp.run("(+ 1 2)", catalog_exec: mock_catalog_exec())
+      assert step.catalog_ops == []
+    end
+  end
 end
