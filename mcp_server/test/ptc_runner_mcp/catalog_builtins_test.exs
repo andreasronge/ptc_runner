@@ -8,40 +8,25 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{CatalogBuiltins, CatalogConfig, UpstreamCalls}
   alias PtcRunnerMcp.Upstream.Registry
 
   @registry_name PtcRunnerMcp.CatalogBuiltinsTestRegistry
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
 
     {:ok, _pid} = Registry.start_link(name: @registry_name)
     CatalogConfig.set(CatalogConfig.defaults())
 
     on_exit(fn ->
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       CatalogConfig.set(CatalogConfig.defaults())
     end)
 
     :ok
-  end
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
-    end
   end
 
   defp tools_config(tools) do

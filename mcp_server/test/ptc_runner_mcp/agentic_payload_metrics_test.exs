@@ -10,6 +10,8 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.Agentic.Planner
   alias PtcRunnerMcp.{AgenticConfig, AggregatorConfig, Limits, Tools}
   alias PtcRunnerMcp.Upstream.Catalog
@@ -102,7 +104,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   end
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
     Catalog.clear_frozen()
     AgenticConfig.set(AgenticConfig.defaults())
     AggregatorConfig.set(AggregatorConfig.defaults())
@@ -112,7 +114,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     original_llm_adapter = Application.get_env(:ptc_runner, :llm_adapter)
 
     on_exit(fn ->
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       Catalog.clear_frozen()
       AgenticConfig.set(AgenticConfig.defaults())
       AggregatorConfig.set(AggregatorConfig.defaults())
@@ -134,23 +136,6 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
 
   defp restore(app, key, nil), do: Application.delete_env(app, key)
   defp restore(app, key, value), do: Application.put_env(app, key, value)
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
-    end
-  end
 
   defp tools_config(tools) do
     %{tools: Map.new(tools, fn {n, fun} -> {n, {%{name: n, input_schema: %{}}, fun}} end)}

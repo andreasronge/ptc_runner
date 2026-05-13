@@ -22,6 +22,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   """
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunnerMcp.{AggregatorConfig, Tools}
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
@@ -31,11 +33,11 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   @fixture_path Path.expand("../fixtures/tool_entry_v1.json", __DIR__)
 
   setup do
-    stop_existing_registry()
+    stop_existing_registry(@registry_name)
     Catalog.clear_frozen()
 
     on_exit(fn ->
-      stop_existing_registry()
+      stop_existing_registry(@registry_name)
       Catalog.clear_frozen()
       AggregatorConfig.set(AggregatorConfig.defaults())
     end)
@@ -249,23 +251,6 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       end
     else
       :ok
-    end
-  end
-
-  defp stop_existing_registry do
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
     end
   end
 end

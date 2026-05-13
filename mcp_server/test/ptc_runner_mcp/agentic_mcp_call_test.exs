@@ -1,6 +1,8 @@
 defmodule PtcRunnerMcp.AgenticMcpCallTest do
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunnerMcp.Agentic.{Ledger, McpCall}
   alias PtcRunnerMcp.{AggregatorConfig, Limits}
@@ -11,13 +13,15 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
   @registry_name PtcRunnerMcp.Upstream.Registry
 
   setup do
-    stop_existing_registry()
+    Fake.stop("alpha")
+    stop_existing_registry(@registry_name)
     Catalog.clear_frozen()
     AggregatorConfig.set(AggregatorConfig.defaults())
     Limits.set(Limits.defaults())
 
     on_exit(fn ->
-      stop_existing_registry()
+      Fake.stop("alpha")
+      stop_existing_registry(@registry_name)
       Catalog.clear_frozen()
       AggregatorConfig.set(AggregatorConfig.defaults())
       Limits.set(Limits.defaults())
@@ -278,24 +282,5 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
           {name, {schema, fun}}
         end)
     }
-  end
-
-  defp stop_existing_registry do
-    Fake.stop("alpha")
-
-    case Process.whereis(@registry_name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          1_000 -> :ok
-        end
-    end
   end
 end
