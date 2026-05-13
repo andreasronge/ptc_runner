@@ -1,0 +1,3261 @@
+%{
+  clojure_core_audit: [
+    %{
+      name: "*",
+      status: :supported,
+      description: "Multiplies numbers; returns 1 with no args",
+      notes: ""
+    },
+    %{
+      name: "*'",
+      status: :candidate,
+      description: "Multiplies numbers with arbitrary precision",
+      notes: "pure numerical operation"
+    },
+    %{
+      name: "+",
+      status: :supported,
+      description: "Adds numbers; returns 0 with no args",
+      notes: ""
+    },
+    %{
+      name: "+'",
+      status: :candidate,
+      description: "Adds numbers with arbitrary precision",
+      notes: "pure numerical operation"
+    },
+    %{
+      name: "-",
+      status: :supported,
+      description: "Subtracts numbers or negates single argument",
+      notes: ""
+    },
+    %{
+      name: "-'",
+      status: :candidate,
+      description: "Subtracts numbers with arbitrary precision",
+      notes: "pure numerical operation"
+    },
+    %{
+      name: "->",
+      status: :supported,
+      description: "Threads expression as second argument through forms",
+      notes: ""
+    },
+    %{
+      name: "->>",
+      status: :supported,
+      description: "Threads expression as last argument through forms",
+      notes: ""
+    },
+    %{
+      name: ".",
+      status: :not_relevant,
+      description: "Java member access and method calls",
+      notes: "Java interop"
+    },
+    %{
+      name: "..",
+      status: :not_relevant,
+      description: "Chains member access operations",
+      notes: "Java interop"
+    },
+    %{name: "/", status: :supported, description: "Divides numbers", notes: ""},
+    %{
+      name: "<",
+      status: :supported,
+      description: "Returns true if numbers monotonically increase",
+      notes: ""
+    },
+    %{
+      name: "<=",
+      status: :supported,
+      description: "Returns true if numbers non-decreasing",
+      notes: ""
+    },
+    %{name: "=", status: :supported, description: "Equality comparison", notes: ""},
+    %{
+      name: "==",
+      status: :candidate,
+      description: "Type-independent numeric equality",
+      notes: "pure numeric predicate"
+    },
+    %{
+      name: ">",
+      status: :supported,
+      description: "Returns true if numbers monotonically decrease",
+      notes: ""
+    },
+    %{
+      name: ">=",
+      status: :supported,
+      description: "Returns true if numbers non-increasing",
+      notes: ""
+    },
+    %{
+      name: "abs",
+      status: :supported,
+      description: "Returns absolute value of number",
+      notes: ""
+    },
+    %{
+      name: "accessor",
+      status: :candidate,
+      description: "Returns function accessing structmap value at key",
+      notes: "pure functional access to data"
+    },
+    %{
+      name: "aclone",
+      status: :not_relevant,
+      description: "Returns clone of Java array",
+      notes: "Java array manipulation"
+    },
+    %{
+      name: "add-tap",
+      status: :not_relevant,
+      description: "Adds function to receive tap> values",
+      notes: "I/O and global state side effects"
+    },
+    %{
+      name: "add-watch",
+      status: :not_relevant,
+      description: "Adds watch function to reference",
+      notes: "mutable state and referencing"
+    },
+    %{
+      name: "agent",
+      status: :not_relevant,
+      description: "Creates agent with initial value",
+      notes: "concurrency primitive (mutable state)"
+    },
+    %{
+      name: "agent-error",
+      status: :not_relevant,
+      description: "Returns exception from failed agent",
+      notes: "depends on agent state and exception handling"
+    },
+    %{
+      name: "aget",
+      status: :not_relevant,
+      description: "Returns value at Java array index",
+      notes: "Java interop (Java array access)"
+    },
+    %{
+      name: "alength",
+      status: :not_relevant,
+      description: "Returns length of Java array",
+      notes: "Java interop (Java array length)"
+    },
+    %{
+      name: "alias",
+      status: :not_relevant,
+      description: "Adds namespace alias",
+      notes: "namespace manipulation"
+    },
+    %{
+      name: "all-ns",
+      status: :not_relevant,
+      description: "Returns all namespaces",
+      notes: "namespace system"
+    },
+    %{
+      name: "alter",
+      status: :not_relevant,
+      description: "Sets ref value in transaction",
+      notes: "concurrency primitive (ref mutation)"
+    },
+    %{
+      name: "alter-meta!",
+      status: :not_relevant,
+      description: "Atomically sets metadata via function",
+      notes: "metadata and mutability"
+    },
+    %{
+      name: "alter-var-root",
+      status: :not_relevant,
+      description: "Atomically alters var root binding",
+      notes: "var root mutation"
+    },
+    %{
+      name: "amap",
+      status: :not_relevant,
+      description: "Maps expression across Java array",
+      notes: "Java interop (Java array iteration)"
+    },
+    %{
+      name: "ancestors",
+      status: :not_relevant,
+      description: "Returns parents of tag via hierarchy",
+      notes: "relies on Clojure's global hierarchy/multimethod system"
+    },
+    %{name: "and", status: :supported, description: "Short-circuit logical AND", notes: ""},
+    %{
+      name: "any?",
+      status: :candidate,
+      description: "Returns true for any argument",
+      notes: "pure predicate function"
+    },
+    %{
+      name: "apply",
+      status: :supported,
+      description: "Applies function to argument sequence",
+      notes: ""
+    },
+    %{
+      name: "areduce",
+      status: :not_relevant,
+      description: "Reduces expression across Java array",
+      notes: "relies on Java array interoperability"
+    },
+    %{
+      name: "array-map",
+      status: :candidate,
+      description: "Constructs array-map from key-value pairs",
+      notes: "pure constructor for map data structure"
+    },
+    %{
+      name: "as->",
+      status: :supported,
+      description: "Binds name to expr, threads through forms",
+      notes: ""
+    },
+    %{
+      name: "aset",
+      status: :not_relevant,
+      description: "Sets value in Java array at index",
+      notes: "performs mutable operations on Java arrays"
+    },
+    %{
+      name: "assert",
+      status: :not_relevant,
+      description: "Throws AssertionError if expr false",
+      notes: "relies on exception handling/throwing"
+    },
+    %{
+      name: "assoc",
+      status: :supported,
+      description: "Returns map/vector with added key-value pairs",
+      notes: ""
+    },
+    %{
+      name: "assoc!",
+      status: :not_relevant,
+      description: "Sets value in transient collection",
+      notes: "relies on transient collections (mutability)"
+    },
+    %{
+      name: "assoc-in",
+      status: :supported,
+      description: "Associates value in nested structure",
+      notes: ""
+    },
+    %{
+      name: "associative?",
+      status: :supported,
+      description: "Returns true if coll implements Associative",
+      notes: ""
+    },
+    %{
+      name: "atom",
+      status: :not_relevant,
+      description: "Creates atom with initial value",
+      notes: "relies on mutable state"
+    },
+    %{
+      name: "await",
+      status: :not_relevant,
+      description: "Blocks until agent actions complete",
+      notes: "relies on agent state"
+    },
+    %{
+      name: "await-for",
+      status: :not_relevant,
+      description: "Blocks with timeout for agent actions",
+      notes: "relies on agent state"
+    },
+    %{
+      name: "bases",
+      status: :not_relevant,
+      description: "Returns immediate superclass and interfaces",
+      notes: "Java interop and class inspection"
+    },
+    %{
+      name: "bean",
+      status: :not_relevant,
+      description: "Returns map based on JavaBean properties",
+      notes: "Java interop (JavaBeans)"
+    },
+    %{
+      name: "bigdec",
+      status: :candidate,
+      description: "Coerces to BigDecimal",
+      notes: "pure numerical coercion"
+    },
+    %{
+      name: "bigint",
+      status: :candidate,
+      description: "Coerces to BigInt",
+      notes: "pure numerical coercion"
+    },
+    %{
+      name: "biginteger",
+      status: :candidate,
+      description: "Coerces to BigInteger",
+      notes: "pure numerical coercion"
+    },
+    %{
+      name: "binding",
+      status: :not_relevant,
+      description: "Binds vars to new values for body duration",
+      notes: "relies on thread-local var binding mechanism"
+    },
+    %{
+      name: "bit-and",
+      status: :supported,
+      description: "Bitwise AND",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-and-not",
+      status: :supported,
+      description: "Bitwise AND with complement",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-clear",
+      status: :supported,
+      description: "Clears bit at index",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-flip",
+      status: :supported,
+      description: "Flips bit at index",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-not",
+      status: :supported,
+      description: "Bitwise complement",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-or",
+      status: :supported,
+      description: "Bitwise OR",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-set",
+      status: :supported,
+      description: "Sets bit at index",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-shift-left",
+      status: :supported,
+      description: "Bitwise left shift",
+      notes: "integers only; BEAM has no fixed integer width (shift amount not mod 64)"
+    },
+    %{
+      name: "bit-shift-right",
+      status: :supported,
+      description: "Bitwise right shift",
+      notes: "integers only; arithmetic (sign-extending) shift"
+    },
+    %{
+      name: "bit-test",
+      status: :supported,
+      description: "Tests bit at index",
+      notes: "integers only"
+    },
+    %{
+      name: "bit-xor",
+      status: :supported,
+      description: "Bitwise exclusive OR",
+      notes: "integers only"
+    },
+    %{name: "boolean", status: :supported, description: "Coerces to boolean", notes: ""},
+    %{
+      name: "boolean-array",
+      status: :not_relevant,
+      description: "Creates boolean Java array",
+      notes: "creates Java array, incompatible with BEAM/non-JVM environments"
+    },
+    %{
+      name: "boolean?",
+      status: :supported,
+      description: "Returns true if value is Boolean",
+      notes: ""
+    },
+    %{
+      name: "booleans",
+      status: :not_relevant,
+      description: "Casts to boolean array",
+      notes: "Java array manipulation"
+    },
+    %{
+      name: "bound-fn",
+      status: :not_relevant,
+      description: "Returns function with call-site bindings",
+      notes: "relies on thread-local/dynamic scope bindings"
+    },
+    %{
+      name: "bound-fn*",
+      status: :not_relevant,
+      description: "Returns function applying creation-context bindings",
+      notes: "relies on thread-local/dynamic scope bindings"
+    },
+    %{
+      name: "bound?",
+      status: :not_relevant,
+      description: "Returns true if all vars have bound value",
+      notes: "relies on dynamic var binding state"
+    },
+    %{
+      name: "bounded-count",
+      status: :not_relevant,
+      description: "Counts up to n elements",
+      notes: "designed for lazy sequences"
+    },
+    %{name: "butlast", status: :supported, description: "Returns all but last item", notes: ""},
+    %{
+      name: "byte",
+      status: :candidate,
+      description: "Coerces to byte",
+      notes: "pure numerical type coercion"
+    },
+    %{
+      name: "byte-array",
+      status: :not_relevant,
+      description: "Creates byte Java array",
+      notes: "Java array creation"
+    },
+    %{
+      name: "bytes",
+      status: :not_relevant,
+      description: "Casts to byte array",
+      notes: "Java array casting"
+    },
+    %{
+      name: "bytes?",
+      status: :not_relevant,
+      description: "Returns true if value is byte array",
+      notes: "Java array type check"
+    },
+    %{
+      name: "case",
+      status: :supported,
+      description: "Constant-time dispatch on expression value",
+      notes: ""
+    },
+    %{
+      name: "cast",
+      status: :not_relevant,
+      description: "Throws ClassCastException if not instance",
+      notes: "relies on Java type system and exception handling"
+    },
+    %{
+      name: "cat",
+      status: :candidate,
+      description: "Transducer concatenating input collections",
+      notes: "pure transducer for collection transformation"
+    },
+    %{
+      name: "char",
+      status: :candidate,
+      description: "Coerces to char",
+      notes: "pure data type coercion"
+    },
+    %{
+      name: "char-array",
+      status: :not_relevant,
+      description: "Creates char Java array",
+      notes: "creates Java array"
+    },
+    %{
+      name: "char?",
+      status: :supported,
+      description: "Returns true if value is Character",
+      notes: ""
+    },
+    %{
+      name: "chars",
+      status: :not_relevant,
+      description: "Casts to char array",
+      notes: "relies on Java char array types"
+    },
+    %{
+      name: "class",
+      status: :not_relevant,
+      description: "Returns class of value",
+      notes: "relies on Java class introspection"
+    },
+    %{
+      name: "class?",
+      status: :not_relevant,
+      description: "Returns true if value is Class instance",
+      notes: "relies on Java type system"
+    },
+    %{
+      name: "clojure-version",
+      status: :not_relevant,
+      description: "Returns Clojure version string",
+      notes: "environment info irrelevant to pure data transformation"
+    },
+    %{
+      name: "coll?",
+      status: :supported,
+      description: "Returns true if implements IPersistentCollection",
+      notes: ""
+    },
+    %{
+      name: "comment",
+      status: :not_relevant,
+      description: "Ignores body, yields nil",
+      notes: "REPL/source code construct"
+    },
+    %{
+      name: "commute",
+      status: :not_relevant,
+      description: "Sets ref value via commutative function",
+      notes: "mutable state primitive (refs)"
+    },
+    %{
+      name: "comp",
+      status: :supported,
+      description: "Composes functions right-to-left",
+      notes: ""
+    },
+    %{
+      name: "comparator",
+      status: :candidate,
+      description: "Returns Comparator from predicate",
+      notes: "pure function to create a comparison function"
+    },
+    %{
+      name: "compare",
+      status: :supported,
+      description: "Compares values returning neg/zero/pos",
+      notes: ""
+    },
+    %{
+      name: "compare-and-set!",
+      status: :not_relevant,
+      description: "Atomically sets atom if current equals old",
+      notes: "operates on mutable state (atoms)"
+    },
+    %{
+      name: "compile",
+      status: :not_relevant,
+      description: "Compiles namespace into classfiles",
+      notes: "compilation and class generation"
+    },
+    %{
+      name: "complement",
+      status: :supported,
+      description: "Returns function with opposite truth value",
+      notes: ""
+    },
+    %{
+      name: "completing",
+      status: :candidate,
+      description: "Returns reducing function with completion",
+      notes: "pure function for reducing transformations"
+    },
+    %{
+      name: "concat",
+      status: :supported,
+      description: "Returns lazy seq concatenating collections",
+      notes: ""
+    },
+    %{name: "cond", status: :supported, description: "Multi-way conditional", notes: ""},
+    %{
+      name: "cond->",
+      status: :supported,
+      description: "Threads through forms where tests true",
+      notes: ""
+    },
+    %{
+      name: "cond->>",
+      status: :supported,
+      description: "Threads as last arg where tests true",
+      notes: ""
+    },
+    %{
+      name: "condp",
+      status: :supported,
+      description: "Predicate dispatch against expression",
+      notes: ""
+    },
+    %{
+      name: "conj",
+      status: :supported,
+      description: "Returns collection with items added",
+      notes: ""
+    },
+    %{
+      name: "conj!",
+      status: :not_relevant,
+      description: "Adds item to transient collection",
+      notes: "operates on transient collections (mutable)"
+    },
+    %{
+      name: "cons",
+      status: :supported,
+      description: "Returns seq with item prepended",
+      notes: ""
+    },
+    %{
+      name: "constantly",
+      status: :supported,
+      description: "Returns function ignoring args, returning value",
+      notes: ""
+    },
+    %{
+      name: "contains?",
+      status: :supported,
+      description: "Returns true if key present in collection",
+      notes: ""
+    },
+    %{
+      name: "count",
+      status: :supported,
+      description: "Returns number of items in collection",
+      notes: ""
+    },
+    %{
+      name: "counted?",
+      status: :supported,
+      description: "Returns true if constant-time count",
+      notes: ""
+    },
+    %{
+      name: "create-ns",
+      status: :not_relevant,
+      description: "Creates or returns namespace",
+      notes: "requires namespace system"
+    },
+    %{
+      name: "create-struct",
+      status: :not_relevant,
+      description: "Returns structure basis object",
+      notes: "relies on legacy fixed-key structure system"
+    },
+    %{
+      name: "cycle",
+      status: :not_relevant,
+      description: "Returns infinite lazy seq repeating collection",
+      notes: "relies on lazy sequences"
+    },
+    %{name: "dec", status: :supported, description: "Returns number minus one", notes: ""},
+    %{
+      name: "dec'",
+      status: :candidate,
+      description: "Decrements with arbitrary precision",
+      notes: "pure arithmetic function"
+    },
+    %{name: "decimal?", status: :supported, description: "Returns true if BigDecimal", notes: ""},
+    %{
+      name: "declare",
+      status: :not_relevant,
+      description: "Defines var names with no bindings",
+      notes: "relies on namespace/var system"
+    },
+    %{
+      name: "dedupe",
+      status: :supported,
+      description: "Removes consecutive duplicates",
+      notes: ""
+    },
+    %{name: "def", status: :supported, description: "Creates and interns global var", notes: ""},
+    %{
+      name: "definterface",
+      status: :not_relevant,
+      description: "Creates Java interface",
+      notes: "Java interop"
+    },
+    %{
+      name: "defmacro",
+      status: :not_relevant,
+      description: "Defines macro",
+      notes: "macro system"
+    },
+    %{
+      name: "defmethod",
+      status: :not_relevant,
+      description: "Creates multimethod implementation",
+      notes: "multimethods"
+    },
+    %{
+      name: "defmulti",
+      status: :not_relevant,
+      description: "Creates multimethod with dispatch function",
+      notes: "multimethods"
+    },
+    %{name: "defn", status: :supported, description: "Defines named function", notes: ""},
+    %{
+      name: "defn-",
+      status: :not_relevant,
+      description: "Defines private function",
+      notes: "namespacing/metadata"
+    },
+    %{
+      name: "defonce",
+      status: :supported,
+      description: "Defines var only if not already defined",
+      notes: ""
+    },
+    %{
+      name: "defprotocol",
+      status: :not_relevant,
+      description: "Creates protocol with method signatures",
+      notes: "protocols"
+    },
+    %{
+      name: "defrecord",
+      status: :not_relevant,
+      description: "Creates record type with fields",
+      notes: "custom types/Java-like classes"
+    },
+    %{
+      name: "defstruct",
+      status: :not_relevant,
+      description: "Creates structure type",
+      notes: "obsolete type system"
+    },
+    %{
+      name: "deftype",
+      status: :not_relevant,
+      description: "Creates custom type with fields",
+      notes: "custom types/Java interop"
+    },
+    %{
+      name: "delay",
+      status: :not_relevant,
+      description: "Defers expression evaluation",
+      notes: "lazy evaluation/stateful caching"
+    },
+    %{
+      name: "delay?",
+      status: :not_relevant,
+      description: "Returns true if value is delay",
+      notes: "relies on delay/concurrency which is not supported"
+    },
+    %{
+      name: "deliver",
+      status: :not_relevant,
+      description: "Delivers result to promise",
+      notes: "relies on promise/mutable state"
+    },
+    %{
+      name: "denominator",
+      status: :candidate,
+      description: "Returns denominator of ratio",
+      notes: "pure math operation"
+    },
+    %{
+      name: "deref",
+      status: :not_relevant,
+      description: "Dereferences ref/delay/future/promise",
+      notes: "relies on mutable state/concurrency types"
+    },
+    %{
+      name: "derive",
+      status: :not_relevant,
+      description: "Establishes hierarchical relationship",
+      notes: "relies on global namespace/hierarchy state"
+    },
+    %{
+      name: "descendants",
+      status: :not_relevant,
+      description: "Returns all descendants of tag",
+      notes: "relies on global namespace/hierarchy state"
+    },
+    %{name: "disj", status: :supported, description: "Returns set with item removed", notes: ""},
+    %{
+      name: "disj!",
+      status: :not_relevant,
+      description: "Removes from transient set",
+      notes: "relies on transient/mutable data structures"
+    },
+    %{name: "dissoc", status: :supported, description: "Returns map with key removed", notes: ""},
+    %{
+      name: "dissoc!",
+      status: :not_relevant,
+      description: "Removes from transient map",
+      notes: "relies on transient/mutable data structures"
+    },
+    %{
+      name: "distinct",
+      status: :supported,
+      description: "Returns seq removing duplicates",
+      notes: ""
+    },
+    %{
+      name: "distinct?",
+      status: :supported,
+      description: "Returns true if all args distinct",
+      notes: ""
+    },
+    %{
+      name: "do",
+      status: :supported,
+      description: "Evaluates expressions, returns last",
+      notes: ""
+    },
+    %{
+      name: "doall",
+      status: :not_relevant,
+      description: "Realizes entire lazy seq",
+      notes: "relies on lazy sequences"
+    },
+    %{
+      name: "dorun",
+      status: :not_relevant,
+      description: "Realizes lazy seq, returns nil",
+      notes: "relies on lazy sequences"
+    },
+    %{
+      name: "doseq",
+      status: :supported,
+      description: "Iterates over sequences for side effects",
+      notes: ""
+    },
+    %{
+      name: "dosync",
+      status: :not_relevant,
+      description: "Executes body in STM transaction",
+      notes: "relies on concurrency/STM primitives"
+    },
+    %{
+      name: "dotimes",
+      status: :not_relevant,
+      description: "Executes body n times with counter",
+      notes: "relies on side-effecting loops"
+    },
+    %{
+      name: "doto",
+      status: :not_relevant,
+      description: "Calls methods on object, returns object",
+      notes: "relies on Java interop"
+    },
+    %{name: "double", status: :supported, description: "Coerces to double", notes: ""},
+    %{
+      name: "double-array",
+      status: :not_relevant,
+      description: "Creates double Java array",
+      notes: "relies on Java arrays"
+    },
+    %{name: "double?", status: :supported, description: "Returns true if Double", notes: ""},
+    %{
+      name: "doubles",
+      status: :not_relevant,
+      description: "Casts to double array",
+      notes: "relies on Java arrays"
+    },
+    %{
+      name: "drop",
+      status: :supported,
+      description: "Returns seq skipping first n items",
+      notes: ""
+    },
+    %{
+      name: "drop-last",
+      status: :supported,
+      description: "Returns seq without last n items",
+      notes: ""
+    },
+    %{
+      name: "drop-while",
+      status: :supported,
+      description: "Drops items while predicate true",
+      notes: ""
+    },
+    %{
+      name: "eduction",
+      status: :not_relevant,
+      description: "Returns reducible wrapper of transducer",
+      notes: "relies on lazy/transducer abstractions"
+    },
+    %{
+      name: "empty",
+      status: :supported,
+      description: "Returns empty collection of same type",
+      notes: ""
+    },
+    %{
+      name: "empty?",
+      status: :supported,
+      description: "Returns true if collection empty",
+      notes: ""
+    },
+    %{
+      name: "ensure",
+      status: :not_relevant,
+      description: "Ensures ref not written by other transaction",
+      notes: "relies on software transactional memory (ref/transactional state)"
+    },
+    %{
+      name: "ensure-reduced",
+      status: :candidate,
+      description: "Wraps in reduced if not already",
+      notes: "pure utility for reduction flow control"
+    },
+    %{
+      name: "enumeration-seq",
+      status: :not_relevant,
+      description: "Lazy seq from Java Enumeration",
+      notes: "relies on lazy sequences and Java interop"
+    },
+    %{
+      name: "error-handler",
+      status: :not_relevant,
+      description: "Returns agent error handler",
+      notes: "relies on agent state"
+    },
+    %{
+      name: "error-mode",
+      status: :not_relevant,
+      description: "Returns agent error mode",
+      notes: "relies on agent state"
+    },
+    %{
+      name: "eval",
+      status: :not_relevant,
+      description: "Evaluates form in current namespace",
+      notes: "requires runtime compilation and namespace support"
+    },
+    %{
+      name: "even?",
+      status: :supported,
+      description: "Returns true if number is even",
+      notes: ""
+    },
+    %{
+      name: "every-pred",
+      status: :supported,
+      description: "Returns combined predicate (all must be true)",
+      notes: ""
+    },
+    %{
+      name: "every?",
+      status: :supported,
+      description: "Returns true if pred true for all items",
+      notes: ""
+    },
+    %{
+      name: "ex-cause",
+      status: :not_relevant,
+      description: "Returns cause of exception",
+      notes: "relies on exception handling"
+    },
+    %{
+      name: "ex-data",
+      status: :not_relevant,
+      description: "Returns data map of exception",
+      notes: "relies on exception handling"
+    },
+    %{
+      name: "ex-info",
+      status: :not_relevant,
+      description: "Creates exception with message and data",
+      notes: "relies on exception handling"
+    },
+    %{
+      name: "ex-message",
+      status: :not_relevant,
+      description: "Returns exception message string",
+      notes: "relies on exception handling"
+    },
+    %{
+      name: "extend",
+      status: :not_relevant,
+      description: "Adds protocol implementations for type",
+      notes: "relies on protocols"
+    },
+    %{
+      name: "extend-protocol",
+      status: :not_relevant,
+      description: "Extends protocol to types",
+      notes: "relies on protocols"
+    },
+    %{
+      name: "extend-type",
+      status: :not_relevant,
+      description: "Extends type to implement protocol",
+      notes: "relies on protocols"
+    },
+    %{
+      name: "extenders",
+      status: :not_relevant,
+      description: "Returns types extending protocol",
+      notes: "relies on protocols"
+    },
+    %{
+      name: "extends?",
+      status: :not_relevant,
+      description: "Returns true if type extends protocol",
+      notes: "relies on protocols"
+    },
+    %{
+      name: "false?",
+      status: :supported,
+      description: "Returns true if value is false",
+      notes: ""
+    },
+    %{name: "ffirst", status: :supported, description: "First of first item", notes: ""},
+    %{
+      name: "file-seq",
+      status: :not_relevant,
+      description: "Lazy seq of files in directory tree",
+      notes: "relies on lazy sequences and file I/O"
+    },
+    %{
+      name: "filter",
+      status: :supported,
+      description: "Returns items where predicate true",
+      notes: ""
+    },
+    %{
+      name: "filterv",
+      status: :supported,
+      description: "Returns vector of items where pred true",
+      notes: ""
+    },
+    %{
+      name: "find",
+      status: :supported,
+      description: "Returns map entry for key or nil",
+      notes: ""
+    },
+    %{
+      name: "find-keyword",
+      status: :not_relevant,
+      description: "Returns keyword with ns and name",
+      notes: "relies on namespaces"
+    },
+    %{
+      name: "find-ns",
+      status: :not_relevant,
+      description: "Returns namespace or nil",
+      notes: "relies on namespace system"
+    },
+    %{
+      name: "find-var",
+      status: :not_relevant,
+      description: "Returns var or nil",
+      notes: "relies on vars/namespace system"
+    },
+    %{name: "first", status: :supported, description: "Returns first item", notes: ""},
+    %{name: "flatten", status: :supported, description: "Flattens nested collections", notes: ""},
+    %{name: "float", status: :supported, description: "Coerces to float", notes: ""},
+    %{
+      name: "float-array",
+      status: :not_relevant,
+      description: "Creates float Java array",
+      notes: "creates Java array"
+    },
+    %{name: "float?", status: :supported, description: "Returns true if Float", notes: ""},
+    %{
+      name: "floats",
+      status: :not_relevant,
+      description: "Casts to float array",
+      notes: "handles Java arrays"
+    },
+    %{
+      name: "flush",
+      status: :not_relevant,
+      description: "Flushes output writer",
+      notes: "I/O operation"
+    },
+    %{name: "fn", status: :supported, description: "Defines anonymous function", notes: ""},
+    %{
+      name: "fn?",
+      status: :supported,
+      description: "Returns true if value is function",
+      notes: ""
+    },
+    %{name: "fnext", status: :supported, description: "First of next item", notes: ""},
+    %{
+      name: "fnil",
+      status: :supported,
+      description: "Returns function with nil defaults",
+      notes: ""
+    },
+    %{
+      name: "for",
+      status: :supported,
+      description: "List comprehension from nested iteration",
+      notes: ""
+    },
+    %{
+      name: "force",
+      status: :not_relevant,
+      description: "Forces evaluation of delay",
+      notes: "relies on lazy evaluation/delays"
+    },
+    %{name: "format", status: :supported, description: "Returns formatted string", notes: ""},
+    %{
+      name: "frequencies",
+      status: :supported,
+      description: "Returns map of item frequencies",
+      notes: ""
+    },
+    %{
+      name: "future",
+      status: :not_relevant,
+      description: "Async computation",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "future-call",
+      status: :not_relevant,
+      description: "Calls function asynchronously",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "future-cancel",
+      status: :not_relevant,
+      description: "Cancels future",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "future-cancelled?",
+      status: :not_relevant,
+      description: "Returns true if future cancelled",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "future-done?",
+      status: :not_relevant,
+      description: "Returns true if future complete",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "future?",
+      status: :not_relevant,
+      description: "Returns true if value is future",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "gensym",
+      status: :not_relevant,
+      description: "Returns unique symbol",
+      notes: "macro system utility"
+    },
+    %{name: "get", status: :supported, description: "Returns value for key or nil", notes: ""},
+    %{
+      name: "get-in",
+      status: :supported,
+      description: "Returns value at nested key path",
+      notes: ""
+    },
+    %{
+      name: "get-method",
+      status: :not_relevant,
+      description: "Returns multimethod implementation",
+      notes: "multimethods not supported"
+    },
+    %{
+      name: "get-proxy-class",
+      status: :not_relevant,
+      description: "Returns proxy class",
+      notes: "Java interop"
+    },
+    %{
+      name: "get-thread-bindings",
+      status: :not_relevant,
+      description: "Returns thread-local bindings",
+      notes: "concurrency primitive / thread locals"
+    },
+    %{
+      name: "get-validator",
+      status: :not_relevant,
+      description: "Returns reference validator",
+      notes: "mutable state validator"
+    },
+    %{
+      name: "group-by",
+      status: :supported,
+      description: "Groups items by function result",
+      notes: ""
+    },
+    %{
+      name: "halt-when",
+      status: :not_relevant,
+      description: "Transducer halting on predicate",
+      notes:
+        "relies on transducers which often involve stateful reduction and lazy-like sequence processing"
+    },
+    %{
+      name: "hash",
+      status: :candidate,
+      description: "Returns hash code",
+      notes: "pure function computing a value from data"
+    },
+    %{
+      name: "hash-map",
+      status: :supported,
+      description: "Creates hash map from pairs",
+      notes: ""
+    },
+    %{
+      name: "hash-ordered-coll",
+      status: :candidate,
+      description: "Returns hash of ordered collection",
+      notes: "pure function computing a hash"
+    },
+    %{
+      name: "hash-set",
+      status: :candidate,
+      description: "Creates hash set from items",
+      notes: "pure function creating a hash set data structure"
+    },
+    %{
+      name: "hash-unordered-coll",
+      status: :candidate,
+      description: "Returns hash of unordered collection",
+      notes: "pure function computing a hash"
+    },
+    %{
+      name: "ident?",
+      status: :candidate,
+      description: "Returns true if keyword or symbol",
+      notes: "pure predicate for data types"
+    },
+    %{
+      name: "identical?",
+      status: :not_relevant,
+      description: "Returns true if same object",
+      notes:
+        "relies on object identity which is not meaningful for serializable data in a BEAM-based environment"
+    },
+    %{name: "identity", status: :supported, description: "Returns argument unchanged", notes: ""},
+    %{name: "if", status: :supported, description: "Conditional branch", notes: ""},
+    %{name: "if-let", status: :supported, description: "Conditional with binding", notes: ""},
+    %{name: "if-not", status: :supported, description: "Negated conditional", notes: ""},
+    %{name: "if-some", status: :supported, description: "Binds if not nil", notes: ""},
+    %{name: "ifn?", status: :supported, description: "Returns true if invokable", notes: ""},
+    %{
+      name: "import",
+      status: :not_relevant,
+      description: "Imports Java classes",
+      notes: "relies on Java interop"
+    },
+    %{
+      name: "in-ns",
+      status: :not_relevant,
+      description: "Changes current namespace",
+      notes: "relies on namespace support"
+    },
+    %{name: "inc", status: :supported, description: "Returns number plus one", notes: ""},
+    %{
+      name: "inc'",
+      status: :candidate,
+      description: "Increments with arbitrary precision",
+      notes: "pure mathematical transformation"
+    },
+    %{
+      name: "indexed?",
+      status: :supported,
+      description: "Returns true if supports indexed access",
+      notes: ""
+    },
+    %{
+      name: "infinite?",
+      status: :supported,
+      description: "Returns true if number infinite",
+      notes: ""
+    },
+    %{
+      name: "inst-ms",
+      status: :candidate,
+      description: "Milliseconds since epoch for instant",
+      notes: "pure data extraction from date object"
+    },
+    %{
+      name: "inst?",
+      status: :candidate,
+      description: "Returns true if instant",
+      notes: "pure type predicate"
+    },
+    %{
+      name: "instance?",
+      status: :not_relevant,
+      description: "Returns true if instance of class",
+      notes: "relies on Java class system"
+    },
+    %{name: "int", status: :supported, description: "Coerces to int", notes: ""},
+    %{
+      name: "int-array",
+      status: :not_relevant,
+      description: "Creates int Java array",
+      notes: "relies on Java array/mutability"
+    },
+    %{name: "int?", status: :supported, description: "Returns true if Integer", notes: ""},
+    %{name: "integer?", status: :supported, description: "Returns true if integer", notes: ""},
+    %{
+      name: "interleave",
+      status: :supported,
+      description: "Interleaves items from collections",
+      notes: ""
+    },
+    %{
+      name: "intern",
+      status: :not_relevant,
+      description: "Creates or returns var in namespace",
+      notes: "operates on namespaces"
+    },
+    %{
+      name: "interpose",
+      status: :supported,
+      description: "Inserts separator between items",
+      notes: ""
+    },
+    %{
+      name: "into",
+      status: :supported,
+      description: "Conjoins items from source into target",
+      notes: ""
+    },
+    %{
+      name: "into-array",
+      status: :not_relevant,
+      description: "Creates Java array from items",
+      notes: "Java interop"
+    },
+    %{
+      name: "ints",
+      status: :not_relevant,
+      description: "Casts to int array",
+      notes: "Java interop"
+    },
+    %{
+      name: "isa?",
+      status: :not_relevant,
+      description: "Returns true if child is parent instance",
+      notes: "relies on hierarchy/multimethods system"
+    },
+    %{
+      name: "iterate",
+      status: :not_relevant,
+      description: "Lazy seq of repeated function application",
+      notes: "creates lazy sequences"
+    },
+    %{
+      name: "iteration",
+      status: :not_relevant,
+      description: "Reducible wrapper of iterator",
+      notes: "wraps Java iterators"
+    },
+    %{
+      name: "iterator-seq",
+      status: :not_relevant,
+      description: "Lazy seq from Java Iterator",
+      notes: "creates lazy sequences from Java iterators"
+    },
+    %{
+      name: "juxt",
+      status: :supported,
+      description: "Applies multiple functions, collects results",
+      notes: ""
+    },
+    %{
+      name: "keep",
+      status: :supported,
+      description: "Keeps non-nil results of function",
+      notes: ""
+    },
+    %{
+      name: "keep-indexed",
+      status: :supported,
+      description: "Keeps non-nil results with index",
+      notes: ""
+    },
+    %{name: "key", status: :supported, description: "Returns key of map entry", notes: ""},
+    %{name: "keys", status: :supported, description: "Returns map keys", notes: ""},
+    %{name: "keyword", status: :supported, description: "Coerces to keyword", notes: ""},
+    %{name: "keyword?", status: :supported, description: "Returns true if keyword", notes: ""},
+    %{name: "last", status: :supported, description: "Returns last item", notes: ""},
+    %{
+      name: "lazy-cat",
+      status: :not_relevant,
+      description: "Lazy concatenation of expressions",
+      notes: "relies on lazy sequences"
+    },
+    %{
+      name: "lazy-seq",
+      status: :not_relevant,
+      description: "Creates lazy sequence from expression",
+      notes: "relies on lazy sequences"
+    },
+    %{name: "let", status: :supported, description: "Local variable bindings", notes: ""},
+    %{
+      name: "letfn",
+      status: :candidate,
+      description: "Binds function names for mutual recursion",
+      notes: "pure binding of functions for recursion"
+    },
+    %{
+      name: "line-seq",
+      status: :not_relevant,
+      description: "Lazy seq of lines from reader",
+      notes: "relies on lazy sequences and reader I/O"
+    },
+    %{
+      name: "list",
+      status: :supported,
+      description: "Alias for vector (PTC-Lisp is vector-first)",
+      notes: "implemented as alias for vector"
+    },
+    %{
+      name: "list*",
+      status: :candidate,
+      description: "Creates list with seq appended",
+      notes: "pure list constructor"
+    },
+    %{
+      name: "list?",
+      status: :candidate,
+      description: "Returns true if list",
+      notes: "pure predicate"
+    },
+    %{
+      name: "load",
+      status: :not_relevant,
+      description: "Loads Clojure file from classpath",
+      notes: "relies on file I/O and classpath"
+    },
+    %{
+      name: "load-file",
+      status: :not_relevant,
+      description: "Loads Clojure file from path",
+      notes: "relies on file I/O"
+    },
+    %{
+      name: "load-reader",
+      status: :not_relevant,
+      description: "Loads code from reader",
+      notes: "relies on reader I/O"
+    },
+    %{
+      name: "load-string",
+      status: :not_relevant,
+      description: "Loads code from string",
+      notes: "evaluates code/REPL feature"
+    },
+    %{
+      name: "locking",
+      status: :not_relevant,
+      description: "Acquires monitor lock, executes body",
+      notes: "concurrency primitive/locking"
+    },
+    %{
+      name: "long",
+      status: :candidate,
+      description: "Coerces to long",
+      notes: "type coercion, pure"
+    },
+    %{
+      name: "long-array",
+      status: :not_relevant,
+      description: "Creates long Java array",
+      notes: "Java interop/primitive array"
+    },
+    %{
+      name: "longs",
+      status: :not_relevant,
+      description: "Casts to long array",
+      notes: "Java interop/primitive array"
+    },
+    %{
+      name: "loop",
+      status: :supported,
+      description: "Loop with recur for tail recursion",
+      notes: ""
+    },
+    %{
+      name: "macroexpand",
+      status: :not_relevant,
+      description: "Recursively expands macro",
+      notes: "macro system"
+    },
+    %{
+      name: "macroexpand-1",
+      status: :not_relevant,
+      description: "Expands macro one level",
+      notes: "macro system"
+    },
+    %{
+      name: "make-array",
+      status: :not_relevant,
+      description: "Creates Java array",
+      notes: "Java interop/array creation"
+    },
+    %{
+      name: "make-hierarchy",
+      status: :not_relevant,
+      description: "Returns empty hierarchy",
+      notes: "relies on multimethods system"
+    },
+    %{name: "map", status: :supported, description: "Applies function to each item", notes: ""},
+    %{
+      name: "map-entry?",
+      status: :supported,
+      description: "Returns true if map entry",
+      notes: ""
+    },
+    %{
+      name: "map-indexed",
+      status: :supported,
+      description: "Applies function with index to items",
+      notes: ""
+    },
+    %{name: "map?", status: :supported, description: "Returns true if map", notes: ""},
+    %{
+      name: "mapcat",
+      status: :supported,
+      description: "Maps then concatenates results",
+      notes: ""
+    },
+    %{
+      name: "mapv",
+      status: :supported,
+      description: "Returns vector from mapping function",
+      notes: ""
+    },
+    %{name: "max", status: :supported, description: "Returns greatest number", notes: ""},
+    %{
+      name: "max-key",
+      status: :supported,
+      description: "Returns item with greatest function value",
+      notes: ""
+    },
+    %{
+      name: "memfn",
+      status: :not_relevant,
+      description: "Returns function calling Java method",
+      notes: "relies on Java interop"
+    },
+    %{
+      name: "memoize",
+      status: :not_relevant,
+      description: "Caches function results by arguments",
+      notes: "relies on mutable state for caching"
+    },
+    %{name: "merge", status: :supported, description: "Merges maps", notes: ""},
+    %{
+      name: "merge-with",
+      status: :supported,
+      description: "Merges maps with combining function",
+      notes: ""
+    },
+    %{
+      name: "meta",
+      status: :not_relevant,
+      description: "Returns metadata",
+      notes: "relies on metadata support"
+    },
+    %{
+      name: "methods",
+      status: :not_relevant,
+      description: "Returns multimethod implementations",
+      notes: "relies on multimethods"
+    },
+    %{name: "min", status: :supported, description: "Returns least number", notes: ""},
+    %{
+      name: "min-key",
+      status: :supported,
+      description: "Returns item with least function value",
+      notes: ""
+    },
+    %{name: "mod", status: :supported, description: "Returns modulo", notes: ""},
+    %{
+      name: "name",
+      status: :supported,
+      description: "Returns name string of symbol/keyword",
+      notes: ""
+    },
+    %{
+      name: "namespace",
+      status: :not_relevant,
+      description: "Returns namespace of symbol/keyword",
+      notes: "relies on namespace support"
+    },
+    %{
+      name: "nat-int?",
+      status: :supported,
+      description: "Returns true if non-negative integer",
+      notes: ""
+    },
+    %{
+      name: "neg-int?",
+      status: :supported,
+      description: "Returns true if negative integer",
+      notes: ""
+    },
+    %{
+      name: "neg?",
+      status: :supported,
+      description: "Returns true if number negative",
+      notes: ""
+    },
+    %{
+      name: "newline",
+      status: :not_relevant,
+      description: "Writes newline to output",
+      notes: "relies on I/O"
+    },
+    %{name: "next", status: :supported, description: "Returns seq after first item", notes: ""},
+    %{name: "nfirst", status: :supported, description: "Next of first item", notes: ""},
+    %{name: "nil?", status: :supported, description: "Returns true if nil", notes: ""},
+    %{name: "nnext", status: :supported, description: "Next of next item", notes: ""},
+    %{name: "not", status: :supported, description: "Logical complement", notes: ""},
+    %{
+      name: "not-any?",
+      status: :supported,
+      description: "Returns true if pred false for all",
+      notes: ""
+    },
+    %{
+      name: "not-empty",
+      status: :supported,
+      description: "Returns collection or nil if empty",
+      notes: ""
+    },
+    %{
+      name: "not-every?",
+      status: :supported,
+      description: "Returns true if pred false for some",
+      notes: ""
+    },
+    %{name: "not=", status: :supported, description: "Returns true if not equal", notes: ""},
+    %{name: "nth", status: :supported, description: "Returns item at index", notes: ""},
+    %{
+      name: "nthnext",
+      status: :candidate,
+      description: "Returns nth next",
+      notes: "pure list/sequence navigation"
+    },
+    %{
+      name: "nthrest",
+      status: :candidate,
+      description: "Returns rest after nth item",
+      notes: "pure list/sequence navigation"
+    },
+    %{
+      name: "num",
+      status: :candidate,
+      description: "Coerces to number",
+      notes: "pure numeric coercion"
+    },
+    %{name: "number?", status: :supported, description: "Returns true if number", notes: ""},
+    %{
+      name: "numerator",
+      status: :candidate,
+      description: "Returns numerator of ratio",
+      notes: "pure mathematical operation on ratios"
+    },
+    %{
+      name: "object-array",
+      status: :not_relevant,
+      description: "Creates object Java array",
+      notes: "relies on Java interop and host arrays"
+    },
+    %{name: "odd?", status: :supported, description: "Returns true if number odd", notes: ""},
+    %{name: "or", status: :supported, description: "Short-circuit logical OR", notes: ""},
+    %{
+      name: "parents",
+      status: :not_relevant,
+      description: "Returns immediate parents of tag",
+      notes: "metadata/hierarchy manipulation not supported in PTC-Lisp"
+    },
+    %{
+      name: "parse-boolean",
+      status: :candidate,
+      description: "Parses string to boolean",
+      notes: "pure string-to-data transformation"
+    },
+    %{
+      name: "parse-double",
+      status: :supported,
+      description: "Parses string to double",
+      notes: ""
+    },
+    %{name: "parse-long", status: :supported, description: "Parses string to long", notes: ""},
+    %{
+      name: "parse-uuid",
+      status: :candidate,
+      description: "Parses string to UUID",
+      notes: "pure string-to-data transformation"
+    },
+    %{
+      name: "partial",
+      status: :supported,
+      description: "Fixes supplied arguments to function",
+      notes: ""
+    },
+    %{
+      name: "partition",
+      status: :supported,
+      description: "Partitions items into groups of n",
+      notes: ""
+    },
+    %{
+      name: "partition-all",
+      status: :supported,
+      description: "Partitions without dropping partial group",
+      notes: ""
+    },
+    %{
+      name: "partition-by",
+      status: :supported,
+      description: "Partitions by change in function value",
+      notes: ""
+    },
+    %{
+      name: "pcalls",
+      status: :supported,
+      description: "Parallel calls to zero-arity functions",
+      notes: ""
+    },
+    %{
+      name: "peek",
+      status: :supported,
+      description: "Returns first/last without removing",
+      notes: ""
+    },
+    %{
+      name: "persistent!",
+      status: :not_relevant,
+      description: "Converts transient to persistent",
+      notes: "transients are unsupported"
+    },
+    %{name: "pmap", status: :supported, description: "Parallel map over collection", notes: ""},
+    %{
+      name: "pop",
+      status: :supported,
+      description: "Returns collection without first/last",
+      notes: ""
+    },
+    %{
+      name: "pop!",
+      status: :not_relevant,
+      description: "Removes from transient collection",
+      notes: "transients are unsupported"
+    },
+    %{
+      name: "pos-int?",
+      status: :supported,
+      description: "Returns true if positive integer",
+      notes: ""
+    },
+    %{
+      name: "pos?",
+      status: :supported,
+      description: "Returns true if number positive",
+      notes: ""
+    },
+    %{
+      name: "pr",
+      status: :not_relevant,
+      description: "Prints value in readable form",
+      notes: "I/O operation"
+    },
+    %{
+      name: "pr-str",
+      status: :supported,
+      description: "Returns readable string of value",
+      notes: ""
+    },
+    %{
+      name: "prefer-method",
+      status: :not_relevant,
+      description: "Prefers multimethod implementation",
+      notes: "multimethods are unsupported"
+    },
+    %{
+      name: "prefers",
+      status: :not_relevant,
+      description: "Returns multimethod preferences",
+      notes: "multimethods are unsupported"
+    },
+    %{
+      name: "print",
+      status: :not_relevant,
+      description: "Prints value without quoting",
+      notes: "I/O operation"
+    },
+    %{
+      name: "print-str",
+      status: :not_relevant,
+      description: "Returns printed string of value",
+      notes: "relies on printing logic/I/O"
+    },
+    %{
+      name: "printf",
+      status: :not_relevant,
+      description: "Prints formatted output",
+      notes: "performs stdout I/O"
+    },
+    %{name: "println", status: :supported, description: "Prints with newline", notes: ""},
+    %{
+      name: "promise",
+      status: :not_relevant,
+      description: "Creates promise",
+      notes: "concurrency primitive"
+    },
+    %{
+      name: "proxy",
+      status: :not_relevant,
+      description: "Creates proxy implementing interfaces",
+      notes: "Java interop"
+    },
+    %{
+      name: "push-thread-bindings",
+      status: :not_relevant,
+      description: "Installs thread-local bindings",
+      notes: "thread-local mutability/state"
+    },
+    %{
+      name: "qualified-ident?",
+      status: :candidate,
+      description: "Returns true if ident has namespace",
+      notes: "pure predicate for data inspection"
+    },
+    %{
+      name: "qualified-keyword?",
+      status: :candidate,
+      description: "Returns true if keyword has namespace",
+      notes: "pure predicate for data inspection"
+    },
+    %{
+      name: "qualified-symbol?",
+      status: :candidate,
+      description: "Returns true if symbol has namespace",
+      notes: "pure predicate for data inspection"
+    },
+    %{
+      name: "quot",
+      status: :supported,
+      description: "Returns integer division quotient",
+      notes: ""
+    },
+    %{
+      name: "quote",
+      status: :candidate,
+      description: "Returns form unevaluated",
+      notes: "fundamental Lisp evaluation control"
+    },
+    %{
+      name: "rand",
+      status: :candidate,
+      description: "Returns random float 0-1",
+      notes: "pure data-generating function (if implemented as a pure seeded RNG)"
+    },
+    %{
+      name: "rand-int",
+      status: :not_relevant,
+      description: "Returns random int less than arg",
+      notes: "relies on non-deterministic side effects/state"
+    },
+    %{
+      name: "rand-nth",
+      status: :not_relevant,
+      description: "Returns random item from seq",
+      notes: "relies on non-deterministic side effects/state"
+    },
+    %{
+      name: "random-sample",
+      status: :not_relevant,
+      description: "Returns random sample of items",
+      notes: "relies on non-deterministic side effects/state"
+    },
+    %{
+      name: "random-uuid",
+      status: :not_relevant,
+      description: "Returns random UUID",
+      notes: "relies on non-deterministic side effects"
+    },
+    %{name: "range", status: :supported, description: "Returns sequence of numbers", notes: ""},
+    %{name: "ratio?", status: :supported, description: "Returns true if ratio", notes: ""},
+    %{
+      name: "rational?",
+      status: :supported,
+      description: "Returns true if rational number",
+      notes: ""
+    },
+    %{
+      name: "rationalize",
+      status: :candidate,
+      description: "Coerces to ratio",
+      notes: "pure mathematical transformation"
+    },
+    %{name: "re-find", status: :supported, description: "Returns first regex match", notes: ""},
+    %{
+      name: "re-groups",
+      status: :candidate,
+      description: "Returns regex match groups",
+      notes: "pure string processing function"
+    },
+    %{
+      name: "re-matcher",
+      status: :not_relevant,
+      description: "Returns matcher for pattern",
+      notes: "returns an object maintaining mutable state/matcher position"
+    },
+    %{
+      name: "re-matches",
+      status: :supported,
+      description: "Returns full regex match or nil",
+      notes: ""
+    },
+    %{
+      name: "re-pattern",
+      status: :supported,
+      description: "Returns compiled regex pattern",
+      notes: ""
+    },
+    %{name: "re-seq", status: :supported, description: "Returns seq of regex matches", notes: ""},
+    %{
+      name: "read",
+      status: :not_relevant,
+      description: "Reads next form from reader",
+      notes: "implies I/O and interaction with reader contexts"
+    },
+    %{
+      name: "read-line",
+      status: :not_relevant,
+      description: "Reads line from input",
+      notes: "I/O operation"
+    },
+    %{
+      name: "read-string",
+      status: :not_relevant,
+      description: "Reads form from string",
+      notes: "invokes reader/eval capabilities not supported in sandbox"
+    },
+    %{
+      name: "realized?",
+      status: :not_relevant,
+      description: "Returns true if delay/future complete",
+      notes: "relies on concurrency/lazy primitives not supported"
+    },
+    %{
+      name: "record?",
+      status: :not_relevant,
+      description: "Returns true if record",
+      notes: "relies on class/type system not supported"
+    },
+    %{
+      name: "recur",
+      status: :supported,
+      description: "Rebinds loop vars and jumps to loop start",
+      notes: ""
+    },
+    %{
+      name: "reduce",
+      status: :supported,
+      description: "Reduces collection with function",
+      notes: ""
+    },
+    %{
+      name: "reduce-kv",
+      status: :supported,
+      description: "Reduces map with key-value function",
+      notes: ""
+    },
+    %{
+      name: "reduced",
+      status: :candidate,
+      description: "Wraps value indicating reduction complete",
+      notes: "pure control flow mechanism for reduction interruption"
+    },
+    %{
+      name: "reduced?",
+      status: :candidate,
+      description: "Returns true if wrapped in reduced",
+      notes: "pure predicate for checking reduction status"
+    },
+    %{
+      name: "reductions",
+      status: :not_relevant,
+      description: "Returns intermediate reduction results",
+      notes: "returns a lazy sequence"
+    },
+    %{
+      name: "ref",
+      status: :not_relevant,
+      description: "Creates STM reference",
+      notes: "mutable state/concurrency primitive"
+    },
+    %{
+      name: "ref-set",
+      status: :not_relevant,
+      description: "Sets ref value in transaction",
+      notes: "mutable state/concurrency primitive"
+    },
+    %{
+      name: "reify",
+      status: :not_relevant,
+      description: "Creates instance implementing protocols",
+      notes: "relies on protocols and class generation"
+    },
+    %{name: "rem", status: :supported, description: "Returns remainder of division", notes: ""},
+    %{
+      name: "remove",
+      status: :supported,
+      description: "Returns items where predicate false",
+      notes: ""
+    },
+    %{
+      name: "remove-all-methods",
+      status: :not_relevant,
+      description: "Removes all multimethod impls",
+      notes: "relies on multimethods"
+    },
+    %{
+      name: "remove-method",
+      status: :not_relevant,
+      description: "Removes multimethod impl",
+      notes: "relies on multimethods"
+    },
+    %{
+      name: "remove-ns",
+      status: :not_relevant,
+      description: "Removes namespace",
+      notes: "relies on namespaces"
+    },
+    %{
+      name: "remove-tap",
+      status: :not_relevant,
+      description: "Removes function from tap set",
+      notes: "relies on global mutable state/taps"
+    },
+    %{
+      name: "remove-watch",
+      status: :not_relevant,
+      description: "Removes watch from reference",
+      notes: "relies on mutable state references"
+    },
+    %{
+      name: "repeat",
+      status: :not_relevant,
+      description: "Returns infinite seq repeating value",
+      notes: "returns lazy sequences"
+    },
+    %{
+      name: "repeatedly",
+      status: :not_relevant,
+      description: "Returns seq calling function repeatedly",
+      notes: "returns lazy sequences"
+    },
+    %{
+      name: "replace",
+      status: :supported,
+      description: "Replaces values by map mapping",
+      notes: ""
+    },
+    %{
+      name: "require",
+      status: :not_relevant,
+      description: "Requires namespace",
+      notes: "relies on namespace/load system"
+    },
+    %{
+      name: "requiring-resolve",
+      status: :not_relevant,
+      description: "Requires ns and resolves symbol",
+      notes: "relies on namespace/load system"
+    },
+    %{
+      name: "reset!",
+      status: :not_relevant,
+      description: "Sets atom value",
+      notes: "mutable state (atoms)"
+    },
+    %{
+      name: "reset-meta!",
+      status: :not_relevant,
+      description: "Sets metadata",
+      notes: "metadata manipulation"
+    },
+    %{
+      name: "reset-vals!",
+      status: :not_relevant,
+      description: "Sets atom, returns [old new]",
+      notes: "mutable state (atoms)"
+    },
+    %{
+      name: "resolve",
+      status: :not_relevant,
+      description: "Resolves symbol in namespace",
+      notes: "namespace/symbol resolution"
+    },
+    %{name: "rest", status: :supported, description: "Returns seq after first item", notes: ""},
+    %{
+      name: "restart-agent",
+      status: :not_relevant,
+      description: "Restarts failed agent",
+      notes: "concurrency primitives (agents)"
+    },
+    %{name: "reverse", status: :supported, description: "Reverses order of items", notes: ""},
+    %{
+      name: "reversible?",
+      status: :supported,
+      description: "Returns true if collection reversible",
+      notes: ""
+    },
+    %{
+      name: "rseq",
+      status: :not_relevant,
+      description: "Returns reverse seq of sorted collection",
+      notes: "relies on lazy/sorted sequence implementation details"
+    },
+    %{
+      name: "rsubseq",
+      status: :not_relevant,
+      description: "Returns reverse subseq of sorted coll",
+      notes: "relies on lazy/sorted sequence implementation details"
+    },
+    %{
+      name: "run!",
+      status: :not_relevant,
+      description: "Runs side effects, returns nil",
+      notes: "relies on side effects"
+    },
+    %{
+      name: "satisfies?",
+      status: :not_relevant,
+      description: "Returns true if type satisfies protocol",
+      notes: "protocol/type system feature"
+    },
+    %{name: "second", status: :supported, description: "Returns second item", notes: ""},
+    %{
+      name: "select-keys",
+      status: :supported,
+      description: "Returns map with only specified keys",
+      notes: ""
+    },
+    %{
+      name: "send",
+      status: :not_relevant,
+      description: "Dispatches action to agent",
+      notes: "relies on agent mutable state"
+    },
+    %{
+      name: "send-off",
+      status: :not_relevant,
+      description: "Dispatches blocking action to agent",
+      notes: "relies on agent mutable state"
+    },
+    %{
+      name: "send-via",
+      status: :not_relevant,
+      description: "Sends action via executor to agent",
+      notes: "relies on agent mutable state"
+    },
+    %{
+      name: "seq",
+      status: :supported,
+      description: "Returns sequence or nil if empty",
+      notes: ""
+    },
+    %{
+      name: "seq?",
+      status: :supported,
+      description: "Returns true if value is sequence",
+      notes: ""
+    },
+    %{
+      name: "seqable?",
+      status: :supported,
+      description: "Returns true if implements Seqable",
+      notes: ""
+    },
+    %{
+      name: "sequence",
+      status: :not_relevant,
+      description: "Returns seq applying transducer",
+      notes: "relies on lazy sequences"
+    },
+    %{
+      name: "sequential?",
+      status: :supported,
+      description: "Returns true if sequential",
+      notes: ""
+    },
+    %{name: "set", status: :supported, description: "Creates set from items", notes: ""},
+    %{
+      name: "set!",
+      status: :not_relevant,
+      description: "Sets thread-local var value",
+      notes: "relies on mutable state"
+    },
+    %{name: "set?", status: :supported, description: "Returns true if set", notes: ""},
+    %{
+      name: "short",
+      status: :candidate,
+      description: "Coerces to short",
+      notes: "pure numerical type coercion"
+    },
+    %{
+      name: "short-array",
+      status: :not_relevant,
+      description: "Creates short Java array",
+      notes: "relies on Java array instantiation"
+    },
+    %{
+      name: "shorts",
+      status: :not_relevant,
+      description: "Casts to short array",
+      notes: "relies on Java array interaction"
+    },
+    %{
+      name: "shuffle",
+      status: :not_relevant,
+      description: "Returns items in random order",
+      notes: "relies on non-deterministic side effects (randomness)"
+    },
+    %{
+      name: "shutdown-agents",
+      status: :not_relevant,
+      description: "Shuts down agent thread pool",
+      notes: "manages thread pools which is unsupported"
+    },
+    %{
+      name: "simple-ident?",
+      status: :candidate,
+      description: "Returns true if ident has no namespace",
+      notes: "pure predicate for data validation"
+    },
+    %{
+      name: "simple-keyword?",
+      status: :candidate,
+      description: "Returns true if keyword has no ns",
+      notes: "pure predicate for data validation"
+    },
+    %{
+      name: "simple-symbol?",
+      status: :candidate,
+      description: "Returns true if symbol has no ns",
+      notes: "pure predicate for data validation"
+    },
+    %{
+      name: "slurp",
+      status: :not_relevant,
+      description: "Reads entire contents of file/URL",
+      notes: "involves file/network I/O"
+    },
+    %{
+      name: "some",
+      status: :supported,
+      description: "Returns first truthy result or nil",
+      notes: ""
+    },
+    %{
+      name: "some->",
+      status: :supported,
+      description: "Threads through forms while non-nil",
+      notes: ""
+    },
+    %{
+      name: "some->>",
+      status: :supported,
+      description: "Threads as last arg while non-nil",
+      notes: ""
+    },
+    %{
+      name: "some-fn",
+      status: :supported,
+      description: "Returns pred true if any fn truthy",
+      notes: ""
+    },
+    %{name: "some?", status: :supported, description: "Returns true if not nil", notes: ""},
+    %{name: "sort", status: :supported, description: "Returns sorted sequence", notes: ""},
+    %{
+      name: "sort-by",
+      status: :supported,
+      description: "Returns seq sorted by function result",
+      notes: ""
+    },
+    %{
+      name: "sorted-map",
+      status: :candidate,
+      description: "Creates sorted map from pairs",
+      notes: "pure collection construction"
+    },
+    %{
+      name: "sorted-map-by",
+      status: :candidate,
+      description: "Creates sorted map with comparator",
+      notes: "pure collection construction with custom comparator"
+    },
+    %{
+      name: "sorted-set",
+      status: :candidate,
+      description: "Creates sorted set from items",
+      notes: "pure collection construction"
+    },
+    %{
+      name: "sorted-set-by",
+      status: :candidate,
+      description: "Creates sorted set with comparator",
+      notes: "pure collection construction with custom comparator"
+    },
+    %{
+      name: "sorted?",
+      status: :supported,
+      description: "Returns true if collection sorted",
+      notes: ""
+    },
+    %{
+      name: "spit",
+      status: :not_relevant,
+      description: "Writes content to file",
+      notes: "file I/O"
+    },
+    %{name: "split-at", status: :supported, description: "Splits seq at index", notes: ""},
+    %{name: "split-with", status: :supported, description: "Splits seq by predicate", notes: ""},
+    %{name: "str", status: :supported, description: "Converts to string", notes: ""},
+    %{name: "string?", status: :supported, description: "Returns true if string", notes: ""},
+    %{
+      name: "struct",
+      status: :not_relevant,
+      description: "Creates structure instance",
+      notes: "legacy structure system, discouraged/deprecated"
+    },
+    %{
+      name: "struct-map",
+      status: :not_relevant,
+      description: "Creates structure map from basis",
+      notes: "legacy structure system, discouraged/deprecated"
+    },
+    %{name: "subs", status: :supported, description: "Returns substring", notes: ""},
+    %{
+      name: "subseq",
+      status: :candidate,
+      description: "Returns subseq of sorted collection",
+      notes: "pure operation on sorted collections"
+    },
+    %{name: "subvec", status: :supported, description: "Returns subvector", notes: ""},
+    %{
+      name: "supers",
+      status: :not_relevant,
+      description: "Returns all ancestors of class",
+      notes: "relies on Java class hierarchy/interop"
+    },
+    %{
+      name: "swap!",
+      status: :not_relevant,
+      description: "Updates atom with function",
+      notes: "requires mutable state (atom)"
+    },
+    %{
+      name: "swap-vals!",
+      status: :not_relevant,
+      description: "Updates atom, returns [old new]",
+      notes: "requires mutable state (atom)"
+    },
+    %{
+      name: "symbol",
+      status: :candidate,
+      description: "Coerces to symbol",
+      notes: "pure data coercion"
+    },
+    %{name: "symbol?", status: :supported, description: "Returns true if symbol", notes: ""},
+    %{name: "take", status: :supported, description: "Returns first n items", notes: ""},
+    %{name: "take-last", status: :supported, description: "Returns last n items", notes: ""},
+    %{
+      name: "take-nth",
+      status: :not_relevant,
+      description: "Returns every nth item",
+      notes: "returns a lazy sequence"
+    },
+    %{
+      name: "take-while",
+      status: :supported,
+      description: "Takes items while predicate true",
+      notes: ""
+    },
+    %{
+      name: "tap>",
+      status: :not_relevant,
+      description: "Sends value to taps",
+      notes: "side-effecting I/O mechanism"
+    },
+    %{
+      name: "test",
+      status: :not_relevant,
+      description: "Runs tests for namespace",
+      notes: "built-in testing framework/REPL tool"
+    },
+    %{
+      name: "throw",
+      status: :not_relevant,
+      description: "Throws exception",
+      notes: "exception handling"
+    },
+    %{
+      name: "time",
+      status: :not_relevant,
+      description: "Evaluates and prints elapsed time",
+      notes: "side-effecting I/O and timing"
+    },
+    %{
+      name: "to-array",
+      status: :not_relevant,
+      description: "Converts to object array",
+      notes: "Java interop for array creation"
+    },
+    %{
+      name: "to-array-2d",
+      status: :not_relevant,
+      description: "Converts to 2D array",
+      notes: "Java interop for array creation"
+    },
+    %{
+      name: "trampoline",
+      status: :candidate,
+      description: "Mutual recursion without stack overflow",
+      notes: "Pure mutual recursion utility"
+    },
+    %{
+      name: "transduce",
+      status: :candidate,
+      description: "Reduces with transducer",
+      notes: "Pure data transformation utility"
+    },
+    %{
+      name: "transient",
+      status: :not_relevant,
+      description: "Creates transient collection",
+      notes: "Mutable state/transients are not supported"
+    },
+    %{name: "tree-seq", status: :supported, description: "Depth-first seq from root", notes: ""},
+    %{name: "true?", status: :supported, description: "Returns true if value is true", notes: ""},
+    %{
+      name: "try",
+      status: :not_relevant,
+      description: "Exception handling",
+      notes: "Exception handling is not supported"
+    },
+    %{name: "type", status: :supported, description: "Returns type of value", notes: ""},
+    %{
+      name: "unchecked-add",
+      status: :not_relevant,
+      description: "Adds without overflow check",
+      notes: "Java-specific math optimization"
+    },
+    %{
+      name: "unchecked-add-int",
+      status: :not_relevant,
+      description: "Adds ints without overflow check",
+      notes: "Java-specific math optimization"
+    },
+    %{
+      name: "unchecked-byte",
+      status: :not_relevant,
+      description: "Casts to byte without check",
+      notes: "Java-specific primitive casting"
+    },
+    %{
+      name: "unchecked-char",
+      status: :not_relevant,
+      description: "Casts to char without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-dec",
+      status: :not_relevant,
+      description: "Decrements without overflow check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-dec-int",
+      status: :not_relevant,
+      description: "Decrements int without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-divide-int",
+      status: :not_relevant,
+      description: "Divides ints without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-double",
+      status: :not_relevant,
+      description: "Casts to double without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-float",
+      status: :not_relevant,
+      description: "Casts to float without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-inc",
+      status: :not_relevant,
+      description: "Increments without overflow check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-inc-int",
+      status: :not_relevant,
+      description: "Increments int without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-int",
+      status: :not_relevant,
+      description: "Casts to int without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-long",
+      status: :not_relevant,
+      description: "Casts to long without check",
+      notes: "Relies on Java primitive casting/low-level JVM semantics"
+    },
+    %{
+      name: "unchecked-multiply",
+      status: :not_relevant,
+      description: "Multiplies without overflow check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-multiply-int",
+      status: :not_relevant,
+      description: "Multiplies ints without check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-negate",
+      status: :not_relevant,
+      description: "Negates without overflow check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-negate-int",
+      status: :not_relevant,
+      description: "Negates int without check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-remainder-int",
+      status: :not_relevant,
+      description: "Remainder without check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-short",
+      status: :not_relevant,
+      description: "Casts to short without check",
+      notes: "relies on Java type casting/interop"
+    },
+    %{
+      name: "unchecked-subtract",
+      status: :not_relevant,
+      description: "Subtracts without overflow check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "unchecked-subtract-int",
+      status: :not_relevant,
+      description: "Subtracts ints without check",
+      notes: "relies on JVM-specific primitive behavior/overflow semantics"
+    },
+    %{
+      name: "underive",
+      status: :not_relevant,
+      description: "Removes hierarchical relationship",
+      notes: "requires global hierarchy/multimethod infrastructure"
+    },
+    %{
+      name: "unreduced",
+      status: :candidate,
+      description: "Unwraps from reduced",
+      notes: "pure transformation used for handling reduced values in reductions"
+    },
+    %{
+      name: "unsigned-bit-shift-right",
+      status: :not_relevant,
+      description: "Unsigned right shift",
+      notes:
+        "no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from"
+    },
+    %{
+      name: "update",
+      status: :supported,
+      description: "Applies function to map value at key",
+      notes: ""
+    },
+    %{
+      name: "update-in",
+      status: :supported,
+      description: "Applies function to nested map value",
+      notes: ""
+    },
+    %{
+      name: "update-keys",
+      status: :supported,
+      description: "Applies function to map keys",
+      notes: ""
+    },
+    %{
+      name: "update-proxy",
+      status: :not_relevant,
+      description: "Updates proxy method implementations",
+      notes: "relies on Java interop/proxy class system"
+    },
+    %{
+      name: "update-vals",
+      status: :supported,
+      description: "Applies function to map values",
+      notes: ""
+    },
+    %{name: "val", status: :supported, description: "Returns value of map entry", notes: ""},
+    %{name: "vals", status: :supported, description: "Returns map values", notes: ""},
+    %{
+      name: "var-get",
+      status: :not_relevant,
+      description: "Gets value of var",
+      notes: "relies on specific var/namespace system"
+    },
+    %{
+      name: "var-set",
+      status: :not_relevant,
+      description: "Sets var in thread-local binding",
+      notes: "relies on mutable thread-local bindings"
+    },
+    %{
+      name: "var?",
+      status: :not_relevant,
+      description: "Returns true if var",
+      notes: "relies on var data structure absent in PTC-Lisp"
+    },
+    %{
+      name: "vary-meta",
+      status: :not_relevant,
+      description: "Returns value with transformed metadata",
+      notes: "relies on metadata feature"
+    },
+    %{name: "vec", status: :supported, description: "Converts to vector", notes: ""},
+    %{name: "vector", status: :supported, description: "Creates vector from items", notes: ""},
+    %{name: "vector?", status: :supported, description: "Returns true if vector", notes: ""},
+    %{
+      name: "volatile!",
+      status: :not_relevant,
+      description: "Creates volatile with initial value",
+      notes: "relies on mutable state"
+    },
+    %{
+      name: "volatile?",
+      status: :not_relevant,
+      description: "Returns true if volatile",
+      notes: "relies on mutable state"
+    },
+    %{
+      name: "vreset!",
+      status: :not_relevant,
+      description: "Sets volatile value",
+      notes: "relies on mutable state"
+    },
+    %{
+      name: "vswap!",
+      status: :not_relevant,
+      description: "Updates volatile with function",
+      notes: "involves mutable state (volatiles)"
+    },
+    %{name: "when", status: :supported, description: "Evaluates body if test true", notes: ""},
+    %{
+      name: "when-first",
+      status: :supported,
+      description: "Evaluates body if seq non-empty",
+      notes: ""
+    },
+    %{
+      name: "when-let",
+      status: :supported,
+      description: "Binds if truthy, evaluates body",
+      notes: ""
+    },
+    %{
+      name: "when-not",
+      status: :supported,
+      description: "Evaluates body if test false",
+      notes: ""
+    },
+    %{
+      name: "when-some",
+      status: :supported,
+      description: "Binds if not nil, evaluates body",
+      notes: ""
+    },
+    %{
+      name: "while",
+      status: :not_relevant,
+      description: "Repeats body while test true",
+      notes: "imperative looping construct typically relying on side effects"
+    },
+    %{
+      name: "with-bindings",
+      status: :not_relevant,
+      description: "Executes body with thread-local bindings",
+      notes: "relies on thread-local state which is not supported in the BEAM model for PTC-Lisp"
+    },
+    %{
+      name: "with-in-str",
+      status: :not_relevant,
+      description: "Evaluates body with string as input",
+      notes: "relies on I/O streams"
+    },
+    %{
+      name: "with-local-vars",
+      status: :not_relevant,
+      description: "Evaluates body with local var bindings",
+      notes: "requires mutable local vars"
+    },
+    %{
+      name: "with-meta",
+      status: :not_relevant,
+      description: "Returns value with new metadata",
+      notes: "metadata is not supported"
+    },
+    %{
+      name: "with-open",
+      status: :not_relevant,
+      description: "Opens resources, closes on exit",
+      notes: "relies on I/O and resource management"
+    },
+    %{
+      name: "with-out-str",
+      status: :not_relevant,
+      description: "Captures output to string",
+      notes: "relies on capturing side-effecting I/O"
+    },
+    %{
+      name: "with-precision",
+      status: :not_relevant,
+      description: "Sets decimal precision for body",
+      notes:
+        "relies on specific BigDecimal support and dynamic binding context not present in PTC-Lisp"
+    },
+    %{
+      name: "with-redefs",
+      status: :not_relevant,
+      description: "Redefines vars for body duration",
+      notes:
+        "modifies global var bindings, which is not supported in a functional, immutable sandbox"
+    },
+    %{
+      name: "xml-seq",
+      status: :not_relevant,
+      description: "Lazy seq of XML elements",
+      notes: "relies on lazy sequences and I/O-related parsing"
+    },
+    %{
+      name: "zero?",
+      status: :supported,
+      description: "Returns true if number is zero",
+      notes: ""
+    },
+    %{
+      name: "zipmap",
+      status: :supported,
+      description: "Creates map from keys and values seqs",
+      notes: ""
+    }
+  ],
+  clojure_string_audit: [
+    %{
+      name: "blank?",
+      status: :candidate,
+      description: "True if s is nil, empty, or contains only whitespace",
+      notes: "pure string predicate"
+    },
+    %{
+      name: "capitalize",
+      status: :candidate,
+      description: "Converts first character to upper-case, rest to lower-case",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "ends-with?",
+      status: :supported,
+      description: "True if s ends with substr",
+      notes: ""
+    },
+    %{
+      name: "escape",
+      status: :candidate,
+      description: "Return a new string applying cmap to each character",
+      notes: "pure character mapping"
+    },
+    %{name: "includes?", status: :supported, description: "True if s includes substr", notes: ""},
+    %{
+      name: "index-of",
+      status: :supported,
+      description: "Return index of value in string",
+      notes: ""
+    },
+    %{
+      name: "join",
+      status: :supported,
+      description: "Returns a string of elements joined by separator",
+      notes: ""
+    },
+    %{
+      name: "last-index-of",
+      status: :supported,
+      description: "Return last index of value in string",
+      notes: ""
+    },
+    %{
+      name: "lower-case",
+      status: :supported,
+      description: "Converts string to all lower-case",
+      notes: ""
+    },
+    %{
+      name: "re-quote-replacement",
+      status: :not_relevant,
+      description: "Escapes special characters in replacement string",
+      notes: "Java regex-specific utility"
+    },
+    %{
+      name: "replace",
+      status: :supported,
+      description: "Replaces all instances of match in s",
+      notes: ""
+    },
+    %{
+      name: "replace-first",
+      status: :candidate,
+      description: "Replaces first instance of match in s",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "reverse",
+      status: :candidate,
+      description: "Returns s with characters reversed",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "split",
+      status: :supported,
+      description: "Splits string on regex or string",
+      notes: ""
+    },
+    %{
+      name: "split-lines",
+      status: :supported,
+      description: "Splits string on \\n or \\r\\n",
+      notes: ""
+    },
+    %{
+      name: "starts-with?",
+      status: :supported,
+      description: "True if s starts with substr",
+      notes: ""
+    },
+    %{
+      name: "trim",
+      status: :supported,
+      description: "Removes whitespace from both ends of string",
+      notes: ""
+    },
+    %{
+      name: "trim-newline",
+      status: :candidate,
+      description: "Removes all trailing newline or return characters",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "triml",
+      status: :candidate,
+      description: "Removes whitespace from the left side of string",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "trimr",
+      status: :candidate,
+      description: "Removes whitespace from the right side of string",
+      notes: "pure string transformation"
+    },
+    %{
+      name: "upper-case",
+      status: :supported,
+      description: "Converts string to all upper-case",
+      notes: ""
+    }
+  ],
+  clojure_set_audit: [
+    %{
+      name: "difference",
+      status: :supported,
+      description: "Return a set that is the first set without elements of the remaining sets",
+      notes: ""
+    },
+    %{
+      name: "index",
+      status: :candidate,
+      description: "Returns a map of the distinct values of ks mapped to sets of maps",
+      notes: "pure set/map operation"
+    },
+    %{
+      name: "intersection",
+      status: :supported,
+      description: "Return a set that is the intersection of the input sets",
+      notes: ""
+    },
+    %{
+      name: "join",
+      status: :candidate,
+      description: "When passed 2 rels, returns the rel corresponding to the natural join",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "map-invert",
+      status: :candidate,
+      description: "Returns the map with vals mapped to keys",
+      notes: "pure map transformation"
+    },
+    %{
+      name: "project",
+      status: :candidate,
+      description: "Returns a rel of the elements of xrel with only the keys in ks",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "rename",
+      status: :candidate,
+      description: "Returns a rel with the keys in kmap renamed",
+      notes: "relational algebra operation"
+    },
+    %{
+      name: "rename-keys",
+      status: :candidate,
+      description: "Returns the map with keys renamed according to kmap",
+      notes: "pure map transformation"
+    },
+    %{
+      name: "select",
+      status: :candidate,
+      description: "Returns a set of the elements for which pred is true",
+      notes: "pure set filtering"
+    },
+    %{
+      name: "subset?",
+      status: :candidate,
+      description: "Is set1 a subset of set2?",
+      notes: "pure set predicate"
+    },
+    %{
+      name: "superset?",
+      status: :candidate,
+      description: "Is set1 a superset of set2?",
+      notes: "pure set predicate"
+    },
+    %{
+      name: "union",
+      status: :supported,
+      description: "Return a set that is the union of the input sets",
+      notes: ""
+    }
+  ],
+  java_math_audit: [
+    %{name: "abs", status: :supported, description: "Returns the absolute value", notes: ""},
+    %{
+      name: "acos",
+      status: :candidate,
+      description: "Returns the arc cosine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "addExact",
+      status: :not_relevant,
+      description: "Returns sum, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "asin",
+      status: :candidate,
+      description: "Returns the arc sine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "atan",
+      status: :candidate,
+      description: "Returns the arc tangent of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "atan2",
+      status: :candidate,
+      description: "Returns angle theta from (x,y) to polar (r,theta)",
+      notes: "pure math"
+    },
+    %{
+      name: "cbrt",
+      status: :candidate,
+      description: "Returns the cube root of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "ceil",
+      status: :supported,
+      description: "Returns the smallest integer >= argument",
+      notes: ""
+    },
+    %{
+      name: "copySign",
+      status: :not_relevant,
+      description: "Returns first arg with sign of second arg",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "cos",
+      status: :candidate,
+      description: "Returns the trigonometric cosine of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "cosh",
+      status: :candidate,
+      description: "Returns the hyperbolic cosine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "decrementExact",
+      status: :not_relevant,
+      description: "Returns argument decremented by one, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "exp",
+      status: :candidate,
+      description: "Returns Euler's number e raised to the power of a",
+      notes: "pure math"
+    },
+    %{
+      name: "expm1",
+      status: :not_relevant,
+      description: "Returns e^x - 1",
+      notes: "specialized numerical precision, low demand"
+    },
+    %{
+      name: "floor",
+      status: :supported,
+      description: "Returns the largest integer <= argument",
+      notes: ""
+    },
+    %{
+      name: "floorDiv",
+      status: :not_relevant,
+      description: "Returns floor of integer division",
+      notes: "Java integer division semantics; use quot + floor"
+    },
+    %{
+      name: "floorMod",
+      status: :not_relevant,
+      description: "Returns floor modulus of arguments",
+      notes: "Java integer semantics; use mod"
+    },
+    %{
+      name: "fma",
+      status: :not_relevant,
+      description: "Fused multiply-add",
+      notes: "specialized numerical precision"
+    },
+    %{
+      name: "getExponent",
+      status: :not_relevant,
+      description: "Returns unbiased exponent of a float/double",
+      notes: "low-level IEEE 754 inspection"
+    },
+    %{
+      name: "hypot",
+      status: :candidate,
+      description: "Returns sqrt(x^2 + y^2) without intermediate overflow",
+      notes: "pure math"
+    },
+    %{
+      name: "IEEEremainder",
+      status: :not_relevant,
+      description: "Returns IEEE 754 remainder",
+      notes: "low-level IEEE 754 semantics; use rem/mod"
+    },
+    %{
+      name: "incrementExact",
+      status: :not_relevant,
+      description: "Returns argument incremented by one, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "log",
+      status: :candidate,
+      description: "Returns the natural logarithm (base e) of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "log10",
+      status: :candidate,
+      description: "Returns the base 10 logarithm of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "log1p",
+      status: :not_relevant,
+      description: "Returns ln(1 + x)",
+      notes: "specialized numerical precision, low demand"
+    },
+    %{
+      name: "max",
+      status: :supported,
+      description: "Returns the greater of two values",
+      notes: ""
+    },
+    %{
+      name: "min",
+      status: :supported,
+      description: "Returns the smaller of two values",
+      notes: ""
+    },
+    %{
+      name: "multiplyExact",
+      status: :not_relevant,
+      description: "Returns product, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "multiplyHigh",
+      status: :not_relevant,
+      description: "Returns high 64 bits of 128-bit product",
+      notes: "low-level 64-bit arithmetic"
+    },
+    %{
+      name: "negateExact",
+      status: :not_relevant,
+      description: "Returns negation, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "nextAfter",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "nextDown",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value towards negative infinity",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "nextUp",
+      status: :not_relevant,
+      description: "Returns adjacent floating-point value towards positive infinity",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "pow",
+      status: :supported,
+      description: "Returns the value of a raised to the power of b",
+      notes: ""
+    },
+    %{
+      name: "random",
+      status: :candidate,
+      description: "Returns a pseudorandom double between 0.0 and 1.0",
+      notes: "pure (non-deterministic but side-effect free)"
+    },
+    %{
+      name: "rint",
+      status: :not_relevant,
+      description: "Returns closest double to argument that is a mathematical integer",
+      notes: "use round instead"
+    },
+    %{
+      name: "round",
+      status: :supported,
+      description: "Returns the closest long/int to the argument",
+      notes: ""
+    },
+    %{
+      name: "scalb",
+      status: :not_relevant,
+      description: "Returns d × 2^scaleFactor",
+      notes: "low-level IEEE 754 manipulation"
+    },
+    %{
+      name: "signum",
+      status: :candidate,
+      description: "Returns the signum function of the argument",
+      notes: "pure math"
+    },
+    %{
+      name: "sin",
+      status: :candidate,
+      description: "Returns the trigonometric sine of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "sinh",
+      status: :candidate,
+      description: "Returns the hyperbolic sine of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "sqrt",
+      status: :supported,
+      description: "Returns the positive square root of a value",
+      notes: ""
+    },
+    %{
+      name: "subtractExact",
+      status: :not_relevant,
+      description: "Returns difference, throwing on overflow",
+      notes: "Java overflow semantics not applicable on BEAM"
+    },
+    %{
+      name: "tan",
+      status: :candidate,
+      description: "Returns the trigonometric tangent of an angle",
+      notes: "pure math"
+    },
+    %{
+      name: "tanh",
+      status: :candidate,
+      description: "Returns the hyperbolic tangent of a value",
+      notes: "pure math"
+    },
+    %{
+      name: "toDegrees",
+      status: :candidate,
+      description: "Converts an angle from radians to degrees",
+      notes: "pure math"
+    },
+    %{
+      name: "toIntExact",
+      status: :not_relevant,
+      description: "Returns long narrowed to int, throwing on overflow",
+      notes: "Java type narrowing not applicable on BEAM"
+    },
+    %{
+      name: "toRadians",
+      status: :candidate,
+      description: "Converts an angle from degrees to radians",
+      notes: "pure math"
+    },
+    %{
+      name: "ulp",
+      status: :not_relevant,
+      description: "Returns size of an ulp of the argument",
+      notes: "low-level IEEE 754 inspection"
+    }
+  ]
+}
