@@ -732,6 +732,41 @@ upstream catalog at boot, capped by
 plus SHA-256 hash. To provide your own wording, set
 `--agentic-capability-summary /path/to/summary.md`.
 
+### Prompt-size benchmark
+
+Agentic mode has two separate prompt-cost surfaces:
+
+- `ptc_task`'s MCP tool entry is paid by the client at `tools/list`
+  time, once per session.
+- The planner system prompt is paid server-side on every `ptc_task`
+  invocation.
+
+Run the deterministic tier-1 benchmark from `mcp_server/`:
+
+```bash
+mix run --no-start bench/agentic_prompt_bench.exs \
+  --out=../tmp/agentic_prompt_bench.json
+```
+
+It makes no LLM calls. It freezes synthetic upstream catalogs and
+routes through `Tools.list/0`, `Agentic.Prompt.system_prompt/1`,
+`CatalogDescription.render/0`, and `CapabilitySummary.from_frozen/1`.
+With the default `--agentic-capability-summary-max-bytes=800` and
+default auto inline thresholds (`40` tools / `12000` chars), the current
+bench reports:
+
+| Fleet | `:auto` effective mode | Planner prompt `:auto` | Planner prompt `:inline` | Planner prompt `:lazy` | `ptc_task` tool entry `:auto` | `ptc_task` tool entry `:inline` | `ptc_task` tool entry `:lazy` |
+|---|---|---:|---:|---:|---:|---:|---:|
+| small: 3 servers x 10 tools | inline | ~2.4 K tokens | ~2.4 K | ~0.7 K | ~0.7 K | ~1.1 K | ~0.6 K |
+| medium: 5 servers x 30 tools | lazy | ~0.7 K | ~9.7 K | ~0.7 K | ~0.7 K | ~3.2 K | ~0.6 K |
+| large: 10 servers x 100 tools | lazy | ~0.7 K | ~61.2 K | ~0.7 K | ~0.7 K | ~18.6 K | ~0.6 K |
+
+For the large synthetic fleet, forced `:inline` adds roughly 60 K
+estimated tokens to every planner invocation versus `:auto`/`:lazy`.
+For the small fleet, `:auto` intentionally stays inline, and forcing
+`:lazy` saves roughly 1.7 K estimated planner tokens per `ptc_task`
+call at the cost of runtime catalog discovery.
+
 When an upstream tool advertises `outputSchema`, the generated catalog
 turns the supported JSON Schema subset into compact PTC-style output
 hints, for example:

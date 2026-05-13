@@ -11,6 +11,15 @@ revisions.
 
 ### Added
 
+- Agentic prompt-size benchmark
+  (`bench/agentic_prompt_bench.exs`). The deterministic tier-1 harness
+  freezes synthetic upstream catalogs and measures server-side
+  `ptc_task` planner system-prompt bytes, client-visible `ptc_task`
+  tool-entry bytes, and `ptc_lisp_execute` tool-entry bytes across
+  `--catalog-mode auto|inline|lazy`, small/medium/large fleet shapes,
+  and `--agentic-capability-summary-max-bytes` sensitivity rows. It
+  makes zero LLM/provider calls, supports `--runs` stability checks and
+  `--out` JSON output, and is documented in README "Agentic mode".
 - PTC payload-reduction metrics
   (`Plans/ptc-runner-mcp-payload-reduction.md`). Aggregator-mode
   responses (`ptc_lisp_execute` with ≥ 1 upstream call, and every
