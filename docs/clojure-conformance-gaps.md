@@ -4,6 +4,7 @@ Tracked differences between PTC-Lisp and Clojure semantics, discovered via confo
 
 **Test file:** `test/ptc_runner/lisp/sci_conformance_test.exs`
 **Related issue:** [#832](https://github.com/andreasronge/ptc_runner/issues/832)
+**Design policy:** `docs/ptc-lisp-design-guidelines.md`
 **Audit (function coverage):** `docs/clojure-core-audit.md`
 **Function reference:** `docs/function-reference.md`
 
@@ -616,3 +617,4 @@ When conformance testing reveals a new gap:
 3. Set priority: P0 if it causes silent wrong results, P1 if it errors where Clojure succeeds, P2 if edge case
 4. Include a minimal reproducer with both Clojure and PTC-Lisp output
 5. Note the source (SCI test name + line, Joker test, manual, etc.)
+6. For `DIV-*` entries, apply the rules in `docs/ptc-lisp-design-guidelines.md`: state why Clojure conformance loses to sandbox safety, bounded execution, or recoverable signal values

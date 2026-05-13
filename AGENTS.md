@@ -8,6 +8,14 @@ Use a concise Conventional Commit subject, e.g.
 For non-trivial commits, add a short body covering what changed and how
 it was verified.
 
+## PTC-Lisp Changes
+
+When changing PTC-Lisp syntax, builtins, Java interop, or Clojure
+conformance behavior, read `docs/ptc-lisp-design-guidelines.md` first.
+Clojure compatibility is the default, but sandbox safety and recoverable
+signal values take precedence for Clojure-named functions where Clojure
+would raise; Java-named dot methods keep Java semantics.
+
 <!-- usage-rules-start -->
 <!-- usage-rules-header -->
 # Usage Rules
