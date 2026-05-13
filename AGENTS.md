@@ -1,3 +1,13 @@
+# Repository Instructions
+
+## Commit Messages
+
+Use a concise Conventional Commit subject, e.g.
+`feat(mcp): add stateful sessions`.
+
+For non-trivial commits, add a short body covering what changed and how
+it was verified.
+
 <!-- usage-rules-start -->
 <!-- usage-rules-header -->
 # Usage Rules
