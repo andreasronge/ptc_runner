@@ -11,6 +11,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   use GenServer
 
   alias PtcRunnerMcp.Limits, as: McpLimits
+  alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
 
   @bytes_per_word :erlang.system_info(:wordsize)
@@ -195,7 +196,12 @@ defmodule PtcRunnerMcp.Sessions.Session do
           commit_success(state, previous, step, opts)
 
         {:error, step} ->
-          response = Projection.eval_lisp_error(state, step)
+          upstream_calls = Map.get(opts, :upstream_calls, [])
+
+          response =
+            Projection.eval_lisp_error(state, step)
+            |> maybe_put_upstream_calls(upstream_calls)
+            |> decorate_ptc_metrics(upstream_calls)
 
           :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
             session_id: state.id,
@@ -408,17 +414,15 @@ defmodule PtcRunnerMcp.Sessions.Session do
     {turn_history, history_notices} =
       Limits.cap_turn_history(state.turn_history, step.return, state.limits)
 
+    upstream_calls = Map.get(opts, :upstream_calls, [])
+
     candidate = %{
       memory: step.memory || %{},
       turn_history: turn_history,
       prints: Limits.append_prints(state.prints, step.prints || [], state.limits),
       tool_calls: Limits.append_tool_calls(state.tool_calls, step.tool_calls || [], state.limits),
       upstream_calls:
-        Limits.append_upstream_calls(
-          state.upstream_calls,
-          Map.get(opts, :upstream_calls, []),
-          state.limits
-        )
+        Limits.append_upstream_calls(state.upstream_calls, upstream_calls, state.limits)
     }
 
     case Limits.validate_candidate(candidate, state.limits) do
@@ -432,7 +436,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
         response =
           Projection.eval_success(previous, committed, step, history_notices)
-          |> maybe_put_upstream_calls(Map.get(opts, :upstream_calls, []))
+          |> maybe_put_upstream_calls(upstream_calls)
+          |> decorate_ptc_metrics(upstream_calls)
 
         :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: committed.turn}, %{
           session_id: committed.id,
@@ -449,6 +454,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
             "session persisted-state limit exceeded; eval was not committed",
             %{detail: detail, session: Projection.inspect_view(state, "limits")["session"]}
           )
+          |> maybe_put_upstream_calls(upstream_calls)
+          |> decorate_ptc_metrics(upstream_calls)
 
         :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
           session_id: state.id,
@@ -468,6 +475,32 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   defp maybe_put_upstream_calls(payload, []), do: payload
   defp maybe_put_upstream_calls(payload, calls), do: Map.put(payload, "upstream_calls", calls)
+
+  # Mirrors the stateless `ptc_lisp_execute` decoration in `Tools`: when the
+  # eval made at least one upstream call, attach a per-eval `ptc_metrics`
+  # block so session workflows have the same payload-reduction visibility
+  # as one-shot programs. Non-aggregator runs drain to `[]` and skip this.
+  defp decorate_ptc_metrics(payload, []), do: payload
+
+  defp decorate_ptc_metrics(payload, entries) when is_map(payload) and is_list(entries) do
+    Map.put(
+      payload,
+      "ptc_metrics",
+      PayloadMetrics.build(result_field_bytes(payload), prints_field_bytes(payload), entries)
+    )
+  end
+
+  defp result_field_bytes(%{"result" => r}) when is_binary(r), do: byte_size(r)
+  defp result_field_bytes(_), do: 0
+
+  defp prints_field_bytes(%{"prints" => p}) when is_list(p) do
+    case Jason.encode(p) do
+      {:ok, json} -> byte_size(json)
+      {:error, _} -> 0
+    end
+  end
+
+  defp prints_field_bytes(_), do: 0
 
   defp matching_eval(%{eval: %{request_id: request_id} = eval}, request_id), do: {:ok, eval}
   defp matching_eval(_state, _request_id), do: {:error, :stale_eval}

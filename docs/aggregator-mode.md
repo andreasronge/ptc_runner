@@ -565,10 +565,13 @@ detail string).
 The whole point of programmatic tool calling is that the program
 fetches from upstream MCP tools and **collapses** the results down to
 a small answer before handing it back. Aggregator-mode responses
-(`ptc_lisp_execute` with at least one upstream call, and every
-`ptc_task`) carry a deterministic accounting of that, in a
+(`ptc_lisp_execute` with at least one upstream call, every
+`ptc_task`, and every `ptc_session_eval` whose turn made at least one
+upstream call) carry a deterministic accounting of that, in a
 `ptc_metrics` block on the `structuredContent` envelope plus
-`result_bytes` / `oversize` on each `upstream_calls[]` entry:
+`result_bytes` / `oversize` on each `upstream_calls[]` entry. For
+sessions the block is **per-eval** — it accounts for the calls drained
+this turn, not the session's cumulative `upstream_calls` history:
 
 ```jsonc
 // structuredContent (abridged) — ptc_lisp_execute, aggregator mode
