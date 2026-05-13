@@ -101,20 +101,6 @@ defmodule PtcRunner.Lisp.RuntimeStringTest do
     end
   end
 
-  describe "string key parameters - pluck" do
-    test "pluck accepts string key parameter with string-keyed data" do
-      data = [%{"name" => "Alice"}, %{"name" => "Bob"}]
-      result = Runtime.pluck("name", data)
-      assert result == ["Alice", "Bob"]
-    end
-
-    test "pluck accepts string key parameter with atom-keyed data" do
-      data = [%{name: "Alice"}, %{name: "Bob"}]
-      result = Runtime.pluck("name", data)
-      assert result == ["Alice", "Bob"]
-    end
-  end
-
   describe "string key parameters - get" do
     test "get accepts string key parameter with string-keyed map" do
       map = %{"name" => "Alice"}

@@ -863,12 +863,6 @@ defmodule PtcRunner.Lisp do
 
   defp collect_tool_names({:juxt, fns}, acc), do: Enum.reduce(fns, acc, &collect_tool_names/2)
 
-  defp collect_tool_names({:where, _field, _op, val}, acc) when not is_nil(val),
-    do: collect_tool_names(val, acc)
-
-  defp collect_tool_names({:pred_combinator, _kind, preds}, acc),
-    do: Enum.reduce(preds, acc, &collect_tool_names/2)
-
   defp collect_tool_names(_other, acc), do: acc
 
   defp execute_tool(normalized_tools, name, args) do
@@ -1065,17 +1059,6 @@ defmodule PtcRunner.Lisp do
 
   defp collect_undefined_vars({:set, elems}, scope) do
     Enum.flat_map(elems, &collect_undefined_vars(&1, scope))
-  end
-
-  # Predicates
-  defp collect_undefined_vars({:where, _field, _op, value}, scope) when not is_nil(value) do
-    collect_undefined_vars(value, scope)
-  end
-
-  defp collect_undefined_vars({:where, _field, _op, nil}, _scope), do: []
-
-  defp collect_undefined_vars({:pred_combinator, _kind, predicates}, scope) do
-    Enum.flat_map(predicates, &collect_undefined_vars(&1, scope))
   end
 
   # Juxt

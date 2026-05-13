@@ -248,9 +248,9 @@ If you don't see "Output:" in the trace, either no `println` was called or the L
 **Solutions:**
 
 1. **Check common mistakes** (these are fed back to the LLM automatically):
-   - Missing operator: `(where :status "active")` should be `(where :status = "active")`
    - Lists instead of vectors: `'(1 2 3)` should be `[1 2 3]`
    - Missing else branch: `(if cond then)` should be `(if cond then nil)`
+   - Quoted-list syntax: `'(1 2 3)` is not supported, use `[1 2 3]`
 
 2. **View raw LLM output** to see what the LLM generated:
    ```elixir

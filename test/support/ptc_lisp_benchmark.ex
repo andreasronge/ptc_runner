@@ -64,21 +64,13 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
 
   ## COMMON INVALID PATTERNS (reject these):
 
-  1. `where` predicate without operator:
-     - INVALID: `(where :active true)` or `(where :field value)`
-     - VALID: `(where :active = true)` or `(where :active)` for truthy check
-
-  2. 3-arity comparisons (Clojure range syntax not supported):
+  1. 3-arity comparisons (Clojure range syntax not supported):
      - INVALID: `(<= 100 x 500)` or `(< 0 n 10)`
      - VALID: `(and (>= x 100) (<= x 500))`
 
-  3. Destructuring in `fn` parameters (only supported in `let`):
+  2. Destructuring in `fn` parameters (only supported in `let`):
      - INVALID: `(fn [{:keys [a b]}] ...)`
      - VALID: `(fn [item] (let [{:keys [a b]} item] ...))`
-
-  4. Using `and`/`or` for filtering predicates (use combinators):
-     - INVALID: `(filter #(and (> (:price %) 100) (< (:price %) 500)) items)`
-     - VALID: `(filter (all-of (where :price > 100) (where :price < 500)) items)`
 
   ## Response Format:
   Respond with ONLY a JSON object (no markdown):
@@ -95,7 +87,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
       %{
         name: "simple_filter",
         level: 1,
-        task: "Filter products where price is greater than 100",
+        task: "Filter products to those whose price is greater than 100",
         context_description:
           "data/products contains a list of products with :name and :price fields"
       },
@@ -162,7 +154,7 @@ defmodule PtcRunner.TestSupport.PtcLispBenchmark do
       %{
         name: "edge_truthy_check",
         level: 5,
-        task: "Filter to only active users (where :active is true)",
+        task: "Filter to only active users (the :active field is true)",
         context_description:
           "data/users contains a list of users with :name, :email, and :active (boolean) fields. Note: Use explicit equality check with operator."
       },

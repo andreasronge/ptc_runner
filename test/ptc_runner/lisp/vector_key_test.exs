@@ -11,26 +11,6 @@ defmodule PtcRunner.Lisp.VectorKeyTest do
     assert Runtime.avg_by([:salary], nil) == nil
   end
 
-  test "pluck with vector path" do
-    data = [%{salary: 100}, %{salary: 200}]
-    assert Runtime.pluck([:salary], data) == [100, 200]
-  end
-
-  test "pluck with empty path returns items" do
-    data = [%{salary: 100}, %{salary: 200}]
-    assert Runtime.pluck([], data) == data
-  end
-
-  test "nested vector path for pluck" do
-    data = [%{address: %{city: "Oslo"}}, %{address: %{city: "Bergen"}}]
-    assert Runtime.pluck([:address, :city], data) == ["Oslo", "Bergen"]
-  end
-
-  test "mixed type path for pluck" do
-    data = [%{"address" => %{city: "Oslo"}}, %{"address" => %{city: "Bergen"}}]
-    assert Runtime.pluck(["address", :city], data) == ["Oslo", "Bergen"]
-  end
-
   test "sum_by with vector path" do
     data = [%{amount: 100}, %{amount: 200}, %{other: 50}]
     assert Runtime.sum_by([:amount], data) == 300

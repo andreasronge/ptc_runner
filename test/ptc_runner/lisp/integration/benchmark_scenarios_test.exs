@@ -17,7 +17,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 1 - simple_filter" do
     test "filters products where price > 100" do
       source = ~S"""
-      (filter (where :price > 100) data/products)
+      (filter (fn [p] (> (:price p) 100)) data/products)
       """
 
       ctx = %{
@@ -40,7 +40,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 1 - simple_count" do
     test "counts active users" do
       source = ~S"""
-      (count (filter (where :active) data/users))
+      (count (filter :active data/users))
       """
 
       ctx = %{
@@ -65,7 +65,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
     test "gets top 5 highest-paid employees" do
       source = ~S"""
       (->> data/employees
-           (filter (where :salary > 50000))
+           (filter (fn [e] (> (:salary e) 50000)))
            (sort-by :salary >)
            (take 5))
       """
@@ -96,7 +96,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
     test "calculates total of completed orders" do
       source = ~S"""
       (->> data/orders
-           (filter (where :status = "completed"))
+           (filter (fn [o] (= (:status o) "completed")))
            (sum-by :amount))
       """
 
@@ -122,10 +122,10 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
     test "finds electronics OR expensive, excluding out of stock" do
       source = ~S"""
       (->> data/products
-           (filter (all-of
-                     (any-of (where :category = "electronics")
-                             (where :price > 500))
-                     (where :in_stock))))
+           (filter (fn [p]
+                     (and (or (= (:category p) "electronics")
+                              (> (:price p) 500))
+                          (:in_stock p)))))
       """
 
       ctx = %{
@@ -181,8 +181,8 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
     test "fetches premium users and returns emails" do
       source = ~S"""
       (->> (tool/get-users {})
-           (filter (where :tier = "premium"))
-           (pluck :email))
+           (filter (fn [u] (= (:tier u) "premium")))
+           (map :email))
       """
 
       tools = %{
@@ -207,7 +207,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       # Use def for explicit storage if needed across turns
       source = ~S"""
       (let [high-value (->> (tool/get-orders {})
-                            (filter (where :amount > 1000)))]
+                            (filter (fn [o] (> (:amount o) 1000))))]
         {:count (count high-value)
          :high_value_orders high-value})
       """
@@ -240,7 +240,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 5 - edge_truthy_check" do
     test "filters active users with explicit equality" do
       source = ~S"""
-      (filter (where :active = true) data/users)
+      (filter (fn [u] (= (:active u) true)) data/users)
       """
 
       ctx = %{
@@ -261,7 +261,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
 
     test "filters active users with truthy check" do
       source = ~S"""
-      (filter (where :active) data/users)
+      (filter :active data/users)
       """
 
       ctx = %{
@@ -285,8 +285,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   describe "Level 5 - edge_range_check" do
     test "finds products with price between 100 and 500 inclusive" do
       source = ~S"""
-      (filter (all-of (where :price >= 100)
-                      (where :price <= 500))
+      (filter (fn [p] (and (>= (:price p) 100) (<= (:price p) 500)))
               data/products)
       """
 

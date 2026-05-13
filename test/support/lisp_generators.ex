@@ -183,7 +183,6 @@ defmodule PtcRunner.TestSupport.LispGenerators do
       {1, gen_comparison(depth - 1, scope)},
       {1, gen_and(depth - 1, scope)},
       {1, gen_or(depth - 1, scope)},
-      {1, gen_where(depth - 1)},
       {1, gen_tool_call(depth - 1, scope)}
     ])
   end
@@ -278,66 +277,6 @@ defmodule PtcRunner.TestSupport.LispGenerators do
     # min_length: 1 to avoid generating (or) with no args
     list_of(gen_expr(depth, scope), min_length: 1, max_length: 4)
     |> map(&{:list, [{:symbol, :or} | &1]})
-  end
-
-  @doc "Generate where predicate"
-  def gen_where(depth) do
-    frequency([
-      {3, gen_where_truthy()},
-      {3, gen_where_comparison(depth)},
-      {2, gen_where_with_path(depth)}
-    ])
-  end
-
-  defp gen_where_truthy do
-    gen_where_field()
-    |> map(&{:list, [{:symbol, :where}, &1]})
-  end
-
-  defp gen_where_comparison(_depth) do
-    bind(gen_where_field(), fn field ->
-      bind(gen_where_operator(), fn op ->
-        bind(gen_where_value(op), fn value ->
-          constant({:list, [{:symbol, :where}, field, {:symbol, op}, value]})
-        end)
-      end)
-    end)
-  end
-
-  defp gen_where_with_path(_depth) do
-    # Generate (where [:key1 :key2] op value) for nested access
-    bind(list_of(gen_keyword(), min_length: 2, max_length: 3), fn path_keywords ->
-      path = {:vector, path_keywords}
-
-      bind(gen_where_operator(), fn op ->
-        bind(gen_where_value(op), fn value ->
-          constant({:list, [{:symbol, :where}, path, {:symbol, op}, value]})
-        end)
-      end)
-    end)
-  end
-
-  defp gen_where_field do
-    # Simple keyword field (most common case)
-    gen_keyword()
-  end
-
-  defp gen_where_operator do
-    # All where operators from spec Section 7.1
-    member_of([:=, :"not=", :>, :<, :>=, :<=, :includes, :in])
-  end
-
-  defp gen_where_value(op) when op in [:includes, :in] do
-    # `includes` checks if collection contains value
-    # `in` checks if value is in a collection
-    frequency([
-      {2, gen_leaf_expr([])},
-      {1, list_of(gen_leaf_expr([]), min_length: 1, max_length: 3) |> map(&{:vector, &1})}
-    ])
-  end
-
-  defp gen_where_value(_op) do
-    gen_leaf_expr([])
   end
 
   @doc "Generate tool call with mocked tool using tool/ syntax"

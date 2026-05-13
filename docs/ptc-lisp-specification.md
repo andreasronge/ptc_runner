@@ -43,19 +43,15 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.1) |
 | `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
 | `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
-| `where`, `all-of`, `any-of`, `none-of` | Predicate builders for filtering (§7) |
 | `sum`, `avg` | Simple collection aggregators (§8) |
 | `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Field-based collection aggregators (§8) |
 | `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
 | `re-pattern`, `#"..."` | Compile string to regex (§8.8) |
-| `pluck` | Extract field values from collections (§8) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
 | `float`, `double`, `int` | Type coercion (to float / to integer) |
 | `call` | Tool invocation special form (§9) |
 | `return`, `fail` | Control flow for multi-turn agentic loops (§5.22, §5.23) |
 | `doseq` | Side-effecting iteration (§5.21) |
-| Keyword/string coercion in `where` | `:status = :active` matches `"active"` (§7.6) |
-| Path-based `where` | `(where [:user :role] = :admin)` for nested access (§7.1) |
 
 All other syntax and functions are valid Clojure and are tested against Babashka for conformance.
 
@@ -1450,257 +1446,121 @@ Threads through forms, short-circuiting to `nil` if any intermediate result is `
 
 ---
 
-## 7. Predicate Builders
+## 7. Filtering Predicates
 
-Predicate builders create **predicate functions** for use with `filter`, `remove`, `find`, etc. They eliminate the need for anonymous functions in most filtering scenarios.
+Filtering operations (`filter`, `remove`, `find`, `some`, `every?`, `not-any?`, `not-every?`, `take-while`, `drop-while`) accept any callable as a predicate. The three common shapes are:
 
-### 7.1 `where` — Field Comparison
-
-Creates a predicate function that compares a field value:
+| Shape | Example | When to use |
+|-------|---------|-------------|
+| Keyword accessor | `(filter :active users)` | Truthy check on a single field |
+| Anonymous `fn` / `#()` | `(filter (fn [u] (> (:age u) 18)) users)` | Field comparisons, multi-field logic |
+| Named function | `(filter even? xs)` | Standard or user-defined predicate |
 
 ```clojure
-(where field-key operator value)
-(where path operator value)
+(count (filter :active [{:active 1} {:active nil} {:active false}])) ; => 1
+(count (filter (fn [m] (> (:x m) 1)) [{:x 1} {:x 2} {:x 3}]))        ; => 2
+(count (filter #(= (:status %) "active") [{:status "active"} {:status "x"}])) ; => 1
 ```
 
-**Operators:** `=`, `not=`, `>`, `<`, `>=`, `<=`, `includes`, `in`
+### 7.1 Combining Predicates with `and` / `or` / `not`
 
-#### Single Field
-
-```clojure
-(where :status = "active")      ; field equals value
-(where :age > 18)               ; field greater than
-(where :price <= 100)           ; field less than or equal
-(where :category not= "hidden") ; field not equals
-(where :tags includes "urgent") ; field includes value (substring or member)
-```
+To check several conditions, build the boolean inside a single `fn`:
 
 ```clojure
-(count (filter (where :x = 1) [{:x 1} {:x 2}]))           ; => 1
-(count (filter (where :x > 1) [{:x 1} {:x 2} {:x 3}]))    ; => 2
-(count (filter (where :x < 2) [{:x 1} {:x 2} {:x 3}]))    ; => 1
-(count (filter (where :x not= 2) [{:x 1} {:x 2} {:x 3}])) ; => 2
-(count (filter (where :x >= 2) [{:x 1} {:x 2} {:x 3}]))   ; => 2
-(count (filter (where :x <= 2) [{:x 1} {:x 2} {:x 3}]))   ; => 2
-```
+;; All conditions must hold
+(filter (fn [u] (and (= (:status u) "active") (>= (:age u) 18))) users)
 
-#### Nested Field (Path)
+;; At least one condition must hold
+(filter (fn [u] (or (= (:role u) "admin") (= (:role u) "moderator"))) users)
 
-Use a vector for nested access:
-
-```clojure
-(where [:user :age] > 18)
-(where [:profile :email] not= nil)
-(where [:address :country] = "US")
+;; Negation
+(remove (fn [i] (:deleted i)) items)
 ```
 
 ```clojure
-(count (filter (where [:a :b] = 1) [{:a {:b 1}} {:a {:b 2}}]))  ; => 1
+(count (filter (fn [m] (and (= (:a m) 1) (= (:b m) 2)))
+               [{:a 1 :b 2} {:a 1 :b 3}]))           ; => 1
+(count (filter (fn [m] (or (= (:a m) 1) (= (:a m) 2)))
+               [{:a 1} {:a 2} {:a 3}]))              ; => 2
 ```
 
-#### Field Exists / Is Truthy
+### 7.2 Membership Testing
 
-Check if field is truthy (not `nil` or `false`):
+Use `contains?` against a set or list:
 
 ```clojure
-(where :active)           ; field is truthy (not nil, not false)
-(where :verified = true)    ; explicit boolean check
-(where [:user :premium])  ; nested truthy check
+;; Pick orders whose status is "active" or "pending"
+(filter (fn [o] (contains? #{"active" "pending"} (:status o))) orders)
 ```
 
-```clojure
-(count (filter (where :a) [{:a 1} {:a nil} {:a false}]))  ; => 1
-(count (filter (where :a = true) [{:a true} {:a false}])) ; => 1
-```
-
-#### Keyword/String Coercion
-
-For the equality operators (`=`, `not=`), `in`, and `includes`, keywords are coerced to strings for comparison. This allows LLM-generated keywords to match string data values:
+For a variable membership set built from the data itself:
 
 ```clojure
-;; Keyword coerces to string
-(where :status = :active)        ; matches if field is "active"
-(where :status in [:active :pending])  ; both keywords coerce to strings
-(where :tags includes :urgent)   ; keyword "urgent" matches in ["urgent" "bug"]
-```
-
-**Coercion rules:**
-- Keywords (atoms that are not booleans) coerce to their string representation
-- `true` and `false` do **not** coerce (prevent `true` from matching `"true"`)
-- Empty keyword `:""` coerces to empty string `""`
-- Other types (`strings`, `numbers`, `nil`) are unchanged
-
-**Note:** Ordering comparisons (`>`, `<`, `>=`, `<=`) do **not** use coercion. Type mismatches return `false` (same as `nil` handling).
-
-```clojure
-(count (filter (where :s = :a) [{:s "a"} {:s "b"}]))             ; => 1
-(count (filter (where :s in [:a :b]) [{:s "a"} {:s "c"}]))       ; => 1
-(count (filter (where :t includes :x) [{:t ["x" "y"]} {:t []}])) ; => 1
-```
-
-### 7.2 Combining Predicates
-
-Use `all-of`, `any-of`, `none-of` to combine predicate functions:
-
-```clojure
-;; ALL-OF - all predicates must match
-(filter (all-of (where :status = "active")
-                (where :age >= 18))
-        users)
-
-;; ANY-OF - at least one predicate must match
-(filter (any-of (where :role = "admin")
-                (where :role = "moderator"))
-        users)
-
-;; NONE-OF - no predicate must match (inverts)
-(filter (none-of (where :deleted))
-        items)
-
-;; Complex combinations
-(filter (all-of (where :status = "active")
-                (any-of (where :role = "admin")
-                        (where :premium))
-                (none-of (where :banned)))
-        users)
-```
-
-```clojure
-(count (filter (all-of (where :a = 1) (where :b = 2)) [{:a 1 :b 2} {:a 1 :b 3}]))  ; => 1
-(count (filter (any-of (where :a = 1) (where :a = 2)) [{:a 1} {:a 2} {:a 3}]))     ; => 2
-(count (filter (none-of (where :a = 1)) [{:a 1} {:a 2}]))                          ; => 1
-```
-
-**Zero predicates:**
-
-| Expression | Result |
-|------------|--------|
-| `(all-of)` | Always true (vacuous truth) |
-| `(any-of)` | Always false (no predicate matches) |
-| `(none-of)` | Always true (no predicate to fail) |
-
-```clojure
-(count (filter (all-of) [{:a 1} {:a 2}]))     ; => 2
-(count (filter (any-of) [{:a 1} {:a 2}]))     ; => 0
-(count (filter (none-of) [{:a 1} {:a 2}]))    ; => 2
-```
-
-**Why not `and`/`or`/`not`?**
-
-The logical operators `and`, `or`, `not` operate on **boolean values** and short-circuit. Predicate combinators `all-of`, `any-of`, `none-of` combine **predicate functions** into a new predicate function. Keeping them separate avoids confusion:
-
-```clojure
-;; WRONG - and returns last truthy value, not a combined predicate
-(filter (and (where :a = 1) (where :b = 2)) coll)  ; BUG!
-
-;; CORRECT - all-of returns a new predicate that checks both
-(filter (all-of (where :a = 1) (where :b = 2)) coll)  ; OK
-```
-
-### 7.3 Membership Testing
-
-Test if field value is in a set of values:
-
-```clojure
-(where :status in ["active" "pending"])
-(where :category in ["travel" "food" "transport"])
-```
-
-Equivalent to: `(or (where :status = "active") (where :status = "pending"))`
-
-**Variables in `in` clause:** The value can be a bound variable, not just a literal:
-
-```clojure
-;; Using a variable for the membership set
 (let [premium-ids (->> users
-                       (filter (where :tier = "premium"))
-                       (pluck :id))]
-  (filter (where :user-id in premium-ids) orders))
+                       (filter (fn [u] (= (:tier u) "premium")))
+                       (map :id))
+      premium-set (set premium-ids)]
+  (filter (fn [o] (contains? premium-set (:user-id o))) orders))
 ```
 
-At eval time, `premium-ids` is resolved to its value before the predicate closure is created.
+### 7.3 Nested Field Access in Predicates
 
-### 7.4 `where` Semantics
-
-| Expression | True when |
-|------------|-----------|
-| `(where :f = v)` | `(= (get item :f) v)` |
-| `(where :f not= v)` | `(not= (get item :f) v)` |
-| `(where :f > v)` | `(> (get item :f) v)` |
-| `(where :f < v)` | `(< (get item :f) v)` |
-| `(where :f >= v)` | `(>= (get item :f) v)` |
-| `(where :f <= v)` | `(<= (get item :f) v)` |
-| `(where :f includes v)` | Value `v` is in field `f` (string substring or collection member) |
-| `(where :f in [vs])` | Field value equals any value in list |
-| `(where :f)` | Field is truthy (not `nil`, not `false`) |
-| `(where [:a :b] op v)` | `(op (get-in item [:a :b]) v)` |
-
-### 7.5 `where` Edge Cases
+Use `get-in` (or sequential `(:b (:a item))`) for nested fields:
 
 ```clojure
-; Missing field returns nil, comparisons handle gracefully
-(where :missing = nil)     ; matches items without the field
-(where :missing > 0)       ; false (nil > 0 is false inside where)
-
-; nil handling
-(where :field = nil)       ; explicitly match nil
-(where :field not= nil)    ; field exists and is not nil
-(where :field)             ; field is truthy (not nil, not false)
+(filter (fn [u] (= (get-in u [:profile :verified]) true)) users)
+(filter (fn [i] (> (get-in i [:user :age]) 18)) items)
 ```
 
-**`where` vs raw comparisons with nil:**
+### 7.4 Nil Handling in Predicates
 
-Inside `where`, ordering comparisons (`>`, `<`, `>=`, `<=`) with `nil` or missing fields return `false` instead of raising a type error. This enables safe filtering without pre-checking for nil:
+Ordering comparisons (`>`, `<`, `>=`, `<=`) with `nil` are **type errors**. Guard explicitly when a field may be missing or `nil`:
 
 ```clojure
-; INSIDE where: nil comparisons return false (safe for filtering)
-(filter (where :age > 18) users)   ; users without :age are excluded, no error
-
-; OUTSIDE where: nil comparisons are type errors
-(> 5 nil)                          ; => TYPE ERROR
-(< nil 10)                         ; => TYPE ERROR
+;; Safe: filter out users without :age first
+(filter (fn [u] (and (some? (:age u)) (> (:age u) 18))) users)
 ```
 
-This distinction exists because `where` is designed for safe filtering over potentially incomplete data, while raw comparisons should fail explicitly on invalid input.
+For equality checks `nil` is well-defined:
 
-**Flexible Key Access — String and Atom Keys:**
+```clojure
+(filter (fn [m] (= (:field m) nil)) items)   ; explicitly match nil
+(filter (fn [m] (some? (:field m))) items)   ; field exists and is not nil
+```
 
-Field accessors in `where` and key-based functions (`sort-by`, `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by`, `group-by`, `pluck`, `get`) support **bidirectional key matching**. This means:
+### 7.5 Flexible Key Access — String and Atom Keys
+
+Keyword accessors (`(:status m)`, `(get m :status)`, `(get-in m [:a :b])`) and the key-based aggregators (`sort-by`, `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by`, `group-by`) support **bidirectional key matching**:
+
 - Atom keys in code (`:status`) match both atom and string keys in data
 - String keys in code (`"status"`) match both string and atom keys in data
-
-This makes it easy to work with data from various sources without preprocessing:
+- Atom keys take precedence when both exist on the same map
 
 ```clojure
-; Atom keys (preferred Elixir style)
-(filter (where :status = "active") users)
+;; Atom keys (preferred Elixir style)
+(filter (fn [u] (= (:status u) "active")) users)
 
-; String keys (from JSON APIs or LLM-generated code)
-(filter (where :status = "active") data)
-;; If data is %{"status" => "active"}, it will match!
+;; Works with string-keyed data from JSON APIs
+(filter (fn [u] (= (:status u) "active")) data)
+;; A %{"status" => "active"} entry matches.
 
-; String key parameter also works (LLM compatibility)
-(sort-by "price" products)   ; Works with both %{price: 10} and %{"price" => 10}
-(sum-by "amount" expenses)   ; Same bidirectional matching
+;; String key parameter also works (useful for LLM-generated code)
+(sort-by "price" products)
+(sum-by "amount" expenses)
 
-; Mixed: nested structure with different key types
-(filter (where [:user :email] = "alice@example.com") items)
-;; Matches both: %{user: %{"email" => ...}} and %{"user" => %{email: ...}}
-
-; Atom key takes precedence when both exist
-;; If a map has both :category and "category", the atom key wins
-%{category: "priority", "category" => "ignored"}
-;; (where :category = "priority") matches "priority", not "ignored"
+;; Nested access with mixed key types
+(filter (fn [i] (= (get-in i [:user :email]) "alice@example.com")) items)
+;; Matches both %{user: %{"email" => ...}} and %{"user" => %{email: ...}}.
 ```
 
 **How it works:**
-1. When looking up a field, the accessor tries the exact key type first
-2. If not found, it falls back to the alternative type (atom↔string conversion)
-3. When both exist, the exact key type takes precedence
-4. This applies to nested fields too—each level independently tries exact match first, then fallback
-5. Missing fields at any level still return `nil`
+1. When looking up a field, the accessor tries the exact key type first.
+2. If not found, it falls back to the alternative type (atom ↔ string).
+3. When both exist on the same map, the exact key type takes precedence.
+4. This applies to nested fields independently at each level.
+5. Missing fields at any level still return `nil`.
 
-This design eliminates the need to manually convert JSON responses to atom-keyed maps before filtering, and provides resilience to LLM-generated code that may use strings instead of keywords.
+This eliminates the need to manually convert JSON responses to atom-keyed maps before filtering and gives some resilience against LLM-generated code that uses strings instead of keywords.
 
 ---
 
@@ -1725,15 +1585,14 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
-;; Using where (explicit predicate builder)
-(filter (where :active) users)
-(remove (where :deleted) items)
-(find (where :id = 42) users)
-
-;; Using keyword directly (concise, checks truthiness)
+;; Using a keyword directly (concise, checks truthiness)
 (filter :active users)
 (remove :deleted items)
 (find :special items)
+
+;; Using an anonymous fn for richer comparisons
+(filter (fn [u] (> (:age u) 18)) users)
+(find   (fn [u] (= (:id u) 42)) users)
 ```
 
 **Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
@@ -1783,17 +1642,15 @@ This design eliminates the need to manually convert JSON responses to atom-keyed
 | `mapv` | `(mapv f c1 c2 c3)` | Like map with three collections |
 | `map-indexed` | `(map-indexed f coll)` | Apply f to index and item |
 | `select-keys` | `(select-keys map keys)` | Pick specific keys |
-| `pluck` | `(pluck key coll)` | Extract single field from each item |
 
 ```clojure
-(map :name users)                    ; extract :name from each
+(map :name users)                    ; extract :name from each item
 (mapcat (fn [x] [x (* x 2)]) [1 2 3])  ; => [1 2 2 4 3 6] (map + flatten)
 (pmap :name users)                   ; same, but parallel execution
 (pcalls #(tool/get-user) #(tool/get-stats))  ; parallel heterogeneous calls
 (mapv :name users)                   ; same, ensures vector
 (map-indexed (fn [i x] [i x]) ["a" "b"]) ; => [[0 "a"] [1 "b"]]
 (select-keys user [:name :email])    ; pick keys from map
-(pluck :name users)                  ; shorthand for (map :name coll)
 
 ;; Multi-arity map - parallel iteration over collections
 (map + [1 2 3] [10 20 30])           ; => [11 22 33]
@@ -2183,7 +2040,7 @@ The `seq` function converts a collection to a sequence:
 (distinct-by :category products)  ; one item per category (first occurrence)
 (frequencies [:a :b :a :c :b :a]) ; => {:a 3, :b 2, :c 1}
 (frequencies "hello")                 ; => {"h" 1, "e" 1, "l" 2, "o" 1}
-(frequencies (pluck :status orders))  ; count orders by status
+(frequencies (map :status orders))    ; count orders by status
 (min-by first [["b" 2] ["a" 1]])  ; => ["a" 1] (item with minimum first element)
 (max-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; item with maximum second element
 (sum-by (fn [x] (nth x 1)) [["a" 2] ["b" 3]])  ; => 5 (sum second elements)
@@ -2225,9 +2082,7 @@ The `seq` function converts a collection to a sequence:
 (not-empty [1 2])                  ; => [1 2]
 (not-empty [])                     ; => nil
 (not-empty nil)                    ; => nil
-(some (where :admin) users)        ; any admins? (with predicate)
 (some :admin users)                ; any admins? (keyword shorthand)
-(every? (where :active) users)     ; all active? (with predicate)
 (every? :active users)             ; all active? (keyword shorthand)
 (not-any? :error items)            ; no errors?
 (contains? {:a 1} :a)              ; => true
@@ -3213,7 +3068,7 @@ Context is **per-request** data passed by the host. It does not persist across t
 
 ```clojure
 (->> data/expenses
-     (filter (where :category = "travel"))
+     (filter (fn [e] (= (:category e) "travel")))
      (sum-by :amount))
 ```
 
@@ -3327,7 +3182,7 @@ Invoke registered tools using the `tool/` namespace:
 ;; Store tool result for later use
 (let [users (tool/get-users)]
   (->> users
-       (filter (where :active))
+       (filter :active)
        (count)))
 ```
 
@@ -3362,7 +3217,7 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 ```clojure
 ;; Discover which upstreams are available, then describe a tool on one of them
 (let [servers (catalog/list-servers)]
-  (when (some (where :name "github") servers)
+  (when (some (fn [s] (= (:name s) "github")) servers)
     (catalog/describe-tool "github" "search_repos")))
 
 ;; Find tools related to "read" across every configured upstream
@@ -3423,7 +3278,7 @@ Filter expenses by category and sum amounts:
 
 ```clojure
 (->> data/expenses
-     (filter (where :category = "travel"))
+     (filter (fn [e] (= (:category e) "travel")))
      (sum-by :amount))
 ```
 
@@ -3458,8 +3313,6 @@ Get top 5 products by price:
 Get all product names:
 
 ```clojure
-(pluck :name data/products)
-;; or
 (map :name data/products)
 ```
 
@@ -3481,10 +3334,11 @@ Find eligible orders (high value, premium status, not flagged):
 
 ```clojure
 (->> data/orders
-     (filter (all-of (where :total > 100)
-                     (any-of (where :status = "vip")
-                             (where :status = "premium"))
-                     (none-of (where :flagged)))))
+     (filter (fn [o]
+               (and (> (:total o) 100)
+                    (or (= (:status o) "vip")
+                        (= (:status o) "premium"))
+                    (not (:flagged o))))))
 ```
 
 ### 10.7 Transform and Select Fields
@@ -3493,7 +3347,7 @@ Get names and emails of active users:
 
 ```clojure
 (->> data/users
-     (filter (where :active))
+     (filter :active)
      (mapv (fn [u] (select-keys u [:name :email]))))
 ```
 
@@ -3505,9 +3359,9 @@ Join orders with user information:
 (let [users (tool/get-users)
       orders (tool/get-orders)]
   (->> orders
-       (filter (where :total > 100))
+       (filter (fn [o] (> (:total o) 100)))
        (mapv (fn [order]
-               (let [user (find (where :id = (:user-id order)) users)]
+               (let [user (find (fn [u] (= (:id u) (:user-id order))) users)]
                  (merge order (select-keys user [:name :email])))))))
 ```
 
@@ -3535,7 +3389,7 @@ Filter by nested field:
 
 ```clojure
 (->> data/users
-     (filter (where [:profile :verified] = true)))
+     (filter (fn [u] (= (get-in u [:profile :verified]) true))))
 ```
 
 ---
@@ -3580,7 +3434,7 @@ Filter by nested field:
 (< nil 10)                   ; => TYPE ERROR
 
 ;; filter/map handle nil gracefully
-(filter (where :x = nil) [{:x nil} {:x 1}])  ; => [{:x nil}]
+(filter (fn [m] (= (:x m) nil)) [{:x nil} {:x 1}])  ; => [{:x nil}]
 ```
 
 ### 11.3 Type Errors in Comparisons
@@ -3734,16 +3588,6 @@ The formatted strings shown below are human-readable renderings for display to u
 Errors should include location and context when available. Source location tracking (line/column) is recommended but optional for v1 implementations—at minimum, errors must include the error type and a descriptive message.
 
 ```
-parse-error at line 3, column 15:
-  (filter (where :status "active") coll)
-                 ^
-  Expected operator (=, >, <, >=, <=, not=, includes, in)
-  after field name in 'where' expression.
-
-  Hint: Use (where :status = "active") for equality comparison.
-```
-
-```
 type-error at line 5:
   (sum-by :amount items)
 
@@ -3758,7 +3602,6 @@ type-error at line 5:
 | Error | Hint |
 |-------|------|
 | Unknown symbol `foo` | Did you mean: `filter`, `first`, `find`? |
-| `where` missing operator | Use `(where :field = value)`, not `(where :field value)` |
 | Wrong arity for `if` | `if` requires 2 or 3 arguments (condition, then, else?) |
 | `let` bindings not paired | `let` requires an even number of binding forms |
 
@@ -3842,10 +3685,10 @@ The `#()` syntax desugars to the equivalent `fn`:
 (mapv (fn [{:keys [name age]}] {:name name :years age}) users)
 ```
 
-**When to use `#()` vs `fn` vs `where`:**
-- Use `#()` for simple, single-argument lambdas (most common LLM use case)
-- Use `fn` for complex logic, destructuring, or multiple parameters
-- Use `where` for simple field comparisons in `filter`/`remove`/`find`
+**When to use `#()` vs `fn`:**
+- Use a keyword (`:active`) as the predicate when you just need a truthy field check.
+- Use `#()` for simple, single-argument lambdas (most common LLM use case).
+- Use `fn` for complex logic, destructuring, or multiple parameters.
 
 ### 13.2 Functions Excluded from Core
 
@@ -3952,7 +3795,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 
 Programs should produce identical results when run in:
 1. PTC-Lisp interpreter (Elixir)
-2. Clojure (with stub implementations for `data/`, `tool/`, `call`, `where`, etc.)
+2. Clojure (with stub implementations for `data/`, `tool/`, `call`, and other PTC-specific forms)
 
 ---
 
@@ -4018,7 +3861,7 @@ The program's return value is passed through unchanged. Storage is explicit via 
 ```clojure
 ;; Returns a number - nothing stored
 (->> data/expenses
-     (filter (where :category = "travel"))
+     (filter (fn [e] (= (:category e) "travel")))
      (sum-by :amount))
 ```
 
@@ -4027,9 +3870,9 @@ The program's return value is passed through unchanged. Storage is explicit via 
 ```clojure
 ;; Store values explicitly, return a result
 (def high-paid (->> (tool/find-employees {})
-                    (filter (where :salary > 100000))))
+                    (filter (fn [e] (> (:salary e) 100000)))))
 (def last-query "employees")
-(pluck :email high-paid)
+(map :email high-paid)
 ```
 
 After execution:
@@ -4118,7 +3961,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 
 ```clojure
 (def high-paid (->> (tool/find-employees {})
-                    (filter (where :salary > 100000))))
+                    (filter (fn [e] (> (:salary e) 100000)))))
 (count high-paid)
 ```
 
@@ -4137,7 +3980,7 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 **Turn 3:** Fetch orders for stored employees, add new symbol
 
 ```clojure
-(def orders (let [ids (pluck :id high-paid)]
+(def orders (let [ids (map :id high-paid)]
               (tool/get-orders {:employee-ids ids})))
 {:orders-count (count orders)}
 ```
@@ -4166,7 +4009,7 @@ Every execution produces a log entry:
   timestamp: ~U[2024-01-15 10:30:00Z],
 
   # Input
-  program_source: "(do (def orders (call \"get-orders\" {:ids (pluck :id high-paid)})) ...)",
+  program_source: "(do (def orders (call \"get-orders\" {:ids (map :id high-paid)})) ...)",
   memory_before: %{high_paid: [...]},
   ctx: %{user_id: "user-123"},
 

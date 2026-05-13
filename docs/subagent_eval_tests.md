@@ -640,7 +640,7 @@ What is the average price of products with status 'archived'? If there are no su
 
 
 
-(if-let [filtered (filter (where :status = "archived") data/products)]
+(if-let [filtered (filter (fn [p] (= (:status p) "archived")) data/products)]
   (avg-by :price filtered)
   0)
 
@@ -660,7 +660,7 @@ Get the name of the first product in the 'luxury' category. If no such product e
 
 
 
-(if-let [luxury-products (filter (where :category = "luxury") data/products)]
+(if-let [luxury-products (filter (fn [p] (= (:category p) "luxury")) data/products)]
   (get (first luxury-products) :name)
   "none")
 

@@ -3,49 +3,6 @@ defmodule PtcRunner.Lisp.RuntimeFlexAccessTest do
 
   alias PtcRunner.Lisp.Runtime
 
-  describe "pluck - flexible key access" do
-    test "string key fallback: pluck with string keys in data" do
-      data = [
-        %{"name" => "Alice", "age" => 30},
-        %{"name" => "Bob", "age" => 25}
-      ]
-
-      result = Runtime.pluck(:name, data)
-      assert result == ["Alice", "Bob"]
-    end
-
-    test "atom key precedence: pluck prefers atom keys when both exist" do
-      data = [
-        %{"name" => "ignored", name: "Alice"},
-        %{"name" => "ignored", name: "Bob"}
-      ]
-
-      result = Runtime.pluck(:name, data)
-      assert result == ["Alice", "Bob"]
-    end
-
-    test "atom key precedence: pluck with falsy atom value wins" do
-      data = [
-        %{"active" => true, active: false},
-        %{"active" => true, active: nil}
-      ]
-
-      result = Runtime.pluck(:active, data)
-      assert result == [false, nil]
-    end
-
-    test "mixed collections: pluck with both atom and string keys" do
-      data = [
-        %{status: "active"},
-        %{"status" => "inactive"},
-        %{"status" => "ignored", status: "pending"}
-      ]
-
-      result = Runtime.pluck(:status, data)
-      assert result == ["active", "inactive", "pending"]
-    end
-  end
-
   describe "sort_by - flexible key access" do
     test "string key fallback: sort_by with string keys in data" do
       data = [

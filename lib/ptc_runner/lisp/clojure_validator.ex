@@ -157,7 +157,8 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   Adds definitions for:
   - `ctx` - Context data as a map
   - `memory` - Memory data as a map
-  - PTC-specific functions: `where`, `all-of`, `any-of`, `none-of`, etc.
+  - PTC-specific aggregator/tool stubs (`sum-by`, `avg-by`, `min-by`, `max-by`,
+    `pmap`, `pcalls`, `call`, …)
   """
   @spec wrap_with_stubs(String.t(), map(), map()) :: String.t()
   def wrap_with_stubs(source, context \\ %{}, memory \\ %{}) do
@@ -424,56 +425,6 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     ;; Import clojure.walk functions (walk, prewalk, postwalk)
     (require '[clojure.walk :refer [walk prewalk postwalk]])
 
-    ;; Helper to coerce keyword to string for comparison (PTC-Lisp behavior)
-    (defn- coerce-for-compare [v]
-      (if (keyword? v) (name v) v))
-
-    ;; Helper to get value from item, supporting both keywords and paths
-    (defn- flex-get [item field]
-      (if (vector? field)
-        (get-in item field)
-        (get item field)))
-
-    ;; PTC-specific predicate builders
-    ;; where must be a macro because PTC-Lisp treats the operator as a symbol
-    (defmacro where
-      ([field] `(fn [item#] (boolean (flex-get item# ~field))))
-      ([field op value]
-       (case op
-         = `(fn [item#]
-              (let [v# (flex-get item# ~field)
-                    cmp# (coerce-for-compare ~value)]
-                (or (= v# ~value) (= v# cmp#))))
-         not= `(fn [item#]
-                 (let [v# (flex-get item# ~field)
-                       cmp# (coerce-for-compare ~value)]
-                   (and (not= v# ~value) (not= v# cmp#))))
-         > `(fn [item#] (> (flex-get item# ~field) ~value))
-         < `(fn [item#] (< (flex-get item# ~field) ~value))
-         >= `(fn [item#] (>= (flex-get item# ~field) ~value))
-         <= `(fn [item#] (<= (flex-get item# ~field) ~value))
-         includes `(fn [item#]
-                     (let [v# (flex-get item# ~field)
-                           cmp# (coerce-for-compare ~value)]
-                       (cond
-                         (string? v#) (.contains v# (str cmp#))
-                         (sequential? v#) (some #(or (= % ~value) (= % cmp#)) v#)
-                         :else false)))
-         in `(fn [item#]
-               (let [v# (flex-get item# ~field)
-                     coll# (map coerce-for-compare ~value)]
-                 (or (contains? (set ~value) v#)
-                     (contains? (set coll#) v#)))))))
-
-    (defn all-of [& preds]
-      (fn [item] (every? #(% item) preds)))
-
-    (defn any-of [& preds]
-      (fn [item] (some #(% item) preds)))
-
-    (defn none-of [& preds]
-      (fn [item] (not-any? #(% item) preds)))
-
     ;; PTC-specific aggregators
     (defn sum-by [key coll]
       (reduce + 0 (map #(or (get % key) 0) coll)))
@@ -494,10 +445,6 @@ defmodule PtcRunner.Lisp.ClojureValidator do
         (let [valid (filter #(some? (get % key)) coll)]
           (when (seq valid)
             (apply max-key #(get % key) valid)))))
-
-    ;; PTC-specific collection functions
-    (defn pluck [key coll]
-      (map #(get % key) coll))
 
     ;; Parallel execution stubs (run sequentially in BB/Clojure for validation)
     (defn pmap [f coll] (map f coll))

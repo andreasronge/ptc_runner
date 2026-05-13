@@ -286,11 +286,11 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert hd(result).active == false
     end
 
-    test "pluck still works with atoms as regular values" do
+    test "map with keyword accessor extracts field from each item" do
       items = [%{email: "a@b.com"}, %{email: "c@d.com"}]
 
       {:ok, %Step{return: result}} =
-        Lisp.run("(pluck :email data/items)", context: %{items: items})
+        Lisp.run("(map :email data/items)", context: %{items: items})
 
       assert result == ["a@b.com", "c@d.com"]
     end

@@ -22,7 +22,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   # Specific error messages for common mistakes
   defp specific_type_error(name, [_, %MapSet{} = set])
-       when name in [:take, :drop, :sort_by, :pluck, :take_while, :drop_while] do
+       when name in [:take, :drop, :sort_by, :take_while, :drop_while] do
     {:ok, {:type_error, "#{name} does not support sets (sets are unordered)", set}}
   end
 
@@ -69,13 +69,6 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
      {:type_error,
       "update-vals expects (map, function) but got (function, map). " <>
         "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
-  end
-
-  defp specific_type_error(:pluck, [key, %{} = _map] = args) when is_atom(key) do
-    {:ok,
-     {:type_error,
-      "pluck expects a list of maps, got a single map. " <>
-        "Use (:#{key} map) or (get map :#{key}) to access a single map", args}}
   end
 
   defp specific_type_error(:sort_by, [key, coll, comp] = args)

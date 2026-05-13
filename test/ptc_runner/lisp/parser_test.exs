@@ -127,9 +127,9 @@ defmodule PtcRunner.Lisp.ParserTest do
               {:list,
                [
                  {:symbol, :filter},
-                 {:list, [{:symbol, :where}, {:keyword, :active}, {:symbol, :=}, true]},
+                 {:list, [{:symbol, :=}, {:keyword, :active}, true]},
                  {:symbol, :users}
-               ]}} = Parser.parse("(filter (where :active = true) users)")
+               ]}} = Parser.parse("(filter (= :active true) users)")
     end
 
     test "empty set" do
@@ -208,7 +208,7 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "threading macro" do
       source = """
       (->> data/products
-           (filter (where :in-stock))
+           (filter :in-stock)
            (sort-by :price)
            (take 10))
       """
