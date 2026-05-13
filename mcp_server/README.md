@@ -8,11 +8,12 @@ An [MCP](https://modelcontextprotocol.io/) server that exposes
 to any MCP client (Claude Desktop, Cursor, Cline, Claude Code, …)
 over stdio JSON-RPC. In default mode the server advertises
 `ptc_lisp_execute`, which accepts a PTC-Lisp program plus optional
-`context` and `signature`, runs it in an isolated BEAM process
-(1 s wall-clock, 10 MB memory, no I/O except `println`, no
-filesystem, no network — see [aggregator mode](#aggregator-mode)
-for an opt-in way to call other MCP servers from inside the
-sandbox), and returns a structured result. In aggregator mode, the
+`context` and `output_schema` (or legacy `signature`), runs it in
+an isolated BEAM process (1 s wall-clock, 10 MB memory in default
+mode; 10 s / 100 MB in [aggregator mode](#aggregator-mode); no I/O
+except `println`, no filesystem, no network), and returns a
+structured result. Aggregator mode opt-in lets programs call other
+MCP servers from inside the sandbox. In aggregator mode, the
 experimental [agentic mode](#agentic-mode) can also expose
 `ptc_task`, a natural-language task tool backed by a configured
 planner model.
@@ -23,9 +24,9 @@ The pitch over Python/JS execution servers:
   arbitrary process exec; only PTC-Lisp built-ins and `println`.
 - **Designed for LLM authoring** — no imports, no setup, every
   program is a self-contained expression.
-- **Schemas as types** — optional `signature` validates and
-  coerces the return value; programmatic clients consume the
-  validated value.
+- **Schemas as types** — optional `output_schema` (JSON Schema) or
+  `signature` validates and coerces the return value; programmatic
+  clients consume the validated value.
 - **Stable wire format** — same response contract as in-process
   PtcRunner surfaces, so logs and tests carry over.
 
@@ -290,6 +291,11 @@ session; concurrent evals for the same session return `session_busy`.
 Use `ptc_session_forget` to remove stale or large bindings and clear
 histories. Use `ptc_session_close` when the session is done.
 
+Sessions work with aggregator mode: `ptc_session_eval` programs can
+call `(tool/mcp-call ...)` and use `catalog/*` builtins just like
+stateless `ptc_lisp_execute`. Upstream results are recorded in the
+session's bounded upstream-call history.
+
 ## Aggregator mode
 
 In default mode the sandbox is sealed: programs do deterministic
@@ -394,6 +400,11 @@ chmod +x ~/ptc-mcp-sandbox/run.sh
 claude mcp add ptc-runner ~/ptc-mcp-sandbox/run.sh
 ```
 
+> **Stale artifacts**: `--no-compile` uses whatever is already in
+> `_build/dev/`. After pulling changes or editing `mcp_server/`,
+> run `cd mcp_server && mix compile` then reconnect the MCP client
+> — otherwise the server silently runs old code.
+
 For Claude Desktop / Cursor / Cline, add `--upstreams-config` to
 the `args` array of an existing release-binary entry:
 
@@ -401,10 +412,12 @@ the `args` array of an existing release-binary entry:
 "args": ["start", "--upstreams-config", "/absolute/path/to/upstreams.json"]
 ```
 
-Restart the client. The `tools/list` description will now include
-an inline catalog of every tool advertised by every configured
-upstream — that's what the LLM uses to know which `(tool/mcp-call
-...)` shapes are valid.
+Restart the client. In the default `--catalog-mode auto`, the
+`tools/list` description includes an inline catalog of upstream
+tools when the fleet is small (≤ 40 tools / ≤ 12 K chars); for
+larger fleets it switches to a compact summary with on-demand
+discovery via `catalog/*` builtins. See
+[Catalog modes](#catalog-modes).
 
 ### Codex configuration
 
@@ -472,13 +485,23 @@ Even with N upstreams configured, aggregator mode does not re-advertise
 upstream tools individually. In an aggregator-only configuration, the
 client's `tools/list` returns `ptc_lisp_execute`; optional server
 features such as sessions, diagnostics, or agentic tools may add their
-own top-level tools. Upstream tools are folded into the
-`ptc_lisp_execute` `description` field as a compact, deterministic
-catalog rendered once at server boot from each upstream's own
-`tools/list` response (cached in `:persistent_term`; rebuilt only on
-PtcRunner restart).
+own top-level tools. How the upstream catalog is exposed depends on the
+active [catalog mode](#catalog-modes) (`--catalog-mode`):
 
-The `description` string concatenates three sections:
+- **`inline`** — the full catalog is folded into the `ptc_lisp_execute`
+  `description` field.
+- **`lazy`** — the description lists server names and tool counts only;
+  programs discover tools at runtime via `catalog/*` builtins.
+- **`auto`** *(default)* — chooses inline when the fleet is small
+  (≤ `--catalog-inline-max-tools` tools and ≤
+  `--catalog-inline-max-chars` rendered chars); lazy otherwise.
+
+The upstream catalog is rendered once at server boot from each
+upstream's own `tools/list` response (cached in `:persistent_term`;
+rebuilt only on PtcRunner restart).
+
+In **inline mode**, the `description` string concatenates three
+sections:
 
 1. A one-paragraph capability statement.
 2. The aggregator authoring card (calling convention, `nil` /
@@ -527,6 +550,41 @@ At call time, `:server` and `:tool` are validated against the
 same cached `tools/list` data — unknown server / tool on a healthy
 upstream raises a programmer-fault `runtime_error` so the LLM can
 self-correct against the catalog it was given.
+
+### Catalog modes
+
+The `--catalog-mode` flag (env: `PTC_RUNNER_MCP_CATALOG_MODE`)
+controls how upstream tools are exposed. Default is `auto`.
+
+| Mode | Description |
+|---|---|
+| `inline` | Full catalog inlined in `ptc_lisp_execute` description. Best for small fleets. |
+| `lazy` | Compact server listing; tools discovered at runtime via `catalog/*` builtins. Best for large fleets or cost-conscious setups. |
+| `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and ≤ `--catalog-inline-max-chars` (12000); lazy otherwise. |
+
+In **lazy** (or auto-resolved-lazy) mode, programs discover tools
+via PTC-Lisp builtins that run inside `ptc_lisp_execute` — no
+extra MCP tool calls:
+
+| Builtin | Purpose |
+|---|---|
+| `(catalog/summary)` | Current mode, servers, load status |
+| `(catalog/list-servers)` | All servers with tool counts |
+| `(catalog/list-tools "server" {:limit 50})` | Tools for one server |
+| `(catalog/describe-tool "server" "tool")` | Full schema + call example |
+| `(catalog/search-tools "query" {:limit 8})` | Cross-server lexical search |
+
+Catalog builtins have a separate budget from upstream calls:
+`--max-catalog-ops-per-program` (default 25) and
+`--max-catalog-result-bytes` (default 256 KiB).
+
+| Flag | Env var | Default | Meaning |
+|---|---|---|---|
+| `--catalog-mode` | `PTC_RUNNER_MCP_CATALOG_MODE` | `auto` | `auto` \| `inline` \| `lazy` |
+| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `12000` | Auto→lazy threshold (rendered chars) |
+| `--catalog-inline-max-tools` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS` | `40` | Auto→lazy threshold (tool count) |
+| `--max-catalog-ops-per-program` | `PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM` | `25` | `catalog/*` call budget per program |
+| `--max-catalog-result-bytes` | `PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES` | `262144` (256 KiB) | Per-builtin result cap |
 
 ### Aggregator-mode flags
 
@@ -921,8 +979,9 @@ there is no extra process, no ring buffer, and the tool does not
 appear in `tools/list`.
 
 It records every recognized-tool `tools/call`
-(`ptc_lisp_execute`, `ptc_task`) — successes, `args_error` validation
-failures, and `busy` concurrency-gate rejections alike — into a
+(`ptc_lisp_execute`, `ptc_task`, and all `ptc_session_*` tools when
+sessions are enabled) — successes, `args_error` validation failures,
+and `busy` concurrency-gate rejections alike — into a
 bounded in-memory ring (`--debug-ring-size`, default 500, FIFO
 eviction). `ptc_debug`'s own calls and unknown-tool requests are not
 recorded. The ring lives in process memory: it is lost on restart,
