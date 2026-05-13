@@ -191,13 +191,34 @@ defmodule PtcRunnerMcp.Sessions.Limits do
   def history_preview_marker(value, bytes, max_bytes) do
     {preview, _truncated?} = Format.to_clojure(value, limit: 20, printable_limit: 200)
 
-    %{
+    full_marker = %{
       ptc_session_preview: true,
       reason: :max_history_entry_bytes,
       bytes: bytes,
       max_bytes: max_bytes,
       preview: preview
     }
+
+    if term_bytes(full_marker) <= max_bytes do
+      full_marker
+    else
+      compact_history_preview_marker(bytes, max_bytes)
+    end
+  end
+
+  defp compact_history_preview_marker(bytes, max_bytes) do
+    marker = %{
+      ptc_session_preview: true,
+      reason: :max_history_entry_bytes,
+      bytes: bytes,
+      max_bytes: max_bytes
+    }
+
+    if term_bytes(marker) <= max_bytes do
+      marker
+    else
+      %{ptc_session_preview: true}
+    end
   end
 
   defp cap_history_entry(value, limits) do

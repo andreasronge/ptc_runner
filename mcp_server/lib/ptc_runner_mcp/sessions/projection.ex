@@ -195,7 +195,6 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     %{
       "session_id" => state.id,
       "title" => state.title,
-      "mode" => Atom.to_string(state.mode),
       "turn" => state.turn,
       "created_at" => DateTime.to_iso8601(state.created_at),
       "updated_at" => DateTime.to_iso8601(state.updated_at),
