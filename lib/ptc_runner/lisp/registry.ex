@@ -123,7 +123,9 @@ defmodule PtcRunner.Lisp.Registry do
   def builtins_by_category(category) do
     implemented()
     |> Enum.filter(&(&1.category == category and &1.dispatch == :env))
-    |> Enum.map(&String.to_existing_atom(&1.name))
+    # Names come from the closed compile-time registry, not user input.
+    # Using to_atom/1 avoids depending on Env being loaded first.
+    |> Enum.map(&String.to_atom(&1.name))
   end
 
   @doc """

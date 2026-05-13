@@ -127,9 +127,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     try do
-      push_side_effect_stash()
-      result = apply(fun, converted_args)
-      {:ok, result, pop_side_effects(eval_ctx)}
+      with_side_effect_stash(eval_ctx, fn -> apply(fun, converted_args) end)
     rescue
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
@@ -261,12 +259,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        when is_function(fun, 1) do
     # Convert any closures/builtins in args to callable functions
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
-    push_side_effect_stash()
-    result = fun.(converted_args)
-    {:ok, result, pop_side_effects(eval_ctx)}
+
+    with_side_effect_stash(eval_ctx, fn -> fun.(converted_args) end)
   rescue
     e in ExecutionError ->
-      pop_side_effects(eval_ctx)
       {:error, execution_error_tuple(e)}
   end
 
@@ -286,9 +282,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       fun = elem(funs, idx)
 
       try do
-        push_side_effect_stash()
-        result = apply(fun, converted_args)
-        {:ok, result, pop_side_effects(eval_ctx)}
+        with_side_effect_stash(eval_ctx, fn -> apply(fun, converted_args) end)
       rescue
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
@@ -308,9 +302,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, _do_eval_fn)
        when is_function(fun) do
-    push_side_effect_stash()
-    result = apply(fun, args)
-    {:ok, result, pop_side_effects(eval_ctx)}
+    with_side_effect_stash(eval_ctx, fn -> apply(fun, args) end)
   end
 
   # Map as function: (map key) → Map.get(map, key)
@@ -598,7 +590,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          body,
          closure_env,
          %EvalContext{} = eval_context,
-         closure_turn_history,
+         _closure_turn_history,
          metadata,
          do_eval_fn
        ) do
@@ -628,7 +620,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_context.user_ns,
         new_env,
         eval_context.tool_exec,
-        closure_turn_history,
+        eval_context.turn_history,
         pmap_timeout: eval_context.pmap_timeout,
         catalog_exec: eval_context.catalog_exec
       )
@@ -656,9 +648,33 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Uses a stack to handle nested HOFs: each HOF pushes a fresh accumulator,
   # inner HOFs push/pop their own level, and the outer HOF collects everything.
 
+  defp with_side_effect_stash(%EvalContext{} = eval_ctx, fun) when is_function(fun, 0) do
+    push_side_effect_stash()
+
+    try do
+      result = fun.()
+      {:ok, result, pop_side_effects(eval_ctx)}
+    rescue
+      e ->
+        drop_side_effect_stash()
+        reraise e, __STACKTRACE__
+    catch
+      kind, reason ->
+        drop_side_effect_stash()
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
   defp push_side_effect_stash do
     stack = Process.get(:__ptc_hof_stack, [])
     Process.put(:__ptc_hof_stack, [%{tool_calls: [], prints: [], catalog_ops: []} | stack])
+  end
+
+  defp drop_side_effect_stash do
+    case Process.get(:__ptc_hof_stack, []) do
+      [_top | rest] -> Process.put(:__ptc_hof_stack, rest)
+      [] -> :ok
+    end
   end
 
   defp stash_side_effects(%EvalContext{} = ctx) do
@@ -737,7 +753,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp do_execute_closure(
-         {:closure, _closure_patterns, body, closure_env, closure_turn_history, meta} = closure,
+         {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
          binding_patterns,
          args,
          %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
@@ -754,7 +770,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             _ -> new_env
           end
 
-        closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
+        closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, caller_ctx.turn_history)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
         # `locals` is rebuilt from the closure's lexical capture + this invocation's
@@ -844,7 +860,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       Enum.reduce(user_ns, user_ns, fn
         {name, {:closure, ^params, ^body, ^env, ^th, old_meta}}, acc ->
           new_meta = Map.put(old_meta, :return_type, return_type)
-          Map.put(acc, name, {:closure, params, body, env, th, new_meta})
+          Map.put(acc, name, {:closure, params, body, env, [], new_meta})
 
         _, acc ->
           acc
