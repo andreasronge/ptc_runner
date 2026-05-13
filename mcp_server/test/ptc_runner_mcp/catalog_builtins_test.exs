@@ -439,6 +439,141 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       end
     end
 
+    # Regression for issue #944 finding #4: a query that matches the server
+    # description but NOT any individual tool's name/args/own-description
+    # should not pull in arbitrary tools from that server. Reporter saw
+    # fs/create_directory, fs/directory_tree, fs/edit_file rank for query
+    # "search" purely because the fs server's description mentioned search.
+    test "tools without a tool-specific match are not pulled in by server-desc tokens" do
+      config = %{
+        tools:
+          Map.new(
+            %{
+              "search_files" => %{
+                name: "search_files",
+                description: "Recursively search for files matching a pattern",
+                input_schema: %{"properties" => %{"pattern" => %{}}, "required" => ["pattern"]}
+              },
+              "create_directory" => %{
+                name: "create_directory",
+                description: "Create a new directory",
+                input_schema: %{"properties" => %{"path" => %{}}, "required" => ["path"]}
+              },
+              "directory_tree" => %{
+                name: "directory_tree",
+                description: "Get a recursive tree view of files and directories",
+                input_schema: %{"properties" => %{"path" => %{}}, "required" => ["path"]}
+              },
+              "edit_file" => %{
+                name: "edit_file",
+                description: "Make line-based edits to a text file",
+                input_schema: %{"properties" => %{"path" => %{}}, "required" => ["path"]}
+              }
+            },
+            fn {n, schema} -> {n, {schema, fn _ -> "ok" end}} end
+          )
+      }
+
+      :ok =
+        Registry.put_fake(
+          "fs",
+          Map.put(config, :metadata, %{
+            description: "Filesystem access with read, write, and search capability"
+          }),
+          @registry_name
+        )
+
+      {:ok, _} = Registry.ensure_started("fs", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search", %{limit: 5}])
+
+      names = Enum.map(result, & &1["tool"])
+
+      # The actually-search-related tool must be present.
+      assert "search_files" in names
+
+      # Tools whose name/description/args don't mention "search" must
+      # not be pulled in by the server-description boost alone.
+      refute "create_directory" in names
+      refute "directory_tree" in names
+      refute "edit_file" in names
+    end
+
+    # Codex review caught a remaining gap in the #4 fix: when the query
+    # matches ONLY the server description and no tool, the relative filter
+    # falls back to "keep all tools" — which reproduces the original noise.
+    # Server-NAME matches are legitimate fallback ("I asked about server X")
+    # but server-description/capability matches are not.
+    test "server-description-only match drops tools (codex edge case)" do
+      config = %{
+        tools:
+          Map.new(
+            %{
+              "create_directory" => %{
+                name: "create_directory",
+                description: "Create a new directory",
+                input_schema: %{"properties" => %{"path" => %{}}}
+              },
+              "edit_file" => %{
+                name: "edit_file",
+                description: "Make line-based edits to a text file",
+                input_schema: %{"properties" => %{"path" => %{}}}
+              }
+            },
+            fn {n, schema} -> {n, {schema, fn _ -> "ok" end}} end
+          )
+      }
+
+      :ok =
+        Registry.put_fake(
+          "fs",
+          Map.put(config, :metadata, %{
+            description: "Filesystem with search capability"
+          }),
+          @registry_name
+        )
+
+      {:ok, _} = Registry.ensure_started("fs", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["search", %{limit: 5}])
+
+      # No tool matches "search" specifically, and the server NAME doesn't
+      # match either — so no results should be returned. The description
+      # mention alone isn't a license to dump every tool from the server.
+      assert result == []
+    end
+
+    test "query matching server name returns all tools on that server" do
+      config = %{
+        tools:
+          Map.new(
+            %{
+              "tool_a" => %{name: "tool_a", description: "first tool", input_schema: %{}},
+              "tool_b" => %{name: "tool_b", description: "second tool", input_schema: %{}}
+            },
+            fn {n, schema} -> {n, {schema, fn _ -> "ok" end}} end
+          )
+      }
+
+      :ok =
+        Registry.put_fake(
+          "warehouse",
+          Map.put(config, :metadata, %{description: "Warehouse inventory"}),
+          @registry_name
+        )
+
+      {:ok, _} = Registry.ensure_started("warehouse", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["warehouse", %{limit: 5}])
+
+      names = Enum.map(result, & &1["tool"])
+      assert "tool_a" in names
+      assert "tool_b" in names
+    end
+
     test "camelCase tool names are tokenized correctly" do
       put_fake("srv", [
         {"getIssueComments", fn _ -> "ok" end},
