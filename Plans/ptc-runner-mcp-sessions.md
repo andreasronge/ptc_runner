@@ -4,119 +4,187 @@
 |---|---|
 | Status | Draft |
 | Target package | `:ptc_runner_mcp` |
-| Depends on | `ptc-runner-mcp-server.md`, `ptc-runner-mcp-aggregator.md`, `agentic-ptc-task-subagent-spec.md` |
-| Last revised | 2026-05-12 |
+| Depends on | `ptc-runner-mcp-server.md`, `ptc-runner-mcp-aggregator.md` |
+| Last revised | 2026-05-13 |
 
-This document specifies an opt-in session layer for PtcRunner MCP. The
-goal is to support multi-turn exploration and bounded working memory
-without weakening the current stateless `ptc_lisp_execute` contract.
+This document specifies an opt-in stateful session layer for
+PtcRunner MCP. A session is a supervised, bounded PTC-Lisp REPL
+environment exposed over MCP. It reuses the existing PTC-Lisp memory
+contract, turn history, `println` capture, and SubAgent feedback
+renderers instead of adding a second artifact/notebook memory model.
+
 Sections using **MUST** / **SHOULD** / **MAY** carry RFC 2119
 normative weight.
 
 ## 1. Motivation
 
 Current `ptc_runner_mcp` is intentionally stateless: each
-`tools/call` receives a program, context, and optional signature, runs
-with fresh PTC-Lisp execution memory, and returns a structured result.
-Aggregator connection and catalog caches remain server-owned and are
-not user-visible working memory. This is excellent for deterministic
-compute and single-shot aggregation, but it is inefficient for
-exploratory workflows:
+`ptc_lisp_execute` call receives a complete program, fresh memory, and
+fresh tool cache, then returns a structured result. This is the right
+default for deterministic compute and one-shot aggregation.
 
-1. The LLM repeatedly rediscovering the same upstream catalog.
-2. Large intermediate results flowing back into the model context only
-   to be filtered or summarized in a later call.
-3. Multi-step investigations losing local facts, open questions, and
-   prior upstream-call diagnostics between turns.
-4. No first-class way to continue a bounded investigation without
-   asking the client model to carry all state in prompt text.
+Exploration has a different shape. A client LLM often wants to:
 
-The BEAM is a good fit for this problem: one lightweight supervised
-process per exploration session, per-session quotas, TTL, cancellation,
-telemetry, and clean crash isolation.
+1. Fetch data once, bind it with `(def issues ...)`, then filter it in
+   later turns.
+2. Define helper functions with `(defn interesting? [x] ...)` and
+   reuse them.
+3. Inspect values with `println` and continue based on the output.
+4. Use REPL-style result history (`*1`, `*2`, `*3`) for quick
+   iteration.
+5. Ask "what is currently defined?" without forcing the model to
+   remember every prior turn in prompt text.
 
-## 2. Product Positioning
+The in-process SubAgent loop and `mix ptc.repl` already implement
+most of this model. MCP sessions should reuse it.
+
+## 2. Positioning
 
 The session feature should be positioned as:
 
-> PtcRunner is a BEAM-native stateful MCP/code-mode aggregator:
-> deterministic PTC-Lisp execution plus supervised, bounded,
-> inspectable per-session exploration state.
+> PtcRunner MCP supports stateful, supervised PTC-Lisp REPL sessions:
+> define data and helper functions once, keep exploring across turns,
+> and inspect the session environment under BEAM resource limits.
 
-This is distinct from generic code-mode tools that provide only
-one-shot Python/JavaScript execution or opaque persistent notebooks.
-PtcRunner sessions are structured working memory for investigation,
-not arbitrary hidden interpreter state.
+This is distinct from generic code-mode tools that expose arbitrary
+Python/JavaScript notebook state. PTC-Lisp sessions persist only the
+language's explicit user namespace (`def` / `defn`) plus bounded REPL
+history and execution traces.
 
 ## 3. Scope and Goals
 
 Goals:
 
-1. Keep `ptc_lisp_execute` stateless and unchanged by default.
-2. Add explicit opt-in exploration sessions for multi-turn MCP use.
-3. Support the current stdio deployment model first: one MCP client
-   normally owns one `ptc_runner_mcp` OS process.
-4. Design ownership boundaries so a future HTTP transport with
-   multiple concurrent MCP clients can reuse the same session model.
-5. Store structured, bounded artifacts: notes, facts, catalog
-   snapshots, selected result handles, upstream-call summaries, and
-   open questions.
-6. Never store credentials or unredacted auth material.
-7. Provide operator-visible telemetry and debugging hooks.
-8. Preserve deterministic execution: PTC-Lisp programs run in the
-   existing sandbox with resource limits; session state is an explicit
-   input/output side channel managed by the MCP server.
+1. Keep `ptc_lisp_execute` stateless and unchanged.
+2. Add explicit opt-in stateful sessions.
+3. Reuse `PtcRunner.Lisp.run/2` with `memory:` and `turn_history:`.
+4. Reuse existing renderers where possible:
+   `PtcRunner.SubAgent.Loop.TurnFeedback`,
+   `PtcRunner.SubAgent.Namespace.User`, and
+   `PtcRunner.SubAgent.Namespace.ExecutionHistory`.
+5. Support stdio first: one MCP client normally owns one
+   `ptc_runner_mcp` OS process.
+6. Design owner checks so a future HTTP transport can support many
+   clients concurrently.
+7. Enforce session TTL, idle timeout, memory limits, binding limits,
+   print-history limits, and tool-call-history limits.
+8. Preserve the existing safety claim: PTC-Lisp itself has no file,
+   network, or shell access; upstream MCP tools still own their
+   effects.
 
 ## 4. Non-Goals
 
 The following are out of scope for the first implementation:
 
-- Durable cross-process memory by default.
+- A separate artifact/note/summarization memory system.
+- Durable cross-process persistence by default.
 - Global memory shared across clients.
-- A general Python/JavaScript notebook runtime.
-- Automatic authorization of write-capable upstream tools based on
-  session memory.
-- Replacing `ptc_lisp_execute`.
+- A Python/JavaScript notebook runtime.
+- Automatic semantic summarization of session state.
 - HTTP transport implementation itself.
 - Vector search or embeddings over session memory.
-- Persisting raw upstream payloads without explicit operator opt-in.
-- A claim that upstream effects are sandboxed. PtcRunner can mediate,
-  log, and cap calls, but upstream MCP servers still own their effects.
+- Persisting raw upstream payloads outside the PTC-Lisp user
+  namespace.
+- Authorizing write-capable upstream calls based on session state.
 
-## 5. Definitions
+## 5. Existing Mechanisms To Reuse
+
+### 5.1 PTC-Lisp Memory
+
+`PtcRunner.Lisp.run/2` accepts `memory:` and returns `step.memory`.
+The current memory contract is explicit:
+
+- `(def name value)` stores or replaces a user namespace binding.
+- `(defn name [args] body)` stores a closure binding.
+- `let` bindings and ordinary intermediate values do not persist.
+- Failed executions return an error step and MUST NOT update session
+  memory.
+
+Session evaluation should therefore be a thin wrapper around:
+
+```elixir
+PtcRunner.Lisp.run(program,
+  memory: session.memory,
+  turn_history: session.turn_history,
+  tools: session_tools,
+  tool_cache: %{},
+  caller: :mcp,
+  profile: :mcp_session
+)
+```
+
+Phase 1 does **not** persist `tool_cache` across session evals. Each
+eval starts with an empty tool cache. This keeps REPL state visible and
+explicit: only `def` / `defn`, last-three results, prints, and call
+history persist.
+
+### 5.2 REPL Turn History
+
+`mix ptc.repl` already passes `turn_history:` and keeps the last three
+results so PTC-Lisp can resolve `*1`, `*2`, and `*3`.
+
+MCP sessions SHOULD use the same rule:
+
+- after a successful eval, append `step.return`;
+- keep only the last three results;
+- expose them to the next eval through `turn_history:`.
+
+### 5.3 Print Output
+
+`println` output is captured in `step.prints`; it is not written to
+stdout. Sessions SHOULD keep a bounded recent-print history for
+inspection and return the current eval's prints in the eval response.
+
+### 5.4 Environment Orientation
+
+The SubAgent UI already has compact renderers:
+
+- `Namespace.User.render/2` shows defined functions and values with
+  type/sample information.
+- `ExecutionHistory.render_output/3` renders recent `println` output.
+- `ExecutionHistory.render_tool_calls/2` renders recent tool calls.
+- `TurnFeedback.execution_feedback/3` renders result previews, changed
+  memory previews, stored keys, prints, and truncation flags.
+
+Session inspect/eval responses SHOULD reuse these renderers or extract
+shared helpers rather than duplicating formatting logic.
+
+## 6. Definitions
 
 | Term | Meaning |
 |---|---|
-| Transport session | The client/server connection identity. In stdio v1 this is the running `ptc_runner_mcp` process. In future Streamable HTTP this is the MCP `Mcp-Session-Id` plus any authenticated user/client identity. |
-| Exploration session | A logical PtcRunner investigation with a `session_id`, owned by one transport session, backed by one supervised BEAM process. |
-| Session owner | The identity allowed to read, update, or close an exploration session. In stdio v1, this is the local server instance. |
-| Session artifact | A bounded structured value stored in a session: note, fact, open question, catalog snapshot, result summary, result handle, or upstream-call summary. |
-| Session projection | The bounded JSON-compatible view of session state injected into a `ptc_session_call` context or returned from `ptc_session_read`. |
-| Raw payload | Full upstream result body or full PTC-Lisp result beyond configured preview limits. Raw payload storage is disabled by default. |
+| Transport session | The client/server connection identity. In stdio v1 this is the running `ptc_runner_mcp` process. In future Streamable HTTP this is the MCP `Mcp-Session-Id` plus authenticated client/user identity. |
+| PTC session | A logical stateful PTC-Lisp REPL with a `session_id`, owner, persistent `memory`, last-three `turn_history`, bounded print history, and bounded tool-call history. |
+| Session owner | The identity allowed to eval, inspect, forget, or close a session. |
+| Session memory | The PTC-Lisp user namespace map returned as `step.memory`; contains explicit `def` and `defn` bindings. |
+| Binding | One entry in session memory. |
 
-## 6. Transport Model
+## 7. Transport Model
 
-### 6.1 Stdio v1
+### 7.1 Stdio v1
 
-With stdio, each MCP client typically starts its own server process and
-communicates over that process's stdin/stdout. Therefore:
+With stdio, each MCP client typically starts its own server process.
+Therefore:
 
-- The implementation **MAY** treat the process as the transport
-  session.
-- In-memory sessions are naturally isolated per client process.
-- Multiple clients can use PtcRunner concurrently by running separate
-  OS processes.
-- Concurrent requests from the same client remain bounded by
+- the process MAY be treated as the transport session;
+- in-memory PTC sessions are naturally isolated per client process;
+- multiple clients can use PTC Runner concurrently by running separate
+  OS processes;
+- concurrent requests from the same client remain bounded by
   `max_concurrent_calls`.
 
-This is an acceptable Phase 1 deployment model. It gives strong
-default isolation without needing a multi-tenant registry.
+### 7.2 Future HTTP
 
-### 6.2 Future HTTP
+The session model MUST NOT assume stdio forever. Every PTC session
+MUST carry an owner field.
 
-The data model **MUST NOT** assume stdio forever. Every exploration
-session **MUST** carry an owner field so HTTP can later bind sessions
-to:
+For stdio v1:
+
+```elixir
+%{transport: :stdio, instance_id: String.t()}
+```
+
+For future HTTP:
 
 ```elixir
 %{
@@ -127,64 +195,49 @@ to:
 }
 ```
 
-For stdio v1 the owner can be:
+The owner check MUST happen before eval, inspect, forget, or close.
 
-```elixir
-%{
-  transport: :stdio,
-  instance_id: String.t()
-}
+## 8. Tool Surface
+
+Session tools are advertised only when enabled:
+
+```text
+--sessions
+PTC_RUNNER_MCP_SESSIONS=true
 ```
 
-The owner check **MUST** happen before reading, updating, executing
-against, or closing a session.
-
-## 7. Tool Surface
-
-The initial session layer SHOULD expose a small explicit tool surface.
-Exact names may change during implementation, but the recommended
-shape is:
+Recommended tool set:
 
 1. `ptc_session_start`
-2. `ptc_session_call`
-3. `ptc_session_read`
-4. `ptc_session_update`
+2. `ptc_session_eval`
+3. `ptc_session_inspect`
+4. `ptc_session_forget`
 5. `ptc_session_close`
 
-`ptc_lisp_execute` remains available and stateless.
+`ptc_lisp_execute` remains the stateless baseline.
 
-If sessions are disabled, the session tools SHOULD NOT be advertised.
-A non-advertised session tool call MAY return `unknown_tool`; if an
-implementation reserves the names even while disabled, it MUST return
-`sessions_disabled`. The behavior MUST be covered by tests so clients
-do not see both responses from the same server build.
+If sessions are disabled, session tools SHOULD NOT be advertised. If
+an implementation reserves the names anyway, calls MUST return
+`sessions_disabled`; this behavior must be consistent within a build.
 
-### 7.1 `ptc_session_start`
+### 8.1 `ptc_session_start`
 
-Creates a new exploration session.
+Creates a new empty PTC-Lisp REPL session.
 
 Input:
 
 ```json
 {
   "title": "Investigate recent GitHub MCP issues",
-  "purpose": "Find likely bug clusters and summarize evidence",
   "mode": "read_only",
-  "memory_policy": "summaries_only",
   "ttl_ms": 1800000
 }
 ```
-
-Required fields:
-
-- `purpose`
 
 Optional fields:
 
 - `title`
 - `mode`: `"read_only" | "write_capable"`; default `"read_only"`.
-- `memory_policy`: `"summaries_only" | "handles_and_summaries" |
-  "raw_payloads"`; default `"summaries_only"`.
 - `ttl_ms`; capped by server config.
 
 Output:
@@ -193,174 +246,149 @@ Output:
 {
   "status": "ok",
   "session_id": "ptcs_...",
-  "expires_at": "2026-05-12T14:30:00Z",
+  "expires_at": "2026-05-13T14:30:00Z",
   "limits": {
-    "max_bytes": 1048576,
-    "max_artifacts": 200,
+    "max_memory_bytes": 1048576,
+    "max_binding_bytes": 262144,
+    "max_bindings": 200,
     "max_idle_ms": 900000
   }
 }
 ```
 
-### 7.2 `ptc_session_call`
+### 8.2 `ptc_session_eval`
 
-Runs a PTC-Lisp program with access to the session's selected state and
-optionally stores a bounded artifact from the result.
+Evaluates a PTC-Lisp program against persistent session memory.
 
 Input:
 
 ```json
 {
   "session_id": "ptcs_...",
-  "program": "(return {:count 3})",
-  "context": {},
-  "signature": "{count :int}",
-  "store": {
-    "kind": "fact",
-    "title": "Open issue count",
-    "from": "validated",
-    "path": ["count"]
-  }
+  "program": "(def bugs (filter bug? issues)) (println \"bugs\" (count bugs))",
+  "context": {}
 }
 ```
 
 Semantics:
 
-- The PTC-Lisp runtime still gets fresh execution memory per call.
-  Any upstream connection or tool-list cache remains server-owned and
-  is not mutable session state.
-- The server injects a bounded, read-only projection of session memory
-  under `context` as `data/session`.
-- Caller-provided `context` **MUST NOT** contain a top-level
-  `"session"` key. This key is reserved for the server projection;
-  conflicting input returns `session_args_error`.
-- The merged context (`context` plus server session projection)
-  **MUST** be validated against the existing context key and byte
-  limits before execution. If the projection makes the merged context
-  too large, the call returns `session_limit_exceeded` before acquiring
-  a worker permit.
-- The program may call configured upstreams through aggregator mode
-  when available.
-- Storing is controlled by the MCP server after execution, not by
-  arbitrary mutation from inside PTC-Lisp.
-- The server **MUST NOT** invent semantic summaries of arbitrary PTC
-  results. Stored content must come from an explicit caller body, a
-  deterministic selected validated value, a capped result preview, or
-  the compact upstream ledger.
+- Pass `session.memory` to `Lisp.run/2` as `memory:`.
+- Pass `session.turn_history` as `turn_history:`.
+- Phase 1 exposes no upstream tools inside session eval. Phase 2 may
+  expose `(tool/mcp-call ...)` using the existing aggregator tool
+  registry.
+- Pass `tool_cache: %{}` in Phase 1. Cacheable tool results do not
+  persist across session evals.
+- `context` remains per-call input and does not persist.
+- On success, replace `session.memory` with `step.memory`.
+- On success, update `session.turn_history` with `step.return`,
+  keeping only the last three results.
+- On success, append `step.prints`, `step.tool_calls`, and any compact
+  upstream-call entries to bounded histories.
+- On error, do not update memory or result history. The implementation
+  MAY append an error entry to bounded execution history.
 
-`store` is optional. If omitted, the call returns the PTC result and
-updates only session bookkeeping such as `updated_at` and, in
-aggregator mode, the compact upstream ledger.
-
-Allowed `store.from` values:
-
-| Value | Meaning |
-|---|---|
-| `"validated"` | Store the whole validated value, or the subvalue at `path`, only after signature validation succeeds. |
-| `"result_preview"` | Store the rendered result preview after response-profile truncation. |
-| `"caller_body"` | Store the explicit `body` supplied inside `store`; this is appropriate for model-authored notes or summaries. |
-| `"upstream_ledger"` | Store a compact summary of upstream-call records from this call. |
-
-Every stored value is redacted and checked against `max_artifact_bytes`
-and remaining session quota. If execution succeeds but the requested
-artifact cannot be stored, the server SHOULD return the PTC result with
-`session.store_status: "skipped"` and a structured reason instead of
-failing the entire successful computation.
-
-Output includes the normal PTC result plus session metadata:
+Output SHOULD include:
 
 ```json
 {
   "status": "ok",
-  "result": "...",
-  "validated": {},
+  "result": "user=> ...",
+  "prints": ["bugs 12"],
+  "feedback": ";; bugs = [...]",
+  "memory": {
+    "changed": {"bugs": "[...]"},
+    "stored_keys": ["bug?", "bugs", "issues"],
+    "truncated": false
+  },
   "session": {
     "session_id": "ptcs_...",
-    "stored_artifact_id": "a_...",
-    "store_status": "stored",
-    "bytes_used": 12345,
-    "artifact_count": 12
-  }
+    "turn": 3,
+    "memory_bytes": 123456,
+    "binding_count": 3
+  },
+  "truncated": false
 }
 ```
 
-#### 7.2.1 `ptc_session_call` lifecycle
+The `feedback`, `result`, and `memory` fields SHOULD come from
+`TurnFeedback.execution_feedback/3` or a shared equivalent. MCP
+response-profile work may choose slim/structured/debug variants, but
+the session state update semantics are independent of the response
+shape.
 
-The session process **MUST NOT** run PTC-Lisp directly. Execution uses
-the same worker, cancellation, sandbox, aggregator, and concurrency
-paths as `ptc_lisp_execute`.
+`signature` / `return_schema` / `output_contract` inputs are
+deliberately omitted from `ptc_session_eval` in Phase 1. Session eval
+is an exploratory REPL operation; typed programmatic extraction
+remains the job of stateless `ptc_lisp_execute`. A later phase may add
+typed validation, but must define exact validation timing and rollback
+behavior before doing so.
 
-Recommended lifecycle:
+This does **not** refer to MCP tool `outputSchema`. Session tools may
+still advertise MCP `outputSchema` for their own response envelopes
+when the active response profile allows it.
 
-1. Validate tool arguments.
-2. Derive and check owner.
-3. Ask the session process for a bounded immutable projection.
-4. Merge projection into context as `session` and validate merged
-   context size.
-5. Acquire the normal `max_concurrent_calls` permit through the stdio
-   worker path.
-6. Execute PTC-Lisp through the existing sandbox/aggregator path.
-7. After execution, append requested artifacts and upstream summaries
-   with one atomic session update.
-8. Return the normal PTC envelope plus session metadata.
+### 8.3 `ptc_session_inspect`
 
-Concurrent calls against the same session may run in parallel after
-they receive their projections. Append-time quota checks are
-authoritative. If two successful calls race and only one artifact fits,
-the losing append is reported with `store_status: "skipped"` and
-`reason: "session_limit_exceeded"` while preserving that call's PTC
-result.
-
-### 7.3 `ptc_session_read`
-
-Reads a compact projection of session state. This is for client/model
-orientation, not bulk export.
+Returns a compact orientation view of the session.
 
 Input:
 
 ```json
 {
   "session_id": "ptcs_...",
-  "view": "summary",
-  "limit": 20
+  "view": "overview"
 }
 ```
 
 Views:
 
-- `"summary"` — title, purpose, status, artifact counts, recent facts,
-  open questions.
-- `"facts"` — stored fact artifacts.
-- `"notes"` — notes and model-authored summaries.
-- `"upstream_calls"` — compact call ledger.
-- `"catalog"` — cached catalog snapshot summaries.
+| View | Meaning |
+|---|---|
+| `"overview"` | Defined functions/values, recent prints, recent tool calls, last result previews. |
+| `"memory"` | Defined functions and values only. |
+| `"prints"` | Recent `println` output. |
+| `"tool_calls"` | Recent tool/upstream call summaries. |
+| `"history"` | `*1`, `*2`, `*3` previews. |
+| `"limits"` | Current memory/binding/history usage. |
 
-### 7.4 `ptc_session_update`
+`overview` SHOULD reuse:
 
-Adds or supersedes explicit artifacts without running PTC-Lisp.
+- `Namespace.User.render(session.memory, has_println: has_recent_prints?)`
+- `ExecutionHistory.render_output(session.prints, limit, has_println?)`
+- `ExecutionHistory.render_tool_calls(session.tool_calls, limit)`
+
+### 8.4 `ptc_session_forget`
+
+Removes bindings or clears bounded histories.
 
 Input:
 
 ```json
 {
   "session_id": "ptcs_...",
-  "append": [
-    {
-      "kind": "open_question",
-      "title": "Check whether issue cluster is new",
-      "body": "Need to compare with older closed issues."
-    }
-  ],
-  "supersede": ["a_old"]
+  "bindings": ["issues", "bugs"],
+  "clear": ["prints", "tool_calls"]
 }
 ```
 
-The server **MUST** validate size, allowed artifact kinds, and owner
-before applying changes.
+Semantics:
 
-### 7.5 `ptc_session_close`
+- `bindings` removes named user namespace entries.
+- `clear` may contain `"memory"`, `"history"`, `"prints"`, or
+  `"tool_calls"` in Phase 1.
+- Forgetting `"memory"` clears all `def` / `defn` bindings.
+- The response returns the remaining stored keys and usage.
 
-Closes a session and deletes active in-memory state.
+`"tool_cache"` is not accepted in Phase 1 because session evals do not
+persist tool cache. If a later phase adds persistent tool cache, it may
+add `"tool_cache"` as a clear target with explicit cache limits.
+
+This is the explicit cleanup mechanism for stale or large values.
+
+### 8.5 `ptc_session_close`
+
+Closes a session and deletes its state.
 
 Input:
 
@@ -371,17 +399,59 @@ Input:
 }
 ```
 
-After close, the implementation **SHOULD** keep a small tombstone until
-`closed_tombstone_ttl_ms` expires so later calls can return
-`session_closed`. Tombstones contain only `session_id`, `owner_hash`,
-`closed_at`, and `reason`; they do not contain artifacts, raw payloads,
-or projections. After the tombstone expires, the same id returns
-`session_not_found`.
+After close, session tools MUST return `session_not_found` or
+`session_closed` for that id. A short tombstone MAY be retained so
+clients can distinguish closed from unknown sessions.
 
-## 8. Session State Shape
+### 8.6 Session Authoring Card
 
-Internal state SHOULD be atom-keyed Elixir structs or maps. JSON
-projection happens only at MCP boundaries.
+When sessions are enabled, the server SHOULD ship a short
+session-specific authoring card, separate from the stateless
+`mcp_authoring_card.md`.
+
+Recommended file:
+
+```text
+mcp_server/priv/mcp_session_authoring_card.md
+```
+
+This card MUST only be included in:
+
+- session tool descriptions; and/or
+- `ptc_session_inspect view: "overview"` orientation output when
+  useful.
+
+It MUST NOT be appended to the stateless `ptc_lisp_execute`
+description, because that tool remains independent per invocation and
+its existing "No state across calls" rule remains true.
+
+The card should be short enough that it can stay in `tools/list`
+without crowding the catalog. Recommended text:
+
+```markdown
+# PTC-Lisp sessions
+
+This tool evaluates PTC-Lisp inside a stateful session. Values defined
+with `(def name value)` and functions defined with `(defn name [args]
+body)` are available in later `ptc_session_eval` calls for the same
+session.
+
+Use `println` to inspect values between calls. Printed lines are
+captured and returned; they are not stdout.
+
+`*1`, `*2`, and `*3` reference the last three successful eval results.
+
+Use `let` for temporary values. Use `ptc_session_forget` to remove
+stale or large bindings.
+
+Keep programs short and store only values you need again.
+```
+
+Session tool descriptions MAY include only the card plus a one-line
+tool-specific contract. Detailed language/reference text should remain
+in existing docs, not in every tool description.
+
+## 9. Session State Shape
 
 Recommended internal state:
 
@@ -390,131 +460,37 @@ Recommended internal state:
   id: String.t(),
   owner: map(),
   title: String.t() | nil,
-  purpose: String.t(),
   mode: :read_only | :write_capable,
-  memory_policy: :summaries_only | :handles_and_summaries | :raw_payloads,
   created_at: DateTime.t(),
   updated_at: DateTime.t(),
   expires_at: DateTime.t(),
-  status: :active,
+  turn: non_neg_integer(),
+  memory: map(),
+  turn_history: [term()],
+  prints: [String.t()],
+  tool_calls: [map()],
+  upstream_calls: [map()],
+  eval: nil | %{request_id: term(), worker: pid(), monitor: reference()},
   limits: %{
-    max_bytes: pos_integer(),
-    max_artifacts: pos_integer(),
-    max_idle_ms: pos_integer(),
-    max_projection_bytes: pos_integer(),
-    max_raw_payload_bytes: non_neg_integer()
-  },
-  artifacts: [artifact()],
-  bytes_used: non_neg_integer(),
-  upstream_ledger: [map()],
-  catalog_snapshot: [map()] | nil
+    max_memory_bytes: pos_integer(),
+    max_binding_bytes: pos_integer(),
+    max_bindings: pos_integer(),
+    max_history_entry_bytes: pos_integer(),
+    max_print_entries: pos_integer(),
+    max_print_bytes: pos_integer(),
+    max_tool_call_entries: pos_integer(),
+    max_tool_call_bytes: pos_integer(),
+    max_upstream_call_entries: pos_integer(),
+    max_upstream_call_bytes: pos_integer(),
+    max_idle_ms: pos_integer()
+  }
 }
 ```
 
-Artifact shape:
+`memory` is the same map returned by `Lisp.run/2`. It is not a new
+storage abstraction.
 
-```elixir
-%{
-  id: String.t(),
-  kind:
-    :note
-    | :fact
-    | :open_question
-    | :decision
-    | :result_summary
-    | :result_handle
-    | :catalog_snapshot
-    | :upstream_call_summary,
-  title: String.t() | nil,
-  body: String.t() | map() | list(),
-  source: :model | :ptc_result | :upstream_call | :operator,
-  created_at: DateTime.t(),
-  supersedes: [String.t()],
-  redacted: boolean(),
-  bytes: non_neg_integer()
-}
-```
-
-## 9. Memory Policy
-
-### 9.1 `summaries_only`
-
-Default. The server stores only compact summaries, facts, notes, and
-upstream-call metadata. Full upstream payloads are not stored.
-
-### 9.2 `handles_and_summaries`
-
-Stores summaries plus opaque result handles. Handles may refer to
-server-side capped previews or recomputable upstream calls. The handle
-format is internal and **MUST NOT** grant access across owners.
-
-### 9.3 `raw_payloads`
-
-Disabled unless explicitly enabled by operator config. Even when
-enabled:
-
-- raw payloads **MUST** be capped by `max_raw_payload_bytes`;
-- credentials and configured secret patterns **MUST** be redacted;
-- payloads **MUST** count against session `max_bytes`;
-- `ptc_session_read` **MUST NOT** return raw payloads by default.
-
-## 10. Safety Model
-
-### 10.1 Authority
-
-Session memory is not authority. A later write-capable operation
-**MUST NOT** be authorized solely because a session note says it is
-allowed. Write-capable upstream calls still need the normal upstream
-configuration, write policy, and any future approval gates.
-
-### 10.2 Read-only Mode
-
-`mode: "read_only"` is a session policy. In this mode, the server
-SHOULD reject upstream calls known to be write-capable before the
-upstream request is sent. Enforcement belongs at the `(tool/mcp-call
-...)` boundary inside `ptc_session_call`, after the target
-`server/tool` is known and before `Upstream.call/4`.
-
-Because MCP tool annotations are not universal, the reliable Phase 3
-mechanism is an explicit allowlist in upstream configuration. In
-`read_only` sessions:
-
-- if `allowed_tools` is configured for the upstream, any tool not in
-  the allowlist **MUST** be rejected with `session_policy_violation`;
-- if upstream tool metadata declares a destructive or non-read-only
-  operation, the call **MUST** be rejected;
-- if neither allowlist nor useful metadata exists, enforcement is
-  best-effort and the tool description/debug output SHOULD make that
-  limitation visible.
-
-Recommended upstream allowlist:
-
-```json
-{
-  "server": "github",
-  "allowed_tools": ["search_issues", "get_issue", "list_pull_requests"]
-}
-```
-
-### 10.3 Redaction
-
-The session write boundary **MUST** run the same redaction strategy as
-trace/debug payloads. Credentials, auth headers, and configured secret
-bindings must never be persisted in session artifacts.
-
-### 10.4 Prompt Injection
-
-Stored artifacts are untrusted data. When injecting session memory
-into a future PTC-Lisp call or agentic prompt, the renderer **MUST**
-label it as data from prior tool results, not instructions.
-
-### 10.5 Staleness
-
-Every artifact projection **SHOULD** include timestamps. Summaries
-SHOULD mention when they were derived. The server **MAY** mark old
-artifacts as stale after a configurable age.
-
-## 11. Resource Limits
+## 10. Limits
 
 Add session-specific limits:
 
@@ -524,15 +500,128 @@ Add session-specific limits:
 | `max_sessions_per_owner` | 16 | env/CLI |
 | `session_ttl_ms` | 30 min | env/CLI |
 | `session_idle_timeout_ms` | 15 min | env/CLI |
-| `max_session_bytes` | 1 MiB | env/CLI |
-| `max_session_artifacts` | 200 | env/CLI |
-| `max_artifact_bytes` | 64 KiB | env/CLI |
-| `max_session_projection_bytes` | 128 KiB | env/CLI |
-| `max_raw_payload_bytes` | 0 | env/CLI |
-| `closed_tombstone_ttl_ms` | 5 min | env/CLI |
+| `max_session_memory_bytes` | 1 MiB | env/CLI |
+| `max_session_binding_bytes` | 256 KiB | env/CLI |
+| `max_session_bindings` | 200 | env/CLI |
+| `max_session_history_entry_bytes` | 64 KiB | env/CLI |
+| `max_session_print_entries` | 50 | env/CLI |
+| `max_session_print_bytes` | 64 KiB | env/CLI |
+| `max_session_tool_call_entries` | 50 | env/CLI |
+| `max_session_tool_call_bytes` | 128 KiB | env/CLI |
+| `max_session_upstream_call_entries` | 50 | env/CLI |
+| `max_session_upstream_call_bytes` | 128 KiB | env/CLI |
 
-Crossing a limit **MUST** produce structured tool errors, not server
-crashes.
+After a successful eval, the session process MUST validate:
+
+1. total `:erlang.external_size(step.memory)`;
+2. binding count;
+3. per-binding external size;
+4. each new `turn_history` entry after truncation/capping;
+5. total bounded print history bytes;
+6. total bounded tool-call history bytes;
+7. total bounded upstream-call history bytes.
+
+If any candidate persisted session field exceeds limits, the eval MUST
+return `session_limit_exceeded` and MUST NOT commit the candidate
+memory, history, prints, or call-history changes. This gives
+transactional session semantics: either the eval succeeds and commits
+all session updates, or the session remains as it was before the call.
+
+History and trace fields are bounded before commit:
+
+- `turn_history` stores at most three entries. Each entry is stored as
+  the raw term only if its external size is within
+  `max_session_history_entry_bytes`; otherwise the entry is replaced
+  by a capped preview marker. This prevents a huge final result from
+  living indefinitely in `*1`.
+- `*1`, `*2`, and `*3` therefore preserve raw values only while those
+  values fit the history-entry cap. If a value is replaced by a
+  preview marker, later code sees that marker, not the original value.
+  The eval response MUST make this explicit, e.g. `"*1 stored as
+  preview; original value exceeded max_session_history_entry_bytes"`.
+- `prints` stores recent print lines only. Lines are already capped by
+  `Lisp.run/2`'s `max_print_length`; the session also enforces total
+  print-history byte and count caps.
+- `tool_calls` and `upstream_calls` store compact, redacted metadata
+  only, not full large results. They are capped by count and total
+  external size.
+- Phase 1 has no persistent `tool_cache`, so no cache-size limit is
+  needed. If a later phase persists tool cache, it MUST add explicit
+  byte limits and invalidation semantics first.
+
+## 11. Safety Model
+
+### 11.1 Persistent Data Is Explicit
+
+Only explicit `def` and `defn` bindings persist. Ordinary expression
+results persist only in bounded `*1`, `*2`, `*3` history.
+
+### 11.2 Hidden Bindings
+
+Existing renderers hide samples for names starting with `_`. Sessions
+SHOULD preserve that convention:
+
+```clojure
+(def _token "...") ; inspect shows type and [Hidden], not sample
+```
+
+This is only display hygiene, not a secret vault. Session tools MUST
+still run configured redaction before storing print/tool-call history.
+
+### 11.3 Read-only Mode
+
+`mode: "read_only"` is metadata-only in Phase 1 because the current
+aggregator `read_only` setting is an operator assertion for MCP
+annotations, not an enforcement layer.
+
+Enforcement is deferred to Phase 2. Phase 2 MUST add a concrete hook
+at the `(tool/mcp-call ...)` boundary before `Upstream.call/4`. In
+read-only sessions, that hook MUST reject write-capable tools when an
+upstream allowlist or reliable tool metadata exists. Without such
+metadata, enforcement remains best-effort and must be documented in
+the tool description/debug output.
+
+### 11.4 Prompt Injection
+
+Session memory and previous prints are untrusted data. If rendered into
+LLM-facing prompts, they MUST be labeled as prior data/output, not
+instructions.
+
+### 11.5 Staleness
+
+Bindings can become stale. The server SHOULD expose `updated_at`,
+turn number, and optional eval metadata in inspect responses. It
+SHOULD NOT silently summarize or rewrite stale bindings.
+
+Implementation note: Phase 1 inspect output SHOULD include session
+`updated_at`, current `turn`, `eval_status`, `memory_bytes`, and
+`binding_count` in every overview/limits response. A later phase
+SHOULD add per-binding metadata outside executable Lisp memory:
+`bound_at_turn`, `updated_at`, `approx_bytes`, and optionally
+`source`. This metadata is for inspect/debug only and MUST NOT become
+implicitly executable Lisp state.
+
+### 11.6 Product Risk Guidance
+
+The main product risks are stale state, accidental memory bloat,
+history truncation surprises, and over-trusting read-only mode.
+
+- Stale state: inspect output should make age visible. Tool
+  descriptions should encourage intentional refresh patterns, e.g.
+  storing `(defn fetch-issues [] ...)` separately from `(def issues
+  (fetch-issues))` so the model can refresh explicitly.
+- Memory bloat: `ptc_session_forget` must be easy for the LLM to
+  discover. Inspect `view: "limits"` SHOULD show top bindings by
+  approximate byte size when cheap to compute, plus print/tool-call
+  history counts.
+- History truncation: when `*1`, `*2`, or `*3` is stored as a preview
+  marker, eval feedback MUST say so plainly.
+- Cancellation/close: tests MUST cover cancelled evals not committing,
+  busy flags being cleared on worker death, and close cancelling any
+  running worker.
+- Read-only expectations: until Phase 2 enforcement exists, session
+  tool descriptions MUST say that `read_only` is metadata-only and
+  does not block upstream writes.
 
 ## 12. OTP Architecture
 
@@ -542,14 +631,13 @@ Recommended modules:
 mcp_server/lib/ptc_runner_mcp/
   sessions.ex                  # public facade
   sessions/
-    config.ex                  # limits and feature flag
+    config.ex                  # feature flag and limits
     owner.ex                   # stdio/http owner derivation and checks
     registry.ex                # lookup/index, quotas
-    supervisor.ex              # DynamicSupervisor over session processes
-    session.ex                 # GenServer per exploration session
-    artifact.ex                # validation/projection helpers
-    projection.ex              # compact JSON views
-    redactor.ex                # storage-boundary redaction wrapper
+    supervisor.ex              # DynamicSupervisor over Session processes
+    session.ex                 # GenServer per PTC-Lisp REPL session
+    projection.ex              # inspect/eval response shaping
+    limits.ex                  # memory/binding/history validation
 ```
 
 Supervision tree addition:
@@ -563,20 +651,52 @@ PtcRunnerMcp.Supervisor
   Stdio
 ```
 
-`Sessions.Registry` should start before `Stdio` so tools can create
-sessions during request handling. The placement after
-`Upstream.Supervisor` means a crash of `Credentials` or
-`Upstream.Supervisor` under the current `:rest_for_one` tree will also
-restart session processes and lose in-memory sessions. That is
-acceptable for the first in-memory implementation, but it **MUST** be
-covered by a test or documented operator note. If preserving sessions
-across upstream restarts becomes a goal, sessions need a different
-supervision boundary or a persistence backend.
+Each PTC session process owns its memory and histories, but it MUST
+NOT execute PTC-Lisp inside the GenServer callback. Eval runs in a
+cancellable worker process owned by the stdio request path.
 
-Each exploration session process owns its state. The registry owns
-indexes, tombstones, and session-count quotas. Session processes
-terminate on close, TTL, idle timeout, owner shutdown, or supervisor
-shutdown.
+`ptc_session_eval` lifecycle:
+
+1. `JsonRpc` validates the tool name and basic argument shape.
+2. `Stdio` treats `ptc_session_eval` as an async gated tool, same
+   class as `ptc_lisp_execute`: it acquires a `max_concurrent_calls`
+   permit, spawns a per-request worker, monitors it, and records it in
+   the in-flight table.
+3. The worker asks `Sessions.Session` to begin eval. The session
+   GenServer atomically checks owner, checks that no eval is already
+   running, snapshots memory/history, records the worker pid/request
+   id in `state.eval`, and returns the snapshot.
+4. The worker runs `Lisp.run/2` with the snapshot, linked/cancellable
+   sandbox behavior matching `ptc_lisp_execute`.
+5. The worker sends the eval result back to the session GenServer for
+   commit. The session validates all limits against the candidate new
+   state, then either commits or rejects with `session_limit_exceeded`.
+6. The worker returns the final MCP envelope to `Stdio`; `Stdio`
+   releases the concurrency permit on worker `:DOWN`.
+
+Per-session concurrency rule for Phase 1: at most one eval may run per
+session. A second `ptc_session_eval` for a session with `state.eval !=
+nil` MUST return `session_busy`; it MUST NOT queue. `ptc_session_inspect`
+MAY run during an eval and returns the last committed state plus
+`eval_status: "running"`. `ptc_session_forget` MUST return
+`session_busy` while an eval is running. `ptc_session_close` MUST cancel
+the running worker, clear the session state, and close/tombstone the
+session.
+
+Cancellation:
+
+- MCP `notifications/cancelled` kills the stdio worker for the matching
+  request id, as today.
+- Because the sandbox child is linked to that worker, killing the
+  worker terminates the in-flight eval promptly.
+- The session GenServer monitors the worker recorded in `state.eval`.
+  If it receives `:DOWN` before a commit message, it clears
+  `state.eval` and leaves memory/history unchanged.
+- A late commit from a dead or superseded worker MUST be ignored by
+  matching the stored request id/monitor reference.
+
+The registry owns indexes and quotas. Session processes terminate on
+close, TTL, idle timeout, owner shutdown, or supervisor shutdown.
 
 ## 13. Error Model
 
@@ -588,20 +708,13 @@ Add session-specific reasons to MCP tool envelopes:
 | `session_not_found` | Unknown or expired session id. |
 | `session_closed` | Session was explicitly closed. |
 | `session_owner_mismatch` | Caller does not own the session. |
-| `session_limit_exceeded` | Count/byte/artifact quota exceeded. |
+| `session_busy` | An eval is already running for this session. |
+| `session_limit_exceeded` | Count/byte/binding/history quota exceeded. |
 | `session_policy_violation` | Operation rejected by read-only/write policy. |
 | `session_args_error` | Malformed session tool arguments. |
 
-These should be MCP-only error reasons unless promoted to a shared PTC
-protocol reason later.
-
-Each advertised session tool **MUST** include an `outputSchema` for
-success and error responses, unless the active response profile omits
-schemas globally. The schema must include the session-specific reasons
-above so strict structured-content clients accept server-generated
-errors. Session tools should follow the active
-`slim|structured|debug` response profile where practical, but their
-core `status`, `reason`, and `message` fields must remain stable.
+These are MCP-only reasons unless later promoted to shared PTC
+protocol reasons.
 
 ## 14. Telemetry
 
@@ -609,11 +722,11 @@ Emit telemetry events:
 
 ```elixir
 [:ptc_runner_mcp, :session, :start]
-[:ptc_runner_mcp, :session, :stop]
+[:ptc_runner_mcp, :session, :eval, :start]
+[:ptc_runner_mcp, :session, :eval, :stop]
+[:ptc_runner_mcp, :session, :inspect]
+[:ptc_runner_mcp, :session, :forget]
 [:ptc_runner_mcp, :session, :close]
-[:ptc_runner_mcp, :session, :artifact, :append]
-[:ptc_runner_mcp, :session, :call, :start]
-[:ptc_runner_mcp, :session, :call, :stop]
 [:ptc_runner_mcp, :session, :evict]
 ```
 
@@ -622,123 +735,253 @@ Metadata SHOULD include:
 - `session_id`
 - `owner_hash`
 - `mode`
-- `memory_policy`
-- `artifact_count`
-- `bytes_used`
+- `turn`
+- `binding_count`
+- `memory_bytes`
+- `prints_count`
+- `tool_calls_count`
 - `reason` for close/evict/error
 
-Do not emit raw artifact bodies in telemetry metadata.
+Do not emit raw binding values, print lines, or tool results in
+telemetry metadata.
 
 ## 15. Interaction With Existing Features
 
 ### 15.1 `ptc_lisp_execute`
 
-No behavior change. It remains stateless and should continue to be
-the default safe baseline.
+No behavior change. It remains stateless.
 
 ### 15.2 Aggregator Mode
 
-Session calls MAY use aggregator mode. Upstream-call entries produced
-inside `ptc_session_call` SHOULD be appended to the session's compact
-upstream ledger, subject to limits.
-
-The upstream ledger append is separate from raw payload storage. It
-stores compact metadata compatible with the existing `upstream_calls`
-envelope and never stores full upstream bodies unless `raw_payloads`
-is enabled and an explicit store request selects them.
+`ptc_session_eval` MAY use aggregator mode. Upstream-call entries
+produced inside a session eval SHOULD be appended to the session's
+bounded upstream-call history.
 
 ### 15.3 Agentic `ptc_task`
 
-`ptc_task` may later use sessions as working memory. Phase 1 should
-not require agentic mode. Sessions should be useful for deterministic
-client-authored PTC-Lisp first.
+Agentic `ptc_task` may later use sessions as its working environment,
+but Phase 1 should not require agentic mode. Sessions should be useful
+for client-authored PTC-Lisp first.
 
 ### 15.4 Debug Tool
 
-`ptc_debug` SHOULD include session events when the debug tool is
-enabled, capped by the existing debug response limits.
+`ptc_debug` SHOULD include session events when enabled, capped by the
+existing debug response limits.
 
-## 16. MCP Advertisement
+### 15.5 JSON-RPC and Tool Integration
 
-Session tools SHOULD be hidden unless enabled by config:
+Session tools extend the existing `tools/list` and `tools/call`
+handling:
 
-```text
---sessions
-PTC_RUNNER_MCP_SESSIONS=true
-```
+- `ptc_session_start`, `ptc_session_inspect`, `ptc_session_forget`,
+  and `ptc_session_close` are synchronous tool calls. They do not
+  acquire the global `max_concurrent_calls` execution permit because
+  they do not run the sandbox, but they must still validate frame and
+  argument sizes.
+- `ptc_session_eval` is an async gated tool, like
+  `ptc_lisp_execute`. It acquires the global execution permit, runs in
+  a per-request worker, supports `notifications/cancelled`, records
+  debug outcomes, and releases the permit on worker `:DOWN`.
+- `tools/list` advertises session tools only when sessions are enabled.
+  Each advertised session tool MUST include an `inputSchema` and, when
+  the active response profile supports schemas, an `outputSchema` that
+  includes the session-specific error reasons.
+- Argument validation happens before acquiring the global execution
+  permit when possible. Owner checks and per-session busy checks happen
+  before sandbox execution.
+- Session tools SHOULD follow the active
+  `slim|structured|debug` response profile where practical, but their
+  core `status`, `reason`, `message`, and `session_id` fields must
+  remain stable.
+- `ptc_debug` recording must include session tool calls when enabled,
+  but must not record raw binding values, raw prints, or large tool
+  results beyond existing debug limits.
 
-When enabled, `tools/list` advertises the session tools alongside
-`ptc_lisp_execute` and any enabled `ptc_task` / `ptc_debug` tools.
+## 16. Related Tools and Future Additions
 
-Tool descriptions MUST state:
+Other stateful MCP REPL tools point at useful directions, but also
+clarify what PtcRunner should not become.
 
-- sessions are per-client/process in stdio mode;
-- state is bounded and expires;
-- credentials are not stored;
-- session memory is not authorization for writes;
-- `ptc_lisp_execute` remains stateless.
+### 16.1 External Reference Points
+
+- Posit `mcptools` separates MCP server and live language sessions:
+  the server brokers access, while `mcp_session()` registers an
+  interactive R process. PtcRunner should borrow the server/session
+  split, but keep the session language PTC-Lisp.
+- `hdresearch/mcp-python` offers a minimal persistent Python REPL:
+  execute code, list variables, reset. PtcRunner should borrow the
+  simple eval/inspect/forget shape, not arbitrary Python execution or
+  package installation.
+- `takafu/repl-mcp` manages many generic REPL and shell processes,
+  with session URLs, signal handling, timeout recovery, and prompt
+  learning. PtcRunner should borrow lifecycle and observability ideas,
+  not expose arbitrary shells as its core capability.
+
+The PtcRunner differentiator remains: stateful exploration in a
+constrained, deterministic PTC-Lisp runtime with BEAM supervision,
+resource limits, typed outputs, and optional MCP aggregation.
+
+### 16.2 Candidate Future Tools
+
+The following tools are intentionally out of Phase 1 but should remain
+compatible with the session architecture:
+
+| Tool | Purpose |
+|---|---|
+| `ptc_session_list` | List active sessions for the current owner/process. |
+| `ptc_session_details` | Return metadata, limits, usage, last activity, and status for one session. |
+| `ptc_session_interrupt` | Cancel an in-flight session eval, mirroring `notifications/cancelled` behavior. |
+| `ptc_session_reset` | Clear memory, history, prints, tool calls, and tool cache in one operation. May be sugar over `ptc_session_forget`. |
+| `ptc_session_export` | Return a redacted, bounded snapshot for debugging or transfer. Disabled by default. |
+
+`ptc_session_list` is a strong Phase 1.5 candidate because users and
+LLMs will quickly ask which sessions exist. A minimal version only
+needs `session_id`, `title`, `turn`, `updated_at`, `memory_bytes`, and
+`eval_status`.
+
+`ptc_session_details` can initially be covered by
+`ptc_session_inspect view: "limits"`, but a separate tool may become
+useful if clients want metadata without rendered memory previews.
+
+`ptc_session_reset` is ergonomic sugar over
+`ptc_session_forget clear: ["memory", "history", "prints",
+"tool_calls"]`. It should remain optional until real usage shows the
+extra tool is worth the surface area.
+
+### 16.3 Candidate Future UX
+
+- Browser/session trace viewer similar in spirit to `repl-mcp`, but
+  backed by PTC trace data rather than a raw terminal.
+- Session timeline in `ptc_debug`: evals, changed bindings, prints,
+  tool calls, errors, limit events.
+- Optional initial prelude on `ptc_session_start`, useful for loading
+  helper functions.
+- Optional persistence backend for explicit operator-managed session
+  continuity across server restarts.
+- HTTP transport ownership support using MCP `Mcp-Session-Id`.
+
+### 16.4 Explicit Non-Direction
+
+PtcRunner sessions SHOULD NOT grow into a generic shell/PTY manager.
+That space is covered by tools like `repl-mcp`, and adopting it would
+weaken PtcRunner's safety and positioning. If users need arbitrary
+Python, R, Ruby, or shell REPL access, they should use a purpose-built
+REPL MCP server with appropriate OS/container isolation.
 
 ## 17. Phasing
 
-### Phase 0 — Contract and Tests
+### Phase 0 — Contract and Shared Helpers
 
-- Add this specification.
-- Add unit tests for owner model, artifact validation, projections,
-  quotas, TTL/idle calculations, and error envelopes.
-- No public tools yet.
+- Replace artifact-memory design with this REPL-session contract.
+- Identify renderer helpers that should be shared rather than
+  SubAgent-private.
+- Add tests for memory commit/rollback semantics using `Lisp.run/2`.
 
 ### Phase 1 — Stdio-Local Sessions
 
-- Add `Sessions.Supervisor`, `Sessions.Registry`, and `Sessions.Session`.
-- Add `ptc_session_start`, `ptc_session_read`,
-  `ptc_session_update`, and `ptc_session_close`.
-- Store only summaries/facts/notes/open questions.
-- Accept `mode` and `memory_policy` fields, but only enforce the
-  portions implemented in Phase 1. `raw_payloads` MUST be rejected
-  unless operator config enables it.
-- Add closed-session tombstones.
+- Add session config, registry, supervisor, owner derivation, and
+  session GenServer.
+- Implement `ptc_session_start`, `ptc_session_eval`,
+  `ptc_session_inspect`, `ptc_session_forget`, and
+  `ptc_session_close`.
 - Feature flag off by default.
+- Support no-upstream PTC-Lisp first.
 
-### Phase 2 — `ptc_session_call`
+### Phase 2 — Aggregator Integration
 
-- Run PTC-Lisp with a bounded session projection.
-- Support optional post-call artifact storage.
-- Append compact upstream-call summaries.
-- Enforce per-session quotas under concurrent calls.
+- Add `(tool/mcp-call ...)` support inside `ptc_session_eval`.
+- Persist bounded tool/upstream call histories.
+- Apply read-only policy where metadata/allowlists exist.
 
-### Phase 3 — Read-only Policy
-
-- Support configured upstream allowlists.
-- Reject known write-capable tools in read-only sessions when metadata
-  is available.
-
-### Phase 4 — HTTP-Ready Ownership
+### Phase 3 — HTTP-Ready Ownership
 
 - Refactor owner derivation to accept future HTTP `Mcp-Session-Id`.
-- Add tests for owner mismatch and multi-owner isolation.
-- Do not implement HTTP transport here; only make the session model
-  transport-neutral.
+- Add owner mismatch and multi-owner isolation tests.
+- Do not implement HTTP transport in this phase.
 
-### Phase 5 — Optional Persistence
+### Phase 4 — Optional Persistence
 
 - Optional, explicitly configured persistence backend.
 - Preserve owner binding and expiration.
-- Raw payload persistence remains disabled by default.
+- Disabled by default.
 
-## 18. Open Questions
+## 18. Implementation and Review Workflow
 
-1. Should session tools be separate MCP tools or folded into
-   `ptc_task`? This spec recommends separate tools for clarity.
-2. How should read-only upstream allowlists be configured alongside
-   existing upstream config?
-3. Should session ids be opaque random strings only, or include a
-   short process/owner prefix for debugging?
-4. Should `ptc_session_read` support server-side filtering/search in
-   Phase 1, or only simple views?
-5. What exact fields should be injected into PTC-Lisp as
-   `data/session`?
+Implementation should proceed phase-by-phase. A fresh Codex session
+should start by reading this specification and then implement only the
+requested phase or sub-phase. Do not broaden Phase 1 into Phase 2
+aggregator support unless explicitly requested.
 
-## 19. Initial Acceptance Criteria
+Each phase or substantial sub-phase should end with:
+
+- focused tests for the new behavior;
+- `mix format`;
+- targeted `mix test ...`;
+- `mix check` when practical;
+- an independent high-effort Codex review before merging or starting
+  the next substantial phase.
+
+Use the `codex-review` skill in review mode for the independent pass.
+The review request should name this specification and the implemented
+scope, for example:
+
+```text
+Review the current diff against Plans/ptc-runner-mcp-sessions.md.
+Scope: Phase 1b, ptc_session_eval worker/cancellation/busy/rollback.
+Focus on behavioral bugs, missing tests, and scope creep into Phase 2.
+```
+
+Suggested review checkpoints:
+
+1. Phase 0: shared renderer extraction and rollback/limit tests.
+2. Phase 1a: session config, owner, registry, supervisor, and session
+   lifecycle.
+3. Phase 1b: `ptc_session_eval` worker, cancellation, `session_busy`,
+   rollback, and persisted-state limits.
+4. Phase 1c: MCP tool surface, `tools/list`, JSON-RPC routing,
+   schemas, response profiles, and debug recording.
+5. Phase 1d: `ptc_session_inspect`, `ptc_session_forget`,
+   `ptc_session_close`, disabled-by-default behavior, and full Phase 1
+   integration.
+
+Recommended fresh-session handoff:
+
+```text
+Read Plans/ptc-runner-mcp-sessions.md first. Implement only <phase>.
+Do not implement Phase 2 aggregator support. After tests pass, run the
+codex-review skill in high-effort review mode on the diff and address
+valid findings.
+```
+
+When subagents are used, split work by file ownership to avoid merge
+conflicts. `tools.ex`, `json_rpc.ex`, `stdio.ex`, `application.ex`,
+and shared test helpers are collision-prone and should have a single
+owner per sub-phase.
+
+## 19. Open Questions
+
+1. Should `tool_cache` persist across session evals after Phase 1?
+   This improves repeated pure/cacheable tool use, but can surprise
+   users when upstream data changes. Phase 1 answer: no persistent
+   tool cache.
+2. Should `ptc_session_eval` allow a typed return contract after
+   Phase 1, and if so should validation failure roll back memory?
+   Phase 1 answer: no `signature` / `return_schema` /
+   `output_contract` on `ptc_session_eval`.
+3. How much of `TurnFeedback` should move to a shared non-SubAgent
+   module?
+4. Should `ptc_session_inspect view: "memory"` return only rendered
+   text, structured entries, or both?
+5. Should closed sessions keep tombstones briefly?
+6. Should `ptc_session_forget` support wildcard/prefix deletion?
+7. Should session start support loading an initial prelude program?
+8. Should `ptc_session_list` be Phase 1.5 for usability, or Phase 2
+   to keep the initial surface minimal?
+9. Should `ptc_session_interrupt` be implemented as a separate tool,
+   or should MCP `notifications/cancelled` be the only cancellation
+   path for Phase 1?
+
+## 20. Initial Acceptance Criteria
 
 The first shippable version is acceptable when:
 
@@ -747,11 +990,21 @@ The first shippable version is acceptable when:
 3. Multiple sessions can exist concurrently in one stdio server
    process.
 4. Session state is isolated by owner.
-5. TTL, idle timeout, byte limit, artifact limit, and max-session
-   limits are enforced.
-6. `ptc_lisp_execute` remains stateless and all existing tests pass.
-7. Stored artifacts are redacted and capped.
-8. `ptc_session_close` deletes active state and leaves only a capped
-   tombstone for `session_closed`.
-9. Debug/telemetry expose counts and ids, never raw secret-bearing
-   payloads.
+5. `def` and `defn` persist across `ptc_session_eval` calls.
+6. `let` bindings and ordinary intermediate values do not persist.
+7. `*1`, `*2`, `*3` work across eval calls.
+8. `println` output is returned and available via inspect.
+9. Memory limit violations roll back the eval.
+10. `ptc_session_forget` removes selected bindings and histories.
+11. Cancelled evals do not commit memory/history.
+12. A concurrent eval on the same session returns `session_busy`.
+13. Persisted `turn_history`, prints, tool-call history, and
+    upstream-call history are all bounded by count and bytes.
+14. `ptc_session_eval` has no `signature` / `return_schema` /
+    `output_contract` in Phase 1.
+15. `tool_cache` does not persist across session evals in Phase 1.
+16. Oversized `*1` / `*2` / `*3` entries become explicit preview
+    markers and eval feedback reports that truncation.
+17. `read_only` session descriptions clearly state metadata-only in
+    Phase 1.
+18. `ptc_lisp_execute` remains stateless and all existing tests pass.
