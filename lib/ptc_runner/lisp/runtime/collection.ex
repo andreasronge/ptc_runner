@@ -241,6 +241,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll |> Enum.drop(n) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
+  def nthrest(coll, n), do: Enum.drop(Normalize.to_seq(coll), max(n, 0))
+  def nthnext(coll, n), do: coll |> nthrest(n) |> seq()
+
   # ============================================================
   # Distinct
   # ============================================================
@@ -252,6 +255,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
   # Construction
   # ============================================================
+
+  def hash_set(args) when is_list(args), do: MapSet.new(args)
 
   def concat2(a, b) do
     a = a || []

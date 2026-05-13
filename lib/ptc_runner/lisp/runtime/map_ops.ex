@@ -23,6 +23,17 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.hash_map([:a, 1, :b, 2])
       %{a: 1, b: 2}
   """
+  def array_map(args) when is_list(args) do
+    if rem(length(args), 2) != 0 do
+      raise ExecutionError,
+        message: "array-map requires an even number of arguments, got #{length(args)}"
+    end
+
+    args
+    |> Enum.chunk_every(2)
+    |> Enum.into(%{}, fn [k, v] -> {k, v} end)
+  end
+
   def hash_map(args) when is_list(args) do
     if rem(length(args), 2) != 0 do
       raise ExecutionError,

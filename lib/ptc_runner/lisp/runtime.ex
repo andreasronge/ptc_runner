@@ -70,6 +70,8 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate nnext(coll), to: Collection
   defdelegate take(n, coll), to: Collection
   defdelegate drop(n, coll), to: Collection
+  defdelegate nthrest(coll, n), to: Collection
+  defdelegate nthnext(coll, n), to: Collection
   defdelegate take_while(pred, coll), to: Collection
   defdelegate drop_while(pred, coll), to: Collection
   defdelegate distinct(coll), to: Collection
@@ -125,6 +127,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate range(start, end_val), to: Collection
   defdelegate range(start, end_val, step), to: Collection
   defdelegate combinations(coll, n), to: Collection
+  defdelegate hash_set(args), to: Collection
 
   # Tree Traversal
   defdelegate walk(inner, outer, form), to: Collection
@@ -163,6 +166,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate reduce_kv(f, init, m), to: MapOps
   defdelegate zipmap(keys, vals), to: MapOps
   defdelegate hash_map(args), to: MapOps
+  defdelegate array_map(args), to: MapOps
 
   # ============================================================
   # Arithmetic
@@ -265,6 +269,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   defdelegate parse_long(s), to: RuntimeString
   defdelegate parse_double(s), to: RuntimeString
+  defdelegate parse_boolean(s), to: RuntimeString
 
   # ============================================================
   # Regex Operations

@@ -2276,6 +2276,25 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "array-map" do
+    test "aliases hash-map semantics" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(array-map :a 1 :b 2)|)
+      assert result == %{a: 1, b: 2}
+    end
+
+    test "errors on odd number of arguments" do
+      {:error, %Step{fail: fail}} = Lisp.run(~S|(array-map :a 1 :b)|)
+      assert fail.message =~ "even number"
+    end
+  end
+
+  describe "hash-set" do
+    test "creates a set from variadic arguments" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(hash-set 1 1 2 3)|)
+      assert result == MapSet.new([1, 2, 3])
+    end
+  end
+
   # ==========================================================================
   # filterv - Filter returning vector
   # ==========================================================================
@@ -2439,6 +2458,40 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "subvec empty vector" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(subvec [] 0 0)|)
       assert result == []
+    end
+  end
+
+  describe "nthrest and nthnext" do
+    test "nthrest returns drop result, preserving empty vector" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(nthrest [1 2 3] 2)|)
+      assert result == [3]
+
+      {:ok, %Step{return: empty}} = Lisp.run(~S|(nthrest [1 2 3] 5)|)
+      assert empty == []
+    end
+
+    test "nthnext returns nil when the dropped sequence is empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(nthnext [1 2 3] 2)|)
+      assert result == [3]
+
+      {:ok, %Step{return: empty}} = Lisp.run(~S|(nthnext [1 2 3] 5)|)
+      assert empty == nil
+    end
+
+    test "nthrest and nthnext accept nil as seqable" do
+      {:ok, %Step{return: rest}} = Lisp.run(~S|(nthrest nil 0)|)
+      assert rest == []
+
+      {:ok, %Step{return: next}} = Lisp.run(~S|(nthnext nil 0)|)
+      assert next == nil
+    end
+
+    test "nthrest and nthnext accept sets as seqable" do
+      {:ok, %Step{return: rest}} = Lisp.run(~S|(nthrest (hash-set 1 2) 0)|)
+      assert Enum.sort(rest) == [1, 2]
+
+      {:ok, %Step{return: next}} = Lisp.run(~S|(nthnext (hash-set 1 2) 0)|)
+      assert Enum.sort(next) == [1, 2]
     end
   end
 
