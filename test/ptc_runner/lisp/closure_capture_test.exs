@@ -195,5 +195,43 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       assert memory_size < 2_000,
              "expected defn memory < 2000 bytes, got #{memory_size}"
     end
+
+    test "closures do not retain prior turn history in session memory" do
+      large_history_entry = String.duplicate("x", 100_000)
+
+      {:ok, step} =
+        Lisp.run("(def f (fn [] 1))",
+          profile: :mcp_no_tools,
+          mode: :multi_turn,
+          turn_history: [large_history_entry]
+        )
+
+      memory_size = :erlang.external_size(step.memory)
+      {:closure, _params, _body, _env, captured_history, _meta} = step.memory[:f]
+
+      assert captured_history == []
+
+      assert memory_size < 2_000,
+             "expected closure memory to exclude turn history, got #{memory_size} bytes"
+    end
+
+    test "closure reads current caller turn history, not definition-time history" do
+      {:ok, step1} =
+        Lisp.run("(def f (fn [] *1))",
+          profile: :mcp_no_tools,
+          mode: :multi_turn,
+          turn_history: ["definition-time"]
+        )
+
+      {:ok, step2} =
+        Lisp.run("(f)",
+          profile: :mcp_no_tools,
+          mode: :multi_turn,
+          memory: step1.memory,
+          turn_history: ["call-time"]
+        )
+
+      assert step2.return == "call-time"
+    end
   end
 end

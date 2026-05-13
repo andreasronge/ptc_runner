@@ -402,14 +402,14 @@ defmodule PtcRunner.Lisp.Eval do
     # would inflate session memory by ~18 KB per closure.
     {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
     meta = locals_meta(captured_locals, %{})
-    {:ok, {:closure, params, body, captured_env, eval_ctx.turn_history, meta}, eval_ctx}
+    {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
   # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
   defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
     {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
     meta = locals_meta(captured_locals, %{fn_name: name})
-    {:ok, {:closure, params, body, captured_env, eval_ctx.turn_history, meta}, eval_ctx}
+    {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
   # ============================================================
@@ -1235,7 +1235,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Convert a closure to a zero-arity Erlang function for use in pcalls
   defp pcalls_fn_to_erlang(
-         {:closure, [], body, closure_env, turn_history, metadata} = closure,
+         {:closure, [], body, closure_env, _turn_history, metadata} = closure,
          %EvalContext{} = eval_ctx
        ) do
     closure_env = Apply.bind_self_recursion(closure_env, metadata, closure)
@@ -1247,7 +1247,7 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx.user_ns,
           closure_env,
           eval_ctx.tool_exec,
-          turn_history
+          eval_ctx.turn_history
         )
 
       ctx = %{

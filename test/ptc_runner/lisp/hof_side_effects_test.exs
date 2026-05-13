@@ -11,6 +11,16 @@ defmodule PtcRunner.Lisp.HofSideEffectsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.{Env, Eval}
+
+  defp clear_hof_stack! do
+    Process.delete(:__ptc_hof_stack)
+    on_exit(fn -> Process.delete(:__ptc_hof_stack) end)
+  end
+
+  defp assert_hof_stack_empty do
+    assert Process.get(:__ptc_hof_stack, []) == []
+  end
 
   describe "tool_calls inside reduce" do
     test "tool calls made inside reduce are captured in step.tool_calls" do
@@ -138,6 +148,62 @@ defmodule PtcRunner.Lisp.HofSideEffectsTest do
       assert step.return == 3
       assert length(step.tool_calls) == 3
       assert step.prints == ["storing 1", "storing 2", "storing 3"]
+    end
+  end
+
+  describe "side-effect stash cleanup on errors" do
+    test "multi-arity HOF callback errors do not retain process dictionary state" do
+      clear_hof_stack!()
+
+      ast =
+        {:call, {:var, :map},
+         [
+           {:fn, [{:var, :x}], {:call, {:var, :+}, [{:var, :x}, nil]}},
+           {:vector, [1, 2, 3]}
+         ]}
+
+      assert {:error, {:type_error, _message, _args}} =
+               Eval.eval(ast, %{}, %{}, Env.initial(), fn _, _ -> nil end)
+
+      assert_hof_stack_empty()
+    end
+
+    test "normal HOF callback errors do not retain process dictionary state" do
+      clear_hof_stack!()
+
+      ast =
+        {:call, {:var, :filter},
+         [
+           {:fn, [{:var, :x}], {:call, {:var, :+}, [{:var, :x}, nil]}},
+           {:vector, [1, 2, 3]}
+         ]}
+
+      assert {:error, {:type_error, _message, _args}} =
+               Eval.eval(ast, %{}, %{}, Env.initial(), fn _, _ -> nil end)
+
+      assert_hof_stack_empty()
+    end
+
+    test "collect builtin errors do not retain process dictionary state" do
+      clear_hof_stack!()
+
+      assert_raise ArgumentError, ~r/every-pred requires at least 1 predicate/, fn ->
+        Eval.eval({:call, {:var, :"every-pred"}, []}, %{}, %{}, Env.initial(), fn _, _ -> nil end)
+      end
+
+      assert_hof_stack_empty()
+    end
+
+    test "plain function errors do not retain process dictionary state" do
+      clear_hof_stack!()
+
+      bad = fn _ -> raise "boom" end
+
+      assert_raise RuntimeError, "boom", fn ->
+        Eval.eval({:call, {:var, :bad}, [1]}, %{}, %{}, %{bad: bad}, fn _, _ -> nil end)
+      end
+
+      assert_hof_stack_empty()
     end
   end
 end
