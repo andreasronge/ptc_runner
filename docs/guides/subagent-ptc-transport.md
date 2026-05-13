@@ -182,9 +182,9 @@ Common cases:
 - **Ollama** — generally not supported.
 - **`openai-compat:` endpoints without tool calling** — not supported.
 
-When in doubt, leave `ptc_transport` at its default. See
-[`usage-rules/llm-setup.md`](../../usage-rules/llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling)
-for the per-provider table and the failure surface.
+When in doubt, leave `ptc_transport` at its default. See the
+[LLM setup guide](subagent-llm-setup.md) for provider compatibility
+details.
 
 ## Don't
 
@@ -197,8 +197,8 @@ for the per-provider table and the failure surface.
 
 ## See also
 
-- [SubAgent usage rules — PTC-Lisp transport](../../usage-rules/subagent.md#ptc-lisp-transport-ptc_transport)
-- [LLM setup — provider compatibility](../../usage-rules/llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling)
+- [LLM setup guide](subagent-llm-setup.md) — provider compatibility
+  for tool calling.
 - [Output Modes in an App Loop livebook](../../livebooks/output_modes_in_app_loops.livemd) —
   runnable walkthrough that demos `:content` and `:tool_call` over the same
   scenario.

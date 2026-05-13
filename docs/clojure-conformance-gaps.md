@@ -515,7 +515,7 @@ The negative-start rule specifically kills the `(.indexOf s needle) → -1 → s
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | `Plans/json-support.md` §4.1 / §4.4 |
+| **Source** | PtcRunner JSON support design decision |
 
 ```clojure
 ;; Cheshire / Jason.decode!
@@ -539,7 +539,7 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | `Plans/json-support.md` §4.2 / §4.4 |
+| **Source** | PtcRunner JSON support design decision |
 
 ```clojure
 ;; Vanilla Jason.encode/1 silently coerces non-boolean atoms to JSON strings:

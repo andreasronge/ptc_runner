@@ -239,8 +239,10 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-getting-started.md",
         "docs/guides/subagent-llm-setup.md",
         "docs/guides/subagent-text-mode.md",
+        "docs/guides/text-mode-ptc-compute.md",
         "docs/guides/subagent-concepts.md",
         "docs/guides/subagent-patterns.md",
+        "docs/guides/subagent-ptc-transport.md",
         "docs/guides/subagent-navigator.md",
         "docs/guides/subagent-rlm-patterns.md",
         "docs/guides/subagent-testing.md",
@@ -252,6 +254,13 @@ defmodule PtcRunner.MixProject do
         # Integration Guides
         "docs/guides/phoenix-streaming.md",
         "docs/guides/structured-output-callbacks.md",
+        # MCP Server
+        "docs/mcp-server.md",
+        "docs/guides/mcp-getting-started.md",
+        "docs/aggregator-mode.md",
+        "docs/agentic-mode.md",
+        "docs/mcp-debug.md",
+        "docs/mcp-server-configuration.md",
         # Reference
         "docs/signature-syntax.md",
         "docs/benchmark-eval.md",
@@ -275,8 +284,10 @@ defmodule PtcRunner.MixProject do
         "livebooks/prompt_caching.livemd"
       ],
       groups_for_extras: [
-        "SubAgent Guides": ~r/docs\/guides\/subagent-.+\.md/,
+        "SubAgent Guides": ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute)\.md/,
         "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
+        "MCP Server":
+          ~r/docs\/(mcp-server|mcp-server-configuration|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
         Reference:
           ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/

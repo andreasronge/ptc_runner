@@ -4,23 +4,39 @@
 [Model Context Protocol](https://modelcontextprotocol.io/) over stdio
 JSON-RPC and exposes `ptc_lisp_execute` to any MCP client (Claude
 Desktop, Cursor, Cline, Claude Code, MCP Inspector, …). The tool
-accepts a PTC-Lisp program plus optional `context` and
-`signature`, runs it in an isolated BEAM sandbox, and returns a
-structured result.
+accepts a PTC-Lisp program plus optional `context` and `output_schema`
+(or legacy `signature`), runs it in an isolated BEAM sandbox, and
+returns a structured result.
 
 The server has no LLM of its own. The MCP client's LLM does the
 reasoning; PtcRunner is invoked only when deterministic computation is
-useful — counting, filtering, JSON shape validation, signature-driven
+useful — counting, filtering, JSON shape validation, schema-driven
 extraction. State does not persist between calls; each `tools/call` is
 independent unless the server is started with the optional session
 tools enabled.
 
+Several capabilities are opt-in and add their own top-level tools:
+
+- [Aggregator mode](aggregator-mode.md) lets PTC-Lisp programs call
+  configured upstream MCP servers via `(tool/mcp-call ...)`.
+- [Agentic mode](agentic-mode.md) adds `ptc_task`, a
+  natural-language task tool backed by a planner LLM (requires
+  aggregator mode).
+- [Stateful sessions](#stateful-sessions) add `ptc_session_*` tools
+  that persist `(def ...)` bindings, the last three results, and
+  bounded history.
+- [`ptc_debug`](mcp-debug.md) exposes in-process telemetry rollups
+  for diagnostics.
+
+`ptc_lisp_execute` itself is rendered through one of three
+[response profiles](mcp-server-configuration.md#response-profiles)
+(`slim` / `structured` / `debug`), defaulting to `slim`.
+
 This document is the conceptual overview. For install + client
-configuration, see
-[`mcp_server/README.md`](../mcp_server/README.md). For the full v1
-contract, see
-[`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md).
-For the PTC-Lisp language itself, see
+configuration, see [`mcp_server/README.md`](../mcp_server/README.md);
+for every flag and environment variable, see
+[`docs/mcp-server-configuration.md`](mcp-server-configuration.md). For
+the PTC-Lisp language itself, see
 [`docs/ptc-lisp-specification.md`](ptc-lisp-specification.md).
 
 ## When to use it
@@ -37,12 +53,17 @@ Concrete cases:
 - **Arithmetic over data the LLM has already seen.** Sum a list of
   order totals, average a column, compute a percentile — without
   trusting the model's mental math.
-- **JSON shape validation.** Pass a `signature` to assert the result
-  is `{count :int, sum :int}`; on mismatch the response carries a
-  `validation_error` the model can self-correct from.
-- **Signature-validated extraction.** Filter a JSON array down to
+- **JSON shape validation.** Pass an `output_schema` to assert the
+  result is `{count :int, sum :int}`; on mismatch the response
+  carries a `validation_error` the model can self-correct from.
+- **Schema-validated extraction.** Filter a JSON array down to
   records matching some condition and return them as a typed,
   programmatic value the calling client can consume directly.
+- **Cross-server orchestration.** With [aggregator
+  mode](aggregator-mode.md) on, one PTC-Lisp program can fan out to
+  several configured upstream MCP servers, reduce the results, and
+  return the collapsed answer — typically an order of magnitude fewer
+  bytes than the LLM doing the same work N round-trips at a time.
 - **Filtering or reshaping a structured payload** that already lives
   in the conversation. A small PTC-Lisp program is cheaper and more
   reliable than a long natural-language transformation.
@@ -64,11 +85,11 @@ look like this:
 | Authoring overhead for the LLM | Zero — every program is a self-contained expression | Imports, virtualenv awareness, library knowledge | `require`, `import`, package availability |
 | Schema validation of the return value | First-class — `signature` field, structured `validated` payload | None (server returns raw stdout / repr) | None (server returns raw value or `JSON.stringify`) |
 | Stable wire format | Yes — same R22/R23 contract as in-process PtcRunner | None standardized | None standardized |
-| Network access from the program | None — sandbox blocks it | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
-| Filesystem access from the program | None — sandbox blocks it | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
+| Network access from the program | None directly — opt-in only via configured upstream MCP servers in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
+| Filesystem access from the program | None directly — opt-in only via filesystem-MCP upstreams in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
 | Install footprint | Single Mix release (BEAM + ERTS bundled) | Python + interpreter + libs + sandbox tooling | Node + sandbox tooling |
 | Concurrency model | Per-call BEAM process, semaphore-bounded | Process-per-call (typical) or threadpool | Worker-per-call or single-loop |
-| Default resource caps | 1 s wall-clock, 10 MB memory, 64 KB program, 4 MB context, 8 concurrent | Operator-defined | Operator-defined |
+| Default resource caps | 1 s wall-clock, 10 MB memory, 64 KB program, 4 MB context, 8 concurrent (aggregator mode raises the per-program caps to 10 s / 100 MB) | Operator-defined | Operator-defined |
 
 The PtcRunner pitch in one line: **the sandbox is the language, not
 the deployment**. Other servers ship a general-purpose interpreter and
@@ -123,12 +144,15 @@ Each `tools/call` request flows top-to-bottom:
    passing the concurrency semaphore (`max_concurrent_calls`,
    default 8). Excess calls return immediately with `reason: "busy"`
    instead of queuing.
-3. The worker validates `program` / `context` / `signature`, builds
-   fresh `Lisp.run/2` opts (empty memory, empty tool cache, no journal
-   reuse), and invokes `PtcToolProtocol.lisp_run/2`.
+3. The worker validates `program` / `context` / `output_schema` (or
+   legacy `signature`), builds fresh `Lisp.run/2` opts (empty memory,
+   empty tool cache, no journal reuse), and invokes
+   `PtcToolProtocol.lisp_run/2`.
 4. `:ptc_runner` runs the program in an isolated BEAM process with a
-   1 s wall-clock cap and a 10 MB heap cap. Filesystem and network
-   APIs are not exposed to the program.
+   1 s wall-clock cap and a 10 MB heap cap (10 s / 100 MB in
+   aggregator mode). Filesystem and network APIs are not exposed to
+   the program; aggregator-mode programs reach out only through the
+   mediated `(tool/mcp-call …)` builtin.
 5. The result flows back up: `PtcToolProtocol.render_success_from_step/2`
    builds the R22 success payload, or `render_error/3` builds the R23
    error payload. The MCP envelope (`isError`, `structuredContent`,
@@ -231,27 +255,40 @@ unless you are actively debugging a specific reproduction.
 | `max_program_bytes` | 64 KiB | `--max-program-bytes` / env |
 | `max_context_bytes` | 4 MiB | `--max-context-bytes` / env |
 | `max_concurrent_calls` | `min(8, logical_processors)` | `--max-concurrent-calls` / env |
-| Program wall-clock | 1 s | not configurable in v1 |
-| Program memory | 10 MB | not configurable in v1 |
+| Program wall-clock | 1 s (10 s in aggregator mode) | `--program-timeout-ms` / env |
+| Program memory | 10 MB (100 MB in aggregator mode) | `--program-memory-limit-bytes` / env |
 
 Frame overflow surfaces as a JSON-RPC `-32700`. The other caps surface
 as structured tool-result errors (`args_error`, `busy`, `timeout`,
-`memory_limit`).
+`memory_limit`). Aggregator mode adds its own per-call caps
+(`upstream_call_timeout_ms`, `max_upstream_response_bytes`,
+`max_upstream_calls_per_program`); see
+[`docs/mcp-server-configuration.md`](mcp-server-configuration.md) for
+the full set.
 
 ## Links
 
-- [`mcp_server/README.md`](../mcp_server/README.md) — install,
-  client configuration, configuration flags.
+- [`mcp_server/README.md`](../mcp_server/README.md) — install and
+  client configuration.
+- [`docs/mcp-server-configuration.md`](mcp-server-configuration.md) —
+  every flag, environment variable, response profile, catalog mode,
+  tracing setup, and lifecycle command.
+- [`docs/aggregator-mode.md`](aggregator-mode.md) — calling configured
+  upstream MCP servers from inside the sandbox via `(tool/mcp-call …)`,
+  plus the payload-reduction metrics emitted on every aggregator
+  response.
+- [`docs/agentic-mode.md`](agentic-mode.md) — `ptc_task`, the
+  natural-language planner tool layered on top of aggregator mode.
+- [`docs/mcp-debug.md`](mcp-debug.md) — the opt-in `ptc_debug`
+  diagnostics tool.
 - [Getting started guide](guides/mcp-getting-started.md) — short
-  walkthrough from install to first signature-validated call.
-- [`Plans/ptc-runner-mcp-server.md`](../Plans/ptc-runner-mcp-server.md)
-  — the full v1 specification (handshake, request / response
-  contracts, implementation plan).
+  walkthrough from install to first schema-validated call.
 - [`docs/ptc-lisp-specification.md`](ptc-lisp-specification.md) — the
   PTC-Lisp language reference.
 - [`docs/function-reference.md`](function-reference.md) — every
   built-in function with its signature.
-- [`docs/signature-syntax.md`](signature-syntax.md) — the signature
-  grammar used by the `signature` argument.
+- [`docs/signature-syntax.md`](signature-syntax.md) — the grammar
+  used by the legacy `signature` argument and by `output_schema`'s
+  Lisp form.
 - [Model Context Protocol](https://modelcontextprotocol.io/) — the
   upstream protocol spec.

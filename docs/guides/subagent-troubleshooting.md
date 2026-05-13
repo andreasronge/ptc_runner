@@ -397,8 +397,7 @@ real capability mismatch.
 
 1. **Switch to a tool-calling-capable model** (most Anthropic, OpenAI,
    Bedrock-hosted variants, and tool-calling models on OpenRouter qualify).
-   See the per-provider table in
-   [`usage-rules/llm-setup.md`](../../usage-rules/llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling).
+   See the [LLM setup guide](subagent-llm-setup.md) for provider details.
 
 2. **Or drop `ptc_transport`** to use the default `:content` transport. It
    works on every provider PtcRunner supports.
