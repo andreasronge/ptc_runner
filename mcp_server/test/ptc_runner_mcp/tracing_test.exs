@@ -64,7 +64,7 @@ defmodule PtcRunnerMcp.TracingTest do
     # in a per-call worker; the work_fn closes over tracing wraps so
     # both sync and async invocation yield the same trace artifacts).
     case JsonRpc.dispatch({:ok, frame}) do
-      {:async_call, ^id, work_fn, _on_busy, _} ->
+      {:async_call, ^id, work_fn, _on_busy, _on_discard, _} ->
         envelope = work_fn.()
         %{"jsonrpc" => "2.0", "id" => id, "result" => envelope}
 

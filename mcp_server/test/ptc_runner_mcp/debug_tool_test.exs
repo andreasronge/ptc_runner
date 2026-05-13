@@ -77,7 +77,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     }
 
     case JsonRpc.dispatch({:ok, frame}) do
-      {:async_call, ^id, work_fn, _on_busy, _} -> work_fn.()
+      {:async_call, ^id, work_fn, _on_busy, _on_discard, _} -> work_fn.()
       {:reply, %{"result" => env}, _} -> env
     end
   end

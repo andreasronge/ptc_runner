@@ -7,13 +7,15 @@ Spec: [`Plans/ptc-runner-mcp-aggregator.md`](../Plans/ptc-runner-mcp-aggregator.
 
 ## Overview
 
-In aggregator mode the MCP server still advertises **exactly one**
-tool, `ptc_lisp_execute`, but the PTC-Lisp sandbox gains access to
-`(tool/mcp-call ...)` — a programmatic primitive that calls
-configured upstream MCP servers and composes their results
-deterministically inside the sandbox. One LLM-authored,
-sandboxed PTC-Lisp program replaces N round-trip `tools/call`
-invocations against the calling client.
+Aggregator mode does not advertise upstream tools individually. It
+adds `(tool/mcp-call ...)` to the PTC-Lisp sandbox — a programmatic
+primitive that calls configured upstream MCP servers and composes their
+results deterministically inside the sandbox. In an aggregator-only
+configuration, the MCP server advertises `ptc_lisp_execute`; optional
+features such as sessions, diagnostics, or agentic tools may add their
+own top-level tools. One LLM-authored, sandboxed PTC-Lisp program
+replaces N round-trip `tools/call` invocations against the calling
+client.
 
 Best fit:
 

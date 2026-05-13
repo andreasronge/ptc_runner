@@ -42,6 +42,7 @@ defmodule PtcRunnerMcp.Tools do
     PayloadMetrics,
     ResponseProfile,
     Sandbox,
+    Sessions,
     UpstreamCalls
   }
 
@@ -471,7 +472,7 @@ defmodule PtcRunnerMcp.Tools do
         base
       end
 
-    %{"tools" => tools}
+    %{"tools" => tools ++ Sessions.tool_entries()}
   end
 
   @doc false
@@ -517,8 +518,37 @@ defmodule PtcRunnerMcp.Tools do
 
   def call(%{"name" => "ptc_task"}), do: handle_agentic_call(%{})
 
-  def call(%{"name" => name}) when is_binary(name), do: Envelope.unknown_tool(name)
+  def call(%{"name" => name} = params) when is_binary(name) do
+    if Sessions.tool_name?(name) do
+      Sessions.call(params)
+    else
+      Envelope.unknown_tool(name)
+    end
+  end
+
   def call(_), do: Envelope.unknown_tool("")
+
+  @doc false
+  @spec validate_session_eval(map()) :: {:ok, map()} | {:error, map()}
+  def validate_session_eval(args) when is_map(args), do: Sessions.validate_eval(args)
+
+  @doc false
+  @spec call_session_eval_validated(map(), keyword()) :: map()
+  def call_session_eval_validated(validated, opts \\ []) when is_map(validated) do
+    Sessions.eval_validated(validated, opts)
+  end
+
+  @doc false
+  @spec call_session_eval_reserved(map(), keyword()) :: map()
+  def call_session_eval_reserved(reservation, opts \\ []) when is_map(reservation) do
+    Sessions.eval_reserved(reservation, opts)
+  end
+
+  @doc false
+  @spec abort_session_eval_reserved(map(), term()) :: :ok | {:error, map()}
+  def abort_session_eval_reserved(reservation, reason) when is_map(reservation) do
+    Sessions.abort_reserved_eval(reservation, reason)
+  end
 
   @doc """
   Validate the inner `arguments` map for `tools/call name:

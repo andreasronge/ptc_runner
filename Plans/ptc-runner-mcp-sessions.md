@@ -229,7 +229,6 @@ Input:
 ```json
 {
   "title": "Investigate recent GitHub MCP issues",
-  "mode": "read_only",
   "ttl_ms": 1800000
 }
 ```
@@ -237,7 +236,6 @@ Input:
 Optional fields:
 
 - `title`
-- `mode`: `"read_only" | "write_capable"`; default `"read_only"`.
 - `ttl_ms`; capped by server config.
 
 Output:
@@ -274,9 +272,8 @@ Semantics:
 
 - Pass `session.memory` to `Lisp.run/2` as `memory:`.
 - Pass `session.turn_history` as `turn_history:`.
-- Phase 1 exposes no upstream tools inside session eval. Phase 2 may
-  expose `(tool/mcp-call ...)` using the existing aggregator tool
-  registry.
+- When aggregator mode is configured, session eval exposes
+  `(tool/mcp-call ...)` using the existing aggregator tool registry.
 - Pass `tool_cache: %{}` in Phase 1. Cacheable tool results do not
   persist across session evals.
 - `context` remains per-call input and does not persist.
@@ -460,7 +457,7 @@ Recommended internal state:
   id: String.t(),
   owner: map(),
   title: String.t() | nil,
-  mode: :read_only | :write_capable,
+  mode: :read_only | :write_capable, # internal metadata, not public schema
   created_at: DateTime.t(),
   updated_at: DateTime.t(),
   expires_at: DateTime.t(),
@@ -568,18 +565,15 @@ SHOULD preserve that convention:
 This is only display hygiene, not a secret vault. Session tools MUST
 still run configured redaction before storing print/tool-call history.
 
-### 11.3 Read-only Mode
+### 11.3 Session Access Policy
 
-`mode: "read_only"` is metadata-only in Phase 1 because the current
-aggregator `read_only` setting is an operator assertion for MCP
-annotations, not an enforcement layer.
+Session access mode is not part of the public tool schema. Upstream
+tool permissions are controlled by MCP server configuration and the
+upstream tools themselves, not by a client-selected per-session flag.
 
-Enforcement is deferred to Phase 2. Phase 2 MUST add a concrete hook
-at the `(tool/mcp-call ...)` boundary before `Upstream.call/4`. In
-read-only sessions, that hook MUST reject write-capable tools when an
-upstream allowlist or reliable tool metadata exists. Without such
-metadata, enforcement remains best-effort and must be documented in
-the tool description/debug output.
+If a future version exposes enforced per-session modes, the schema and
+tool descriptions must document the concrete enforcement behavior at
+the `(tool/mcp-call ...)` boundary before `Upstream.call/4`.
 
 ### 11.4 Prompt Injection
 
@@ -604,7 +598,7 @@ implicitly executable Lisp state.
 ### 11.6 Product Risk Guidance
 
 The main product risks are stale state, accidental memory bloat,
-history truncation surprises, and over-trusting read-only mode.
+history truncation surprises, and assuming sessions are durable.
 
 - Stale state: inspect output should make age visible. Tool
   descriptions should encourage intentional refresh patterns, e.g.
@@ -619,9 +613,8 @@ history truncation surprises, and over-trusting read-only mode.
 - Cancellation/close: tests MUST cover cancelled evals not committing,
   busy flags being cleared on worker death, and close cancelling any
   running worker.
-- Read-only expectations: until Phase 2 enforcement exists, session
-  tool descriptions MUST say that `read_only` is metadata-only and
-  does not block upstream writes.
+- Access expectations: do not expose advisory access-mode controls in
+  client-facing schemas unless they enforce behavior.
 
 ## 12. OTP Architecture
 
@@ -1005,6 +998,6 @@ The first shippable version is acceptable when:
 15. `tool_cache` does not persist across session evals in Phase 1.
 16. Oversized `*1` / `*2` / `*3` entries become explicit preview
     markers and eval feedback reports that truncation.
-17. `read_only` session descriptions clearly state metadata-only in
-    Phase 1.
+17. `ptc_session_start` does not advertise advisory/non-enforced
+    access-mode fields.
 18. `ptc_lisp_execute` remains stateless and all existing tests pass.

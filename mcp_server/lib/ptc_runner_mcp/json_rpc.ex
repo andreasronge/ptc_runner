@@ -19,7 +19,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   Phase 4 introduces three new outcomes:
 
-    * `{:async_call, request_id, work_fn, on_busy, lifecycle}` —
+    * `{:async_call, request_id, work_fn, on_busy, on_discard, lifecycle}` —
       `tools/call` that has passed argument validation and is ready to
       execute in a per-call worker. The caller (`PtcRunnerMcp.Stdio`)
       acquires a concurrency permit, spawns the worker to run
@@ -46,6 +46,7 @@ defmodule PtcRunnerMcp.JsonRpc do
     Envelope,
     Lifecycle,
     Log,
+    Sessions,
     Tools,
     TraceFile,
     TracePayload,
@@ -59,7 +60,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   @type result ::
           {:reply, map(), lifecycle()}
           | {:noreply, lifecycle()}
-          | {:async_call, term(), (-> map()), (map() -> any()), lifecycle()}
+          | {:async_call, term(), (-> map()), (map() -> any()), (-> any()), lifecycle()}
           | {:cancel, term(), lifecycle()}
 
   @doc """
@@ -184,7 +185,11 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   # `tools/call` sent as a notification is malformed but tolerated:
   # no reply, no worker spawn — discard the work_fn / on_busy.
-  defp suppress_reply_if_notification({:async_call, _id, _work_fn, _on_busy, lifecycle}, true) do
+  defp suppress_reply_if_notification(
+         {:async_call, _id, _work_fn, _on_busy, on_discard, lifecycle},
+         true
+       ) do
+    safe_invoke(on_discard)
     {:noreply, lifecycle}
   end
 
@@ -225,7 +230,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, envelope), :continue}
 
-      Map.get(params, "name") not in ["ptc_lisp_execute", "ptc_task"] ->
+      not known_tool_name?(Map.get(params, "name")) ->
         # Unknown tool: handled synchronously (no Lisp execution, no
         # gate). We still trace + emit `[:ptc_runner_mcp, :call, :*]`
         # so subscribers see the call regardless of outcome.
@@ -235,6 +240,22 @@ defmodule PtcRunnerMcp.JsonRpc do
           request_id: id,
           is_error: Map.get(envelope, "isError")
         })
+
+        {:reply, success_reply(id, envelope), :continue}
+
+      Sessions.tool_name?(Map.get(params, "name")) and
+          not Sessions.async_tool_name?(Map.get(params, "name")) ->
+        envelope =
+          traced_tools_call(id, params, fn ->
+            Tools.call(params)
+          end)
+
+        Log.log(:info, "tools_call_stop", %{
+          request_id: id,
+          is_error: Map.get(envelope, "isError")
+        })
+
+        DebugRecorder.record_outcome(id, params, envelope, duration_ms: 0)
 
         {:reply, success_reply(id, envelope), :continue}
 
@@ -292,7 +313,7 @@ defmodule PtcRunnerMcp.JsonRpc do
             end)
           end)
 
-        {:async_call, id, work_fn, busy_record_fn(id, params), :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params), noop_fn(), :continue}
 
       {:ok, :ptc_task, validated} ->
         work_fn =
@@ -302,7 +323,26 @@ defmodule PtcRunnerMcp.JsonRpc do
             end)
           end)
 
-        {:async_call, id, work_fn, busy_record_fn(id, params), :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params), noop_fn(), :continue}
+
+      {:ok, :ptc_session_eval, validated} ->
+        work_fn =
+          recorded_work_fn(id, params, fn ->
+            traced_tools_call(id, params, fn ->
+              Tools.call_session_eval_reserved(validated, request_id: id)
+            end)
+          end)
+
+        on_discard = fn ->
+          _ = Tools.abort_session_eval_reserved(validated, :discarded)
+        end
+
+        on_busy = fn busy_envelope ->
+          _ = Tools.abort_session_eval_reserved(validated, :global_busy)
+          DebugRecorder.record_outcome(id, params, busy_envelope, duration_ms: 0)
+        end
+
+        {:async_call, id, work_fn, on_busy, on_discard, :continue}
     end
   end
 
@@ -328,6 +368,16 @@ defmodule PtcRunnerMcp.JsonRpc do
     end
   end
 
+  defp noop_fn, do: fn -> :ok end
+
+  defp safe_invoke(fun) when is_function(fun, 0) do
+    fun.()
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
   defp validate_tool_args(%{"name" => "ptc_lisp_execute"}, args) do
     case Tools.validate(args) do
       {:ok, program, context, parsed_signature} ->
@@ -348,6 +398,23 @@ defmodule PtcRunnerMcp.JsonRpc do
       {:error, Envelope.unknown_tool("ptc_task")}
     end
   end
+
+  defp validate_tool_args(%{"name" => "ptc_session_eval"}, args) do
+    case Tools.validate_session_eval(args) do
+      {:ok, validated} ->
+        case Sessions.reserve_eval(validated, make_ref()) do
+          {:ok, reservation} -> {:ok, :ptc_session_eval, reservation}
+          {:error, response} -> {:error, Envelope.error_envelope(response)}
+        end
+
+      {:error, envelope} ->
+        {:error, envelope}
+    end
+  end
+
+  defp known_tool_name?(name) when name in ["ptc_lisp_execute", "ptc_task"], do: true
+  defp known_tool_name?(name) when is_binary(name), do: Sessions.tool_name?(name)
+  defp known_tool_name?(_), do: false
 
   # Wrap the `Tools.call/1` invocation in:
   #

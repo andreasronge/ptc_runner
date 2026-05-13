@@ -16,7 +16,15 @@ defmodule PtcRunnerMcp.DebugRecorder do
 
   alias PtcRunnerMcp.{DebugConfig, Log, TraceConfig, TracePayload, Version}
 
-  @recognized_tools ["ptc_lisp_execute", "ptc_task"]
+  @recognized_tools [
+    "ptc_lisp_execute",
+    "ptc_task",
+    "ptc_session_start",
+    "ptc_session_eval",
+    "ptc_session_inspect",
+    "ptc_session_forget",
+    "ptc_session_close"
+  ]
 
   # JSON-RPC `id` is client-controlled and bounded only by `--max-frame-bytes`
   # (default 8 MiB). The ring is bounded by *count*, not bytes, so storing a
