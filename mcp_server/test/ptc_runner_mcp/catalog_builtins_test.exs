@@ -36,9 +36,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
           schema = %{
             name: n,
             description: "Tool #{n}",
-            inputSchema: %{
+            input_schema: %{
               "type" => "object",
-              "properties" => %{"query" => %{"type" => "string"}}
+              "properties" => %{"query" => %{"type" => "string"}},
+              "required" => ["query"]
             }
           }
 
@@ -467,10 +468,70 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result["tool"] == "search"
       assert is_binary(result["summary"])
       assert is_map(result["input_schema"])
-      assert is_list(result["arg_keys"])
+      assert result["arg_keys"] == ["query"]
+      assert result["required"] == ["query"]
       assert is_binary(result["call_example"])
       assert result["call_example"] =~ "tool/mcp-call"
       assert is_binary(result["response_notes"])
+    end
+
+    test "call_example surfaces required args with :args clause" do
+      put_fake("github", [{"search", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:describe_tool, ["github", "search"])
+
+      assert result["call_example"] ==
+               ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+    end
+
+    test "call_example includes empty :args clause when tool has no properties" do
+      schema = %{
+        name: "ping",
+        description: "no-arg tool",
+        input_schema: %{"type" => "object", "properties" => %{}}
+      }
+
+      config = %{tools: %{"ping" => {schema, fn _ -> "pong" end}}, metadata: %{}}
+      :ok = Registry.put_fake("util", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("util", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:describe_tool, ["util", "ping"])
+
+      assert result["arg_keys"] == []
+      assert result["required"] == []
+
+      assert result["call_example"] ==
+               ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
+    end
+
+    test "describe_tool surfaces input_schema fields for upstream-normalized tools" do
+      schema = %{
+        name: "read_text_file",
+        description: "read a file",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "path" => %{"type" => "string"},
+            "head" => %{"type" => "integer"},
+            "tail" => %{"type" => "integer"}
+          },
+          "required" => ["path"]
+        }
+      }
+
+      config = %{tools: %{"read_text_file" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("fs", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("fs", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:describe_tool, ["fs", "read_text_file"])
+
+      assert result["arg_keys"] == ["head", "path", "tail"]
+      assert result["required"] == ["path"]
+      assert result["input_schema"]["properties"]["path"]["type"] == "string"
+      assert result["call_example"] =~ ":args {:path ...}"
     end
 
     test "unknown tool is programmer fault" do

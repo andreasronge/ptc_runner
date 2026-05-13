@@ -3233,7 +3233,7 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 | `catalog/summary` | `(catalog/summary)` | Map `{"mode" "servers" [...] "catalogs_loaded" bool}` — one compact entry per server (`name`, `description`, `tool_count`, optional `capabilities`). |
 | `catalog/list-servers` | `(catalog/list-servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
 | `catalog/list-tools` | `(catalog/list-tools server)` / `(catalog/list-tools server opts)` | List of compact tool maps (`server`, `tool`, `summary`, `arg_keys`, `read_only`), sorted by tool name. `opts` is a map with `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0) for pagination. |
-| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | Detailed tool map (`input_schema`, `arg_keys`, `annotations`, `call_example`, `response_notes`, …). |
+| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | Detailed tool map (`input_schema`, `arg_keys`, `required`, `annotations`, `call_example`, `response_notes`, …). The `call_example` always includes an `:args { … }` clause and uses the required keys (or the first available arg key) as placeholders. |
 | `catalog/search-tools` | `(catalog/search-tools query)` / `(catalog/search-tools query opts)` | Deterministic lexical search across upstream tool catalogs: a list of compact tool maps (`server`, `tool`, `summary`, `arg_keys`, `read_only`, `catalog_loaded`) ranked by relevance, with `{server, tool}` tie-breaking. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false — when false, an unloaded server contributes a server-level placeholder map with a `next` hint instead of triggering `ensure_started`). |
 
 **Error model** (same split as `tool/mcp-call`):
