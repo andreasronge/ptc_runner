@@ -11,7 +11,6 @@ defmodule PtcRunner.Lisp.Eval do
   This module delegates to specialized submodules:
   - `Eval.Context` - Evaluation context struct
   - `Eval.Patterns` - Pattern matching for let bindings
-  - `Eval.Where` - Where predicates and comparisons
   - `Eval.Apply` - Function application dispatch
   - `Eval.Helpers` - Type errors and utilities
   """
@@ -20,7 +19,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
-  alias PtcRunner.Lisp.Eval.{Apply, Patterns, Where}
+  alias PtcRunner.Lisp.Eval.{Apply, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
@@ -294,7 +293,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Conditional: if
   defp do_eval({:if, cond_ast, then_ast, else_ast}, %EvalContext{} = eval_ctx) do
     with {:ok, cond_val, eval_ctx2} <- do_eval(cond_ast, eval_ctx) do
-      if Where.truthy?(cond_val) do
+      if truthy?(cond_val) do
         do_eval(then_ast, eval_ctx2)
       else
         do_eval(else_ast, eval_ctx2)
@@ -421,42 +420,6 @@ defmodule PtcRunner.Lisp.Eval do
         eval_ctx2,
         &do_eval/2
       )
-    end
-  end
-
-  # ============================================================
-  # Where predicates
-  # ============================================================
-
-  defp do_eval({:where, field_path, op, value_ast}, %EvalContext{} = eval_ctx) do
-    # Evaluate the comparison value (if not truthy check)
-    case value_ast do
-      nil ->
-        accessor = Where.build_field_accessor(field_path)
-        fun = Where.build_where_predicate(op, accessor, nil)
-        {:ok, fun, eval_ctx}
-
-      _ ->
-        with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-          accessor = Where.build_field_accessor(field_path)
-          fun = Where.build_where_predicate(op, accessor, value)
-          {:ok, fun, eval_ctx2}
-        end
-    end
-  end
-
-  # ============================================================
-  # Predicate combinators
-  # ============================================================
-
-  defp do_eval({:pred_combinator, kind, pred_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(pred_asts, eval_ctx) do
-      {:ok, pred_fns, eval_ctx2} ->
-        fun = Where.build_pred_combinator(kind, pred_fns)
-        {:ok, fun, eval_ctx2}
-
-      {:error, _} = err ->
-        err
     end
   end
 
@@ -777,6 +740,12 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
   # Evaluation helpers
   # ============================================================
+
+  # Truthiness check for conditional / short-circuit forms.
+  # Only `nil` and `false` are falsy; every other value is truthy.
+  defp truthy?(nil), do: false
+  defp truthy?(false), do: false
+  defp truthy?(_), do: true
 
   # Merge docstring from def opts into closure metadata
   defp merge_docstring_into_closure(
@@ -1125,7 +1094,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval_and([e | rest], _last_value, %EvalContext{} = eval_ctx) do
     with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
-      if Where.truthy?(value) do
+      if truthy?(value) do
         do_eval_and(rest, value, eval_ctx2)
       else
         # Short-circuit: return falsy value
@@ -1139,7 +1108,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_or([e | rest], %EvalContext{} = eval_ctx) do
     case do_eval(e, eval_ctx) do
       {:ok, value, eval_ctx2} ->
-        if Where.truthy?(value) do
+        if truthy?(value) do
           # Short-circuit: return truthy value
           {:ok, value, eval_ctx2}
         else
@@ -1165,7 +1134,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_or_rest([e | rest], _last_value, %EvalContext{} = eval_ctx) do
     case do_eval(e, eval_ctx) do
       {:ok, value, eval_ctx2} ->
-        if Where.truthy?(value) do
+        if truthy?(value) do
           # Short-circuit: return truthy value
           {:ok, value, eval_ctx2}
         else

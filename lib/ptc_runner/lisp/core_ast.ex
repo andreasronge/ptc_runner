@@ -45,9 +45,6 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Short-circuit logic (special forms, not calls)
           | {:and, [t()]}
           | {:or, [t()]}
-          # Predicates
-          | {:where, field_path(), where_op(), t() | nil}
-          | {:pred_combinator, :all_of | :any_of | :none_of, [t()]}
           # Control flow signals
           | {:return, t()}
           | {:fail, t()}
@@ -77,18 +74,4 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:destructure, {:seq, [pattern()]}}
           # Rest pattern: [a b & rest] binds rest to remaining elements
           | {:destructure, {:seq_rest, [pattern()], pattern()}}
-
-  @type field_path :: {:field, [field_segment()]}
-  @type field_segment :: {:keyword, atom()} | {:string, String.t()}
-
-  @type where_op ::
-          :eq
-          | :not_eq
-          | :gt
-          | :lt
-          | :gte
-          | :lte
-          | :includes
-          | :in
-          | :truthy
 end

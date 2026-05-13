@@ -162,9 +162,9 @@ defmodule PtcRunner.LispTest do
     end
   end
 
-  describe "where predicates" do
+  describe "filter with anonymous predicates" do
     test "equality predicate" do
-      source = "(filter (where :status = \"active\") data/items)"
+      source = ~S|(filter (fn [i] (= (:status i) "active")) data/items)|
       ctx = %{items: [%{status: "active"}, %{status: "inactive"}]}
 
       assert {:ok, %{return: [%{status: "active"}], memory: %{}}} =
@@ -172,43 +172,19 @@ defmodule PtcRunner.LispTest do
     end
 
     test "greater than predicate" do
-      source = "(filter (where :age > 18) data/items)"
+      source = "(filter (fn [i] (> (:age i) 18)) data/items)"
       ctx = %{items: [%{age: 20}, %{age: 15}]}
 
       assert {:ok, %{return: [%{age: 20}], memory: %{}}} =
                Lisp.run(source, context: ctx)
     end
 
-    test "truthy predicate" do
-      source = "(filter (where :active) data/items)"
+    test "truthy predicate via keyword accessor" do
+      source = "(filter :active data/items)"
       ctx = %{items: [%{active: true}, %{active: false}, %{active: nil}]}
 
       assert {:ok, %{return: [%{active: true}], memory: %{}}} =
                Lisp.run(source, context: ctx)
-    end
-  end
-
-  describe "predicate combinators" do
-    test "all-of combines predicates" do
-      source = "(filter (all-of (where :a = 1) (where :b = 2)) data/items)"
-      ctx = %{items: [%{a: 1, b: 2}, %{a: 1, b: 3}, %{a: 2, b: 2}]}
-
-      assert {:ok, %{return: [%{a: 1, b: 2}], memory: %{}}} =
-               Lisp.run(source, context: ctx)
-    end
-
-    test "empty all-of is true" do
-      source = "(filter (all-of) data/items)"
-      ctx = %{items: [%{a: 1}, %{a: 2}]}
-
-      assert {:ok, %{return: [%{a: 1}, %{a: 2}], memory: %{}}} =
-               Lisp.run(source, context: ctx)
-    end
-
-    test "empty any-of is false" do
-      source = "(filter (any-of) data/items)"
-      ctx = %{items: [%{a: 1}, %{a: 2}]}
-      assert {:ok, %{return: [], memory: %{}}} = Lisp.run(source, context: ctx)
     end
   end
 

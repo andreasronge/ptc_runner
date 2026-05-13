@@ -11,7 +11,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
   describe "invalid programs - parse errors" do
     test "missing closing paren" do
-      source = "(filter (where :active data/users"
+      source = "(filter :active data/users"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
       assert message =~ "unbalanced parentheses"
@@ -63,7 +63,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
   describe "invalid programs - type errors" do
     test "filter with non-collection returns type error" do
       # Passing non-list to filter returns error tuple
-      source = "(filter (where :x) 42)"
+      source = "(filter :x 42)"
 
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
       assert message =~ "expected a collection, got number 42"
@@ -123,18 +123,6 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
   end
 
   describe "invalid programs - common LLM mistakes" do
-    test "where with field and value but missing operator" do
-      # LLMs often write (where :field value) expecting equality
-      # but where requires explicit operator: (where :field = value)
-      source = ~S|(filter (where :status "active") data/items)|
-      ctx = %{items: [%{status: "active"}]}
-
-      assert {:error, %Step{fail: %{reason: :invalid_where_form, message: message}}} =
-               Lisp.run(source, context: ctx)
-
-      assert message =~ "expected (where field) or (where field op value)"
-    end
-
     test "using quoted list syntax instead of vector" do
       # PTC-Lisp uses vectors [1 2 3], not quoted lists '(1 2 3)
       source = "'(1 2 3)"

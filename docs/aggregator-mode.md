@@ -457,7 +457,7 @@ program's upstream-call quota.
      (map :tool))
 
 ;; Only describe a tool if its server is actually configured
-(when (some (where :name "fs") (catalog/list-servers))
+(when (some (fn [s] (= (:name s) "fs")) (catalog/list-servers))
   (catalog/describe-tool "fs" "read_text_file"))
 
 ;; Search every configured upstream for "read"-related tools,

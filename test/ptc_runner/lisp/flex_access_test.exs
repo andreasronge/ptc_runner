@@ -48,8 +48,8 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       assert {:ok, %Step{return: "Alice"}} = PtcRunner.Lisp.run(program, context: context)
     end
 
-    test "where clause path works with string keys" do
-      program = ~S"(->> data/items (filter (where [:meta :active] = true)))"
+    test "get-in path works with string keys" do
+      program = ~S"(->> data/items (filter (fn [m] (= (get-in m [:meta :active]) true))))"
 
       context = %{
         "items" => [
@@ -59,114 +59,6 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       }
 
       assert {:ok, %Step{return: [%{"meta" => %{"active" => true}, "name" => "A"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-  end
-
-  describe "where clause with keyword/string coercion" do
-    test "where = coerces keyword to string for equality" do
-      program = ~S"(->> data/items (filter (where :status = :active)))"
-
-      context = %{
-        "items" => [
-          %{"status" => "active", "name" => "A"},
-          %{"status" => "inactive", "name" => "B"}
-        ]
-      }
-
-      assert {:ok, %Step{return: [%{"status" => "active", "name" => "A"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where not= with keyword/string coercion" do
-      program = ~S"(->> data/items (filter (where :status not= :active)))"
-
-      context = %{
-        "items" => [
-          %{"status" => "active", "name" => "A"},
-          %{"status" => "inactive", "name" => "B"}
-        ]
-      }
-
-      assert {:ok, %Step{return: [%{"status" => "inactive", "name" => "B"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where in coerces keywords in collection to strings" do
-      program = ~S"(->> data/items (filter (where :status in [:active :pending])))"
-
-      context = %{
-        "items" => [
-          %{"status" => "active", "name" => "A"},
-          %{"status" => "inactive", "name" => "B"},
-          %{"status" => "pending", "name" => "C"}
-        ]
-      }
-
-      assert {:ok,
-              %Step{
-                return: [
-                  %{"status" => "active", "name" => "A"},
-                  %{"status" => "pending", "name" => "C"}
-                ]
-              }} = PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where includes with list membership using keyword/string coercion" do
-      program = ~S"(->> data/items (filter (where :tags includes :urgent)))"
-
-      context = %{
-        "items" => [
-          %{"tags" => ["urgent", "bug"], "name" => "A"},
-          %{"tags" => ["feature"], "name" => "B"}
-        ]
-      }
-
-      assert {:ok, %Step{return: [%{"tags" => ["urgent", "bug"], "name" => "A"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where = does not coerce booleans" do
-      program = ~S"(->> data/items (filter (where :active = true)))"
-
-      context = %{
-        "items" => [
-          %{"active" => true, "name" => "A"},
-          %{"active" => "true", "name" => "B"}
-        ]
-      }
-
-      # Only the boolean true should match, not the string "true"
-      assert {:ok, %Step{return: [%{"active" => true, "name" => "A"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where = does not coerce false to string" do
-      program = ~S"(->> data/items (filter (where :active = false)))"
-
-      context = %{
-        "items" => [
-          %{"active" => false, "name" => "A"},
-          %{"active" => "false", "name" => "B"}
-        ]
-      }
-
-      # Only the boolean false should match, not the string "false"
-      assert {:ok, %Step{return: [%{"active" => false, "name" => "A"}]}} =
-               PtcRunner.Lisp.run(program, context: context)
-    end
-
-    test "where = coerces empty atom to empty string" do
-      program = ~S'(->> data/items (filter (where :value = "")))'
-
-      context = %{
-        "items" => [
-          %{"value" => "", "name" => "A"},
-          %{"value" => "nonempty", "name" => "B"}
-        ]
-      }
-
-      assert {:ok, %Step{return: [%{"value" => "", "name" => "A"}]}} =
                PtcRunner.Lisp.run(program, context: context)
     end
   end

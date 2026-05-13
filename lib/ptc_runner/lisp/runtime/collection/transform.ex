@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
   @moduledoc """
   Transformation operations for PTC-Lisp collections: map, mapv, mapcat,
-  keep, map_indexed, pluck.
+  keep, map_indexed.
 
   Each function is collapsed from many type-dispatch clauses to 2-4 by
   delegating normalization to `Collection.Normalize`.
@@ -148,9 +148,4 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
     end)
     |> Enum.reverse()
   end
-
-  # ── pluck ───────────────────────────────────────────────────────────
-
-  def pluck(_key, nil), do: []
-  def pluck(key, coll) when is_list(coll), do: Enum.map(coll, &FlexAccess.flex_get(&1, key))
 end

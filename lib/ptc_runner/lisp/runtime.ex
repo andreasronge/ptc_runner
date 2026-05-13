@@ -49,7 +49,6 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate mapv(f, coll1, coll2, coll3), to: Collection
   defdelegate mapcat(f, coll), to: Collection
   defdelegate map_indexed(f, coll), to: Collection
-  defdelegate pluck(key, coll), to: Collection
   defdelegate sort(coll), to: Collection
   defdelegate sort(comp, coll), to: Collection
   defdelegate sort_by(keyfn, coll), to: Collection

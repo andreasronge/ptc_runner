@@ -21,13 +21,13 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   describe "full E2E pipeline with threading and tool calls" do
     test "high-paid employees example exercises complete pipeline" do
-      # Exercises: tool call, threading (->>) filter, where predicate with comparison,
-      # let binding, map literal with pluck
+      # Exercises: tool call, threading (->>) filter, anonymous fn predicate,
+      # let binding, map literal with :keyword extraction
       # V2: just returns the map, no implicit memory merge
       source = ~S"""
       (let [high-paid (->> (tool/find-employees {})
-                           (filter (where :salary > 100000)))]
-        {:emails (pluck :email high-paid)
+                           (filter (fn [e] (> (:salary e) 100000))))]
+        {:emails (map :email high-paid)
          :high-paid high-paid
          :count (count high-paid)})
       """
@@ -59,7 +59,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # V2: returns count directly, no implicit memory
       source = ~S"""
       (let [results (->> (tool/search {})
-                         (filter (where :active = true)))]
+                         (filter (fn [r] (= (:active r) true))))]
         (count results))
       """
 
@@ -97,12 +97,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert new_memory == %{}
     end
 
-    test "where predicate safely handles nil field values" do
-      # Tests that comparison with nil doesn't error and filters correctly
-      # V2: returns count directly, no implicit memory
+    test "filter predicate explicitly guards against nil field values" do
+      # Tests that comparison guarded by `some?` works correctly when fields
+      # may be nil. (Raw `>` with `nil` is a type error.)
       source = ~S"""
       (let [filtered (->> data/items
-                         (filter (where :age > 18)))]
+                         (filter (fn [i] (and (some? (:age i)) (> (:age i) 18)))))]
         (count filtered))
       """
 
@@ -117,7 +117,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, context: ctx)
 
-      # Only Alice and Carol match (age > 18), Bob's nil is safely filtered
+      # Only Alice and Carol match (age > 18); Bob's nil is filtered out.
       assert result == 2
       assert new_memory == %{}
     end
@@ -133,7 +133,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Thread-last: value goes as last argument
       source = ~S"""
       (->> (tool/get-numbers {})
-           (filter (where :value > 1))
+           (filter (fn [n] (> (:value n) 1)))
            first
            (:name))
       """
