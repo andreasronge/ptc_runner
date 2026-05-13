@@ -2,8 +2,16 @@ defmodule PtcRunner.Lisp.Registry do
   @moduledoc """
   Single source of truth for PTC-Lisp function metadata.
 
-  Loads `priv/functions.exs` at compile time via `@external_resource`.
-  No runtime file I/O — recompiles automatically when the registry changes.
+  Loads `priv/functions.exs` (implemented + Java interop entries) and
+  `priv/function_audit.exs` (Clojure/Java parity triage notes) at
+  compile time via `@external_resource`. No runtime file I/O —
+  recompiles automatically when either file changes.
+
+  The two files are split (#896) because their change cadence differs:
+  `functions.exs` is touched when the language definition evolves, while
+  `function_audit.exs` is touched when triaging Clojure/Java parity.
+  Keeping them separate keeps each file in a more manageable size range
+  and avoids recompiling dependents when only audit metadata changes.
 
   ## Usage
 
@@ -20,10 +28,13 @@ defmodule PtcRunner.Lisp.Registry do
   """
 
   @registry_path "priv/functions.exs"
+  @audit_path "priv/function_audit.exs"
 
   # Compile-time loading (no runtime file I/O)
   @external_resource @registry_path
+  @external_resource @audit_path
   @registry Code.eval_file(@registry_path) |> elem(0)
+  @audit Code.eval_file(@audit_path) |> elem(0)
 
   @doc """
   Returns all implemented function entries.
@@ -47,7 +58,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec clojure_core_audit() :: [map()]
-  def clojure_core_audit, do: @registry.clojure_core_audit
+  def clojure_core_audit, do: @audit.clojure_core_audit
 
   @doc """
   Returns all clojure.string audit entries.
@@ -59,7 +70,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec clojure_string_audit() :: [map()]
-  def clojure_string_audit, do: @registry.clojure_string_audit
+  def clojure_string_audit, do: @audit.clojure_string_audit
 
   @doc """
   Returns all clojure.set audit entries.
@@ -71,7 +82,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec clojure_set_audit() :: [map()]
-  def clojure_set_audit, do: @registry.clojure_set_audit
+  def clojure_set_audit, do: @audit.clojure_set_audit
 
   @doc """
   Returns all java.lang.Math audit entries.
@@ -83,7 +94,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec java_math_audit() :: [map()]
-  def java_math_audit, do: @registry.java_math_audit
+  def java_math_audit, do: @audit.java_math_audit
 
   @doc """
   Returns all Java interop entries.
