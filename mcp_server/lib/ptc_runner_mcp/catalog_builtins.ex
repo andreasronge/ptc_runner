@@ -84,7 +84,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     opts = parse_list_tools_opts(rest)
 
     with :ok <- validate_list_tools_opts(opts),
-         :ok <- check_configured(registry, server) do
+         :ok <- check_configured(registry, server, "catalog/list-tools") do
       do_list_tools(server, opts, call_context, registry, catalog_config)
     end
   end
@@ -92,7 +92,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp dispatch(:describe_tool, [server, tool], call_context, registry, catalog_config) do
     with :ok <- validate_string_arg(server, "catalog/describe-tool", "server"),
          :ok <- validate_string_arg(tool, "catalog/describe-tool", "tool"),
-         :ok <- check_configured(registry, server) do
+         :ok <- check_configured(registry, server, "catalog/describe-tool") do
       do_describe_tool(server, tool, call_context, registry, catalog_config)
     end
   end
@@ -378,17 +378,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # Option parsing and validation
   # ----------------------------------------------------------------
 
-  defp parse_list_tools_opts([]), do: %{}
-
-  defp parse_list_tools_opts([opts]) when is_map(opts) do
-    Map.new(opts, fn
-      {k, v} when is_atom(k) -> {k, v}
-      {k, v} when is_binary(k) -> {safe_to_atom(k), v}
-      kv -> kv
-    end)
-  end
-
-  defp parse_list_tools_opts(_), do: %{}
+  defp parse_list_tools_opts(rest), do: parse_catalog_opts(rest)
 
   defp validate_list_tools_opts(opts) do
     limit = Map.get(opts, :limit, 50)
@@ -408,9 +398,11 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
-  defp parse_search_tools_opts([]), do: %{}
+  defp parse_search_tools_opts(rest), do: parse_catalog_opts(rest)
 
-  defp parse_search_tools_opts([opts]) when is_map(opts) do
+  defp parse_catalog_opts([]), do: %{}
+
+  defp parse_catalog_opts([opts]) when is_map(opts) do
     Map.new(opts, fn
       {k, v} when is_atom(k) -> {k, v}
       {k, v} when is_binary(k) -> {safe_to_atom(k), v}
@@ -418,7 +410,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end)
   end
 
-  defp parse_search_tools_opts(_), do: %{}
+  defp parse_catalog_opts(_), do: %{}
 
   defp validate_search_tools_opts(opts) do
     limit = Map.get(opts, :limit, 8)
@@ -455,8 +447,8 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
-  defp check_configured(registry, server) do
-    with :ok <- validate_string_arg(server, "catalog/list-tools", "server") do
+  defp check_configured(registry, server, form) do
+    with :ok <- validate_string_arg(server, form, "server") do
       if Registry.configured?(server, registry) do
         :ok
       else
@@ -526,7 +518,12 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # ----------------------------------------------------------------
 
   defp all_server_info(registry) do
-    routings = GenServer.call(registry, :all_routings)
+    routings =
+      try do
+        GenServer.call(registry, :all_routings)
+      catch
+        :exit, _ -> %{}
+      end
 
     routings
     |> Enum.map(fn {name, routing} ->
