@@ -123,6 +123,9 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
 
   @doc "Atomize value based on expected type."
   @spec atomize_value(term(), term()) :: term()
+  def atomize_value(map, {:closed_map, fields}) when is_map(map),
+    do: atomize_value(map, {:map, fields})
+
   def atomize_value(map, {:map, fields}) when is_map(map) do
     field_types = Map.new(fields)
 
