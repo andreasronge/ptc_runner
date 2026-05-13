@@ -87,6 +87,25 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert after_failure["result"] == "user=> 1"
   end
 
+  test "oversized history result stores reusable preview marker" do
+    SessionsConfig.set(%{enabled: true, max_session_history_entry_bytes: 128})
+    session_id = start_session()
+
+    large = String.duplicate("x", 256)
+    oversized = eval(session_id, inspect(large))
+
+    assert oversized["status"] == "ok"
+    assert [%{field: "*1"}] = oversized["history_notices"]
+
+    history = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "history"})
+    assert [%{"name" => "*1", "preview" => preview}] = history["history"]
+    assert preview =~ ":ptc_session_preview true"
+
+    marker = eval(session_id, "*1")
+    assert marker["status"] == "ok"
+    assert marker["result"] =~ ":ptc_session_preview true"
+  end
+
   test "forget removes named bindings and clears prints" do
     session_id = start_session()
 
@@ -104,6 +123,14 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "prints"})
     assert inspect["prints"] == []
+  end
+
+  test "inspect session summary does not expose advisory access mode" do
+    session_id = start_session()
+
+    inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "overview"})
+
+    refute Map.has_key?(inspect["session"], "mode")
   end
 
   test "persisted print and call histories are redacted before storage" do
