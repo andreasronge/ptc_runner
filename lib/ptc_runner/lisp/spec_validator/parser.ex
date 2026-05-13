@@ -1,6 +1,6 @@
 defmodule PtcRunner.Lisp.SpecValidator.Parser do
   @moduledoc """
-  Markdown-extraction half of `PtcRunner.Lisp.SpecValidator` (#899).
+  Markdown-extraction half of `PtcRunner.Lisp.SpecValidator`.
 
   Parses the PTC-Lisp specification markdown into structured data —
   testable examples (`{code, expected, section}` tuples), `TODO` and

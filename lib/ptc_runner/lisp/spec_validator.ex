@@ -10,7 +10,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
   and the implementation.
 
   The markdown-parsing half lives in
-  `PtcRunner.Lisp.SpecValidator.Parser` (#899). This module is the
+  `PtcRunner.Lisp.SpecValidator.Parser`. This module is the
   thin orchestration façade: spec I/O + example execution + result
   aggregation + negative-test handling.
 
