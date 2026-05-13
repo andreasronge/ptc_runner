@@ -1,6 +1,7 @@
 defmodule PtcRunnerMcp.SessionsTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Credentials
   alias PtcRunnerMcp.Credentials.Binding
   alias PtcRunnerMcp.JsonRpc
@@ -10,14 +11,21 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.Sessions.Limits, as: SessionLimits
   alias PtcRunnerMcp.Sessions.Owner
   alias PtcRunnerMcp.Sessions.Registry
+  alias PtcRunnerMcp.Stdio
+  alias PtcRunnerMcp.Test.JsonRpcHarness
   alias PtcRunnerMcp.Tools
 
   setup do
+    stop_sessions_processes()
     SessionsConfig.set(%{enabled: true})
+    ConcurrencyGate.reset()
+    assert :ok = Sessions.ensure_started()
 
     on_exit(fn ->
+      stop_sessions_processes()
       SessionsConfig.reset()
       Limits.set(Limits.defaults())
+      ConcurrencyGate.reset()
     end)
 
     :ok
@@ -284,6 +292,54 @@ defmodule PtcRunnerMcp.SessionsTest do
     on_busy.(%{"isError" => true, "structuredContent" => %{"reason" => "busy"}})
   end
 
+  test "stdio concurrent eval on same session returns session_busy and does not hang" do
+    {:ok, harness} = JsonRpcHarness.start()
+    on_exit(fn -> JsonRpcHarness.stop(harness) end)
+
+    session_id = start_session()
+    _ = JsonRpcHarness.drain_replied_messages()
+
+    :ok =
+      Stdio.feed(harness.stdio, session_eval_line("long-1", session_id, long_running_program()))
+
+    wait_until(fn -> Stdio.in_flight_count(harness.stdio) == 1 end, 500)
+
+    :ok = Stdio.feed(harness.stdio, session_eval_line("busy-1", session_id, "(+ 1 2)"))
+
+    replies = read_replies(harness)
+
+    assert Enum.any?(replies, fn reply ->
+             reply["id"] == "busy-1" and
+               reply["result"]["structuredContent"]["reason"] == "session_busy"
+           end)
+
+    :ok = Stdio.feed(harness.stdio, cancelled_line("long-1"))
+    wait_until(fn -> Stdio.in_flight_count(harness.stdio) == 0 end, 1_500)
+  end
+
+  test "stdio cancelled session eval does not commit candidate memory and clears busy state" do
+    {:ok, harness} = JsonRpcHarness.start()
+    on_exit(fn -> JsonRpcHarness.stop(harness) end)
+
+    session_id = start_session()
+    assert eval(session_id, "(def x 41)")["status"] == "ok"
+    _ = JsonRpcHarness.drain_replied_messages()
+
+    program = "(def x 99) " <> long_running_program()
+
+    :ok = Stdio.feed(harness.stdio, session_eval_line("cancel-1", session_id, program))
+    wait_until(fn -> Stdio.in_flight_count(harness.stdio) == 1 end, 500)
+
+    :ok = Stdio.feed(harness.stdio, cancelled_line("cancel-1"))
+    wait_until(fn -> Stdio.in_flight_count(harness.stdio) == 0 end, 1_500)
+
+    assert read_replies(harness) == []
+    assert eval(session_id, "x")["result"] == "user=> 41"
+
+    inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "overview"})
+    assert inspect["session"]["eval_status"] == "idle"
+  end
+
   defp start_session do
     call!("ptc_session_start", %{})["session_id"]
   end
@@ -307,6 +363,74 @@ defmodule PtcRunnerMcp.SessionsTest do
         "arguments" => %{"session_id" => session_id, "program" => program}
       }
     }
+  end
+
+  defp session_eval_line(id, session_id, program) do
+    Jason.encode!(session_eval_frame(id, session_id, program)) <> "\n"
+  end
+
+  defp cancelled_line(id) do
+    Jason.encode!(%{
+      "jsonrpc" => "2.0",
+      "method" => "notifications/cancelled",
+      "params" => %{"requestId" => id}
+    }) <> "\n"
+  end
+
+  defp read_replies(%{io: io}) do
+    io
+    |> StringIO.flush()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
+
+  defp long_running_program do
+    "((fn ack [m n] " <>
+      "(cond (= m 0) (+ n 1) " <>
+      "(= n 0) (ack (- m 1) 1) " <>
+      ":else (ack (- m 1) (ack m (- n 1))))) 3 8)"
+  end
+
+  defp wait_until(fun, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_until(fun, deadline)
+  end
+
+  defp do_wait_until(fun, deadline) do
+    if fun.() do
+      :ok
+    else
+      if System.monotonic_time(:millisecond) > deadline do
+        flunk("wait_until timed out")
+      else
+        receive do
+        after
+          10 -> :ok
+        end
+
+        do_wait_until(fun, deadline)
+      end
+    end
+  end
+
+  defp stop_sessions_processes do
+    stop_if_alive(Registry)
+    stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
+  end
+
+  defp stop_if_alive(name) do
+    case Process.whereis(name) do
+      nil -> :ok
+      pid -> stop_process(pid)
+    end
+  end
+
+  defp stop_process(pid) do
+    if Process.alive?(pid) do
+      GenServer.stop(pid, :normal, 5_000)
+    end
+  catch
+    :exit, _ -> :ok
   end
 
   defp start_credentials!(bindings) do
