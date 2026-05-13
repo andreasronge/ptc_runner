@@ -50,7 +50,7 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   @doc "Child specs for future Application supervision wiring."
-  @spec child_specs() :: [Elixir.Supervisor.child_spec()]
+  @spec child_specs() :: [Elixir.Supervisor.child_spec() | {module(), term()}]
   def child_specs do
     [
       {Registry, [session_supervisor: Supervisor]},
