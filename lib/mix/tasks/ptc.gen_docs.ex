@@ -82,7 +82,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{length(entries)} functions and special forms.
 
-    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Design Guidelines](ptc-lisp-design-guidelines.md) | #{audit_links}
+    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | #{audit_links}
 
     ## Table of Contents
 
@@ -190,7 +190,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{description}
 
-    See also: [Function Reference](function-reference.md) | [Design Guidelines](ptc-lisp-design-guidelines.md) | #{see_also}
+    See also: [Function Reference](function-reference.md) | #{see_also}
 
     ## Summary
 
@@ -253,7 +253,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{length(entries)} interop entries across #{length(by_class)} classes.
 
-    See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Design Guidelines](ptc-lisp-design-guidelines.md)
+    See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
 
     #{sections}
     """

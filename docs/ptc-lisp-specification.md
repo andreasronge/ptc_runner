@@ -1,7 +1,6 @@
 # PTC-Lisp Language Specification
 
 **Related docs:**
-- [PTC-Lisp Design Guidelines](ptc-lisp-design-guidelines.md) — rules for feature inclusion and intentional Clojure divergence
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
 - [Clojure Core Audit](clojure-core-audit.md) — function-level coverage of Clojure core
 
@@ -30,7 +29,31 @@ This design enables safe execution in **agentic LLM loops** where programs are g
 5. **Expressive**: Sufficient for common data transformation tasks
 6. **Transactional**: All-or-nothing memory updates, safe for retry loops
 
-Detailed feature-inclusion and divergence policy lives in [PTC-Lisp Design Guidelines](ptc-lisp-design-guidelines.md). In short: Clojure compatibility is the default for pure, bounded, Clojure-named data functions; sandbox safety and recoverable signal values take precedence where Clojure would raise and PTC-Lisp has no `try`/`catch` recovery path.
+### Design Philosophy
+
+Clojure compatibility is the default — but it is not the top-level
+goal. The top-level goal is deterministic, bounded, recoverable data
+transformation inside an agent loop. When the two conflict, four
+rules decide:
+
+1. **No `try` / `catch`.** Raising terminates the program and there is
+   no recovery path. So Clojure-named helpers prefer **signal values**
+   (`nil`, `""`, `false`, an empty collection) when external input is
+   bad and the caller can reasonably continue:
+   `(parse-long "abc")` returns `nil`, not a `NumberFormatException`.
+2. **Eager, not lazy.** Inputs must be finite and bounded; programs
+   run under wall-clock and memory caps.
+3. **Java-named methods follow Java semantics.** `.substring`,
+   `.indexOf`, `.length` raise on out-of-range — the dot prefix
+   signals "Java idiom expected." `subs`, `parse-long`, `get` follow
+   the safer-for-sandbox signal pattern.
+4. **Properties of input data may signal; properties of the program
+   raise.** `(parse-long "abc")` signals (bad data); `(+ 1 nil)`,
+   wrong arity, or unknown symbols raise (bad program — fix it).
+
+Tracked Clojure divergences live in
+[Clojure Conformance Gaps](clojure-conformance-gaps.md) under
+`DIV-*` entries.
 
 ### Non-Goals
 
