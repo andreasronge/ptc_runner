@@ -162,6 +162,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
           strict_data: boolean()
         }
 
+  @type recur_effects :: %{
+          prints: [String.t()],
+          tool_calls: [tool_call()],
+          pmap_calls: [pmap_call()],
+          catalog_ops: [catalog_op()],
+          tool_cache: map()
+        }
+
   @doc """
   Creates a new evaluation context.
 
@@ -258,6 +266,35 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec append_catalog_op(t(), catalog_op()) :: t()
   def append_catalog_op(%__MODULE__{catalog_ops: catalog_ops} = context, catalog_op) do
     %{context | catalog_ops: [catalog_op | catalog_ops]}
+  end
+
+  @doc """
+  Extracts accumulated side effects that must survive a `recur` jump.
+  """
+  @spec recur_effects(t()) :: recur_effects()
+  def recur_effects(%__MODULE__{} = context) do
+    %{
+      prints: context.prints,
+      tool_calls: context.tool_calls,
+      pmap_calls: context.pmap_calls,
+      catalog_ops: context.catalog_ops,
+      tool_cache: context.tool_cache
+    }
+  end
+
+  @doc """
+  Restores side effects carried by a `recur` signal onto the next iteration context.
+  """
+  @spec restore_recur_effects(t(), recur_effects()) :: t()
+  def restore_recur_effects(%__MODULE__{} = context, effects) do
+    %{
+      context
+      | prints: effects.prints,
+        tool_calls: effects.tool_calls,
+        pmap_calls: effects.pmap_calls,
+        catalog_ops: effects.catalog_ops,
+        tool_cache: effects.tool_cache
+    }
   end
 
   @doc """
