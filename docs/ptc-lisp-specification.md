@@ -1,6 +1,7 @@
 # PTC-Lisp Language Specification
 
 **Related docs:**
+- [PTC-Lisp Design Guidelines](ptc-lisp-design-guidelines.md) — rules for feature inclusion and intentional Clojure divergence
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
 - [Clojure Core Audit](clojure-core-audit.md) — function-level coverage of Clojure core
 
@@ -28,6 +29,8 @@ This design enables safe execution in **agentic LLM loops** where programs are g
 4. **Verifiable**: Can be validated against real Clojure for correctness
 5. **Expressive**: Sufficient for common data transformation tasks
 6. **Transactional**: All-or-nothing memory updates, safe for retry loops
+
+Detailed feature-inclusion and divergence policy lives in [PTC-Lisp Design Guidelines](ptc-lisp-design-guidelines.md). In short: Clojure compatibility is the default for pure, bounded, Clojure-named data functions; sandbox safety and recoverable signal values take precedence where Clojure would raise and PTC-Lisp has no `try`/`catch` recovery path.
 
 ### Non-Goals
 

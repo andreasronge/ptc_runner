@@ -257,6 +257,7 @@ defmodule PtcRunner.MixProject do
         "docs/benchmark-eval.md",
         # PTC-Lisp
         "docs/ptc-lisp-specification.md",
+        "docs/ptc-lisp-design-guidelines.md",
         "docs/clojure-conformance-gaps.md",
         # Generated Reference (mix ptc.gen_docs)
         "docs/function-reference.md",
