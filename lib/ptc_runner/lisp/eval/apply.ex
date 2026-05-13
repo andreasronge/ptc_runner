@@ -360,10 +360,16 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   """
   @spec closure_to_fun(term(), EvalContext.t(), (term(), EvalContext.t() -> term())) :: term()
   def closure_to_fun(
-        {:closure, patterns, body, closure_env, closure_turn_history, _metadata},
+        {:closure, patterns, body, closure_env, closure_turn_history, metadata} = closure,
         %EvalContext{} = eval_context,
         do_eval_fn
       ) do
+    # Self-recursion: a named fn must be visible under its own name inside
+    # its body. `do_execute_closure` binds this at call time; for HOF use
+    # (Enum.map etc.) we wire it directly into the captured env so the
+    # var resolver finds it via the locals path (closure_locals adds
+    # fn_name to locals from metadata).
+    closure_env = bind_self_recursion(closure_env, metadata, closure)
     # For variadic closures, we provide wrappers for common arities (0-3)
     # as long as they satisfy the minimum arity (length of leading patterns).
     # For fixed closures, we use the exact arity.
@@ -386,6 +392,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -399,6 +406,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -412,6 +420,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -425,6 +434,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -472,6 +482,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -485,6 +496,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               eval_context,
               closure_turn_history,
+              metadata,
               do_eval_fn
             )
           end
@@ -587,6 +599,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          closure_env,
          %EvalContext{} = eval_context,
          closure_turn_history,
+         metadata,
          do_eval_fn
        ) do
     case check_arity(patterns, args) do
@@ -619,6 +632,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         pmap_timeout: eval_context.pmap_timeout,
         catalog_exec: eval_context.catalog_exec
       )
+
+    eval_ctx = %{eval_ctx | locals: closure_locals(metadata, bindings)}
 
     case do_eval_fn.(body, eval_ctx) do
       {:ok, result, final_ctx} ->
@@ -693,6 +708,29 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Closure Execution Helpers
   # ============================================================
 
+  # Locals for the closure body = lexically-captured names ∪ this call's
+  # arg bindings ∪ the fn's own name (named fns only). Without this, the
+  # `:var` resolver would lose precedence for shadowed names (e.g. a let
+  # binding shadowing a later `def`).
+  @doc false
+  def closure_locals(meta, bindings) do
+    captured = Map.get(meta, :captured_locals, MapSet.new())
+    arg_names = bindings |> Map.keys() |> MapSet.new()
+    base = MapSet.union(captured, arg_names)
+
+    case meta do
+      %{fn_name: name} -> MapSet.put(base, name)
+      _ -> base
+    end
+  end
+
+  # For named fns, wire the closure to its own name in `env` so that
+  # `(:var fn_name)` inside the body resolves via the locals path
+  # (closure_locals puts fn_name into locals from metadata).
+  @doc false
+  def bind_self_recursion(env, %{fn_name: name}, closure), do: Map.put(env, name, closure)
+  def bind_self_recursion(env, _meta, _closure), do: env
+
   defp execute_closure(closure, args, eval_ctx, do_eval_fn) do
     {:closure, patterns, _body, _env, _th, _meta} = closure
     do_execute_closure(closure, patterns, args, eval_ctx, do_eval_fn)
@@ -718,10 +756,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
         closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, closure_turn_history)
 
-        # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls
+        # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
+        # `locals` is rebuilt from the closure's lexical capture + this invocation's
+        # arg bindings + (for named fns) the fn's own name. Builtins no longer live
+        # in `env`, so the `:var` resolver falls through to Env.builtin? for them.
         closure_ctx = %{
           closure_ctx
-          | loop_limit: caller_ctx.loop_limit,
+          | locals: closure_locals(meta, bindings),
+            loop_limit: caller_ctx.loop_limit,
             prints: caller_ctx.prints,
             max_print_length: caller_ctx.max_print_length,
             pmap_timeout: caller_ctx.pmap_timeout,
@@ -738,8 +780,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           {:ok, result, final_ctx} ->
             # Capture return type and update user_ns if this closure is a named function
             final_ctx = update_closure_return_type(closure, result, final_ctx)
-            # Restore caller's environment, keep updated prints/user_ns
-            {:ok, result, %{final_ctx | env: caller_ctx.env}}
+            # Restore caller's env AND locals — without restoring locals, a
+            # param name that shadowed a top-level def would stay in the
+            # caller's `locals` set after the call, making subsequent
+            # lookups of that name resolve to (a missing) env entry instead
+            # of falling through to user_ns.
+            {:ok, result, %{final_ctx | env: caller_ctx.env, locals: caller_ctx.locals}}
 
           {:error, _} = err ->
             err

@@ -25,7 +25,15 @@ defmodule PtcRunner.Lisp.Env do
 
   @spec initial() :: env()
   def initial do
-    builtin_bindings() |> Map.new()
+    case :persistent_term.get({__MODULE__, :initial}, :unset) do
+      :unset ->
+        env = builtin_bindings() |> Map.new()
+        :persistent_term.put({__MODULE__, :initial}, env)
+        env
+
+      env ->
+        env
+    end
   end
 
   @doc """
