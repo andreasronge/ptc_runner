@@ -385,6 +385,11 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:var, :"my-var"}} = Parser.parse("#'my-var")
     end
 
+    test "var with trailing apostrophe" do
+      assert {:ok, {:var, :"+'"}} = Parser.parse("#'+'")
+      assert {:ok, {:var, :"inc'"}} = Parser.parse("#'inc'")
+    end
+
     test "var in collection" do
       assert {:ok, {:vector, [{:var, :x}, {:var, :y}]}} = Parser.parse("[#'x #'y]")
     end

@@ -241,7 +241,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll |> Enum.drop(n) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
-  def nthrest(coll, n), do: drop(n, coll)
+  def nthrest(coll, n), do: Enum.drop(Normalize.to_seq(coll), max(n, 0))
   def nthnext(coll, n), do: coll |> nthrest(n) |> seq()
 
   # ============================================================

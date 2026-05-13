@@ -94,6 +94,12 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
       assert_lisp("(*' 2 3 4)", 24)
     end
 
+    test "-' without args returns a clean arity error" do
+      {:error, step} = PtcRunner.Lisp.run("(-')")
+      assert step.fail.reason == :arity_error
+      assert step.fail.message == "arity error: -' requires at least 1 argument, got 0"
+    end
+
     test "inc' and dec' alias inc and dec" do
       assert_lisp("(inc' 41)", 42)
       assert_lisp("(dec' 43)", 42)

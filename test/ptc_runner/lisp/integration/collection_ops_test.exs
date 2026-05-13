@@ -2477,6 +2477,22 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: empty}} = Lisp.run(~S|(nthnext [1 2 3] 5)|)
       assert empty == nil
     end
+
+    test "nthrest and nthnext accept nil as seqable" do
+      {:ok, %Step{return: rest}} = Lisp.run(~S|(nthrest nil 0)|)
+      assert rest == []
+
+      {:ok, %Step{return: next}} = Lisp.run(~S|(nthnext nil 0)|)
+      assert next == nil
+    end
+
+    test "nthrest and nthnext accept sets as seqable" do
+      {:ok, %Step{return: rest}} = Lisp.run(~S|(nthrest (hash-set 1 2) 0)|)
+      assert Enum.sort(rest) == [1, 2]
+
+      {:ok, %Step{return: next}} = Lisp.run(~S|(nthnext (hash-set 1 2) 0)|)
+      assert Enum.sort(next) == [1, 2]
+    end
   end
 
   # ==========================================================================

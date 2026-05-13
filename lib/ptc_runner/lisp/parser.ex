@@ -189,10 +189,8 @@ defmodule PtcRunner.Lisp.Parser do
   defcombinatorp(
     :var_reader,
     ignore(string("#'"))
-    |> ascii_string([?a..?z, ?A..?Z, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_], 1)
-    |> optional(
-      ascii_string([?a..?z, ?A..?Z, ?0..?9, ?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_], min: 1)
-    )
+    |> ascii_string(symbol_first, 1)
+    |> optional(ascii_string(symbol_rest, min: 1))
     |> reduce({ParserHelpers, :build_var, []})
   )
 
