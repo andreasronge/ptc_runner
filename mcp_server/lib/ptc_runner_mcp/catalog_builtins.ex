@@ -218,33 +218,53 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       tokenize(server_info.description || "") ++
         tokenize_capabilities(server_info.capabilities)
 
-    Enum.map(tools, fn tool ->
-      tool_name = tool_name_of(tool)
-      tool_desc = tool_description(tool)
-      arg_keys = tool_arg_keys(tool)
-      annotations = tool_annotations(tool)
+    server_name_score = score_tokens(query_tokens, server_tokens, 2)
+    server_desc_score = score_tokens(query_tokens, server_desc_tokens, 0)
+    server_score = server_name_score + server_desc_score
 
-      tool_name_tokens = tokenize(tool_name)
-      tool_desc_tokens = tokenize(tool_desc)
-      arg_tokens = Enum.flat_map(arg_keys, &tokenize/1)
-      annotation_tokens = tokenize_annotations(annotations)
+    scored =
+      Enum.map(tools, fn tool ->
+        tool_name = tool_name_of(tool)
+        tool_desc = tool_description(tool)
+        arg_keys = tool_arg_keys(tool)
+        annotations = tool_annotations(tool)
 
-      name_score =
-        score_tokens(query_tokens, server_tokens, 2) +
-          score_tokens(query_tokens, tool_name_tokens, 2)
+        tool_name_tokens = tokenize(tool_name)
+        tool_desc_tokens = tokenize(tool_desc)
+        arg_tokens = Enum.flat_map(arg_keys, &tokenize/1)
+        annotation_tokens = tokenize_annotations(annotations)
 
-      desc_score =
-        score_tokens(query_tokens, server_desc_tokens, 0) +
-          score_tokens(query_tokens, tool_desc_tokens, 0) +
-          score_tokens(query_tokens, arg_tokens, 0) +
-          score_tokens(query_tokens, annotation_tokens, 0)
+        tool_score =
+          score_tokens(query_tokens, tool_name_tokens, 2) +
+            score_tokens(query_tokens, tool_desc_tokens, 0) +
+            score_tokens(query_tokens, arg_tokens, 0) +
+            score_tokens(query_tokens, annotation_tokens, 0)
 
-      total = name_score + desc_score
+        entry = compact_tool_entry(server_info.name, tool) |> Map.put("catalog_loaded", true)
+        {tool_score, server_score + tool_score, entry}
+      end)
 
-      entry = compact_tool_entry(server_info.name, tool) |> Map.put("catalog_loaded", true)
-      {total, entry}
+    # Issue #944 finding #4: keep a tool only when one of these is true:
+    #   * the tool itself matched (name/desc/args/annotations), or
+    #   * no tool matched specifically AND the server NAME matched (a
+    #     query like "warehouse" against a loaded `warehouse` server
+    #     should still surface its tools)
+    # A pure server-description/capability overlap (e.g. desc contains
+    # "search capability" but no tool mentions search) is NOT enough —
+    # that was the reporter's noise.
+    any_tool_match? = Enum.any?(scored, fn {tool_score, _, _} -> tool_score > 0 end)
+    server_name_match? = server_name_score > 0
+
+    scored
+    |> Enum.filter(fn {tool_score, total, _} ->
+      cond do
+        tool_score > 0 -> true
+        any_tool_match? -> false
+        server_name_match? -> total > 0
+        true -> false
+      end
     end)
-    |> Enum.filter(fn {score, _} -> score > 0 end)
+    |> Enum.map(fn {_, total, entry} -> {total, entry} end)
   end
 
   defp score_server_level(server_info, query_tokens) do
