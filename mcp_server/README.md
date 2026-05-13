@@ -201,9 +201,54 @@ them to the `args` array, e.g.:
 | `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
 | `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
 | `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
-| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [Diagnostics](#diagnostics-the-ptc_debug-tool)). |
+| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `ptc_lisp_execute` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
+| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [Diagnostics](#diagnostics-the-ptc_debug-tool)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `ptc_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
+
+## Response profiles
+
+`ptc_lisp_execute` renders its result according to a boot-time
+**response profile** (`--response-profile`). The default is **`slim`**:
+optimized for the model consuming the tool result, not for an
+operator reading a trace.
+
+| Profile | `content[0].text` | `structuredContent` | `outputSchema` advertised | Observability fields |
+|---|---|---|---|---|
+| **`slim`** *(default)* | concise human-readable text / the value | — | no | omitted everywhere — no `ptc_metrics`, no `upstream_calls`, no empty `prints`/`feedback`, no default `truncated` |
+| **`structured`** | concise text | compact `{status, result, …}` (errors add `reason`/`message`/`feedback` and a trimmed error-only `upstream_calls`) | yes (compact) | `ptc_metrics` omitted; `upstream_calls` carried *only* on errors and trimmed to the failed entries (no `duration_ms` / `result_bytes` / per-entry observability), so the model still has enough to repair the program |
+| **`debug`** | the result, mirrored | full payload (also mirrored as text) | yes (full) | full `ptc_metrics`, full `upstream_calls` (all entries with timings/byte counts), and the rest of the verbose payload |
+
+`--debug-tool` implies `--response-profile debug` unless a profile is
+set explicitly. If you combine `--debug-tool --response-profile slim`,
+the client-facing response stays slim while the `ptc_debug` recorder
+still gets the full pre-slim payload internally.
+
+**Why `slim` by default — wire cost.** Measured with
+`bench/local_payload_bench.py` (drives a real
+`@modelcontextprotocol/server-filesystem` upstream; bytes ÷ 4 ≈
+tokens; deterministic frame-byte counting, *not* LLM authoring cost):
+
+| Per `ptc_lisp_execute` call | `slim` | `structured` | `debug` | native MCP, direct |
+|---|---|---|---|---|
+| read one file, return it whole | ~67 t | ~123 t | ~873 t | ~105 t |
+| return the first line of 3 files (1 program vs 3 round-trips) | ~36 t | ~60 t | ~924 t | ~284 t |
+| return one matched line out of a file | ~29 t | ~46 t | ~790 t | ~105 t |
+
+`slim` is ≈ 13–28× smaller than `debug` per call — debug's mirrored
+payload + `ptc_metrics` + `upstream_calls` is a roughly *fixed*
+~800–950-token tax regardless of result size, which is exactly why
+it's opt-in (`--debug-tool`). Versus calling the upstream MCP tool
+directly, `slim` wins whenever the program collapses several calls into
+one and/or filters the result down (here: ~8× on the 3-file case, 1
+round-trip instead of 3; ~4× on the one-line grep), and is about
+break-even for a single verbatim pass-through. The one-time `tools/list`
+("cold") cost is comparable to a native server's (~2.7 K vs ~3.1 K
+tokens here); `debug` adds ~1.2 K tokens of `outputSchema` there. These
+ratios are illustrative — actual savings scale with payload size and how
+much the program reduces it; see [Payload reduction](#payload-reduction)
+for the honest framing of what the server can and cannot measure, and
+re-run `bench/local_payload_bench.py` against your own fixtures.
 
 ## Aggregator mode
 

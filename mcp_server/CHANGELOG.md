@@ -123,8 +123,64 @@ revisions.
   `decoded_bytes: 0` and `text_bytes` (size of the rejected text
   for cap correlation). No event fires when no text-content item is
   present or when the mimeType doesn't match.
+- Response profiles for `ptc_lisp_execute`
+  (`Plans/ptc-runner-mcp-slim-responses.md`). New `--response-profile`
+  / `PTC_RUNNER_MCP_RESPONSE_PROFILE` flag selects `slim` (the new
+  default — concise text in `content[0].text`, no `structuredContent`,
+  no advertised `outputSchema`, with `ptc_metrics` / `upstream_calls` /
+  empty `prints`/`feedback` / default `truncated` omitted),
+  `structured` (compact `structuredContent` + concise text,
+  observability fields still omitted; compact `outputSchema`
+  advertised), or `debug` (the pre-existing verbose shape: mirrored
+  full payload, `ptc_metrics`, `upstream_calls`, full `outputSchema`).
+  `--debug-tool` infers `debug` unless the profile is set explicitly;
+  `--debug-tool --response-profile slim` keeps the client response
+  slim while still feeding the full pre-slim payload to the `ptc_debug`
+  recorder internally (the private `__ptc_debug_structured` carrier is
+  stripped before the JSON-RPC frame is written). The tool description
+  advertises the active profile. See README "Response profiles" and
+  `bench/local_payload_bench.py` for the wire-cost comparison
+  (`slim` is roughly 13-28x smaller per call than `debug`).
+- Catalog discovery from inside PTC-Lisp, aggregator mode
+  (`Plans/ptc-runner-mcp-catalog-exposure.md`). New `catalog/`
+  namespace with five builtins — `catalog/summary`,
+  `catalog/list-servers`, `catalog/list-tools` (paginated via
+  `:limit` / `:offset`), `catalog/describe-tool`, and
+  `catalog/search-tools` (deterministic lexical ranking with
+  `{server, tool}` tie-breaking; `:limit` / `:load` opts). World-fault
+  → `nil` / programmer-fault → raise, same split as `tool/mcp-call`;
+  results size-capped at `--max-catalog-result-bytes`; catalog ops run
+  on a separate per-program budget (`--max-catalog-ops-per-program`)
+  that never consumes the upstream-call quota. Unavailable outside
+  aggregator mode.
+- Catalog-exposure config and upstream metadata. New flags
+  `--catalog-mode`, `--catalog-inline-max-chars`,
+  `--catalog-inline-max-tools`, `--max-catalog-ops-per-program`,
+  `--max-catalog-result-bytes` (with `PTC_RUNNER_MCP_*` equivalents,
+  CLI > env > default). Each upstream entry in the upstreams config may
+  carry optional `description` (string) and `capabilities` (array)
+  fields; they are extracted before transport normalization (so they
+  never reach the stdio `command`/`env` or HTTP `url`/headers paths and
+  never trip the "unknown config key" warning), type-validated
+  (invalid → warn + dropped), and surfaced through `catalog/summary` /
+  `catalog/list-servers` / `catalog/search-tools` (`description` falls
+  back to the server name when absent).
 
 ### Breaking changes
+
+- The default `ptc_lisp_execute` response shape is now `slim`
+  (`Plans/ptc-runner-mcp-slim-responses.md`): `content[0].text` carries
+  concise human-readable text (the value, or `<prints>…</prints>` +
+  `<result>…` when the program printed), there is no
+  `structuredContent`, and no `outputSchema` is advertised even when a
+  `signature` argument is present. `ptc_metrics`, `upstream_calls`,
+  empty `prints`/`feedback`, and a default `truncated: false` are
+  omitted. Clients that parsed `structuredContent` from
+  `ptc_lisp_execute` (or relied on the advertised `outputSchema`) must
+  start the server with `--response-profile structured` (compact
+  machine-readable shape) or `--debug-tool` / `--response-profile
+  debug` (the pre-existing verbose shape). The MCP v1 response contract
+  in `Plans/ptc-runner-mcp-server.md` §10 is now the `debug` profile.
 
 - `outputSchema` no longer includes the `memory` field on success
   responses, and `tools/call` responses no longer surface
