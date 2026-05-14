@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   use GenServer
 
+  alias PtcRunner.PtcToolProtocol
   alias PtcRunnerMcp.Limits, as: McpLimits
   alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
@@ -411,6 +412,13 @@ defmodule PtcRunnerMcp.Sessions.Session do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp commit_success(state, previous, step, opts) do
+    # `(return v)` wraps step.return in a sentinel; in single-shot session
+    # context that's identical to a final expression value. Unwrap once
+    # here so everything downstream (turn history `*1`, the `result`
+    # preview, signature validation) sees the actual value — mirrors the
+    # stateless renderer in `PtcRunnerMcp.Sandbox.execute/4`.
+    step = unwrap_return_sentinel(step)
+
     {turn_history, history_notices} =
       Limits.cap_turn_history(state.turn_history, step.return, state.limits)
 
@@ -427,25 +435,91 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
     case Limits.validate_candidate(candidate, state.limits) do
       :ok ->
-        committed =
-          state
-          |> Map.merge(candidate)
-          |> Map.update!(:turn, &(&1 + 1))
-          |> Map.put(:updated_at, DateTime.utc_now())
-          |> reset_idle_timer()
+        parsed_signature = Map.get(opts, :parsed_signature)
 
-        response =
-          Projection.eval_success(previous, committed, step, history_notices)
-          |> maybe_put_upstream_calls(upstream_calls)
-          |> decorate_ptc_metrics(upstream_calls)
+        case validate_return_value(step.return, parsed_signature) do
+          :no_contract ->
+            committed =
+              state
+              |> Map.merge(candidate)
+              |> Map.update!(:turn, &(&1 + 1))
+              |> Map.put(:updated_at, DateTime.utc_now())
+              |> reset_idle_timer()
 
-        :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: committed.turn}, %{
-          session_id: committed.id,
-          owner_hash: Owner.fingerprint(committed.owner),
-          mode: committed.mode
-        })
+            response =
+              Projection.eval_success(previous, committed, step, history_notices)
+              |> maybe_put_upstream_calls(upstream_calls)
+              |> decorate_ptc_metrics(upstream_calls)
 
-        {:reply, {:ok, response}, committed}
+            :telemetry.execute(
+              [:ptc_runner_mcp, :session, :eval, :stop],
+              %{turn: committed.turn},
+              %{
+                session_id: committed.id,
+                owner_hash: Owner.fingerprint(committed.owner),
+                mode: committed.mode
+              }
+            )
+
+            {:reply, {:ok, response}, committed}
+
+          {:ok, validated} ->
+            committed =
+              state
+              |> Map.merge(candidate)
+              |> Map.update!(:turn, &(&1 + 1))
+              |> Map.put(:updated_at, DateTime.utc_now())
+              |> reset_idle_timer()
+
+            # Always emit `validated` when a contract was supplied — even
+            # when the value is `nil`. Mirrors the stateless renderer,
+            # which surfaces "validated": null distinct from "no contract".
+            response =
+              Projection.eval_success(previous, committed, step, history_notices)
+              |> Map.put("validated", validated)
+              |> maybe_put_upstream_calls(upstream_calls)
+              |> decorate_ptc_metrics(upstream_calls)
+
+            :telemetry.execute(
+              [:ptc_runner_mcp, :session, :eval, :stop],
+              %{turn: committed.turn},
+              %{
+                session_id: committed.id,
+                owner_hash: Owner.fingerprint(committed.owner),
+                mode: committed.mode
+              }
+            )
+
+            {:reply, {:ok, response}, committed}
+
+          {:error, message} ->
+            # Validation failure: the program executed cleanly but its
+            # return value didn't match the caller-supplied schema. Treat
+            # like `session_limit_exceeded` — reject the eval, do NOT
+            # commit the candidate state. Side effects (upstream calls)
+            # already happened and are surfaced as usual.
+            response =
+              Projection.error(
+                :validation_error,
+                message,
+                %{session: Projection.inspect_view(state, "limits")["session"]}
+              )
+              |> maybe_put_upstream_calls(upstream_calls)
+              |> decorate_ptc_metrics(upstream_calls)
+
+            :telemetry.execute(
+              [:ptc_runner_mcp, :session, :eval, :stop],
+              %{turn: state.turn},
+              %{
+                session_id: state.id,
+                owner_hash: Owner.fingerprint(state.owner),
+                mode: state.mode,
+                reason: :validation_error
+              }
+            )
+
+            {:reply, {:error, response}, touch(state)}
+        end
 
       {:error, detail} ->
         response =
@@ -475,6 +549,48 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   defp maybe_put_upstream_calls(payload, []), do: payload
   defp maybe_put_upstream_calls(payload, calls), do: Map.put(payload, "upstream_calls", calls)
+
+  # `(return v)` is unwrapped at the top of commit_success so step.return
+  # is already the raw value here — no extra unwrapping needed.
+  defp unwrap_return_sentinel(%{return: {:__ptc_return__, value}} = step),
+    do: %{step | return: value}
+
+  defp unwrap_return_sentinel(step), do: step
+
+  # No signature supplied — skip validation; commit_success won't emit a
+  # `validated` field. Distinct from `{:ok, nil}` (a contract supplied
+  # that validated to null, which DOES emit "validated": null).
+  defp validate_return_value(_return, nil), do: :no_contract
+
+  defp validate_return_value(return, {:signature, _params, return_type} = parsed_signature) do
+    typed = PtcToolProtocol.atomize_value(return, return_type)
+    definition = %{parsed_signature: parsed_signature}
+
+    case PtcToolProtocol.validate_return(definition, typed) do
+      :ok ->
+        case PtcToolProtocol.to_json_value(typed) do
+          {:ok, encoded} ->
+            {:ok, encoded}
+
+          {:error, reason} ->
+            {:error, "validated value: #{reason}"}
+        end
+
+      {:error, errors} when is_list(errors) ->
+        {:error, format_validation_errors(errors)}
+    end
+  end
+
+  defp format_validation_errors(errors) do
+    Enum.map_join(errors, "; ", fn
+      %{path: path, message: message} ->
+        path_str = if path == [], do: "return", else: "return." <> Enum.join(path, ".")
+        "#{path_str}: #{message}"
+
+      other ->
+        inspect(other)
+    end)
+  end
 
   # Mirrors the stateless `ptc_lisp_execute` decoration in `Tools`: when the
   # eval made at least one upstream call, attach a per-eval `ptc_metrics`

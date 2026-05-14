@@ -139,13 +139,15 @@ defmodule PtcRunnerMcp.Sessions do
     with {:ok, session_id} <- required_string(args, "session_id"),
          {:ok, program} <- required_string(args, "program"),
          :ok <- validate_program_size(program),
-         {:ok, context} <- validate_context(Map.get(args, "context", %{})) do
+         {:ok, context} <- validate_context(Map.get(args, "context", %{})),
+         {:ok, parsed_signature} <- Tools.validate_output_contract(args) do
       {:ok,
        %{
          session_id: session_id,
          program: program,
          context: context,
-         owner_context: owner_context(args)
+         owner_context: owner_context(args),
+         parsed_signature: parsed_signature
        }}
     else
       {:error, message} ->
@@ -158,7 +160,7 @@ defmodule PtcRunnerMcp.Sessions do
   def eval_validated(validated, opts \\ []) when is_map(validated) do
     eval_opts =
       validated
-      |> Map.take([:context])
+      |> Map.take([:context, :parsed_signature])
       |> Map.merge(Map.new(opts))
 
     validated.session_id
@@ -274,7 +276,7 @@ defmodule PtcRunnerMcp.Sessions do
              request_id: request_id,
              snapshot: snapshot,
              program: validated.program,
-             opts: Map.take(validated, [:context])
+             opts: Map.take(validated, [:context, :parsed_signature])
            }}
 
         {:error, response} ->
@@ -592,14 +594,25 @@ defmodule PtcRunnerMcp.Sessions do
       "name" => "ptc_session_eval",
       "description" =>
         session_card() <>
-          "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.",
+          "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not." <>
+          "\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`.",
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id", "program"],
         "properties" => %{
           "session_id" => %{"type" => "string"},
           "program" => %{"type" => "string"},
-          "context" => %{"type" => "object"}
+          "context" => %{"type" => "object"},
+          "output_schema" => %{
+            "type" => "object",
+            "description" =>
+              "JSON Schema validated against the program's return value. Mutually exclusive with `signature`. On mismatch, the eval is rejected and session state is not committed."
+          },
+          "signature" => %{
+            "type" => "string",
+            "description" =>
+              "PTC signature syntax (e.g. `-> {count: int}`). Mutually exclusive with `output_schema`. On mismatch, the eval is rejected and session state is not committed."
+          }
         },
         "additionalProperties" => false
       },
