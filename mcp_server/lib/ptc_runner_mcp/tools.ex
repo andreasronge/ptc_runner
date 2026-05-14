@@ -994,11 +994,19 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
-  # Mutual exclusivity gate: if both `output_schema` and `signature`
-  # are supplied, reject before either is parsed.
-  # `signature: "any"` normalizes to nil in validate_signature/1, so it
-  # must not trigger this gate — treat it as absent here too.
-  defp validate_output_contract(args) do
+  @doc """
+  Parse the `output_schema` / `signature` pair from an MCP tools/call
+  arguments map. Mutually exclusive — supplying both is an args_error.
+  Returns `{:ok, parsed_signature}` (or `{:ok, nil}` when neither was
+  supplied) or `{:error, message}`. Public so `PtcRunnerMcp.Sessions`
+  can reuse the same gate from `ptc_session_eval` validation.
+
+  `signature: "any"` normalizes to nil in validate_signature/1, so it
+  must not trigger the mutex gate — treat it as absent here too.
+  """
+  @spec validate_output_contract(map()) ::
+          {:ok, Sandbox.parsed_signature() | nil} | {:error, String.t()}
+  def validate_output_contract(args) when is_map(args) do
     sig_present =
       case Map.fetch(args, "signature") do
         {:ok, nil} -> false

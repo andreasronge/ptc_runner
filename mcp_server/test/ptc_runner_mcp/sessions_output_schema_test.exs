@@ -1,0 +1,259 @@
+defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
+  @moduledoc """
+  Regression coverage for GitHub issue #944 finding #5: `ptc_session_eval`
+  must accept `output_schema` / `signature` and validate the program's
+  return value, mirroring the stateless `ptc_lisp_execute` contract.
+
+  Validation failure does NOT commit the session candidate state — the
+  eval is rejected, same precedent as `session_limit_exceeded`. Side
+  effects (upstream calls) still surface in the response because they
+  already happened.
+  """
+  use ExUnit.Case, async: false
+
+  alias PtcRunnerMcp.{ConcurrencyGate, Sessions, Tools}
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
+  alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
+
+  setup do
+    stop_sessions_processes()
+    SessionsConfig.set(%{enabled: true})
+    ConcurrencyGate.reset()
+    assert :ok = Sessions.ensure_started()
+
+    on_exit(fn ->
+      stop_sessions_processes()
+      SessionsConfig.reset()
+      ConcurrencyGate.reset()
+    end)
+
+    :ok
+  end
+
+  describe "output_schema on ptc_session_eval" do
+    test "matching return value is committed and surfaces a `validated` field" do
+      session_id = start_session()
+
+      response =
+        eval(session_id, "{:count (+ 1 2 3) :label \"hello\"}",
+          output_schema: %{
+            "type" => "object",
+            "properties" => %{
+              "count" => %{"type" => "integer"},
+              "label" => %{"type" => "string"}
+            },
+            "required" => ["count", "label"]
+          }
+        )
+
+      assert response["status"] == "ok"
+      assert response["validated"] == %{"count" => 6, "label" => "hello"}
+
+      # State was committed — turn advanced.
+      assert response["session"]["turn"] == 1
+    end
+
+    test "non-matching return rejects the eval and does NOT commit state" do
+      session_id = start_session()
+
+      # First commit so we can confirm the failed eval's memory delta
+      # didn't merge into state.
+      eval(session_id, "(def baseline 1)")
+
+      response =
+        eval(session_id, "(do (def will-be-rolled-back 999) \"not-an-integer\")",
+          output_schema: %{"type" => "integer"}
+        )
+
+      assert response["status"] == "error"
+      assert response["reason"] == "validation_error"
+      assert response["message"] =~ "return"
+
+      # Confirm rollback: the def from the failed eval did NOT land in memory.
+      after_failure = eval(session_id, "(list baseline)")
+      assert after_failure["status"] == "ok"
+      assert after_failure["memory"]["stored_keys"] == ["baseline"]
+    end
+
+    test "signature alternative to output_schema works the same way" do
+      session_id = start_session()
+
+      response =
+        eval(session_id, "{:count (+ 1 2)}", signature: "() -> {count :int}")
+
+      assert response["status"] == "ok"
+      assert response["validated"] == %{"count" => 3}
+    end
+
+    test "both output_schema and signature is an args_error before the gate" do
+      session_id = start_session()
+
+      envelope =
+        Tools.call(%{
+          "name" => "ptc_session_eval",
+          "arguments" => %{
+            "session_id" => session_id,
+            "program" => "42",
+            "output_schema" => %{"type" => "integer"},
+            "signature" => "() -> int"
+          }
+        })
+
+      assert envelope["isError"] == true
+      assert envelope["structuredContent"]["reason"] == "session_args_error"
+      assert envelope["structuredContent"]["message"] =~ "mutually exclusive"
+    end
+
+    test "malformed output_schema is an args_error" do
+      session_id = start_session()
+
+      envelope =
+        Tools.call(%{
+          "name" => "ptc_session_eval",
+          "arguments" => %{
+            "session_id" => session_id,
+            "program" => "42",
+            "output_schema" => "not-a-map"
+          }
+        })
+
+      assert envelope["isError"] == true
+      assert envelope["structuredContent"]["reason"] == "session_args_error"
+      assert envelope["structuredContent"]["message"] =~ "output_schema"
+    end
+
+    test "eval without output_schema works exactly as before (no `validated` field)" do
+      session_id = start_session()
+
+      response = eval(session_id, "(+ 1 2)")
+
+      assert response["status"] == "ok"
+      refute Map.has_key?(response, "validated")
+    end
+
+    # Regression for codex P1 on this fix: validation must work on the
+    # JSON-RPC/stdio path too, not just the direct `Tools.call` path. That
+    # path goes via Sessions.reserve_eval/eval_reserved, which previously
+    # dropped `:parsed_signature` when building the reservation.
+    test "reserve_eval/eval_reserved path threads parsed_signature through" do
+      session_id = start_session()
+
+      {:ok, validated} =
+        Sessions.validate_eval(%{
+          "session_id" => session_id,
+          "program" => "\"not-an-integer\"",
+          "output_schema" => %{"type" => "integer"}
+        })
+
+      assert validated.parsed_signature != nil
+
+      {:ok, reservation} = Sessions.reserve_eval(validated, make_ref())
+      assert reservation.opts[:parsed_signature] == validated.parsed_signature
+
+      envelope = Sessions.eval_reserved(reservation)
+      assert envelope["isError"] == true
+      assert envelope["structuredContent"]["reason"] == "validation_error"
+    end
+
+    # Regression for codex P2-1 and the latent sentinel leak: programs
+    # using `(return v)` wrap step.return in {:__ptc_return__, v}. The
+    # session response — `result`, `*1` history, and `validated` — must
+    # all see the unwrapped value, mirroring the stateless renderer.
+    test "(return v) is unwrapped before validation and across the response" do
+      session_id = start_session()
+
+      response =
+        eval(session_id, "(return 42)", output_schema: %{"type" => "integer"})
+
+      assert response["status"] == "ok"
+      assert response["validated"] == 42
+      assert response["result"] == "user=> 42"
+
+      # The next eval's *1 history reference must see 42, not the sentinel.
+      followup = eval(session_id, "*1")
+      assert followup["status"] == "ok"
+      assert followup["result"] == "user=> 42"
+    end
+
+    test "non-contracted (return v) is also unwrapped (was a latent leak)" do
+      session_id = start_session()
+
+      response = eval(session_id, "(return 7)")
+      assert response["status"] == "ok"
+      assert response["result"] == "user=> 7"
+
+      followup = eval(session_id, "*1")
+      assert followup["result"] == "user=> 7"
+    end
+
+    # Regression for codex P2-2: when the contract validates to JSON null,
+    # the response must keep "validated": null — distinct from "no contract
+    # was supplied". Otherwise a caller can't tell the two cases apart.
+    # `output_schema` doesn't accept type "null", so this uses the optional
+    # signature syntax `:int?`.
+    test "nil return value with an optional signature emits an explicit null `validated`" do
+      session_id = start_session()
+
+      response = eval(session_id, "nil", signature: "() -> :int?")
+
+      assert response["status"] == "ok"
+      # "validated" must be present and explicitly null — distinct from
+      # the no-contract case where the field is absent entirely.
+      assert Map.has_key?(response, "validated")
+      assert response["validated"] == nil
+    end
+
+    test "tool advertises output_schema and signature in inputSchema" do
+      tool =
+        Tools.list()["tools"]
+        |> Enum.find(&(&1["name"] == "ptc_session_eval"))
+
+      props = tool["inputSchema"]["properties"]
+      assert Map.has_key?(props, "output_schema")
+      assert Map.has_key?(props, "signature")
+      assert props["output_schema"]["type"] == "object"
+      assert props["signature"]["type"] == "string"
+    end
+  end
+
+  defp start_session do
+    call!("ptc_session_start", %{})["session_id"]
+  end
+
+  defp eval(session_id, program, extra \\ []) do
+    base = %{"session_id" => session_id, "program" => program}
+
+    args =
+      Enum.reduce(extra, base, fn
+        {:output_schema, v}, acc -> Map.put(acc, "output_schema", v)
+        {:signature, v}, acc -> Map.put(acc, "signature", v)
+      end)
+
+    call!("ptc_session_eval", args)
+  end
+
+  defp call!(name, args) do
+    envelope = Tools.call(%{"name" => name, "arguments" => args})
+    envelope["structuredContent"]
+  end
+
+  defp stop_sessions_processes do
+    stop_if_alive(SessionsRegistry)
+    stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
+  end
+
+  defp stop_if_alive(name) do
+    case Process.whereis(name) do
+      nil -> :ok
+      pid -> stop_process(pid)
+    end
+  end
+
+  defp stop_process(pid) do
+    if Process.alive?(pid) do
+      GenServer.stop(pid, :normal, 5_000)
+    end
+  catch
+    :exit, _ -> :ok
+  end
+end
