@@ -2,6 +2,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
   use ExUnit.Case, async: false
 
   alias PtcRunnerMcp.Agentic.Prompt
+  alias PtcRunnerMcp.PromptRegistry
   alias PtcRunnerMcp.Tools
   alias PtcRunnerMcp.Upstream.Catalog
 
@@ -44,6 +45,65 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert prompt =~ "Check the value before returning it"
     assert prompt =~ "You may continue across turns"
     assert prompt =~ "Write-capable upstream calls may have side effects"
+  end
+
+  test "agentic prompt profile pins trust boundaries and terminal recap placement" do
+    assert [
+             %{
+               id: :mcp_agentic_preamble,
+               dynamic_boundary: :static_card,
+               placement: :preamble,
+               trust: :authoritative
+             },
+             %{
+               id: :mcp_agentic_operator_prefix,
+               dynamic_boundary: :operator_text,
+               placement: :after_preamble,
+               trust: :operator_text
+             },
+             %{
+               id: :mcp_agentic_dialect_card,
+               dynamic_boundary: :static_card,
+               placement: :dialect_reference,
+               trust: :authoritative
+             },
+             %{
+               id: :mcp_agentic_mcp_call_contract,
+               dynamic_boundary: :before_dynamic_catalog,
+               placement: :mcp_call_contract,
+               trust: :authoritative
+             },
+             %{
+               id: :mcp_agentic_catalog_section,
+               dynamic_boundary: :dynamic_catalog,
+               placement: :after_mcp_call_contract,
+               trust: :untrusted_data
+             },
+             %{
+               id: :mcp_agentic_operator_suffix,
+               dynamic_boundary: :operator_text,
+               placement: :before_terminal_recap,
+               trust: :operator_text
+             },
+             %{
+               id: :mcp_agentic_final_recap,
+               dynamic_boundary: :terminal_authoritative_card,
+               placement: :terminal_recap,
+               trust: :authoritative
+             }
+           ] = PromptRegistry.profile_metadata(:mcp_agentic_task_prompt)
+  end
+
+  test "agentic prompt delegates system prompt rendering to registry" do
+    opts = [
+      catalog: "alpha:\n  ping()",
+      prefix: "operator prefix",
+      suffix: "operator suffix",
+      max_turns: 2,
+      allow_writes: true
+    ]
+
+    assert Prompt.system_prompt(opts) == PromptRegistry.render(:mcp_agentic_task_prompt, opts)
   end
 
   test "prompt contains exactly one ptc_task MCP-call contract" do
