@@ -191,19 +191,12 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @doc false
   @spec render(atom(), keyword()) :: String.t() | nil
   def render(:mcp_no_tools_description, _opts) do
-    render_parts(profile_parts!(:mcp_no_tools_description))
+    render_profile(:mcp_no_tools_description, &static_part/1)
   end
 
   def render(:mcp_aggregator_description, opts) do
     catalog = Keyword.get(opts, :catalog)
-
-    :mcp_aggregator_description
-    |> profile_parts!()
-    |> Enum.flat_map(fn
-      :mcp_dynamic_catalog -> dynamic_catalog_part(catalog)
-      card -> [render_card(card)]
-    end)
-    |> Enum.join("\n\n")
+    render_profile(:mcp_aggregator_description, &aggregator_part(&1, catalog))
   end
 
   def render(:mcp_agentic_task_prompt, opts) do
@@ -212,10 +205,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     catalog_mode =
       Keyword.get_lazy(opts, :catalog_mode, fn -> CatalogConfig.get().catalog_mode end)
 
-    :mcp_agentic_task_prompt
-    |> profile_parts!()
-    |> Enum.flat_map(&agentic_part(&1, opts, catalog, catalog_mode))
-    |> Enum.join("\n\n")
+    render_profile(:mcp_agentic_task_prompt, &agentic_part(&1, opts, catalog, catalog_mode))
   end
 
   def render(key, _opts) when is_atom(key), do: render_card_or_nil(key)
@@ -246,7 +236,12 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @spec profile_parts!(atom()) :: [atom()]
   def profile_parts!(key) when is_atom(key), do: Map.fetch!(@profiles, key)
 
-  defp render_parts(parts), do: Enum.map_join(parts, "\n\n", &render_card/1)
+  defp render_profile(key, part_fun) do
+    key
+    |> profile_parts!()
+    |> Enum.flat_map(part_fun)
+    |> Enum.join("\n\n")
+  end
 
   defp render_card_or_nil(key) do
     if Map.has_key?(@cards, key), do: render_card(key)
@@ -266,6 +261,11 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp dynamic_catalog_part(nil), do: []
   defp dynamic_catalog_part(""), do: []
   defp dynamic_catalog_part(catalog) when is_binary(catalog), do: [catalog]
+
+  defp static_part(card), do: [render_card(card)]
+
+  defp aggregator_part(:mcp_dynamic_catalog, catalog), do: dynamic_catalog_part(catalog)
+  defp aggregator_part(card, _catalog), do: static_part(card)
 
   defp agentic_part(:mcp_agentic_preamble, opts, _catalog, _catalog_mode) do
     [agentic_preamble(opts)]
