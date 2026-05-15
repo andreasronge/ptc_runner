@@ -233,6 +233,20 @@ defmodule PtcRunnerMcp.PromptRegistry do
   end
 
   @doc false
+  @spec prompt_keys() :: [atom()]
+  def prompt_keys do
+    Enum.uniq(profile_keys() ++ card_keys())
+  end
+
+  @doc false
+  @spec profile_keys() :: [atom()]
+  def profile_keys, do: Map.keys(@profiles)
+
+  @doc false
+  @spec card_keys() :: [atom()]
+  def card_keys, do: Map.keys(@cards)
+
+  @doc false
   @spec profile_parts!(atom()) :: [atom()]
   def profile_parts!(key) when is_atom(key), do: Map.fetch!(@profiles, key)
 
