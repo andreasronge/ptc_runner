@@ -324,6 +324,22 @@ contract or in documentation, not before it.
 
 ## 10. Migration Plan
 
+Implementation status as of 2026-05-15:
+
+- Phase 0 invariants are in place for MCP aggregator first-2KB
+  contracts, direct-vs-agentic MCP failure semantics, and registry
+  metadata vocabulary.
+- Phase 1 introduced `PtcRunner.Lisp.PromptRegistry` behind existing
+  `LanguageSpec` behavior.
+- Phase 2 routed the combined-mode compact PTC reference through the
+  `ptc_runner` registry while preserving dynamic tool inventory
+  rendering.
+- Phase 3 introduced `PtcRunnerMcp.PromptRegistry` and now routes
+  direct no-tools, direct aggregator, agentic `ptc_task`, and
+  start/eval session descriptions through MCP-owned contracts. The
+  remaining session inspect/forget/close descriptions are still simple
+  one-line tool summaries.
+
 ### Phase 0: Inventory and Invariants
 
 - Document all current prompt surfaces and the dimensions each uses.
