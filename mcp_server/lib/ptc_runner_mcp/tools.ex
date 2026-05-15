@@ -40,6 +40,7 @@ defmodule PtcRunnerMcp.Tools do
     Envelope,
     Limits,
     PayloadMetrics,
+    PromptRegistry,
     ResponseProfile,
     Sandbox,
     Sessions,
@@ -51,30 +52,6 @@ defmodule PtcRunnerMcp.Tools do
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "ptc_lisp_execute"
-
-  # Compile-time read of the authoring card per § 8.4. The
-  # `@external_resource` attribute tells BEAM to recompile this module
-  # whenever the file changes. We resolve the path relative to this
-  # source file rather than via `:code.priv_dir/1` because the app may
-  # not yet be loaded at compile time.
-  @priv_path Path.expand(Path.join([__DIR__, "..", "..", "priv", "mcp_authoring_card.md"]))
-  @external_resource @priv_path
-  @authoring_card File.read!(@priv_path)
-
-  # Phase 1a §8.1: aggregator mode advertises a different authoring
-  # card describing `(tool/mcp-call ...)`, the `nil` failure convention,
-  # the `:json-null` sentinel, and the `upstream_calls` envelope field.
-  @aggregator_priv_path Path.expand(
-                          Path.join([
-                            __DIR__,
-                            "..",
-                            "..",
-                            "priv",
-                            "mcp_aggregator_authoring_card.md"
-                          ])
-                        )
-  @external_resource @aggregator_priv_path
-  @aggregator_authoring_card File.read!(@aggregator_priv_path)
 
   # § 10.4 outputSchema. `oneOf` discriminated by `status`.
   # `result` is intentionally NOT in the success branch's `required`
@@ -252,7 +229,7 @@ defmodule PtcRunnerMcp.Tools do
   file trigger a recompile of this module.
   """
   @spec authoring_card() :: String.t()
-  def authoring_card, do: @authoring_card
+  def authoring_card, do: PromptRegistry.card_text(:mcp_no_tools_authoring_card)
 
   @doc """
   The advertised `description` field for the `ptc_lisp_execute` tool,
@@ -273,7 +250,7 @@ defmodule PtcRunnerMcp.Tools do
   def advertised_description(profile, opts \\ [])
 
   def advertised_description(:mcp_no_tools, _opts) do
-    PtcToolProtocol.tool_description(:mcp_no_tools) <> "\n\n" <> authoring_card()
+    PromptRegistry.render(:mcp_no_tools_description, [])
   end
 
   # Phase 1a §8.1: aggregator description = capability statement +
@@ -281,15 +258,7 @@ defmodule PtcRunnerMcp.Tools do
   # will use to inject an inline upstream catalog; for Phases 1a-2,
   # `catalog: nil` is acceptable per §8.1.
   def advertised_description(:mcp_aggregator, opts) do
-    catalog = Keyword.get(opts, :catalog)
-
-    base = mcp_aggregator_description() <> "\n\n" <> aggregator_authoring_card()
-
-    case catalog do
-      nil -> base
-      "" -> base
-      str when is_binary(str) -> base <> "\n\n" <> str
-    end
+    PromptRegistry.render(:mcp_aggregator_description, opts)
   end
 
   @doc """
@@ -310,29 +279,7 @@ defmodule PtcRunnerMcp.Tools do
   time via `@external_resource`.
   """
   @spec aggregator_authoring_card() :: String.t()
-  def aggregator_authoring_card, do: @aggregator_authoring_card
-
-  # Aggregator-mode capability statement. Adapted from the v1
-  # `:mcp_no_tools` description so the aggregator advertisement stays
-  # consistent in tone but accurately reflects the new capability.
-  # The full authoring card and optional catalog are appended after
-  # this first-call quick contract.
-  defp mcp_aggregator_description do
-    """
-    Execute a PTC-Lisp program in PtcRunner's sandbox for deterministic computation, filtering, aggregation, and orchestration over configured upstream MCP servers.
-
-    Quick aggregator contract:
-    - Call upstream tools inside the program as `(tool/mcp-call {:server "<name>" :tool "<tool>" :args {...}})`.
-    - World-fault failures such as timeout, oversize, upstream error, cap exhaustion, or unavailable upstream return `nil` and are recorded in `upstream_calls`.
-    - A successful top-level JSON `null` returns `:json-null`, not `nil`.
-    - Unwrap upstream MCP envelopes with `(mcp/text r)` for text and `(mcp/json r)` for structured JSON.
-    - Use `catalog/search-tools`, `catalog/list-tools`, or `catalog/describe-tool` when catalog details are not inline or a schema is unfamiliar.
-    - Return compact maps, vectors, or strings; do not return full upstream envelopes unless the caller asked for them.
-
-    Each invocation of `ptc_lisp_execute` is independent; there is no memory of prior calls.
-    """
-    |> String.trim()
-  end
+  def aggregator_authoring_card, do: PromptRegistry.card_text(:mcp_aggregator_authoring_card)
 
   @doc """
   Backward-compatible alias for `advertised_description(:mcp_no_tools, [])`.
