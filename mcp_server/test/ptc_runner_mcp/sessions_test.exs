@@ -85,6 +85,22 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert eval["description"] =~ "validation_error"
   end
 
+  test "session start and eval descriptions preserve legacy assembly shape" do
+    session_card =
+      :ptc_runner_mcp
+      |> :code.priv_dir()
+      |> Path.join("mcp_session_authoring_card.md")
+      |> File.read!()
+
+    assert PromptRegistry.render(:mcp_session_start_description, []) ==
+             session_card <> "\n\nCreates a new empty stateful PTC-Lisp session."
+
+    assert PromptRegistry.render(:mcp_session_eval_description, []) ==
+             session_card <>
+               "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not." <>
+               "\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
+  end
+
   test "session prompt registry pins metadata order for start and eval descriptions" do
     assert [
              %{
