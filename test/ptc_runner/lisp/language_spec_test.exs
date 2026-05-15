@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.LanguageSpec
+  alias PtcRunner.Lisp.PromptRegistry
 
   doctest LanguageSpec
 
@@ -114,6 +115,36 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       expected = ref <> "\n\n" <> mt <> "\n\n" <> ret <> "\n\n" <> journal
 
       assert LanguageSpec.get(:explicit_journal) == expected
+    end
+  end
+
+  describe "internal prompt registry metadata" do
+    test "cards carry Phase 1 contract metadata" do
+      metadata = PromptRegistry.card_metadata(:reference)
+
+      assert metadata.id == :reference
+      assert metadata.surface == :subagent_content
+      assert metadata.audience == :subagent_system_prompt
+      assert metadata.budget_profile == :standard
+      assert metadata.placement == :dialect_reference
+      assert metadata.dynamic_boundary == :static_card
+      assert metadata.trust == :authoritative
+      assert :dialect in metadata.dimensions
+      refute Map.has_key?(metadata, :prompt_fun)
+    end
+
+    test "profile metadata preserves canonical render order" do
+      assert [
+               %{id: :reference},
+               %{id: :behavior_multi_turn},
+               %{id: :behavior_return_explicit}
+             ] = PromptRegistry.profile_metadata(:explicit_return)
+    end
+
+    test "registry renderer stays behind existing LanguageSpec behavior" do
+      assert PromptRegistry.render(:single_shot) == LanguageSpec.get(:single_shot)
+      assert PromptRegistry.render(:explicit_return) == LanguageSpec.get(:explicit_return)
+      assert PromptRegistry.render(:nonexistent) == nil
     end
   end
 
