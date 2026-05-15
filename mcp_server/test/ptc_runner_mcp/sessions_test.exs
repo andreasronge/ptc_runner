@@ -6,6 +6,7 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.Credentials.Binding
   alias PtcRunnerMcp.JsonRpc
   alias PtcRunnerMcp.Limits
+  alias PtcRunnerMcp.PromptRegistry
   alias PtcRunnerMcp.Sessions
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Limits, as: SessionLimits
@@ -65,6 +66,53 @@ defmodule PtcRunnerMcp.SessionsTest do
       assert error["properties"]["status"] == %{"const" => "error"}
       assert error["properties"]["reason"] == %{"type" => "string"}
     end)
+  end
+
+  test "session start and eval descriptions are rendered from prompt registry" do
+    tools = Tools.list()["tools"]
+    start = Enum.find(tools, &(&1["name"] == "ptc_session_start"))
+    eval = Enum.find(tools, &(&1["name"] == "ptc_session_eval"))
+
+    assert start["description"] == PromptRegistry.render(:mcp_session_start_description, [])
+    assert eval["description"] == PromptRegistry.render(:mcp_session_eval_description, [])
+
+    assert start["description"] =~ "# PTC-Lisp sessions"
+    assert start["description"] =~ "Creates a new empty stateful PTC-Lisp session."
+
+    assert eval["description"] =~ "Explicit definitions persist across calls"
+    assert eval["description"] =~ "output_schema"
+    assert eval["description"] =~ "signature"
+    assert eval["description"] =~ "validation_error"
+  end
+
+  test "session prompt registry pins metadata order for start and eval descriptions" do
+    assert [
+             %{
+               id: :mcp_session_authoring_card,
+               surface: :mcp_session,
+               audience: :mcp_tool_description,
+               profile: :mcp_session,
+               placement: :session_quick_contract,
+               dynamic_boundary: :static_card,
+               trust: :authoritative
+             },
+             %{
+               id: :mcp_session_start_detail,
+               placement: :after_session_quick_contract,
+               dynamic_boundary: :static_card,
+               trust: :authoritative
+             }
+           ] = PromptRegistry.profile_metadata(:mcp_session_start_description)
+
+    assert [
+             %{id: :mcp_session_authoring_card},
+             %{
+               id: :mcp_session_eval_detail,
+               placement: :after_session_quick_contract,
+               dynamic_boundary: :static_card,
+               trust: :authoritative
+             }
+           ] = PromptRegistry.profile_metadata(:mcp_session_eval_description)
   end
 
   test "session eval persists explicit definitions and turn history" do
