@@ -31,6 +31,24 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @external_resource @aggregator_authoring_card_path
   @aggregator_authoring_card File.read!(@aggregator_authoring_card_path)
 
+  @session_authoring_card_path Path.expand(
+                                 Path.join([
+                                   __DIR__,
+                                   "..",
+                                   "..",
+                                   "priv",
+                                   "mcp_session_authoring_card.md"
+                                 ])
+                               )
+  @external_resource @session_authoring_card_path
+  @session_authoring_card (case File.read(@session_authoring_card_path) do
+                             {:ok, body} ->
+                               body
+
+                             _ ->
+                               "PTC-Lisp sessions persist explicit `(def ...)` and `(defn ...)` bindings across eval calls. `println` output is captured; `*1`, `*2`, and `*3` reference the last three successful eval results."
+                           end)
+
   @cards %{
     mcp_no_tools_capability:
       Map.merge(@common_card, %{
@@ -164,6 +182,42 @@ defmodule PtcRunnerMcp.PromptRegistry do
       prompt_fun: :mcp_agentic_final_recap,
       surface: :mcp_agentic_task,
       trust: :authoritative
+    },
+    mcp_session_authoring_card: %{
+      id: :mcp_session_authoring_card,
+      audience: :mcp_tool_description,
+      budget_profile: :compact,
+      dimensions: [:dialect, :execution_surface, :completion_contract],
+      dynamic_boundary: :static_card,
+      placement: :session_quick_contract,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_authoring_card,
+      surface: :mcp_session,
+      trust: :authoritative
+    },
+    mcp_session_start_detail: %{
+      id: :mcp_session_start_detail,
+      audience: :mcp_tool_description,
+      budget_profile: :compact,
+      dimensions: [:execution_surface],
+      dynamic_boundary: :static_card,
+      placement: :after_session_quick_contract,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_start_detail,
+      surface: :mcp_session,
+      trust: :authoritative
+    },
+    mcp_session_eval_detail: %{
+      id: :mcp_session_eval_detail,
+      audience: :mcp_tool_description,
+      budget_profile: :compact,
+      dimensions: [:execution_surface, :completion_contract],
+      dynamic_boundary: :static_card,
+      placement: :after_session_quick_contract,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_eval_detail,
+      surface: :mcp_session,
+      trust: :authoritative
     }
   }
 
@@ -185,6 +239,14 @@ defmodule PtcRunnerMcp.PromptRegistry do
       :mcp_agentic_catalog_section,
       :mcp_agentic_operator_suffix,
       :mcp_agentic_final_recap
+    ],
+    mcp_session_start_description: [
+      :mcp_session_authoring_card,
+      :mcp_session_start_detail
+    ],
+    mcp_session_eval_description: [
+      :mcp_session_authoring_card,
+      :mcp_session_eval_detail
     ]
   }
 
@@ -206,6 +268,14 @@ defmodule PtcRunnerMcp.PromptRegistry do
       Keyword.get_lazy(opts, :catalog_mode, fn -> CatalogConfig.get().catalog_mode end)
 
     render_profile(:mcp_agentic_task_prompt, &agentic_part(&1, opts, catalog, catalog_mode))
+  end
+
+  def render(:mcp_session_start_description, _opts) do
+    render_profile(:mcp_session_start_description, &static_part/1)
+  end
+
+  def render(:mcp_session_eval_description, _opts) do
+    render_profile(:mcp_session_eval_description, &static_part/1)
   end
 
   def render(key, _opts) when is_atom(key), do: render_card_or_nil(key)
@@ -267,6 +337,9 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp render_card(:mcp_aggregator_authoring_card), do: @aggregator_authoring_card
   defp render_card(:mcp_agentic_dialect_card), do: agentic_dialect_authoring_card()
   defp render_card(:mcp_agentic_final_recap), do: agentic_final_recap()
+  defp render_card(:mcp_session_authoring_card), do: @session_authoring_card
+  defp render_card(:mcp_session_start_detail), do: mcp_session_start_detail()
+  defp render_card(:mcp_session_eval_detail), do: mcp_session_eval_detail()
 
   defp render_card(key) do
     raise ArgumentError, "unknown MCP prompt card: #{inspect(key)}"
@@ -324,6 +397,14 @@ defmodule PtcRunnerMcp.PromptRegistry do
     Each invocation of `ptc_lisp_execute` is independent; there is no memory of prior calls.
     """
     |> String.trim()
+  end
+
+  defp mcp_session_start_detail do
+    "Creates a new empty stateful PTC-Lisp session."
+  end
+
+  defp mcp_session_eval_detail do
+    "Evaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
   end
 
   defp agentic_preamble(opts) do

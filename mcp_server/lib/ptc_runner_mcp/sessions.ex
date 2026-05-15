@@ -15,6 +15,7 @@ defmodule PtcRunnerMcp.Sessions do
     CatalogConfig,
     Envelope,
     Limits,
+    PromptRegistry,
     Tools,
     UpstreamCalls
   }
@@ -575,9 +576,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp session_start_tool do
     %{
       "name" => "ptc_session_start",
-      "description" =>
-        session_card() <>
-          "\n\nCreates a new empty stateful PTC-Lisp session.",
+      "description" => PromptRegistry.render(:mcp_session_start_description, []),
       "inputSchema" => %{
         "type" => "object",
         "properties" => %{
@@ -592,10 +591,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp session_eval_tool do
     %{
       "name" => "ptc_session_eval",
-      "description" =>
-        session_card() <>
-          "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not." <>
-          "\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`.",
+      "description" => PromptRegistry.render(:mcp_session_eval_description, []),
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id", "program"],
@@ -725,25 +721,5 @@ defmodule PtcRunnerMcp.Sessions do
       },
       overrides
     )
-  end
-
-  defp session_card do
-    case :code.priv_dir(:ptc_runner_mcp) do
-      dir when is_list(dir) ->
-        dir
-        |> Path.join("mcp_session_authoring_card.md")
-        |> File.read()
-        |> case do
-          {:ok, body} -> body
-          _ -> fallback_session_card()
-        end
-
-      _ ->
-        fallback_session_card()
-    end
-  end
-
-  defp fallback_session_card do
-    "PTC-Lisp sessions persist explicit `(def ...)` and `(defn ...)` bindings across eval calls. `println` output is captured; `*1`, `*2`, and `*3` reference the last three successful eval results."
   end
 end
