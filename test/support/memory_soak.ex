@@ -185,9 +185,9 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   end
 
   @doc """
-  Runs warmup iterations, returns a `:before` snapshot taken AFTER
-  warmup, runs measured iterations, returns the `:before` / `:after`
-  pair for use with the `assert_*` helpers.
+  Runs warmup iterations (dropped), then measured iterations,
+  returning a `{before, after}` snapshot pair for use with
+  `assert_flat!/4` and friends.
 
   Snapshotting after warmup is critical: parsers and analyzers
   typically intern atoms / build caches on first call, and we want
@@ -201,6 +201,58 @@ defmodule PtcRunner.TestSupport.MemorySoak do
     Enum.each(1..n, fn i -> fun.({:measured, i}) end)
     aft = snapshot()
     {before, aft}
+  end
+
+  @doc """
+  Like `measure/3`, but also captures a mid-snapshot after the **first**
+  measured iteration. Returns `{before, mid, after}`.
+
+  This lets `assert_atoms_per_iter_strict!/4` separate one-shot
+  startup interning (everything that happens during the first
+  measured iteration: lazy module loading, vocabulary interning,
+  first-time parser caches) from per-iteration interning across
+  iterations 2..N. The per-iter rate is computed over `N-1` iters
+  with the first-iter cost subtracted out — no fudgy `:fixed_budget`
+  needed.
+  """
+  def measure3(n, opts \\ [], fun) when is_function(fun, 1) and n >= 2 do
+    warmup = Keyword.get(opts, :warmup, warmup_count())
+    Enum.each(1..max(warmup, 1), fn i -> fun.({:warmup, i}) end)
+    before = snapshot()
+    fun.({:measured, 1})
+    mid = snapshot()
+    Enum.each(2..n, fn i -> fun.({:measured, i}) end)
+    aft = snapshot()
+    {before, mid, aft}
+  end
+
+  @doc """
+  Asserts the steady-state atom-growth rate (between `mid` and
+  `after`, divided by `n - 1`) is below `:max_per_iter`.
+
+  Unlike `assert_atoms_per_iter!/4`, this does not need a fudgy
+  fixed-budget knob — the first measured iteration's atom interning
+  is captured in `(mid - before)` and excluded from the rate. Any
+  remaining per-iter growth IS a real leak.
+  """
+  def assert_atoms_per_iter_strict!(before, mid, aft, n, opts \\ []) when n >= 2 do
+    max_per_iter = Keyword.get(opts, :max_per_iter, 0.1)
+    first_iter_cost = mid.atoms - before.atoms
+    steady_delta = aft.atoms - mid.atoms
+    rate = steady_delta / (n - 1)
+
+    if rate > max_per_iter do
+      raise ExUnit.AssertionError,
+        message:
+          "Atom growth rate #{Float.round(rate, 4)} atoms/iter exceeds budget " <>
+            "#{max_per_iter}/iter " <>
+            "(first_iter=#{first_iter_cost} atoms, " <>
+            "steady_delta=#{steady_delta} atoms over #{n - 1} iters). " <>
+            "This is a real per-iter atom leak — likely `String.to_atom/1` " <>
+            "on user-derived input."
+    end
+
+    :ok
   end
 
   @doc "Legacy: warmup then measured iterations, no snapshot. Prefer `measure/3`."
