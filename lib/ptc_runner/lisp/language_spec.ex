@@ -41,30 +41,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
       PtcRunner.Lisp.LanguageSpec.get(:reference) <> my_custom_addon
   """
 
-  alias PtcRunner.Prompts
-
-  # Compositions: predefined combinations of snippets
-  # Default compositions include the language reference.
-  # Use {:profile, behavior, reference: :none} to omit it for capable models.
-  @compositions %{
-    single_shot: [:reference, :behavior_single_shot],
-    explicit_return: [:reference, :behavior_multi_turn, :behavior_return_explicit],
-    explicit_journal: [
-      :reference,
-      :behavior_multi_turn,
-      :behavior_return_explicit,
-      :capability_journal
-    ]
-  }
-
-  # Snippet keys mapped to Prompts module functions
-  @snippets %{
-    reference: :reference,
-    behavior_single_shot: :behavior_single_shot,
-    behavior_multi_turn: :behavior_multi_turn,
-    behavior_return_explicit: :behavior_return_explicit,
-    capability_journal: :capability_journal
-  }
+  alias PtcRunner.Lisp.PromptRegistry
 
   # Parse metadata from file header
   defp parse_metadata(header) do
@@ -107,23 +84,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
 
   """
   @spec get(atom()) :: String.t() | nil
-  def get(key) when is_atom(key) do
-    case Map.get(@compositions, key) do
-      nil ->
-        # Direct snippet lookup
-        case Map.get(@snippets, key) do
-          nil -> nil
-          prompts_key -> apply(Prompts, prompts_key, [])
-        end
-
-      parts ->
-        # Compose from parts
-        parts
-        |> Enum.map(&get/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.join("\n\n")
-    end
-  end
+  def get(key) when is_atom(key), do: PromptRegistry.render(key)
 
   @doc """
   Get a prompt by key, raising if not found.
@@ -181,21 +142,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     reference = Keyword.get(opts, :reference, :full)
     journal? = Keyword.get(opts, :journal, false)
 
-    parts = if reference == :full, do: [:reference], else: []
-
-    parts =
-      parts ++
-        case behavior do
-          :single_shot -> [:behavior_single_shot]
-          :explicit_return -> [:behavior_multi_turn, :behavior_return_explicit]
-        end
-
-    parts = if journal?, do: parts ++ [:capability_journal], else: parts
-
-    parts
-    |> Enum.map(&get/1)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n\n")
+    PromptRegistry.render_structured(behavior, reference: reference, journal: journal?)
   end
 
   defp validate_profile!(behavior, opts) do
@@ -234,19 +181,11 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   """
   @spec version(atom()) :: pos_integer()
   def version(key) when is_atom(key) do
-    actual_key =
-      case Map.get(@compositions, key) do
-        [first | _] -> first
-        nil -> key
-      end
-
-    case Map.get(@snippets, actual_key) do
+    case PromptRegistry.prompt_header(key) do
       nil ->
         raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
 
-      prompts_key ->
-        header_fn = String.to_atom("#{prompts_key}_with_header")
-        {header, _content} = apply(Prompts, header_fn, [])
+      {header, _content} ->
         meta = parse_metadata(header)
         Map.get(meta, :version, 1)
     end
@@ -267,19 +206,11 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   """
   @spec metadata(atom()) :: map()
   def metadata(key) when is_atom(key) do
-    actual_key =
-      case Map.get(@compositions, key) do
-        [first | _] -> first
-        nil -> key
-      end
-
-    case Map.get(@snippets, actual_key) do
+    case PromptRegistry.prompt_header(key) do
       nil ->
         raise ArgumentError, "Unknown prompt: #{inspect(key)}. Available: #{inspect(list())}"
 
-      prompts_key ->
-        header_fn = String.to_atom("#{prompts_key}_with_header")
-        {header, _content} = apply(Prompts, header_fn, [])
+      {header, _content} ->
         parse_metadata(header)
     end
   end
@@ -298,9 +229,7 @@ defmodule PtcRunner.Lisp.LanguageSpec do
   """
   @spec list() :: [atom()]
   def list do
-    composition_keys = Map.keys(@compositions)
-    snippet_keys = Map.keys(@snippets)
-    Enum.uniq(composition_keys ++ snippet_keys)
+    PromptRegistry.prompt_keys()
   end
 
   @doc """
@@ -324,13 +253,13 @@ defmodule PtcRunner.Lisp.LanguageSpec do
     ]
 
     # Snippets that are not also compositions get auto-described from content
-    composition_keys = Map.keys(@compositions)
+    composition_keys = PromptRegistry.profile_keys()
 
     snippet_descriptions =
-      @snippets
-      |> Enum.reject(fn {key, _} -> key in composition_keys end)
-      |> Enum.map(fn {key, prompts_key} ->
-        content = apply(Prompts, prompts_key, [])
+      PromptRegistry.card_keys()
+      |> Enum.reject(fn key -> key in composition_keys end)
+      |> Enum.map(fn key ->
+        content = get(key)
 
         desc =
           content
