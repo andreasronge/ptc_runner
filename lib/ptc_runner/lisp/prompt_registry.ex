@@ -46,7 +46,7 @@ defmodule PtcRunner.Lisp.PromptRegistry do
     capability_journal:
       Map.merge(@common_card, %{
         id: :capability_journal,
-        dimensions: [:catalog_discovery],
+        dimensions: [:capability],
         placement: :capability_addon,
         prompt_fun: :capability_journal,
         surface: :subagent_content
