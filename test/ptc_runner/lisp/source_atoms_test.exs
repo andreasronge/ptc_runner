@@ -33,10 +33,11 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
     end
 
     test "does not create a new atom for unknown names" do
-      before = :erlang.system_info(:atom_count)
-      _ = SourceAtoms.intern("a_truly_novel_string_#{System.unique_integer()}")
-      aft = :erlang.system_info(:atom_count)
-      assert aft == before
+      name = "a_truly_novel_string_#{System.unique_integer([:positive])}"
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(name) end
+      assert SourceAtoms.intern(name) == name
+      assert_raise ArgumentError, fn -> String.to_existing_atom(name) end
     end
 
     test "covers core analyzer special forms" do
@@ -62,6 +63,16 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       assert SourceAtoms.intern("search-tools") == :"search-tools"
       assert SourceAtoms.intern("describe-tool") == :"describe-tool"
       assert SourceAtoms.intern("list-tools") == :"list-tools"
+    end
+
+    test "covers analyzer-dispatched source forms outside the core list" do
+      assert SourceAtoms.intern("task") == :task
+      assert SourceAtoms.intern("step-done") == :"step-done"
+      assert SourceAtoms.intern("task-reset") == :"task-reset"
+      assert SourceAtoms.intern("juxt") == :juxt
+      assert SourceAtoms.intern("pmap") == :pmap
+      assert SourceAtoms.intern("pcalls") == :pcalls
+      assert SourceAtoms.intern(".") == :.
     end
 
     test "covers short-fn param atoms" do
@@ -115,6 +126,13 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :doseq,
       :for,
       :comment,
+      :task,
+      :"step-done",
+      :"task-reset",
+      :juxt,
+      :pmap,
+      :pcalls,
+      :.,
       # destructuring + iteration modifiers
       :else,
       :keys,
@@ -140,13 +158,15 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :Instant,
       :"java.time.LocalDate",
       :"java.time.Instant",
+      :"java.util.Date.",
       # qualified analyzer keys
       :summary,
       :remaining,
       :"list-servers",
       :"list-tools",
       :"describe-tool",
-      :"search-tools"
+      :"search-tools",
+      :"re-pattern"
     ]
 
     test "every required atom literal is in the SourceAtoms table" do

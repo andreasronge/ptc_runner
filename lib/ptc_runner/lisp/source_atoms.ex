@@ -87,6 +87,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # closure-error hints. Audited 2026-05-15: no aspirational entries.
   @special_forms ~w(
     return fail
+    task step-done task-reset
     let fn def defn defonce
     if if-let if-not if-some
     when when-let when-not when-some when-first
@@ -96,6 +97,8 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     loop recur
     doseq for
     comment
+    juxt pmap pcalls
+    .
   )a
 
   # Keyword modifiers used by for/doseq and destructuring.
@@ -126,7 +129,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
     summary remaining list-servers list-tools describe-tool search-tools
-    step-done task-reset re-pattern
+    re-pattern
   )a
 
   # Symbol special names appearing in analyzer pattern matches that
