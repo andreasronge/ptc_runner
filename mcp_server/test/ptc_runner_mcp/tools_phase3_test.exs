@@ -24,7 +24,15 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
 
-  alias PtcRunnerMcp.{AggregatorConfig, CatalogConfig, CatalogDescription, ResponseProfile, Tools}
+  alias PtcRunnerMcp.{
+    AggregatorConfig,
+    CatalogConfig,
+    CatalogDescription,
+    PromptRegistry,
+    ResponseProfile,
+    Tools
+  }
+
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
@@ -58,6 +66,43 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   end
 
   describe ":mcp_aggregator description with frozen catalog (§12.5)" do
+    test "MCP prompt registry exposes aggregator description metadata" do
+      assert [
+               %{
+                 id: :mcp_aggregator_quick_contract,
+                 surface: :mcp_direct_ptc_lisp_execute,
+                 audience: :mcp_tool_description,
+                 profile: :mcp_aggregator,
+                 placement: :quick_contract,
+                 dynamic_boundary: :before_dynamic_catalog,
+                 trust: :authoritative
+               },
+               %{
+                 id: :mcp_aggregator_authoring_card,
+                 placement: :after_quick_contract,
+                 dynamic_boundary: :before_dynamic_catalog,
+                 trust: :authoritative
+               },
+               %{
+                 id: :mcp_dynamic_catalog,
+                 placement: :after_authoritative_cards,
+                 dynamic_boundary: :dynamic_catalog,
+                 trust: :untrusted_data
+               }
+             ] = PromptRegistry.profile_metadata(:mcp_aggregator_description)
+    end
+
+    test "MCP prompt registry preserves no-tools description contract" do
+      fixture_description = Jason.decode!(File.read!(@fixture_path))["description"]
+
+      assert PromptRegistry.render(:mcp_no_tools_description, []) == fixture_description
+
+      metadata = PromptRegistry.card_metadata(:mcp_no_tools_authoring_card)
+      assert metadata.profile == :mcp_no_tools
+      assert metadata.trust == :authoritative
+      assert metadata.dynamic_boundary == :static_card
+    end
+
     test "quick contract is complete in the first 2 KB before lazy catalog text" do
       catalog =
         CatalogDescription.render_for_entries(
