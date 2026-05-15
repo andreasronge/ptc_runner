@@ -64,6 +64,8 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
 
   use ExUnit.Case, async: false
 
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 2]
+
   alias PtcRunnerMcp.{Limits, Tools}
   alias PtcRunnerMcp.Upstream.{Connection, Registry, Stdio}
 
@@ -384,7 +386,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
     stdio_monitor = monitor_existing_stdio(@upstream_name)
 
     stop_existing_connection(@upstream_name)
-    kill_named_genserver(@registry_name)
+    stop_existing_registry(@registry_name, 5_000)
 
     wait_for_stdio_down(stdio_monitor)
   end
@@ -419,23 +421,6 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
           # terminate/2 -> Port.close + Stdio.Names release).
           Connection.stop(conn_pid)
       end
-    end
-  end
-
-  defp kill_named_genserver(name) do
-    case Process.whereis(name) do
-      nil ->
-        :ok
-
-      pid ->
-        ref = Process.monitor(pid)
-        Process.exit(pid, :kill)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _} -> :ok
-        after
-          5_000 -> :ok
-        end
     end
   end
 
