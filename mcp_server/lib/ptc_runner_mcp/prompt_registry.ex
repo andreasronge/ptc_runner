@@ -218,6 +218,42 @@ defmodule PtcRunnerMcp.PromptRegistry do
       prompt_fun: :mcp_session_eval_detail,
       surface: :mcp_session,
       trust: :authoritative
+    },
+    mcp_session_inspect_description: %{
+      id: :mcp_session_inspect_description,
+      audience: :mcp_tool_description,
+      budget_profile: :minimal,
+      dimensions: [:execution_surface],
+      dynamic_boundary: :static_card,
+      placement: :single_line_summary,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_inspect_description,
+      surface: :mcp_session,
+      trust: :authoritative
+    },
+    mcp_session_forget_description: %{
+      id: :mcp_session_forget_description,
+      audience: :mcp_tool_description,
+      budget_profile: :minimal,
+      dimensions: [:execution_surface],
+      dynamic_boundary: :static_card,
+      placement: :single_line_summary,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_forget_description,
+      surface: :mcp_session,
+      trust: :authoritative
+    },
+    mcp_session_close_description: %{
+      id: :mcp_session_close_description,
+      audience: :mcp_tool_description,
+      budget_profile: :minimal,
+      dimensions: [:execution_surface],
+      dynamic_boundary: :static_card,
+      placement: :single_line_summary,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_close_description,
+      surface: :mcp_session,
+      trust: :authoritative
     }
   }
 
@@ -340,6 +376,9 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp render_card(:mcp_session_authoring_card), do: @session_authoring_card
   defp render_card(:mcp_session_start_detail), do: mcp_session_start_detail()
   defp render_card(:mcp_session_eval_detail), do: mcp_session_eval_detail()
+  defp render_card(:mcp_session_inspect_description), do: mcp_session_inspect_description()
+  defp render_card(:mcp_session_forget_description), do: mcp_session_forget_description()
+  defp render_card(:mcp_session_close_description), do: mcp_session_close_description()
 
   defp render_card(key) do
     raise ArgumentError, "unknown MCP prompt card: #{inspect(key)}"
@@ -405,6 +444,18 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp mcp_session_eval_detail do
     "Evaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
+  end
+
+  defp mcp_session_inspect_description do
+    "Returns a compact orientation view of a PTC-Lisp session."
+  end
+
+  defp mcp_session_forget_description do
+    "Removes selected bindings or clears bounded session histories."
+  end
+
+  defp mcp_session_close_description do
+    "Closes a session and deletes its state."
   end
 
   defp agentic_preamble(opts) do

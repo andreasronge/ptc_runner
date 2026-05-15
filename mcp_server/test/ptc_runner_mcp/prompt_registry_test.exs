@@ -30,6 +30,7 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
 
   @budget_profiles MapSet.new([
                      :compact,
+                     :minimal,
                      :standard
                    ])
 
