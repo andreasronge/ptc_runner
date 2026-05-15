@@ -49,7 +49,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   require Logger
 
   alias PtcRunner.Lisp.LanguageSpec
-  alias PtcRunner.Prompts
+  alias PtcRunner.Lisp.PromptRegistry
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Exposure
   alias PtcRunner.SubAgent.Namespace
@@ -632,7 +632,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   def combined_mode_reference_card(%{output: :text, ptc_transport: :tool_call} = agent) do
     case agent.ptc_reference do
       :compact ->
-        static = Prompts.ptc_text_mode_compact_reference()
+        static = PromptRegistry.render(:ptc_text_mode_compact_reference)
         inventory = combined_mode_tool_inventory(agent)
 
         case inventory do
