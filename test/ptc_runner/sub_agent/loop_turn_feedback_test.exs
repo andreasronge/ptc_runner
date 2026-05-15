@@ -478,6 +478,25 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert result.feedback =~ "truncated"
     end
 
+    test "multibyte prints are not falsely truncated by byte length" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [feedback_max_chars: 250]
+        )
+
+      state = build_state()
+      lisp_step = build_lisp_step(prints: [String.duplicate("é", 200)])
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == false
+      assert result.feedback == String.duplicate("é", 200)
+      refute result.feedback =~ "truncated"
+    end
+
     test "feedback string excludes append_turn_info output" do
       # Multi-turn agent — format/3 would append "Turn 2 of 5 ..." style info.
       # execution_feedback/3 must NOT include any of that.

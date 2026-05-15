@@ -435,11 +435,13 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     end
   end
 
-  defp truncate_prints(str, max_chars) when byte_size(str) > max_chars do
-    {String.slice(str, 0, max_chars), true}
+  defp truncate_prints(str, max_chars) do
+    if String.length(str) > max_chars do
+      {String.slice(str, 0, max_chars), true}
+    else
+      {str, false}
+    end
   end
-
-  defp truncate_prints(str, _max_chars), do: {str, false}
 
   # Return only vars that are new or changed compared to previous turn
   defp changed_vars(prev_memory, current_memory) do
