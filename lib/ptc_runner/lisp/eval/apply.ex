@@ -352,7 +352,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   """
   @spec closure_to_fun(term(), EvalContext.t(), (term(), EvalContext.t() -> term())) :: term()
   def closure_to_fun(
-        {:closure, patterns, body, closure_env, closure_turn_history, metadata} = closure,
+        {:closure, patterns, body, closure_env, _closure_turn_history, metadata} = closure,
         %EvalContext{} = eval_context,
         do_eval_fn
       ) do
@@ -383,7 +383,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -397,7 +396,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -411,7 +409,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -425,7 +422,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -473,7 +469,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -487,7 +482,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               body,
               closure_env,
               eval_context,
-              closure_turn_history,
               metadata,
               do_eval_fn
             )
@@ -590,7 +584,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          body,
          closure_env,
          %EvalContext{} = eval_context,
-         _closure_turn_history,
          metadata,
          do_eval_fn
        ) do
