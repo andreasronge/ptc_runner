@@ -85,6 +85,19 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert eval["description"] =~ "validation_error"
   end
 
+  test "session utility descriptions are rendered from prompt registry" do
+    tools = Tools.list()["tools"]
+
+    assert tool_description(tools, "ptc_session_inspect") ==
+             PromptRegistry.render(:mcp_session_inspect_description, [])
+
+    assert tool_description(tools, "ptc_session_forget") ==
+             PromptRegistry.render(:mcp_session_forget_description, [])
+
+    assert tool_description(tools, "ptc_session_close") ==
+             PromptRegistry.render(:mcp_session_close_description, [])
+  end
+
   test "session start and eval descriptions preserve legacy assembly shape" do
     session_card =
       :ptc_runner_mcp
@@ -129,6 +142,24 @@ defmodule PtcRunnerMcp.SessionsTest do
                trust: :authoritative
              }
            ] = PromptRegistry.profile_metadata(:mcp_session_eval_description)
+  end
+
+  test "session utility prompt cards pin metadata" do
+    for key <- [
+          :mcp_session_inspect_description,
+          :mcp_session_forget_description,
+          :mcp_session_close_description
+        ] do
+      assert %{
+               audience: :mcp_tool_description,
+               budget_profile: :minimal,
+               dynamic_boundary: :static_card,
+               placement: :single_line_summary,
+               profile: :mcp_session,
+               surface: :mcp_session,
+               trust: :authoritative
+             } = PromptRegistry.card_metadata(key)
+    end
   end
 
   test "session eval persists explicit definitions and turn history" do
@@ -410,6 +441,12 @@ defmodule PtcRunnerMcp.SessionsTest do
 
   defp eval(session_id, program) do
     call!("ptc_session_eval", %{"session_id" => session_id, "program" => program})
+  end
+
+  defp tool_description(tools, name) do
+    tools
+    |> Enum.find(&(&1["name"] == name))
+    |> Map.fetch!("description")
   end
 
   defp call!(name, args) do

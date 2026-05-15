@@ -619,7 +619,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp session_inspect_tool do
     %{
       "name" => "ptc_session_inspect",
-      "description" => "Returns a compact orientation view of a PTC-Lisp session.",
+      "description" => PromptRegistry.render(:mcp_session_inspect_description, []),
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id"],
@@ -638,7 +638,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp session_forget_tool do
     %{
       "name" => "ptc_session_forget",
-      "description" => "Removes selected bindings or clears bounded session histories.",
+      "description" => PromptRegistry.render(:mcp_session_forget_description, []),
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id"],
@@ -661,7 +661,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp session_close_tool do
     %{
       "name" => "ptc_session_close",
-      "description" => "Closes a session and deletes its state.",
+      "description" => PromptRegistry.render(:mcp_session_close_description, []),
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id"],
