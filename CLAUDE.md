@@ -32,6 +32,7 @@ mix credo --strict              # Lint
 mix dialyzer                    # Type checking
 mix precommit                   # Fast quality gate (format + compile + credo + schema + spec + tests)
 mix prepush                     # Slower checks before pushing (dialyzer + unused-deps check)
+mix test --only soak            # Memory soak tests (see test/soak/README.md)
 ```
 
 Full quality check: `mix format --check-formatted && mix compile --warnings-as-errors && mix test`
