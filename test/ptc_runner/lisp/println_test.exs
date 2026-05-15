@@ -102,9 +102,8 @@ defmodule PtcRunner.Lisp.PrintlnTest do
 
     {:ok, step} = Lisp.run(source)
     [output] = step.prints
-    assert String.length(output) == 2003
-    assert String.ends_with?(output, "...")
     assert String.starts_with?(output, "xxx")
+    assert output =~ "... (2000/2500 chars)"
   end
 
   test "multiple long println calls each truncated independently" do
@@ -120,13 +119,11 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert length(step.prints) == 2
 
     [first, second] = step.prints
-    assert String.length(first) == 2003
     assert String.starts_with?(first, "aaa")
-    assert String.ends_with?(first, "...")
+    assert first =~ "... (2000/2100 chars)"
 
-    assert String.length(second) == 2003
     assert String.starts_with?(second, "bbb")
-    assert String.ends_with?(second, "...")
+    assert second =~ "... (2000/2100 chars)"
   end
 
   test "println respects configurable max_print_length option" do
@@ -139,9 +136,8 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     # Custom limit of 100 characters
     {:ok, step} = Lisp.run(source, max_print_length: 100)
     [output] = step.prints
-    assert String.length(output) == 103
-    assert String.ends_with?(output, "...")
     assert String.starts_with?(output, "yyy")
+    assert output =~ "... (100/200 chars)"
   end
 
   test "max_print_length propagates into defn calls" do
@@ -155,11 +151,8 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     # Custom limit of 100 characters should be respected inside defn
     {:ok, step} = Lisp.run(source, max_print_length: 100)
     [output] = step.prints
-
-    assert String.length(output) == 103,
-           "expected 103 (100 + '...'), got #{String.length(output)}"
-
-    assert String.ends_with?(output, "...")
+    assert String.starts_with?(output, "zzz")
+    assert output =~ "... (100/200 chars)"
   end
 
   test "max_print_length propagates into closure calls" do
@@ -172,11 +165,8 @@ defmodule PtcRunner.Lisp.PrintlnTest do
 
     {:ok, step} = Lisp.run(source, max_print_length: 100)
     [output] = step.prints
-
-    assert String.length(output) == 103,
-           "expected 103 (100 + '...'), got #{String.length(output)}"
-
-    assert String.ends_with?(output, "...")
+    assert String.starts_with?(output, "www")
+    assert output =~ "... (100/200 chars)"
   end
 
   describe "char list detection (take on string)" do

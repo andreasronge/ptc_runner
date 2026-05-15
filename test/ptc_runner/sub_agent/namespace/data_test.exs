@@ -60,7 +60,7 @@ defmodule PtcRunner.SubAgent.Namespace.DataTest do
       assert result =~ "data/items"
       assert result =~ "list[10]"
       # Should be truncated due to limit: 3
-      assert result =~ "[1 2 3 ...] (10 items, showing first 3)"
+      assert result =~ "[1 2 3 ...] (3/10)"
     end
 
     test "sorts entries alphabetically" do

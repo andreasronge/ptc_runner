@@ -109,7 +109,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
 
       assert result =~ "items"
       assert result =~ "list[5]"
-      assert result =~ "sample: [1 2 3 ...] (5 items, showing first 3)"
+      assert result =~ "sample: [1 2 3 ...] (3/5)"
     end
 
     test "renders value with map type" do
