@@ -11,7 +11,7 @@
 # subprocess (e.g. `@modelcontextprotocol/server-filesystem` via
 # `npx`). Excluded by default; opt in with
 # `MCP_REAL_UPSTREAM=1 mix test --include real_upstream`.
-ExUnit.start(exclude: [:integration, :real_upstream, :real_remote_upstream])
+ExUnit.start(exclude: [:integration, :real_upstream, :real_remote_upstream, :soak])
 
 # Default tests to a quiet logger; individual tests that exercise
 # stderr emission can `PtcRunnerMcp.Log.set_level/1` themselves.
