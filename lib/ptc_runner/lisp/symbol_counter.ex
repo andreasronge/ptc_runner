@@ -9,6 +9,8 @@ defmodule PtcRunner.Lisp.SymbolCounter do
   from the count since they're predefined and don't contribute to atom exhaustion.
   """
 
+  alias PtcRunner.Lisp.SourceAtoms
+
   # Core language symbols that don't count toward the limit.
   # These are already atoms in the BEAM and won't exhaust the atom table.
   @core_symbols MapSet.new([
@@ -79,25 +81,25 @@ defmodule PtcRunner.Lisp.SymbolCounter do
 
   # Recursively collect unique non-core symbols and keywords from AST
 
-  defp collect_symbols({:symbol, name}, acc) when is_atom(name) do
-    if MapSet.member?(@core_symbols, name) do
+  defp collect_symbols({:symbol, name}, acc) when is_atom(name) or is_binary(name) do
+    if core_symbol?(name) do
       acc
     else
       MapSet.put(acc, name)
     end
   end
 
-  defp collect_symbols({:keyword, name}, acc) when is_atom(name) do
-    if MapSet.member?(@core_symbols, name) do
+  defp collect_symbols({:keyword, name}, acc) when is_atom(name) or is_binary(name) do
+    if core_symbol?(name) do
       acc
     else
       MapSet.put(acc, name)
     end
   end
 
-  defp collect_symbols({:ns_symbol, _ns, key}, acc) when is_atom(key) do
+  defp collect_symbols({:ns_symbol, _ns, key}, acc) when is_atom(key) or is_binary(key) do
     # Namespaced symbols like tool/foo or data/foo - count the key part
-    if MapSet.member?(@core_symbols, key) do
+    if core_symbol?(key) do
       acc
     else
       MapSet.put(acc, key)
@@ -147,4 +149,15 @@ defmodule PtcRunner.Lisp.SymbolCounter do
   defp collect_symbols(b, acc) when is_boolean(b), do: acc
   defp collect_symbols(nil, acc), do: acc
   defp collect_symbols(a, acc) when a in [:infinity, :negative_infinity, :nan], do: acc
+
+  # Core-symbol set is atom-keyed; accept binary names too by comparing
+  # against the atom form when one exists in the bounded vocabulary.
+  defp core_symbol?(name) when is_atom(name), do: MapSet.member?(@core_symbols, name)
+
+  defp core_symbol?(name) when is_binary(name) do
+    case Map.get(SourceAtoms.table(), name) do
+      nil -> false
+      atom -> MapSet.member?(@core_symbols, atom)
+    end
+  end
 end
