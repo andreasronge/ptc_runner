@@ -13,6 +13,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.PromptRegistry
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.SystemPrompt
 
@@ -50,6 +51,24 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
 
       assert static =~ @card_section_open
       assert static =~ @card_def_form
+    end
+
+    test "compact card is sourced from the internal prompt registry" do
+      agent =
+        SubAgent.new(
+          prompt: "do work",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      assert SystemPrompt.combined_mode_reference_card(agent) ==
+               PromptRegistry.render(:ptc_text_mode_compact_reference)
+
+      metadata = PromptRegistry.card_metadata(:ptc_text_mode_compact_reference)
+      assert metadata.surface == :combined_text_ptc
+      assert metadata.audience == :combined_text_ptc_system_prompt
+      assert metadata.dynamic_boundary == :before_dynamic_tool_inventory
+      assert metadata.placement == :combined_ptc_reference
     end
 
     test ":both-exposed tools are listed in the PTC tool inventory" do
@@ -133,6 +152,22 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
       assert prompt =~ @card_def_form
       # No tools to list — the dynamic inventory section is omitted
       refute prompt =~ "<ptc_tools>"
+    end
+
+    test "compact card does not include MCP aggregator-only mcp-call semantics" do
+      agent =
+        SubAgent.new(
+          prompt: "do work",
+          output: :text,
+          ptc_transport: :tool_call
+        )
+
+      prompt = SystemPrompt.generate(agent)
+
+      refute prompt =~ "tool/mcp-call"
+      refute prompt =~ ":json-null"
+      refute prompt =~ "World-fault"
+      refute prompt =~ "upstream_calls"
     end
   end
 
