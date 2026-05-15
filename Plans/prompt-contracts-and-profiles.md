@@ -335,10 +335,8 @@ Implementation status as of 2026-05-15:
   `ptc_runner` registry while preserving dynamic tool inventory
   rendering.
 - Phase 3 introduced `PtcRunnerMcp.PromptRegistry` and now routes
-  direct no-tools, direct aggregator, agentic `ptc_task`, and
-  start/eval session descriptions through MCP-owned contracts. The
-  remaining session inspect/forget/close descriptions are still simple
-  one-line tool summaries.
+  direct no-tools, direct aggregator, agentic `ptc_task`, and all
+  session tool descriptions through MCP-owned contracts.
 
 ### Phase 0: Inventory and Invariants
 
