@@ -616,7 +616,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       result = TurnFeedback.execution_feedback(agent, state, lisp_step)
 
       assert result.truncated == true
-      assert result.result =~ "... (truncated, use println on specific fields)"
+      assert result.result =~ "truncated at 10 chars; use println on specific fields"
       # Sanity: this case isn't being detected via prints/memory channels.
       assert result.memory.truncated == false
     end
@@ -639,6 +639,87 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert result.memory.truncated == false
       assert result.result =~ "user=> 42"
       refute result.result =~ "truncated"
+    end
+
+    test "outer cap hint shows the actual budget value" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 15]
+        )
+
+      state = build_state()
+      big_list = Enum.to_list(1..200)
+      lisp_step = build_lisp_step(return: big_list)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == true
+      assert result.result =~ "truncated at 15 chars"
+    end
+
+    test "inner Format.to_clojure hints survive when outer cap does not cut" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 500]
+        )
+
+      state = build_state()
+      # A list that Format.to_clojure truncates at limit:50 but fits in 500 chars
+      long_list = Enum.to_list(1..100)
+      lisp_step = build_lisp_step(return: long_list)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      # Inner hint from Format.to_clojure should survive (compact shown/total)
+      assert result.result =~ "(50/100)"
+      # Outer cap hint should NOT appear since the formatted string fits
+      refute result.result =~ "truncated at"
+    end
+
+    test "outer cap replaces inner hint when it must cut" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 20]
+        )
+
+      state = build_state()
+      long_list = Enum.to_list(1..100)
+      lisp_step = build_lisp_step(return: long_list)
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.truncated == true
+      # Outer cap hint should appear with the actual budget
+      assert result.result =~ "truncated at 20 chars"
+    end
+
+    test "memory truncation hint shows the actual budget" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [preview_max_chars: 15]
+        )
+
+      state = build_state()
+      big_list = Enum.to_list(1..200)
+
+      lisp_step = build_lisp_step(return: nil, memory: %{huge: big_list})
+
+      result = TurnFeedback.execution_feedback(agent, state, lisp_step)
+
+      assert result.memory.truncated == true
+      assert result.feedback =~ "truncated at 15 chars"
     end
 
     test "stored_keys is empty list when memory is empty" do

@@ -99,7 +99,7 @@ defmodule PtcRunner.Lisp.Format do
   ## Options
 
   - `:limit` - Maximum items to show in collections (default: :infinity)
-  - `:printable_limit` - Maximum string bytes to show (default: :infinity)
+  - `:printable_limit` - Maximum string chars to show (default: :infinity)
 
   ## Examples
 
@@ -131,10 +131,10 @@ defmodule PtcRunner.Lisp.Format do
       {"[{:a 1} {:b 2}]", false}
 
       iex> PtcRunner.Lisp.Format.to_clojure([1, 2, 3, 4, 5], limit: 2)
-      {"[1 2 ...] (5 items, showing first 2)", true}
+      {"[1 2 ...] (2/5)", true}
 
       iex> PtcRunner.Lisp.Format.to_clojure("very long string here", printable_limit: 10)
-      {~s("very long ..."), true}
+      {~s("very long ...") <> " (10/21 chars)", true}
 
       iex> {str, _} = PtcRunner.Lisp.Format.to_clojure(%{title: "Hello", _body: "secret"})
       iex> str
@@ -191,8 +191,9 @@ defmodule PtcRunner.Lisp.Format do
     formatted = Enum.join(formatted_items, " ")
 
     if set_truncated do
+      shown = length(to_show)
       total = MapSet.size(set)
-      {"\#{#{formatted} ...} (#{total} items, showing first #{limit})", true}
+      {"\#{#{formatted} ...} (#{shown}/#{total})", true}
     else
       {"\#{#{formatted}}", any_child_truncated}
     end
@@ -232,8 +233,9 @@ defmodule PtcRunner.Lisp.Format do
     formatted = Enum.join(formatted_items, " ")
 
     if list_truncated do
+      shown = length(items)
       total = length(list)
-      {"[#{formatted} ...] (#{total} items, showing first #{limit})", true}
+      {"[#{formatted} ...] (#{shown}/#{total})", true}
     else
       {"[#{formatted}]", any_child_truncated}
     end
@@ -299,7 +301,9 @@ defmodule PtcRunner.Lisp.Format do
     formatted = Enum.join(formatted_items, " ")
 
     if map_truncated do
-      {"{#{formatted} ...}", true}
+      shown = length(items)
+      total = length(entries)
+      {"{#{formatted} ...} (#{shown}/#{total})", true}
     else
       {"{#{formatted}}", any_child_truncated}
     end
@@ -333,11 +337,14 @@ defmodule PtcRunner.Lisp.Format do
       :infinity ->
         {inspect(s), false}
 
-      n when byte_size(s) > n ->
-        {inspect(String.slice(s, 0, n) <> "..."), true}
+      n when is_integer(n) ->
+        total = String.length(s)
 
-      _ ->
-        {inspect(s), false}
+        if total > n do
+          {inspect(String.slice(s, 0, n) <> "...") <> " (#{n}/#{total} chars)", true}
+        else
+          {inspect(s), false}
+        end
     end
   end
 
