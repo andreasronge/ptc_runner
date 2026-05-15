@@ -24,7 +24,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
 
-  alias PtcRunnerMcp.{AggregatorConfig, CatalogDescription, Tools}
+  alias PtcRunnerMcp.{AggregatorConfig, CatalogConfig, CatalogDescription, ResponseProfile, Tools}
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
@@ -40,9 +40,11 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       stop_existing_registry(@registry_name)
       Catalog.clear_frozen()
       AggregatorConfig.set(AggregatorConfig.defaults())
+      CatalogConfig.set(CatalogConfig.defaults())
     end)
 
     AggregatorConfig.set(AggregatorConfig.defaults())
+    CatalogConfig.set(CatalogConfig.defaults())
     :ok
   end
 
@@ -72,20 +74,30 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       description = Tools.advertised_description(:mcp_aggregator, catalog: catalog)
       first_2kb = first_bytes(description, 2 * 1024)
 
-      for marker <- [
-            "(tool/mcp-call",
-            "nil",
-            ":json-null",
-            "mcp/text",
-            "mcp/json",
-            "catalog/",
-            "compact"
-          ] do
-        assert first_2kb =~ marker
-      end
+      assert_quick_contract_in_first_chunk(first_2kb)
 
       assert_before(description, "Quick aggregator contract:", "# PTC-Lisp authoring")
       assert_before(description, "Quick aggregator contract:", "Configured upstream MCP servers:")
+    end
+
+    test "tool_entry/0 slim response profile preserves quick contract in first 2 KB" do
+      {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
+      :ok = UpstreamRegistry.put_fake("alpha", fake_tools_config(), @registry_name)
+      old_profile = ResponseProfile.current()
+      on_exit(fn -> ResponseProfile.set(old_profile) end)
+
+      :ok = ResponseProfile.set(:slim)
+      :ok = CatalogConfig.set(%{catalog_mode: :lazy})
+
+      snapshot = Catalog.snapshot(@registry_name)
+      :ok = Catalog.freeze(Catalog.render(@registry_name))
+      :ok = Catalog.freeze_snapshot(snapshot)
+
+      description = Tools.tool_entry()["description"]
+      first_2kb = first_bytes(description, 2 * 1024)
+
+      assert_quick_contract_in_first_chunk(first_2kb)
+      assert description =~ "Response profile: slim."
     end
 
     test "includes the frozen catalog block as a trailing paragraph" do
@@ -266,6 +278,21 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   defp first_bytes(text, max_bytes) do
     binary_part(text, 0, min(byte_size(text), max_bytes))
+  end
+
+  defp assert_quick_contract_in_first_chunk(text) do
+    for marker <- [
+          "(tool/mcp-call",
+          "World-fault failures",
+          "return `nil`",
+          ":json-null",
+          "mcp/text",
+          "mcp/json",
+          "catalog/",
+          "compact"
+        ] do
+      assert text =~ marker
+    end
   end
 
   defp assert_before(text, earlier, later) do
