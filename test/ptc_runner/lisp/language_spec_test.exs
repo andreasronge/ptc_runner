@@ -141,6 +141,13 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
              ] = PromptRegistry.profile_metadata(:explicit_return)
     end
 
+    test "journal capability metadata does not claim catalog discovery" do
+      metadata = PromptRegistry.card_metadata(:capability_journal)
+
+      assert metadata.dimensions == [:capability]
+      refute :catalog_discovery in metadata.dimensions
+    end
+
     test "registry renderer stays behind existing LanguageSpec behavior" do
       assert PromptRegistry.render(:single_shot) == LanguageSpec.get(:single_shot)
       assert PromptRegistry.render(:explicit_return) == LanguageSpec.get(:explicit_return)
