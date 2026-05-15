@@ -59,7 +59,6 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistoryTest do
       # Should show truncation indicator from Format.to_clojure
       assert result =~ ";   analyze"
       assert result =~ "..."
-      assert result =~ "10 items"
     end
 
     test "ignores extra fields in tool call maps" do

@@ -233,7 +233,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
     prints_with_hint =
       if prints_truncated? do
-        prints_output <> "\n... (truncated, print specific fields instead)"
+        prints_output <> "\n... (truncated at #{max_chars} chars; print specific fields instead)"
       else
         prints_output
       end
@@ -349,13 +349,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   defp format_result_preview_unconditional(lisp_step, preview_max) do
     if lisp_step.return != nil and not var?(lisp_step.return) do
       {text, was_truncated?} = truncate_value(lisp_step.return, preview_max)
-
-      hint =
-        if was_truncated?,
-          do: "\n... (truncated, use println on specific fields)",
-          else: ""
-
-      {"user=> #{text}#{hint}", was_truncated?}
+      {"user=> #{text}", was_truncated?}
     else
       {nil, false}
     end
@@ -397,7 +391,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
 
         hint =
           if any_truncated?,
-            do: "\n;; (truncated, use println on specific fields)",
+            do: "\n;; (truncated at #{preview_max} chars; use println on specific fields)",
             else: ""
 
         stored_hint_text = Enum.join(lines, "\n") <> hint
@@ -455,12 +449,14 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   end
 
   # Format a value as Clojure EDN and truncate for preview.
-  # Returns {text, was_truncated?}.
+  # Preserves inner Format.to_clojure hints when the outer cap does not cut;
+  # replaces with an outer cap hint when it does.
   defp truncate_value(value, max_len) do
     {str, format_truncated?} = Format.to_clojure(value, limit: 50)
 
     if String.length(str) > max_len do
-      {String.slice(str, 0, max_len) <> " ...", true}
+      {String.slice(str, 0, max_len) <>
+         " ... (truncated at #{max_len} chars; use println on specific fields)", true}
     else
       {str, format_truncated?}
     end

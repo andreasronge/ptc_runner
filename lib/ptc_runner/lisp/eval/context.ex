@@ -234,9 +234,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
   @spec append_print(t(), String.t()) :: t()
   def append_print(%__MODULE__{prints: prints, max_print_length: max_len} = context, message) do
+    total = String.length(message)
+
     truncated =
-      if String.length(message) > max_len do
-        String.slice(message, 0, max_len) <> "..."
+      if total > max_len do
+        String.slice(message, 0, max_len) <> "... (#{max_len}/#{total} chars)"
       else
         message
       end

@@ -211,7 +211,7 @@ defmodule PtcRunner.Lisp.FormatTest do
       assert result =~ ":a"
       assert result =~ ":b"
       assert result =~ ":c"
-      refute result =~ "entries, showing"
+      refute result =~ "..."
     end
   end
 
@@ -282,6 +282,59 @@ defmodule PtcRunner.Lisp.FormatTest do
       assert result =~ "\"id\" 1"
       refute result =~ "_secret"
       refute result =~ "hidden"
+    end
+  end
+
+  describe "to_clojure/2 compact (shown/total) hints" do
+    test "lists use compact hint format" do
+      {result, true} = Format.to_clojure([1, 2, 3, 4, 5], limit: 2)
+      assert result == "[1 2 ...] (2/5)"
+    end
+
+    test "sets use compact hint format" do
+      set = MapSet.new([1, 2, 3, 4, 5])
+      {result, true} = Format.to_clojure(set, limit: 2)
+      assert result =~ "...} (2/5)"
+    end
+
+    test "maps use compact hint format with count after hidden filtering" do
+      map = %{a: 1, b: 2, c: 3, d: 4, e: 5}
+      {result, true} = Format.to_clojure(map, limit: 2)
+      assert result =~ "...} (2/5)"
+    end
+
+    test "map total excludes hidden fields" do
+      map = %{a: 1, b: 2, _secret: "hidden", _token: "also-hidden"}
+      {result, true} = Format.to_clojure(map, limit: 1)
+      assert result =~ "(1/2)"
+      refute result =~ "_secret"
+      refute result =~ "_token"
+    end
+  end
+
+  describe "to_clojure/2 string truncation hints" do
+    test "shows char-based hint when truncated" do
+      {result, true} = Format.to_clojure("hello world", printable_limit: 5)
+      assert result =~ "(5/11 chars)"
+    end
+
+    test "no hint when string fits within limit" do
+      {result, false} = Format.to_clojure("short", printable_limit: 100)
+      assert result == ~s("short")
+      refute result =~ "chars"
+    end
+
+    test "uses String.length not byte_size for guard" do
+      # Multi-byte chars: "héllo" is 5 chars but 6 bytes
+      {result, false} = Format.to_clojure("héllo", printable_limit: 5)
+      assert result == ~s("héllo")
+      refute result =~ "chars"
+    end
+
+    test "truncates multi-byte string correctly by chars" do
+      # "aaaa héllo" is 10 chars; limit to 5 should truncate
+      {result, true} = Format.to_clojure("aaaa héllo", printable_limit: 5)
+      assert result =~ "(5/10 chars)"
     end
   end
 
