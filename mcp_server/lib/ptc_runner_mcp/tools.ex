@@ -76,15 +76,6 @@ defmodule PtcRunnerMcp.Tools do
   @external_resource @aggregator_priv_path
   @aggregator_authoring_card File.read!(@aggregator_priv_path)
 
-  # Aggregator-mode capability statement. Adapted from the v1
-  # `:mcp_no_tools` description so the aggregator advertisement stays
-  # consistent in tone but accurately reflects the new capability:
-  # "this server can call configured upstream MCP tools from inside
-  # the sandbox." Per §8.1 the description is one constant + the
-  # authoring card; per §11.1 the catalog injection seam (Phase 3)
-  # is the `opts` keyword.
-  @mcp_aggregator_description ~s|Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, and orchestration over configured upstream MCP servers. Call upstream tools as `(tool/mcp-call {:server "<name>" :tool "<tool>" :args {...}})` from inside the program. World-fault failures (timeout, oversize, upstream error, cap, unavailable) return `nil` and are recorded in `upstream_calls` on the response envelope. Each invocation of `ptc_lisp_execute` is independent — there is no memory of prior calls.|
-
   # § 10.4 outputSchema. `oneOf` discriminated by `status`.
   # `result` is intentionally NOT in the success branch's `required`
   # list — `render_success/2` elides it for programs whose final
@@ -292,7 +283,7 @@ defmodule PtcRunnerMcp.Tools do
   def advertised_description(:mcp_aggregator, opts) do
     catalog = Keyword.get(opts, :catalog)
 
-    base = @mcp_aggregator_description <> "\n\n" <> aggregator_authoring_card()
+    base = mcp_aggregator_description() <> "\n\n" <> aggregator_authoring_card()
 
     case catalog do
       nil -> base
@@ -320,6 +311,28 @@ defmodule PtcRunnerMcp.Tools do
   """
   @spec aggregator_authoring_card() :: String.t()
   def aggregator_authoring_card, do: @aggregator_authoring_card
+
+  # Aggregator-mode capability statement. Adapted from the v1
+  # `:mcp_no_tools` description so the aggregator advertisement stays
+  # consistent in tone but accurately reflects the new capability.
+  # The full authoring card and optional catalog are appended after
+  # this first-call quick contract.
+  defp mcp_aggregator_description do
+    """
+    Execute a PTC-Lisp program in PtcRunner's sandbox for deterministic computation, filtering, aggregation, and orchestration over configured upstream MCP servers.
+
+    Quick aggregator contract:
+    - Call upstream tools inside the program as `(tool/mcp-call {:server "<name>" :tool "<tool>" :args {...}})`.
+    - World-fault failures such as timeout, oversize, upstream error, cap exhaustion, or unavailable upstream return `nil` and are recorded in `upstream_calls`.
+    - A successful top-level JSON `null` returns `:json-null`, not `nil`.
+    - Unwrap upstream MCP envelopes with `(mcp/text r)` for text and `(mcp/json r)` for structured JSON.
+    - Use `catalog/search-tools`, `catalog/list-tools`, or `catalog/describe-tool` when catalog details are not inline or a schema is unfamiliar.
+    - Return compact maps, vectors, or strings; do not return full upstream envelopes unless the caller asked for them.
+
+    Each invocation of `ptc_lisp_execute` is independent; there is no memory of prior calls.
+    """
+    |> String.trim()
+  end
 
   @doc """
   Backward-compatible alias for `advertised_description(:mcp_no_tools, [])`.
