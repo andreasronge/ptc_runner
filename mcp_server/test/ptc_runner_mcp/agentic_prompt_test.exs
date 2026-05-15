@@ -2,6 +2,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
   use ExUnit.Case, async: false
 
   alias PtcRunnerMcp.Agentic.Prompt
+  alias PtcRunnerMcp.Tools
   alias PtcRunnerMcp.Upstream.Catalog
 
   setup do
@@ -57,6 +58,21 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     refute prompt =~ ":tag"
     refute prompt =~ "returns `nil`"
     refute prompt =~ "tool/mcp-call returns nil"
+  end
+
+  test "direct aggregator and agentic planner keep distinct mcp-call failure contracts" do
+    direct = Tools.advertised_description(:mcp_aggregator, catalog: nil)
+    agentic = Prompt.system_prompt(catalog: "docs:\n  search()")
+
+    assert direct =~ "return `nil`"
+    assert direct =~ ":json-null"
+    refute direct =~ "tagged map"
+    refute direct =~ "inspect `:ok`"
+
+    assert agentic =~ "returns a tagged map"
+    assert agentic =~ "inspect `:ok`"
+    refute agentic =~ "return `nil`"
+    refute agentic =~ ":json-null"
   end
 
   test "prompt includes unknown-content guidance only when catalog has unknown outputs" do

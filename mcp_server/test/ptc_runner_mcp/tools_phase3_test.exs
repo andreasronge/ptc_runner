@@ -24,7 +24,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
 
-  alias PtcRunnerMcp.{AggregatorConfig, Tools}
+  alias PtcRunnerMcp.{AggregatorConfig, CatalogDescription, Tools}
   alias PtcRunnerMcp.Upstream.Catalog
   alias PtcRunnerMcp.Upstream.Connection
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
@@ -56,6 +56,38 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   end
 
   describe ":mcp_aggregator description with frozen catalog (§12.5)" do
+    test "quick contract is complete in the first 2 KB before lazy catalog text" do
+      catalog =
+        CatalogDescription.render_for_entries(
+          [
+            %{
+              name: "alpha",
+              tools: [%{name: "search", description: "Search indexed records."}],
+              metadata: %{description: "Example upstream"}
+            }
+          ],
+          %{PtcRunnerMcp.CatalogConfig.defaults() | catalog_mode: :lazy}
+        )
+
+      description = Tools.advertised_description(:mcp_aggregator, catalog: catalog)
+      first_2kb = first_bytes(description, 2 * 1024)
+
+      for marker <- [
+            "(tool/mcp-call",
+            "nil",
+            ":json-null",
+            "mcp/text",
+            "mcp/json",
+            "catalog/",
+            "compact"
+          ] do
+        assert first_2kb =~ marker
+      end
+
+      assert_before(description, "Quick aggregator contract:", "# PTC-Lisp authoring")
+      assert_before(description, "Quick aggregator contract:", "Configured upstream MCP servers:")
+    end
+
     test "includes the frozen catalog block as a trailing paragraph" do
       {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
       :ok = UpstreamRegistry.put_fake("alpha", fake_tools_config(), @registry_name)
@@ -230,6 +262,16 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
            }, fn _, _ -> {:ok, "pong"} end}
       }
     }
+  end
+
+  defp first_bytes(text, max_bytes) do
+    binary_part(text, 0, min(byte_size(text), max_bytes))
+  end
+
+  defp assert_before(text, earlier, later) do
+    assert {earlier_index, _} = :binary.match(text, earlier)
+    assert {later_index, _} = :binary.match(text, later)
+    assert earlier_index < later_index
   end
 
   defp wait_until_not_started(pid, timeout_ms) do
