@@ -50,6 +50,16 @@ defmodule PtcRunner.Lisp.PromptRegistry do
         placement: :capability_addon,
         prompt_fun: :capability_journal,
         surface: :subagent_content
+      }),
+    ptc_text_mode_compact_reference:
+      Map.merge(@common_card, %{
+        audience: :combined_text_ptc_system_prompt,
+        id: :ptc_text_mode_compact_reference,
+        dimensions: [:dialect, :execution_surface, :completion_contract],
+        dynamic_boundary: :before_dynamic_tool_inventory,
+        placement: :combined_ptc_reference,
+        prompt_fun: :ptc_text_mode_compact_reference,
+        surface: :combined_text_ptc
       })
   }
 
