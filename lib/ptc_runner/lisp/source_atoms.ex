@@ -1,29 +1,37 @@
 defmodule PtcRunner.Lisp.SourceAtoms do
   @moduledoc """
-  Bounded vocabulary of atoms the parser is allowed to produce from
-  source text.
+  Bounded vocabulary — the set of names the parser is allowed to
+  intern as atoms.
 
-  Why this exists: `String.to_atom/1` on parser input is an
-  unbounded-atom leak (issue #953). Using `String.to_existing_atom/1`
-  instead "works" but is a footgun — it consults the *global VM atom
-  table*, so the same source can parse differently depending on which
-  other modules happen to be loaded.
+  More precisely: this is the set of source-text names the
+  analyzer/evaluator currently pattern-matches as atom literals.
+  Builtin function names + special forms + bounded namespaces +
+  destructuring modifiers + qualified analyzer keys + short-fn
+  param atoms. Everything else stays as a binary in the AST so the
+  global atom table never grows from user input (issue #953).
 
-  This module is the explicit allowlist. Names in the table become
-  atoms (so the analyzer's atom-literal dispatch keeps working).
-  Names NOT in the table stay as binaries (no permanent atom is created).
+  Why an explicit allowlist instead of `String.to_existing_atom/1`:
+  the global VM atom table is non-deterministic — unrelated modules
+  loading later can change how the same source parses. Codex's
+  pushback on the bug thread covers this in detail.
 
   ## What's in the table
 
     1. Every key of `PtcRunner.Lisp.Env.initial/0` — all builtin
        functions (`map`, `filter`, `+`, `str`, etc.).
     2. Analyzer special forms — `let`, `fn`, `def`, `if`, `case`, etc.
+       Only forms that the analyzer currently dispatches on. No
+       aspirational Clojure entries.
     3. Bounded keyword modifiers used by `for`/`doseq`/destructuring —
-       `:else`, `:keys`, `:as`, etc.
+       `:else`, `:keys`, `:as`, `:or`, etc.
     4. Bounded namespaces — `data`, `tool`, `catalog`, `budget`,
-       `json`, `mcp`, plus Clojure aliases like `clojure.string`.
-    5. Symbol special names — operator-like atoms that appear in
-       analyzer pattern matches.
+       `json`, `mcp`, plus Clojure aliases (`clojure.string`),
+       and fully-qualified Java namespaces from `Env.clojure_namespaces`
+       (`java.time.LocalDate`, etc.).
+    5. Qualified analyzer keys — `search-tools`, `describe-tool`,
+       etc. matched as atom literals in `dispatch_list_form` clauses.
+    6. Short-fn param atoms `:p1`..`:p20` synthesized by the
+       short-fn analyzer.
 
   ## What's NOT in the table
 
@@ -74,44 +82,51 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # ============================================================
 
   # Special forms that the analyzer dispatches via atom-literal
-  # pattern match. Keep in sync with eval/helpers.ex @special_forms
-  # and analyzer dispatch_list_form clauses.
+  # pattern match. Sourced from `eval/helpers.ex @special_forms` plus
+  # forms the analyzer uses but `eval/helpers.ex` doesn't list as
+  # closure-error hints. Audited 2026-05-15: no aspirational entries.
   @special_forms ~w(
     return fail
-    let fn def defn defonce defmacro
-    if when when-let when-some when-first if-let if-some
+    let fn def defn defonce
+    if if-let if-not if-some
+    when when-let when-not when-some when-first
     cond case condp do
     and or not
     -> ->> as-> cond-> cond->> some-> some->>
     loop recur
-    try catch throw finally
-    doseq for while dotimes
+    doseq for
     comment
   )a
 
   # Keyword modifiers used by for/doseq and destructuring.
+  # `:while` is a for/doseq modifier. `:keys`/`:strs`/`:or`/`:as` are
+  # destructuring forms. `:else` is the cond/case fallthrough key.
   @keyword_modifiers ~w(
     when let while else
-    keys strs syms as default or
+    keys strs as or
   )a
 
   # Bounded namespace prefixes used in `ns/key` syntax. The analyzer
   # pattern-matches these as atom literals in `{:ns_symbol, ns, _}`.
+  # Fully-qualified Java namespaces are included verbatim because
+  # `parse_namespaced_symbol` doesn't split them — `java.time.LocalDate`
+  # is one atom, not `java.time` + `LocalDate`.
   @bounded_namespaces ~w(
     data tool catalog budget json mcp
     str string set regex
-    Math Interop System
+    Math Interop System Double
     LocalDate Instant
+    java.time.LocalDate java.time.Instant java.util.Date.
     clojure.core clojure.string clojure.set
     core
   )a
 
-  # Common qualified keys analyzer dispatches on (e.g. `(catalog/summary)`,
-  # `(budget/remaining)`). The atom_str-suffix-split path in analyze.ex's
-  # @qualified_namespace_tables auto-intern these from Env.initial, but
-  # short-form analyzer clauses also use atom literals like :"list-tools".
+  # Qualified analyzer keys — atom literals after `ns/` in dispatch
+  # clauses (e.g. `(catalog/list-tools)`, `(catalog/search-tools)`).
+  # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
-    summary remaining list-servers list-tools describe-tool
+    summary remaining list-servers list-tools describe-tool search-tools
+    step-done task-reset re-pattern
   )a
 
   # Symbol special names appearing in analyzer pattern matches that
