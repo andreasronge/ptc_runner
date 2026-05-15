@@ -44,12 +44,14 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
   @profiles MapSet.new([
               :mcp_aggregator,
               :mcp_agentic_task,
-              :mcp_no_tools
+              :mcp_no_tools,
+              :mcp_session
             ])
 
   @surfaces MapSet.new([
               :mcp_agentic_task,
-              :mcp_direct_ptc_lisp_execute
+              :mcp_direct_ptc_lisp_execute,
+              :mcp_session
             ])
 
   @trust_levels MapSet.new([
