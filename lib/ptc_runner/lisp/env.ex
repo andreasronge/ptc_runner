@@ -52,10 +52,14 @@ defmodule PtcRunner.Lisp.Env do
       iex> PtcRunner.Lisp.Env.builtin?(:my_var)
       false
   """
-  @spec builtin?(atom()) :: boolean()
+  @spec builtin?(atom() | String.t()) :: boolean()
   def builtin?(name) when is_atom(name) do
     Map.has_key?(initial(), name)
   end
+
+  # Binary names are never builtins by construction — `SourceAtoms.intern/1`
+  # would have returned an atom if the name matched the bounded vocabulary.
+  def builtin?(name) when is_binary(name), do: false
 
   # ============================================================
   # Clojure namespace compatibility

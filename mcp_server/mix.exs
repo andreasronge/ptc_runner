@@ -87,7 +87,8 @@ defmodule PtcRunnerMcp.MixProject do
       {:plug, "~> 1.16", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+      {:recon, "~> 2.5", only: [:dev, :test], runtime: false}
     ]
   end
 

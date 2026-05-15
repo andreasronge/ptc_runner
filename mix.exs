@@ -22,7 +22,7 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:ex_unit, :mix, :req, :req_llm],
+        plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :recon],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
@@ -60,7 +60,8 @@ defmodule PtcRunner.MixProject do
       {:kino, "~> 0.14", optional: true},
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
-      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false}
+      {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
+      {:recon, "~> 2.5", only: [:dev, :test], runtime: false}
     ]
   end
 
