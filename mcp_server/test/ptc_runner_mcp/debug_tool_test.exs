@@ -18,10 +18,13 @@ defmodule PtcRunnerMcp.DebugToolTest do
     DebugConfig,
     JsonRpc,
     Limits,
+    Sessions,
     TraceConfig,
     TraceHandler
   }
 
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
+  alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.Test.JsonRpcHarness
 
   setup do
@@ -35,7 +38,9 @@ defmodule PtcRunnerMcp.DebugToolTest do
       DebugConfig.set(original_debug)
       TraceConfig.set(original_trace)
       Limits.set(original_limits)
+      SessionsConfig.reset()
       TraceHandler.detach()
+      stop_sessions_processes()
       stop_buffer()
       ConcurrencyGate.reset()
     end)
@@ -64,6 +69,26 @@ defmodule PtcRunnerMcp.DebugToolTest do
       nil -> :ok
       pid -> if Process.alive?(pid), do: GenServer.stop(pid)
     end
+  end
+
+  defp enable_sessions do
+    SessionsConfig.set(%{enabled: true})
+    assert :ok = Sessions.ensure_started()
+    :ok
+  end
+
+  defp stop_sessions_processes do
+    stop_if_alive(SessionsRegistry)
+    stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
+  end
+
+  defp stop_if_alive(name) do
+    case Process.whereis(name) do
+      nil -> :ok
+      pid -> if Process.alive?(pid), do: GenServer.stop(pid)
+    end
+  catch
+    :exit, _reason -> :ok
   end
 
   # Dispatch `tools/call ptc_lisp_execute/ptc_task` via JsonRpc, running
@@ -280,6 +305,18 @@ defmodule PtcRunnerMcp.DebugToolTest do
     r = sc(call_debug(11, %{"op" => "recent", "limit" => 50}))
     request_ids = Enum.map(r["calls"], & &1["request_id"])
     assert request_ids == ["1"]
+  end
+
+  test "stats records ptc_session_list calls" do
+    :ok = enable_debug()
+    :ok = enable_sessions()
+
+    env = call_tool(1, "ptc_session_list", %{})
+    assert sc(env)["status"] == "ok"
+    _ = flush_ring()
+
+    s = sc(call_debug(10, %{"op" => "stats"}))
+    assert s["by_tool"]["ptc_session_list"]["calls"] == 1
   end
 
   test "unknown-tool requests (disabled ptc_task) are NOT recorded" do

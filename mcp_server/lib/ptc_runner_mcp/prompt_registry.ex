@@ -231,6 +231,18 @@ defmodule PtcRunnerMcp.PromptRegistry do
       surface: :mcp_session,
       trust: :authoritative
     },
+    mcp_session_list_description: %{
+      id: :mcp_session_list_description,
+      audience: :mcp_tool_description,
+      budget_profile: :minimal,
+      dimensions: [:execution_surface],
+      dynamic_boundary: :static_card,
+      placement: :single_line_summary,
+      profile: :mcp_session,
+      prompt_fun: :mcp_session_list_description,
+      surface: :mcp_session,
+      trust: :authoritative
+    },
     mcp_session_forget_description: %{
       id: :mcp_session_forget_description,
       audience: :mcp_tool_description,
@@ -377,6 +389,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp render_card(:mcp_session_start_detail), do: mcp_session_start_detail()
   defp render_card(:mcp_session_eval_detail), do: mcp_session_eval_detail()
   defp render_card(:mcp_session_inspect_description), do: mcp_session_inspect_description()
+  defp render_card(:mcp_session_list_description), do: mcp_session_list_description()
   defp render_card(:mcp_session_forget_description), do: mcp_session_forget_description()
   defp render_card(:mcp_session_close_description), do: mcp_session_close_description()
 
@@ -448,6 +461,10 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp mcp_session_inspect_description do
     "Returns a compact orientation view of a PTC-Lisp session."
+  end
+
+  defp mcp_session_list_description do
+    "Lists live PTC-Lisp sessions for the current owner without rendering stored values."
   end
 
   defp mcp_session_forget_description do

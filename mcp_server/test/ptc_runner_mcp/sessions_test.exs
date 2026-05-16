@@ -51,6 +51,7 @@ defmodule PtcRunnerMcp.SessionsTest do
              "ptc_session_eval",
              "ptc_session_forget",
              "ptc_session_inspect",
+             "ptc_session_list",
              "ptc_session_start"
            ]
 
@@ -90,6 +91,9 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     assert tool_description(tools, "ptc_session_inspect") ==
              PromptRegistry.render(:mcp_session_inspect_description, [])
+
+    assert tool_description(tools, "ptc_session_list") ==
+             PromptRegistry.render(:mcp_session_list_description, [])
 
     assert tool_description(tools, "ptc_session_forget") ==
              PromptRegistry.render(:mcp_session_forget_description, [])
@@ -147,6 +151,7 @@ defmodule PtcRunnerMcp.SessionsTest do
   test "session utility prompt cards pin metadata" do
     for key <- [
           :mcp_session_inspect_description,
+          :mcp_session_list_description,
           :mcp_session_forget_description,
           :mcp_session_close_description
         ] do
@@ -275,6 +280,101 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     assert envelope["isError"]
     assert envelope["structuredContent"]["reason"] == "session_args_error"
+  end
+
+  test "session start rejects advisory mode argument" do
+    envelope =
+      Tools.call(%{"name" => "ptc_session_start", "arguments" => %{"mode" => "read_only"}})
+
+    assert envelope["isError"]
+    assert envelope["structuredContent"]["reason"] == "session_args_error"
+    assert envelope["structuredContent"]["message"] =~ "unexpected ptc_session_start argument"
+  end
+
+  test "session list returns metadata-only summaries for current owner" do
+    owner_a = %{"transport" => "stdio", "instance_id" => "owner-a"}
+    owner_b = %{"transport" => "stdio", "instance_id" => "owner-b"}
+
+    a_session =
+      call!("ptc_session_start", %{"title" => "A", "owner" => owner_a})["session_id"]
+
+    _b_session =
+      call!("ptc_session_start", %{"title" => "B", "owner" => owner_b})["session_id"]
+
+    assert call!(
+             "ptc_session_eval",
+             %{"session_id" => a_session, "program" => "(def secret 42)", "owner" => owner_a}
+           )["status"] == "ok"
+
+    assert call!("ptc_session_list", %{"owner" => owner_a})["reason"] == "session_args_error"
+
+    listed = list_for_owner!(owner_a)
+
+    assert listed["status"] == "ok"
+    assert listed["count"] == 1
+
+    assert [
+             %{
+               "session_id" => ^a_session,
+               "title" => "A",
+               "turn" => 1,
+               "eval_status" => "idle",
+               "memory_bytes" => memory_bytes,
+               "binding_count" => 1
+             } = summary
+           ] = listed["sessions"]
+
+    assert is_integer(memory_bytes) and memory_bytes > 0
+    refute Map.has_key?(summary, "text")
+    refute Map.has_key?(summary, "stored_keys")
+    refute inspect(summary) =~ "secret"
+  end
+
+  test "session list sorts by live updated_at descending" do
+    first = start_session()
+    second = start_session()
+
+    assert eval(first, "(def newer 1)")["status"] == "ok"
+
+    listed = call!("ptc_session_list", %{})["sessions"]
+    assert [%{"session_id" => ^first}, %{"session_id" => ^second}] = Enum.take(listed, 2)
+  end
+
+  test "session list shows running status without acquiring rendered state" do
+    session_id = start_session()
+    {:ok, owner} = Owner.from_context(nil)
+    request_id = make_ref()
+
+    assert {:ok, snapshot} = Sessions.begin_eval(session_id, owner, request_id, %{program: "1"})
+
+    listed = call!("ptc_session_list", %{})
+
+    assert Enum.find_value(listed["sessions"], fn
+             %{"session_id" => ^session_id, "eval_status" => "running"} -> true
+             _summary -> false
+           end)
+
+    result = Sessions.run_snapshot(snapshot, "1", %{profile: :mcp_no_tools})
+    assert {:ok, _response} = Sessions.commit_eval(session_id, owner, request_id, result, %{})
+  end
+
+  test "session list does not refresh idle timer" do
+    SessionsConfig.set(%{enabled: true, session_idle_timeout_ms: 250})
+    session_id = start_session()
+
+    Process.sleep(180)
+    assert call!("ptc_session_list", %{})["count"] == 1
+    Process.sleep(120)
+
+    wait_until(
+      fn ->
+        case Registry.lookup(session_id) do
+          {:ok, _meta} -> false
+          {:error, _reason} -> true
+        end
+      end,
+      300
+    )
   end
 
   test "session eval applies context validation limits" do
@@ -441,6 +541,11 @@ defmodule PtcRunnerMcp.SessionsTest do
 
   defp eval(session_id, program) do
     call!("ptc_session_eval", %{"session_id" => session_id, "program" => program})
+  end
+
+  defp list_for_owner!(owner_context) do
+    {:ok, response} = Sessions.list(owner_context)
+    response
   end
 
   defp tool_description(tools, name) do
