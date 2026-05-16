@@ -177,6 +177,21 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       assert {:ok, :from_user_ns, ^user_ns} =
                Eval.eval(ast, %{}, user_ns, env, fn _, _ -> nil end)
     end
+
+    test "caller-injected env entries are captured for string and atom keys" do
+      alias PtcRunner.Lisp.Eval
+
+      string_ast = {:call, {:fn, [], {:var, "external"}}, []}
+      atom_ast = {:call, {:fn, [], {:var, :external}}, []}
+
+      assert {:ok, :from_string_env, %{}} =
+               Eval.eval(string_ast, %{}, %{}, %{"external" => :from_string_env}, fn _, _ ->
+                 nil
+               end)
+
+      assert {:ok, :from_atom_env, %{}} =
+               Eval.eval(atom_ast, %{}, %{}, %{external: :from_atom_env}, fn _, _ -> nil end)
+    end
   end
 
   describe "memory footprint" do
