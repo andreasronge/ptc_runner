@@ -32,26 +32,15 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Sessions, Tools}
-  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.TestSupport.MemorySoak
+  alias PtcRunnerMcp.TestSupport.SoakHelpers
 
   @moduletag :soak
   @moduletag timeout: :infinity
 
   setup do
-    stop_sessions_processes()
-    SessionsConfig.set(%{enabled: true, max_sessions: 10_000})
-    ConcurrencyGate.reset()
-    assert :ok = Sessions.ensure_started()
-
-    on_exit(fn ->
-      stop_sessions_processes()
-      SessionsConfig.reset()
-      ConcurrencyGate.reset()
-    end)
-
+    SoakHelpers.setup_sessions(%{enabled: true, max_sessions: 10_000})
     {:ok, iters: MemorySoak.iteration_count()}
   end
 
@@ -60,9 +49,9 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
     IO.puts("BEFORE (churn, n=#{iters}):\n#{MemorySoak.format(before)}")
 
     MemorySoak.loop(iters, fn _phase ->
-      session_id = start_session()
-      eval_ok!(session_id, "(+ 1 2 3)")
-      close_session!(session_id)
+      session_id = SoakHelpers.start_session()
+      SoakHelpers.eval_ok!(session_id, "(+ 1 2 3)")
+      SoakHelpers.close_session!(session_id)
     end)
 
     flush_registry()
@@ -74,32 +63,6 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
     MemorySoak.assert_flat!(before, aft, :total, tolerance_pct: 30)
     MemorySoak.assert_flat!(before, aft, :binary, tolerance_pct: 50)
     MemorySoak.assert_atoms_per_iter!(before, aft, iters)
-  end
-
-  defp start_session do
-    %{"structuredContent" => sc} =
-      Tools.call(%{"name" => "ptc_session_start", "arguments" => %{}})
-
-    sc["session_id"]
-  end
-
-  defp eval_ok!(session_id, program) do
-    response =
-      Tools.call(%{
-        "name" => "ptc_session_eval",
-        "arguments" => %{"session_id" => session_id, "program" => program}
-      })
-
-    sc = response["structuredContent"]
-    assert sc["status"] == "ok", "eval failed: #{inspect(sc)}"
-    sc
-  end
-
-  defp close_session!(session_id) do
-    Tools.call(%{
-      "name" => "ptc_session_close",
-      "arguments" => %{"session_id" => session_id}
-    })
   end
 
   # `ptc_session_close` makes the Session GenServer reply then `:stop`
@@ -115,25 +78,5 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
     end
 
     :ok
-  end
-
-  defp stop_sessions_processes do
-    stop_if_alive(SessionsRegistry)
-    stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
-  end
-
-  defp stop_if_alive(name) do
-    case Process.whereis(name) do
-      nil -> :ok
-      pid -> stop_process(pid)
-    end
-  end
-
-  defp stop_process(pid) do
-    if Process.alive?(pid) do
-      GenServer.stop(pid, :normal, 5_000)
-    end
-  catch
-    :exit, _ -> :ok
   end
 end
