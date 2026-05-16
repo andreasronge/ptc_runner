@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Parser do
 
   import NimbleParsec
   alias PtcRunner.Lisp.AST
+  alias PtcRunner.Lisp.FastParser
   alias PtcRunner.Lisp.ParserHelpers
 
   # ============================================================
@@ -256,7 +257,8 @@ defmodule PtcRunner.Lisp.Parser do
     :program,
     parsec(:inter_expr)
     |> repeat(parsec(:expr) |> concat(parsec(:inter_expr)))
-    |> eos()
+    |> eos(),
+    inline: true
   )
 
   # ============================================================
@@ -284,55 +286,26 @@ defmodule PtcRunner.Lisp.Parser do
   end
 
   defp do_parse(source) do
-    case program(source) do
-      # Empty program
-      {:ok, [], "", _context, _position, _offset} ->
-        {:ok, nil}
-
-      # Single expression (backward compatible)
-      {:ok, [ast], "", _context, _position, _offset} ->
+    case FastParser.parse(source) do
+      {:ok, ast} ->
         {:ok, ast}
 
-      # Multiple expressions -> wrap in {:program, [...]}
-      {:ok, asts, "", _context, _position, _offset} when is_list(asts) ->
-        {:ok, {:program, asts}}
-
-      {:ok, _result, rest, _context, {line, _}, _offset} ->
-        {:error,
-         {:parse_error, "Unexpected input at line #{line}: #{inspect(String.slice(rest, 0, 20))}"}}
-
-      {:error, reason, rest, _context, {line, line_offset}, offset} ->
-        column = offset - line_offset + 1
-        snippet = String.slice(rest, 0, 20)
-
-        # Improve error message for common cases
+      {:error, reason} ->
         improved_reason =
-          cond do
-            reason == "expected end of string" and offset == 0 ->
-              # Failed at position 0 means no expressions were parsed
-              # Check for unbalanced delimiters first, then unsupported syntax
-              case check_delimiter_balance(source) do
-                "syntax error: could not parse expression" ->
-                  check_unsupported_patterns(source) ||
-                    "syntax error: could not parse expression"
-
-                msg ->
-                  msg
-              end
-
-            reason == "expected end of string" ->
-              # Parsed some content but then failed - check for unsupported syntax
-              check_unsupported_patterns(source) ||
-                debug_and_return_error(source, reason, line, column, snippet)
-
-            true ->
-              "#{reason} at line #{line}, column #{column}: #{inspect(snippet)}"
-          end
+          check_unsupported_patterns(source) ||
+            delimiter_error_or_reason(source, reason)
 
         {:error, {:parse_error, improved_reason}}
     end
   rescue
     e in ArgumentError -> {:error, {:parse_error, e.message}}
+  end
+
+  defp delimiter_error_or_reason(source, reason) do
+    case check_delimiter_balance(source) do
+      "syntax error: could not parse expression" -> reason
+      msg -> msg
+    end
   end
 
   # Check for unbalanced delimiters and return a helpful error message
@@ -394,31 +367,5 @@ defmodule PtcRunner.Lisp.Parser do
       true ->
         nil
     end
-  end
-
-  # Debug helper: optionally print source and return error message
-  defp debug_and_return_error(source, reason, line, column, snippet) do
-    # Enable with: PTC_DEBUG_PARSER=1 mix ...
-    if System.get_env("PTC_DEBUG_PARSER") do
-      IO.puts("\n=== DEBUG: Unidentified parse error ===")
-      IO.puts("Source code:")
-      IO.puts("---")
-      IO.puts(source)
-      IO.puts("---")
-      IO.puts("Failed at line #{line}, column #{column}")
-      IO.puts("=== END DEBUG ===\n")
-    end
-
-    # Improve confusing NimbleParsec error messages
-    friendly_reason =
-      case reason do
-        "expected end of string" ->
-          "syntax error: invalid or unexpected content"
-
-        other ->
-          other
-      end
-
-    "#{friendly_reason} at line #{line}, column #{column}: #{inspect(snippet)}"
   end
 end
