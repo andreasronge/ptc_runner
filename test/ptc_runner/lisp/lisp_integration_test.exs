@@ -597,6 +597,33 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert [tool_call] = step.tool_calls
       assert tool_call.args == %{"url" => "http://example.com"}
     end
+
+    test "novel keyword values in tool args are externalized without struct enumeration" do
+      tools = %{
+        "echo" => fn args -> args end
+      }
+
+      source = ~S|(tool/echo {:kind :novel-runtime-keyword})|
+
+      {:ok, step} = Lisp.run(source, tools: tools)
+
+      assert [tool_call] = step.tool_calls
+      assert tool_call.args == %{"kind" => "novel-runtime-keyword"}
+      assert step.return == %{"kind" => "novel-runtime-keyword"}
+    end
+
+    test "single novel keyword arg keeps the named-args validation error" do
+      tools = %{
+        "echo" => fn args -> args end
+      }
+
+      source = ~S|(tool/echo :novel-runtime-keyword)|
+
+      assert {:error, %{fail: %{reason: :invalid_tool_args, message: msg}}} =
+               Lisp.run(source, tools: tools)
+
+      assert msg =~ "Tool calls require named arguments"
+    end
   end
 
   describe "tool_calls preserved across closure calls" do
