@@ -54,6 +54,7 @@ defmodule PtcRunnerMcp.TestSupport.SoakHelpers do
   def stop_sessions_processes do
     stop_if_alive(SessionsRegistry)
     stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
+    stop_if_alive(PtcRunnerMcp.Sessions.Names)
   end
 
   defp stop_if_alive(name) do
