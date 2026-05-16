@@ -31,6 +31,13 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:ok, {:string, "quote: \""}} = Parser.parse(~s("quote: \\""))
     end
 
+    test "backslash before newline or carriage return is not a valid string escape" do
+      assert {:error, {:parse_error, _}} = Parser.parse("\"a\\\nb\"")
+      assert {:error, {:parse_error, _}} = Parser.parse("\"a\\\rb\"")
+      assert {:error, {:parse_error, _}} = Parser.parse("#\"a\\\nb\"")
+      assert {:error, {:parse_error, _}} = Parser.parse("#\"a\\\rb\"")
+    end
+
     test "keywords" do
       assert {:ok, {:keyword, :name}} = Parser.parse(":name")
       assert {:ok, {:keyword, "user_id"}} = Parser.parse(":user_id")
@@ -317,6 +324,12 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "case-insensitive exponent" do
       assert {:ok, 500.0} = Parser.parse("5E2")
       assert {:ok, 500.0} = Parser.parse("5e2")
+    end
+
+    test "invalid decimal exponent does not get swallowed" do
+      assert {:ok, {:program, [3.14, {:symbol, "e+"}]}} = Parser.parse("3.14e+")
+      assert {:ok, {:program, [3.14, {:symbol, "efoo"}]}} = Parser.parse("3.14efoo")
+      assert {:ok, {:program, [3.14, {:symbol, "E-"}]}} = Parser.parse("3.14E-")
     end
 
     test "positive sign on numbers" do
