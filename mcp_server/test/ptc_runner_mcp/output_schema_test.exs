@@ -11,9 +11,48 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     * Concrete R22 / R23 payloads have all fields the schema's
       `required` arrays demand.
   """
-  use ExUnit.Case, async: true
+  # Calls the real `ptc_lisp_execute` tool, which reads process-wide
+  # MCP config and the production upstream registry name.
+  use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.Tools
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+
+  alias PtcRunnerMcp.{
+    AggregatorConfig,
+    CatalogConfig,
+    ConcurrencyGate,
+    DebugConfig,
+    Limits,
+    ResponseProfile,
+    Tools
+  }
+
+  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
+
+  setup do
+    old_debug = DebugConfig.get()
+    old_profile = ResponseProfile.current()
+
+    stop_existing_registry(UpstreamRegistry)
+    AggregatorConfig.set(AggregatorConfig.defaults())
+    CatalogConfig.set(CatalogConfig.defaults())
+    Limits.set(Limits.defaults())
+    ConcurrencyGate.reset()
+    ResponseProfile.set(:debug)
+    DebugConfig.set(DebugConfig.defaults())
+
+    on_exit(fn ->
+      stop_existing_registry(UpstreamRegistry)
+      AggregatorConfig.set(AggregatorConfig.defaults())
+      CatalogConfig.set(CatalogConfig.defaults())
+      Limits.set(Limits.defaults())
+      ConcurrencyGate.reset()
+      ResponseProfile.set(old_profile)
+      DebugConfig.set(old_debug)
+    end)
+
+    :ok
+  end
 
   describe "output_schema/0 shape" do
     test "is byte-equal to the spec literal § 10.4 schema" do

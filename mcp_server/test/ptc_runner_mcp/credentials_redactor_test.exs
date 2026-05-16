@@ -450,6 +450,8 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
         5_000 -> :ok
       end
     end
+  catch
+    :exit, _ -> :ok
   end
 
   defp ensure_table_absent do
