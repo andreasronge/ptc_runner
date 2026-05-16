@@ -26,6 +26,8 @@ defmodule PtcRunner.Lisp.SpecValidator do
       examples = PtcRunner.Lisp.SpecValidator.extract_examples()
   """
 
+  alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.SpecValidator.Parser
 
   @spec_path "docs/ptc-lisp-specification.md"
@@ -136,7 +138,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
 
     case PtcRunner.Lisp.run(code, opts) do
       {:ok, %{return: result}} ->
-        if result == expected do
+        if values_match?(expected, result) do
           :ok
         else
           {:error, "Expected #{inspect(expected)} but got #{inspect(result)}"}
@@ -145,6 +147,60 @@ defmodule PtcRunner.Lisp.SpecValidator do
       {:error, %{fail: fail}} ->
         {:error, "Execution failed: #{inspect(fail)}"}
     end
+  end
+
+  # Compares a spec-doc expected value against a runtime result, tolerant of
+  # PTC-Lisp keyword representation.
+  #
+  # Source keyword notation (`:foo`) in the spec can legitimately surface at
+  # runtime as a plain atom (`:foo`), a `%PtcRunner.Lisp.Keyword{}` struct, or
+  # — once externalized as a map key — a binary, depending on the VM atom
+  # table at parse time (see the `SourceAtoms` bounded-vocabulary design).
+  # The validator checks *spec conformance*, not which of those equivalent
+  # representations the runtime happened to pick, so keyword-position
+  # comparisons match by name. A genuine string in the expected value still
+  # requires a string in the result — the tolerance is keyword-only and
+  # guided by the expected value's shape.
+  @spec values_match?(term(), term()) :: boolean()
+  defp values_match?(expected, actual) do
+    cond do
+      LispKeyword.keyword?(expected) -> keyword_match?(expected, actual)
+      var?(expected) and var?(actual) -> var_name(expected) == var_name(actual)
+      is_list(expected) and is_list(actual) -> lists_match?(expected, actual)
+      plain_map?(expected) and plain_map?(actual) -> maps_match?(expected, actual)
+      true -> expected == actual
+    end
+  end
+
+  # A keyword (atom or `%Keyword{}`) matches another keyword with the same
+  # name, or a binary equal to that name (the externalized-map-key form).
+  defp keyword_match?(expected, actual) do
+    name = LispKeyword.name(expected)
+
+    cond do
+      is_binary(actual) -> actual == name
+      LispKeyword.keyword?(actual) -> LispKeyword.name(actual) == name
+      true -> false
+    end
+  end
+
+  defp var?(value), do: is_struct(value, Var)
+  defp var_name(%Var{name: name}), do: to_string(name)
+
+  defp plain_map?(value), do: is_map(value) and not is_struct(value)
+
+  defp lists_match?(expected, actual) do
+    length(expected) == length(actual) and
+      expected |> Enum.zip(actual) |> Enum.all?(fn {e, a} -> values_match?(e, a) end)
+  end
+
+  # Sizes are equal and keyword keys are unique by name within a map, so an
+  # `all?`/`any?` pairing is sufficient — no risk of double-matching a key.
+  defp maps_match?(expected, actual) do
+    map_size(expected) == map_size(actual) and
+      Enum.all?(expected, fn {ek, ev} ->
+        Enum.any?(actual, fn {ak, av} -> values_match?(ek, ak) and values_match?(ev, av) end)
+      end)
   end
 
   @doc """
