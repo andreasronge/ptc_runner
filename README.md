@@ -9,23 +9,25 @@
 [![Run in Livebook](https://img.shields.io/badge/Run_in-Livebook-purple)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
 [![Blog](https://img.shields.io/badge/Blog-posts-green)](https://andreasronge.github.io/ptc_runner/)
 
-Build LLM agents that write and execute programs. SubAgents combine the reasoning power of LLMs with the computational precision of a sandboxed interpreter.
+Build LLM agents with a secure code mode. SubAgents let models write small programs that execute in a fast BEAM-native sandbox, combining LLM reasoning with deterministic computation.
 
 > **Using an MCP client (Claude Desktop, Cursor, Cline, Claude Code)?**
-> See [`mcp_server/README.md`](mcp_server/README.md) for `ptc_runner_mcp`, an MCP server
-> that exposes the PTC-Lisp sandbox over stdio JSON-RPC. The README
-> there has ready-to-paste `claude_desktop_config.json`,
-> `cline_mcp_settings.json`, and Cursor `mcp.json` snippets.
-> For the conceptual overview (when to use it, comparison with
-> Python / JS execution servers, security model), see
-> [`docs/mcp-server.md`](docs/mcp-server.md).
+> `ptc_runner_mcp` gives the client a secure code mode backed by PTC-Lisp:
+> the model writes small programs, PtcRunner runs them in a fast BEAM sandbox,
+> and the client receives compact computed results.
+> You do not need an Elixir application to use it; `ptc_runner_mcp` runs as a
+> standalone MCP server for any MCP-compatible client.
 >
-> **Aggregator mode** wraps any combination of upstream MCP servers
-> — stdio (`@modelcontextprotocol/server-filesystem`, in-process
-> CLIs) and HTTP (Streamable HTTP rev 2025-06-18; bearer / basic /
-> custom-header auth via a credentials registry; `https://api.githubcopilot.com/mcp/`,
-> Cloudflare-hosted MCPs, etc.) — and exposes them through a single
-> `(tool/mcp-call …)` form. See [`docs/aggregator-mode.md`](docs/aggregator-mode.md).
+> Compared with process-per-call Python or JavaScript code execution,
+> PtcRunner avoids per-call runtime startup, package installation from generated
+> code, and direct filesystem/network access unless you explicitly provide tools
+> or upstream MCP servers. Programs run with BEAM process isolation, timeouts,
+> and heap limits; optional stateful sessions keep definitions and intermediate
+> results across calls.
+>
+> Start with [`mcp_server/README.md`](mcp_server/README.md) for client config
+> snippets. See [`docs/mcp-server.md`](docs/mcp-server.md) for security,
+> sessions, and the Python/JS comparison.
 
 ## Quick Start
 
@@ -71,7 +73,8 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 
 ### Key Features
 
-- **Two execution modes**: [PTC-Lisp](docs/ptc-lisp-specification.md) for multi-turn agentic workflows with tools, or [text mode](docs/guides/subagent-text-mode.md) for direct LLM responses with optional native tool calling
+- **Secure code mode**: [PTC-Lisp](docs/ptc-lisp-specification.md) executes generated programs in a BEAM-native sandbox with process isolation, timeouts, and heap limits
+- **Two agent modes**: PTC-Lisp for multi-turn agentic workflows with tools, or [text mode](docs/guides/subagent-text-mode.md) for direct LLM responses with optional native tool calling
 - **Signatures**: Type contracts (`{sentiment :string, score :float}`) that validate outputs and drive auto-retry on mismatch
 - **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
 - **Transactional memory**: `def` persists data across turns without bloating context
@@ -81,6 +84,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 - **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows ([interactive Livebook](livebooks/observability_and_tracing.livemd))
 - **[Context compaction](docs/guides/subagent-compaction.md)**: Pressure-triggered trimming for long-running multi-turn agents — opt in with `compaction: true` to drop older turns once a turn or token threshold is hit
 - **BEAM-native**: Parallel tool calling (`pmap`/`pcalls`), process isolation with timeout and heap limits, fault tolerance
+- **MCP server**: Expose the sandbox as client-side code mode, with optional stateful sessions and [aggregator mode](docs/aggregator-mode.md) for upstream MCP tools
 
 ### Examples
 
