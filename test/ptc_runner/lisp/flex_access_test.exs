@@ -8,7 +8,8 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       program = ~S"(select-keys data/data [:a :b])"
       context = %{"data" => %{"a" => nil, "b" => 2}}
 
-      assert {:ok, %Step{return: %{a: nil, b: 2}}} = PtcRunner.Lisp.run(program, context: context)
+      assert {:ok, %Step{return: %{"a" => nil, "b" => 2}}} =
+               PtcRunner.Lisp.run(program, context: context)
     end
 
     test "destructuring with :or does not replace nil" do
@@ -150,8 +151,8 @@ defmodule PtcRunner.Lisp.FlexAccessTest do
       context = %{"result" => %{total_tokens: 500, duration_ms: 42, status: "ok"}}
 
       assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program, context: context)
-      assert result[:"total-tokens"] == 500 || result[:total_tokens] == 500
-      assert result[:"duration-ms"] == 42 || result[:duration_ms] == 42
+      assert result["total-tokens"] == 500 || result["total_tokens"] == 500
+      assert result["duration-ms"] == 42 || result["duration_ms"] == 42
     end
 
     test "normalization returns nil for genuinely missing keys" do

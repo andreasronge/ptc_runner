@@ -64,7 +64,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       iex> compiled.llm_required?
       false
       iex> result = compiled.execute.(%{n: 10}, [])
-      iex> result.return.result
+      iex> result.return["result"]
       20
   """
 
@@ -139,7 +139,7 @@ defmodule PtcRunner.SubAgent.CompiledAgent do
       iex> tool.type
       :compiled
       iex> result = tool.execute.(%{n: 5})
-      iex> result.return.result
+      iex> result.return["result"]
       10
   """
   @spec as_tool(t()) :: %{

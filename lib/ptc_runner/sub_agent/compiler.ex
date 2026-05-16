@@ -76,7 +76,7 @@ defmodule PtcRunner.SubAgent.Compiler do
       iex> is_function(compiled.execute, 2)
       true
       iex> result = compiled.execute.(%{n: 10}, [])
-      iex> result.return.result
+      iex> result.return["result"]
       20
 
   Agents with LLMTool compile successfully (LLMTool requires LLM at runtime):

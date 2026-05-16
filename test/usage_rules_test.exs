@@ -142,7 +142,7 @@ defmodule UsageRulesTest do
           context: %{}
         )
 
-      assert step.return == %{foo: 1, bar: 2}
+      assert step.return == %{"foo" => 1, "bar" => 2}
       # The map is NOT silently merged into memory.
       assert step.memory == %{} or not Map.has_key?(step.memory, :foo)
     end
@@ -239,7 +239,7 @@ defmodule UsageRulesTest do
 
       step = compiled.execute.(%{n: 21}, [])
       assert %PtcRunner.Step{} = step
-      assert step.return.result == 42
+      assert step.return["result"] == 42
     end
 
     test "SubAgent.compile/2 rejects multi-turn or text-mode agents" do

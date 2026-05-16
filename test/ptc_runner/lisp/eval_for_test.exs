@@ -75,7 +75,7 @@ defmodule PtcRunner.Lisp.EvalForTest do
       assert {:ok, %Step{return: result}} =
                Lisp.run("(for [[k v] {:a 1 :b 2}] [k v])")
 
-      assert Enum.sort(result) == [[:a, 1], [:b, 2]]
+      assert Enum.sort(result) == [["a", 1], ["b", 2]]
     end
   end
 

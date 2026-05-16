@@ -22,7 +22,7 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     """
 
     {:ok, step} = Lisp.run(source)
-    assert step.return == %{a: 1}
+    assert step.return == %{"a" => 1}
     assert step.prints == ["hello", "world 42"]
   end
 
@@ -76,7 +76,7 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     """
 
     {:ok, step} = Lisp.run(source)
-    assert step.return == :done
+    assert step.return == "done"
     assert step.prints == ["x is 3", "x is 2", "x is 1"]
   end
 

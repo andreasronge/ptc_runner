@@ -2394,7 +2394,7 @@ The `seq` function converts a collection to a sequence:
 
 **Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
 
-**`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Uses `String.to_existing_atom/1` internally, so only keywords already known to the VM can be created.
+**`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Coercion never grows the BEAM atom table: names in the bounded vocabulary become atoms, every other name becomes a runtime keyword struct.
 
 ### 8.4a Bitwise Operations
 

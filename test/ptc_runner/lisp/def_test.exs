@@ -296,7 +296,7 @@ defmodule PtcRunner.Lisp.DefTest do
     test "def shadowing persists across turns" do
       # Turn 1: shadow builtin with intermediate result
       {:ok, %{memory: user_ns}} = Lisp.run(~s|(def entries [{:a 1} {:b 2}])|)
-      assert user_ns[:entries] == [%{a: 1}, %{b: 2}]
+      assert user_ns[:entries] == [%{"a" => 1}, %{"b" => 2}]
 
       # Turn 2: access the shadowed binding
       {:ok, %{return: result}} = Lisp.run("(count entries)", memory: user_ns)

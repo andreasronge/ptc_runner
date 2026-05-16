@@ -89,7 +89,7 @@ defmodule PtcRunner.Lisp.BudgetRemainingTest do
         )
 
       # Note: PTC-Lisp uses hyphenated keywords (Clojure-style)
-      assert step.return == :"low-budget"
+      assert step.return == "low-budget"
     end
 
     test "budget map with nil values returns empty map" do
@@ -132,8 +132,8 @@ defmodule PtcRunner.Lisp.BudgetRemainingTest do
       {:ok, high_step} = Lisp.run(code, budget: high_budget)
 
       # Note: PTC-Lisp uses hyphenated keywords (Clojure-style)
-      assert low_step.return == :"batch-mode"
-      assert high_step.return == :"individual-mode"
+      assert low_step.return == "batch-mode"
+      assert high_step.return == "individual-mode"
     end
   end
 

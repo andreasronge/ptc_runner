@@ -176,7 +176,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
 
       result = compiled.execute.(%{n: 10}, [])
-      assert result.return.result == 20
+      assert result.return["result"] == 20
     end
 
     test "compiled.execute calls tools at runtime with correct args" do
@@ -302,7 +302,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert is_function(tool.execute, 1)
 
       result = tool.execute.(%{n: 5})
-      assert result.return.result == 10
+      assert result.return["result"] == 10
     end
 
     test "as_tool raises error for compiled agents with SubAgentTools" do
@@ -366,7 +366,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # Run via unified API - no LLM needed since no SubAgentTools
       {:ok, step} = SubAgent.run(compiled, context: %{n: 5})
-      assert step.return.result == 10
+      assert step.return["result"] == 10
     end
 
     test "run/2 with CompiledAgent returns error when llm required but not provided" do
@@ -438,7 +438,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       runtime_llm = fn _ -> {:ok, ~S|(return {:echo "runtime echo"})|} end
       {:ok, step} = SubAgent.run(compiled, context: %{input: "test"}, llm: runtime_llm)
-      assert step.return.result == "runtime echo"
+      assert step.return["result"] == "runtime echo"
     end
   end
 
@@ -477,7 +477,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       assert {:ok, step} = result
       # CompiledAgent returns atom keys
-      assert step.return.final == 30
+      assert step.return["final"] == 30
     end
 
     test "then/3 short-circuits on error" do
@@ -553,7 +553,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
         |> SubAgent.then(second)
 
       assert {:ok, step} = result
-      assert step.return.final == 20
+      assert step.return["final"] == 20
     end
   end
 
@@ -609,12 +609,12 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # Execute multiple times without LLM
       result1 = compiled.execute.(%{value: 80.0, threshold: 50.0}, [])
-      assert result1.return.score == 0.9
-      assert result1.return.anomalous == true
+      assert result1.return["score"] == 0.9
+      assert result1.return["anomalous"] == true
 
       result2 = compiled.execute.(%{value: 30.0, threshold: 50.0}, [])
-      assert result2.return.score == 0.1
-      assert result2.return.anomalous == false
+      assert result2.return["score"] == 0.1
+      assert result2.return["anomalous"] == false
     end
 
     test "compiled agent handles runtime tool errors gracefully" do
@@ -640,7 +640,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # Valid execution
       result1 = compiled.execute.(%{a: 10, b: 2}, [])
-      assert result1.return.result == 5
+      assert result1.return["result"] == 5
 
       # Runtime error - tool exceptions return :tool_error
       result2 = compiled.execute.(%{a: 10, b: 0}, [])
@@ -677,7 +677,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # With longer timeout, should succeed
       result_ok = compiled.execute.(%{n: 5}, timeout: 500)
-      assert result_ok.return.result == 10
+      assert result_ok.return["result"] == 10
     end
 
     test "compiled.execute respects max_heap option" do
@@ -708,6 +708,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # With default heap, should succeed
       result_ok = compiled.execute.(%{size: 100}, [])
+      # `count` is a bounded-vocabulary name, so it externalizes as an atom.
       assert result_ok.return.count == 100
     end
   end
@@ -826,9 +827,9 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert result.return != nil,
              "Expected return value but got nil. Fail: #{inspect(result.fail)}"
 
-      assert result.return.joke != nil
-      assert is_integer(result.return.iterations)
-      assert is_boolean(result.return.was_improved)
+      assert result.return["joke"] != nil
+      assert is_integer(result.return["iterations"])
+      assert is_boolean(result.return["was_improved"])
     end
 
     test "compiles orchestrator with SubAgentTools, executing them at runtime" do
@@ -903,8 +904,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       # Execute with runtime LLM for SubAgentTools
       result = compiled.execute.(%{topic: "programmers"}, llm: runtime_llm)
 
-      assert result.return.joke =~ "programmer"
-      assert result.return.has_punchline == true
+      assert result.return["joke"] =~ "programmer"
+      assert result.return["has_punchline"] == true
     end
 
     test "compiled orchestrator can be executed multiple times with different LLMs" do
@@ -949,8 +950,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       result1 = compiled.execute.(%{message: "test"}, llm: llm1)
       result2 = compiled.execute.(%{message: "test"}, llm: llm2)
 
-      assert result1.return.result == "Hello from LLM1"
-      assert result2.return.result == "Hello from LLM2"
+      assert result1.return["result"] == "Hello from LLM1"
+      assert result2.return["result"] == "Hello from LLM2"
     end
 
     test "compile retries when LLM produces invalid tool call syntax" do
@@ -993,7 +994,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # Verify the compiled agent works
       result = compiled.execute.(%{text: "good stuff"}, [])
-      assert result.return.sentiment == "positive"
+      assert result.return["sentiment"] == "positive"
     end
 
     test "raises error if llm not provided at execute time with SubAgentTools" do
@@ -1157,7 +1158,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
           llm_registry: %{child_llm: child_llm}
         )
 
-      assert result.return.result == "from child_llm"
+      assert result.return["result"] == "from child_llm"
     end
   end
 end
