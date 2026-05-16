@@ -87,6 +87,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
                   "fail",
                   "validation_error",
                   "busy",
+                  "cancelled",
                   "unknown_tool",
                   "shutting_down"
                 ]
@@ -189,6 +190,11 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     test "tool entry includes outputSchema" do
       %{"tools" => [tool]} = Tools.list()
       assert tool["outputSchema"] == Tools.output_schema()
+    end
+
+    test "error schema advertises HTTP cancellation envelopes" do
+      [_, error_branch] = Tools.output_schema()["oneOf"]
+      assert "cancelled" in error_branch["properties"]["reason"]["enum"]
     end
   end
 end

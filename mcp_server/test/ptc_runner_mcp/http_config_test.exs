@@ -40,6 +40,20 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     refute Config.loopback_host?("0.0.0.0")
   end
 
+  test "rejects non-IP bind hostnames except localhost" do
+    assert {:ok, cfg} = Config.resolve(%{http: true, http_host: "localhost"})
+    assert cfg.host == "localhost"
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_host: "example.internal",
+               http_auth_token: String.duplicate("a", 32)
+             })
+
+    assert message =~ "IP address or localhost"
+  end
+
   test "parse_args preserves repeated allowed-origin flags" do
     args =
       PtcRunnerMcp.Application.parse_args([

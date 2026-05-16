@@ -3,6 +3,8 @@ defmodule PtcRunnerMcp.Http.Session do
 
   use GenServer
 
+  alias PtcRunnerMcp.Http.Telemetry
+
   alias PtcRunnerMcp.{
     ConcurrencyGate,
     Envelope,
@@ -58,9 +60,9 @@ defmodule PtcRunnerMcp.Http.Session do
      }}
   end
 
-  @spec request(GenServer.server(), map(), timeout()) :: terminal()
-  def request(server, frame, timeout \\ 5_000) do
-    GenServer.call(server, {:request, frame, self()}, timeout)
+  @spec request(GenServer.server(), map(), keyword(), timeout()) :: terminal()
+  def request(server, frame, context \\ [], timeout \\ 5_000) do
+    GenServer.call(server, {:request, frame, self(), context}, timeout)
   end
 
   @spec notify_or_response(GenServer.server(), map(), timeout()) :: :accepted | {:reply, map()}
@@ -89,10 +91,10 @@ defmodule PtcRunnerMcp.Http.Session do
   end
 
   @impl GenServer
-  def handle_call({:request, frame, waiter}, _from, state) do
+  def handle_call({:request, frame, waiter, context}, _from, state) do
     state = touch(state)
 
-    case dispatch(frame, state) do
+    case dispatch(frame, state, context) do
       {:reply, reply, lifecycle} ->
         reply_with_lifecycle({:reply, reply}, state, lifecycle)
 
@@ -125,7 +127,7 @@ defmodule PtcRunnerMcp.Http.Session do
         {:reply, :accepted, state}
 
       false ->
-        case dispatch(frame, state) do
+        case dispatch(frame, state, []) do
           {:reply, _reply, lifecycle} ->
             reply_with_lifecycle(:accepted, state, lifecycle)
 
@@ -164,13 +166,14 @@ defmodule PtcRunnerMcp.Http.Session do
   @impl GenServer
   def handle_info({:async_reply, request_id, envelope}, state) do
     case Map.fetch(state.in_flight, request_id) do
-      {:ok, %{ref: ref, waiter: waiter}} ->
+      {:ok, %{ref: ref, waiter: waiter, waiter_ref: waiter_ref}} ->
         Log.log(:info, "tools_call_stop", %{
           request_id: request_id,
           is_error: Map.get(envelope, "isError")
         })
 
         Process.demonitor(ref, [:flush])
+        Process.demonitor(waiter_ref, [:flush])
         send(waiter, {:ptc_http_reply, request_id, success_reply(request_id, envelope)})
         {:noreply, state |> remove_in_flight(request_id) |> touch()}
 
@@ -179,7 +182,7 @@ defmodule PtcRunnerMcp.Http.Session do
     end
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case Map.fetch(state.workers, pid) do
       {:ok, request_id} ->
         reply =
@@ -194,7 +197,16 @@ defmodule PtcRunnerMcp.Http.Session do
         {:noreply, state |> remove_in_flight(request_id) |> touch()}
 
       :error ->
-        {:noreply, state}
+        case find_waiter_request(state, ref) do
+          nil ->
+            {:noreply, state}
+
+          request_id ->
+            {state, _cancelled?} =
+              cancel_request(state, request_id, :client_disconnect, reply?: false)
+
+            {:noreply, touch(state)}
+        end
     end
   end
 
@@ -204,12 +216,16 @@ defmodule PtcRunnerMcp.Http.Session do
     :ok
   end
 
-  defp dispatch(frame, state) do
+  defp dispatch(frame, state, context) do
     frame = maybe_put_http_owner(frame, state.id)
 
     JsonRpc.dispatch({:ok, frame},
       draining: state.draining,
-      protocol_version: state.protocol_version
+      protocol_version: state.protocol_version,
+      transport: Keyword.get(context, :transport, :http),
+      transport_request_id: Keyword.get(context, :transport_request_id),
+      owner_hash: Keyword.get(context, :owner_hash, state.owner_hash),
+      mcp_session_hash: Keyword.get(context, :mcp_session_hash)
     )
   end
 
@@ -220,6 +236,7 @@ defmodule PtcRunnerMcp.Http.Session do
         {:reply, duplicate_reply(request_id), state}
 
       map_size(state.in_flight) >= state.max_in_flight ->
+        Telemetry.emit([:limit, :rejected], %{count: 1}, telemetry_meta(state, :in_flight))
         envelope = Envelope.busy(state.max_in_flight)
         safe_invoke(on_busy, envelope)
         {:reply, success_reply(request_id, envelope), state}
@@ -230,6 +247,12 @@ defmodule PtcRunnerMcp.Http.Session do
             {:ok, spawn_worker(state, request_id, work_fn, on_discard, waiter)}
 
           :full ->
+            Telemetry.emit(
+              [:limit, :rejected],
+              %{count: 1},
+              telemetry_meta(state, :global_concurrency)
+            )
+
             envelope = Envelope.busy(Limits.max_concurrent_calls())
             safe_invoke(on_busy, envelope)
             {:reply, success_reply(request_id, envelope), state}
@@ -239,6 +262,7 @@ defmodule PtcRunnerMcp.Http.Session do
 
   defp spawn_worker(state, request_id, work_fn, on_discard, waiter) do
     parent = self()
+    waiter_ref = Process.monitor(waiter)
 
     {pid, ref} =
       spawn_monitor(fn ->
@@ -253,19 +277,24 @@ defmodule PtcRunnerMcp.Http.Session do
             pid: pid,
             ref: ref,
             waiter: waiter,
+            waiter_ref: waiter_ref,
             on_discard: on_discard
           }),
         workers: Map.put(state.workers, pid, request_id)
     }
   end
 
-  defp cancel_request(state, request_id, _reason) do
+  defp cancel_request(state, request_id, reason, opts \\ []) do
     case Map.fetch(state.in_flight, request_id) do
-      {:ok, %{pid: pid, ref: ref, waiter: waiter, on_discard: on_discard}} ->
+      {:ok, %{pid: pid, ref: ref, waiter: waiter}} ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
-        safe_invoke(on_discard)
-        send(waiter, {:ptc_http_reply, request_id, cancelled_reply(request_id)})
+
+        if Keyword.get(opts, :reply?, true) do
+          send(waiter, {:ptc_http_reply, request_id, cancelled_reply(request_id)})
+        end
+
+        Telemetry.emit([:cancelled], %{count: 1}, telemetry_meta(state, reason))
         {remove_in_flight(state, request_id), true}
 
       :error ->
@@ -285,7 +314,8 @@ defmodule PtcRunnerMcp.Http.Session do
       {nil, _} ->
         state
 
-      {%{pid: pid, on_discard: on_discard}, in_flight} ->
+      {%{pid: pid, waiter_ref: waiter_ref, on_discard: on_discard}, in_flight} ->
+        Process.demonitor(waiter_ref, [:flush])
         safe_invoke(on_discard)
         ConcurrencyGate.release()
         %{state | in_flight: in_flight, workers: Map.delete(state.workers, pid)}
@@ -307,6 +337,13 @@ defmodule PtcRunnerMcp.Http.Session do
 
   defp touch(state), do: %{state | last_seen_mono: System.monotonic_time(:millisecond)}
 
+  defp find_waiter_request(state, waiter_ref) do
+    Enum.find_value(state.in_flight, fn
+      {request_id, %{waiter_ref: ^waiter_ref}} -> request_id
+      _ -> nil
+    end)
+  end
+
   defp classify_response(%{"method" => _}), do: false
   defp classify_response(%{"id" => _, "result" => _}), do: true
   defp classify_response(%{"id" => _, "error" => _}), do: true
@@ -318,7 +355,8 @@ defmodule PtcRunnerMcp.Http.Session do
 
     if is_map(args) and Sessions.tool_name?(Map.get(params, "name")) do
       owner = %{transport: :http, mcp_session_id: session_id}
-      put_in(frame, ["params", "arguments"], Map.put(args, :owner, owner))
+      args = args |> Map.drop(["owner", :owner]) |> Map.put(:owner, owner)
+      put_in(frame, ["params", "arguments"], args)
     else
       frame
     end
@@ -340,6 +378,15 @@ defmodule PtcRunnerMcp.Http.Session do
 
   defp cancelled_reply(id) do
     success_reply(id, Envelope.cancelled("cancelled"))
+  end
+
+  defp telemetry_meta(state, reason) do
+    %{
+      owner_hash: state.owner_hash,
+      session_hash: Telemetry.hash_id(state.id),
+      reason: reason,
+      limit_name: reason
+    }
   end
 
   defp safe_invoke(fun) when is_function(fun, 0) do

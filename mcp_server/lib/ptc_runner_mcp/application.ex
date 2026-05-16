@@ -58,7 +58,8 @@ defmodule PtcRunnerMcp.Application do
     TraceHandler
   }
 
-  alias PtcRunnerMcp.Http.{Config, Server, SessionRegistry}
+  alias PtcRunnerMcp.Http.{Config, Server}
+  alias PtcRunnerMcp.Http.SessionRegistry, as: HttpSessionRegistry
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   @impl Application
@@ -111,6 +112,23 @@ defmodule PtcRunnerMcp.Application do
     Supervisor.start_link(children, opts)
   end
 
+  @impl Application
+  def prep_stop(state) do
+    case Application.get_env(:ptc_runner_mcp, :http_config) do
+      %{enabled: true, shutdown_grace_ms: grace_ms} ->
+        if Process.whereis(HttpSessionRegistry) do
+          _ = HttpSessionRegistry.begin_drain()
+          Process.sleep(grace_ms)
+          _ = HttpSessionRegistry.cancel_all(:shutdown)
+        end
+
+      _ ->
+        :ok
+    end
+
+    state
+  end
+
   # Compose the production supervisor child list. Public-but-undocumented
   # seam so tests can inspect ordering without running `start/2`.
   # Order matters for `:rest_for_one`: `Credentials` MUST come before
@@ -141,7 +159,7 @@ defmodule PtcRunnerMcp.Application do
       aggregator_children(upstreams) ++
       session_children_for_http() ++
       [
-        {SessionRegistry, [config: http_config]},
+        {HttpSessionRegistry, [config: http_config]},
         Server.child_spec(http_config)
       ] ++
       debug_children()

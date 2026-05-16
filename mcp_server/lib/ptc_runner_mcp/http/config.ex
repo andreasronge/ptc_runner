@@ -143,10 +143,20 @@ defmodule PtcRunnerMcp.Http.Config do
   defp validate(%{enabled: false} = cfg), do: {:ok, cfg}
 
   defp validate(cfg) do
-    with :ok <- validate_path_collisions(cfg),
+    with :ok <- validate_bind_host(cfg.host),
+         :ok <- validate_path_collisions(cfg),
          :ok <- validate_auth(cfg) do
       maybe_warn_single_token_caps(cfg)
       {:ok, cfg}
+    end
+  end
+
+  defp validate_bind_host("localhost"), do: :ok
+
+  defp validate_bind_host(host) when is_binary(host) do
+    case :inet.parse_address(to_charlist(host)) do
+      {:ok, _ip} -> :ok
+      _ -> {:error, "HTTP host must be an IP address or localhost"}
     end
   end
 

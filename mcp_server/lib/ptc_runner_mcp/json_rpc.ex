@@ -134,12 +134,7 @@ defmodule PtcRunnerMcp.JsonRpc do
           {:reply, success_reply(id, Tools.list()), :continue}
 
         "tools/call" ->
-          handle_tools_call(
-            id,
-            params,
-            draining?,
-            Keyword.get(opts, :protocol_version, Version.primary())
-          )
+          handle_tools_call(id, params, draining?, call_opts(opts))
 
         _ ->
           Log.log(:warn, "method_not_found", %{request_id: id, method: method})
@@ -214,7 +209,9 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   defp suppress_reply_if_notification(other, _), do: other
 
-  defp handle_tools_call(id, params, draining?, protocol_version) when is_map(params) do
+  defp handle_tools_call(id, params, draining?, opts) when is_map(params) do
+    protocol_version = Keyword.get(opts, :protocol_version, Version.primary())
+
     Log.log(:info, "tools_call_start", %{
       request_id: id,
       tool: Map.get(params, "name")
@@ -255,7 +252,10 @@ defmodule PtcRunnerMcp.JsonRpc do
         # so subscribers see the call regardless of outcome.
         envelope =
           traced_tools_call(id, params, fn -> Tools.call(params) end,
-            protocol_version: protocol_version
+            protocol_version: protocol_version,
+            transport_request_id: Keyword.get(opts, :transport_request_id),
+            owner_hash: Keyword.get(opts, :owner_hash),
+            mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
           )
 
         Log.log(:info, "tools_call_stop", %{
@@ -274,7 +274,10 @@ defmodule PtcRunnerMcp.JsonRpc do
             fn ->
               Tools.call(params)
             end,
-            protocol_version: protocol_version
+            protocol_version: protocol_version,
+            transport_request_id: Keyword.get(opts, :transport_request_id),
+            owner_hash: Keyword.get(opts, :owner_hash),
+            mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
           )
 
         Log.log(:info, "tools_call_stop", %{
@@ -290,11 +293,11 @@ defmodule PtcRunnerMcp.JsonRpc do
         {:reply, success_reply(id, envelope), :continue}
 
       true ->
-        async_tools_call(id, params, protocol_version)
+        async_tools_call(id, params, opts)
     end
   end
 
-  defp handle_tools_call(id, _, _draining?, _protocol_version) do
+  defp handle_tools_call(id, _, _draining?, _opts) do
     {:reply, error_reply(id, -32_602, "Invalid params"), :continue}
   end
 
@@ -316,7 +319,8 @@ defmodule PtcRunnerMcp.JsonRpc do
   # built via `DebugRecorder.record_outcome/4`, which no-ops when
   # `--debug-tool` is disabled and swallows + `warn`-logs any failure
   # — it can never affect the response.
-  defp async_tools_call(id, params, protocol_version) do
+  defp async_tools_call(id, params, opts) do
+    protocol_version = Keyword.get(opts, :protocol_version, Version.primary())
     args = extract_arguments(params)
 
     case validate_tool_args(params, args) do
@@ -335,7 +339,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
       {:ok, :ptc_lisp_execute, {program, context, parsed_signature}} ->
         work_fn =
-          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+          recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
               id,
               params,
@@ -347,7 +351,10 @@ defmodule PtcRunnerMcp.JsonRpc do
                 # parent `tools/call` request.
                 Tools.call_validated(program, context, parsed_signature, request_id: id)
               end,
-              protocol_version: protocol_version
+              protocol_version: protocol_version,
+              transport_request_id: Keyword.get(opts, :transport_request_id),
+              owner_hash: Keyword.get(opts, :owner_hash),
+              mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
             )
           end)
 
@@ -356,14 +363,17 @@ defmodule PtcRunnerMcp.JsonRpc do
 
       {:ok, :ptc_task, validated} ->
         work_fn =
-          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+          recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
               id,
               params,
               fn ->
                 Tools.call_agentic_validated(validated, request_id: id)
               end,
-              protocol_version: protocol_version
+              protocol_version: protocol_version,
+              transport_request_id: Keyword.get(opts, :transport_request_id),
+              owner_hash: Keyword.get(opts, :owner_hash),
+              mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
             )
           end)
 
@@ -372,14 +382,17 @@ defmodule PtcRunnerMcp.JsonRpc do
 
       {:ok, :ptc_session_eval, validated} ->
         work_fn =
-          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+          recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
               id,
               params,
               fn ->
                 Tools.call_session_eval_reserved(validated, request_id: id)
               end,
-              protocol_version: protocol_version
+              protocol_version: protocol_version,
+              transport_request_id: Keyword.get(opts, :transport_request_id),
+              owner_hash: Keyword.get(opts, :owner_hash),
+              mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
             )
           end)
 
@@ -417,6 +430,16 @@ defmodule PtcRunnerMcp.JsonRpc do
 
       strip_private_result(envelope)
     end
+  end
+
+  defp call_opts(opts) do
+    Keyword.take(opts, [
+      :protocol_version,
+      :transport,
+      :transport_request_id,
+      :owner_hash,
+      :mcp_session_hash
+    ])
   end
 
   # 1-arity callback Stdio runs (passing the `busy` envelope it built)
@@ -518,13 +541,14 @@ defmodule PtcRunnerMcp.JsonRpc do
         other -> Jason.encode!(other)
       end
 
-    TraceFile.with_traced_call(request_id, query_str, [], fn ->
+    TraceFile.with_traced_call(request_id, query_str, trace_header_opts(opts), fn ->
       span_meta =
         call_start_meta(
           request_id,
           params,
           args,
-          Keyword.get(opts, :protocol_version, Version.primary())
+          Keyword.get(opts, :protocol_version, Version.primary()),
+          opts
         )
 
       :telemetry.span([:ptc_runner_mcp, :call], span_meta, fn ->
@@ -542,7 +566,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp extract_arguments(%{"arguments" => args}) when is_map(args), do: args
   defp extract_arguments(_), do: %{}
 
-  defp call_start_meta(request_id, params, args, protocol_version) do
+  defp call_start_meta(request_id, params, args, protocol_version, opts) do
     program = Map.get(args, "program")
     context = Map.get(args, "context")
 
@@ -571,8 +595,14 @@ defmodule PtcRunnerMcp.JsonRpc do
       program_bytes: program_bytes,
       context_bytes: context_bytes,
       signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
-      protocol_version: protocol_version
+      protocol_version: protocol_version,
+      transport: Keyword.get(opts, :transport),
+      transport_request_id: Keyword.get(opts, :transport_request_id),
+      owner_hash: Keyword.get(opts, :owner_hash),
+      mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
     }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp call_stop_meta(start_meta, envelope) do
@@ -590,19 +620,32 @@ defmodule PtcRunnerMcp.JsonRpc do
     # the full `validated` value or `prints`. Same payload-policy
     # bypass concern as call_start_meta — third-party subscribers
     # MUST NOT receive raw user content via telemetry.
-    base = %{
-      request_id: start_meta.request_id,
-      tool_name: start_meta.tool_name,
-      protocol_version: start_meta.protocol_version,
-      status: status,
-      is_error: is_error,
-      validated_present?: Map.has_key?(sc, "validated")
-    }
+    base =
+      %{
+        request_id: start_meta.request_id,
+        tool_name: start_meta.tool_name,
+        protocol_version: start_meta.protocol_version,
+        transport: Map.get(start_meta, :transport),
+        transport_request_id: Map.get(start_meta, :transport_request_id),
+        owner_hash: Map.get(start_meta, :owner_hash),
+        mcp_session_hash: Map.get(start_meta, :mcp_session_hash),
+        status: status,
+        is_error: is_error,
+        validated_present?: Map.has_key?(sc, "validated")
+      }
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
 
     case reason do
       nil -> base
       r -> Map.put(base, :reason, r)
     end
+  end
+
+  defp trace_header_opts(opts) do
+    opts
+    |> Keyword.take([:transport_request_id, :owner_hash, :mcp_session_hash])
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
   end
 
   # ----------------------------------------------------------------
