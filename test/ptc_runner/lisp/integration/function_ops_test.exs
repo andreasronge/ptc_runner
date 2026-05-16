@@ -130,7 +130,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == [:bob, 7]
+      assert result == ["bob", 7]
     end
 
     test "max-key with apply on map entries" do
@@ -139,7 +139,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == [:bob, 7]
+      assert result == ["bob", 7]
     end
 
     test "min-key returns element with least (f x)" do
@@ -171,7 +171,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{a: 10, b: 42}
+      assert result == %{"a" => 10, "b" => 42}
     end
 
     test "sum-by with function key" do

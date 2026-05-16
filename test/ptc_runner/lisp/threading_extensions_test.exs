@@ -128,7 +128,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "nil takes else branch" do
-      assert {:ok, %{return: :nope}} = Lisp.run("(if-some [x nil] (inc x) :nope)")
+      assert {:ok, %{return: "nope"}} = Lisp.run("(if-some [x nil] (inc x) :nope)")
     end
 
     test "false is NOT nil — binds and takes then branch" do

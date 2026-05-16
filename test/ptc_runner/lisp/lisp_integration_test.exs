@@ -46,9 +46,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       # V2: Map returns as-is, no implicit memory merge
       assert result == %{
-               :"high-paid" => [%{id: 1, name: "Alice", salary: 150_000, email: "alice@ex.com"}],
-               emails: ["alice@ex.com"],
-               count: 1
+               "high-paid" => [%{id: 1, name: "Alice", salary: 150_000, email: "alice@ex.com"}],
+               "emails" => ["alice@ex.com"],
+               :count => 1
              }
 
       assert new_memory == %{}
@@ -93,7 +93,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
-      assert result == %{:"cached-x" => 10, :"cached-y" => 20, result: 30}
+      assert result == %{"cached-x" => 10, "cached-y" => 20, "result" => 30}
       assert new_memory == %{}
     end
 
@@ -126,7 +126,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Thread-first: value goes as first argument
       source = "(-> {:a 1} (assoc :b 2) (assoc :c 3))"
       {:ok, %{return: result, memory: _}} = Lisp.run(source)
-      assert result == %{a: 1, b: 2, c: 3}
+      assert result == %{"a" => 1, "b" => 2, "c" => 3}
     end
 
     test "thread-last with multiple transformations" do
@@ -180,7 +180,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       ctx = %{user: %{name: "Alice", age: 30}}
       {:ok, %{return: result, memory: _}} = Lisp.run(source, context: ctx)
-      assert result == %{name: "Alice", age: 30}
+      assert result == %{:name => "Alice", "age" => 30}
     end
 
     test "underscore in vector destructuring skips positions" do
@@ -329,7 +329,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       {:ok, %{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) {:a 1 :b 2})|)
       assert length(result) == 2
       # Order is arbitrary but structure should be [index, [key, value]]
-      assert Enum.any?(result, fn [i, x] -> i in [0, 1] and x in [[:a, 1], [:b, 2]] end)
+      assert Enum.any?(result, fn [i, x] -> i in [0, 1] and x in [["a", 1], ["b", 2]] end)
     end
   end
 
@@ -486,7 +486,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   describe "key/val Clojure compatibility" do
     test "key extracts key from map entry vector" do
       {:ok, %{return: result}} = Lisp.run("(key [:a 1])")
-      assert result == :a
+      assert result == "a"
     end
 
     test "val extracts value from map entry vector" do
@@ -496,7 +496,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "key/val work with map iteration (seq)" do
       {:ok, %{return: result}} = Lisp.run("(map key (seq {:a 1 :b 2}))")
-      assert Enum.sort(result) == [:a, :b]
+      assert Enum.sort(result) == ["a", "b"]
     end
 
     test "max-key finds entry with max value" do
@@ -511,12 +511,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "apply max-key with val on map (Clojure pattern)" do
       {:ok, %{return: result}} = Lisp.run("(apply max-key val (seq {:a 10 :b 42 :c 7}))")
-      assert result == [:b, 42]
+      assert result == ["b", 42]
     end
 
     test "key extracts from max-key result" do
       {:ok, %{return: result}} = Lisp.run("(key (apply max-key val (seq {:a 10 :b 42 :c 7})))")
-      assert result == :b
+      assert result == "b"
     end
 
     test "val extracts from min-key result" do
@@ -815,7 +815,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     test "basic keyword args with :keys" do
       code = ~s|(defn foo [& {:keys [a b]}] {:a a :b b}) (foo :a 1 :b 2)|
       {:ok, %{return: result}} = Lisp.run(code)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "keyword args with zero rest args defaults to nil" do
@@ -830,7 +830,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
     test "keyword args with :as binding" do
       code = ~s|((fn [& {:keys [a] :as opts}] [a opts]) :a 1)|
-      {:ok, %{return: [1, %{a: 1}]}} = Lisp.run(code)
+      {:ok, %{return: [1, %{"a" => 1}]}} = Lisp.run(code)
     end
 
     test "odd number of keyword args returns error" do

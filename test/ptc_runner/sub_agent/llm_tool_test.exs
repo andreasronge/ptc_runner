@@ -450,7 +450,7 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
       tools = ToolNormalizer.normalize(%{"judge" => llm_tool}, state, agent)
       result = tools["judge"].(%{"a" => "hiking", "b" => "camping"})
 
-      assert result == :compatible
+      assert result == "compatible"
     after
       for path <- Path.wildcard(System.tmp_dir!() |> Path.join("ptc_test_traces_*")) do
         File.rm_rf!(path)

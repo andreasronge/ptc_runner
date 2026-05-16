@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       {:ok, %{return: result, memory: _}} =
         Lisp.run("{:value (/ 10 3)}", float_precision: 1)
 
-      assert result == %{value: 3.3}
+      assert result == %{"value" => 3.3}
     end
 
     test "precision 0 rounds to integers" do
@@ -45,7 +45,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       {:ok, %{return: result, memory: _}} =
         Lisp.run("{:value (/ 10 3), :pi 3.14159}", float_precision: 2)
 
-      assert result == %{value: 3.33, pi: 3.14}
+      assert result == %{"value" => 3.33, "pi" => 3.14}
     end
   end
 
@@ -132,7 +132,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
     test "validates nested structure" do
       source = "{:items [{:id 1} {:id 2}]}"
 
-      assert {:ok, %{return: %{items: _}}} =
+      assert {:ok, %{return: %{"items" => _}}} =
                Lisp.run(source, signature: "{items [{id :int}]}")
     end
 
@@ -149,8 +149,8 @@ defmodule PtcRunner.Lisp.OptionsTest do
       assert {:ok, %{return: return}} =
                Lisp.run(source, signature: "{user-id :int, is-active :bool}")
 
-      assert Map.get(return, :"user-id") == 42
-      assert Map.get(return, :"is-active") == true
+      assert Map.get(return, "user-id") == 42
+      assert Map.get(return, "is-active") == true
     end
 
     test "hyphenated signature field matches underscored result key" do
@@ -203,7 +203,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       # V2: :return is just a regular key, map returns as-is
       source = "{:value 42, :stored 100}"
 
-      assert {:ok, %{return: %{value: 42, stored: 100}, signature: _}} =
+      assert {:ok, %{return: %{"value" => 42, "stored" => 100}, signature: _}} =
                Lisp.run(source, signature: "{value :int, stored :int}")
     end
   end
@@ -222,7 +222,9 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
     test "accepts programs within limit" do
       program = "{:a 1 :b 2 :c 3}"
-      assert {:ok, %{return: %{a: 1, b: 2, c: 3}}} = Lisp.run(program, max_symbols: 10)
+
+      assert {:ok, %{return: %{"a" => 1, "b" => 2, "c" => 3}}} =
+               Lisp.run(program, max_symbols: 10)
     end
 
     test "uses default limit of 10_000" do
@@ -288,7 +290,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, timeout: 1000)
 
-      assert result == %{value: 42, stored: 100}
+      assert result == %{"value" => 42, "stored" => 100}
       assert new_memory == %{}
     end
 
@@ -316,7 +318,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
       {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, tools: tools)
 
-      assert result == %{result: "success", status: "done"}
+      assert result == %{"result" => "success", "status" => "done"}
       assert new_memory == %{}
     end
   end

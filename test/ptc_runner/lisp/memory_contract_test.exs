@@ -44,7 +44,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       source = "{:cached-count 3}"
       {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
-      assert result == %{:"cached-count" => 3}
+      assert result == %{"cached-count" => 3}
       assert new_memory == %{}
     end
 
@@ -55,7 +55,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       {:ok, %{return: result, memory: new_memory}} =
         Lisp.run(source, memory: initial_memory)
 
-      assert result == %{y: 20}
+      assert result == %{"y" => 20}
       assert new_memory == %{x: 10}
     end
 
@@ -64,7 +64,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
       {:ok, %{return: result, memory: new_memory}} = Lisp.run(source)
 
       # :return is just a regular key now, no special extraction
-      assert result == %{return: 42, stored: 100}
+      assert result == %{:return => 42, "stored" => 100}
       assert new_memory == %{}
     end
 

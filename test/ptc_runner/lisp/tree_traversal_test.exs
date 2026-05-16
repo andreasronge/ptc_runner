@@ -19,7 +19,7 @@ defmodule PtcRunner.Lisp.TreeTraversalTest do
     test "walks a map" do
       source = ~S|(walk identity identity {:a 1 :b 2})|
       {:ok, %{return: result}} = Lisp.run(source)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "scalar passes through outer only" do
@@ -75,7 +75,7 @@ defmodule PtcRunner.Lisp.TreeTraversalTest do
     test "works on maps" do
       source = ~S|(prewalk #(if (number? %) (inc %) %) {:a 1 :b {:c 2}})|
       {:ok, %{return: result}} = Lisp.run(source)
-      assert result == %{a: 2, b: %{c: 3}}
+      assert result == %{"a" => 2, "b" => %{"c" => 3}}
     end
 
     test "works on sets" do
@@ -137,7 +137,7 @@ defmodule PtcRunner.Lisp.TreeTraversalTest do
     test "works on maps" do
       source = ~S|(postwalk #(if (number? %) (inc %) %) {:a 1 :b {:c 2}})|
       {:ok, %{return: result}} = Lisp.run(source)
-      assert result == %{a: 2, b: %{c: 3}}
+      assert result == %{"a" => 2, "b" => %{"c" => 3}}
     end
 
     test "works on sets" do
@@ -258,7 +258,7 @@ defmodule PtcRunner.Lisp.TreeTraversalTest do
                  {:value 1 :nested {:value 2}})
       |
       {:ok, %{return: result}} = Lisp.run(source)
-      assert result == %{value: 2, nested: %{value: 3}}
+      assert result == %{"value" => 2, "nested" => %{"value" => 3}}
     end
 
     test "count nodes in tree" do

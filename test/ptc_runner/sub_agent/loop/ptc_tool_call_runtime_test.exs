@@ -410,7 +410,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         )
 
       {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
-      assert step.return == :ok
+      assert step.return == "ok"
       assert paired_tool_call_id?(step.messages, "c1")
 
       tool_msg = find_tool_message(step.messages, "c1")
@@ -525,7 +525,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         )
 
       {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
-      assert step.return == :recovered
+      assert step.return == "recovered"
 
       msg_a = find_tool_message(step.messages, "a")
       msg_b = find_tool_message(step.messages, "b")
@@ -557,7 +557,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         )
 
       {:ok, step} = SubAgent.run(agent, llm: llm, collect_messages: true)
-      assert step.return == :ok
+      assert step.return == "ok"
 
       assert json_field(find_tool_message(step.messages, "x"), "reason") ==
                "multiple_tool_calls"
@@ -1017,7 +1017,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         )
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm)
-      assert step.return == :done
+      assert step.return == "done"
     end
   end
 end

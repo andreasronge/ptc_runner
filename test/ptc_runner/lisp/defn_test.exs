@@ -318,7 +318,7 @@ defmodule PtcRunner.Lisp.DefnTest do
 
       {:ok, %{return: result}} = Lisp.run(source)
 
-      assert result == [%{amount: 150}, %{amount: 200}]
+      assert result == [%{"amount" => 150}, %{"amount" => 200}]
     end
 
     test "defn with multiple body expressions (implicit do)" do

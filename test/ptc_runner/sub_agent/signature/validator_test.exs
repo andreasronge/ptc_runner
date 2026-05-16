@@ -49,9 +49,30 @@ defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
       assert :ok = Validator.validate(:pending, :keyword)
     end
 
-    test "rejects string as keyword" do
+    test "validates keyword (struct)" do
+      assert :ok = Validator.validate(PtcRunner.Lisp.Keyword.new("pending"), :keyword)
+    end
+
+    test "accepts a valid keyword-name binary (externalized form, #964)" do
+      # A keyword outside the bounded vocabulary externalizes to a plain
+      # binary, so a binary is a valid `:keyword` value at the boundary.
+      # Operator chars are accepted because the parser allows them in
+      # keyword literals (e.g. `:foo+`).
+      for name <- ["pending", "high-priority", "foo+", "ok?"] do
+        assert :ok = Validator.validate(name, :keyword)
+      end
+    end
+
+    test "rejects a binary that is not a valid keyword name" do
+      for invalid <- ["not a keyword", "", "foo/bar"] do
+        assert {:error, [%{path: [], message: "expected keyword, got " <> _}]} =
+                 Validator.validate(invalid, :keyword)
+      end
+    end
+
+    test "rejects a non-keyword value as keyword" do
       assert {:error, [%{path: [], message: "expected keyword, got " <> _}]} =
-               Validator.validate("pending", :keyword)
+               Validator.validate(42, :keyword)
     end
   end
 

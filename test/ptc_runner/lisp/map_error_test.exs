@@ -18,7 +18,7 @@ defmodule PtcRunner.Lisp.MapErrorTest do
 
     test "still works with function and single map" do
       {:ok, %Step{return: result}} = Lisp.run("(map (fn [x] (first x)) {:a 1 :b 2})")
-      assert Enum.sort(result) == [:a, :b]
+      assert Enum.sort(result) == ["a", "b"]
     end
   end
 
@@ -36,7 +36,7 @@ defmodule PtcRunner.Lisp.MapErrorTest do
 
     test "still works with function and single map" do
       {:ok, %Step{return: result}} = Lisp.run("(mapv (fn [x] (first x)) {:a 1 :b 2})")
-      assert Enum.sort(result) == [:a, :b]
+      assert Enum.sort(result) == ["a", "b"]
     end
   end
 end

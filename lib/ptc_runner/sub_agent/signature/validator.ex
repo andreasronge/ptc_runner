@@ -63,11 +63,15 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end
   end
 
+  # A keyword outside the bounded vocabulary externalizes to a plain binary
+  # (#964), so a binary whose contents form a valid keyword name is accepted.
+  # Arbitrary strings (spaces, `/`, empty) are still rejected so the signature
+  # keeps catching genuinely wrong return values.
   defp validate_type(data, :keyword, path) do
-    if is_atom(data) or match?(%LispKeyword{}, data) do
-      []
-    else
-      [error_at(path, "expected keyword, got #{type_name(data)}")]
+    cond do
+      is_atom(data) or match?(%LispKeyword{}, data) -> []
+      is_binary(data) and LispKeyword.valid_name?(data) -> []
+      true -> [error_at(path, "expected keyword, got #{type_name(data)}")]
     end
   end
 

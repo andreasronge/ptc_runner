@@ -20,7 +20,7 @@ defmodule PtcRunner.Lisp.TerminationTest do
       # 4. The final result of the `do` block is the result of println (nil)
 
       # We EXPECT it to return the sentinel from return and NOT execute the rest
-      assert step.return == {:__ptc_return__, %{status: "ok"}}
+      assert step.return == {:__ptc_return__, %{"status" => "ok"}}
       assert step.memory == %{}
       assert step.prints == []
     end
@@ -57,7 +57,7 @@ defmodule PtcRunner.Lisp.TerminationTest do
 
     test "fail in thread-first (->)" do
       {:ok, step} = Lisp.run("(-> {:reason :test} (fail))")
-      assert step.return == {:__ptc_fail__, %{reason: :test}}
+      assert step.return == {:__ptc_fail__, %{"reason" => "test"}}
     end
 
     test "return in longer pipeline" do

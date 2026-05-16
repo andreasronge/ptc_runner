@@ -103,7 +103,7 @@ defmodule PtcRunner.Step do
 
   ## Error Reasons
 
-  Complete list of error reasons in `step.fail.reason`:
+  Common system error reasons in `step.fail.reason`:
 
   | Reason | Source | Description |
   |--------|--------|-------------|
@@ -128,7 +128,7 @@ defmodule PtcRunner.Step do
   | `:invalid_llm` | SubAgent | Registry value not a function |
   | `:chained_failure` | SubAgent | Chained onto a failed step |
   | `:template_error` | SubAgent | Template placeholder missing |
-  | Custom atoms | SubAgent | From `(fail {:reason :custom ...})` |
+  | Custom atoms/strings | SubAgent | Caller-defined structured fail reasons; novel keyword reasons externalize as strings |
 
   ## Usage Patterns
 
@@ -208,13 +208,14 @@ defmodule PtcRunner.Step do
   Error information on failure.
 
   Fields:
-  - `reason`: Machine-readable error code (atom)
+  - `reason`: Machine-readable error code. System failures use atoms;
+    structured `(fail {:reason ...})` can carry a caller-defined atom or string.
   - `message`: Human-readable description
   - `op`: Optional operation/tool that failed
   - `details`: Optional additional context
   """
   @type fail :: %{
-          required(:reason) => atom(),
+          required(:reason) => atom() | String.t(),
           required(:message) => String.t(),
           optional(:op) => String.t(),
           optional(:details) => map()

@@ -167,9 +167,9 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
-      assert Enum.find(result, &(&1.id == 1)).size == "small"
-      assert Enum.find(result, &(&1.id == 2)).size == "medium"
-      assert Enum.find(result, &(&1.id == 3)).size == "large"
+      assert Enum.find(result, &(&1["id"] == 1))["size"] == "small"
+      assert Enum.find(result, &(&1["id"] == 2))["size"] == "medium"
+      assert Enum.find(result, &(&1["id"] == 3))["size"] == "large"
     end
   end
 
@@ -227,8 +227,8 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
         Lisp.run(source, tools: tools)
 
       assert result.count == 2
-      assert length(result.high_value_orders) == 2
-      assert Enum.all?(result.high_value_orders, fn o -> o.amount > 1000 end)
+      assert length(result["high_value_orders"]) == 2
+      assert Enum.all?(result["high_value_orders"], fn o -> o.amount > 1000 end)
       assert new_memory == %{}
     end
   end
@@ -323,8 +323,8 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result == [
-               %{id: 1, name: "Order A"},
-               %{id: 2, name: "Order B"}
+               %{"id" => 1, :name => "Order A"},
+               %{"id" => 2, :name => "Order B"}
              ]
     end
 
@@ -346,8 +346,8 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
       {:ok, %Step{return: result}} = Lisp.run(source, context: ctx)
 
       assert result == [
-               %{id: 1, name: "Order A"},
-               %{id: 2, name: "Order B"}
+               %{"id" => 1, :name => "Order A"},
+               %{"id" => 2, :name => "Order B"}
              ]
     end
   end

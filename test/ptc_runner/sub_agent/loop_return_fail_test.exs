@@ -64,7 +64,7 @@ defmodule PtcRunner.SubAgent.LoopReturnFailTest do
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{n: 5})
 
-      assert step.return == %{"sign" => :positive}
+      assert step.return == %{"sign" => "positive"}
     end
   end
 
