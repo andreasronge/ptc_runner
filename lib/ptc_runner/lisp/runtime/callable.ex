@@ -16,15 +16,28 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
       (map range [1 2 3])              ;; multi_arity - now works
   """
 
-  alias PtcRunner.Lisp.Runtime.Math
-
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.FlexAccess
+  alias PtcRunner.Lisp.Runtime.Math
 
   # Guard: true keywords (atoms that aren't nil, true, or false)
   defguardp is_keyword(k) when is_atom(k) and k != nil and k != true and k != false
 
   @spec call(term(), [term()]) :: term()
   def call(f, args) when is_function(f), do: apply(f, args)
+
+  def call(%LispKeyword{} = k, [m]) when is_map(m), do: FlexAccess.flex_get(m, k)
+  def call(%LispKeyword{}, [nil]), do: nil
+  def call(%LispKeyword{}, [_]), do: nil
+
+  def call(%LispKeyword{} = k, [m, default]) when is_map(m) do
+    case FlexAccess.flex_fetch(m, k) do
+      {:ok, val} -> val
+      :error -> default
+    end
+  end
+
+  def call(%LispKeyword{}, [nil, default]), do: default
 
   # Keyword as function: (:key map) → map lookup
   def call(k, [m]) when is_keyword(k) and is_map(m), do: FlexAccess.flex_get(m, k)

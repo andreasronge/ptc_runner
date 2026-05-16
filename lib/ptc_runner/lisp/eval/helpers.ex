@@ -82,8 +82,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   # (get key map) / (get-in path map) — collection must come first. A keyword
   # or string first arg with a map second arg is almost always swapped.
-  defp specific_type_error(name, [k, %{} = _m] = args)
-       when name in [:get, :get_in] and (is_atom(k) or is_binary(k) or is_list(k)) do
+  defp specific_type_error(name, [k, %{} = m] = args)
+       when name in [:get, :get_in] and not is_struct(m) and
+              (is_atom(k) or is_binary(k) or is_list(k) or
+                 is_struct(k, PtcRunner.Lisp.Keyword)) do
     {:ok,
      {:type_error,
       "#{display_name(name)} expects the collection first, e.g. (#{display_name(name)} map key) — " <>

@@ -7,12 +7,12 @@ defmodule PtcRunner.AtomLeakSoakTest do
 
   This is the regression test for [#953](https://github.com/andreasronge/ptc_runner/issues/953).
 
-  PTC-Lisp's parser currently interns every var, symbol, and keyword
-  name via `String.to_atom/1` (see `lib/ptc_runner/lisp/parser_helpers.ex`,
-  `lib/ptc_runner/lisp/ast.ex`), so this test is **expected to fail
-  on the pre-fix code**. After the audited call sites switch to
-  `String.to_existing_atom/1` (or move to binary keys), the rate
-  should drop to ~0 atoms/iter.
+  PTC-Lisp used to intern every var, symbol, and keyword name via
+  `String.to_atom/1` (see `lib/ptc_runner/lisp/parser_helpers.ex`,
+  `lib/ptc_runner/lisp/ast.ex`). The parser now keeps only the bounded
+  `SourceAtoms` vocabulary as atoms and leaves unbounded source names
+  as binaries, so the steady-state atom growth rate should stay at
+  ~0 atoms/iter.
 
   ## Why three programs
 
@@ -37,14 +37,7 @@ defmodule PtcRunner.AtomLeakSoakTest do
   alias PtcRunner.Lisp
   alias PtcRunner.TestSupport.MemorySoak
 
-  # Tagged `:skip` because this regression test currently fails — it
-  # reproduces the leak described in
-  # https://github.com/andreasronge/ptc_runner/issues/953. Run
-  # explicitly with `mix test --include skip --include soak
-  # test/soak/atom_leak_soak_test.exs` to reproduce.
-  # Remove the `:skip` tag once #953 is fixed.
   @moduletag :soak
-  @moduletag :skip
   @moduletag timeout: :infinity
 
   setup do

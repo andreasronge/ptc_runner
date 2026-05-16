@@ -21,12 +21,12 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
   end
 
   def match_pattern({:destructure, {:keys, keys, defaults}}, value)
-      when is_map(value) or is_nil(value) do
+      when (is_map(value) and not is_struct(value)) or is_nil(value) do
     value = value || %{}
 
     bindings =
       Enum.reduce(keys, %{}, fn key, acc ->
-        default = Keyword.get(defaults, key)
+        default = default_for(defaults, key)
 
         val =
           case flex_fetch(value, key) do
@@ -45,12 +45,12 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
   end
 
   def match_pattern({:destructure, {:map, keys, renames, defaults}}, value)
-      when is_map(value) or is_nil(value) do
+      when (is_map(value) and not is_struct(value)) or is_nil(value) do
     value = value || %{}
     # First extract keys
     keys_bindings =
       Enum.reduce(keys, %{}, fn key, acc ->
-        default = Keyword.get(defaults, key)
+        default = default_for(defaults, key)
 
         val =
           case flex_fetch(value, key) do
@@ -68,7 +68,7 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
         # or we just pass nil and let the inner pattern handle its own defaults.
         default =
           case pattern do
-            {:var, name} -> Keyword.get(defaults, name)
+            {:var, name} -> default_for(defaults, name)
             _ -> nil
           end
 
@@ -192,5 +192,12 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
     list
     |> Enum.chunk_every(2)
     |> Enum.into(%{}, fn [k, v] -> {k, v} end)
+  end
+
+  defp default_for(defaults, key) when is_list(defaults) do
+    case List.keyfind(defaults, key, 0) do
+      {^key, value} -> value
+      nil -> nil
+    end
   end
 end

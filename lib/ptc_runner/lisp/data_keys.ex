@@ -76,7 +76,9 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   # Data access - the target of our extraction
   defp do_extract({:data, key}, acc) when is_atom(key), do: MapSet.put(acc, key)
-  defp do_extract({:data, key}, acc) when is_binary(key), do: MapSet.put(acc, key)
+
+  defp do_extract({:data, key}, acc) when is_binary(key),
+    do: MapSet.put(acc, existing_atom_or(key))
 
   # Lists - recurse into each element
   defp do_extract(list, acc) when is_list(list) do
@@ -99,4 +101,10 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   # Primitives and structs - no data access
   defp do_extract(_other, acc), do: acc
+
+  defp existing_atom_or(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> key
+  end
 end

@@ -46,7 +46,9 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
       iex> f.(5)
       6
   """
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.SourceAtoms
 
   # Plain 1-arity function
   def fnil(f, default) when is_function(f, 1) do
@@ -240,8 +242,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def string?(x), do: is_binary(x)
 
-  def keyword?(x),
-    do: is_atom(x) and not is_nil(x) and not is_boolean(x) and not SpecialValues.special?(x)
+  def keyword?(x), do: LispKeyword.keyword?(x) and not SpecialValues.special?(x)
 
   def vector?(x), do: is_list(x)
   def char?(x), do: is_binary(x) and String.length(x) == 1
@@ -255,7 +256,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # coll? returns true for all collections: vectors, maps, and sets
   def coll?(x) when is_list(x), do: true
   def coll?(%MapSet{}), do: true
-  def coll?(x) when is_map(x), do: true
+  def coll?(x) when is_map(x) and not is_struct(x), do: true
   def coll?(_), do: false
 
   # sequential? returns true for ordered collections (vectors in PTC-Lisp)
@@ -305,6 +306,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # like mapv/group-by because Callable.call/2 doesn't dispatch on them.
   # Wrap in a lambda: (mapv #(my-map %) coll)
   def ifn?(%MapSet{}), do: true
+  def ifn?(%LispKeyword{}), do: true
   def ifn?(x) when is_map(x) and not is_struct(x), do: true
   def ifn?(x) when is_atom(x) and not is_nil(x) and not is_boolean(x), do: type_of(x) != :number
   def ifn?(x), do: type_of(x) == :function
@@ -325,6 +327,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def type_of(x) when is_binary(x), do: :string
   def type_of(x) when is_list(x), do: :vector
   def type_of(%MapSet{}), do: :set
+  def type_of(%LispKeyword{}), do: :keyword
 
   def type_of(x) when is_atom(x) do
     if SpecialValues.special?(x), do: :number, else: :keyword
@@ -340,7 +343,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     end
   end
 
-  def type_of(x) when is_map(x), do: :map
+  def type_of(x) when is_map(x) and not is_struct(x), do: :map
   def type_of(x) when is_function(x), do: :function
   def type_of(_), do: :unknown
 
@@ -380,25 +383,21 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     end
   end
 
+  def keyword(%LispKeyword{} = k), do: k
+
   def keyword(s) when is_binary(s) do
     unless Regex.match?(@keyword_pattern, s) do
       raise ArgumentError, "invalid keyword name: #{inspect(s)}"
     end
 
-    case safe_to_existing_atom(s) do
-      {:ok, atom} -> atom
-      :error -> raise ArgumentError, "keyword not found: #{inspect(s)}"
+    case SourceAtoms.intern(s) do
+      atom when is_atom(atom) -> atom
+      name when is_binary(name) -> LispKeyword.new(name)
     end
   end
 
   def keyword(x) do
     raise ArgumentError, "cannot coerce to keyword: #{inspect(x)}"
-  end
-
-  defp safe_to_existing_atom(s) do
-    {:ok, String.to_existing_atom(s)}
-  rescue
-    ArgumentError -> :error
   end
 
   @doc "Convert collection to set"

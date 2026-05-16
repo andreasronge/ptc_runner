@@ -5,6 +5,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   Provides strict validation with path-based error reporting.
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.SubAgent.KeyNormalizer
 
   @type validation_error :: %{
@@ -63,7 +64,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   end
 
   defp validate_type(data, :keyword, path) do
-    if is_atom(data) do
+    if is_atom(data) or match?(%LispKeyword{}, data) do
       []
     else
       [error_at(path, "expected keyword, got #{type_name(data)}")]
@@ -71,7 +72,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   end
 
   defp validate_type(data, :map, path) do
-    if is_map(data) do
+    if plain_map?(data) do
       []
     else
       [error_at(path, "expected map, got #{type_name(data)}")]
@@ -117,7 +118,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
 
   # Map types with field validation
   defp validate_type(data, {:map, fields}, path) do
-    if is_map(data) do
+    if plain_map?(data) do
       validate_map_fields(data, fields, path)
     else
       [error_at(path, "expected map, got #{type_name(data)}")]
@@ -128,7 +129,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   # declared field is validated as usual *and* any undeclared key is an
   # error, so fields the caller explicitly excluded can't leak through.
   defp validate_type(data, {:closed_map, fields}, path) do
-    if is_map(data) do
+    if plain_map?(data) do
       {field_errors, consumed_keys} = validate_map_fields_tracking(data, fields, path)
       field_errors ++ validate_no_extra_fields(data, consumed_keys, path)
     else
@@ -181,6 +182,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
     end)
   end
 
+  defp path_segment(%LispKeyword{name: name}), do: name
   defp path_segment(key) when is_binary(key) or is_atom(key), do: to_string(key)
   defp path_segment(key), do: inspect(key)
 
@@ -189,7 +191,7 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   # or normalized `:user_id` / `"user_id"`). PTC-Lisp keyword-keyed maps reach
   # the validator with hyphenated atom keys; Elixir-side tools typically use
   # underscored atom or string keys.
-  defp get_field(data, field_name) when is_map(data) do
+  defp get_field(data, field_name) when is_map(data) and not is_struct(data) do
     normalized = KeyNormalizer.normalize_key(field_name)
 
     candidates =
@@ -217,7 +219,17 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
         result
 
       :missing ->
-        if Map.has_key?(data, key), do: {:ok, key, Map.get(data, key)}, else: :missing
+        cond do
+          Map.has_key?(data, key) ->
+            {:ok, key, Map.get(data, key)}
+
+          Map.has_key?(data, %LispKeyword{name: key}) ->
+            keyword = %LispKeyword{name: key}
+            {:ok, keyword, Map.get(data, keyword)}
+
+          true ->
+            :missing
+        end
     end
   end
 
@@ -237,12 +249,15 @@ defmodule PtcRunner.SubAgent.Signature.Validator do
   defp optional?({:optional, _type}), do: true
   defp optional?(_), do: false
 
+  defp plain_map?(data), do: is_map(data) and not is_struct(data)
+
   defp type_name(data) when is_binary(data), do: "string"
   defp type_name(data) when is_integer(data) and not is_boolean(data), do: "int"
   defp type_name(data) when is_float(data), do: "float"
   defp type_name(data) when is_boolean(data), do: "bool"
   defp type_name(data) when is_atom(data), do: "keyword"
-  defp type_name(data) when is_map(data), do: "map"
+  defp type_name(%LispKeyword{}), do: "keyword"
+  defp type_name(data) when is_map(data) and not is_struct(data), do: "map"
   defp type_name(data) when is_list(data), do: "list"
   defp type_name(data), do: inspect(data)
 

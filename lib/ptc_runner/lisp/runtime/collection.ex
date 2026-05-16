@@ -12,6 +12,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   """
 
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.Collection.Select
@@ -414,6 +415,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   # Keyword on string: keyword access on graphemes always nil → nothing passes
   def split_with(pred, coll) when is_atom(pred) and is_binary(coll),
+    do: [[], Normalize.graphemes(coll)]
+
+  def split_with(%LispKeyword{}, coll) when is_binary(coll),
     do: [[], Normalize.graphemes(coll)]
 
   def split_with(pred, coll) do

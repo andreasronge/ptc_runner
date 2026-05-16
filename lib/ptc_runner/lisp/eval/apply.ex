@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
@@ -37,32 +38,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Keyword as function: (:key map) → Map.get(map, :key)
   defp do_apply_fun(k, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_atom(k) do
-    case args do
-      [m] when is_map(m) ->
-        {:ok, flex_get(m, k), eval_ctx}
+    apply_keyword(k, args, eval_ctx)
+  end
 
-      [m, default] when is_map(m) ->
-        case flex_fetch(m, k) do
-          {:ok, val} -> {:ok, val, eval_ctx}
-          :error -> {:ok, default, eval_ctx}
-        end
-
-      [nil] ->
-        {:ok, nil, eval_ctx}
-
-      [nil, default] ->
-        {:ok, default, eval_ctx}
-
-      # Clojure returns nil for keyword lookup on non-map types: (:key "string") → nil
-      [_] ->
-        {:ok, nil, eval_ctx}
-
-      [_, default] ->
-        {:ok, default, eval_ctx}
-
-      _ ->
-        {:error, {:invalid_keyword_call, k, args}}
-    end
+  defp do_apply_fun(%LispKeyword{} = k, args, %EvalContext{} = eval_ctx, _do_eval_fn) do
+    apply_keyword(k, args, eval_ctx)
   end
 
   # Set as function: (#{1 2 3} x) → checks membership, returns element or nil
@@ -326,6 +306,35 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Fallback: not callable
   defp do_apply_fun(other, _args, %EvalContext{}, _do_eval_fn) do
     {:error, {:not_callable, other}}
+  end
+
+  defp apply_keyword(k, args, %EvalContext{} = eval_ctx) do
+    case args do
+      [m] when is_map(m) ->
+        {:ok, flex_get(m, k), eval_ctx}
+
+      [m, default] when is_map(m) ->
+        case flex_fetch(m, k) do
+          {:ok, val} -> {:ok, val, eval_ctx}
+          :error -> {:ok, default, eval_ctx}
+        end
+
+      [nil] ->
+        {:ok, nil, eval_ctx}
+
+      [nil, default] ->
+        {:ok, default, eval_ctx}
+
+      # Clojure returns nil for keyword lookup on non-map types: (:key "string") → nil
+      [_] ->
+        {:ok, nil, eval_ctx}
+
+      [_, default] ->
+        {:ok, default, eval_ctx}
+
+      _ ->
+        {:error, {:invalid_keyword_call, k, args}}
+    end
   end
 
   defp check_arity({:variadic, leading, _rest}, args) do

@@ -50,6 +50,8 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+
   @doc """
   Format a Lisp value as a string for display.
 
@@ -168,6 +170,7 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(s, opts) when is_binary(s), do: format_clojure_string(s, opts)
   defp format_clojure(a, _opts) when is_atom(a), do: {":#{a}", false}
+  defp format_clojure(%LispKeyword{name: name}, _opts), do: {":#{name}", false}
 
   defp format_clojure(%Fn{params: params}, _opts), do: {"#fn[#{params}]", false}
   defp format_clojure(%Builtin{}, _opts), do: {"#<builtin>", false}
@@ -322,6 +325,7 @@ defmodule PtcRunner.Lisp.Format do
 
   # Format map keys - atoms as keywords, strings as strings
   defp format_clojure_key(k) when is_atom(k), do: ":#{k}"
+  defp format_clojure_key(%LispKeyword{name: name}), do: ":#{name}"
   defp format_clojure_key(k) when is_binary(k), do: inspect(k)
 
   defp format_clojure_key(k) do
@@ -376,7 +380,7 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize({:collect, fun}) when is_function(fun), do: %Fn{params: "..."}
 
   # Var references - convert to Var struct for display
-  defp sanitize({:var, name}) when is_atom(name), do: %Var{name: name}
+  defp sanitize({:var, name}) when is_atom(name) or is_binary(name), do: %Var{name: name}
 
   # Pass through wrapper structs unchanged (they're already sanitized)
   defp sanitize(%Var{} = v), do: v
@@ -406,7 +410,7 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize(value), do: value
 
   # Extract parameter name from pattern AST
-  defp extract_param_name({:var, name}), do: Atom.to_string(name)
+  defp extract_param_name({:var, name}), do: Kernel.to_string(name)
   defp extract_param_name({:destructure, _}), do: "_"
   defp extract_param_name(_), do: "_"
 end

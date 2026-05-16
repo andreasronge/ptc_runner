@@ -14,6 +14,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
   """
 
   alias PtcRunner.Lisp.Formatter
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
   Convert a Core AST node to a PTC-Lisp source string.
@@ -63,7 +64,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
   end
 
   # Variables and data access
-  def format({:var, name}), do: Atom.to_string(name)
+  def format({:var, name}), do: to_string(name)
   def format({:data, key}), do: "data/#{key}"
 
   # Collections
@@ -274,11 +275,18 @@ defmodule PtcRunner.Lisp.CoreToSource do
     {non_closures, closures} =
       Enum.split_with(entries, fn {_k, v} -> !match?({:closure, _, _, _, _, _}, v) end)
 
-    ns_keys = MapSet.new(Enum.map(entries, fn {k, _} -> k end))
+    ns_keys = MapSet.new(Enum.map(entries, fn {k, _} -> source_name(k) end))
+
     # Build dependency graph: closure -> set of namespace keys it references
     deps =
       Map.new(closures, fn {k, {:closure, _params, body, _env, _h, _m}} ->
-        {k, collect_var_refs(body) |> MapSet.intersection(ns_keys) |> MapSet.delete(k)}
+        refs =
+          body
+          |> collect_var_refs()
+          |> Enum.map(&source_name/1)
+          |> MapSet.new()
+
+        {k, refs |> MapSet.intersection(ns_keys) |> MapSet.delete(source_name(k))}
       end)
 
     sorted_closures = topo_sort(closures, deps, [], MapSet.new())
@@ -300,10 +308,15 @@ defmodule PtcRunner.Lisp.CoreToSource do
         Enum.reverse(acc) ++ remaining
 
       _ ->
-        new_visited = Enum.reduce(ready, visited, fn {k, _}, vs -> MapSet.put(vs, k) end)
+        new_visited =
+          Enum.reduce(ready, visited, fn {k, _}, vs -> MapSet.put(vs, source_name(k)) end)
+
         topo_sort(blocked, deps, Enum.reverse(ready) ++ acc, new_visited)
     end
   end
+
+  defp source_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp source_name(name) when is_binary(name), do: name
 
   defp collect_var_refs(ast, acc \\ MapSet.new())
   defp collect_var_refs({:var, name}, acc), do: MapSet.put(acc, name)
@@ -393,6 +406,10 @@ defmodule PtcRunner.Lisp.CoreToSource do
     String.starts_with?(name, "_") or String.starts_with?(name, "__ptc_")
   end
 
+  defp internal_key?(key) when is_binary(key) do
+    String.starts_with?(key, "_") or String.starts_with?(key, "__ptc_")
+  end
+
   defp internal_key?(_), do: false
 
   # --- Helpers ---
@@ -415,10 +432,10 @@ defmodule PtcRunner.Lisp.CoreToSource do
     end
   end
 
-  defp format_pattern({:var, name}), do: Atom.to_string(name)
+  defp format_pattern({:var, name}), do: to_string(name)
 
   defp format_pattern({:destructure, {:keys, keys, defaults}}) do
-    keys_str = Enum.map_join(keys, " ", &Atom.to_string/1)
+    keys_str = Enum.map_join(keys, " ", &to_string/1)
 
     case defaults do
       [] ->
@@ -467,6 +484,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
   # Runtime map keys: strings stay as strings, atoms become keywords
   defp format_map_key(k) when is_binary(k), do: ~s("#{escape_string(k)}")
   defp format_map_key(k) when is_atom(k), do: ":#{k}"
+  defp format_map_key(%LispKeyword{name: name}), do: ":#{name}"
   defp format_map_key(k), do: format(k)
 
   defp escape_string(s) do
