@@ -196,6 +196,46 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
              "expected defn memory < 2000 bytes, got #{memory_size}"
     end
 
+    test "closure does not capture a sibling let binding it never references (#961)" do
+      src = """
+      (def f
+        (let [unused-big (apply str (range 0 5000))
+              also-unused 7]
+          (fn [] 42)))
+      """
+
+      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:closure, _params, _body, captured_env, _history, _meta} = step.memory[:f]
+
+      # The body is the literal `42` — it references nothing, so neither
+      # the 5k-char `unused-big` nor `also-unused` should be pinned.
+      assert captured_env == %{}
+
+      assert :erlang.external_size(step.memory) < 2_000,
+             "closure pinned an unused sibling binding: #{:erlang.external_size(step.memory)} bytes"
+    end
+
+    test "closure still captures the sibling binding its body references (#961)" do
+      src = """
+      (def adder
+        (let [base 100
+              unused-big (apply str (range 0 5000))]
+          (fn [n] (+ n base))))
+      """
+
+      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:closure, _params, _body, captured_env, _history, _meta} = step.memory[:adder]
+
+      # `base` is referenced and must survive; `unused-big` must not.
+      assert Map.keys(captured_env) == ["base"] or Map.keys(captured_env) == [:base]
+
+      # The captured closure remains callable in a later turn.
+      {:ok, next} =
+        Lisp.run("(adder 5)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+
+      assert next.return == 105
+    end
+
     test "closures do not retain prior turn history in session memory" do
       large_history_entry = String.duplicate("x", 100_000)
 

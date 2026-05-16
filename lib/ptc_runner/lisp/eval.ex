@@ -374,17 +374,18 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:fn, params, body}, %EvalContext{} = eval_ctx) do
     # Capture only the *user-visible* slice of the env — let/fn-param locals
     # plus any caller-injected env entries (anything that isn't in the
-    # canonical builtin set). Builtins are resolved at call time via the
-    # Env.builtin? fallback in (:var ...), so carrying them in the closure
-    # would inflate session memory by ~18 KB per closure.
-    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
+    # canonical builtin set), further narrowed to names the body actually
+    # references. Builtins are resolved at call time via the Env.builtin?
+    # fallback in (:var ...), so carrying them in the closure would inflate
+    # session memory by ~18 KB per closure.
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, body)
     meta = locals_meta(captured_locals, %{})
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
   # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
   defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
-    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx)
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, body)
     meta = locals_meta(captured_locals, %{fn_name: name})
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
@@ -1433,31 +1434,70 @@ defmodule PtcRunner.Lisp.Eval do
   # Closure capture helpers
   # ============================================================
 
-  defp capture_lexical_scope(%EvalContext{env: env, locals: locals}) do
+  defp capture_lexical_scope(%EvalContext{env: env, locals: locals}, body) do
     initial = Env.initial()
 
-    # Keep an entry if EITHER:
-    #   * its key is in `locals` (let/fn-param, possibly shadowing a builtin
-    #     like `count` — must preserve so the shadow survives in the closure)
-    #   * its key isn't a builtin at all (caller-injected env entries, e.g.
-    #     test harness pre-populating env)
+    # Names the closure body can actually reference (issue #961). A closure
+    # captures its whole enclosing lexical scope, so a `(fn [] 42)` defined
+    # next to a large `let` binding would otherwise pin that binding for the
+    # closure's entire lifetime — and in a long-lived session, for the
+    # session's TTL. `referenced_vars/1` over-approximates: it collects every
+    # `{:var, _}` occurrence in the body (including names re-bound by an inner
+    # scope and nested-fn params), so the result is always a safe superset of
+    # the true free-variable set — it can never drop a binding the body needs.
+    referenced = referenced_vars(body)
+
+    # Keep an entry only if the body references it AND it is EITHER:
+    #   * a key in `locals` (let/fn-param, possibly shadowing a builtin like
+    #     `count` — must preserve so the shadow survives in the closure)
+    #   * not a builtin at all (caller-injected env entries, e.g. a test
+    #     harness pre-populating env)
     # Builtins that the user didn't shadow are stripped; they resolve at
     # call time via the Env.builtin? fallback in (:var ...). This is the
     # whole point of the optimization — each closure would otherwise drag
-    # the full ~18 KB builtin map around.
-    captured_env =
-      :maps.filter(
-        fn key, _value ->
-          MapSet.member?(locals, key) or not Map.has_key?(initial, key)
-        end,
-        env
-      )
+    # the full ~18 KB builtin map (and every unused sibling binding) around.
+    keep? = fn key ->
+      MapSet.member?(referenced, to_string(key)) and
+        (MapSet.member?(locals, key) or not Map.has_key?(initial, key))
+    end
 
-    # `locals` is NOT widened to include caller-injected env keys —
-    # promoting them would invert the documented precedence
-    # (locals > user_ns > env). They stay accessible via the env path.
-    {captured_env, locals}
+    captured_env = :maps.filter(fn key, _value -> keep?.(key) end, env)
+
+    # Narrow `locals` (stored in meta as `:captured_locals`) to the same
+    # referenced set so it stays consistent with `captured_env` — every
+    # captured local still has an env entry. `locals` is NOT widened to
+    # include caller-injected env keys: promoting them would invert the
+    # documented precedence (locals > user_ns > env).
+    captured_locals =
+      locals
+      |> Enum.filter(&MapSet.member?(referenced, to_string(&1)))
+      |> MapSet.new()
+
+    {captured_env, captured_locals}
   end
+
+  # Collects the names of every `{:var, _}` reference anywhere in a CoreAST
+  # subtree, normalized to strings. A deliberately total structural walk —
+  # any unrecognized tuple/list/map is recursed into rather than skipped — so
+  # a future AST node cannot silently cause a referenced var to be missed.
+  @spec referenced_vars(term()) :: MapSet.t(String.t())
+  defp referenced_vars(ast), do: collect_var_refs(ast, MapSet.new())
+
+  defp collect_var_refs({:var, name}, acc), do: MapSet.put(acc, to_string(name))
+
+  defp collect_var_refs(tuple, acc) when is_tuple(tuple) do
+    collect_var_refs(Tuple.to_list(tuple), acc)
+  end
+
+  defp collect_var_refs(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, &collect_var_refs/2)
+  end
+
+  defp collect_var_refs(map, acc) when is_map(map) and not is_struct(map) do
+    Enum.reduce(map, acc, fn {k, v}, inner -> collect_var_refs(v, collect_var_refs(k, inner)) end)
+  end
+
+  defp collect_var_refs(_other, acc), do: acc
 
   # Only embed captured_locals in meta when non-empty — keeps closure size
   # tiny for top-level (defn ...) without enclosing scope.
