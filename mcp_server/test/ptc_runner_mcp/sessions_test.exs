@@ -377,6 +377,101 @@ defmodule PtcRunnerMcp.SessionsTest do
     )
   end
 
+  test "live lookup does not use the central registry mailbox" do
+    session_id = start_session()
+    registry_pid = Process.whereis(Registry)
+
+    :sys.suspend(registry_pid)
+
+    try do
+      assert {:ok, %{pid: session_pid}} = Registry.lookup(session_id)
+      assert Process.alive?(session_pid)
+
+      {:ok, owner} = Owner.from_context(nil)
+      request_id = make_ref()
+      assert {:ok, snapshot} = Sessions.begin_eval(session_id, owner, request_id, %{program: "1"})
+      result = Sessions.run_snapshot(snapshot, "1", %{profile: :mcp_no_tools})
+      assert {:ok, response} = Sessions.commit_eval(session_id, owner, request_id, result, %{})
+      assert response["status"] == "ok"
+    after
+      :sys.resume(registry_pid)
+    end
+  end
+
+  test "custom registries keep explicit session ids isolated from default live lookup" do
+    {:ok, owner} = Owner.from_context(nil)
+    session_id = "shared-session-id"
+
+    {:ok, supervisor_a} = start_named_session_supervisor(:a)
+    {:ok, supervisor_b} = start_named_session_supervisor(:b)
+    {:ok, registry_a} = start_named_session_registry(:a, supervisor_a)
+    {:ok, registry_b} = start_named_session_registry(:b, supervisor_b)
+
+    on_exit(fn ->
+      stop_process(registry_a)
+      stop_process(registry_b)
+      stop_process(supervisor_a)
+      stop_process(supervisor_b)
+    end)
+
+    assert {:ok, %{pid: pid_a}} =
+             Registry.start_session(owner, %{session_id: session_id}, registry_a)
+
+    assert {:ok, %{pid: pid_b}} =
+             Registry.start_session(owner, %{session_id: session_id}, registry_b)
+
+    assert pid_a != pid_b
+
+    assert {:ok, %{pid: ^pid_a}} = Registry.lookup(session_id, registry_a)
+    assert {:ok, %{pid: ^pid_b}} = Registry.lookup(session_id, registry_b)
+    assert {:error, :session_not_found} = Registry.lookup(session_id)
+    assert [] = live_name_lookup(session_id)
+  end
+
+  test "live lookup ignores sessions owned by a previous default registry process" do
+    session_id = start_session()
+    {:ok, %{pid: session_pid}} = Registry.lookup(session_id)
+    assert [_entry] = live_name_lookup(session_id)
+
+    Registry
+    |> Process.whereis()
+    |> GenServer.stop(:normal, 5_000)
+
+    assert Process.alive?(session_pid)
+    assert :ok = Sessions.ensure_started()
+    assert {:error, :session_not_found} = Registry.lookup(session_id)
+  end
+
+  test "closed sessions are removed from the live name registry" do
+    session_id = start_session()
+
+    assert [_entry] = Elixir.Registry.lookup(PtcRunnerMcp.Sessions.Names, session_id)
+    assert call!("ptc_session_close", %{"session_id" => session_id})["status"] == "ok"
+
+    wait_until(
+      fn ->
+        live_name_lookup(session_id) == [] and
+          match?({:error, :session_closed}, Registry.lookup(session_id))
+      end,
+      300
+    )
+  end
+
+  test "crashed sessions are removed from the live name registry" do
+    session_id = start_session()
+    {:ok, %{pid: session_pid}} = Registry.lookup(session_id)
+
+    Process.exit(session_pid, :kill)
+
+    wait_until(
+      fn ->
+        live_name_lookup(session_id) == [] and
+          match?({:error, :session_not_found}, Registry.lookup(session_id))
+      end,
+      300
+    )
+  end
+
   test "session eval applies context validation limits" do
     Limits.set(%{Limits.defaults() | max_context_bytes: 8})
 
@@ -622,6 +717,26 @@ defmodule PtcRunnerMcp.SessionsTest do
   defp stop_sessions_processes do
     stop_if_alive(Registry)
     stop_if_alive(PtcRunnerMcp.Sessions.Supervisor)
+    stop_if_alive(PtcRunnerMcp.Sessions.Names)
+  end
+
+  defp start_named_session_supervisor(label) do
+    PtcRunnerMcp.Sessions.Supervisor.start_link(name: global_test_name(:supervisor, label))
+  end
+
+  defp start_named_session_registry(label, supervisor) do
+    Registry.start_link(name: global_test_name(:registry, label), session_supervisor: supervisor)
+  end
+
+  defp global_test_name(kind, label) do
+    {:global, {__MODULE__, kind, label, make_ref()}}
+  end
+
+  defp live_name_lookup(session_id) do
+    case Process.whereis(PtcRunnerMcp.Sessions.Names) do
+      nil -> []
+      _pid -> Elixir.Registry.lookup(PtcRunnerMcp.Sessions.Names, session_id)
+    end
   end
 
   defp stop_if_alive(name) do

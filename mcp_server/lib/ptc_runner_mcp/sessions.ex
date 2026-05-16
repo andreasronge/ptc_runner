@@ -24,6 +24,8 @@ defmodule PtcRunnerMcp.Sessions do
 
   alias PtcRunnerMcp.Sessions.{Config, Owner, Projection, Registry, Session, Supervisor}
 
+  @names_registry PtcRunnerMcp.Sessions.Names
+
   @sync_tool_names [
     "ptc_session_start",
     "ptc_session_list",
@@ -45,9 +47,15 @@ defmodule PtcRunnerMcp.Sessions do
   """
   @spec ensure_started() :: :ok | {:error, term()}
   def ensure_started do
-    case ensure_process(Registry, {Registry, []}) do
-      :ok -> ensure_process(Supervisor, {Supervisor, []})
-      {:error, reason} -> {:error, reason}
+    case ensure_process(@names_registry, names_registry_child_spec()) do
+      :ok ->
+        case ensure_process(Registry, {Registry, []}) do
+          :ok -> ensure_process(Supervisor, {Supervisor, []})
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -55,9 +63,15 @@ defmodule PtcRunnerMcp.Sessions do
   @spec child_specs() :: [Elixir.Supervisor.child_spec() | {module(), term()}]
   def child_specs do
     [
+      names_registry_child_spec(),
       {Registry, [session_supervisor: Supervisor]},
       {Supervisor, []}
     ]
+  end
+
+  defp names_registry_child_spec do
+    {Elixir.Registry,
+     keys: :unique, name: @names_registry, partitions: System.schedulers_online()}
   end
 
   @doc "Return true when stateful sessions are enabled."

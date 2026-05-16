@@ -11,12 +11,14 @@ defmodule PtcRunnerMcp.Sessions.Registry do
   alias PtcRunnerMcp.Sessions.{Config, Owner, Supervisor}
 
   @max_tombstones 1024
+  @names_registry PtcRunnerMcp.Sessions.Names
 
   defstruct sessions: %{},
             by_owner: %{},
             monitors: %{},
             tombstones: %{},
-            session_supervisor: PtcRunnerMcp.Sessions.Supervisor
+            session_supervisor: PtcRunnerMcp.Sessions.Supervisor,
+            names_registry: nil
 
   @type session_meta :: %{
           id: String.t(),
@@ -37,7 +39,13 @@ defmodule PtcRunnerMcp.Sessions.Registry do
 
   @impl GenServer
   def init(opts) do
-    {:ok, %__MODULE__{session_supervisor: Keyword.get(opts, :session_supervisor, Supervisor)}}
+    name = Keyword.get(opts, :name, __MODULE__)
+
+    {:ok,
+     %__MODULE__{
+       session_supervisor: Keyword.get(opts, :session_supervisor, Supervisor),
+       names_registry: Keyword.get(opts, :names_registry, default_names_registry(name))
+     }}
   end
 
   @doc "Create and register a new session."
@@ -50,8 +58,37 @@ defmodule PtcRunnerMcp.Sessions.Registry do
   @doc "Lookup a live session by id."
   @spec lookup(String.t(), GenServer.server()) ::
           {:ok, session_meta()} | {:error, :session_not_found | :session_closed}
-  def lookup(session_id, registry \\ __MODULE__) when is_binary(session_id) do
+  def lookup(session_id, registry \\ __MODULE__)
+
+  def lookup(session_id, __MODULE__) when is_binary(session_id) do
+    case live_lookup(session_id, Process.whereis(__MODULE__)) do
+      [{pid, meta}] -> {:ok, Map.put(meta, :pid, pid)}
+      [] -> GenServer.call(__MODULE__, {:lookup, session_id})
+    end
+  end
+
+  def lookup(session_id, registry) when is_binary(session_id) do
     GenServer.call(registry, {:lookup, session_id})
+  end
+
+  defp live_lookup(_session_id, nil), do: []
+
+  defp live_lookup(session_id, registry_pid) do
+    case Process.whereis(@names_registry) do
+      nil ->
+        []
+
+      _pid ->
+        @names_registry
+        |> Elixir.Registry.lookup(session_id)
+        |> Enum.flat_map(fn
+          {pid, %{registry_pid: ^registry_pid} = meta} ->
+            [{pid, Map.delete(meta, :registry_pid)}]
+
+          _entry ->
+            []
+        end)
+    end
   end
 
   @doc "List sessions for the given owner."
@@ -152,34 +189,8 @@ defmodule PtcRunnerMcp.Sessions.Registry do
     ttl_ms = Config.clamp_ttl_ms(Map.get(opts, :ttl_ms))
     created_at = DateTime.utc_now()
 
-    child_opts = [
-      id: id,
-      owner: owner,
-      title: title,
-      mode: mode,
-      ttl_ms: ttl_ms,
-      limits: Config.session_limits(),
-      registry: self()
-    ]
-
-    case Supervisor.start_session(child_opts, state.session_supervisor) do
-      {:ok, pid} ->
-        register_started_child(pid, owner, owner_hash, id, title, mode, created_at, state)
-
-      {:ok, pid, _info} ->
-        register_started_child(pid, owner, owner_hash, id, title, mode, created_at, state)
-
-      {:error, reason} ->
-        {:reply, {:error, %{reason: :sessions_unavailable, detail: inspect(reason)}}, state}
-    end
-  end
-
-  defp register_started_child(pid, owner, owner_hash, id, title, mode, created_at, state) do
-    ref = Process.monitor(pid)
-
     meta = %{
       id: id,
-      pid: pid,
       owner: owner,
       owner_hash: owner_hash,
       title: title,
@@ -187,20 +198,57 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       created_at: created_at
     }
 
+    child_opts =
+      [
+        id: id,
+        owner: owner,
+        title: title,
+        mode: mode,
+        ttl_ms: ttl_ms,
+        limits: Config.session_limits(),
+        registry: self()
+      ]
+      |> maybe_put_name(state.names_registry, id, Map.put(meta, :registry_pid, self()))
+
+    case Supervisor.start_session(child_opts, state.session_supervisor) do
+      {:ok, pid} ->
+        register_started_child(pid, meta, state)
+
+      {:ok, pid, _info} ->
+        register_started_child(pid, meta, state)
+
+      {:error, reason} ->
+        {:reply, {:error, %{reason: :sessions_unavailable, detail: inspect(reason)}}, state}
+    end
+  end
+
+  defp register_started_child(pid, meta_without_pid, state) do
+    ref = Process.monitor(pid)
+    meta = Map.put(meta_without_pid, :pid, pid)
+
     state =
       state
-      |> put_in([Access.key!(:sessions), id], meta)
-      |> put_in([Access.key!(:monitors), ref], id)
-      |> add_owner_index(owner_hash, id)
+      |> put_in([Access.key!(:sessions), meta.id], meta)
+      |> put_in([Access.key!(:monitors), ref], meta.id)
+      |> add_owner_index(meta.owner_hash, meta.id)
 
     :telemetry.execute([:ptc_runner_mcp, :session, :start], %{count: 1}, %{
-      session_id: id,
-      owner_hash: owner_hash,
-      mode: mode
+      session_id: meta.id,
+      owner_hash: meta.owner_hash,
+      mode: meta.mode
     })
 
     {:reply, {:ok, meta}, state}
   end
+
+  defp maybe_put_name(child_opts, nil, _id, _meta), do: child_opts
+
+  defp maybe_put_name(child_opts, names_registry, id, meta) do
+    Keyword.put(child_opts, :name, {:via, Elixir.Registry, {names_registry, id, meta}})
+  end
+
+  defp default_names_registry(__MODULE__), do: @names_registry
+  defp default_names_registry(_name), do: nil
 
   defp owner_count(state, owner_hash) do
     state.by_owner

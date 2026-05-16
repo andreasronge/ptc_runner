@@ -71,7 +71,10 @@ defmodule PtcRunnerMcp.Sessions.Session do
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) when is_list(opts) do
-    GenServer.start_link(__MODULE__, opts)
+    case Keyword.fetch(opts, :name) do
+      {:ok, name} -> GenServer.start_link(__MODULE__, opts, name: name)
+      :error -> GenServer.start_link(__MODULE__, opts)
+    end
   end
 
   @impl GenServer
