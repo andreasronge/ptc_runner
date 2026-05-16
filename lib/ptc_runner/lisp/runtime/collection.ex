@@ -527,12 +527,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def count(nil), do: 0
   def count(%MapSet{} = set), do: MapSet.size(set)
   def count(coll) when is_binary(coll), do: String.length(coll)
-  def count(coll) when is_list(coll) or is_map(coll), do: Enum.count(coll)
+  def count(coll) when is_list(coll), do: Enum.count(coll)
+  def count(coll) when is_map(coll) and not is_struct(coll), do: Enum.count(coll)
 
   def empty?(nil), do: true
   def empty?(%MapSet{} = set), do: MapSet.size(set) == 0
   def empty?(coll) when is_binary(coll), do: coll == ""
-  def empty?(coll) when is_list(coll) or is_map(coll), do: Enum.empty?(coll)
+  def empty?(coll) when is_list(coll), do: Enum.empty?(coll)
+  def empty?(coll) when is_map(coll) and not is_struct(coll), do: Enum.empty?(coll)
 
   def not_empty(coll) do
     if seq(coll), do: coll, else: nil
@@ -559,7 +561,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
-  def seq(m) when is_map(m) do
+  def seq(m) when is_map(m) and not is_struct(m) do
     case Enum.empty?(m) do
       true -> nil
       false -> Enum.map(m, fn {k, v} -> [k, v] end)
@@ -897,15 +899,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 
-  def contains?(coll, key) when is_map(coll) do
-    cond do
-      Map.has_key?(coll, key) -> true
-      is_atom(key) -> Map.has_key?(coll, to_string(key))
-      is_binary(key) -> Map.has_key?(coll, String.to_existing_atom(key))
-      true -> false
+  def contains?(coll, key) when is_map(coll) and not is_struct(coll) do
+    case FlexAccess.flex_fetch(coll, key) do
+      {:ok, _value} -> true
+      :error -> false
     end
-  rescue
-    ArgumentError -> false
   end
 
   def contains?(coll, val) when is_list(coll), do: val in coll

@@ -251,7 +251,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
 
   def regex?(x), do: is_tuple(x) and elem(x, 0) == :re_mp
 
-  def map?(x), do: is_map(x) and not is_struct(x, MapSet)
+  def map?(x), do: is_map(x) and not is_struct(x)
 
   # coll? returns true for all collections: vectors, maps, and sets
   def coll?(x) when is_list(x), do: true
@@ -275,7 +275,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # counted? - all types where count works (collection.ex)
   def counted?(x) when is_list(x), do: true
   def counted?(%MapSet{}), do: true
-  def counted?(x) when is_map(x), do: true
+  def counted?(x) when is_map(x) and not is_struct(x), do: true
   def counted?(x) when is_binary(x), do: true
   def counted?(_), do: false
 
@@ -296,7 +296,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def seqable?(nil), do: true
   def seqable?(x) when is_list(x), do: true
   def seqable?(%MapSet{}), do: true
-  def seqable?(x) when is_map(x), do: true
+  def seqable?(x) when is_map(x) and not is_struct(x), do: true
   def seqable?(x) when is_binary(x), do: true
   def seqable?(_), do: false
 
@@ -409,7 +409,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def vec(coll) when is_list(coll), do: coll
   def vec(%MapSet{} = set), do: MapSet.to_list(set)
   def vec(s) when is_binary(s), do: String.graphemes(s)
-  def vec(m) when is_map(m), do: Enum.map(m, fn {k, v} -> [k, v] end)
+  def vec(m) when is_map(m) and not is_struct(m), do: Enum.map(m, fn {k, v} -> [k, v] end)
 
   # ============================================================
   # Numeric Predicates
