@@ -2203,7 +2203,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp format_type_description({:map, fields}, field_descriptions) do
     Enum.map_join(fields, "\n", fn {name, type} ->
       type_str = format_type_name(type)
-      desc = Map.get(field_descriptions, String.to_atom(name), "")
+      desc = field_description(field_descriptions, name)
       desc_part = if desc != "", do: " - #{desc}", else: ""
       "- `#{name}` (#{type_str})#{desc_part}"
     end)
@@ -2215,6 +2215,25 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp format_type_description(type, _field_descriptions) do
     "(#{format_type_name(type)})"
+  end
+
+  defp field_description(field_descriptions, name) do
+    case Map.fetch(field_descriptions, name) do
+      {:ok, desc} ->
+        desc
+
+      :error ->
+        case existing_atom(name) do
+          {:ok, atom} -> Map.get(field_descriptions, atom, "")
+          :error -> ""
+        end
+    end
+  end
+
+  defp existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
   end
 
   defp format_type_name(:string), do: "string"

@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
   """
 
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
@@ -53,6 +54,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
   def normalize_pred(key, :value) when is_atom(key),
     do: fn item -> FlexAccess.flex_get(item, key) end
 
+  def normalize_pred(%LispKeyword{} = key, :truthy),
+    do: fn item -> !!FlexAccess.flex_get(item, key) end
+
+  def normalize_pred(%LispKeyword{} = key, :value),
+    do: fn item -> FlexAccess.flex_get(item, key) end
+
   def normalize_pred(%MapSet{} = set, _mode),
     do: fn item -> if MapSet.member?(set, item), do: item, else: nil end
 
@@ -69,6 +76,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
   vector error message ("function or key" vs "predicate").
   """
   def normalize_keyfn(key) when is_atom(key),
+    do: fn item -> FlexAccess.flex_get(item, key) end
+
+  def normalize_keyfn(%LispKeyword{} = key),
     do: fn item -> FlexAccess.flex_get(item, key) end
 
   def normalize_keyfn(%MapSet{} = set),

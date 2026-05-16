@@ -33,9 +33,9 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "keywords" do
       assert {:ok, {:keyword, :name}} = Parser.parse(":name")
-      assert {:ok, {:keyword, :user_id}} = Parser.parse(":user_id")
+      assert {:ok, {:keyword, "user_id"}} = Parser.parse(":user_id")
       assert {:ok, {:keyword, :empty?}} = Parser.parse(":empty?")
-      assert {:ok, {:keyword, :valid!}} = Parser.parse(":valid!")
+      assert {:ok, {:keyword, "valid!"}} = Parser.parse(":valid!")
     end
 
     test "keywords with operator characters (Clojure conformance)" do
@@ -82,9 +82,9 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "namespaced symbols" do
-      assert {:ok, {:ns_symbol, :data, :input}} = Parser.parse("data/input")
-      assert {:ok, {:ns_symbol, :tool, :search}} = Parser.parse("tool/search")
-      assert {:ok, {:ns_symbol, :foo, :bar}} = Parser.parse("foo/bar")
+      assert {:ok, {:ns_symbol, :data, "input"}} = Parser.parse("data/input")
+      assert {:ok, {:ns_symbol, :tool, "search"}} = Parser.parse("tool/search")
+      assert {:ok, {:ns_symbol, "foo", "bar"}} = Parser.parse("foo/bar")
     end
 
     test "Clojure-style namespaced symbols with dots" do
@@ -95,8 +95,8 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "nil/true/false don't match as prefixes" do
       # "nilly" should be a symbol, not nil + "ly"
-      assert {:ok, {:symbol, :nilly}} = Parser.parse("nilly")
-      assert {:ok, {:symbol, :truthy}} = Parser.parse("truthy")
+      assert {:ok, {:symbol, "nilly"}} = Parser.parse("nilly")
+      assert {:ok, {:symbol, "truthy"}} = Parser.parse("truthy")
     end
   end
 
@@ -119,7 +119,7 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "map with entries" do
-      assert {:ok, {:map, [{{:keyword, :a}, 1}, {{:keyword, :b}, 2}]}} =
+      assert {:ok, {:map, [{{:keyword, "a"}, 1}, {{:keyword, "b"}, 2}]}} =
                Parser.parse("{:a 1 :b 2}")
     end
 
@@ -132,8 +132,8 @@ defmodule PtcRunner.Lisp.ParserTest do
               {:list,
                [
                  {:symbol, :filter},
-                 {:list, [{:symbol, :=}, {:keyword, :active}, true]},
-                 {:symbol, :users}
+                 {:list, [{:symbol, :=}, {:keyword, "active"}, true]},
+                 {:symbol, "users"}
                ]}} = Parser.parse("(filter (= :active true) users)")
     end
 
@@ -149,7 +149,7 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "set with keywords" do
       set_kw = "#" <> "{:a :b}"
-      assert {:ok, {:set, [{:keyword, :a}, {:keyword, :b}]}} = Parser.parse(set_kw)
+      assert {:ok, {:set, [{:keyword, "a"}, {:keyword, "b"}]}} = Parser.parse(set_kw)
     end
 
     test "nested set" do
@@ -170,13 +170,13 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "set containing map" do
       set_map = "#" <> "{:a {:b 1}}"
 
-      assert {:ok, {:set, [{:keyword, :a}, {:map, [{{:keyword, :b}, 1}]}]}} =
+      assert {:ok, {:set, [{:keyword, "a"}, {:map, [{{:keyword, "b"}, 1}]}]}} =
                Parser.parse(set_map)
     end
 
     test "set with mixed types" do
       set_mixed = "#" <> "{:a \"b\" 3}"
-      assert {:ok, {:set, [{:keyword, :a}, {:string, "b"}, 3]}} = Parser.parse(set_mixed)
+      assert {:ok, {:set, [{:keyword, "a"}, {:string, "b"}, 3]}} = Parser.parse(set_mixed)
     end
   end
 
@@ -198,13 +198,13 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "semicolon after keyword starts a comment" do
       # ; after :foo starts a comment, swallowing :bar on the same line
-      assert {:ok, {:keyword, :foo}} =
+      assert {:ok, {:keyword, "foo"}} =
                Parser.parse(":foo; :bar eaten by comment")
     end
 
     test "semicolon mid-vector eats rest of line" do
       # :baz on next line is still parsed, but :bar is comment
-      assert {:ok, {:vector, [{:keyword, :foo}, {:keyword, :baz}]}} =
+      assert {:ok, {:vector, [{:keyword, "foo"}, {:keyword, "baz"}]}} =
                Parser.parse("[:foo; :bar comment\n:baz]")
     end
   end
@@ -218,7 +218,7 @@ defmodule PtcRunner.Lisp.ParserTest do
            (take 10))
       """
 
-      assert {:ok, {:list, [{:symbol, :"->>"}, {:ns_symbol, :data, :products} | _]}} =
+      assert {:ok, {:list, [{:symbol, :"->>"}, {:ns_symbol, :data, "products"} | _]}} =
                Parser.parse(source)
     end
 
@@ -245,7 +245,8 @@ defmodule PtcRunner.Lisp.ParserTest do
     test "namespaced keywords are not supported" do
       # Spec: "no namespaced keywords like :foo/bar"
       # Parses as two separate tokens: :foo and /bar (a symbol)
-      assert {:ok, {:program, [{:keyword, :foo}, {:symbol, :"/bar"}]}} = Parser.parse(":foo/bar")
+      assert {:ok, {:program, [{:keyword, "foo"}, {:symbol, "/bar"}]}} =
+               Parser.parse(":foo/bar")
     end
 
     test "quoted lists are rejected" do
@@ -292,7 +293,7 @@ defmodule PtcRunner.Lisp.ParserTest do
   describe "numeric edge cases" do
     test "leading decimal point parses as symbol (for .method interop)" do
       # .5 is parsed as symbol because . can start method-call symbols like .getTime
-      assert {:ok, {:symbol, :".5"}} = Parser.parse(".5")
+      assert {:ok, {:symbol, ".5"}} = Parser.parse(".5")
     end
 
     test "trailing decimal point splits into number and dot symbol" do
@@ -320,7 +321,7 @@ defmodule PtcRunner.Lisp.ParserTest do
 
     test "positive sign on numbers" do
       # +5 parses as symbol, not number
-      assert {:ok, {:symbol, :"+5"}} = Parser.parse("+5")
+      assert {:ok, {:symbol, "+5"}} = Parser.parse("+5")
     end
   end
 
@@ -334,11 +335,11 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "false-positive is a symbol not false" do
-      assert {:ok, {:symbol, :"false-positive"}} = Parser.parse("false-positive")
+      assert {:ok, {:symbol, "false-positive"}} = Parser.parse("false-positive")
     end
 
     test "nilly is a symbol not nil" do
-      assert {:ok, {:symbol, :nilly}} = Parser.parse("nilly")
+      assert {:ok, {:symbol, "nilly"}} = Parser.parse("nilly")
     end
   end
 
@@ -366,23 +367,23 @@ defmodule PtcRunner.Lisp.ParserTest do
 
   describe "var reader syntax #'" do
     test "simple var" do
-      assert {:ok, {:var, :x}} = Parser.parse("#'x")
+      assert {:ok, {:var, "x"}} = Parser.parse("#'x")
     end
 
     test "var with question mark" do
-      assert {:ok, {:var, :suspicious?}} = Parser.parse("#'suspicious?")
+      assert {:ok, {:var, "suspicious?"}} = Parser.parse("#'suspicious?")
     end
 
     test "var with bang" do
-      assert {:ok, {:var, :save!}} = Parser.parse("#'save!")
+      assert {:ok, {:var, "save!"}} = Parser.parse("#'save!")
     end
 
     test "var with underscore" do
-      assert {:ok, {:var, :my_var}} = Parser.parse("#'my_var")
+      assert {:ok, {:var, "my_var"}} = Parser.parse("#'my_var")
     end
 
     test "var with hyphen" do
-      assert {:ok, {:var, :"my-var"}} = Parser.parse("#'my-var")
+      assert {:ok, {:var, "my-var"}} = Parser.parse("#'my-var")
     end
 
     test "var with trailing apostrophe" do
@@ -391,11 +392,11 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "var in collection" do
-      assert {:ok, {:vector, [{:var, :x}, {:var, :y}]}} = Parser.parse("[#'x #'y]")
+      assert {:ok, {:vector, [{:var, "x"}, {:var, "y"}]}} = Parser.parse("[#'x #'y]")
     end
 
     test "var in map value" do
-      assert {:ok, {:map, [{{:keyword, :result}, {:var, :foo}}]}} =
+      assert {:ok, {:map, [{{:keyword, "result"}, {:var, "foo"}}]}} =
                Parser.parse("{:result #'foo}")
     end
 
@@ -414,25 +415,25 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "short function with single placeholder" do
-      assert {:ok, {:short_fn, [{:symbol, :%}]}} = Parser.parse("#(%)")
+      assert {:ok, {:short_fn, [{:symbol, "%"}]}} = Parser.parse("#(%)")
     end
 
     test "short function with arithmetic" do
-      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :%}, 1]}} = Parser.parse("#(+ % 1)")
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, "%"}, 1]}} = Parser.parse("#(+ % 1)")
     end
 
     test "short function with numeric placeholders" do
-      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :"%1"}, {:symbol, :"%2"}]}} =
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, "%1"}, {:symbol, "%2"}]}} =
                Parser.parse("#(+ %1 %2)")
     end
 
     test "short function with multiple uses of same placeholder" do
-      assert {:ok, {:short_fn, [{:symbol, :*}, {:symbol, :%}, {:symbol, :%}]}} =
+      assert {:ok, {:short_fn, [{:symbol, :*}, {:symbol, "%"}, {:symbol, "%"}]}} =
                Parser.parse("#(* % %)")
     end
 
     test "short function with whitespace and formatting" do
-      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, :%}, 1]}} =
+      assert {:ok, {:short_fn, [{:symbol, :+}, {:symbol, "%"}, 1]}} =
                Parser.parse("#(  +  %  1  )")
     end
 
@@ -441,7 +442,7 @@ defmodule PtcRunner.Lisp.ParserTest do
               {:list,
                [
                  {:symbol, :filter},
-                 {:short_fn, [{:symbol, :>}, {:symbol, :%}, 10]},
+                 {:short_fn, [{:symbol, :>}, {:symbol, "%"}, 10]},
                  {:vector, [5, 15]}
                ]}} = Parser.parse("(filter #(> % 10) [5 15])")
     end
@@ -451,16 +452,16 @@ defmodule PtcRunner.Lisp.ParserTest do
     end
 
     test "placeholder symbols parse outside #()" do
-      assert {:ok, {:symbol, :%}} = Parser.parse("%")
-      assert {:ok, {:symbol, :"%1"}} = Parser.parse("%1")
-      assert {:ok, {:symbol, :"%2"}} = Parser.parse("%2")
+      assert {:ok, {:symbol, "%"}} = Parser.parse("%")
+      assert {:ok, {:symbol, "%1"}} = Parser.parse("%1")
+      assert {:ok, {:symbol, "%2"}} = Parser.parse("%2")
     end
   end
 
   describe "multiple top-level expressions" do
     test "single expression returns unwrapped (backward compatible)" do
       assert {:ok, 42} = Parser.parse("42")
-      assert {:ok, {:symbol, :x}} = Parser.parse("x")
+      assert {:ok, {:symbol, "x"}} = Parser.parse("x")
     end
 
     test "multiple expressions return {:program, list}" do

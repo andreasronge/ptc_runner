@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   """
 
   alias PtcRunner.Lisp.Analyze
+  alias PtcRunner.Lisp.SourceAtoms
 
   @doc """
   Desugars short function syntax into a transformed AST.
@@ -163,13 +164,13 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
 
   defp generate_params({:variadic, n}) do
     leading =
-      if n > 0, do: Enum.map(1..n, fn i -> {:symbol, String.to_atom("p#{i}")} end), else: []
+      if n > 0, do: Enum.map(1..n, fn i -> {:symbol, SourceAtoms.intern("p#{i}")} end), else: []
 
     leading ++ [{:symbol, :&}, {:symbol, :rest}]
   end
 
   defp generate_params(arity) when arity > 0 do
-    Enum.map(1..arity, fn i -> {:symbol, String.to_atom("p#{i}")} end)
+    Enum.map(1..arity, fn i -> {:symbol, SourceAtoms.intern("p#{i}")} end)
   end
 
   # ============================================================
@@ -182,7 +183,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
     Enum.map(asts, &transform_body(&1, placeholders))
   end
 
-  defp transform_body({:symbol, name}, _placeholders) when is_atom(name) do
+  defp transform_body({:symbol, name}, _placeholders) when is_atom(name) or is_binary(name) do
     name_str = to_string(name)
 
     case Analyze.placeholder?(name) do
@@ -227,7 +228,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
     case name_str do
       "%" -> :p1
       "%&" -> :rest
-      "%" <> num_str -> String.to_atom("p#{num_str}")
+      "%" <> num_str -> SourceAtoms.intern("p#{num_str}")
     end
   end
 end

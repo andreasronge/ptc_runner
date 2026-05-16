@@ -1,25 +1,29 @@
 defmodule PtcRunner.Lisp.AST do
   @moduledoc "AST node types for PTC-Lisp"
 
+  alias PtcRunner.Lisp.SourceAtoms
+
+  @type name :: atom() | String.t()
+
   # Literals
   @type t ::
           nil
           | boolean()
           | number()
           | {:string, String.t()}
-          | {:keyword, atom()}
+          | {:keyword, name()}
           # Collections
           | {:vector, [t()]}
           | {:map, [{t(), t()}]}
           | {:set, [t()]}
           # Symbols
-          | {:symbol, atom()}
-          | {:ns_symbol, atom(), atom()}
+          | {:symbol, name()}
+          | {:ns_symbol, name(), name()}
           # Calls
           | {:list, [t()]}
 
   @doc "Create a keyword node"
-  def keyword(name) when is_binary(name), do: {:keyword, String.to_atom(name)}
+  def keyword(name) when is_binary(name), do: {:keyword, SourceAtoms.intern(name)}
 
   @doc "Create a symbol node"
   def symbol(name) when is_binary(name) do
@@ -37,18 +41,18 @@ defmodule PtcRunner.Lisp.AST do
       _ ->
         case String.split(name, "/", parts: 2) do
           [name] ->
-            {:symbol, String.to_atom(name)}
+            {:symbol, SourceAtoms.intern(name)}
 
           ["", _] ->
             # Handles "/" operator (division) - empty namespace means not a namespaced symbol
-            {:symbol, String.to_atom(name)}
+            {:symbol, SourceAtoms.intern(name)}
 
           [ns, key] when ns != "" and key != "" ->
-            {:ns_symbol, String.to_atom(ns), String.to_atom(key)}
+            {:ns_symbol, SourceAtoms.intern(ns), SourceAtoms.intern(key)}
 
           _ ->
             # Fallback for edge cases
-            {:symbol, String.to_atom(name)}
+            {:symbol, SourceAtoms.intern(name)}
         end
     end
   end

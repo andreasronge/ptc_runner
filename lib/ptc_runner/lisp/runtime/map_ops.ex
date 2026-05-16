@@ -37,11 +37,11 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
     |> Enum.into(%{}, fn [k, v] -> {k, v} end)
   end
 
-  def get(m, k) when is_map(m), do: FlexAccess.flex_get(m, k)
+  def get(m, k) when is_map(m) and not is_struct(m), do: FlexAccess.flex_get(m, k)
   def get(l, k) when is_list(l), do: FlexAccess.flex_get(l, k)
   def get(nil, _k), do: nil
 
-  def get(m, k, default) when is_map(m) do
+  def get(m, k, default) when is_map(m) and not is_struct(m) do
     cond do
       Map.has_key?(m, k) ->
         Map.get(m, k)
@@ -71,10 +71,10 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   def get(nil, _k, default), do: default
 
-  def get_in(m, path) when is_map(m), do: FlexAccess.flex_get_in(m, path)
+  def get_in(m, path) when is_map(m) and not is_struct(m), do: FlexAccess.flex_get_in(m, path)
   def get_in(l, path) when is_list(l), do: FlexAccess.flex_get_in(l, path)
 
-  def get_in(m, path, default) when is_map(m) do
+  def get_in(m, path, default) when is_map(m) and not is_struct(m) do
     case FlexAccess.flex_get_in(m, path) do
       nil -> default
       val -> val

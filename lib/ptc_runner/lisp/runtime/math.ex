@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.SpecialValues
 
   def add(args) when is_list(args) do
@@ -395,7 +396,16 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def not_eq(x, y), do: not eq(x, y)
 
   def eq(x, y) do
-    if SpecialValues.nan?(x) or SpecialValues.nan?(y), do: false, else: x == y
+    cond do
+      SpecialValues.nan?(x) or SpecialValues.nan?(y) ->
+        false
+
+      LispKeyword.keyword?(x) and LispKeyword.keyword?(y) ->
+        LispKeyword.name(x) == LispKeyword.name(y)
+
+      true ->
+        x == y
+    end
   end
 
   def lt(x, y) do

@@ -129,7 +129,7 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
       has_defaults = not Enum.empty?(defaults)
 
       # Convert :strs names into renames with string source keys
-      strs_as_renames = Enum.map(strs, fn name -> {{:var, name}, Atom.to_string(name)} end)
+      strs_as_renames = Enum.map(strs, fn name -> {{:var, name}, to_string(name)} end)
       all_renames = renames ++ strs_as_renames
 
       if has_keys || has_strs || has_renames || has_defaults do

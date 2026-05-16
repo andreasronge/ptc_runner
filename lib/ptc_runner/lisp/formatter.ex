@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.Formatter do
 
   def format({:string, s}), do: ~s("#{escape_string(s)}")
   def format({:keyword, k}), do: ":#{k}"
-  def format({:symbol, name}), do: Atom.to_string(name)
+  def format({:symbol, name}), do: to_string(name)
   def format({:ns_symbol, ns, key}), do: "#{ns}/#{key}"
 
   def format({:vector, elems}) do

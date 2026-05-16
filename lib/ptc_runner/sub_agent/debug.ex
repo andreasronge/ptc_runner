@@ -748,7 +748,7 @@ defmodule PtcRunner.SubAgent.Debug do
         print_box_footer()
 
       :error ->
-        available = sections |> Map.keys() |> Enum.sort()
+        available = sections |> Map.keys() |> Enum.sort_by(&to_string/1)
 
         IO.puts(
           "\n#{ansi(:yellow)}Unknown section :#{key} for turn #{turn_number}.#{ansi(:reset)}"
@@ -806,7 +806,7 @@ defmodule PtcRunner.SubAgent.Debug do
         |> String.replace(~r/[^a-z0-9]+/, "_")
         |> String.trim_leading("_")
         |> String.trim_trailing("_")
-        |> String.to_atom()
+        |> existing_atom_or_string()
 
       key ->
         key
@@ -814,6 +814,12 @@ defmodule PtcRunner.SubAgent.Debug do
   end
 
   defp xml_tag_to_key(tag_name) do
-    Map.get(@xml_tag_to_key, tag_name, String.to_atom(tag_name))
+    Map.get(@xml_tag_to_key, tag_name, existing_atom_or_string(tag_name))
+  end
+
+  defp existing_atom_or_string(name) do
+    String.to_existing_atom(name)
+  rescue
+    ArgumentError -> name
   end
 end

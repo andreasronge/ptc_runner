@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   @moduledoc "Helper functions for parser reductions"
 
   alias PtcRunner.Lisp.AST
+  alias PtcRunner.Lisp.SourceAtoms
 
   # ============================================================
   # Number parsing
@@ -48,11 +49,11 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   # Keyword/Symbol building
   # ============================================================
 
-  def build_keyword([name]), do: {:keyword, String.to_atom(name)}
+  def build_keyword([name]), do: {:keyword, SourceAtoms.intern(name)}
 
   def build_var(parts) do
     name = Enum.join(parts)
-    {:var, String.to_atom(name)}
+    {:var, SourceAtoms.intern(name)}
   end
 
   def build_symbol(parts) do

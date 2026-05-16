@@ -2,7 +2,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias PtcRunner.Lisp.{Formatter, Parser}
+  alias PtcRunner.Lisp.{Formatter, Parser, SourceAtoms}
   alias PtcRunner.Step
   alias PtcRunner.TestSupport.LispGenerators, as: Gen
 
@@ -14,7 +14,9 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
 
         case Parser.parse(source) do
           {:ok, parsed} ->
-            assert ast_equivalent?(ast, parsed),
+            expected = normalize_source_names(ast)
+
+            assert ast_equivalent?(expected, parsed),
                    "Roundtrip failed:\nOriginal: #{inspect(ast)}\nSource: #{source}\nParsed: #{inspect(parsed)}"
 
           {:error, reason} ->
@@ -57,6 +59,39 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
   end
 
   # Helpers
+
+  defp normalize_source_names({tag, name})
+       when tag in [:symbol, :keyword, :var] and (is_atom(name) or is_binary(name)) do
+    {tag, normalize_source_name(name)}
+  end
+
+  defp normalize_source_names({:ns_symbol, ns, name}) do
+    {:ns_symbol, normalize_source_name(ns), normalize_source_name(name)}
+  end
+
+  defp normalize_source_names({:map, entries}) do
+    {:map,
+     Enum.map(entries, fn {key, value} ->
+       {normalize_source_names(key), normalize_source_names(value)}
+     end)}
+  end
+
+  defp normalize_source_names({tag, children})
+       when tag in [:list, :vector, :set, :program, :short_fn] and is_list(children) do
+    {tag, Enum.map(children, &normalize_source_names/1)}
+  end
+
+  defp normalize_source_names(other), do: other
+
+  defp normalize_source_name(name) when is_atom(name) do
+    name
+    |> Atom.to_string()
+    |> SourceAtoms.intern()
+  end
+
+  defp normalize_source_name(name) when is_binary(name) do
+    SourceAtoms.intern(name)
+  end
 
   defp ast_equivalent?(a, b) when is_float(a) and is_float(b) do
     abs(a - b) < 1.0e-9

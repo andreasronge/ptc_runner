@@ -166,6 +166,10 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :"list-tools",
       :"describe-tool",
       :"search-tools",
+      :"parse-string",
+      :"generate-string",
+      :text,
+      :json,
       :"re-pattern"
     ]
 

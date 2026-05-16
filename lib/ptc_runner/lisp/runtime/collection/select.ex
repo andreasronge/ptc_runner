@@ -7,12 +7,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
   delegating predicate/collection normalization to `Collection.Normalize`.
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
 
   # ── filter ──────────────────────────────────────────────────────────
 
   # Keyword on string graphemes: keyword access always returns nil → empty
   def filter(pred, coll) when is_atom(pred) and is_binary(coll), do: []
+  def filter(%LispKeyword{}, coll) when is_binary(coll), do: []
 
   def filter(pred, coll) when is_map(coll) and not is_struct(coll) do
     pred_fn = Normalize.normalize_pred(pred, :truthy)
@@ -27,6 +29,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
 
   # Keyword on string: always falsy, so nothing is removed
   def remove(pred, coll) when is_atom(pred) and is_binary(coll), do: Normalize.graphemes(coll)
+  def remove(%LispKeyword{}, coll) when is_binary(coll), do: Normalize.graphemes(coll)
 
   def remove(pred, coll) when is_map(coll) and not is_struct(coll) do
     pred_fn = Normalize.normalize_pred(pred, :truthy)
@@ -41,6 +44,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
 
   # Keyword on string: always nil
   def find(pred, coll) when is_atom(pred) and is_binary(coll), do: nil
+  def find(%LispKeyword{}, coll) when is_binary(coll), do: nil
 
   def find(pred, coll) when is_map(coll) and not is_struct(coll) do
     pred_fn = Normalize.normalize_pred(pred, :truthy)

@@ -40,6 +40,9 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
       }
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.SourceAtoms
+
   alias PtcRunner.Lisp.Format
 
   @doc """
@@ -613,7 +616,7 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
   # Parse keywords
   defp parse_keyword(str) do
     keyword_name = String.slice(str, 1..-1//1)
-    {:ok, String.to_atom(keyword_name)}
+    {:ok, keyword_value(keyword_name)}
   end
 
   # Parse vars like #'name (optionally followed by comments)
@@ -621,7 +624,14 @@ defmodule PtcRunner.Lisp.SpecValidator.Parser do
     # Only take the part until the first space
     var_part = str |> String.split(" ") |> hd()
     var_name = String.slice(var_part, 2..-1//1)
-    {:ok, %Format.Var{name: String.to_atom(var_name)}}
+    {:ok, %Format.Var{name: SourceAtoms.intern(var_name)}}
+  end
+
+  defp keyword_value(name) do
+    case SourceAtoms.intern(name) do
+      atom when is_atom(atom) -> atom
+      binary when is_binary(binary) -> LispKeyword.new(binary)
+    end
   end
 
   # Unescape string literals

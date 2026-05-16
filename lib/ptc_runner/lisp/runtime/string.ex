@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   """
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
   Convert zero or more values to string and concatenate.
@@ -43,6 +44,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   def to_str(:negative_infinity), do: "-Infinity"
   def to_str(:nan), do: "NaN"
   def to_str(atom) when is_atom(atom), do: inspect(atom)
+  def to_str(%LispKeyword{name: name}), do: ":" <> name
 
   # Temporal structs: render as ISO 8601 so `(java.util.Date. (str dt))` works
   # and the LLM never sees the Elixir sigil form. Must precede the generic map
@@ -712,6 +714,8 @@ defmodule PtcRunner.Lisp.Runtime.String do
       Atom.to_string(k)
     end
   end
+
+  def name(%LispKeyword{name: name}), do: name
 
   def name(x) do
     raise ArgumentError, "name not supported on: #{inspect(x)}"

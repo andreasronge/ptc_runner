@@ -13,12 +13,14 @@ defmodule PtcRunner.Lisp.CoreAST do
   ```
   """
 
+  @type name :: atom() | String.t()
+
   @type literal ::
           nil
           | boolean()
           | number()
           | {:string, String.t()}
-          | {:keyword, atom()}
+          | {:keyword, name()}
 
   @type fn_params :: [pattern()] | {:variadic, [pattern()], pattern()}
 
@@ -29,8 +31,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:map, [{t(), t()}]}
           | {:set, [t()]}
           # Variables and namespace access
-          | {:var, atom()}
-          | {:data, atom()}
+          | {:var, name()}
+          | {:data, name()}
           # Function call: f(args...)
           | {:call, t(), [t()]}
           # Let bindings: (let [p1 v1 p2 v2 ...] body)
@@ -39,7 +41,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:if, t(), t(), t()}
           # Anonymous function (optionally named for self-recursion)
           | {:fn, fn_params(), t()}
-          | {:fn, atom(), fn_params(), t()}
+          | {:fn, name(), fn_params(), t()}
           # Sequential evaluation (special forms, not calls)
           | {:do, [t()]}
           # Short-circuit logic (special forms, not calls)
@@ -55,11 +57,11 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:step_done, t(), t()}
           | {:task_reset, t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
-          | {:tool_call, atom(), [t()]}
+          | {:tool_call, name(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
-          | {:def, atom(), t(), map()}
+          | {:def, name(), t(), map()}
           # Idempotent define: (defonce name value) — no-op if already bound
-          | {:defonce, atom(), t(), map()}
+          | {:defonce, name(), t(), map()}
           # Tail recursion: loop and recur
           | {:loop, [binding()], t()}
           | {:recur, [t()]}
@@ -67,10 +69,10 @@ defmodule PtcRunner.Lisp.CoreAST do
   @type binding :: {:binding, pattern(), t()}
 
   @type pattern ::
-          {:var, atom()}
-          | {:destructure, {:keys, [atom()], keyword()}}
-          | {:destructure, {:map, [atom()], [{pattern(), term()}], keyword()}}
-          | {:destructure, {:as, atom(), pattern()}}
+          {:var, name()}
+          | {:destructure, {:keys, [name()], keyword()}}
+          | {:destructure, {:map, [name()], [{pattern(), term()}], keyword()}}
+          | {:destructure, {:as, name(), pattern()}}
           | {:destructure, {:seq, [pattern()]}}
           # Rest pattern: [a b & rest] binds rest to remaining elements
           | {:destructure, {:seq_rest, [pattern()], pattern()}}

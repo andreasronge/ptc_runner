@@ -25,6 +25,9 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   @default_timeout 5_000
   @local_bb_path "_build/tools/bb"
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.SourceAtoms
+
   @doc """
   Check if Babashka is available.
 
@@ -277,7 +280,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
 
       # Keyword
       String.starts_with?(str, ":") ->
-        str |> String.slice(1..-1//1) |> String.to_atom()
+        str |> String.slice(1..-1//1) |> keyword_value()
 
       # String (quoted)
       String.starts_with?(str, "\"") and String.ends_with?(str, "\"") ->
@@ -333,7 +336,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     Map.new(value, fn {k, v} ->
       key =
         if is_binary(k) and String.starts_with?(k, ":") do
-          k |> String.slice(1..-1//1) |> String.to_atom()
+          k |> String.slice(1..-1//1) |> keyword_value()
         else
           k
         end
@@ -386,6 +389,8 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     Atom.to_string(value)
   end
 
+  defp normalize_value(%LispKeyword{name: name}), do: name
+
   defp normalize_value(value), do: value
 
   # Convert Elixir value to EDN string
@@ -399,6 +404,8 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   defp to_edn(a) when is_atom(a) do
     ":" <> Atom.to_string(a)
   end
+
+  defp to_edn(%LispKeyword{name: name}), do: ":" <> name
 
   defp to_edn(list) when is_list(list) do
     items = Enum.map_join(list, " ", &to_edn/1)
@@ -417,6 +424,13 @@ defmodule PtcRunner.Lisp.ClojureValidator do
       end)
 
     "{#{items}}"
+  end
+
+  defp keyword_value(name) when is_binary(name) do
+    case SourceAtoms.intern(name) do
+      atom when is_atom(atom) -> atom
+      binary when is_binary(binary) -> LispKeyword.new(binary)
+    end
   end
 
   # PTC-specific function stubs for Clojure

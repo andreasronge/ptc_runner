@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
   delegating normalization to `Collection.Normalize`.
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.FlexAccess
@@ -15,6 +16,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
 
   # Keyword on string: flex_get on graphemes always returns nil
   def map(f, coll) when is_atom(f) and is_binary(coll),
+    do: Enum.map(Normalize.graphemes(coll), fn _ -> nil end)
+
+  def map(%LispKeyword{}, coll) when is_binary(coll),
     do: Enum.map(Normalize.graphemes(coll), fn _ -> nil end)
 
   def map(f, coll) when is_map(coll) and not is_struct(coll) do
@@ -78,6 +82,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
     end)
   end
 
+  def mapcat(%LispKeyword{} = key, coll) when is_list(coll) do
+    Enum.flat_map(coll, fn item ->
+      case FlexAccess.flex_get(item, key) do
+        nil -> []
+        val when is_list(val) -> val
+        val -> [val]
+      end
+    end)
+  end
+
   def mapcat(f, coll) when is_map(coll) and not is_struct(coll) do
     Enum.flat_map(coll, fn {k, v} -> Callable.call(f, [[k, v]]) end)
   end
@@ -94,6 +108,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
 
   # Keyword on string: always nil, so keep returns empty
   def keep(f, coll) when is_atom(f) and is_binary(coll), do: []
+  def keep(%LispKeyword{}, coll) when is_binary(coll), do: []
 
   def keep(f, coll) when is_map(coll) and not is_struct(coll) do
     keyfn = Normalize.normalize_keyfn(f)

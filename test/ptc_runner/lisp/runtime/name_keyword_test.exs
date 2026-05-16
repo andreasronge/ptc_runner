@@ -89,12 +89,9 @@ defmodule PtcRunner.Lisp.Runtime.NameKeywordTest do
       assert step.fail.message =~ "cannot coerce special value"
     end
 
-    test "unknown atom string raises error" do
-      # A string that passes validation but has no existing atom
-      assert {:error, step} =
-               PtcRunner.Lisp.run(~s|(keyword "zzxxyywwnotexist")|, context: %{})
-
-      assert step.fail.message =~ "keyword not found"
+    test "unknown atom string becomes a non-atom keyword" do
+      assert run!(~s|(name (keyword "zzxxyywwnotexist"))|) == "zzxxyywwnotexist"
+      assert run!(~s|(keyword? (keyword "zzxxyywwnotexist"))|) == true
     end
   end
 end
