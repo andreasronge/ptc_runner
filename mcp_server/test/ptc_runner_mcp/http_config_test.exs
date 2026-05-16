@@ -1,0 +1,64 @@
+defmodule PtcRunnerMcp.HttpConfigTest do
+  use ExUnit.Case, async: false
+
+  alias PtcRunnerMcp.Http.Config
+
+  test "rejects short auth tokens" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_host: "0.0.0.0",
+               http_auth_token: "short"
+             })
+
+    assert message =~ "at least 32"
+  end
+
+  test "requires auth for non-loopback binds unless explicitly unsafe" do
+    assert {:error, message} = Config.resolve(%{http: true, http_host: "0.0.0.0"})
+    assert message =~ "required"
+
+    assert {:ok, cfg} =
+             Config.resolve(%{
+               http: true,
+               http_host: "0.0.0.0",
+               http_disable_auth: true,
+               http_allow_unsafe_network: true
+             })
+
+    assert cfg.auth_disabled
+  end
+
+  test "rejects endpoint path collisions" do
+    assert {:error, "HTTP paths must be distinct"} =
+             Config.resolve(%{http: true, http_path: "/health"})
+  end
+
+  test "loopback detection covers 127/8 and ::1" do
+    assert Config.loopback_host?("127.9.8.7")
+    assert Config.loopback_host?("::1")
+    refute Config.loopback_host?("0.0.0.0")
+  end
+
+  test "parse_args preserves repeated allowed-origin flags" do
+    args =
+      PtcRunnerMcp.Application.parse_args([
+        "--http-allowed-origin",
+        "http://a.test",
+        "--http-allowed-origin",
+        "http://b.test"
+      ])
+
+    assert args.http_allowed_origin == ["http://a.test", "http://b.test"]
+  end
+
+  test "default body limit follows the applied max frame limit" do
+    on_exit(fn -> PtcRunnerMcp.Limits.set(PtcRunnerMcp.Limits.defaults()) end)
+
+    args = %{http: true, max_frame_bytes: 12_345}
+
+    :ok = PtcRunnerMcp.Application.apply_limits(args)
+    assert {:ok, cfg} = Config.resolve(args)
+    assert cfg.max_body_bytes == 12_345
+  end
+end

@@ -53,6 +53,7 @@ defmodule PtcRunnerMcp.Envelope do
           | :busy
           | :unknown_tool
           | :shutting_down
+          | :cancelled
 
   @doc """
   Build the `unknown_tool` envelope for any `tools/call` whose
@@ -94,6 +95,12 @@ defmodule PtcRunnerMcp.Envelope do
       :shutting_down,
       "server is draining after shutdown; new tool calls are rejected"
     )
+  end
+
+  @doc "Build a cancelled envelope for HTTP request cancellation."
+  @spec cancelled(String.t()) :: t()
+  def cancelled(message) when is_binary(message) do
+    render_error(:cancelled, message)
   end
 
   @doc """
@@ -191,6 +198,19 @@ defmodule PtcRunnerMcp.Envelope do
     %{
       "status" => "error",
       "reason" => "shutting_down",
+      "message" => message,
+      "feedback" => feedback
+    }
+  end
+
+  def render_error_payload(:cancelled, message, opts) when is_binary(message) do
+    feedback =
+      Keyword.get(opts, :feedback) ||
+        "The request was cancelled before the tool call completed."
+
+    %{
+      "status" => "error",
+      "reason" => "cancelled",
       "message" => message,
       "feedback" => feedback
     }

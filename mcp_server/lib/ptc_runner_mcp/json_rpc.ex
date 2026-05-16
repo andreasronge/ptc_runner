@@ -103,7 +103,16 @@ defmodule PtcRunnerMcp.JsonRpc do
       case method do
         "initialize" ->
           Log.log(:info, "initialize", %{request_id: id})
-          {:reply, success_reply(id, Lifecycle.initialize_reply(params)), :continue}
+
+          protocol_version =
+            Keyword.get_lazy(opts, :protocol_version, fn ->
+              params
+              |> requested_protocol_version()
+              |> Version.negotiate()
+            end)
+
+          {:reply, success_reply(id, Lifecycle.initialize_reply(params, protocol_version)),
+           :continue}
 
         "notifications/initialized" ->
           Lifecycle.on_initialized()
@@ -125,7 +134,12 @@ defmodule PtcRunnerMcp.JsonRpc do
           {:reply, success_reply(id, Tools.list()), :continue}
 
         "tools/call" ->
-          handle_tools_call(id, params, draining?)
+          handle_tools_call(
+            id,
+            params,
+            draining?,
+            Keyword.get(opts, :protocol_version, Version.primary())
+          )
 
         _ ->
           Log.log(:warn, "method_not_found", %{request_id: id, method: method})
@@ -157,6 +171,11 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp handle(_other, _opts) do
     {:reply, error_reply(nil, -32_600, "Invalid Request"), :continue}
   end
+
+  defp requested_protocol_version(%{"protocolVersion" => version}) when is_binary(version),
+    do: version
+
+  defp requested_protocol_version(_params), do: nil
 
   # § 6.4 row 3: `notifications/cancelled` for an in-flight requestId
   # signals stdio to kill that worker and emit no response. § 6.4
@@ -195,7 +214,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
   defp suppress_reply_if_notification(other, _), do: other
 
-  defp handle_tools_call(id, params, draining?) when is_map(params) do
+  defp handle_tools_call(id, params, draining?, protocol_version) when is_map(params) do
     Log.log(:info, "tools_call_start", %{
       request_id: id,
       tool: Map.get(params, "name")
@@ -234,7 +253,10 @@ defmodule PtcRunnerMcp.JsonRpc do
         # Unknown tool: handled synchronously (no Lisp execution, no
         # gate). We still trace + emit `[:ptc_runner_mcp, :call, :*]`
         # so subscribers see the call regardless of outcome.
-        envelope = traced_tools_call(id, params, fn -> Tools.call(params) end)
+        envelope =
+          traced_tools_call(id, params, fn -> Tools.call(params) end,
+            protocol_version: protocol_version
+          )
 
         Log.log(:info, "tools_call_stop", %{
           request_id: id,
@@ -246,25 +268,33 @@ defmodule PtcRunnerMcp.JsonRpc do
       Sessions.tool_name?(Map.get(params, "name")) and
           not Sessions.async_tool_name?(Map.get(params, "name")) ->
         envelope =
-          traced_tools_call(id, params, fn ->
-            Tools.call(params)
-          end)
+          traced_tools_call(
+            id,
+            params,
+            fn ->
+              Tools.call(params)
+            end,
+            protocol_version: protocol_version
+          )
 
         Log.log(:info, "tools_call_stop", %{
           request_id: id,
           is_error: Map.get(envelope, "isError")
         })
 
-        DebugRecorder.record_outcome(id, params, envelope, duration_ms: 0)
+        DebugRecorder.record_outcome(id, params, envelope,
+          duration_ms: 0,
+          protocol_version: protocol_version
+        )
 
         {:reply, success_reply(id, envelope), :continue}
 
       true ->
-        async_tools_call(id, params)
+        async_tools_call(id, params, protocol_version)
     end
   end
 
-  defp handle_tools_call(id, _, _draining?) do
+  defp handle_tools_call(id, _, _draining?, _protocol_version) do
     {:reply, error_reply(id, -32_602, "Invalid params"), :continue}
   end
 
@@ -286,7 +316,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   # built via `DebugRecorder.record_outcome/4`, which no-ops when
   # `--debug-tool` is disabled and swallows + `warn`-logs any failure
   # — it can never affect the response.
-  defp async_tools_call(id, params) do
+  defp async_tools_call(id, params, protocol_version) do
     args = extract_arguments(params)
 
     case validate_tool_args(params, args) do
@@ -296,41 +326,61 @@ defmodule PtcRunnerMcp.JsonRpc do
           is_error: true
         })
 
-        DebugRecorder.record_outcome(id, params, args_error_envelope, duration_ms: 0)
+        DebugRecorder.record_outcome(id, params, args_error_envelope,
+          duration_ms: 0,
+          protocol_version: protocol_version
+        )
 
         {:reply, success_reply(id, args_error_envelope), :continue}
 
       {:ok, :ptc_lisp_execute, {program, context, parsed_signature}} ->
         work_fn =
-          recorded_work_fn(id, params, fn ->
-            traced_tools_call(id, params, fn ->
-              # Phase 1a §10: thread the JSON-RPC request id into
-              # `Tools.call_validated/4` so the
-              # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
-              # metadata can correlate upstream calls back to the
-              # parent `tools/call` request.
-              Tools.call_validated(program, context, parsed_signature, request_id: id)
-            end)
+          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+            traced_tools_call(
+              id,
+              params,
+              fn ->
+                # Phase 1a §10: thread the JSON-RPC request id into
+                # `Tools.call_validated/4` so the
+                # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
+                # metadata can correlate upstream calls back to the
+                # parent `tools/call` request.
+                Tools.call_validated(program, context, parsed_signature, request_id: id)
+              end,
+              protocol_version: protocol_version
+            )
           end)
 
-        {:async_call, id, work_fn, busy_record_fn(id, params), noop_fn(), :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params, protocol_version), noop_fn(),
+         :continue}
 
       {:ok, :ptc_task, validated} ->
         work_fn =
-          recorded_work_fn(id, params, fn ->
-            traced_tools_call(id, params, fn ->
-              Tools.call_agentic_validated(validated, request_id: id)
-            end)
+          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+            traced_tools_call(
+              id,
+              params,
+              fn ->
+                Tools.call_agentic_validated(validated, request_id: id)
+              end,
+              protocol_version: protocol_version
+            )
           end)
 
-        {:async_call, id, work_fn, busy_record_fn(id, params), noop_fn(), :continue}
+        {:async_call, id, work_fn, busy_record_fn(id, params, protocol_version), noop_fn(),
+         :continue}
 
       {:ok, :ptc_session_eval, validated} ->
         work_fn =
-          recorded_work_fn(id, params, fn ->
-            traced_tools_call(id, params, fn ->
-              Tools.call_session_eval_reserved(validated, request_id: id)
-            end)
+          recorded_work_fn(id, params, [protocol_version: protocol_version], fn ->
+            traced_tools_call(
+              id,
+              params,
+              fn ->
+                Tools.call_session_eval_reserved(validated, request_id: id)
+              end,
+              protocol_version: protocol_version
+            )
           end)
 
         on_discard = fn ->
@@ -339,7 +389,11 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         on_busy = fn busy_envelope ->
           _ = Tools.abort_session_eval_reserved(validated, :global_busy)
-          DebugRecorder.record_outcome(id, params, busy_envelope, duration_ms: 0)
+
+          DebugRecorder.record_outcome(id, params, busy_envelope,
+            duration_ms: 0,
+            protocol_version: protocol_version
+          )
         end
 
         {:async_call, id, work_fn, on_busy, on_discard, :continue}
@@ -350,21 +404,29 @@ defmodule PtcRunnerMcp.JsonRpc do
   # record the call into the `ptc_debug` ring with the measured
   # duration. The recorder itself is fault-isolated; this wrapper adds
   # the timing only.
-  defp recorded_work_fn(id, params, run_fn) when is_function(run_fn, 0) do
+  defp recorded_work_fn(id, params, opts, run_fn) when is_function(run_fn, 0) do
     fn ->
       started = System.monotonic_time(:millisecond)
       envelope = run_fn.()
       duration_ms = max(System.monotonic_time(:millisecond) - started, 0)
-      DebugRecorder.record_outcome(id, params, envelope, duration_ms: duration_ms)
+
+      DebugRecorder.record_outcome(id, params, envelope,
+        duration_ms: duration_ms,
+        protocol_version: Keyword.get(opts, :protocol_version, Version.primary())
+      )
+
       strip_private_result(envelope)
     end
   end
 
   # 1-arity callback Stdio runs (passing the `busy` envelope it built)
   # when it rejects this call at the concurrency cap.
-  defp busy_record_fn(id, params) do
+  defp busy_record_fn(id, params, protocol_version) do
     fn busy_envelope ->
-      DebugRecorder.record_outcome(id, params, busy_envelope, duration_ms: 0)
+      DebugRecorder.record_outcome(id, params, busy_envelope,
+        duration_ms: 0,
+        protocol_version: protocol_version
+      )
     end
   end
 
@@ -438,8 +500,8 @@ defmodule PtcRunnerMcp.JsonRpc do
   Phase 4 it's `fn -> Tools.call_validated(program, ctx, sig) end`;
   the gate is owned by `Stdio` outside this wrap.
   """
-  @spec traced_tools_call(term(), map(), (-> map())) :: map()
-  def traced_tools_call(request_id, params, run_fn) when is_function(run_fn, 0) do
+  @spec traced_tools_call(term(), map(), (-> map()), keyword()) :: map()
+  def traced_tools_call(request_id, params, run_fn, opts \\ []) when is_function(run_fn, 0) do
     payload_level = PtcRunnerMcp.TraceConfig.trace_payloads()
     args = extract_arguments(params)
     program = Map.get(args, "program")
@@ -457,7 +519,13 @@ defmodule PtcRunnerMcp.JsonRpc do
       end
 
     TraceFile.with_traced_call(request_id, query_str, [], fn ->
-      span_meta = call_start_meta(request_id, params, args)
+      span_meta =
+        call_start_meta(
+          request_id,
+          params,
+          args,
+          Keyword.get(opts, :protocol_version, Version.primary())
+        )
 
       :telemetry.span([:ptc_runner_mcp, :call], span_meta, fn ->
         envelope = run_fn.()
@@ -474,7 +542,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   defp extract_arguments(%{"arguments" => args}) when is_map(args), do: args
   defp extract_arguments(_), do: %{}
 
-  defp call_start_meta(request_id, params, args) do
+  defp call_start_meta(request_id, params, args, protocol_version) do
     program = Map.get(args, "program")
     context = Map.get(args, "context")
 
@@ -503,7 +571,7 @@ defmodule PtcRunnerMcp.JsonRpc do
       program_bytes: program_bytes,
       context_bytes: context_bytes,
       signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
-      protocol_version: Version.negotiated()
+      protocol_version: protocol_version
     }
   end
 
