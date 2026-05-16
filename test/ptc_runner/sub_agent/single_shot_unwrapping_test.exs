@@ -28,7 +28,8 @@ defmodule PtcRunner.SubAgent.SingleShotUnwrappingTest do
       llm = fn _ -> {:ok, "```clojure\n(fail {:reason :not_found :message \"No data\"})\n```"} end
 
       {:error, step} = SubAgent.run(agent, llm: llm)
-      assert step.fail.reason == :not_found
+      # Structured-fail keyword keys/values externalize to strings (#964).
+      assert step.fail.reason == "not_found"
       assert step.fail.message == "No data"
     end
 

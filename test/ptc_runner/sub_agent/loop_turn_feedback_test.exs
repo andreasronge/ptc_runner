@@ -119,7 +119,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.return == :finished
+      assert step.return == "finished"
     end
 
     test "println output is truncated when exceeding feedback_max_chars" do
@@ -159,7 +159,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.return == :done
+      assert step.return == "done"
     end
 
     test "shows FINAL WORK TURN warning with retry info when retry_turns configured" do
@@ -271,7 +271,7 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       end
 
       {:ok, step} = Loop.run(agent, llm: llm, context: %{})
-      assert step.return == :done
+      assert step.return == "done"
 
       all_calls = Agent.get(calls, & &1) |> Enum.reverse()
       assert length(all_calls) == 2

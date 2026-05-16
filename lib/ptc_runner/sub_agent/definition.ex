@@ -363,7 +363,7 @@ defmodule PtcRunner.SubAgent.Definition do
     # Handle both structured and simple fail values
     {reason, message} =
       if is_map(value) do
-        {Map.get(value, :reason, :failed), Map.get(value, :message, inspect(value))}
+        {fail_field(value, :reason, :failed), fail_field(value, :message, inspect(value))}
       else
         {:failed, inspect(value)}
       end
@@ -373,4 +373,15 @@ defmodule PtcRunner.SubAgent.Definition do
   end
 
   def unwrap_sentinels(step), do: {:ok, step}
+
+  # A structured `(fail {...})` map has its keyword keys externalized to
+  # strings (#964), so accept either the atom or the string key.
+  defp fail_field(map, key, default) do
+    with :error <- Map.fetch(map, key),
+         :error <- Map.fetch(map, Atom.to_string(key)) do
+      default
+    else
+      {:ok, value} -> value
+    end
+  end
 end

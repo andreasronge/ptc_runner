@@ -63,7 +63,7 @@ defmodule PtcRunner.Lisp.EvalMcpTest do
          :relation-count (count (get g "relations"))})
       """
 
-      assert {:ok, %{return: %{"entity-count": 2, "relation-count": 1}}} =
+      assert {:ok, %{return: %{"entity-count" => 2, "relation-count" => 1}}} =
                Lisp.run(source, tools: tools)
     end
 

@@ -30,8 +30,8 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run(program, context: %{expenses: expenses})
 
       assert [
-               %{category: "food", average: 75.0},
-               %{category: "transport", average: 30.0}
+               %{"category" => "food", "average" => 75.0},
+               %{"category" => "transport", "average" => 30.0}
              ] = result
     end
   end
@@ -91,7 +91,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{a: 2, b: 3, c: 4}
+      assert result == %{"a" => 2, "b" => 3, "c" => 4}
     end
 
     test "works with empty map" do
@@ -135,7 +135,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{n: 2}
+      assert result == %{"n" => 2}
     end
 
     test "missing key passes nil to function" do
@@ -145,7 +145,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{missing: 0}
+      assert result == %{"missing" => 0}
     end
 
     test "multiple keys in map" do
@@ -155,7 +155,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{a: 1, b: 3, c: 3}
+      assert result == %{"a" => 1, "b" => 3, "c" => 3}
     end
   end
 
@@ -167,7 +167,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{a: %{b: 2}}
+      assert result == %{"a" => %{"b" => 2}}
     end
 
     test "multiple levels deep" do
@@ -177,7 +177,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{x: %{y: %{z: 10}}}
+      assert result == %{"x" => %{"y" => %{"z" => 10}}}
     end
 
     test "works with empty nested map" do
@@ -187,7 +187,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{a: %{b: 0}}
+      assert result == %{"a" => %{"b" => 0}}
     end
 
     test "single key path is equivalent to update" do
@@ -197,7 +197,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
       {:ok, %Step{return: result}} = Lisp.run(source)
 
-      assert result == %{n: 2}
+      assert result == %{"n" => 2}
     end
   end
 
@@ -539,9 +539,9 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run(program)
 
       assert result == %{
-               "first-row-head": 1,
-               "first-row-tail": [2, 3],
-               "remaining-rows": [[4, 5, 6], [7, 8, 9]]
+               "first-row-head" => 1,
+               "first-row-tail" => [2, 3],
+               "remaining-rows" => [[4, 5, 6], [7, 8, 9]]
              }
     end
   end
@@ -566,7 +566,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "map creating pairs with anonymous function" do
       source = "(map (fn [a b] [a b]) [1 2] [:a :b])"
       {:ok, %Step{return: result}} = Lisp.run(source)
-      assert result == [[1, :a], [2, :b]]
+      assert result == [[1, "a"], [2, "b"]]
     end
 
     test "map stops at shortest collection" do
@@ -730,7 +730,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "works with keyword separator" do
       source = "(interpose :sep [:a :b :c])"
       {:ok, %Step{return: result}} = Lisp.run(source)
-      assert result == [:a, :sep, :b, :sep, :c]
+      assert result == ["a", "sep", "b", "sep", "c"]
     end
 
     test "commonly used with join for string building" do
@@ -897,7 +897,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "mapcat with anonymous function creating pairs" do
       source = "(mapcat (fn [x] [[x :start] [x :end]]) [:a :b])"
       {:ok, %Step{return: result}} = Lisp.run(source)
-      assert result == [[:a, :start], [:a, :end], [:b, :start], [:b, :end]]
+      assert result == [["a", "start"], ["a", "end"], ["b", "start"], ["b", "end"]]
     end
 
     test "mapcat in threading macro" do
@@ -940,8 +940,8 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} = Lisp.run(source)
       # Maps have undefined order, but check contents
       assert length(result) == 4
-      assert :a in result
-      assert :b in result
+      assert "a" in result
+      assert "b" in result
       assert 1 in result
       assert 2 in result
     end
@@ -1044,12 +1044,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "_by functions with map arguments" do
     test "max-by second on map returns entry with largest value" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(max-by second {:a 1 :b 3 :c 2})|)
-      assert result == [:b, 3]
+      assert result == ["b", 3]
     end
 
     test "min-by second on map returns entry with smallest value" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(min-by second {:a 1 :b 3 :c 2})|)
-      assert result == [:a, 1]
+      assert result == ["a", 1]
     end
 
     test "sum-by second on map sums all values" do
@@ -1064,7 +1064,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "group-by first on map groups entries by key" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(group-by first {:a 1 :b 2})|)
-      assert result == %{a: [[:a, 1]], b: [[:b, 2]]}
+      assert result == %{"a" => [["a", 1]], "b" => [["b", 2]]}
     end
 
     test "distinct-by second on map removes entries with duplicate values" do
@@ -1083,7 +1083,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "max-by with anonymous function on map" do
       source = ~S|(max-by (fn [entry] (second entry)) {:a 1 :b 3 :c 2})|
       {:ok, %Step{return: result}} = Lisp.run(source)
-      assert result == [:b, 3]
+      assert result == ["b", 3]
     end
   end
 
@@ -1180,7 +1180,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(keep (fn [[k v]] (when (> v 1) k)) {:a 1 :b 2 :c 3})|)
 
-      assert Enum.sort(result) == [:b, :c]
+      assert Enum.sort(result) == ["b", "c"]
     end
   end
 
@@ -1191,7 +1191,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "filter with non-list collections" do
     test "keyword predicate on set collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(filter :a #{{:a 1} {:b 2}})|)
-      assert result == [%{a: 1}]
+      assert result == [%{"a" => 1}]
     end
 
     test "MapSet predicate on set collection" do
@@ -1206,7 +1206,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(filter #{[:a 1]} {:a 1 :b 2})|)
-      assert result == [[:a, 1]]
+      assert result == [["a", 1]]
     end
 
     test "keyword predicate on string returns empty" do
@@ -1218,7 +1218,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "remove with non-list collections" do
     test "keyword predicate on set collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(remove :a #{{:a 1} {:b 2}})|)
-      assert result == [%{b: 2}]
+      assert result == [%{"b" => 2}]
     end
 
     test "MapSet predicate on set collection" do
@@ -1233,7 +1233,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(remove #{[:a 1]} {:a 1 :b 2})|)
-      assert result == [[:b, 2]]
+      assert result == [["b", 2]]
     end
 
     test "keyword predicate on string keeps all graphemes" do
@@ -1265,7 +1265,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(keep #{[:a 1]} {:a 1 :b 2})|)
-      assert result == [[:a, 1]]
+      assert result == [["a", 1]]
     end
 
     test "keyword predicate on string returns empty" do
@@ -1277,7 +1277,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "find with non-list collections" do
     test "keyword predicate on set collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(find :a #{{:b 2} {:a 1}})|)
-      assert result == %{a: 1}
+      assert result == %{"a" => 1}
     end
 
     test "function predicate on set collection" do
@@ -1299,7 +1299,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(find (fn [[k v]] (> v 1)) {:a 1 :b 2})|)
 
-      assert result == [:b, 2]
+      assert result == ["b", 2]
     end
 
     test "keyword predicate on map collection" do
@@ -1310,7 +1310,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(find #{[:a 1]} {:a 1 :b 2})|)
-      assert result == [:a, 1]
+      assert result == ["a", 1]
     end
 
     test "keyword predicate on string returns nil" do
@@ -1337,7 +1337,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(map #{[:a 1]} {:a 1 :b 2})|)
-      assert Enum.sort(result) == [nil, [:a, 1]]
+      assert Enum.sort(result) == [nil, ["a", 1]]
     end
 
     test "keyword predicate on string returns nils" do
@@ -1364,7 +1364,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map collection" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(mapv #{[:a 1]} {:a 1 :b 2})|)
-      assert Enum.sort(result) == [nil, [:a, 1]]
+      assert Enum.sort(result) == [nil, ["a", 1]]
     end
 
     test "keyword predicate on string returns nils" do
@@ -1392,7 +1392,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "MapSet predicate on map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(some #{[:a 1]} {:a 1 :b 2})|)
-      assert result == [:a, 1]
+      assert result == ["a", 1]
     end
   end
 
@@ -1463,8 +1463,8 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     test "into [] with map converts entries to vectors" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(into [] {:a 1 :b 2})|)
       assert length(result) == 2
-      assert [:a, 1] in result
-      assert [:b, 2] in result
+      assert ["a", 1] in result
+      assert ["b", 2] in result
     end
 
     test "into [] with empty map returns empty list" do
@@ -1494,17 +1494,17 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "into {} with list of pairs creates map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(into {} [[:a 1] [:b 2]])|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "into {} with another map merges them" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(into {:a 1} {:b 2})|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "into {:a 1} with list of pairs overwrites existing key" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(into {:a 1} [[:a 2]])|)
-      assert result == %{a: 2}
+      assert result == %{"a" => 2}
     end
 
     test "into with nil source returns original collection" do
@@ -1520,7 +1520,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "entries" do
     test "entries on map returns sorted list of pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(entries {:z 26 :a 1 :m 13})|)
-      assert result == [[:a, 1], [:m, 13], [:z, 26]]
+      assert result == [["a", 1], ["m", 13], ["z", 26]]
     end
 
     test "entries on empty map returns empty list" do
@@ -1532,7 +1532,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "key and val" do
     test "key extracts key from entry" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(key [:a 1])|)
-      assert result == :a
+      assert result == "a"
     end
 
     test "val extracts value from entry" do
@@ -1548,12 +1548,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "zip" do
     test "zip returns list of vectors" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(zip [1 2 3] [:a :b :c])|)
-      assert result == [[1, :a], [2, :b], [3, :c]]
+      assert result == [[1, "a"], [2, "b"], [3, "c"]]
     end
 
     test "zip with unequal lengths truncates to shorter" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(zip [1 2] [:a :b :c])|)
-      assert result == [[1, :a], [2, :b]]
+      assert result == [[1, "a"], [2, "b"]]
     end
 
     test "zip with empty lists returns empty list" do
@@ -1964,7 +1964,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "sort-by on maps" do
     test "sort-by on map returns sorted list of pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by second {:a 3 :b 1 :c 2})|)
-      assert result == [[:b, 1], [:c, 2], [:a, 3]]
+      assert result == [["b", 1], ["c", 2], ["a", 3]]
     end
 
     test "sort-by on empty map returns empty list" do
@@ -1980,7 +1980,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "filter on maps" do
     test "filter on map returns matching entries as pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(filter (fn [[_ v]] (> v 1)) {:a 1 :b 2 :c 3})|)
-      assert Enum.sort(result) == [[:b, 2], [:c, 3]]
+      assert Enum.sort(result) == [["b", 2], ["c", 3]]
     end
 
     test "filter on empty map returns empty list" do
@@ -1992,7 +1992,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "remove on maps" do
     test "remove on map removes matching entries" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(remove (fn [[_ v]] (= v 2)) {:a 1 :b 2 :c 3})|)
-      assert Enum.sort(result) == [[:a, 1], [:c, 3]]
+      assert Enum.sort(result) == [["a", 1], ["c", 3]]
     end
   end
 
@@ -2044,7 +2044,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "maps over a map with index" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(map-indexed (fn [i x] [i x]) {:a 1})|)
-      assert result == [[0, [:a, 1]]]
+      assert result == [[0, ["a", 1]]]
     end
   end
 
@@ -2076,7 +2076,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "cons on map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(cons :x {:a 1})|)
-      assert hd(result) == :x
+      assert hd(result) == "x"
     end
 
     test "cons on string" do
@@ -2149,12 +2149,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "merge-with" do
     test "merges with addition" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + {:a 1 :b 2} {:a 3 :c 4})|)
-      assert result == %{a: 4, b: 2, c: 4}
+      assert result == %{"a" => 4, "b" => 2, "c" => 4}
     end
 
     test "merges multiple maps" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + {:a 1} {:a 2} {:a 3})|)
-      assert result == %{a: 6}
+      assert result == %{"a" => 6}
     end
 
     test "merge-with no maps returns empty map" do
@@ -2164,12 +2164,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "merge-with nil maps treated as empty" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with + nil {:a 1})|)
-      assert result == %{a: 1}
+      assert result == %{"a" => 1}
     end
 
     test "merge-with conj for aggregation" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(merge-with conj {:a [1]} {:a [2]})|)
-      assert result == %{a: [1, [2]]}
+      assert result == %{"a" => [1, [2]]}
     end
 
     test "merge-with zero args raises error" do
@@ -2193,7 +2193,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(reduce-kv (fn [acc k v] (assoc acc k (* v 2))) {} {:a 1 :b 2})|)
 
-      assert result == %{a: 2, b: 4}
+      assert result == %{"a" => 2, "b" => 4}
     end
 
     test "reduce-kv on nil returns init" do
@@ -2210,7 +2210,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(reduce-kv (fn [acc k v] (conj acc k)) [] {:x 1 :y 2})|)
 
-      assert Enum.sort(result) == [:x, :y]
+      assert Enum.sort(result) == ["x", "y"]
     end
   end
 
@@ -2221,12 +2221,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "zipmap" do
     test "creates map from keys and values" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap [:a :b :c] [1 2 3])|)
-      assert result == %{a: 1, b: 2, c: 3}
+      assert result == %{"a" => 1, "b" => 2, "c" => 3}
     end
 
     test "truncates to shorter input" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(zipmap [:a :b] [1 2 3])|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "empty inputs" do
@@ -2262,7 +2262,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "creates map from key-value pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(hash-map :a 1 :b 2)|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "creates map with string keys" do
@@ -2279,7 +2279,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   describe "array-map" do
     test "aliases hash-map semantics" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(array-map :a 1 :b 2)|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
 
     test "errors on odd number of arguments" do
@@ -2650,7 +2650,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(keep-indexed (fn [idx v] (if (odd? idx) v)) [:a :b :c :d])|)
 
-      assert result == [:b, :d]
+      assert result == ["b", "d"]
     end
 
     test "returns index-value pairs" do
@@ -2713,12 +2713,12 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
 
     test "assoc on nil treats it as empty map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(assoc nil :a 1)|)
-      assert result == %{a: 1}
+      assert result == %{"a" => 1}
     end
 
     test "assoc variadic on nil treats it as empty map" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(assoc nil :a 1 :b 2)|)
-      assert result == %{a: 1, b: 2}
+      assert result == %{"a" => 1, "b" => 2}
     end
   end
 end

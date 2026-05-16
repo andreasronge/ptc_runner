@@ -862,8 +862,10 @@ defmodule PtcRunner.Lisp.Eval do
     Map.new(map, fn {k, v} -> {stringify_key(k), stringify_value(v)} end)
   end
 
-  # Recursively stringify values (for nested maps/lists in tool args)
-  defp stringify_value(%LispKeyword{name: name}), do: existing_atom_or(name, name)
+  # Recursively stringify values (for nested maps/lists in tool args).
+  # A keyword value becomes its plain name string — deterministic and
+  # JSON-friendly, matching how `stringify_key/1` handles keyword keys (#964).
+  defp stringify_value(%LispKeyword{name: name}), do: name
 
   defp stringify_value(map) when is_map(map) and not is_struct(map), do: stringify_keys(map)
 
@@ -1516,13 +1518,6 @@ defmodule PtcRunner.Lisp.Eval do
   defp keyword_runtime?(%LispKeyword{}), do: true
   defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
   defp keyword_runtime?(_), do: false
-
-  defp existing_atom_or(name, fallback) when is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> atom
-      :error -> fallback
-    end
-  end
 
   defp legacy_var_present?(map, name) when is_map(map) and is_binary(name) do
     case safe_to_existing_atom(name) do

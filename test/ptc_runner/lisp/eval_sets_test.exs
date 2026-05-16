@@ -46,7 +46,7 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
 
     test "vec from map returns key-value pairs" do
       {:ok, result, _} = run("(vec {:a 1 :b 2})")
-      assert Enum.sort(result) == [[:a, 1], [:b, 2]]
+      assert Enum.sort(result) == [["a", 1], ["b", 2]]
     end
 
     test "vec from nil returns nil" do
@@ -125,12 +125,12 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
 
     test "set with keywords works as predicate" do
       {:ok, result, _} = run(~S"(#{:a :b :c} :b)")
-      assert result == :b
+      assert result == "b"
     end
 
     test "set with single element" do
       {:ok, result, _} = run(~S"(#{:a} :a)")
-      assert result == :a
+      assert result == "a"
     end
 
     test "set works with remove" do

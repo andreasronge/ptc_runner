@@ -30,7 +30,17 @@ defmodule PtcRunner.Lisp do
 
   require Logger
 
-  alias PtcRunner.Lisp.{Analyze, DataKeys, Env, Eval, ExecutionError, Parser, SymbolCounter}
+  alias PtcRunner.Lisp.{
+    Analyze,
+    DataKeys,
+    Env,
+    Eval,
+    ExecutionError,
+    Parser,
+    SourceAtoms,
+    SymbolCounter
+  }
+
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Format.Var
@@ -703,9 +713,13 @@ defmodule PtcRunner.Lisp do
 
   defp round_floats(value, _precision), do: value
 
-  defp externalize_lisp_values(%LispKeyword{name: name} = keyword) do
-    existing_atom_or(name, keyword)
-  end
+  # Collapse runtime keyword structs deterministically: `SourceAtoms.intern/1`
+  # yields the bounded atom for vocabulary names and the plain binary for
+  # everything else. This never consults the global atom table, so the
+  # externalized representation no longer depends on VM state (#964), and it
+  # matches the parser's canonicalization plus the string-keyed SubAgent
+  # boundary contract (signature validation, mustache, chaining).
+  defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
 
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
     %{var | name: existing_atom_or(name, name)}
@@ -725,7 +739,7 @@ defmodule PtcRunner.Lisp do
 
   defp externalize_lisp_values(value) when is_map(value) and not is_struct(value) do
     Map.new(value, fn {k, v} ->
-      {externalize_map_key(k), externalize_lisp_values(v)}
+      {externalize_lisp_values(k), externalize_lisp_values(v)}
     end)
   end
 
@@ -737,12 +751,10 @@ defmodule PtcRunner.Lisp do
     end)
   end
 
-  defp externalize_map_key(%LispKeyword{name: name}), do: existing_atom_or(name, name)
-  defp externalize_map_key(other), do: other
-
-  defp externalize_memory_key(%LispKeyword{name: name} = keyword),
-    do: existing_atom_or(name, keyword)
-
+  # Memory keys are `def`-bound variable names. A binary name may still
+  # collapse to a pre-existing atom for back-compat; a keyword key (rare)
+  # is interned deterministically like any other externalized keyword (#964).
+  defp externalize_memory_key(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
   defp externalize_memory_key(name) when is_binary(name), do: existing_atom_or(name, name)
   defp externalize_memory_key(other), do: other
 

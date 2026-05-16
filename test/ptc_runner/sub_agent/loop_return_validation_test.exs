@@ -33,6 +33,22 @@ defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
       assert step.return == 42
     end
 
+    test "a keyword return validates against a :keyword signature (#964)" do
+      # A novel keyword externalizes to a binary; `:keyword` validation must
+      # still accept it instead of rejecting and retrying until failure.
+      agent =
+        SubAgent.new(
+          prompt: "Return a status keyword",
+          signature: "() -> :keyword",
+          max_turns: 2
+        )
+
+      llm = mock_llm(["(return :approved)"])
+
+      {:ok, step} = SubAgent.run(agent, llm: llm, context: %{})
+      assert step.return == "approved"
+    end
+
     test "validation error on last turn returns error step" do
       agent =
         SubAgent.new(

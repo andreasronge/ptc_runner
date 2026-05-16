@@ -433,7 +433,7 @@ defmodule PtcRunner.SubAgent do
       iex> agent = PtcRunner.SubAgent.new(prompt: "Fail", max_turns: 2)
       iex> mock_llm = fn _ -> {:ok, ~S|(fail {:reason :test :message "Error"})|} end
       iex> PtcRunner.SubAgent.run!(agent, llm: mock_llm)
-      ** (PtcRunner.SubAgentError) SubAgent failed: failed - %{message: "Error", reason: :test}
+      ** (PtcRunner.SubAgentError) SubAgent failed: failed - %{"message" => "Error", "reason" => "test"}
 
   """
   @spec run!(t() | String.t(), keyword()) :: PtcRunner.Step.t()

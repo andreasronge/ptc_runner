@@ -351,9 +351,10 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   # Type Coercion
   # ============================================================
 
-  # Only letters, digits, hyphen, underscore, question mark, and exclamation mark.
-  # Excludes operator chars (+, *, <, >, =) that the parser accepts for builtins
-  # but that should not be created at runtime via keyword coercion.
+  # Runtime `keyword` coercion is intentionally stricter than the parser's
+  # keyword grammar (`Lisp.Keyword.valid_name?/1`): it must start with a
+  # letter and excludes operator chars (+, *, <, >, =), which the parser
+  # accepts in source literals but which should not be minted at runtime.
   @keyword_pattern ~r/\A[a-zA-Z][a-zA-Z0-9\-_?!]*\z/
 
   @doc """
@@ -363,11 +364,13 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   (letters, digits, `-`, `_`, `?`, `!`; must start with a letter).
   No `/` (per DIV-13), no spaces, no empty strings, no operator chars.
 
-  Uses `String.to_existing_atom/1` to avoid atom table pollution from
-  arbitrary runtime strings. Only keywords already known to the VM
-  (from parsed source or BEAM boot) can be created.
+  Routes the name through `PtcRunner.Lisp.SourceAtoms.intern/1`: names in
+  the bounded vocabulary become atoms, every other name becomes a
+  `%PtcRunner.Lisp.Keyword{}` struct. This never grows the BEAM atom table
+  from arbitrary runtime strings.
 
-  - `(keyword "foo")` returns `:foo` (if `:foo` already exists)
+  - `(keyword "foo")` returns the keyword `:foo` — a `%PtcRunner.Lisp.Keyword{}`
+    struct for names outside the bounded vocabulary
   - `(keyword :bar)` returns `:bar`
   - `(keyword nil)` returns `nil`
   - `(keyword "")` raises error
