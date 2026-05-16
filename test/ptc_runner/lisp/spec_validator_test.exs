@@ -151,6 +151,36 @@ defmodule PtcRunner.Lisp.SpecValidatorTest do
     test "validates map results" do
       assert :ok = SpecValidator.validate_example("{:a 1 :b 2}", %{:a => 1, :b => 2})
     end
+
+    # A source keyword can surface at runtime as an atom, a `%Keyword{}`
+    # struct, or an externalized binary depending on the VM atom table.
+    # `validate_example/2` matches keyword positions by name so spec
+    # conformance does not depend on which representation was chosen.
+    test "accepts any keyword representation against a keyword expectation" do
+      alias PtcRunner.Lisp.Keyword, as: LispKeyword
+
+      # Expected given as plain atoms.
+      assert :ok = SpecValidator.validate_example("(keys {:a 1 :b 2})", [:a, :b])
+
+      # Expected given as %Keyword{} structs — same example, must still pass.
+      assert :ok =
+               SpecValidator.validate_example(
+                 "(keys {:a 1 :b 2})",
+                 [LispKeyword.new("a"), LispKeyword.new("b")]
+               )
+
+      # Keyword-keyed map expectation, struct-keyed.
+      assert :ok =
+               SpecValidator.validate_example(
+                 "{:a 1 :b 2}",
+                 %{LispKeyword.new("a") => 1, LispKeyword.new("b") => 2}
+               )
+    end
+
+    test "keyword tolerance does not mask a genuine string mismatch" do
+      # `(keyword "x")` yields a keyword; a string expectation must reject it.
+      assert {:error, _} = SpecValidator.validate_example(~s/(keyword "x")/, "x")
+    end
   end
 
   describe "validate_spec/0" do
