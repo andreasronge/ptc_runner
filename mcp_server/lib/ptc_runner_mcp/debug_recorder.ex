@@ -22,6 +22,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
     "ptc_session_start",
     "ptc_session_eval",
     "ptc_session_inspect",
+    "ptc_session_list",
     "ptc_session_forget",
     "ptc_session_close"
   ]

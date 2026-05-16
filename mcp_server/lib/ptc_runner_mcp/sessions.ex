@@ -26,6 +26,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   @sync_tool_names [
     "ptc_session_start",
+    "ptc_session_list",
     "ptc_session_inspect",
     "ptc_session_forget",
     "ptc_session_close"
@@ -77,6 +78,7 @@ defmodule PtcRunnerMcp.Sessions do
     if enabled?() do
       [
         session_start_tool(),
+        session_list_tool(),
         session_eval_tool(),
         session_inspect_tool(),
         session_forget_tool(),
@@ -102,6 +104,12 @@ defmodule PtcRunnerMcp.Sessions do
 
   def call(%{"name" => "ptc_session_start"}),
     do: call(%{"name" => "ptc_session_start", "arguments" => %{}})
+
+  def call(%{"name" => "ptc_session_list", "arguments" => args}) when is_map(args) do
+    args
+    |> list_session_args()
+    |> envelope()
+  end
 
   def call(%{"name" => "ptc_session_eval", "arguments" => args}) when is_map(args) do
     case validate_eval(args) do
@@ -133,6 +141,35 @@ defmodule PtcRunnerMcp.Sessions do
 
   def call(%{"name" => name}) when is_binary(name), do: Envelope.unknown_tool(name)
   def call(_params), do: Envelope.unknown_tool("")
+
+  @doc "List live sessions for the given owner without refreshing idle timers."
+  @spec list(map() | keyword() | nil) :: response()
+  def list(owner_context \\ nil) do
+    with :ok <- enabled(),
+         :ok <- ensure_started(),
+         {:ok, owner} <- Owner.from_context(owner_context) do
+      sessions =
+        owner
+        |> Registry.list()
+        |> Enum.flat_map(fn meta ->
+          try do
+            case Session.summary(meta.pid, owner) do
+              {:ok, summary} -> [summary]
+              {:error, _response} -> []
+            end
+          catch
+            :exit, _reason -> []
+          end
+        end)
+        |> Enum.sort_by(&summary_updated_at/1, {:desc, DateTime})
+
+      {:ok, Projection.list(sessions)}
+    else
+      :disabled -> {:error, disabled_error()}
+      {:error, reason} when is_atom(reason) -> {:error, registry_error(reason)}
+      {:error, response} when is_map(response) -> {:error, response}
+    end
+  end
 
   @doc "Validate `ptc_session_eval` arguments before acquiring the global eval gate."
   @spec validate_eval(map()) :: {:ok, map()} | {:error, map()}
@@ -467,18 +504,54 @@ defmodule PtcRunnerMcp.Sessions do
   defp envelope({:error, response}) when is_map(response), do: Envelope.error_envelope(response)
 
   defp start_session_args(args) do
-    opts =
-      %{}
-      |> maybe_put(:title, Map.get(args, "title"))
-      |> maybe_put(:mode, Map.get(args, "mode"))
-      |> maybe_put(:ttl_ms, Map.get(args, "ttl_ms"))
+    case validate_start_args(args) do
+      :ok ->
+        opts =
+          %{}
+          |> maybe_put(:title, Map.get(args, "title"))
+          |> maybe_put(:ttl_ms, Map.get(args, "ttl_ms"))
 
-    start_session(owner_context(args), opts)
+        start_session(owner_context(args), opts)
+
+      {:error, message} ->
+        {:error, Projection.error(:session_args_error, message)}
+    end
+  end
+
+  defp list_session_args(args) do
+    case map_size(args) do
+      0 ->
+        list(nil)
+
+      _count ->
+        {:error, Projection.error(:session_args_error, "ptc_session_list takes no arguments")}
+    end
   end
 
   defp owner_context(args) when is_map(args) do
+    # Internal/test override for ownership simulation. Public clients should
+    # rely on transport-derived ownership and should not send this field.
     Map.get(args, "owner") || Map.get(args, :owner) || nil
   end
+
+  defp validate_start_args(args) when is_map(args) do
+    case Enum.find(Map.keys(args), &(not start_arg_key?(&1))) do
+      nil -> :ok
+      key -> {:error, "unexpected ptc_session_start argument: #{key}"}
+    end
+  end
+
+  defp start_arg_key?(key) when key in ["title", "ttl_ms", "owner", :owner], do: true
+  defp start_arg_key?(_key), do: false
+
+  defp summary_updated_at(%{"updated_at" => updated_at}) when is_binary(updated_at) do
+    case DateTime.from_iso8601(updated_at) do
+      {:ok, datetime, _offset} -> datetime
+      {:error, _reason} -> DateTime.from_unix!(0)
+    end
+  end
+
+  defp summary_updated_at(_summary), do: DateTime.from_unix!(0)
 
   defp required_string(args, key) do
     case Map.get(args, key) do
@@ -582,9 +655,23 @@ defmodule PtcRunnerMcp.Sessions do
         "properties" => %{
           "title" => %{"type" => "string"},
           "ttl_ms" => %{"type" => "integer", "minimum" => 1}
-        }
+        },
+        "additionalProperties" => false
       },
       "outputSchema" => session_output_schema(["status", "session_id"])
+    }
+  end
+
+  defp session_list_tool do
+    %{
+      "name" => "ptc_session_list",
+      "description" => PromptRegistry.render(:mcp_session_list_description, []),
+      "inputSchema" => %{
+        "type" => "object",
+        "properties" => %{},
+        "additionalProperties" => false
+      },
+      "outputSchema" => session_output_schema(["status", "count", "sessions"])
     }
   end
 
@@ -712,6 +799,8 @@ defmodule PtcRunnerMcp.Sessions do
         "feedback" => %{"type" => "string"},
         "session_id" => %{"type" => "string"},
         "session" => %{"type" => "object"},
+        "count" => %{"type" => "integer"},
+        "sessions" => %{"type" => "array"},
         "limits" => %{"type" => "object"},
         "memory" => %{"type" => "object"},
         "result" => %{"type" => "string"},

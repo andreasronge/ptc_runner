@@ -142,6 +142,12 @@ defmodule PtcRunnerMcp.Sessions.Session do
     GenServer.call(pid, {:inspect, owner, view})
   end
 
+  @doc "Return metadata-only state summary without refreshing idle timers."
+  @spec summary(GenServer.server(), Owner.t()) :: {:ok, map()} | {:error, map()}
+  def summary(pid, owner) do
+    GenServer.call(pid, {:summary, owner})
+  end
+
   @doc "Forget bindings and/or clear bounded histories."
   @spec forget(GenServer.server(), Owner.t(), map()) :: {:ok, map()} | {:error, map()}
   def forget(pid, owner, opts) when is_map(opts) do
@@ -261,6 +267,13 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
       {:error, reason} ->
         {:reply, {:error, owner_error(reason)}, state}
+    end
+  end
+
+  def handle_call({:summary, owner}, _from, state) do
+    case Owner.check(state.owner, owner) do
+      :ok -> {:reply, {:ok, Projection.session_summary(state)}, state}
+      {:error, reason} -> {:reply, {:error, owner_error(reason)}, state}
     end
   end
 

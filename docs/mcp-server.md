@@ -171,6 +171,7 @@ tools:
 - `ptc_session_start`
 - `ptc_session_eval`
 - `ptc_session_inspect`
+- `ptc_session_list`
 - `ptc_session_forget`
 - `ptc_session_close`
 
@@ -180,6 +181,10 @@ the last three successful eval results (`*1`, `*2`, `*3`), captured
 bindings and ordinary intermediate values do not persist. Use
 `ptc_session_forget` to remove stale or large bindings and clear
 bounded histories.
+
+`ptc_session_list` returns metadata-only live sessions for the current
+owner. It does not render stored binding values or refresh session idle
+timers.
 
 Sessions are in-memory, owner-scoped, disabled by default, TTL/idle
 bounded, and allow at most one eval in a given session at a time.
