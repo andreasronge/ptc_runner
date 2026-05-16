@@ -94,4 +94,38 @@ defmodule PtcRunner.Lisp.Runtime.NameKeywordTest do
       assert run!(~s|(keyword? (keyword "zzxxyywwnotexist"))|) == true
     end
   end
+
+  describe "non-atom keyword runtime behavior" do
+    test "novel source keywords are scalar keywords, not maps or collections" do
+      assert run!(~s|(keyword? :novel-runtime-keyword)|) == true
+      assert run!(~s|(map? :novel-runtime-keyword)|) == false
+      assert run!(~s|(coll? :novel-runtime-keyword)|) == false
+      assert run!(~s|(counted? :novel-runtime-keyword)|) == false
+      assert run!(~s|(seqable? :novel-runtime-keyword)|) == false
+    end
+
+    test "novel source keywords do not expose struct fields through keyword lookup" do
+      assert run!(~s|(:name :novel-runtime-keyword)|) == nil
+    end
+
+    test "novel source keywords use flexible lookup consistently" do
+      ctx = %{"m" => %{"novel-runtime-keyword" => 1}}
+
+      assert {:ok, %{return: 1}} =
+               PtcRunner.Lisp.run(~s|(:novel-runtime-keyword data/m)|, context: ctx)
+
+      assert {:ok, %{return: 1}} =
+               PtcRunner.Lisp.run(~s|(get data/m :novel-runtime-keyword)|, context: ctx)
+
+      assert {:ok, %{return: 1}} =
+               PtcRunner.Lisp.run(~s|(get data/m :novel-runtime-keyword :missing)|,
+                 context: ctx
+               )
+
+      assert {:ok, %{return: true}} =
+               PtcRunner.Lisp.run(~s|(contains? data/m :novel-runtime-keyword)|,
+                 context: ctx
+               )
+    end
+  end
 end

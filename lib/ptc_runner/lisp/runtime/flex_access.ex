@@ -21,15 +21,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   Use this for simple lookups where you don't need to distinguish between nil values and missing keys.
   """
   def flex_get(%MapSet{}, _key), do: nil
+  def flex_get(%LispKeyword{}, _key), do: nil
 
-  def flex_get(map, %LispKeyword{name: name} = key) when is_map(map) do
+  def flex_get(map, %LispKeyword{name: name} = key) when is_map(map) and not is_struct(map) do
     case Map.fetch(map, key) do
       {:ok, value} -> value
       :error -> flex_get_keyword_name(map, name)
     end
   end
 
-  def flex_get(map, key) when is_map(map) and is_atom(key) do
+  def flex_get(map, key) when is_map(map) and not is_struct(map) and is_atom(key) do
     case Map.fetch(map, key) do
       {:ok, value} ->
         value
@@ -50,7 +51,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
-  def flex_get(map, key) when is_map(map) and is_binary(key) do
+  def flex_get(map, key) when is_map(map) and not is_struct(map) and is_binary(key) do
     case Map.fetch(map, key) do
       {:ok, value} ->
         value
@@ -78,8 +79,11 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   end
 
   def flex_get(nil, path) when is_list(path), do: nil
-  def flex_get(map, path) when is_map(map) and is_list(path), do: flex_get_in(map, path)
-  def flex_get(map, key) when is_map(map), do: Map.get(map, key)
+
+  def flex_get(map, path) when is_map(map) and not is_struct(map) and is_list(path),
+    do: flex_get_in(map, path)
+
+  def flex_get(map, key) when is_map(map) and not is_struct(map), do: Map.get(map, key)
 
   # List index support - only non-negative integers
   def flex_get(list, key) when is_list(list) and is_integer(key) and key >= 0,
@@ -95,15 +99,16 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   Use this when you need to distinguish between nil values and missing keys.
   """
   def flex_fetch(%MapSet{}, _key), do: :error
+  def flex_fetch(%LispKeyword{}, _key), do: :error
 
-  def flex_fetch(map, %LispKeyword{name: name} = key) when is_map(map) do
+  def flex_fetch(map, %LispKeyword{name: name} = key) when is_map(map) and not is_struct(map) do
     case Map.fetch(map, key) do
       {:ok, _} = ok -> ok
       :error -> flex_fetch_keyword_name(map, name)
     end
   end
 
-  def flex_fetch(map, key) when is_map(map) and is_atom(key) do
+  def flex_fetch(map, key) when is_map(map) and not is_struct(map) and is_atom(key) do
     case Map.fetch(map, key) do
       {:ok, _} = ok ->
         ok
@@ -124,7 +129,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
-  def flex_fetch(map, key) when is_map(map) and is_binary(key) do
+  def flex_fetch(map, key) when is_map(map) and not is_struct(map) and is_binary(key) do
     case Map.fetch(map, key) do
       {:ok, _} = ok ->
         ok
@@ -151,8 +156,11 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   end
 
   def flex_fetch(nil, path) when is_list(path), do: :error
-  def flex_fetch(map, path) when is_map(map) and is_list(path), do: flex_fetch_in(map, path)
-  def flex_fetch(map, key) when is_map(map), do: Map.fetch(map, key)
+
+  def flex_fetch(map, path) when is_map(map) and not is_struct(map) and is_list(path),
+    do: flex_fetch_in(map, path)
+
+  def flex_fetch(map, key) when is_map(map) and not is_struct(map), do: Map.fetch(map, key)
 
   # List index support - single traversal using sentinel
   def flex_fetch(list, key) when is_list(list) and is_integer(key) and key >= 0 do

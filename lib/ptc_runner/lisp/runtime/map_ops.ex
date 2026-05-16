@@ -42,23 +42,9 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   def get(nil, _k), do: nil
 
   def get(m, k, default) when is_map(m) and not is_struct(m) do
-    cond do
-      Map.has_key?(m, k) ->
-        Map.get(m, k)
-
-      is_atom(k) and Map.has_key?(m, to_string(k)) ->
-        Map.get(m, to_string(k))
-
-      is_binary(k) ->
-        try do
-          atom_key = String.to_existing_atom(k)
-          if Map.has_key?(m, atom_key), do: Map.get(m, atom_key), else: default
-        rescue
-          ArgumentError -> default
-        end
-
-      true ->
-        default
+    case FlexAccess.flex_fetch(m, k) do
+      {:ok, value} -> value
+      :error -> default
     end
   end
 

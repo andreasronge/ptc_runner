@@ -810,7 +810,9 @@ defmodule PtcRunner.Lisp.Eval do
   # - Prevent atom memory leaks from LLM-generated keywords
   # - Match JSON conventions (like Phoenix params)
   defp build_args_map([], _tool_name), do: {:ok, %{}}
-  defp build_args_map([arg], _tool_name) when is_map(arg), do: {:ok, stringify_keys(arg)}
+
+  defp build_args_map([arg], _tool_name) when is_map(arg) and not is_struct(arg),
+    do: {:ok, stringify_keys(arg)}
 
   defp build_args_map(args, tool_name) do
     if keyword_style_args?(args) do
@@ -854,12 +856,15 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Recursively convert map keys to strings (for tool boundary).
   # Handles nested maps and lists to ensure full protection against atom leaks.
-  defp stringify_keys(map) when is_map(map) do
+  defp stringify_keys(map) when is_map(map) and not is_struct(map) do
     Map.new(map, fn {k, v} -> {stringify_key(k), stringify_value(v)} end)
   end
 
   # Recursively stringify values (for nested maps/lists in tool args)
-  defp stringify_value(map) when is_map(map), do: stringify_keys(map)
+  defp stringify_value(%LispKeyword{name: name}), do: existing_atom_or(name, name)
+
+  defp stringify_value(map) when is_map(map) and not is_struct(map), do: stringify_keys(map)
+
   defp stringify_value(list) when is_list(list), do: Enum.map(list, &stringify_value/1)
   defp stringify_value(other), do: other
 
@@ -1469,6 +1474,13 @@ defmodule PtcRunner.Lisp.Eval do
   defp keyword_runtime?(%LispKeyword{}), do: true
   defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
   defp keyword_runtime?(_), do: false
+
+  defp existing_atom_or(name, fallback) when is_binary(name) do
+    case safe_to_existing_atom(name) do
+      {:ok, atom} -> atom
+      :error -> fallback
+    end
+  end
 
   defp legacy_var_present?(map, name) when is_map(map) and is_binary(name) do
     case safe_to_existing_atom(name) do
