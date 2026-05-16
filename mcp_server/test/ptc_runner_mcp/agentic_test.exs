@@ -42,6 +42,11 @@ defmodule PtcRunnerMcp.AgenticTest do
       do: {:ok, ~S|(return "signature.txt")|, %{"model" => "stub:model"}}
   end
 
+  defmodule BareExpressionPlanner do
+    def call(_model, _prompt, _opts),
+      do: {:ok, ~S|(+ 1 1)|, %{"model" => "stub:model"}}
+  end
+
   defmodule RaisingPlanner do
     def call(_model, _prompt, _opts), do: raise("planner exploded")
   end
@@ -252,6 +257,25 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "ptc_max_turns_exceeded"
+    end
+
+    test "retry budget exhaustion keeps a budget-specific reason" do
+      :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 1, retry_turns: 1})
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, ExplanatoryPlanner)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "ptc_budget_exhausted"
+    end
+
+    test "generated-code contract failures keep ptc-prefixed reasons" do
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, BareExpressionPlanner)
+
+      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "ptc_must_return_missing"
     end
 
     test "valid programs may contain signature as ordinary data" do

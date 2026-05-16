@@ -940,27 +940,32 @@ defmodule PtcRunnerMcp.Upstream.Http do
     # `:timeout` for the TCP/TLS handshake.
     conn_opts = [transport_opts: [timeout: state.connect_timeout_ms]]
 
-    conn_opts =
-      case state.proxy do
-        nil -> conn_opts
-        url when is_binary(url) -> Keyword.put(conn_opts, :proxy, parse_proxy(url))
+    with {:ok, conn_opts} <- maybe_put_proxy(conn_opts, state.proxy) do
+      pool_opts = [size: state.pool_size, conn_opts: conn_opts]
+
+      case Finch.start_link(name: finch_name, pools: %{:default => pool_opts}) do
+        {:ok, _pid} ->
+          {:ok, %{state | finch_name: finch_name}}
+
+        {:error, {:already_started, _pid}} ->
+          # Re-using an existing Finch pool with the same name is fine
+          # — typically happens in tests where the GenServer init/1
+          # crashes during handshake but we don't tear down Finch
+          # before the supervisor restarts us. Treat as success.
+          {:ok, %{state | finch_name: finch_name}}
+
+        {:error, reason} ->
+          {:error, "finch start_link failed: #{inspect(reason, limit: 5)}"}
       end
+    end
+  end
 
-    pool_opts = [size: state.pool_size, conn_opts: conn_opts]
+  defp maybe_put_proxy(conn_opts, nil), do: {:ok, conn_opts}
 
-    case Finch.start_link(name: finch_name, pools: %{:default => pool_opts}) do
-      {:ok, _pid} ->
-        {:ok, %{state | finch_name: finch_name}}
-
-      {:error, {:already_started, _pid}} ->
-        # Re-using an existing Finch pool with the same name is fine
-        # — typically happens in tests where the GenServer init/1
-        # crashes during handshake but we don't tear down Finch
-        # before the supervisor restarts us. Treat as success.
-        {:ok, %{state | finch_name: finch_name}}
-
-      {:error, reason} ->
-        {:error, "finch start_link failed: #{inspect(reason, limit: 5)}"}
+  defp maybe_put_proxy(conn_opts, url) when is_binary(url) do
+    case parse_proxy(url) do
+      {:ok, proxy} -> {:ok, Keyword.put(conn_opts, :proxy, proxy)}
+      {:error, detail} -> {:error, detail}
     end
   end
 
@@ -1016,18 +1021,25 @@ defmodule PtcRunnerMcp.Upstream.Http do
 
   defp parse_proxy(url) when is_binary(url) do
     # Req accepts `proxy: {scheme, host, port, opts}` — we delegate
-    # parsing to `URI.new!/1` and let Mint handle the rest.
+    # parsing to `URI.new/1`. Keep scheme conversion on a closed
+    # allowlist so arbitrary proxy URL schemes do not intern permanent
+    # atoms.
     case URI.new(url) do
       {:ok, %URI{scheme: scheme, host: host, port: port}}
-      when is_binary(scheme) and is_binary(host) and is_integer(port) ->
-        {String.to_atom(scheme), host, port, []}
+      when is_binary(scheme) and is_binary(host) and host != "" and is_integer(port) ->
+        case proxy_scheme(scheme) do
+          {:ok, atom_scheme} -> {:ok, {atom_scheme, host, port, []}}
+          :error -> {:error, "unsupported proxy scheme: #{inspect(scheme)}"}
+        end
 
       _ ->
-        # Malformed proxy URL — pass through verbatim and let Req
-        # reject it at request time.
-        url
+        {:error, "malformed proxy URL: #{inspect(url)}"}
     end
   end
+
+  defp proxy_scheme("http"), do: {:ok, :http}
+  defp proxy_scheme("https"), do: {:ok, :https}
+  defp proxy_scheme(_scheme), do: :error
 
   # ----------------------------------------------------------------
   # Session DELETE on stop
