@@ -214,6 +214,10 @@ Recommended tool set:
 4. `ptc_session_forget`
 5. `ptc_session_close`
 
+Phase 1.5 adds:
+
+6. `ptc_session_list`
+
 `ptc_lisp_execute` remains the stateless baseline.
 
 If sessions are disabled, session tools SHOULD NOT be advertised. If
@@ -314,12 +318,17 @@ response-profile work may choose slim/structured/debug variants, but
 the session state update semantics are independent of the response
 shape.
 
-`signature` / `return_schema` / `output_contract` inputs are
-deliberately omitted from `ptc_session_eval` in Phase 1. Session eval
-is an exploratory REPL operation; typed programmatic extraction
-remains the job of stateless `ptc_lisp_execute`. A later phase may add
-typed validation, but must define exact validation timing and rollback
-behavior before doing so.
+`ptc_session_eval` MAY accept a typed return contract via either
+`signature` or `output_schema`, matching the stateless
+`ptc_lisp_execute` validation surface. The two inputs are mutually
+exclusive. Validation happens after PTC-Lisp execution produces a
+candidate return value and before committing session state. If contract
+validation fails, the eval response is an error and memory, result
+history, prints, and tool-call histories from that eval MUST NOT be
+committed.
+
+`return_schema` and `output_contract` are not accepted session-eval
+input names.
 
 This does **not** refer to MCP tool `outputSchema`. Session tools may
 still advertise MCP `outputSchema` for their own response envelopes
@@ -400,7 +409,68 @@ After close, session tools MUST return `session_not_found` or
 `session_closed` for that id. A short tombstone MAY be retained so
 clients can distinguish closed from unknown sessions.
 
-### 8.6 Session Authoring Card
+### 8.6 `ptc_session_list`
+
+Lists active sessions for the current owner.
+
+Input:
+
+```json
+{}
+```
+
+Semantics:
+
+- The result is scoped to the current session owner.
+- Only live sessions are returned. Explicitly closed, expired, and
+  evicted sessions are omitted.
+- Results SHOULD be sorted by the live session `updated_at` descending,
+  so recently used sessions appear first.
+- Listing sessions MUST NOT refresh session idle timers. Polling this
+  tool must not keep otherwise-idle sessions alive.
+- The tool does not inspect or render stored binding values.
+- The tool is synchronous and does not acquire the global
+  `max_concurrent_calls` execution permit.
+
+Output:
+
+```json
+{
+  "status": "ok",
+  "count": 2,
+  "sessions": [
+    {
+      "session_id": "ptcs_...",
+      "title": "Investigate recent GitHub MCP issues",
+      "turn": 3,
+      "created_at": "2026-05-16T09:15:00Z",
+      "updated_at": "2026-05-16T09:24:30Z",
+      "expires_at": "2026-05-16T09:45:00Z",
+      "eval_status": "idle",
+      "memory_bytes": 123456,
+      "binding_count": 4
+    }
+  ]
+}
+```
+
+Each session summary MUST include:
+
+- `session_id`
+- `title`
+- `turn`
+- `created_at`
+- `updated_at`
+- `expires_at`
+- `eval_status`, either `"idle"` or `"running"`
+- `memory_bytes`
+- `binding_count`
+
+This is intentionally metadata-only. Clients that need rendered memory,
+print history, tool-call history, or limit details should call
+`ptc_session_inspect` for a specific `session_id`.
+
+### 8.7 Session Authoring Card
 
 When sessions are enabled, the server SHOULD ship a short
 session-specific authoring card, separate from the stateless
@@ -821,16 +891,13 @@ compatible with the session architecture:
 
 | Tool | Purpose |
 |---|---|
-| `ptc_session_list` | List active sessions for the current owner/process. |
 | `ptc_session_details` | Return metadata, limits, usage, last activity, and status for one session. |
 | `ptc_session_interrupt` | Cancel an in-flight session eval, mirroring `notifications/cancelled` behavior. |
 | `ptc_session_reset` | Clear memory, history, prints, tool calls, and tool cache in one operation. May be sugar over `ptc_session_forget`. |
 | `ptc_session_export` | Return a redacted, bounded snapshot for debugging or transfer. Disabled by default. |
 
-`ptc_session_list` is a strong Phase 1.5 candidate because users and
-LLMs will quickly ask which sessions exist. A minimal version only
-needs `session_id`, `title`, `turn`, `updated_at`, `memory_bytes`, and
-`eval_status`.
+`ptc_session_list` is specified in §8.6 as the Phase 1.5 usability
+addition. It is no longer treated as a speculative future tool.
 
 `ptc_session_details` can initially be covered by
 `ptc_session_inspect view: "limits"`, but a separate tool may become
@@ -879,6 +946,13 @@ REPL MCP server with appropriate OS/container isolation.
   `ptc_session_close`.
 - Feature flag off by default.
 - Support no-upstream PTC-Lisp first.
+
+### Phase 1.5 — Session Discovery
+
+- Implement `ptc_session_list` for owner-scoped live-session discovery.
+- Advertise the tool only when sessions are enabled.
+- Keep the response metadata-only; callers use `ptc_session_inspect`
+  for rendered memory, histories, and limit details.
 
 ### Phase 2 — Aggregator Integration
 
@@ -957,10 +1031,10 @@ owner per sub-phase.
    This improves repeated pure/cacheable tool use, but can surprise
    users when upstream data changes. Phase 1 answer: no persistent
    tool cache.
-2. Should `ptc_session_eval` allow a typed return contract after
-   Phase 1, and if so should validation failure roll back memory?
-   Phase 1 answer: no `signature` / `return_schema` /
-   `output_contract` on `ptc_session_eval`.
+2. Should additional typed return contract aliases be accepted on
+   `ptc_session_eval`? Current answer: only `signature` and
+   `output_schema` are accepted, they are mutually exclusive, and
+   validation failure rolls back the eval.
 3. How much of `TurnFeedback` should move to a shared non-SubAgent
    module?
 4. Should `ptc_session_inspect view: "memory"` return only rendered
@@ -968,9 +1042,7 @@ owner per sub-phase.
 5. Should closed sessions keep tombstones briefly?
 6. Should `ptc_session_forget` support wildcard/prefix deletion?
 7. Should session start support loading an initial prelude program?
-8. Should `ptc_session_list` be Phase 1.5 for usability, or Phase 2
-   to keep the initial surface minimal?
-9. Should `ptc_session_interrupt` be implemented as a separate tool,
+8. Should `ptc_session_interrupt` be implemented as a separate tool,
    or should MCP `notifications/cancelled` be the only cancellation
    path for Phase 1?
 
@@ -993,11 +1065,14 @@ The first shippable version is acceptable when:
 12. A concurrent eval on the same session returns `session_busy`.
 13. Persisted `turn_history`, prints, tool-call history, and
     upstream-call history are all bounded by count and bytes.
-14. `ptc_session_eval` has no `signature` / `return_schema` /
-    `output_contract` in Phase 1.
-15. `tool_cache` does not persist across session evals in Phase 1.
-16. Oversized `*1` / `*2` / `*3` entries become explicit preview
+14. `ptc_session_eval` accepts `signature` and `output_schema` as
+    mutually exclusive return contracts. Validation failures roll back
+    memory, history, prints, and tool-call state for that eval.
+15. `ptc_session_list` returns owner-scoped live-session metadata and
+    omits rendered binding values.
+16. `tool_cache` does not persist across session evals in Phase 1.
+17. Oversized `*1` / `*2` / `*3` entries become explicit preview
     markers and eval feedback reports that truncation.
-17. `ptc_session_start` does not advertise advisory/non-enforced
+18. `ptc_session_start` does not advertise advisory/non-enforced
     access-mode fields.
-18. `ptc_lisp_execute` remains stateless and all existing tests pass.
+19. `ptc_lisp_execute` remains stateless and all existing tests pass.
