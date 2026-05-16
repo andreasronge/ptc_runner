@@ -378,14 +378,14 @@ defmodule PtcRunner.Lisp.Eval do
     # references. Builtins are resolved at call time via the Env.builtin?
     # fallback in (:var ...), so carrying them in the closure would inflate
     # session memory by ~18 KB per closure.
-    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, body)
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, params, body)
     meta = locals_meta(captured_locals, %{})
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
   # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
   defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
-    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, body)
+    {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, params, body, [name])
     meta = locals_meta(captured_locals, %{fn_name: name})
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
@@ -1434,18 +1434,22 @@ defmodule PtcRunner.Lisp.Eval do
   # Closure capture helpers
   # ============================================================
 
-  defp capture_lexical_scope(%EvalContext{env: env, locals: locals}, body) do
+  defp capture_lexical_scope(
+         %EvalContext{env: env, locals: locals},
+         params,
+         body,
+         extra_bound_names \\ []
+       ) do
     initial = Env.initial()
 
     # Names the closure body can actually reference (issue #961). A closure
     # captures its whole enclosing lexical scope, so a `(fn [] 42)` defined
     # next to a large `let` binding would otherwise pin that binding for the
     # closure's entire lifetime — and in a long-lived session, for the
-    # session's TTL. `referenced_vars/1` over-approximates: it collects every
-    # `{:var, _}` occurrence in the body (including names re-bound by an inner
-    # scope and nested-fn params), so the result is always a safe superset of
-    # the true free-variable set — it can never drop a binding the body needs.
-    referenced = referenced_vars(body)
+    # session's TTL. The collector is scope-aware so params, named-fn self
+    # bindings, and inner let/fn/loop bindings don't cause an unrelated outer
+    # value with the same name to be captured.
+    referenced = referenced_vars(body, params, extra_bound_names)
 
     # Keep an entry only if the body references it AND it is EITHER:
     #   * a key in `locals` (let/fn-param, possibly shadowing a builtin like
@@ -1476,28 +1480,124 @@ defmodule PtcRunner.Lisp.Eval do
     {captured_env, captured_locals}
   end
 
-  # Collects the names of every `{:var, _}` reference anywhere in a CoreAST
-  # subtree, normalized to strings. A deliberately total structural walk —
-  # any unrecognized tuple/list/map is recursed into rather than skipped — so
-  # a future AST node cannot silently cause a referenced var to be missed.
-  @spec referenced_vars(term()) :: MapSet.t(String.t())
-  defp referenced_vars(ast), do: collect_var_refs(ast, MapSet.new())
+  # Collects the free `{:var, _}` names in a CoreAST subtree, normalized to
+  # strings. Known binding forms are handled with their lexical scope; any
+  # unrecognized tuple/list/map is still recursed into so a future AST node
+  # cannot silently cause a referenced var to be missed.
+  @spec referenced_vars(term(), CoreAST.fn_params(), [CoreAST.name()]) :: MapSet.t(String.t())
+  defp referenced_vars(ast, params, extra_bound_names) do
+    initial_bound =
+      params
+      |> bound_names_from_params()
+      |> MapSet.union(normalize_name_set(extra_bound_names))
 
-  defp collect_var_refs({:var, name}, acc), do: MapSet.put(acc, to_string(name))
-
-  defp collect_var_refs(tuple, acc) when is_tuple(tuple) do
-    collect_var_refs(Tuple.to_list(tuple), acc)
+    collect_free_var_refs(ast, MapSet.new(), initial_bound)
   end
 
-  defp collect_var_refs(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, &collect_var_refs/2)
+  defp collect_free_var_refs({:var, name}, acc, bound) do
+    name = to_string(name)
+
+    if MapSet.member?(bound, name) do
+      acc
+    else
+      MapSet.put(acc, name)
+    end
   end
 
-  defp collect_var_refs(map, acc) when is_map(map) and not is_struct(map) do
-    Enum.reduce(map, acc, fn {k, v}, inner -> collect_var_refs(v, collect_var_refs(k, inner)) end)
+  defp collect_free_var_refs({:let, bindings, body}, acc, bound) do
+    collect_free_refs_in_bindings(bindings, body, acc, bound)
   end
 
-  defp collect_var_refs(_other, acc), do: acc
+  defp collect_free_var_refs({:loop, bindings, body}, acc, bound) do
+    collect_free_refs_in_bindings(bindings, body, acc, bound)
+  end
+
+  defp collect_free_var_refs({:fn, params, body}, acc, bound) do
+    collect_free_var_refs(body, acc, MapSet.union(bound, bound_names_from_params(params)))
+  end
+
+  defp collect_free_var_refs({:fn, name, params, body}, acc, bound) do
+    inner_bound =
+      bound
+      |> MapSet.union(bound_names_from_params(params))
+      |> MapSet.put(to_string(name))
+
+    collect_free_var_refs(body, acc, inner_bound)
+  end
+
+  defp collect_free_var_refs(tuple, acc, bound) when is_tuple(tuple) do
+    collect_free_var_refs(Tuple.to_list(tuple), acc, bound)
+  end
+
+  defp collect_free_var_refs(list, acc, bound) when is_list(list) do
+    Enum.reduce(list, acc, &collect_free_var_refs(&1, &2, bound))
+  end
+
+  defp collect_free_var_refs(map, acc, bound) when is_map(map) and not is_struct(map) do
+    Enum.reduce(map, acc, fn {k, v}, inner ->
+      v
+      |> collect_free_var_refs(collect_free_var_refs(k, inner, bound), bound)
+    end)
+  end
+
+  defp collect_free_var_refs(_other, acc, _bound), do: acc
+
+  defp collect_free_refs_in_bindings(bindings, body, acc, bound) do
+    {acc, bound} =
+      Enum.reduce(bindings, {acc, bound}, fn {:binding, pattern, value_ast},
+                                             {inner_acc, inner_bound} ->
+        inner_acc = collect_free_var_refs(value_ast, inner_acc, inner_bound)
+        inner_bound = MapSet.union(inner_bound, bound_names_from_pattern(pattern))
+        {inner_acc, inner_bound}
+      end)
+
+    collect_free_var_refs(body, acc, bound)
+  end
+
+  defp bound_names_from_params(params) when is_list(params) do
+    params
+    |> Enum.flat_map(&names_from_pattern/1)
+    |> normalize_name_set()
+  end
+
+  defp bound_names_from_params({:variadic, leading, rest_pattern}) do
+    (Enum.flat_map(leading, &names_from_pattern/1) ++ names_from_pattern(rest_pattern))
+    |> normalize_name_set()
+  end
+
+  defp bound_names_from_pattern(pattern) do
+    pattern
+    |> names_from_pattern()
+    |> normalize_name_set()
+  end
+
+  defp names_from_pattern({:var, name}), do: [name]
+  defp names_from_pattern({:destructure, {:keys, keys, _defaults}}), do: keys
+
+  defp names_from_pattern({:destructure, {:map, keys, renames, _defaults}}) do
+    keys ++
+      Enum.flat_map(renames, fn {target_pattern, _source_key} ->
+        names_from_pattern(target_pattern)
+      end)
+  end
+
+  defp names_from_pattern({:destructure, {:as, name, inner}}),
+    do: [name | names_from_pattern(inner)]
+
+  defp names_from_pattern({:destructure, {:seq, patterns}}),
+    do: Enum.flat_map(patterns, &names_from_pattern/1)
+
+  defp names_from_pattern({:destructure, {:seq_rest, leading, rest}}) do
+    Enum.flat_map(leading, &names_from_pattern/1) ++ names_from_pattern(rest)
+  end
+
+  defp names_from_pattern(_other), do: []
+
+  defp normalize_name_set(names) do
+    names
+    |> Enum.map(&to_string/1)
+    |> MapSet.new()
+  end
 
   # Only embed captured_locals in meta when non-empty — keeps closure size
   # tiny for top-level (defn ...) without enclosing scope.

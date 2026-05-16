@@ -236,6 +236,48 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       assert next.return == 105
     end
 
+    test "closure param does not capture an outer binding with the same name (#961)" do
+      src = """
+      (def f
+        (let [n (apply str (range 0 5000))]
+          (fn [n] n)))
+      """
+
+      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+
+      {:closure, _params, _body, captured_env, _history, _meta} =
+        Map.get(step.memory, "f") || Map.fetch!(step.memory, :f)
+
+      assert captured_env == %{}
+
+      {:ok, next} =
+        Lisp.run("(f 123)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+
+      assert next.return == 123
+      assert :erlang.external_size(step.memory) < 2_000
+    end
+
+    test "inner let binding does not capture an outer binding with the same name (#961)" do
+      src = """
+      (def f
+        (let [x (apply str (range 0 5000))]
+          (fn [] (let [x 2] x))))
+      """
+
+      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+
+      {:closure, _params, _body, captured_env, _history, _meta} =
+        Map.get(step.memory, "f") || Map.fetch!(step.memory, :f)
+
+      assert captured_env == %{}
+
+      {:ok, next} =
+        Lisp.run("(f)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+
+      assert next.return == 2
+      assert :erlang.external_size(step.memory) < 2_000
+    end
+
     test "closures do not retain prior turn history in session memory" do
       large_history_entry = String.duplicate("x", 100_000)
 
