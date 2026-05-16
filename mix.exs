@@ -61,7 +61,8 @@ defmodule PtcRunner.MixProject do
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
-      {:recon, "~> 2.5", only: [:dev, :test], runtime: false}
+      {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
+      {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
     ]
   end
 
