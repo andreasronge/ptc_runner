@@ -33,6 +33,8 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.{Analyze, DataKeys, Env, Eval, ExecutionError, Parser, SymbolCounter}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
@@ -657,9 +659,9 @@ defmodule PtcRunner.Lisp do
     cleaned_pmap_calls = Enum.map(reversed_pmap_calls, &Map.delete(&1, :child_steps))
 
     %Step{
-      return: round_floats(value, precision),
+      return: value |> externalize_lisp_values() |> round_floats(precision),
       fail: nil,
-      memory: ctx.user_ns,
+      memory: externalize_memory(ctx.user_ns),
       journal: ctx.journal,
       summaries: ctx.summaries,
       tool_cache: ctx.tool_cache,
@@ -700,6 +702,56 @@ defmodule PtcRunner.Lisp do
   end
 
   defp round_floats(value, _precision), do: value
+
+  defp externalize_lisp_values(%LispKeyword{name: name} = keyword) do
+    existing_atom_or(name, keyword)
+  end
+
+  defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
+    %{var | name: existing_atom_or(name, name)}
+  end
+
+  defp externalize_lisp_values({:__ptc_return__, inner}) do
+    {:__ptc_return__, externalize_lisp_values(inner)}
+  end
+
+  defp externalize_lisp_values({:__ptc_fail__, inner}) do
+    {:__ptc_fail__, externalize_lisp_values(inner)}
+  end
+
+  defp externalize_lisp_values(value) when is_list(value) do
+    Enum.map(value, &externalize_lisp_values/1)
+  end
+
+  defp externalize_lisp_values(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} ->
+      {externalize_map_key(k), externalize_lisp_values(v)}
+    end)
+  end
+
+  defp externalize_lisp_values(value), do: value
+
+  defp externalize_memory(memory) when is_map(memory) do
+    Map.new(memory, fn {k, v} ->
+      {externalize_memory_key(k), externalize_lisp_values(v)}
+    end)
+  end
+
+  defp externalize_map_key(%LispKeyword{name: name}), do: existing_atom_or(name, name)
+  defp externalize_map_key(other), do: other
+
+  defp externalize_memory_key(%LispKeyword{name: name} = keyword),
+    do: existing_atom_or(name, keyword)
+
+  defp externalize_memory_key(name) when is_binary(name), do: existing_atom_or(name, name)
+  defp externalize_memory_key(other), do: other
+
+  defp existing_atom_or(name, fallback) when is_binary(name) do
+    case safe_to_existing_atom(name) do
+      {:ok, atom} -> atom
+      :error -> fallback
+    end
+  end
 
   # Check if symbol count exceeds limit
   defp check_symbol_limit(ast, max_symbols, memory, journal) do
@@ -945,7 +997,7 @@ defmodule PtcRunner.Lisp do
     name_str = to_string(name)
 
     # Skip interop method names (e.g., .toString) — validity checked at runtime
-    if String.starts_with?(name_str, ".") or Env.builtin?(name) or MapSet.member?(scope, name) do
+    if String.starts_with?(name_str, ".") or Env.builtin?(name) or scope_member?(scope, name) do
       []
     else
       [name_str]
@@ -1165,6 +1217,21 @@ defmodule PtcRunner.Lisp do
   end
 
   defp pattern_vars(_other), do: []
+
+  defp scope_member?(scope, name) do
+    MapSet.member?(scope, name) or
+      (is_binary(name) and
+         case safe_to_existing_atom(name) do
+           {:ok, atom} -> MapSet.member?(scope, atom)
+           :error -> false
+         end)
+  end
+
+  defp safe_to_existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
+  end
 
   # Format errors from parse/analyze for validate/1
   defp format_validate_error({:parse_error, msg}), do: "Parse error: #{msg}"

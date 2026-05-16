@@ -13,12 +13,21 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   3. Hyphen↔underscore normalized variant (`:turn-summaries` → `:turn_summaries`, `"turn_summaries"`)
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+
   @doc """
   Flexible key access: try atom/string and hyphen/underscore variants of the key.
   Returns the value if found, nil if missing.
   Use this for simple lookups where you don't need to distinguish between nil values and missing keys.
   """
   def flex_get(%MapSet{}, _key), do: nil
+
+  def flex_get(map, %LispKeyword{name: name} = key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> flex_get_keyword_name(map, name)
+    end
+  end
 
   def flex_get(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
@@ -29,8 +38,14 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
         str = to_string(key)
 
         case Map.fetch(map, str) do
-          {:ok, value} -> value
-          :error -> get_normalized(map, str, :atom)
+          {:ok, value} ->
+            value
+
+          :error ->
+            case Map.fetch(map, LispKeyword.new(str)) do
+              {:ok, value} -> value
+              :error -> get_normalized(map, str, :atom)
+            end
         end
     end
   end
@@ -50,8 +65,14 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
           end
 
         case result do
-          {:ok, value} -> value
-          :error -> get_normalized(map, key, :string)
+          {:ok, value} ->
+            value
+
+          :error ->
+            case Map.fetch(map, LispKeyword.new(key)) do
+              {:ok, value} -> value
+              :error -> get_normalized(map, key, :string)
+            end
         end
     end
   end
@@ -75,6 +96,13 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   """
   def flex_fetch(%MapSet{}, _key), do: :error
 
+  def flex_fetch(map, %LispKeyword{name: name} = key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, _} = ok -> ok
+      :error -> flex_fetch_keyword_name(map, name)
+    end
+  end
+
   def flex_fetch(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do
       {:ok, _} = ok ->
@@ -84,8 +112,14 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
         str = to_string(key)
 
         case Map.fetch(map, str) do
-          {:ok, _} = ok -> ok
-          :error -> fetch_normalized(map, str, :atom)
+          {:ok, _} = ok ->
+            ok
+
+          :error ->
+            case Map.fetch(map, LispKeyword.new(str)) do
+              {:ok, _} = ok -> ok
+              :error -> fetch_normalized(map, str, :atom)
+            end
         end
     end
   end
@@ -104,8 +138,14 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
           end
 
         case result do
-          {:ok, _} = ok -> ok
-          :error -> fetch_normalized(map, key, :string)
+          {:ok, _} = ok ->
+            ok
+
+          :error ->
+            case Map.fetch(map, LispKeyword.new(key)) do
+              {:ok, _} = ok -> ok
+              :error -> fetch_normalized(map, key, :string)
+            end
         end
     end
   end
@@ -339,6 +379,34 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
         rescue
           ArgumentError -> :error
         end
+    end
+  end
+
+  defp flex_get_keyword_name(map, name) do
+    case fetch_keyword_name(map, name) do
+      {:ok, value} -> value
+      :error -> get_normalized(map, name, :atom)
+    end
+  end
+
+  defp flex_fetch_keyword_name(map, name) do
+    case fetch_keyword_name(map, name) do
+      {:ok, _} = ok -> ok
+      :error -> fetch_normalized(map, name, :atom)
+    end
+  end
+
+  defp fetch_keyword_name(map, name) do
+    result =
+      try do
+        Map.fetch(map, String.to_existing_atom(name))
+      rescue
+        ArgumentError -> :error
+      end
+
+    case result do
+      {:ok, _} = ok -> ok
+      :error -> Map.fetch(map, name)
     end
   end
 

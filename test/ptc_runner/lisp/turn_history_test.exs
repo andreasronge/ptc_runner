@@ -23,9 +23,9 @@ defmodule PtcRunner.Lisp.TurnHistoryTest do
     end
 
     test "other *N symbols parse as regular symbols" do
-      assert AST.symbol("*4") == {:symbol, :"*4"}
-      assert AST.symbol("*0") == {:symbol, :"*0"}
-      assert AST.symbol("*foo") == {:symbol, :"*foo"}
+      assert AST.symbol("*4") == {:symbol, "*4"}
+      assert AST.symbol("*0") == {:symbol, "*0"}
+      assert AST.symbol("*foo") == {:symbol, "*foo"}
     end
   end
 

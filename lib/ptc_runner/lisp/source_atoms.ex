@@ -129,6 +129,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
     summary remaining list-servers list-tools describe-tool search-tools
+    parse-string generate-string text json
     re-pattern
   )a
 

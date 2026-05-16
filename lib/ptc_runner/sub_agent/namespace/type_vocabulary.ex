@@ -1,6 +1,8 @@
 defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
   @moduledoc "Converts Elixir values to human-readable type labels."
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+
   @doc """
   Returns a type label for any value.
 
@@ -65,7 +67,8 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
   def type_of(%NaiveDateTime{}), do: "datetime"
   def type_of(%Date{}), do: "date"
   def type_of(%Time{}), do: "time"
-  def type_of(map) when is_map(map), do: "map[#{map_size(map)}]"
+  def type_of(%LispKeyword{}), do: "keyword"
+  def type_of(map) when is_map(map) and not is_struct(map), do: "map[#{map_size(map)}]"
   def type_of(s) when is_binary(s), do: "string"
   def type_of(n) when is_integer(n), do: "integer"
   def type_of(f) when is_float(f), do: "float"

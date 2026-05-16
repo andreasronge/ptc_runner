@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceContext
@@ -143,7 +144,10 @@ defmodule PtcRunner.Lisp.Eval do
     do: {:ok, n, eval_ctx}
 
   defp do_eval({:string, s}, %EvalContext{} = eval_ctx), do: {:ok, s, eval_ctx}
-  defp do_eval({:keyword, k}, %EvalContext{} = eval_ctx), do: {:ok, k, eval_ctx}
+
+  defp do_eval({:keyword, k}, %EvalContext{} = eval_ctx),
+    do: {:ok, keyword_value(k), eval_ctx}
+
   defp do_eval({:literal, v}, %EvalContext{} = eval_ctx), do: {:ok, v, eval_ctx}
   defp do_eval(a, %EvalContext{} = eval_ctx) when is_atom(a), do: {:ok, a, eval_ctx}
 
@@ -186,40 +190,13 @@ defmodule PtcRunner.Lisp.Eval do
   # env contains both builtins and let bindings; locals tracks let-bound names.
   # user_ns (def) shadows builtins but not let bindings.
   defp do_eval({:var, name}, %EvalContext{user_ns: user_ns, env: env, locals: locals} = eval_ctx) do
-    cond do
-      # Let/fn binding (explicitly tracked as local)
-      MapSet.member?(locals, name) ->
-        {:ok, Map.get(env, name), eval_ctx}
-
-      # User namespace (def/defn) — shadows builtins
-      Map.has_key?(user_ns, name) ->
-        {:ok, Map.get(user_ns, name), eval_ctx}
-
-      # Builtin (from env or Env.initial fallback)
-      Map.has_key?(env, name) ->
-        case Map.get(env, name) do
-          {:constant, value} -> {:ok, value, eval_ctx}
-          other -> {:ok, other, eval_ctx}
-        end
-
-      Env.builtin?(name) ->
-        case Map.get(Env.initial(), name) do
-          {:constant, value} -> {:ok, value, eval_ctx}
-          other -> {:ok, other, eval_ctx}
-        end
-
-      true ->
-        name_str = to_string(name)
-
-        if String.starts_with?(name_str, ".") do
-          available =
-            Env.builtins_by_category(:interop)
-            |> Enum.map_join(", ", &to_string/1)
-
-          {:error, {:unsupported_method, name_str, available}}
-        else
-          {:error, {:unbound_var, name}}
-        end
+    with :error <- resolve_local(name, locals, env, eval_ctx),
+         :error <- resolve_user_ns(name, user_ns, eval_ctx),
+         :error <- resolve_env(name, env, eval_ctx),
+         :error <- resolve_builtin(name, eval_ctx),
+         :error <- resolve_legacy_user_ns(name, user_ns, eval_ctx),
+         :error <- resolve_legacy_env(name, env, eval_ctx) do
+      unresolved_var(name)
     end
   end
 
@@ -264,7 +241,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Binds name only if not already defined in user_ns.
   # Value expression is NOT evaluated when name is already bound.
   defp do_eval({:defonce, name, value_ast, opts}, %EvalContext{user_ns: user_ns} = eval_ctx) do
-    if Map.has_key?(user_ns, name) do
+    if Map.has_key?(user_ns, name) or (is_binary(name) and legacy_var_present?(user_ns, name)) do
       {:ok, %Var{name: name}, eval_ctx}
     else
       with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
@@ -453,7 +430,7 @@ defmodule PtcRunner.Lisp.Eval do
     with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
          {:ok, coll_val, eval_ctx2} <- do_eval(coll_ast, eval_ctx1) do
       # Consistency check: keywords don't work with single hash-map in map/pmap
-      if is_atom(fn_val) and not is_boolean(fn_val) and is_map(coll_val) and
+      if keyword_runtime?(fn_val) and is_map(coll_val) and
            not is_struct(coll_val) do
         {:error,
          {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
@@ -727,8 +704,8 @@ defmodule PtcRunner.Lisp.Eval do
         # Convert args list to map for tool executor
         case build_args_map(arg_vals, tool_name) do
           {:ok, args_map} ->
-            # Convert atom to string for backward compatibility with tool_exec
-            tool_name_str = Atom.to_string(tool_name)
+            # Convert to string for backward compatibility with tool_exec
+            tool_name_str = to_string(tool_name)
             # Check if this tool has caching enabled
             cacheable? = get_in(eval_ctx2.tools_meta, [tool_name_str, :cache]) == true
             record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2, cacheable?)
@@ -745,6 +722,66 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
   # Evaluation helpers
   # ============================================================
+
+  defp resolve_local(name, locals, env, eval_ctx) do
+    if MapSet.member?(locals, name), do: {:ok, Map.get(env, name), eval_ctx}, else: :error
+  end
+
+  defp resolve_user_ns(name, user_ns, eval_ctx) do
+    if Map.has_key?(user_ns, name), do: {:ok, Map.get(user_ns, name), eval_ctx}, else: :error
+  end
+
+  defp resolve_env(name, env, eval_ctx) do
+    case Map.fetch(env, name) do
+      {:ok, value} -> {:ok, unwrap_constant(value), eval_ctx}
+      :error -> :error
+    end
+  end
+
+  defp resolve_builtin(name, eval_ctx) do
+    if Env.builtin?(name) do
+      {:ok, unwrap_constant(Map.get(Env.initial(), name)), eval_ctx}
+    else
+      :error
+    end
+  end
+
+  defp resolve_legacy_user_ns(name, user_ns, eval_ctx) do
+    with true <- is_binary(name),
+         {:ok, atom} <- safe_to_existing_atom(name),
+         {:ok, value} <- Map.fetch(user_ns, atom) do
+      {:ok, value, eval_ctx}
+    else
+      _ -> :error
+    end
+  end
+
+  defp resolve_legacy_env(name, env, eval_ctx) do
+    with true <- is_binary(name),
+         {:ok, atom} <- safe_to_existing_atom(name),
+         {:ok, value} <- Map.fetch(env, atom) do
+      {:ok, unwrap_constant(value), eval_ctx}
+    else
+      _ -> :error
+    end
+  end
+
+  defp unwrap_constant({:constant, value}), do: value
+  defp unwrap_constant(other), do: other
+
+  defp unresolved_var(name) do
+    name_str = to_string(name)
+
+    if String.starts_with?(name_str, ".") do
+      available =
+        Env.builtins_by_category(:interop)
+        |> Enum.map_join(", ", &to_string/1)
+
+      {:error, {:unsupported_method, name_str, available}}
+    else
+      {:error, {:unbound_var, name}}
+    end
+  end
 
   # Truthiness check for conditional / short-circuit forms.
   # Only `nil` and `false` are falsy; every other value is truthy.
@@ -798,11 +835,11 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Check if args list is keyword-style: [:key1, val1, :key2, val2, ...]
-  # Must have even length and odd positions (0, 2, 4...) must be atoms
+  # Must have even length and odd positions (0, 2, 4...) must be keywords
   defp keyword_style_args?(args) when rem(length(args), 2) == 0 do
     args
     |> Enum.chunk_every(2)
-    |> Enum.all?(fn [k, _v] -> is_atom(k) end)
+    |> Enum.all?(fn [k, _v] -> keyword_runtime?(k) end)
   end
 
   defp keyword_style_args?(_), do: false
@@ -827,6 +864,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp stringify_value(other), do: other
 
   defp stringify_key(k) when is_atom(k), do: KeyNormalizer.normalize_key(k)
+  defp stringify_key(%LispKeyword{name: name}), do: KeyNormalizer.normalize_key(name)
   defp stringify_key(k) when is_binary(k), do: KeyNormalizer.normalize_key(k)
   defp stringify_key(k), do: inspect(k)
 
@@ -1167,6 +1205,10 @@ defmodule PtcRunner.Lisp.Eval do
     fn m -> flex_get(m, k) end
   end
 
+  defp value_to_erlang_fn(%LispKeyword{} = k, %EvalContext{}) do
+    fn m -> flex_get(m, k) end
+  end
+
   defp value_to_erlang_fn(value, %EvalContext{} = eval_ctx) do
     Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
   end
@@ -1419,5 +1461,25 @@ defmodule PtcRunner.Lisp.Eval do
       0 -> base
       _ -> Map.put(base, :captured_locals, locals)
     end
+  end
+
+  defp keyword_value(name) when is_atom(name), do: name
+  defp keyword_value(name) when is_binary(name), do: LispKeyword.new(name)
+
+  defp keyword_runtime?(%LispKeyword{}), do: true
+  defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
+  defp keyword_runtime?(_), do: false
+
+  defp legacy_var_present?(map, name) when is_map(map) and is_binary(name) do
+    case safe_to_existing_atom(name) do
+      {:ok, atom} -> Map.has_key?(map, atom)
+      :error -> false
+    end
+  end
+
+  defp safe_to_existing_atom(name) do
+    {:ok, String.to_existing_atom(name)}
+  rescue
+    ArgumentError -> :error
   end
 end
