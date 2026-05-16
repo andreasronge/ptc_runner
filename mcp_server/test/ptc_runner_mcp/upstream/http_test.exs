@@ -55,6 +55,13 @@ defmodule PtcRunnerMcp.Upstream.HttpTest do
     :exit, _ -> :ok
   end
 
+  defp existing_atom?(name) when is_binary(name) do
+    _atom = String.to_existing_atom(name)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
   # ───────── Handshake happy path ─────────
 
   describe "handshake → tools/list cache → tools/call" do
@@ -365,6 +372,26 @@ defmodule PtcRunnerMcp.Upstream.HttpTest do
 
       # Second stop is a no-op (the impl is gone).
       assert :ok = Http.stop(name)
+    end
+  end
+
+  # ───────── proxy parsing ─────────
+
+  describe "proxy parsing" do
+    test "unsupported proxy schemes are not interned as atoms" do
+      %{port: port} = boot_fake(:handshake_success)
+      scheme = "ptcleak#{System.unique_integer([:positive])}"
+      proxy_url = "#{scheme}://127.0.0.1:8080"
+
+      refute existing_atom?(scheme)
+
+      name = unique_name("http-proxy-scheme")
+
+      assert {:error, {:upstream_unavailable, detail}} =
+               Http.start_link(name, config(port, %{proxy: proxy_url}))
+
+      assert detail =~ "unsupported proxy scheme"
+      refute existing_atom?(scheme)
     end
   end
 

@@ -492,8 +492,20 @@ defmodule PtcRunnerMcp.Agentic do
   defp map_step_reason(%{fail: %{reason: :llm_error}}, %{"error" => "planner_error"}, false),
     do: :planner_error
 
+  defp map_step_reason(%{fail: %{reason: :max_turns_exceeded}}, _planner, false),
+    do: :ptc_max_turns_exceeded
+
+  defp map_step_reason(%{fail: %{reason: :budget_exhausted}}, _planner, false),
+    do: :ptc_budget_exhausted
+
+  defp map_step_reason(%{fail: %{reason: :turn_budget_exhausted}}, _planner, false),
+    do: :ptc_turn_budget_exhausted
+
+  defp map_step_reason(%{fail: %{reason: :mission_timeout}}, _planner, false),
+    do: :ptc_mission_timeout
+
   defp map_step_reason(%{fail: %{reason: reason}}, _planner, false) when is_atom(reason),
-    do: :"ptc_#{reason}"
+    do: "ptc_#{reason}"
 
   defp final_program(%{turns: turns}) when is_list(turns) do
     turns
