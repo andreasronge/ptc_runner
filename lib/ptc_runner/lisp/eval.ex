@@ -1460,12 +1460,11 @@ defmodule PtcRunner.Lisp.Eval do
     # call time via the Env.builtin? fallback in (:var ...). This is the
     # whole point of the optimization — each closure would otherwise drag
     # the full ~18 KB builtin map (and every unused sibling binding) around.
-    keep? = fn key ->
-      MapSet.member?(referenced, to_string(key)) and
-        (MapSet.member?(locals, key) or not Map.has_key?(initial, key))
-    end
-
-    captured_env = :maps.filter(fn key, _value -> keep?.(key) end, env)
+    captured_env =
+      referenced
+      |> Enum.reduce(%{}, fn name, acc ->
+        capture_referenced_binding(name, env, locals, initial, acc)
+      end)
 
     # Narrow `locals` (stored in meta as `:captured_locals`) to the same
     # referenced set so it stays consistent with `captured_env` — every
@@ -1473,11 +1472,32 @@ defmodule PtcRunner.Lisp.Eval do
     # include caller-injected env keys: promoting them would invert the
     # documented precedence (locals > user_ns > env).
     captured_locals =
-      locals
-      |> Enum.filter(&MapSet.member?(referenced, to_string(&1)))
+      captured_env
+      |> Map.keys()
+      |> Enum.filter(&MapSet.member?(locals, &1))
       |> MapSet.new()
 
     {captured_env, captured_locals}
+  end
+
+  defp capture_referenced_binding(name, env, locals, initial, acc) do
+    name
+    |> referenced_env_keys()
+    |> Enum.reduce(acc, fn key, inner_acc ->
+      with {:ok, value} <- Map.fetch(env, key),
+           true <- MapSet.member?(locals, key) or not Map.has_key?(initial, key) do
+        Map.put(inner_acc, key, value)
+      else
+        _ -> inner_acc
+      end
+    end)
+  end
+
+  defp referenced_env_keys(name) when is_binary(name) do
+    case safe_to_existing_atom(name) do
+      {:ok, atom} -> [name, atom]
+      :error -> [name]
+    end
   end
 
   # Collects the free `{:var, _}` names in a CoreAST subtree, normalized to
