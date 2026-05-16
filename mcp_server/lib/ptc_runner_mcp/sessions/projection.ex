@@ -99,6 +99,16 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     Map.merge(base, view_payload(state, view))
   end
 
+  @doc "Render a metadata-only live session list."
+  @spec list([map()]) :: map()
+  def list(sessions) when is_list(sessions) do
+    %{
+      "status" => "ok",
+      "count" => length(sessions),
+      "sessions" => sessions
+    }
+  end
+
   @doc "Render a forget response."
   @spec forget(map(), [String.t()], [String.t()]) :: map()
   def forget(state, removed_bindings, cleared) do
@@ -189,7 +199,9 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   defp view_payload(state, _view), do: view_payload(state, "overview")
 
-  defp session_summary(state) do
+  @doc "Render metadata-only summary for one committed session state."
+  @spec session_summary(map()) :: map()
+  def session_summary(state) do
     usage = session_usage(state)
 
     %{
