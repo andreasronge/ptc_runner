@@ -13,6 +13,22 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   @doc """
   Creates a map from alternating key-value pairs.
 
+  Equivalent to Clojure's `array-map`. PTC-Lisp currently uses the same
+  unordered runtime map representation as `hash-map`.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.array_map([])
+      %{}
+
+      iex> PtcRunner.Lisp.Runtime.MapOps.array_map([:a, 1, :b, 2])
+      %{a: 1, b: 2}
+  """
+  def array_map(args) when is_list(args), do: build_map(args, "array-map")
+
+  @doc """
+  Creates a map from alternating key-value pairs.
+
   Equivalent to Clojure's `hash-map`. Requires an even number of arguments.
 
   ## Examples
@@ -23,7 +39,6 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.hash_map([:a, 1, :b, 2])
       %{a: 1, b: 2}
   """
-  def array_map(args) when is_list(args), do: build_map(args, "array-map")
   def hash_map(args) when is_list(args), do: build_map(args, "hash-map")
 
   defp build_map(args, name) do

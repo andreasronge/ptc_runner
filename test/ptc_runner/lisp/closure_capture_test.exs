@@ -11,10 +11,57 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.ClosureCapture
 
   defp run!(src) do
     case Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn) do
       {:ok, step} -> step.return
+    end
+  end
+
+  describe "referenced_vars/3" do
+    test "excludes function params and extra bound names" do
+      ast =
+        {:call, {:var, :+},
+         [
+           {:var, :x},
+           {:var, :outer},
+           {:var, :self}
+         ]}
+
+      assert ClosureCapture.referenced_vars(ast, [{:var, :x}], [:self]) ==
+               MapSet.new(["+", "outer"])
+    end
+
+    test "handles sequential let binding scope" do
+      ast =
+        {:let,
+         [
+           {:binding, {:var, :x}, {:var, :outer}},
+           {:binding, {:var, :y}, {:call, {:var, :inc}, [{:var, :x}]}}
+         ], {:call, {:var, :+}, [{:var, :x}, {:var, :y}, {:var, :z}]}}
+
+      assert ClosureCapture.referenced_vars(ast, [], []) ==
+               MapSet.new(["outer", "inc", "+", "z"])
+    end
+
+    test "treats inner function params and names as locally bound" do
+      ast =
+        {:fn, :walk, [{:var, :node}],
+         {:call, {:var, :map}, [{:var, :walk}, {:var, :node}, {:var, :roots}]}}
+
+      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new(["map", "roots"])
+    end
+
+    test "collects destructuring pattern names as bound" do
+      ast =
+        {:let,
+         [
+           {:binding, {:destructure, {:map, [:keep], [{{:var, :renamed}, :source}], []}},
+            {:var, :input}}
+         ], {:vector, [{:var, :keep}, {:var, :renamed}, {:var, :outside}]}}
+
+      assert ClosureCapture.referenced_vars(ast, [], []) == MapSet.new(["input", "outside"])
     end
   end
 
