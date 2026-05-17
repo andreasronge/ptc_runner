@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.Stdio do
 
   use GenServer
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Envelope, JsonRpc, Limits, Log}
+  alias PtcRunnerMcp.{ConcurrencyGate, Envelope, JsonRpc, Limits, Log, Version}
 
   @newline ?\n
 
@@ -48,6 +48,7 @@ defmodule PtcRunnerMcp.Stdio do
             max_frame_bytes: pos_integer(),
             draining: boolean(),
             exited: boolean(),
+            protocol_version: String.t(),
             auto_read: boolean(),
             observer: pid() | nil,
             in_flight: %{
@@ -71,6 +72,7 @@ defmodule PtcRunnerMcp.Stdio do
               # notification so any frames buffered behind it are not
               # dispatched (avoids replies after the client said exit).
               exited: false,
+              protocol_version: Version.primary(),
               # When true, run the read loop. Tests set this to false
               # and feed bytes directly via Stdio.feed/2.
               auto_read: true,
@@ -514,7 +516,12 @@ defmodule PtcRunnerMcp.Stdio do
         {:error, _} -> {:error, :parse_error}
       end
 
-    case JsonRpc.dispatch(decoded, draining: state.draining) do
+    {protocol_version, state} = negotiate_if_initialize(decoded, state)
+
+    case JsonRpc.dispatch(decoded,
+           draining: state.draining,
+           protocol_version: protocol_version
+         ) do
       {:reply, frame, lifecycle} ->
         write_reply(state, frame)
         apply_lifecycle(state, lifecycle)
@@ -545,6 +552,22 @@ defmodule PtcRunnerMcp.Stdio do
 
     state
   end
+
+  defp negotiate_if_initialize(
+         {:ok, %{"jsonrpc" => "2.0", "method" => "initialize", "params" => params}},
+         state
+       ) do
+    requested =
+      case params do
+        %{"protocolVersion" => v} when is_binary(v) -> v
+        _ -> nil
+      end
+
+    protocol_version = Version.negotiate(requested)
+    {protocol_version, %{state | protocol_version: protocol_version}}
+  end
+
+  defp negotiate_if_initialize(_decoded, state), do: {state.protocol_version, state}
 
   defp write_reply(%State{io: io, observer: observer} = _state, frame) do
     # `Jason.encode!/1` produces a binary of UTF-8 bytes (raw, regardless

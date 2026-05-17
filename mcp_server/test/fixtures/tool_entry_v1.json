@@ -82,6 +82,7 @@
               "fail",
               "validation_error",
               "busy",
+              "cancelled",
               "unknown_tool",
               "shutting_down"
             ],
@@ -106,4 +107,3 @@
     "type": "object"
   }
 }
-

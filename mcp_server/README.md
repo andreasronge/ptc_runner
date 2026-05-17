@@ -6,7 +6,8 @@
 An [MCP](https://modelcontextprotocol.io/) server that exposes
 [PtcRunner](https://hex.pm/packages/ptc_runner)'s PTC-Lisp sandbox to any
 MCP client (Claude Desktop, Cursor, Cline, Claude Code, …) over stdio
-JSON-RPC. The default tool, `ptc_lisp_execute`, accepts a PTC-Lisp
+JSON-RPC, with an opt-in Streamable HTTP mode for private-network
+deployments. The default tool, `ptc_lisp_execute`, accepts a PTC-Lisp
 program plus optional `context` and `output_schema` (or legacy
 `signature`), runs it in an isolated BEAM process (1 s wall-clock,
 10 MB memory; 10 s / 100 MB in [aggregator mode](../docs/aggregator-mode.md)),
@@ -130,6 +131,28 @@ claude mcp add ptc-runner \
 To pass configuration flags through any of these clients, append them
 to the `args` array (e.g., `"args": ["start", "--max-frame-bytes", "8388608"]`).
 
+## Streamable HTTP mode
+
+HTTP mode is opt-in and intended for service deployments, not local
+desktop MCP client configs:
+
+```bash
+export PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)"
+_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start \
+  --http \
+  --http-auth-token "$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN"
+```
+
+The default endpoint is `POST /mcp` on `127.0.0.1:7332`. The first
+client request initializes an HTTP protocol session and receives an
+`MCP-Session-Id`; later POST/DELETE requests send that id. `GET /health`
+is liveness and `GET /ready` is load-balancer readiness.
+
+See [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
+for the private-network deployment runbook and
+[`docs/mcp-server-configuration.md#streamable-http-flags`](../docs/mcp-server-configuration.md#streamable-http-flags)
+for all HTTP flags.
+
 ## Features
 
 The server is one binary with several opt-in capabilities. Each links
@@ -144,6 +167,7 @@ to its own doc.
 | **Diagnostics** — `ptc_debug` for in-process telemetry rollups | off; `--debug-tool` | [`docs/mcp-debug.md`](../docs/mcp-debug.md) |
 | **Response profiles** — `slim` / `structured` / `debug` | `slim` | [`docs/mcp-server-configuration.md#response-profiles`](../docs/mcp-server-configuration.md#response-profiles) |
 | **Tracing** — per-call JSONL traces, viewable via `mix ptc.viewer` | off; `--trace-dir` | [`docs/mcp-server-configuration.md#tracing`](../docs/mcp-server-configuration.md#tracing) |
+| **Streamable HTTP** — private-network MCP endpoint with session ids, bearer auth, health/readiness, and HTTP telemetry | off; `--http` | [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md) |
 
 For every flag and environment variable, see
 [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md).
@@ -165,6 +189,7 @@ ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
 
 - Conceptual overview: [`docs/mcp-server.md`](../docs/mcp-server.md)
 - Configuration reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md)
+- HTTP deployment: [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
 - Aggregator mode: [`docs/aggregator-mode.md`](../docs/aggregator-mode.md)
 - Agentic mode (`ptc_task`): [`docs/agentic-mode.md`](../docs/agentic-mode.md)
 - Diagnostics (`ptc_debug`): [`docs/mcp-debug.md`](../docs/mcp-debug.md)

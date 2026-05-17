@@ -58,6 +58,8 @@ defmodule PtcRunnerMcp.Application do
     TraceHandler
   }
 
+  alias PtcRunnerMcp.Http.{Config, Server}
+  alias PtcRunnerMcp.Http.SessionRegistry, as: HttpSessionRegistry
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   @impl Application
@@ -73,9 +75,11 @@ defmodule PtcRunnerMcp.Application do
     apply_agentic_config(args)
     apply_debug_config(args)
     apply_response_profile(args)
-    apply_sessions_config(args)
-    validate_agentic_boot!(upstreams)
     apply_limits(args, aggregator?: upstreams != [])
+    apply_sessions_config(args)
+    {:ok, http_config} = Config.resolve(args)
+    Application.put_env(:ptc_runner_mcp, :http_config, http_config)
+    validate_agentic_boot!(upstreams)
     apply_trace_config(args)
 
     if AgenticConfig.enabled?() and upstreams == [] do
@@ -94,10 +98,10 @@ defmodule PtcRunnerMcp.Application do
     # unique names. Returning an empty child list keeps the named ETS
     # redaction table free for test-owned `Credentials` instances.
     children =
-      if attach_stdio?() do
-        build_children(upstreams, bindings, args)
-      else
-        []
+      cond do
+        http_config.enabled -> build_http_children(upstreams, bindings, http_config)
+        attach_stdio?() -> build_children(upstreams, bindings, args)
+        true -> []
       end
 
     # `:rest_for_one` per `Plans/http-transport-credentials.md` §7.1.
@@ -106,6 +110,23 @@ defmodule PtcRunnerMcp.Application do
     # they re-handshake against the freshly-rebuilt redaction set.
     opts = [strategy: :rest_for_one, name: PtcRunnerMcp.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  @impl Application
+  def prep_stop(state) do
+    case Application.get_env(:ptc_runner_mcp, :http_config) do
+      %{enabled: true, shutdown_grace_ms: grace_ms} ->
+        if Process.whereis(HttpSessionRegistry) do
+          _ = HttpSessionRegistry.begin_drain()
+          Process.sleep(grace_ms)
+          _ = HttpSessionRegistry.cancel_all(:shutdown)
+        end
+
+      _ ->
+        :ok
+    end
+
+    state
   end
 
   # Compose the production supervisor child list. Public-but-undocumented
@@ -128,6 +149,20 @@ defmodule PtcRunnerMcp.Application do
       aggregator_children(upstreams) ++
       session_children() ++
       stdio_children(args)
+  end
+
+  @doc false
+  @spec build_http_children([map()], %{String.t() => Credentials.Binding.t()}, map()) ::
+          [Supervisor.child_spec() | {module(), term()}]
+  def build_http_children(upstreams, bindings, http_config) do
+    [{Credentials, [bindings: bindings]}] ++
+      aggregator_children(upstreams) ++
+      session_children_for_http() ++
+      [
+        {HttpSessionRegistry, [config: http_config]},
+        Server.child_spec(http_config)
+      ] ++
+      debug_children()
   end
 
   # ----------------------------------------------------------------
@@ -193,12 +228,42 @@ defmodule PtcRunnerMcp.Application do
           debug_tool: :boolean,
           debug_ring_size: :integer,
           max_debug_response_bytes: :integer,
-          response_profile: :string
+          response_profile: :string,
+          http: :boolean,
+          http_host: :string,
+          http_port: :integer,
+          http_path: :string,
+          http_auth_token: :string,
+          http_disable_auth: :boolean,
+          http_allowed_origin: [:string, :keep],
+          http_request_timeout_ms: :integer,
+          http_shutdown_grace_ms: :integer,
+          http_max_body_bytes: :integer,
+          http_session_ttl_ms: :integer,
+          http_session_idle_timeout_ms: :integer,
+          http_max_sessions: :integer,
+          http_max_sessions_per_owner: :integer,
+          http_max_in_flight_per_session: :integer,
+          http_allow_unsafe_network: :boolean,
+          http_metrics: :boolean,
+          http_metrics_path: :string,
+          http_instance_label: :string
         ]
       )
 
-    Map.new(opts)
+    opts_to_map(opts)
   end
+
+  defp opts_to_map(opts) do
+    {origins, rest} = Keyword.pop_values(opts, :http_allowed_origin)
+
+    rest
+    |> Map.new()
+    |> maybe_put_origins(origins)
+  end
+
+  defp maybe_put_origins(map, []), do: map
+  defp maybe_put_origins(map, origins), do: Map.put(map, :http_allowed_origin, origins)
 
   # Public-but-undocumented seam used by tests to verify CLI > env >
   # default precedence for non-limit aggregator behavior.
@@ -931,6 +996,10 @@ defmodule PtcRunnerMcp.Application do
     else
       []
     end
+  end
+
+  defp session_children_for_http do
+    Sessions.child_specs()
   end
 
   # Phase 1a: when at least one upstream is configured, start the

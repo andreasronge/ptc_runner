@@ -16,6 +16,11 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
   `:atomics.add_get/3`; if the post-increment value exceeds the cap,
   it decrements back and returns `:full`. `release/0` decrements.
 
+  HTTP workers can use tracked permits: the permit is acquired first,
+  then attached to the worker pid. A tiny monitor process releases the
+  permit exactly once if the worker exits before the owning session can
+  release it explicitly.
+
   This is intentionally lock-free and non-queueing: `:full` callers
   do NOT wait. Acquire is O(1) regardless of contention.
 
@@ -31,6 +36,7 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
   alias PtcRunnerMcp.Limits
 
   @key {__MODULE__, :ref}
+  @type tracked_permit :: pid()
 
   @doc """
   Initialize the underlying atomics ref. Idempotent. Called once at
@@ -76,6 +82,38 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
     end
   end
 
+  @doc """
+  Try to acquire a permit guarded by a monitor process.
+
+  The returned permit must either be attached to a worker via
+  `track_worker/2` or released with `release_tracked/1`. If the owner
+  process exits before a worker is attached, the guard releases the
+  permit. Once a worker is attached, the guard releases on either
+  explicit release or worker `:DOWN`.
+  """
+  @spec try_acquire_tracked(pos_integer(), pid()) :: {:ok, tracked_permit()} | :full
+  def try_acquire_tracked(cap, owner \\ self())
+      when is_integer(cap) and cap > 0 and is_pid(owner) do
+    case try_acquire(cap) do
+      :ok -> {:ok, spawn(fn -> permit_guard(owner) end)}
+      :full -> :full
+    end
+  end
+
+  @doc "Attach a tracked permit to the worker process that owns it."
+  @spec track_worker(tracked_permit(), pid()) :: :ok
+  def track_worker(permit, worker) when is_pid(permit) and is_pid(worker) do
+    send(permit, {:track_worker, worker})
+    :ok
+  end
+
+  @doc "Release a tracked permit before its worker exits."
+  @spec release_tracked(tracked_permit()) :: :ok
+  def release_tracked(permit) when is_pid(permit) do
+    send(permit, :release)
+    :ok
+  end
+
   @doc "Release one previously-acquired permit. Idempotent: never goes below 0."
   @spec release() :: :ok
   def release do
@@ -116,6 +154,34 @@ defmodule PtcRunnerMcp.ConcurrencyGate do
 
       ref ->
         ref
+    end
+  end
+
+  defp permit_guard(owner) do
+    owner_ref = Process.monitor(owner)
+
+    receive do
+      {:track_worker, worker} ->
+        Process.demonitor(owner_ref, [:flush])
+        worker_ref = Process.monitor(worker)
+        await_permit_release(worker_ref)
+
+      :release ->
+        release()
+
+      {:DOWN, ^owner_ref, :process, _pid, _reason} ->
+        release()
+    end
+  end
+
+  defp await_permit_release(worker_ref) do
+    receive do
+      :release ->
+        Process.demonitor(worker_ref, [:flush])
+        release()
+
+      {:DOWN, ^worker_ref, :process, _pid, _reason} ->
+        release()
     end
   end
 end
