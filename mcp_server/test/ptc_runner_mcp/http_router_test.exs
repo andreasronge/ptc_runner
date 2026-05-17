@@ -25,6 +25,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     Application.put_env(:ptc_runner_mcp, :http_config, cfg)
     start_supervised!({SessionRegistry, [config: cfg]})
     PtcRunnerMcp.ConcurrencyGate.init()
+    PtcRunnerMcp.ConcurrencyGate.reset()
 
     original_trace = TraceConfig.get()
     original_log_level = Log.level()
@@ -313,6 +314,44 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     end)
 
     _new_session_id = initialize_session()
+  end
+
+  test "worker-tracked permit is released after hard session kill" do
+    session_id = initialize_session()
+    {:ok, meta} = SessionRegistry.lookup(session_id, Auth.owner_for(@token))
+
+    call = %{
+      "jsonrpc" => "2.0",
+      "id" => "hard-kill",
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "ptc_lisp_execute",
+        "arguments" => %{"program" => long_running_program(), "context" => %{}}
+      }
+    }
+
+    task =
+      Task.async(fn ->
+        conn(:post, "/mcp", Jason.encode!(call))
+        |> auth()
+        |> put_req_header("mcp-session-id", session_id)
+        |> call()
+      end)
+
+    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end)
+    [%{pid: worker_pid}] = :sys.get_state(meta.pid).in_flight |> Map.values()
+    assert ConcurrencyGate.in_flight() == 1
+
+    session_ref = Process.monitor(meta.pid)
+    Process.exit(meta.pid, :kill)
+    assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}, 1_000
+
+    worker_ref = Process.monitor(worker_pid)
+    Process.exit(worker_pid, :kill)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, :killed}, 1_000
+
+    wait_until(fn -> ConcurrencyGate.in_flight() == 0 end)
+    Task.shutdown(task, :brutal_kill)
   end
 
   test "stopping registry stops live sessions" do

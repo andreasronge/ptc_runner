@@ -242,9 +242,9 @@ defmodule PtcRunnerMcp.Http.Session do
         {:reply, success_reply(request_id, envelope), state}
 
       true ->
-        case ConcurrencyGate.try_acquire(Limits.max_concurrent_calls()) do
-          :ok ->
-            {:ok, spawn_worker(state, request_id, work_fn, on_discard, waiter)}
+        case ConcurrencyGate.try_acquire_tracked(Limits.max_concurrent_calls()) do
+          {:ok, permit} ->
+            {:ok, spawn_worker(state, request_id, work_fn, on_discard, waiter, permit)}
 
           :full ->
             Telemetry.emit(
@@ -260,7 +260,7 @@ defmodule PtcRunnerMcp.Http.Session do
     end
   end
 
-  defp spawn_worker(state, request_id, work_fn, on_discard, waiter) do
+  defp spawn_worker(state, request_id, work_fn, on_discard, waiter, permit) do
     parent = self()
     waiter_ref = Process.monitor(waiter)
 
@@ -270,6 +270,8 @@ defmodule PtcRunnerMcp.Http.Session do
         send(parent, {:async_reply, request_id, envelope})
       end)
 
+    :ok = ConcurrencyGate.track_worker(permit, pid)
+
     %{
       state
       | in_flight:
@@ -278,6 +280,7 @@ defmodule PtcRunnerMcp.Http.Session do
             ref: ref,
             waiter: waiter,
             waiter_ref: waiter_ref,
+            permit: permit,
             on_discard: on_discard
           }),
         workers: Map.put(state.workers, pid, request_id)
@@ -314,10 +317,10 @@ defmodule PtcRunnerMcp.Http.Session do
       {nil, _} ->
         state
 
-      {%{pid: pid, waiter_ref: waiter_ref, on_discard: on_discard}, in_flight} ->
+      {%{pid: pid, waiter_ref: waiter_ref, permit: permit, on_discard: on_discard}, in_flight} ->
         Process.demonitor(waiter_ref, [:flush])
         safe_invoke(on_discard)
-        ConcurrencyGate.release()
+        ConcurrencyGate.release_tracked(permit)
         %{state | in_flight: in_flight, workers: Map.delete(state.workers, pid)}
     end
   end
