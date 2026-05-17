@@ -9,7 +9,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
 
   defstruct sessions: %{},
             by_owner: %{},
-            monitors: %{},
             config: %{},
             draining?: false,
             cleanup_ref: nil
@@ -106,8 +105,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
                max_in_flight: state.config.max_in_flight_per_session
              ) do
           {:ok, pid} ->
-            ref = Process.monitor(pid)
-
             meta = %{
               id: id,
               pid: pid,
@@ -120,7 +117,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
             state =
               state
               |> put_in([Access.key!(:sessions), id], meta)
-              |> put_in([Access.key!(:monitors), ref], id)
               |> add_owner_index(owner.hash, id)
 
             session_hash = Telemetry.hash_id(id)
@@ -194,13 +190,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
     end
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
-    case Map.pop(state.monitors, ref) do
-      {nil, monitors} -> {:noreply, %{state | monitors: monitors}}
-      {id, monitors} -> {:noreply, remove_session(%{state | monitors: monitors}, id, reason)}
-    end
-  end
-
   def handle_info(:cleanup, state) do
     now = System.monotonic_time(:millisecond)
 
@@ -265,7 +254,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
 
         state
         |> Map.put(:sessions, sessions)
-        |> remove_monitor(id)
         |> remove_owner_index(meta.owner_hash, id)
     end
   end
@@ -275,17 +263,6 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
       {id, %{pid: ^pid}} -> id
       _ -> nil
     end)
-  end
-
-  defp remove_monitor(state, id) do
-    case Enum.find(state.monitors, fn {_ref, session_id} -> session_id == id end) do
-      {ref, ^id} ->
-        Process.demonitor(ref, [:flush])
-        %{state | monitors: Map.delete(state.monitors, ref)}
-
-      nil ->
-        state
-    end
   end
 
   defp safe_idle?(pid, now, ms) do
