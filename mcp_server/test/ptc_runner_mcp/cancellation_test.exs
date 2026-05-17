@@ -22,6 +22,7 @@ defmodule PtcRunnerMcp.CancellationTest do
       worker processes with correct metadata.
   """
   use ExUnit.Case, async: false
+  import PtcRunnerMcp.TestSupport.WaitHelpers
 
   alias PtcRunnerMcp.{ConcurrencyGate, Limits, Stdio}
   alias PtcRunnerMcp.Test.JsonRpcHarness
@@ -482,29 +483,4 @@ defmodule PtcRunnerMcp.CancellationTest do
   # ----------------------------------------------------------------
   # Helpers
   # ----------------------------------------------------------------
-
-  defp wait_until(fun, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_until(fun, deadline)
-  end
-
-  defp do_wait_until(fun, deadline) do
-    if fun.() do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) > deadline do
-        flunk("wait_until timed out")
-      else
-        # Non-blocking pause: a `receive` with `after` parks the
-        # scheduler without consuming CPU and avoids the explicit
-        # `Process.sleep` ban from CLAUDE.md.
-        receive do
-        after
-          10 -> :ok
-        end
-
-        do_wait_until(fun, deadline)
-      end
-    end
-  end
 end

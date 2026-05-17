@@ -1,5 +1,6 @@
 defmodule PtcRunnerMcp.SessionsTest do
   use ExUnit.Case, async: false
+  import PtcRunnerMcp.TestSupport.WaitHelpers
 
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Credentials
@@ -690,28 +691,6 @@ defmodule PtcRunnerMcp.SessionsTest do
       "(cond (= m 0) (+ n 1) " <>
       "(= n 0) (ack (- m 1) 1) " <>
       ":else (ack (- m 1) (ack m (- n 1))))) 3 8)"
-  end
-
-  defp wait_until(fun, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_until(fun, deadline)
-  end
-
-  defp do_wait_until(fun, deadline) do
-    if fun.() do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) > deadline do
-        flunk("wait_until timed out")
-      else
-        receive do
-        after
-          10 -> :ok
-        end
-
-        do_wait_until(fun, deadline)
-      end
-    end
   end
 
   defp stop_sessions_processes do

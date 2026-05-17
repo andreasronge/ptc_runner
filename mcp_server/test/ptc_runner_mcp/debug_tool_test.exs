@@ -11,6 +11,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
   aggregation; `record/1` fault isolation.
   """
   use ExUnit.Case, async: false
+  import PtcRunnerMcp.TestSupport.WaitHelpers
 
   alias PtcRunnerMcp.{
     ConcurrencyGate,
@@ -785,28 +786,5 @@ defmodule PtcRunnerMcp.DebugToolTest do
       "(cond (= m 0) (+ n 1) " <>
       "(= n 0) (ack (- m 1) 1) " <>
       ":else (ack (- m 1) (ack m (- n 1))))) 3 9)"
-  end
-
-  defp wait_until(fun, timeout_ms) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait(fun, deadline)
-  end
-
-  defp do_wait(fun, deadline) do
-    cond do
-      fun.() ->
-        :ok
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("wait_until timed out")
-
-      true ->
-        receive do
-        after
-          10 -> :ok
-        end
-
-        do_wait(fun, deadline)
-    end
   end
 end
