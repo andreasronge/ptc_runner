@@ -156,7 +156,7 @@ defmodule UsageRulesTest do
         )
 
       assert step.return == 42
-      assert step.memory[:x] == 42
+      assert step.memory["x"] == 42
     end
 
     test "LLM callback may return a raw string OR a normalized map" do
@@ -207,7 +207,7 @@ defmodule UsageRulesTest do
 
       assert step.return["count"] == 2
       # Memory persistence claim from the docs: (def x ...) survives across turns.
-      assert step.memory[:results] == [%{id: 1}, %{id: 2}]
+      assert step.memory["results"] == [%{id: 1}, %{id: 2}]
     end
 
     test "single-shot mode: max_turns: 1, no tools, no retry_turns" do

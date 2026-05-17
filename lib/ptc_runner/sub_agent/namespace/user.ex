@@ -75,7 +75,8 @@ defmodule PtcRunner.SubAgent.Namespace.User do
     |> Enum.reject(fn {_name, value} -> uninformative?(value) end)
     |> Enum.split_with(fn {_name, value} -> closure?(value) end)
     |> then(fn {fns, vals} ->
-      {Enum.sort_by(fns, &elem(&1, 0)), Enum.sort_by(vals, &elem(&1, 0))}
+      {Enum.sort_by(fns, &display_name(elem(&1, 0))),
+       Enum.sort_by(vals, &display_name(elem(&1, 0)))}
     end)
   end
 
@@ -97,7 +98,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   defp format_functions(functions) do
     Enum.map(functions, fn {name, closure} ->
       params_str = format_params(closure)
-      base = "(#{name} [#{params_str}])"
+      base = "(#{display_name(name)} [#{params_str}])"
       docstring = get_docstring(closure)
       return_type = get_return_type(closure)
 
@@ -137,7 +138,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
     Enum.map_join(params, " ", &extract_param_name/1)
   end
 
-  defp extract_param_name({:var, name}), do: Atom.to_string(name)
+  defp extract_param_name({:var, name}), do: display_name(name)
   defp extract_param_name(_), do: "_"
 
   # Extract docstring from metadata (6-tuple only)
@@ -157,7 +158,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
 
     Enum.map(values, fn {name, value} ->
       type_label = TypeVocabulary.type_of(value)
-      name_str = Atom.to_string(name)
+      name_str = display_name(name)
       # Pad name to 30 chars for alignment
       padded_name = String.pad_trailing(name_str, 30)
       is_hidden = String.starts_with?(name_str, "_")
@@ -175,4 +176,8 @@ defmodule PtcRunner.SubAgent.Namespace.User do
       end
     end)
   end
+
+  defp display_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp display_name(name) when is_binary(name), do: name
+  defp display_name(name), do: inspect(name)
 end

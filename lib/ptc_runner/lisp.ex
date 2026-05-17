@@ -751,11 +751,12 @@ defmodule PtcRunner.Lisp do
     end)
   end
 
-  # Memory keys are `def`-bound variable names. A binary name may still
-  # collapse to a pre-existing atom for back-compat; a keyword key (rare)
-  # is interned deterministically like any other externalized keyword (#964).
+  # Memory keys are `def`-bound variable names. Externalize them through the
+  # same bounded vocabulary as parsed symbols: builtin names remain atoms,
+  # user-defined names remain binaries, and unrelated VM atom-table state is
+  # ignored.
   defp externalize_memory_key(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
-  defp externalize_memory_key(name) when is_binary(name), do: existing_atom_or(name, name)
+  defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
   defp externalize_memory_key(other), do: other
 
   defp existing_atom_or(name, fallback) when is_binary(name) do

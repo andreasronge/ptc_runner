@@ -81,6 +81,31 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       assert Enum.at(lines, 2) =~ "zebra"
     end
 
+    test "renders binary memory keys" do
+      result = User.render(%{"counter" => 1, "_token" => "secret"}, [])
+
+      assert result =~ "counter"
+      assert result =~ "; = integer, sample: 1"
+      assert result =~ "_token"
+      assert result =~ "; = string, [Hidden]"
+      refute result =~ "secret"
+    end
+
+    test "sorts mixed atom and binary memory keys by display name" do
+      result = User.render(%{"alpha" => 2, zebra: 1}, [])
+
+      lines = String.split(result, "\n")
+      assert Enum.at(lines, 1) =~ "alpha"
+      assert Enum.at(lines, 2) =~ "zebra"
+    end
+
+    test "renders binary function names and params" do
+      closure = {:closure, [{:var, "x"}], nil, %{}, [], %{}}
+      result = User.render(%{"my-fn" => closure}, [])
+
+      assert result =~ "(my-fn [x])"
+    end
+
     test "renders variadic function with rest params" do
       closure = {:closure, {:variadic, [], {:var, :args}}, nil, %{}, [], %{}}
       result = User.render(%{foo: closure}, [])

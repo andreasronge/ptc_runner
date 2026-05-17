@@ -203,7 +203,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 42}
+      assert user_ns == %{"x" => 42}
     end
 
     test "(def x \"docstring\" 42) ignores docstring" do
@@ -211,7 +211,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 42}
+      assert user_ns == %{"x" => 42}
     end
 
     test "def with expression value" do
@@ -219,7 +219,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :result}
-      assert user_ns == %{result: 6}
+      assert user_ns == %{"result" => 6}
     end
 
     test "def binding is accessible in subsequent expressions" do
@@ -227,7 +227,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == 10
-      assert user_ns == %{x: 10}
+      assert user_ns == %{"x" => 10}
     end
 
     test "def can be redefined" do
@@ -235,7 +235,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == 2
-      assert user_ns == %{x: 2}
+      assert user_ns == %{"x" => 2}
     end
 
     test "def can reference previous def in same do block" do
@@ -243,7 +243,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == 2
-      assert user_ns == %{a: 1, b: 2}
+      assert user_ns == %{"a" => 1, "b" => 2}
     end
 
     test "def persists across turns (via memory param)" do
@@ -264,7 +264,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source, tools: tools)
 
       assert result == %Var{name: :results}
-      assert user_ns == %{results: [%{id: 1}, %{id: 2}]}
+      assert user_ns == %{"results" => [%{id: 1}, %{id: 2}]}
     end
 
     test "def shadows builtin map" do
@@ -403,7 +403,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 0}
+      assert user_ns == %{"x" => 0}
     end
 
     test "(defonce x 99) is a no-op when x already bound (multi-turn via memory)" do
@@ -414,25 +414,25 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns2}} = Lisp.run("(defonce x 99)", memory: user_ns1)
 
       assert result == %Var{name: :x}
-      assert user_ns2[:x] == 0
+      assert user_ns2["x"] == 0
     end
 
     test "defonce then def accumulates across turns" do
       # Turn 1: initialize counter
       {:ok, %{memory: mem1}} = Lisp.run("(defonce counter 0)")
-      assert mem1[:counter] == 0
+      assert mem1["counter"] == 0
 
       # Turn 2: increment (defonce is no-op, def updates)
       {:ok, %{memory: mem2}} =
         Lisp.run("(do (defonce counter 0) (def counter (inc counter)))", memory: mem1)
 
-      assert mem2[:counter] == 1
+      assert mem2["counter"] == 1
 
       # Turn 3: increment again
       {:ok, %{memory: mem3}} =
         Lisp.run("(do (defonce counter 0) (def counter (inc counter)))", memory: mem2)
 
-      assert mem3[:counter] == 2
+      assert mem3["counter"] == 2
     end
 
     test "defonce with docstring variant works" do
@@ -440,7 +440,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :total}
-      assert user_ns[:total] == 0
+      assert user_ns["total"] == 0
     end
 
     test "defonce shadows builtin" do

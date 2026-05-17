@@ -228,7 +228,12 @@ defmodule PtcRunner.Lisp.Eval do
     with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
       # Merge docstring into closure metadata if value is a closure
       value = merge_docstring_into_closure(value, opts)
-      new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+
+      new_user_ns =
+        eval_ctx2.user_ns
+        |> delete_legacy_user_ns_key(name)
+        |> Map.put(name, value)
+
       {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
     end
   end
@@ -1525,6 +1530,15 @@ defmodule PtcRunner.Lisp.Eval do
       :error -> false
     end
   end
+
+  defp delete_legacy_user_ns_key(map, name) when is_map(map) and is_binary(name) do
+    case safe_to_existing_atom(name) do
+      {:ok, atom} -> Map.delete(map, atom)
+      :error -> map
+    end
+  end
+
+  defp delete_legacy_user_ns_key(map, _name), do: map
 
   defp safe_to_existing_atom(name) do
     {:ok, String.to_existing_atom(name)}

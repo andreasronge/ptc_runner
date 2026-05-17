@@ -267,7 +267,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
       {:ok, result1, messages1, memory1} = SubAgent.chat(agent, "Set counter", llm: llm1)
 
       assert result1 == %{"value" => 42}
-      assert memory1[:counter] == 42
+      assert memory1["counter"] == 42
 
       # Second call: LLM receives previous memory and can use the variable
       llm2 = fn _input ->
