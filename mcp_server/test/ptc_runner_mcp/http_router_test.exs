@@ -2,6 +2,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
   use ExUnit.Case, async: false
   import Plug.Conn
   import Plug.Test
+  import PtcRunnerMcp.TestSupport.WaitHelpers
 
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Http.Auth
@@ -652,11 +653,6 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     Enum.each(PtcRunnerMcp.Sessions.child_specs(), &start_supervised!/1)
   end
 
-  defp wait_until(fun, timeout_ms \\ 1_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_until(fun, deadline)
-  end
-
   defp wait_for_files(dir, expected, timeout_ms \\ 1_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     do_wait_for_files(dir, expected, deadline)
@@ -695,20 +691,5 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "(cond (= m 0) (+ n 1) " <>
       "(= n 0) (ack (- m 1) 1) " <>
       ":else (ack (- m 1) (ack m (- n 1))))) 3 8)"
-  end
-
-  defp do_wait_until(fun, deadline) do
-    if fun.() do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("wait_until timed out")
-      else
-        receive do
-        after
-          5 -> do_wait_until(fun, deadline)
-        end
-      end
-    end
   end
 end

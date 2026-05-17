@@ -27,6 +27,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
   """
 
   use ExUnit.Case, async: false
+  import PtcRunnerMcp.TestSupport.WaitHelpers
 
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Http.{Config, Server, SessionRegistry}
@@ -267,26 +268,6 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
         state = :sys.get_state(pid, 5_000)
         assert map_size(state.sessions) == 0
         assert state.by_owner == %{}
-    end
-  end
-
-  defp wait_until(fun, timeout_ms \\ 1_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_until(fun, deadline)
-  end
-
-  defp do_wait_until(fun, deadline) do
-    if fun.() do
-      :ok
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("wait_until timed out")
-      else
-        receive do
-        after
-          5 -> do_wait_until(fun, deadline)
-        end
-      end
     end
   end
 end
