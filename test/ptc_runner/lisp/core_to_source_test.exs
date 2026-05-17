@@ -273,12 +273,12 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
 
       result = CoreToSource.serialize_namespace(step.memory)
 
-      assert Map.has_key?(result, :f)
-      assert Map.has_key?(result, :g)
-      refute Map.has_key?(result, :total)
+      assert Map.has_key?(result, "f")
+      assert Map.has_key?(result, "g")
+      refute Map.has_key?(result, "total")
 
-      assert result[:f] == "(fn [x] x)"
-      assert result[:g] == "(fn [y] (+ y 1))"
+      assert result["f"] == "(fn [x] x)"
+      assert result["g"] == "(fn [y] (+ y 1))"
     end
 
     test "returns empty map for no closures" do
@@ -307,9 +307,9 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
 
       # Round-trip: running the exported source should reconstruct the namespace
       {:ok, step2} = PtcRunner.Lisp.run(source)
-      assert is_tuple(step2.memory[:helper])
-      assert is_tuple(step2.memory[:recall])
-      assert step2.memory[:threshold] == 0.5
+      assert is_tuple(step2.memory["helper"])
+      assert is_tuple(step2.memory["recall"])
+      assert step2.memory["threshold"] == 0.5
     end
 
     test "handles raw runtime values in memory (empty maps, lists, strings)" do
@@ -331,9 +331,9 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert source =~ "def label"
 
       {:ok, step2} = PtcRunner.Lisp.run(source)
-      assert step2.memory[:visited] == []
-      assert step2.memory[:stats] == %{}
-      assert step2.memory[:label] == "hello"
+      assert step2.memory["visited"] == []
+      assert step2.memory["stats"] == %{}
+      assert step2.memory["label"] == "hello"
     end
 
     test "exported namespace round-trips: helpers remain callable" do

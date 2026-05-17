@@ -4048,7 +4048,7 @@ Every execution produces a log entry:
   # Output
   status: :success,  # or :error
   result: {:orders-count 42},  # last expression value
-  memory_after: %{high_paid: [...], orders: [...]},  # includes def bindings
+  memory_after: %{"high_paid" => [...], "orders" => [...]},  # includes def bindings
 
   # Metrics
   duration_ms: 180,

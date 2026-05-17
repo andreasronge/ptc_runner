@@ -267,7 +267,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       """
 
       {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
-      {:closure, _params, _body, captured_env, _history, _meta} = step.memory[:f]
+      {:closure, _params, _body, captured_env, _history, _meta} = step.memory["f"]
 
       # The body is the literal `42` — it references nothing, so neither
       # the 5k-char `unused-big` nor `also-unused` should be pinned.
@@ -286,7 +286,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       """
 
       {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
-      {:closure, _params, _body, captured_env, _history, _meta} = step.memory[:adder]
+      {:closure, _params, _body, captured_env, _history, _meta} = step.memory["adder"]
 
       # `base` is referenced and must survive; `unused-big` must not.
       assert Map.keys(captured_env) == ["base"] or Map.keys(captured_env) == [:base]
@@ -351,7 +351,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
         )
 
       memory_size = :erlang.external_size(step.memory)
-      {:closure, _params, _body, _env, captured_history, _meta} = step.memory[:f]
+      {:closure, _params, _body, _env, captured_history, _meta} = step.memory["f"]
 
       assert captured_history == []
 

@@ -45,6 +45,29 @@ defmodule PtcRunner.Lisp.KeywordRepresentationTest do
     assert result == %{"kw964probe" => 1}
   end
 
+  test "a novel def-bound memory key externalizes deterministically as a binary" do
+    _ = String.to_atom("def964probe")
+
+    {:ok, %{memory: memory}} = Lisp.run("(def def964probe 1)")
+
+    assert memory == %{"def964probe" => 1}
+    refute Map.has_key?(memory, :def964probe)
+  end
+
+  test "a bounded builtin def-bound memory key still externalizes as an atom" do
+    {:ok, %{memory: memory}} = Lisp.run("(def map {})")
+
+    assert memory == %{map: %{}}
+  end
+
+  test "redefining legacy atom-keyed memory emits one canonical binary key" do
+    assert {:ok, %{memory: memory}} =
+             Lisp.run("(def counter (+ counter 1))", memory: %{counter: 10})
+
+    assert memory == %{"counter" => 11}
+    refute Map.has_key?(memory, :counter)
+  end
+
   test "lookups still resolve regardless of the externalized key shape" do
     # The runtime keeps keywords as structs internally; flex access stays
     # tolerant, so `(:kw m)` resolves even though the map externalizes to
