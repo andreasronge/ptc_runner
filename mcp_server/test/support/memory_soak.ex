@@ -125,6 +125,37 @@ defmodule PtcRunnerMcp.TestSupport.MemorySoak do
     {before, aft}
   end
 
+  def measure3(n, opts \\ [], fun) when is_function(fun, 1) and n >= 2 do
+    warmup = Keyword.get(opts, :warmup, warmup_count())
+    Enum.each(1..max(warmup, 1), fn i -> fun.({:warmup, i}) end)
+    before = snapshot()
+    fun.({:measured, 1})
+    mid = snapshot()
+    Enum.each(2..n, fn i -> fun.({:measured, i}) end)
+    aft = snapshot()
+    {before, mid, aft}
+  end
+
+  def assert_atoms_per_iter_strict!(before, mid, aft, n, opts \\ []) when n >= 2 do
+    max_per_iter = Keyword.get(opts, :max_per_iter, 0.1)
+    first_iter_cost = mid.atoms - before.atoms
+    steady_delta = aft.atoms - mid.atoms
+    rate = steady_delta / (n - 1)
+
+    if rate > max_per_iter do
+      raise ExUnit.AssertionError,
+        message:
+          "Atom growth rate #{Float.round(rate, 4)} atoms/iter exceeds budget " <>
+            "#{max_per_iter}/iter " <>
+            "(first_iter=#{first_iter_cost} atoms, " <>
+            "steady_delta=#{steady_delta} atoms over #{n - 1} iters). " <>
+            "This is a real per-iter atom leak — likely `String.to_atom/1` " <>
+            "on user-derived input."
+    end
+
+    :ok
+  end
+
   def loop(n, warmup \\ nil, fun) when is_function(fun, 1) do
     warmup = warmup || warmup_count()
     Enum.each(1..warmup, fn i -> fun.({:warmup, i}) end)
