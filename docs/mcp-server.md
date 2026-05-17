@@ -2,8 +2,10 @@
 
 `ptc_runner_mcp` is a long-running process that speaks
 [Model Context Protocol](https://modelcontextprotocol.io/) over stdio
-JSON-RPC and exposes `ptc_lisp_execute` to any MCP client (Claude
-Desktop, Cursor, Cline, Claude Code, MCP Inspector, …). The tool
+JSON-RPC by default, with an opt-in Streamable HTTP listener for
+private-network deployments. It exposes `ptc_lisp_execute` to MCP
+clients (Claude Desktop, Cursor, Cline, Claude Code, MCP Inspector,
+agentic applications, …). The tool
 accepts a PTC-Lisp program plus optional `context` and `output_schema`
 (or legacy `signature`), runs it in an isolated BEAM sandbox, and
 returns a structured result.
@@ -36,6 +38,8 @@ This document is the conceptual overview. For install + client
 configuration, see [`mcp_server/README.md`](../mcp_server/README.md);
 for every flag and environment variable, see
 [`docs/mcp-server-configuration.md`](mcp-server-configuration.md). For
+HTTP deployment, see
+[`docs/mcp-server-http-deployment.md`](mcp-server-http-deployment.md). For
 the PTC-Lisp language itself, see
 [`docs/ptc-lisp-specification.md`](ptc-lisp-specification.md).
 
@@ -100,12 +104,13 @@ cannot leak in the first place.
 
 ```
                        MCP client (Claude Desktop, Cursor, Cline, …)
-                                    │  stdio (NDJSON-framed JSON-RPC 2.0)
+                       or trusted private-network HTTP client
+                                    │  stdio NDJSON or Streamable HTTP
                                     ▼
                   ┌─────────────────────────────────────────┐
                   │              ptc_runner_mcp             │
                   │                                         │
-                  │   Stdio reader / writer                 │
+                  │   Stdio transport or HTTP session        │
                   │              │                          │
                   │              ▼                          │
                   │   JSON-RPC dispatcher                   │
@@ -138,8 +143,9 @@ cannot leak in the first place.
 
 Each `tools/call` request flows top-to-bottom:
 
-1. The stdio reader frames one NDJSON line and hands it to the JSON-RPC
-   dispatcher.
+1. The transport frames one JSON-RPC message and hands it to the
+   dispatcher. In stdio mode that is one NDJSON line; in HTTP mode it
+   is one `POST /mcp` body scoped by `MCP-Session-Id`.
 2. The dispatcher routes `tools/call` to a per-call worker after
    passing the concurrency semaphore (`max_concurrent_calls`,
    default 8). Excess calls return immediately with `reason: "busy"`
@@ -156,10 +162,27 @@ Each `tools/call` request flows top-to-bottom:
 5. The result flows back up: `PtcToolProtocol.render_success_from_step/2`
    builds the R22 success payload, or `render_error/3` builds the R23
    error payload. The MCP envelope (`isError`, `structuredContent`,
-   `content`) wraps it. The stdio writer ships one NDJSON frame back.
+   `content`) wraps it. The transport writes one response frame back.
 
 `notifications/cancelled` from the client kills the in-flight sandbox
-process. stdin EOF cancels every in-flight call and exits cleanly.
+process. stdin EOF cancels every stdio in-flight call and exits
+cleanly; HTTP `DELETE /mcp` closes one protocol session and cancels its
+in-flight work.
+
+## Streamable HTTP
+
+Start with `--http` to serve MCP over Streamable HTTP at `/mcp`
+(`127.0.0.1:7332` by default). `POST /mcp` accepts one JSON-RPC
+message. `GET /mcp` returns `405` until SSE/resumability support is
+added. `DELETE /mcp` terminates the protocol session named by
+`MCP-Session-Id`.
+
+HTTP mode is designed for private-network service deployment behind a
+TLS edge or load balancer. It requires a bearer token for non-loopback
+binds, validates browser `Origin` headers, exposes unauthenticated
+`/health` and `/ready`, and stamps request logs/telemetry/traces with
+hashed owner/session ids. See
+[`mcp-server-http-deployment.md`](mcp-server-http-deployment.md).
 
 ## Stateful Sessions
 

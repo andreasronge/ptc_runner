@@ -19,16 +19,10 @@ defmodule PtcRunnerMcp.Lifecycle do
   `tools.listChanged: false`, and intentionally omits `resources`,
   `prompts`, `experimental`, `elicitation`, and `sampling`.
   """
-  @spec initialize_reply(map() | nil) :: map()
-  def initialize_reply(params) do
-    requested =
-      case params do
-        %{"protocolVersion" => v} when is_binary(v) -> v
-        _ -> nil
-      end
-
+  @spec initialize_reply(map() | nil, String.t()) :: map()
+  def initialize_reply(_params, protocol_version) when is_binary(protocol_version) do
     %{
-      "protocolVersion" => Version.negotiate(requested),
+      "protocolVersion" => protocol_version,
       "serverInfo" => %{
         "name" => "ptc_runner_mcp",
         "version" => Version.package_version()

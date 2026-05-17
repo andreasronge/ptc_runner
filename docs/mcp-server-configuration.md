@@ -57,6 +57,40 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `ptc_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
 
+## Streamable HTTP flags
+
+HTTP mode is opt-in. Without `--http`, the release starts exactly as a
+stdio MCP server. With `--http`, the process starts a Streamable HTTP
+listener and does not attach stdio. See
+[`mcp-server-http-deployment.md`](mcp-server-http-deployment.md) for
+the deployment runbook.
+
+| Flag | Env var | Default | Meaning |
+|---|---|---|---|
+| `--http` | `PTC_RUNNER_MCP_HTTP` | `false` | Enable the HTTP listener. |
+| `--http-host` | `PTC_RUNNER_MCP_HTTP_HOST` | `127.0.0.1` | Bind IP address or `localhost`. Non-loopback binds require auth unless explicitly unsafe. |
+| `--http-port` | `PTC_RUNNER_MCP_HTTP_PORT` | `7332` | Bind port. |
+| `--http-path` | `PTC_RUNNER_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP MCP endpoint. Must differ from `/health`, `/ready`, and `--http-metrics-path`. |
+| `--http-auth-token` | `PTC_RUNNER_MCP_HTTP_AUTH_TOKEN` | unset | Static bearer token. Must be at least 32 characters; generate it from a CSPRNG. |
+| `--http-disable-auth` | `PTC_RUNNER_MCP_HTTP_DISABLE_AUTH` | `false` | Disable bearer auth. Permitted on loopback with a warning; non-loopback also requires `--http-allow-unsafe-network`. |
+| `--http-allowed-origin` | `PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN` | unset | Browser `Origin` allow-list. May be repeated or comma-separated. This is a DNS-rebinding check, not full CORS support. |
+| `--http-request-timeout-ms` | `PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS` | `15000` | HTTP request read timeout. |
+| `--http-shutdown-grace-ms` | `PTC_RUNNER_MCP_HTTP_SHUTDOWN_GRACE_MS` | `10000` | Application-stop drain window before in-flight workers are cancelled. |
+| `--http-max-body-bytes` | `PTC_RUNNER_MCP_HTTP_MAX_BODY_BYTES` | `--max-frame-bytes` | HTTP request body cap. |
+| `--http-session-ttl-ms` | `PTC_RUNNER_MCP_HTTP_SESSION_TTL_MS` | `3600000` | Absolute HTTP protocol-session lifetime. |
+| `--http-session-idle-timeout-ms` | `PTC_RUNNER_MCP_HTTP_SESSION_IDLE_TIMEOUT_MS` | `900000` | Idle timeout for HTTP protocol sessions. |
+| `--http-max-sessions` | `PTC_RUNNER_MCP_HTTP_MAX_SESSIONS` | `256` | Global HTTP protocol-session cap. |
+| `--http-max-sessions-per-owner` | `PTC_RUNNER_MCP_HTTP_MAX_SESSIONS_PER_OWNER` | `32` | Per-owner HTTP protocol-session cap. In single-token v1 every client shares one owner. |
+| `--http-max-in-flight-per-session` | `PTC_RUNNER_MCP_HTTP_MAX_IN_FLIGHT_PER_SESSION` | `4` | Non-queueing cap for executing requests in one HTTP protocol session. |
+| `--http-allow-unsafe-network` | `PTC_RUNNER_MCP_HTTP_ALLOW_UNSAFE_NETWORK` | `false` | Allows unauthenticated non-loopback bind only when paired with `--http-disable-auth`. |
+| `--http-metrics` | `PTC_RUNNER_MCP_HTTP_METRICS` | `false` | Reserved for the Prometheus endpoint follow-up; core telemetry is emitted regardless. |
+| `--http-metrics-path` | `PTC_RUNNER_MCP_HTTP_METRICS_PATH` | `/metrics` | Reserved metrics path; must not collide with HTTP control paths. |
+| `--http-instance-label` | `PTC_RUNNER_MCP_HTTP_INSTANCE_LABEL` | hostname | Stable instance label stamped into HTTP logs, telemetry, and trace metadata. |
+
+HTTP emits sanitized telemetry under `[:ptc_runner_mcp, :http, ...]`
+and logs request stop lines to stderr. Raw bearer tokens and raw
+`MCP-Session-Id` values are not logged.
+
 ## Response profiles
 
 `ptc_lisp_execute` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.

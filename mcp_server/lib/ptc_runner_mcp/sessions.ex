@@ -439,6 +439,22 @@ defmodule PtcRunnerMcp.Sessions do
     {:error, Projection.error(:session_args_error, "session_id must be a non-empty string")}
   end
 
+  @doc "Close every live PTC-Lisp session owned by the given owner context."
+  @spec close_owner(map() | keyword() | nil, term()) :: :ok
+  def close_owner(owner_context, reason \\ "owner_closed") do
+    with :ok <- enabled(),
+         :ok <- ensure_started(),
+         {:ok, owner} <- Owner.from_context(owner_context) do
+      owner
+      |> Registry.list()
+      |> Enum.each(fn meta ->
+        _ = Session.close(meta.pid, owner, reason)
+      end)
+    end
+
+    :ok
+  end
+
   defp enabled do
     if Config.enabled?(), do: :ok, else: :disabled
   end
@@ -533,11 +549,12 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp list_session_args(args) do
-    case map_size(args) do
-      0 ->
-        list(nil)
+    case Map.drop(args, [:owner]) do
+      empty when map_size(empty) == 0 ->
+        owner_context = owner_context(args)
+        list(owner_context)
 
-      _count ->
+      _other ->
         {:error, Projection.error(:session_args_error, "ptc_session_list takes no arguments")}
     end
   end
@@ -545,7 +562,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp owner_context(args) when is_map(args) do
     # Internal/test override for ownership simulation. Public clients should
     # rely on transport-derived ownership and should not send this field.
-    Map.get(args, "owner") || Map.get(args, :owner) || nil
+    Map.get(args, :owner) || Map.get(args, "owner") || nil
   end
 
   defp validate_start_args(args) when is_map(args) do

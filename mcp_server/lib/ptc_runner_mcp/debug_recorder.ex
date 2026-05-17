@@ -132,7 +132,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
       result_bytes: result_bytes(sc),
       prints_count: prints_count(sc),
       signature_present?: Map.has_key?(args, "signature") and not is_nil(args["signature"]),
-      protocol_version: protocol_version(),
+      protocol_version: Keyword.get(opts, :protocol_version, Version.primary()),
       upstream_calls: redacted_upstream_calls(sc),
       # `Plans/ptc-runner-mcp-payload-reduction.md` §4.5: copy the
       # envelope's `ptc_metrics` block verbatim (string-keyed) into the
@@ -257,12 +257,4 @@ defmodule PtcRunnerMcp.DebugRecorder do
 
   defp int_or_nil(v) when is_integer(v), do: v
   defp int_or_nil(_), do: nil
-
-  defp protocol_version do
-    Version.negotiated()
-  rescue
-    _ -> nil
-  catch
-    _, _ -> nil
-  end
 end

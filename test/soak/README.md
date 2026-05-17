@@ -30,6 +30,7 @@ MIX_ENV=test mix test --only soak test/soak/mcp_stdio_soak_test.exs
 | `mcp_server/.../session_churn_soak_test.exs`    | `Sessions.Registry` + DynamicSupervisor cleanup over many start/eval/close cycles |
 | `mcp_server/.../many_turns_soak_test.exs`       | Per-turn projection state growth; atom-table growth on user-supplied var names |
 | `mcp_server/.../mcp_stdio_soak_test.exs`        | Built release driven over real stdio with repeated stateless eval calls |
+| `mcp_server/.../http_mcp_soak_test.exs`         | Real Bandit HTTP MCP endpoint churn, DELETE cleanup, registry restart cleanup, and HTTP-owned PTC session ownership |
 
 ## Tunables (env vars)
 

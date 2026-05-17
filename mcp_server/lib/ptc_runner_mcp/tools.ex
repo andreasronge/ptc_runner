@@ -92,6 +92,7 @@ defmodule PtcRunnerMcp.Tools do
               "fail",
               "validation_error",
               "busy",
+              "cancelled",
               "unknown_tool",
               # MCP-only reason emitted by the drain path after `shutdown`.
               # Codex review of 0fe4c78: clients validating tool results

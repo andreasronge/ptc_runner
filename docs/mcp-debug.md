@@ -10,7 +10,7 @@ For the broader MCP server overview see [mcp-server.md](mcp-server.md). For the 
 
 `ptc_debug` records every recognized-tool `tools/call` — `ptc_lisp_execute`, `ptc_task`, and all `ptc_session_*` tools when sessions are enabled — into a bounded in-memory ring (`--debug-ring-size`, default 500, FIFO eviction). Successes, `args_error` validation failures, and `busy` concurrency-gate rejections are all captured. `ptc_debug`'s own calls and unknown-tool requests are not recorded.
 
-The ring lives in process memory: it is lost on restart, and in a multi-client process it mixes records from all clients. Both facts are surfaced in every `stats` response (`debug_source`, `window`, `ring_count`).
+The ring lives in process memory: it is lost on restart, and in a multi-client process it mixes records from all clients. Both facts are surfaced in every `stats` response (`debug_source`, `window`, `ring_count`). In Streamable HTTP mode this means `ptc_debug` is suitable only when every bearer-token holder is in the same trust boundary; v1 does not partition the ring by HTTP session.
 
 ## Operations
 
