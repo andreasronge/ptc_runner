@@ -230,9 +230,10 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
   def terminate(reason, state) do
     if is_reference(state.cleanup_ref), do: Process.cancel_timer(state.cleanup_ref)
 
-    Enum.each(state.sessions, fn {_id, meta} ->
+    Enum.each(state.sessions, fn {id, meta} ->
       _ = Session.cancel_all(meta.pid, reason)
       stop_session(meta.pid)
+      Sessions.close_owner(PtcOwner.http(id), reason)
     end)
 
     :ok

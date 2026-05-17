@@ -12,7 +12,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
   alias PtcRunnerMcp.Log
   alias PtcRunnerMcp.McpTestHelpers
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
-  alias PtcRunnerMcp.Sessions.{Names, Registry, Supervisor}
+  alias PtcRunnerMcp.Sessions.{Names, Owner, Registry, Supervisor}
   alias PtcRunnerMcp.TraceConfig
   alias PtcRunnerMcp.TraceHandler
 
@@ -361,6 +361,35 @@ defmodule PtcRunnerMcp.HttpRouterTest do
 
     assert :ok = stop_supervised(SessionRegistry)
     assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 1_000
+  end
+
+  test "stopping registry closes PTC-Lisp sessions owned by HTTP sessions" do
+    start_ptc_sessions!()
+    session_id = initialize_session()
+
+    start_call = %{
+      "jsonrpc" => "2.0",
+      "id" => "start-owned-session",
+      "method" => "tools/call",
+      "params" => %{"name" => "ptc_session_start", "arguments" => %{}}
+    }
+
+    conn =
+      conn(:post, "/mcp", Jason.encode!(start_call))
+      |> auth()
+      |> put_req_header("mcp-session-id", session_id)
+      |> call()
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert get_in(body, ["result", "structuredContent", "status"]) == "ok"
+
+    owner = Owner.http(session_id)
+    assert [_] = Registry.list(owner)
+
+    assert :ok = stop_supervised(SessionRegistry)
+
+    wait_until(fn -> Registry.list(owner) == [] end)
   end
 
   test "client disconnect cancels in-flight HTTP work and releases permit" do
