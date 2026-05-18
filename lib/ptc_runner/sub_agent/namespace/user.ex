@@ -3,6 +3,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
 
   alias PtcRunner.SubAgent.Namespace.SampleFormatter
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
+  alias PtcRunner.SubAgent.UntrustedRenderer
 
   @doc """
   Render user/ namespace section for USER message.
@@ -41,14 +42,25 @@ defmodule PtcRunner.SubAgent.Namespace.User do
       iex> PtcRunner.SubAgent.Namespace.User.render(%{double: closure}, [])
       ";; === user/ (your prelude) ===\\n(double [x])                  ; \\"Doubles x\\" -> integer"
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, [])
-      ";; === user/ (your prelude) ===\\ntotal                         ; = integer, sample: 42"
+      iex> result = PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, [])
+      iex> result =~ "total"
+      true
+      iex> result =~ "integer, sample: 42"
+      true
+      iex> result =~ "untrusted_ptc_output"
+      true
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, has_println: true)
-      ";; === user/ (your prelude) ===\\ntotal                         ; = integer"
+      iex> result = PtcRunner.SubAgent.Namespace.User.render(%{total: 42}, has_println: true)
+      iex> result =~ "total"
+      true
+      iex> result =~ "; = integer"
+      true
 
-      iex> PtcRunner.SubAgent.Namespace.User.render(%{_secret: "token123"}, [])
-      ";; === user/ (your prelude) ===\\n_secret                       ; = string, sample: \\"token123\\""
+      iex> result = PtcRunner.SubAgent.Namespace.User.render(%{_secret: "token123"}, [])
+      iex> result =~ "_secret"
+      true
+      iex> result =~ "untrusted_ptc_output"
+      true
   """
   @spec render(map(), keyword()) :: String.t() | nil
   def render(memory, _opts) when map_size(memory) == 0, do: nil
@@ -56,14 +68,15 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   def render(memory, opts) do
     {functions, values} = partition_memory(memory)
 
-    # Return nil if no informative entries after filtering
     if functions == [] and values == [] do
       nil
     else
       function_lines = format_functions(functions)
       value_lines = format_values(values, opts)
 
-      [";; === user/ (your prelude) ===" | function_lines ++ value_lines]
+      wrapped_value_lines = wrap_value_lines(value_lines)
+
+      [";; === user/ (your prelude) ===" | function_lines ++ wrapped_value_lines]
       |> Enum.join("\n")
     end
   end
@@ -168,6 +181,13 @@ defmodule PtcRunner.SubAgent.Namespace.User do
         "#{padded_name}; = #{type_label}, sample: #{sample}"
       end
     end)
+  end
+
+  defp wrap_value_lines([]), do: []
+
+  defp wrap_value_lines(lines) do
+    content = Enum.join(lines, "\n")
+    [UntrustedRenderer.wrap(content, "memory")]
   end
 
   defp display_name(name) when is_atom(name), do: Atom.to_string(name)

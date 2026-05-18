@@ -15,6 +15,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   alias PtcRunner.Prompts
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.ProgressRenderer
+  alias PtcRunner.SubAgent.UntrustedRenderer
 
   @doc """
   Append turn progress info to a feedback message.
@@ -118,10 +119,9 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec build_error_feedback(String.t(), Definition.t(), map()) :: String.t()
   def build_error_feedback(error_message, agent, state) do
-    # Start with the error message
-    base = "Error: #{error_message}"
+    wrapped = UntrustedRenderer.wrap(error_message, "error")
+    base = "Error:\n#{wrapped}"
 
-    # Add turn info based on budget model
     append_turn_info(base, agent, state)
   end
 
@@ -238,10 +238,19 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
         prints_output
       end
 
-    feedback =
-      [result_preview_for_feedback, prints_with_hint, memory_hint_for_feedback]
+    wrapped_parts =
+      [
+        UntrustedRenderer.wrap(result_preview_for_feedback, "result"),
+        UntrustedRenderer.wrap(prints_with_hint, "println"),
+        UntrustedRenderer.wrap(memory_hint_for_feedback, "memory")
+      ]
       |> Enum.reject(&is_nil/1)
-      |> Enum.join("\n\n")
+
+    feedback =
+      case wrapped_parts do
+        [] -> ""
+        parts -> UntrustedRenderer.preamble() <> "\n\n" <> Enum.join(parts, "\n\n")
+      end
 
     visible_truncated? = prints_truncated? or result_truncated?
     truncated? = visible_truncated? or memory_truncated?

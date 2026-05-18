@@ -53,13 +53,14 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
 
       result = User.render(%{total: 42, double: closure}, [])
 
-      lines = String.split(result, "\n")
-      # First line is header
-      assert Enum.at(lines, 0) == ";; === user/ (your prelude) ==="
-      # Second line should be the function
-      assert Enum.at(lines, 1) =~ "(double [x])"
-      # Third line should be the value
-      assert Enum.at(lines, 2) =~ "total"
+      assert result =~ ";; === user/ (your prelude) ==="
+      assert result =~ "(double [x])"
+      assert result =~ "total"
+
+      # Functions appear before the untrusted envelope that wraps values
+      fn_pos = :binary.match(result, "(double [x])") |> elem(0)
+      val_pos = :binary.match(result, "total") |> elem(0)
+      assert fn_pos < val_pos
     end
 
     test "sorts functions alphabetically" do
@@ -76,9 +77,12 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     test "sorts values alphabetically" do
       result = User.render(%{zebra: 1, alpha: 2}, [])
 
-      lines = String.split(result, "\n")
-      assert Enum.at(lines, 1) =~ "alpha"
-      assert Enum.at(lines, 2) =~ "zebra"
+      assert result =~ "alpha"
+      assert result =~ "zebra"
+
+      alpha_pos = :binary.match(result, "alpha") |> elem(0)
+      zebra_pos = :binary.match(result, "zebra") |> elem(0)
+      assert alpha_pos < zebra_pos
     end
 
     test "renders binary memory keys" do
@@ -93,9 +97,12 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
     test "sorts mixed atom and binary memory keys by display name" do
       result = User.render(%{"alpha" => 2, zebra: 1}, [])
 
-      lines = String.split(result, "\n")
-      assert Enum.at(lines, 1) =~ "alpha"
-      assert Enum.at(lines, 2) =~ "zebra"
+      assert result =~ "alpha"
+      assert result =~ "zebra"
+
+      alpha_pos = :binary.match(result, "alpha") |> elem(0)
+      zebra_pos = :binary.match(result, "zebra") |> elem(0)
+      assert alpha_pos < zebra_pos
     end
 
     test "renders binary function names and params" do
@@ -181,15 +188,19 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
           []
         )
 
-      lines = String.split(result, "\n")
-      # Header
-      assert Enum.at(lines, 0) == ";; === user/ (your prelude) ==="
-      # Functions (alphabetical, first)
-      assert Enum.at(lines, 1) =~ "(double [x]) -> integer"
-      assert Enum.at(lines, 2) =~ "(format_item [item])"
-      # Values (alphabetical, after functions)
-      assert Enum.at(lines, 3) =~ "items"
-      assert Enum.at(lines, 4) =~ "total"
+      assert result =~ ";; === user/ (your prelude) ==="
+      assert result =~ "(double [x]) -> integer"
+      assert result =~ "(format_item [item])"
+      assert result =~ "items"
+      assert result =~ "total"
+
+      # Functions appear before values
+      fn_pos = :binary.match(result, "(double [x])") |> elem(0)
+      val_pos = :binary.match(result, "items") |> elem(0)
+      assert fn_pos < val_pos
+
+      # Values wrapped in untrusted envelope
+      assert result =~ "<untrusted_ptc_output source=\"memory\">"
     end
 
     test "renders value with underscore-prefixed name" do
