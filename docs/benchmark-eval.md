@@ -2,16 +2,21 @@
 
 Benchmark results for PTC-Lisp code generation across different models.
 
-## Results Summary (v0.9.0)
+## Results Summary (v0.10.1)
 
-| Model | Tests | Runs | Pass Rate | Avg Attempts | Duration |
-|-------|-------|------|-----------|--------------|----------|
-| Claude Haiku 4.5 | 30 | 30 | 99.7% (897/900) | 1.24 | 50.7m |
-| Gemini 3.1 Flash Lite Preview | 30 | 30 | 99.4% (895/900) | 1.22 | 46.1m |
+These are real-provider demo benchmark runs from May 18, 2026, using
+OpenRouter and schema data mode. Each model ran the 30-test demo suite 5
+times, for 150 test executions per model.
 
-*Configuration: 30 tests across 5 difficulty levels, schema data mode, March 2026.*
+| Model | Provider model | Tests | Runs | Pass Rate | Avg Attempts | Duration | Tokens |
+|-------|----------------|-------|------|-----------|--------------|----------|--------|
+| Gemini 3.1 Flash Lite | `openrouter:google/gemini-3.1-flash-lite` | 30 | 5 | 99.3% (149/150) | 1.25 | 4.1m | 10,908 |
+| Claude Haiku 4.5 | `openrouter:anthropic/claude-haiku-4.5` | 30 | 5 | 99.3% (149/150) | 1.31 | 7.7m | 11,462 |
 
-Both Haiku 4.5 and Flash Lite are small, inexpensive models. The high pass rates demonstrate that PTC-Lisp generation does not require large or expensive models.
+Both Haiku 4.5 and Gemini Flash Lite are small, inexpensive models. The high
+pass rates show that PTC-Lisp generation is reliable without requiring a
+frontier-sized model. These numbers are a small evaluation sample, not a
+statistical claim about long-run model rankings.
 
 ## Test Suite
 
@@ -31,35 +36,50 @@ Tests 1-15 are single-shot (one turn, no recovery). Tests 16-30 allow multi-turn
 
 ### Multi-turn attempts are mostly by design, not errors
 
-The 1.22-1.24 average attempts per test does *not* mean 22-24% of tests fail on the first try. Multi-turn tests (16-30) are designed to require multiple turns — the model searches, inspects results, then returns an answer. This is the REPL pattern working as intended.
+The 1.25-1.31 average attempts per test does *not* mean 25-31% of tests fail on
+the first try. Multi-turn tests are designed to require multiple turns: the
+model searches, inspects results, then returns an answer. This is the REPL
+pattern working as intended.
 
 Breaking this down by test category:
 
 - **Single-shot tests (1-15)**: near-100% first-attempt success rate across both models. These are pure data transformation — the model writes one correct program on the first try.
 - **Multi-turn tests (16-30)**: these naturally use 2-3 turns because the model needs to call tools, inspect results, then return an answer. Multiple turns here is the expected workflow, not a failure.
 - **Genuine recovery**: a small percentage of attempts fail due to code errors (unsupported interop methods, type mismatches). The runtime provides clear feedback and the model self-corrects on the next turn.
-- **Unrecoverable (0.3-0.6%)**: the few tests that failed even after retries.
+- **Unrecoverable (0.7% in these runs)**: each model had one failed execution out of 150.
 
-### Unrecoverable failures are LLM reasoning errors
+### Unrecoverable failures are task-level errors
 
-Across both models (1800 total test executions), 8 tests ended as FAIL. All 8 were reasoning errors — the generated code ran successfully but produced the wrong answer:
+Across both fresh runs (300 total test executions), 2 tests ended as FAIL:
 
-| Failure Type | Count | Example |
-|--------------|-------|---------|
-| Hallucinated values | 3 | Returned a made-up document ID instead of extracting from tool results |
-| Wrong field lookup | 3 | Searched `:content` for "ergonomics" when the word was in `:topics` |
-| Guessed instead of checking | 2 | Printed results with `println` but then guessed the answer |
+| Model | Failed Test | Classification | What Happened |
+|-------|-------------|----------------|---------------|
+| Gemini 3.1 Flash Lite | #8, cheapest product name | `budget_exhausted` | The one-turn single-shot task generated code with a type error, leaving no recovery turn. |
+| Claude Haiku 4.5 | #23, ergonomics document | `validation_error` | The model returned `DOC-001`; validation expected `DOC-002`. |
 
-Recoverable errors — ones the model self-corrected after runtime feedback — did include language-related issues: unsupported Java interop methods (`.substring`, `.contains` on non-string types), nested `#()` anonymous functions, and type mismatches. These are real PTC-Lisp limitations that the multi-turn loop compensates for.
+The Gemini failure is a good example of the single-shot tradeoff: tests 1-13
+run with `max_turns: 1`, so a code error is terminal. The Haiku failure is a
+reasoning or inspection failure in a tool-calling task: the code ran, but the
+validated answer was wrong.
+
+Recoverable errors — ones the model self-corrects after runtime feedback — can
+include unsupported Java interop methods, nested `#()` anonymous functions,
+and type mismatches. These are the cases where PTC-Runner's feedback loop
+matters most.
 
 ### Recovery works
 
 When the model writes code that fails at runtime (unsupported Java interop, type mismatches, nested anonymous functions), PTC-Runner returns a clear error message. The model then corrects its approach on the next turn. This recovery succeeds in nearly all cases — only the reasoning failures (where the code runs but produces the wrong answer) are unrecoverable.
 
-Common recovered errors:
-- Using `.substring` or `.contains` on non-string types (switches to `subs` or `some`)
-- Nested `#()` anonymous functions (switches to `(fn [...] ...)`)
-- Arithmetic on nil values (adds default values)
+Examples observed in the fresh reports:
+- Calling unavailable substring helpers, then switching to `subs`
+- Using nested `#()` anonymous functions, then switching to `(fn [...] ...)`
+- Calling sequence helpers such as `first` on maps or sets, then rewriting the extraction logic
+
+The reports also show models proactively using nil-safe patterns such as
+`fnil`, `(or value 0)`, and `(get map key 0)`, but the current `N=5` runs do
+not provide enough evidence to call "arithmetic on nil values" a common
+recovered error.
 
 ## Hardest Tests
 
@@ -72,6 +92,9 @@ The tests that cause the most failures and retries:
 | #17: Find policy covering two topics | Multi-step search and intersection | Model must search, analyze, and narrow results |
 
 These are all multi-turn tool-calling tasks requiring the model to resist premature answers and actually verify its findings.
+
+In the current `N=5` runs, #23 produced the only wrong-answer validation
+failure, while #20 and #17 remained among the higher-attempt cases.
 
 ## Improving Reliability
 
@@ -96,11 +119,12 @@ Some retries stem from models expecting Clojure functions or Java interop method
 ```bash
 cd demo
 
-# Run benchmark with reports (30 tests, default model)
+# Run benchmark with reports (30 tests, default model, 5 runs)
 mix lisp --test --runs=5 --report
 
-# Specific model
-mix lisp --test --model=haiku --runs=30
+# Specific OpenRouter models
+mix lisp --test --runs=5 --model=openrouter:gemini-flash-lite --report
+mix lisp --test --runs=5 --model=openrouter:haiku --report
 
 # Verbose output to debug failures
 mix lisp --test --model=haiku -v
