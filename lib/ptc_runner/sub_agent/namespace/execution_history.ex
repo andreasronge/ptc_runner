@@ -65,6 +65,6 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
   def render_output(prints, limit, true) do
     prints_to_render = Enum.take(prints, -limit)
     content = Enum.join(prints_to_render, "\n")
-    ";; Output:\n" <> UntrustedRenderer.wrap(content, "println")
+    ";; Output:\n" <> UntrustedRenderer.wrap_with_preamble(content, "println")
   end
 end

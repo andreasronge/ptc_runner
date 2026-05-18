@@ -259,6 +259,13 @@ defmodule PtcRunner.Sandbox do
       timeout ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
+
+        receive do
+          {:bounded_result, ^pid, _} -> :ok
+        after
+          0 -> :ok
+        end
+
         {:error, {:timeout, timeout}}
     end
   end

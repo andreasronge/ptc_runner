@@ -187,7 +187,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
 
   defp wrap_value_lines(lines) do
     content = Enum.join(lines, "\n")
-    [UntrustedRenderer.wrap(content, "memory")]
+    [UntrustedRenderer.wrap_with_preamble(content, "memory")]
   end
 
   defp display_name(name) when is_atom(name), do: Atom.to_string(name)
