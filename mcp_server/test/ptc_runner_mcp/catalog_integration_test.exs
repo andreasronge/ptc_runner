@@ -87,8 +87,8 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       description = entry["description"]
 
       assert description =~ "Configured upstream MCP servers:"
-      assert description =~ "srv_a:"
-      assert description =~ "srv_b:"
+      assert description =~ "srv_a"
+      assert description =~ "srv_b"
       assert description =~ "catalog/search-tools"
       assert description =~ "catalog/list-tools"
       assert description =~ "catalog/describe-tool"
@@ -111,9 +111,8 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       description = entry["description"]
 
       assert description =~ "Configured upstream MCP servers:"
-      assert description =~ "gamma:"
-      assert description =~ "delta:"
-      assert description =~ "Catalog loads on first use."
+      assert description =~ "gamma"
+      assert description =~ "delta"
       assert description =~ "catalog/search-tools"
       refute description =~ "  Tools:"
     end

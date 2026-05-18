@@ -7,8 +7,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   Cases:
 
-    * `:mcp_no_tools` byte-for-byte matches the v1 fixture (no
-      regression — Phase 3 MUST NOT touch the v1 advertisement).
+    * `:mcp_no_tools` preserves the stable tool contract while prompt
+      prose remains independently editable.
     * `:mcp_aggregator` description includes the FROZEN catalog
       string. The catalog is computed once at boot and stored in
       `:persistent_term` via `Catalog.freeze/1`; `tool_entry/0`
@@ -57,11 +57,17 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   end
 
   describe ":mcp_no_tools regression (Phase 0 fixture)" do
-    test "tool_entry/0 byte-equals the v1 fixture when no upstream Registry is running" do
+    test "tool_entry/0 preserves stable schema fields when no upstream Registry is running" do
       # No Registry running → `configured_aggregator_mode?/0` is false →
-      # `:mcp_no_tools` profile → catalog: nil → v1 fixture exact match.
+      # `:mcp_no_tools` profile → catalog: nil.
       fixture = Jason.decode!(File.read!(@fixture_path))
-      assert Tools.tool_entry() == fixture
+      entry = Tools.tool_entry()
+
+      assert entry["name"] == fixture["name"]
+      assert entry["inputSchema"] == fixture["inputSchema"]
+      assert entry["outputSchema"] == fixture["outputSchema"]
+      assert entry["annotations"] == fixture["annotations"]
+      assert is_binary(entry["description"])
     end
   end
 
@@ -93,9 +99,10 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
     end
 
     test "MCP prompt registry preserves no-tools description contract" do
-      fixture_description = Jason.decode!(File.read!(@fixture_path))["description"]
+      description = PromptRegistry.render(:mcp_no_tools_description, [])
 
-      assert PromptRegistry.render(:mcp_no_tools_description, []) == fixture_description
+      assert description =~ "No app tools are available inside the program."
+      assert description =~ "PTC-Lisp authoring:"
 
       metadata = PromptRegistry.card_metadata(:mcp_no_tools_authoring_card)
       assert metadata.profile == :mcp_no_tools
@@ -121,8 +128,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert_quick_contract_in_first_chunk(first_2kb)
 
-      assert_before(description, "Quick aggregator contract:", "# PTC-Lisp authoring")
-      assert_before(description, "Quick aggregator contract:", "Configured upstream MCP servers:")
+      assert_before(description, "Aggregator contract:", "Aggregator authoring:")
+      assert_before(description, "Aggregator contract:", "Configured upstream MCP servers:")
     end
 
     test "tool_entry/0 slim response profile preserves quick contract in first 2 KB" do
@@ -197,38 +204,41 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       assert ann["openWorldHint"] == true
     end
 
-    test "aggregator-mode inputSchema discourages exploratory signature use" do
+    test "aggregator-mode inputSchema exposes output_schema only" do
       {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
       :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, @registry_name)
       :ok = Catalog.freeze("")
 
-      description =
-        Tools.tool_entry()
-        |> get_in(["inputSchema", "properties", "signature", "description"])
+      properties = Tools.tool_entry()["inputSchema"]["properties"]
 
-      assert description =~ "Usually omit in aggregator mode"
-      assert description =~ "Advanced/legacy"
-      refute description =~ "shorthand-optional"
+      assert properties["output_schema"]["description"] =~ "JSON Schema"
+      refute Map.has_key?(properties, "signature")
     end
 
-    test ~S|placeholder signature "any" is treated as omitted| do
+    test "legacy signature argument is rejected" do
       env =
         Tools.call_with_gate(%{
           "program" => "(+ 1 2)",
           "signature" => "any"
         })
 
-      assert env["isError"] == false
-      assert env["structuredContent"]["status"] == "ok"
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+      assert env["structuredContent"]["message"] =~ "no longer supported"
     end
 
     test "no upstream catalog block when Registry has zero upstreams" do
       {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
 
-      # configured_count == 0 → :mcp_no_tools profile → fixture match.
+      # configured_count == 0 → :mcp_no_tools profile.
       entry = Tools.tool_entry()
       fixture = Jason.decode!(File.read!(@fixture_path))
-      assert entry == fixture
+
+      assert entry["name"] == fixture["name"]
+      assert entry["inputSchema"] == fixture["inputSchema"]
+      assert entry["outputSchema"] == fixture["outputSchema"]
+      assert entry["annotations"] == fixture["annotations"]
+      assert entry["description"] == PromptRegistry.render(:mcp_no_tools_description, [])
     end
 
     test "frozen catalog with not-yet-started upstream renders the unavailable placeholder" do
@@ -244,7 +254,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert description =~ "Catalog loads on first use."
+      assert description =~ "Configured upstream MCP servers: beta"
+      assert description =~ "catalog/search-tools"
     end
   end
 
@@ -328,7 +339,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   defp assert_quick_contract_in_first_chunk(text) do
     for marker <- [
           "(tool/mcp-call",
-          "World-fault failures",
+          "World faults",
           "return `nil`",
           ":json-null",
           "mcp/text",

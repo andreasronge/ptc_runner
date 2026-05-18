@@ -145,18 +145,16 @@ defmodule PtcRunnerMcp.CatalogDescription do
   # -- Lazy rendering (§6.3) --
 
   defp render_lazy(entries) do
-    server_lines =
+    server_names =
       entries
       |> Enum.sort_by(& &1.name)
-      |> Enum.map_join("\n", &render_lazy_server/1)
+      |> Enum.map_join(", ", & &1.name)
 
-    "Configured upstream MCP servers:\n" <>
-      server_lines <>
+    "Configured upstream MCP servers: " <>
+      server_names <>
       "\n\n" <>
       render_discovery_block()
   end
-
-  defp render_lazy_server(entry), do: render_server_header(entry)
 
   defp render_server_header(%{name: name, tools: nil} = entry) do
     desc = server_description(entry)
@@ -214,11 +212,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
 
   defp render_discovery_block do
     """
-    Use catalog/search-tools inside the PTC-Lisp program to find relevant \
-    upstream tools. If search reports an unloaded server-level match, call \
-    catalog/list-tools or catalog/describe-tool for that server to load its \
-    catalog. Use catalog/describe-tool before calling unfamiliar tools. Then \
-    call upstream tools with tool/mcp-call.
+    Discover tools inside the program:
 
     (catalog/search-tools "query" {:limit 8})
     (catalog/list-tools "server-name" {:limit 20})

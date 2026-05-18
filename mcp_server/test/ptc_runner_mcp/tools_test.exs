@@ -19,7 +19,7 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert ann["openWorldHint"] == false
     end
 
-    test "inputSchema has program required and context/output_schema/signature optional" do
+    test "inputSchema has program required and context/output_schema optional" do
       %{"tools" => [tool]} = Tools.list()
       schema = tool["inputSchema"]
 
@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert Map.has_key?(schema["properties"], "program")
       assert Map.has_key?(schema["properties"], "context")
       assert Map.has_key?(schema["properties"], "output_schema")
-      assert Map.has_key?(schema["properties"], "signature")
+      refute Map.has_key?(schema["properties"], "signature")
     end
 
     test "outputSchema is advertised verbatim from § 10.4 (Phase 3)" do
@@ -61,11 +61,11 @@ defmodule PtcRunnerMcp.ToolsTest do
 
     test "contains all five § 8.4 anchors" do
       desc = Tools.advertised_description()
-      assert desc =~ "subset of Clojure"
+      assert desc =~ "Clojure subset"
       assert desc =~ "data/"
-      assert desc =~ "signature"
+      assert desc =~ "output_schema"
       assert desc =~ "(fail"
-      assert desc =~ "adjust and retry"
+      assert desc =~ "No cross-call memory"
     end
   end
 

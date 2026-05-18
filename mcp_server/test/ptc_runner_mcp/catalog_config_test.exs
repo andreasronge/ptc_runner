@@ -41,8 +41,8 @@ defmodule PtcRunnerMcp.CatalogConfigTest do
       defaults = CatalogConfig.defaults()
 
       assert defaults.catalog_mode == :auto
-      assert defaults.catalog_inline_max_chars == 12_000
-      assert defaults.catalog_inline_max_tools == 40
+      assert defaults.catalog_inline_max_chars == 800
+      assert defaults.catalog_inline_max_tools == 8
       assert defaults.max_catalog_ops_per_program == 25
       assert defaults.max_catalog_result_bytes == 262_144
     end
@@ -55,7 +55,7 @@ defmodule PtcRunnerMcp.CatalogConfigTest do
 
       assert config.catalog_mode == :lazy
       assert config.catalog_inline_max_chars == 5000
-      assert config.catalog_inline_max_tools == 40
+      assert config.catalog_inline_max_tools == 8
     end
 
     test "unknown keys are ignored" do
@@ -113,7 +113,7 @@ defmodule PtcRunnerMcp.CatalogConfigTest do
       config = CatalogConfig.get()
 
       assert config.catalog_mode == :auto
-      assert config.catalog_inline_max_chars == 12_000
+      assert config.catalog_inline_max_chars == 800
     end
 
     test "env var sets catalog_mode" do
@@ -157,7 +157,7 @@ defmodule PtcRunnerMcp.CatalogConfigTest do
       System.put_env("PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS", "0")
       Application.apply_catalog_config(%{})
 
-      assert CatalogConfig.get().catalog_inline_max_chars == 12_000
+      assert CatalogConfig.get().catalog_inline_max_chars == 800
     end
 
     test "non-integer string falls back to default" do

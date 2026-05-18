@@ -9,6 +9,13 @@ revisions.
 
 ## Unreleased
 
+### Removed
+
+- Removed the MCP-facing `signature` argument from `ptc_lisp_execute`
+  and `ptc_session_eval`. Clients should use `output_schema` for
+  return validation. A present `signature` argument now returns
+  `args_error`.
+
 ### Added
 
 - Agentic prompt-size benchmark
@@ -239,7 +246,7 @@ specification at `Plans/ptc-runner-mcp-server.md`.
 - Single tool advertised: `ptc_lisp_execute`. Description is
   `PtcToolProtocol.tool_description(:mcp_no_tools)` followed by
   `\n\n` followed by the verbatim authoring card at
-  `priv/mcp_authoring_card.md` (loaded via `@external_resource`).
+  `priv/prompts/mcp_authoring_card.md` (loaded via `@external_resource`).
 - `tools/call` always returns an MCP tool-result envelope —
   including for unknown tool names (`reason: "unknown_tool"`,
   per § 7.4 deviation D1) and for capacity exhaustion

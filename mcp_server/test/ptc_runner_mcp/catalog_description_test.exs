@@ -5,10 +5,10 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
   Spec: `Plans/ptc-runner-mcp-catalog-exposure.md` §5-§6.
 
   Covers the 8 scenarios from issue #910:
-  1. Small fully-known fleet → auto chooses inline
+  1. Tiny fully-known fleet → auto chooses inline
   2. Large fleet (>40 tools) → auto chooses lazy
   3. Fleet with unknown catalog → auto chooses lazy
-  4. Fleet with rendered >12k chars → auto chooses lazy
+  4. Fleet over rendered char budget → auto chooses lazy
   5. Any fleet, mode=inline → forced inline
   6. Any fleet, mode=lazy → forced lazy
   7. Forced inline with unknown catalogs → inline + warnings + discovery
@@ -55,6 +55,29 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
     ]
   end
 
+  defp tiny_fleet do
+    [
+      %{
+        name: "github",
+        tools: make_tools(2),
+        impl: PtcRunnerMcp.Upstream.Stdio,
+        metadata: %{
+          description: "GitHub MCP server",
+          capabilities: ["issues", "pull requests"]
+        }
+      },
+      %{
+        name: "filesystem",
+        tools: make_tools(1),
+        impl: PtcRunnerMcp.Upstream.Stdio,
+        metadata: %{
+          description: "Filesystem MCP server",
+          capabilities: ["files", "directories"]
+        }
+      }
+    ]
+  end
+
   defp large_fleet do
     [
       %{
@@ -92,8 +115,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
   defp default_config, do: PtcRunnerMcp.CatalogConfig.defaults()
 
   describe "render_for_entries/2 — scenario table" do
-    test "scenario 1: small fully-known fleet, auto → inline" do
-      result = CatalogDescription.render_for_entries(small_fleet(), default_config())
+    test "scenario 1: tiny fully-known fleet, auto → inline" do
+      result = CatalogDescription.render_for_entries(tiny_fleet(), default_config())
 
       assert result =~ "Configured upstream MCP servers:"
       assert result =~ "- filesystem:"
@@ -107,10 +130,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(large_fleet(), default_config())
 
       assert result =~ "Configured upstream MCP servers:"
-      assert result =~ "- github:"
-      assert result =~ "25 tools."
-      assert result =~ "- linear:"
-      assert result =~ "20 tools."
+      assert result =~ "github"
+      assert result =~ "linear"
       refute result =~ "Tools:"
       assert result =~ "catalog/search-tools"
       assert result =~ "catalog/list-tools"
@@ -121,12 +142,13 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), default_config())
 
       assert result =~ "Configured upstream MCP servers:"
-      assert result =~ "Catalog loads on first use."
+      assert result =~ "github"
+      assert result =~ "linear"
       refute result =~ "Tools:"
       assert result =~ "catalog/search-tools"
     end
 
-    test "scenario 4: fleet with rendered >12k chars, auto → lazy" do
+    test "scenario 4: fleet over rendered char budget, auto → lazy" do
       verbose_fleet = [
         %{
           name: "big_server",
@@ -161,8 +183,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       refute result =~ "Tools:"
       assert result =~ "catalog/search-tools"
-      assert result =~ "8 tools."
-      assert result =~ "7 tools."
+      assert result =~ "filesystem"
+      assert result =~ "github"
     end
 
     test "scenario 7: forced inline with unknown catalogs → warnings + discovery" do
@@ -184,7 +206,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
   describe "resolve_mode/2" do
     test "auto with all known and under thresholds → inline" do
-      assert {:inline, []} = CatalogDescription.resolve_mode(small_fleet(), default_config())
+      assert {:inline, []} = CatalogDescription.resolve_mode(tiny_fleet(), default_config())
     end
 
     test "auto with unknown catalog → lazy" do
@@ -218,7 +240,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
   describe "inline rendering format (§6.2)" do
     test "includes server description and capabilities from metadata" do
-      result = CatalogDescription.render_for_entries(small_fleet(), default_config())
+      config = %{default_config() | catalog_mode: :inline}
+      result = CatalogDescription.render_for_entries(small_fleet(), config)
 
       assert result =~ "- github: GitHub MCP server. 8 tools. issues, pull requests."
       assert result =~ "- filesystem: Filesystem MCP server. 7 tools. files, directories."
@@ -280,11 +303,11 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       refute result =~ "Tools:"
     end
 
-    test "unknown server shows catalog loads on first use" do
+    test "lazy mode lists configured server names" do
       config = %{default_config() | catalog_mode: :lazy}
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), config)
 
-      assert result =~ "- linear: Linear issue tracker. Catalog loads on first use."
+      assert result =~ "Configured upstream MCP servers: github, linear"
     end
   end
 
@@ -331,13 +354,19 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
   describe "threshold behavior" do
     test "auto stays inline at exactly the tool threshold" do
-      entries = [%{name: "srv", tools: make_tools(40), metadata: %{}}]
-      assert {:inline, []} = CatalogDescription.resolve_mode(entries, default_config())
+      max_tools = default_config().catalog_inline_max_tools
+      entries = [%{name: "srv", tools: make_tools(max_tools), metadata: %{}}]
+      config = %{default_config() | catalog_inline_max_chars: 10_000}
+
+      assert {:inline, []} = CatalogDescription.resolve_mode(entries, config)
     end
 
     test "auto switches to lazy at tool threshold + 1" do
-      entries = [%{name: "srv", tools: make_tools(41), metadata: %{}}]
-      assert :lazy = CatalogDescription.resolve_mode(entries, default_config())
+      max_tools = default_config().catalog_inline_max_tools
+      entries = [%{name: "srv", tools: make_tools(max_tools + 1), metadata: %{}}]
+      config = %{default_config() | catalog_inline_max_chars: 10_000}
+
+      assert :lazy = CatalogDescription.resolve_mode(entries, config)
     end
 
     test "auto respects custom thresholds" do

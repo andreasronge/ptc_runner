@@ -3,6 +3,18 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
 
   alias PtcRunnerMcp.PromptRegistry
 
+  @forbidden_runtime_patterns [
+    "<!--",
+    "PTC_PROMPT_START",
+    "PTC_PROMPT_END",
+    "docs/",
+    "Plans/",
+    "priv/prompts/README.md",
+    "hexdocs.pm/ptc_runner",
+    "Full reference:",
+    "see docs"
+  ]
+
   @required_card_fields MapSet.new([
                           :audience,
                           :budget_profile,
@@ -100,5 +112,40 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
       |> MapSet.new()
 
     assert MapSet.new(PromptRegistry.prompt_keys()) == expected
+  end
+
+  test "rendered MCP tool descriptions exclude metadata, markers, and authoring references" do
+    for key <- [
+          :mcp_no_tools_description,
+          :mcp_aggregator_description,
+          :mcp_session_start_description,
+          :mcp_session_eval_description
+        ] do
+      rendered = PromptRegistry.render(key, catalog: nil)
+
+      assert is_binary(rendered)
+      assert byte_size(rendered) <= 2_000
+
+      Enum.each(@forbidden_runtime_patterns, fn pattern ->
+        refute String.contains?(rendered, pattern),
+               "#{key} contains forbidden runtime prompt pattern #{inspect(pattern)}"
+      end)
+    end
+  end
+
+  test "file-backed MCP cards are extracted before rendering" do
+    for key <- [
+          :mcp_no_tools_authoring_card,
+          :mcp_aggregator_authoring_card,
+          :mcp_session_authoring_card
+        ] do
+      text = PromptRegistry.card_text(key)
+
+      assert is_binary(text)
+      assert text != ""
+      refute text =~ "<!--"
+      refute text =~ "PTC_PROMPT_START"
+      refute text =~ "PTC_PROMPT_END"
+    end
   end
 end
