@@ -83,7 +83,17 @@ defmodule PtcRunner.Lisp.RegistryTest do
         assert entry.dispatch in [:env, :analyze],
                "Entry '#{entry.name}' has invalid dispatch: #{inspect(entry.dispatch)}"
 
-        assert entry.category in [:core, :string, :set, :regex, :math, :interop, :json, :mcp],
+        assert entry.category in [
+                 :core,
+                 :string,
+                 :set,
+                 :walk,
+                 :regex,
+                 :math,
+                 :interop,
+                 :json,
+                 :mcp
+               ],
                "Entry '#{entry.name}' has invalid category"
 
         assert is_list(entry.signatures), "Entry '#{entry.name}' missing signatures"
@@ -120,6 +130,18 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert is_list(string_builtins)
       assert :join in string_builtins
       assert Enum.all?(string_builtins, &is_atom/1)
+    end
+
+    test "builtins_by_namespace/1 separates namespace membership from display category" do
+      core_builtins = Registry.builtins_by_namespace(:"clojure.core")
+      walk_builtins = Registry.builtins_by_namespace(:"clojure.walk")
+
+      assert :str in core_builtins
+      assert :subs in core_builtins
+      assert :"re-find" in core_builtins
+      assert :abs in core_builtins
+      assert :prewalk not in core_builtins
+      assert walk_builtins == [:postwalk, :prewalk, :walk]
     end
 
     test "find_doc/1 handles invalid regex gracefully" do

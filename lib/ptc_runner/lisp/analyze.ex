@@ -1267,16 +1267,16 @@ defmodule PtcRunner.Lisp.Analyze do
   # Takes a success callback to allow different behavior for symbol vs call position.
   defp normalize_clojure_namespace(ns, func, on_success) do
     cond do
-      Env.clojure_namespace?(ns) and Env.constant?(ns, func) ->
+      Env.clojure_namespace?(ns) and namespace_builtin?(ns, func) and Env.constant?(ns, func) ->
         {:constant, value} = Map.get(Env.initial(), func)
         {:ok, {:literal, value}}
 
-      Env.clojure_namespace?(ns) and Env.builtin?(func) ->
+      Env.clojure_namespace?(ns) and namespace_builtin?(ns, func) ->
         on_success.()
 
       Env.clojure_namespace?(ns) ->
         category = Env.namespace_category(ns)
-        available = Env.builtins_by_category(category) |> Enum.map_join(", ", &to_string/1)
+        available = Env.builtins_by_namespace(ns) |> Enum.map_join(", ", &to_string/1)
         category_name = Env.category_name(category)
 
         {:error,
@@ -1285,10 +1285,44 @@ defmodule PtcRunner.Lisp.Analyze do
       true ->
         {:error,
          {:invalid_form,
-          "unknown namespace #{ns}/. Available namespaces: tool/, data/, catalog/, json/, mcp/, " <>
-            "clojure.string/, clojure.set/. For JSON parsing use json/parse-string " <>
-            "(not cheshire.core/...)."}}
+          "unknown namespace #{ns}/. Available namespaces: #{available_namespaces()}. " <>
+            "For JSON parsing use json/parse-string (not cheshire.core/...)."}}
     end
+  end
+
+  defp namespace_builtin?(ns, func) do
+    Env.clojure_namespace?(ns) and func in Env.builtins_by_namespace(ns)
+  end
+
+  defp available_namespaces do
+    [
+      "data/",
+      "tool/",
+      "catalog/",
+      "budget/",
+      "json/",
+      "mcp/",
+      "clojure.core/",
+      "core/",
+      "clojure.string/",
+      "str/",
+      "string/",
+      "clojure.set/",
+      "set/",
+      "clojure.walk/",
+      "walk/",
+      "regex/",
+      "Math/",
+      "System/",
+      "Double/",
+      "Interop/",
+      "LocalDate/",
+      "Instant/",
+      "java.time.LocalDate/",
+      "java.time.Instant/",
+      "java.util.Date."
+    ]
+    |> Enum.join(", ")
   end
 
   # Maps catalog builtin names to their CoreAST tag atoms.

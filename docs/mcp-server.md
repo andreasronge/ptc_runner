@@ -138,7 +138,8 @@ cannot leak in the first place.
               PtcRunner.Lisp.Eval
               (PTC-Lisp interpreter:
                Clojure subset + java.time +
-               clojure.string, clojure.set)
+               clojure.string, clojure.set,
+               clojure.walk)
 ```
 
 Each `tools/call` request flows top-to-bottom:

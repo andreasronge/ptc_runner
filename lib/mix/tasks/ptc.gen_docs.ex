@@ -5,10 +5,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   and `priv/function_audit.exs` (Clojure/Java parity triage notes):
 
   1. `docs/function-reference.md` — all implemented functions grouped by section
-  2. `docs/clojure-core-audit.md` — clojure.core coverage audit
-  3. `docs/clojure-string-audit.md` — clojure.string coverage audit
-  4. `docs/clojure-set-audit.md` — clojure.set coverage audit
-  5. `docs/java-math-audit.md` — java.lang.Math coverage audit
+  2. `docs/conformance/clojure-core-audit.md` — clojure.core coverage audit
+  3. `docs/conformance/clojure-string-audit.md` — clojure.string coverage audit
+  4. `docs/conformance/clojure-set-audit.md` — clojure.set coverage audit
+  5. `docs/conformance/clojure-walk-audit.md` — clojure.walk coverage audit
+  6. `docs/conformance/java-math-audit.md` — java.lang.Math coverage audit
 
   ## Usage
 
@@ -22,25 +23,31 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
   @audits [
     %{
-      path: "docs/clojure-core-audit.md",
+      path: "docs/conformance/clojure-core-audit.md",
       title: "Clojure Core Audit for PTC-Lisp",
       description: "Comparison of `clojure.core` vars against PTC-Lisp builtins.",
       fetch: &Registry.clojure_core_audit/0
     },
     %{
-      path: "docs/clojure-string-audit.md",
+      path: "docs/conformance/clojure-string-audit.md",
       title: "Clojure String Audit for PTC-Lisp",
       description: "Comparison of `clojure.string` vars against PTC-Lisp builtins.",
       fetch: &Registry.clojure_string_audit/0
     },
     %{
-      path: "docs/clojure-set-audit.md",
+      path: "docs/conformance/clojure-set-audit.md",
       title: "Clojure Set Audit for PTC-Lisp",
       description: "Comparison of `clojure.set` vars against PTC-Lisp builtins.",
       fetch: &Registry.clojure_set_audit/0
     },
     %{
-      path: "docs/java-math-audit.md",
+      path: "docs/conformance/clojure-walk-audit.md",
+      title: "Clojure Walk Audit for PTC-Lisp",
+      description: "Comparison of `clojure.walk` vars against PTC-Lisp builtins.",
+      fetch: &Registry.clojure_walk_audit/0
+    },
+    %{
+      path: "docs/conformance/java-math-audit.md",
       title: "Java Math Audit for PTC-Lisp",
       description: "Comparison of `java.lang.Math` methods against PTC-Lisp builtins.",
       fetch: &Registry.java_math_audit/0
@@ -70,7 +77,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       @audits
       |> Enum.map_join(" | ", fn %{path: path, title: title} ->
         name = title |> String.replace(" for PTC-Lisp", "") |> String.replace(" Audit", "")
-        "[#{name}](#{Path.basename(path)})"
+        "[#{name}](conformance/#{Path.basename(path)})"
       end)
 
     content = """
@@ -181,6 +188,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
         "[#{name}](#{Path.basename(p)})"
       end)
 
+    function_reference_link =
+      path
+      |> Path.dirname()
+      |> relative_link_to(Path.dirname(@function_ref_path), Path.basename(@function_ref_path))
+
     content = """
     <!-- Auto-generated — do not edit by hand -->
     # #{title}
@@ -190,7 +202,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{description}
 
-    See also: [Function Reference](function-reference.md) | #{see_also}
+    See also: [Function Reference](#{function_reference_link}) | #{see_also}
 
     ## Summary
 
@@ -209,6 +221,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     #{rows}
     """
 
+    File.mkdir_p!(Path.dirname(path))
     File.write!(path, content)
     Mix.shell().info("Generated #{path} (#{length(entries)} entries)")
   end
@@ -266,4 +279,21 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   defp status_icon(:candidate), do: "🔲"
   defp status_icon(:not_relevant), do: "❌"
   defp status_icon(_), do: "❓"
+
+  defp relative_link_to(from_dir, to_dir, basename) do
+    from_parts = path_parts(from_dir)
+    to_parts = path_parts(to_dir)
+
+    {from_rest, to_rest} = drop_common_prefix(from_parts, to_parts)
+    up = List.duplicate("..", length(from_rest))
+    Path.join(up ++ to_rest ++ [basename])
+  end
+
+  defp path_parts("."), do: []
+  defp path_parts(path), do: String.split(path, "/", trim: true)
+
+  defp drop_common_prefix([same | from_rest], [same | to_rest]),
+    do: drop_common_prefix(from_rest, to_rest)
+
+  defp drop_common_prefix(from_parts, to_parts), do: {from_parts, to_parts}
 end

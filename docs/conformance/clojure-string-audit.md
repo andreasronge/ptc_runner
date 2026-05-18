@@ -6,7 +6,7 @@
 
 Comparison of `clojure.string` vars against PTC-Lisp builtins.
 
-See also: [Function Reference](function-reference.md) | [Clojure Core Audit](clojure-core-audit.md) | [Clojure Set Audit](clojure-set-audit.md) | [Java Math Audit](java-math-audit.md)
+See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](clojure-core-audit.md) | [Clojure Set Audit](clojure-set-audit.md) | [Clojure Walk Audit](clojure-walk-audit.md) | [Java Math Audit](java-math-audit.md)
 
 ## Summary
 

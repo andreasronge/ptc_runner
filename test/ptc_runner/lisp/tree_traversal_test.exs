@@ -54,6 +54,12 @@ defmodule PtcRunner.Lisp.TreeTraversalTest do
   end
 
   describe "prewalk" do
+    test "clojure.walk/prewalk namespace works" do
+      source = ~S|(clojure.walk/prewalk #(if (number? %) (inc %) %) [1 [2 3]])|
+      {:ok, %{return: result}} = Lisp.run(source)
+      assert result == [2, [3, 4]]
+    end
+
     test "increments all numbers top-down" do
       source = ~S|(prewalk #(if (number? %) (inc %) %) [1 [2 3]])|
       {:ok, %{return: result}} = Lisp.run(source)

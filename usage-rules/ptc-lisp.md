@@ -75,8 +75,9 @@ time. Wrap zero-arity / multi-arity functions: `fn _args -> Mod.fun() end` /
 
 ## What's available in the language
 
-PTC-Lisp covers ~40% of `clojure.core` (211 of 534 vars), plus `clojure.string`,
-`clojure.set`, and `java.lang.Math`. Highlights:
+PTC-Lisp covers ~40% of `clojure.core` (211 of 534 vars), plus selected
+functions from `clojure.string`, `clojure.set`, `clojure.walk`, and
+`java.lang.Math`. Highlights:
 
 - Threading: `->`, `->>`
 - Sequence: `map`, `filter`, `reduce`, `take`, `drop`, `partition`, `group-by`
@@ -91,15 +92,51 @@ The full list lives in `docs/function-reference.md`. Use `mix
 usage_rules.search_docs <name> -p ptc_runner` to look one up.
 
 **Not available** (deliberate omissions): I/O, file system, HTTP, atoms (Clojure
-atoms), refs, agents, lazy seqs (everything is eager), macros, namespaces.
+atoms), refs, agents, lazy seqs (everything is eager), macros, and general
+Clojure namespace declarations/imports (`ns`, `require`, `refer`, `import`).
 
-## Namespace forms
+## Namespaced symbols
 
 | Form | Meaning |
 |------|---------|
 | `data/key` | Reads `context[:key]` (or `context["key"]`). |
 | `tool/name` | Calls a registered tool. |
+| `clojure.string/name` | Calls an allowlisted `clojure.string` function. |
+| `clojure.set/name` | Calls an allowlisted `clojure.set` function. |
+| `clojure.walk/name` | Calls an allowlisted `clojure.walk` function. |
+| `regex/name` | Calls an allowlisted regex helper; regex vars are audited as `clojure.core`. |
+| `Math/name`, `System/name`, `Double/name` | Java-shaped compatibility helpers/constants. |
+| `LocalDate/name`, `Instant/name` | Java time parsing compatibility helpers. |
+| `json/name` / `mcp/name` | Calls JSON and MCP result helpers. |
 | `*1`, `*2`, `*3` | Last 1/2/3 turn results (multi-turn agents only). |
+
+PTC-Lisp does **not** evaluate namespace forms. Do not write `(require
+'[clojure.string :as str])`; use the qualified symbol directly:
+
+```clojure
+(clojure.string/join "," ["a" "b"])
+(clojure.set/intersection #{1 2} #{2 3})
+(clojure.walk/prewalk #(if (number? %) (inc %) %) [1 [2 3]])
+(regex/re-find #"error" line)
+(Math/sqrt 9)
+(Instant/parse "2026-05-18T12:00:00Z")
+```
+
+Namespace resolution is strict per namespace. `clojure.walk/prewalk` works, but
+`clojure.walk/map` and `walk/+` are rejected instead of falling back to unrelated
+core functions. Use the unqualified core form for those:
+
+```clojure
+(map inc [1 2])
+(+ 1 2)
+```
+
+For exact coverage, see the generated audit docs:
+`docs/conformance/clojure-string-audit.md`,
+`docs/conformance/clojure-set-audit.md`, and
+`docs/conformance/clojure-walk-audit.md`. Those files are the source of truth
+for which namespace-qualified functions are supported, candidates for future
+support, or intentionally not relevant.
 
 ## Temporal values
 
