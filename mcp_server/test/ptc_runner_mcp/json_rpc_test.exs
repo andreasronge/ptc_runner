@@ -20,6 +20,8 @@ defmodule PtcRunnerMcp.JsonRpcTest do
       assert result["protocolVersion"] == "2025-11-25"
       assert result["serverInfo"]["name"] == "ptc_runner_mcp"
       assert result["serverInfo"]["version"] =~ ~r/^\d+\.\d+\.\d+/
+      assert is_binary(result["serverInfo"]["build"]["git_commit"])
+      assert is_boolean(result["serverInfo"]["build"]["git_dirty"])
       assert result["capabilities"]["tools"]["listChanged"] == false
     end
 

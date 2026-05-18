@@ -17,4 +17,15 @@ defmodule PtcRunnerMcp.VersionTest do
   test "package_version returns a non-empty semver-ish string" do
     assert Version.package_version() =~ ~r/^\d+\.\d+\.\d+/
   end
+
+  test "display_version includes package version and optional git metadata" do
+    assert Version.display_version() =~ ~r/^\d+\.\d+\.\d+/
+    assert String.starts_with?(Version.display_version(), Version.package_version())
+  end
+
+  test "build_info returns structured git metadata" do
+    assert %{"git_commit" => commit, "git_dirty" => dirty?} = Version.build_info()
+    assert commit == "unknown" or commit =~ ~r/^[0-9a-f]{7,40}$/
+    assert is_boolean(dirty?)
+  end
 end
