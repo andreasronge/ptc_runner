@@ -4,6 +4,9 @@ defmodule PtcRunner.Lisp.FastParser do
   alias PtcRunner.Lisp.AST
   alias PtcRunner.Lisp.SourceAtoms
 
+  @max_integer_digits 100
+  @max_nesting_depth 64
+
   @type cursor :: {binary(), non_neg_integer(), pos_integer(), pos_integer()}
 
   defguardp is_symbol_first(c)
@@ -28,14 +31,22 @@ defmodule PtcRunner.Lisp.FastParser do
         {:ok, Enum.reverse(acc), cursor}
 
       cursor ->
-        with {:ok, ast, cursor} <- parse_expr(cursor) do
+        with {:ok, ast, cursor} <- parse_expr(cursor, 0) do
           parse_program(cursor, [ast | acc])
         end
     end
   end
 
+  defp parse_expr(cursor, depth) do
+    if depth > @max_nesting_depth do
+      {:error, "nesting depth exceeds limit of #{@max_nesting_depth}"}
+    else
+      do_parse_expr(cursor, depth)
+    end
+  end
+
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
-  defp parse_expr(cursor) do
+  defp do_parse_expr(cursor, depth) do
     cursor = skip_ws(cursor)
 
     case cursor do
@@ -43,19 +54,19 @@ defmodule PtcRunner.Lisp.FastParser do
         {:error, "syntax error: could not parse expression at line #{line}, column #{column}"}
 
       {"(" <> rest, offset, line, column} ->
-        parse_sequence({rest, offset + 1, line, column + 1}, ?), :list, [])
+        parse_sequence({rest, offset + 1, line, column + 1}, ?), :list, [], depth)
 
       {"[" <> rest, offset, line, column} ->
-        parse_sequence({rest, offset + 1, line, column + 1}, ?], :vector, [])
+        parse_sequence({rest, offset + 1, line, column + 1}, ?], :vector, [], depth)
 
       {"{" <> rest, offset, line, column} ->
-        parse_sequence({rest, offset + 1, line, column + 1}, ?}, :map, [])
+        parse_sequence({rest, offset + 1, line, column + 1}, ?}, :map, [], depth)
 
       {<<?#, ?{, rest::binary>>, offset, line, column} ->
-        parse_sequence({rest, offset + 2, line, column + 2}, ?}, :set, [])
+        parse_sequence({rest, offset + 2, line, column + 2}, ?}, :set, [], depth)
 
       {"#(" <> rest, offset, line, column} ->
-        parse_sequence({rest, offset + 2, line, column + 2}, ?), :short_fn, [])
+        parse_sequence({rest, offset + 2, line, column + 2}, ?), :short_fn, [], depth)
 
       {"#\"" <> rest, offset, line, column} ->
         parse_string({rest, offset + 2, line, column + 2}, :regex_literal)
@@ -113,7 +124,7 @@ defmodule PtcRunner.Lisp.FastParser do
     end
   end
 
-  defp parse_sequence(cursor, close, type, acc) do
+  defp parse_sequence(cursor, close, type, acc, depth) do
     cursor = skip_ws(cursor)
 
     case cursor do
@@ -126,8 +137,8 @@ defmodule PtcRunner.Lisp.FastParser do
         {:error, "unclosed #{sequence_name(type)} at line #{line}, column #{column}"}
 
       _ ->
-        with {:ok, ast, cursor} <- parse_expr(cursor) do
-          parse_sequence(cursor, close, type, [ast | acc])
+        with {:ok, ast, cursor} <- parse_expr(cursor, depth + 1) do
+          parse_sequence(cursor, close, type, [ast | acc], depth)
         end
     end
   end
@@ -274,6 +285,9 @@ defmodule PtcRunner.Lisp.FastParser do
     cond do
       int == "" ->
         parse_symbol(cursor)
+
+      byte_size(int) > @max_integer_digits ->
+        {:error, "integer literal exceeds #{@max_integer_digits} digit limit"}
 
       match_fraction?(cursor) ->
         {fraction, cursor} = take_fraction(cursor)

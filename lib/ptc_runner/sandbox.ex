@@ -176,6 +176,76 @@ defmodule PtcRunner.Sandbox do
     end
   end
 
+  @doc """
+  Runs an arbitrary function in an isolated process with resource limits.
+
+  Unlike `execute/3` which is specialized for Lisp evaluation, this function
+  runs any zero-arity function under the same process isolation primitives
+  (timeout, `max_heap_size`, monitored child).
+
+  ## Options
+
+    * `:timeout` - Timeout in milliseconds (default: 1000)
+    * `:max_heap` - Max heap size in words (default: 1_250_000)
+
+  ## Returns
+
+    * `{:ok, result}` — the function returned `result`
+    * `{:error, {:timeout, ms}}` — killed after timeout
+    * `{:error, {:memory_exceeded, bytes}}` — heap limit hit
+    * `{:error, {:execution_error, message}}` — process crashed
+
+  ## Examples
+
+      iex> PtcRunner.Sandbox.run_bounded(fn -> 1 + 1 end)
+      {:ok, 2}
+
+      iex> PtcRunner.Sandbox.run_bounded(fn -> :timer.sleep(:infinity) end, timeout: 50)
+      {:error, {:timeout, 50}}
+  """
+  @spec run_bounded((-> term()), keyword()) ::
+          {:ok, term()}
+          | {:error,
+             {:timeout, non_neg_integer()}
+             | {:memory_exceeded, non_neg_integer()}
+             | {:execution_error, String.t()}}
+  def run_bounded(fun, opts \\ []) when is_function(fun, 0) do
+    default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
+    default_max_heap = Application.get_env(:ptc_runner, :default_max_heap, @default_max_heap)
+
+    timeout = Keyword.get(opts, :timeout, default_timeout)
+    max_heap = Keyword.get(opts, :max_heap, default_max_heap)
+
+    parent = self()
+
+    {pid, ref} =
+      Process.spawn(
+        fn ->
+          Process.flag(:priority, :normal)
+          result = fun.()
+          send(parent, {:bounded_result, self(), result})
+        end,
+        [{:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}, :monitor]
+      )
+
+    receive do
+      {:bounded_result, ^pid, result} ->
+        Process.demonitor(ref, [:flush])
+        {:ok, result}
+
+      {:DOWN, ^ref, :process, ^pid, :killed} ->
+        {:error, {:memory_exceeded, max_heap * 8}}
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
+    after
+      timeout ->
+        Process.demonitor(ref, [:flush])
+        Process.exit(pid, :kill)
+        {:error, {:timeout, timeout}}
+    end
+  end
+
   defp get_process_memory do
     case Process.info(self(), :memory) do
       {:memory, bytes} -> bytes

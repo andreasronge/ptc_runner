@@ -9,6 +9,8 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.SourceAtoms
 
+  @max_short_fn_arity 20
+
   @doc """
   Desugars short function syntax into a transformed AST.
 
@@ -52,13 +54,9 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
     # Now find placeholders in the expression
     with placeholders_result <- extract_placeholders([body_expr]),
          {:ok, placeholders} <- validate_placeholder_result(placeholders_result),
-         # 2. Determine arity
-         arity <- determine_arity(placeholders),
-         # 3. Generate parameter list [{:symbol, :p1}, {:symbol, :p2}, ...]
+         {:ok, arity} <- determine_arity(placeholders),
          params <- generate_params(arity),
-         # 4. Replace placeholders in body
          transformed_body <- transform_body(body_expr, placeholders) do
-      # Return desugared form: (fn [params] transformed_body)
       {:ok, {:list, [{:symbol, :fn}, {:vector, params}, transformed_body]}}
     end
   end
@@ -129,34 +127,54 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   # Arity and parameter generation
   # ============================================================
 
-  # Determine arity from placeholders
   defp determine_arity(placeholders) do
     has_rest? = Enum.any?(placeholders, &(to_string(&1) == "%&"))
 
-    # Extract numeric placeholders (filter out % and %&)
-    numeric =
+    numeric_result =
       placeholders
       |> Enum.filter(fn p ->
         s = to_string(p)
         s != "%" and s != "%&"
       end)
-      |> Enum.map(fn p ->
-        p
-        |> to_string()
-        |> String.replace_leading("%", "")
-        |> String.to_integer()
+      |> Enum.reduce_while({:ok, []}, fn p, {:ok, acc} ->
+        num_str = p |> to_string() |> String.replace_leading("%", "")
+
+        if byte_size(num_str) > 3 do
+          {:halt,
+           {:error,
+            {:invalid_form,
+             "short function placeholder %#{num_str} exceeds max arity of #{@max_short_fn_arity}"}}}
+        else
+          n = String.to_integer(num_str)
+
+          if n > @max_short_fn_arity do
+            {:halt,
+             {:error,
+              {:invalid_form,
+               "short function placeholder %#{n} exceeds max arity of #{@max_short_fn_arity}"}}}
+          else
+            {:cont, {:ok, [n | acc]}}
+          end
+        end
       end)
 
-    base_arity =
-      case numeric do
-        [] ->
-          if Enum.any?(placeholders, &(to_string(&1) == "%")), do: 1, else: 0
+    case numeric_result do
+      {:error, _} = err ->
+        err
 
-        nums ->
-          Enum.max(nums)
-      end
+      {:ok, nums} ->
+        base_arity =
+          case nums do
+            [] ->
+              if Enum.any?(placeholders, &(to_string(&1) == "%")), do: 1, else: 0
 
-    if has_rest?, do: {:variadic, base_arity}, else: base_arity
+            nums ->
+              Enum.max(nums)
+          end
+
+        arity = if has_rest?, do: {:variadic, base_arity}, else: base_arity
+        {:ok, arity}
+    end
   end
 
   # Generate parameter list based on arity (as symbols, not yet analyzed)
@@ -223,12 +241,17 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
     node
   end
 
-  # Convert placeholder symbol to parameter variable name
   defp placeholder_to_param(name_str) when is_binary(name_str) do
     case name_str do
-      "%" -> :p1
-      "%&" -> :rest
-      "%" <> num_str -> SourceAtoms.intern("p#{num_str}")
+      "%" ->
+        :p1
+
+      "%&" ->
+        :rest
+
+      "%" <> num_str ->
+        n = String.to_integer(num_str)
+        SourceAtoms.intern("p#{n}")
     end
   end
 end

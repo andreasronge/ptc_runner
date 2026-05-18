@@ -4,14 +4,22 @@ defmodule PtcRunner.Lisp.ParserHelpers do
   alias PtcRunner.Lisp.AST
   alias PtcRunner.Lisp.SourceAtoms
 
+  @max_integer_digits 100
+
   # ============================================================
   # Number parsing
   # ============================================================
 
   def parse_integer(parts) do
-    parts
-    |> Enum.map_join(&to_string_part/1)
-    |> String.to_integer()
+    str = Enum.map_join(parts, &to_string_part/1)
+
+    digit_count = count_digits(str)
+
+    if digit_count > @max_integer_digits do
+      raise ArgumentError, "integer literal exceeds #{@max_integer_digits} digit limit"
+    end
+
+    String.to_integer(str)
   end
 
   def parse_float(parts) do
@@ -24,6 +32,12 @@ defmodule PtcRunner.Lisp.ParserHelpers do
       {float, _rest} -> float
       :error -> raise ArgumentError, "invalid float: #{str}"
     end
+  end
+
+  defp count_digits(str) do
+    str
+    |> String.replace("-", "")
+    |> byte_size()
   end
 
   defp to_string_part(part) when is_integer(part), do: <<part::utf8>>
