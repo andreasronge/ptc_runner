@@ -1081,7 +1081,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 **Safety Mechanism:**
-To ensure sandbox safety, PTC-Lisp enforces an iteration limit on recursive calls. If a loop exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error.
+PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tail-recursive function using `recur` exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion is not counted by this limit; it remains bounded by the sandbox timeout and memory limit.
 
 ### 5.17 `for` — List Comprehension
 
@@ -3845,7 +3845,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 | Timeout | 1,000 ms | Execution time limit |
 | Max Heap | ~10 MB | Memory limit (1,250,000 words) |
 | Max Tool Calls | 10 | Per-program tool invocation limit |
-| Loop Iterations | 1,000 | Per-loop/recur iteration limit |
+| Loop/Recur Iterations | 1,000 | Per-loop/recur jump limit; ordinary non-tail recursion is bounded by timeout and heap |
 
 *Note: Hosts may configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 

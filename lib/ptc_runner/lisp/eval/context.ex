@@ -13,7 +13,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   | Field | Default | Hard Cap | Purpose |
   |-------|---------|----------|---------|
-  | `loop_limit` | 1,000 | 10,000 | Max loop/recursion iterations |
+  | `loop_limit` | 1,000 | 10,000 | Max loop/recur jumps |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
   | `pmap_max_concurrency` | `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
   """
