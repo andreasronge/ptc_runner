@@ -284,6 +284,17 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     assert conn.status == 404
   end
 
+  test "loopback bind rejects hostile Host on DELETE" do
+    conn =
+      conn(:delete, "/mcp")
+      |> auth()
+      |> with_host("attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
+  end
+
   test "deleted owner index allows same owner to initialize again" do
     first_id = initialize_session()
 
