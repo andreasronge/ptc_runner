@@ -263,6 +263,7 @@ defmodule PtcRunner.MixProject do
         "docs/agentic-mode.md",
         "docs/mcp-debug.md",
         "docs/mcp-server-configuration.md",
+        "docs/mcp-server-http-deployment.md",
         # Reference
         "docs/signature-syntax.md",
         "docs/benchmark-eval.md",
@@ -289,7 +290,7 @@ defmodule PtcRunner.MixProject do
         "SubAgent Guides": ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute)\.md/,
         "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
         "MCP Server":
-          ~r/docs\/(mcp-server|mcp-server-configuration|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
+          ~r/docs\/(mcp-server|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
         Reference:
           ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
