@@ -653,32 +653,6 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     Enum.each(PtcRunnerMcp.Sessions.child_specs(), &start_supervised!/1)
   end
 
-  defp wait_for_files(dir, expected, timeout_ms \\ 1_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_for_files(dir, expected, deadline)
-  end
-
-  defp do_wait_for_files(dir, expected, deadline) do
-    files =
-      dir
-      |> File.ls!()
-      |> Enum.reject(&String.ends_with?(&1, ".pending"))
-      |> Enum.sort()
-
-    if length(files) >= expected do
-      files
-    else
-      if System.monotonic_time(:millisecond) >= deadline do
-        flunk("timed out waiting for trace files in #{dir}")
-      else
-        receive do
-        after
-          10 -> do_wait_for_files(dir, expected, deadline)
-        end
-      end
-    end
-  end
-
   defp read_jsonl(path) do
     path
     |> File.read!()
