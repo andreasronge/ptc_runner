@@ -3,8 +3,12 @@
 Core language reference for PTC-Lisp. Optional — included by default, can be omitted for capable models.
 
 <!-- version: 1 -->
-<!-- date: 2026-03-23 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: ptc-lisp-system-prompt -->
+<!-- budget: target<=1700 bytes, hard<=2000 bytes -->
 <!-- changes: Renamed from lisp-base.md as part of 2-axis prompt refactor -->
+<!-- priority: supported Java interop shape; unavailable forms and namespaces -->
 
 <!-- PTC_PROMPT_START -->
 

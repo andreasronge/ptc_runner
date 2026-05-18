@@ -10,8 +10,12 @@ Context variables:
 - `next_turn`: integer, the next turn number
 
 <!-- version: 1 -->
-<!-- date: 2026-01-24 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: turn-feedback-message -->
+<!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Initial version -->
+<!-- variables: is_final_retry, current_retry, total_retries, retries_remaining, next_turn -->
 
 <!-- PTC_PROMPT_START -->
 {{#is_final_retry}}
