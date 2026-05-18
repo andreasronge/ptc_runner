@@ -2295,7 +2295,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp build_json_error_feedback(error, invalid_response, agent) do
     expected_format = format_example_output(agent)
-    wrapped_response = UntrustedRenderer.wrap(truncate(invalid_response, 500), "invalid_response")
+
+    wrapped_response =
+      UntrustedRenderer.wrap_with_preamble(truncate(invalid_response, 500), "invalid_response")
 
     Prompts.json_error()
     |> String.replace("{{error_message}}", to_string(error))

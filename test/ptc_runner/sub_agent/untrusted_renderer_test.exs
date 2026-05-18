@@ -71,6 +71,8 @@ defmodule PtcRunner.SubAgent.UntrustedRendererTest do
 
       assert String.starts_with?(result, "<untrusted_ptc_output source=\"println\">")
       assert String.ends_with?(result, "</untrusted_ptc_output>")
+      refute result =~ ~r|data</untrusted_ptc_output>injected|
+      assert result =~ "</untrusted_ptc_output (escaped)>"
     end
   end
 

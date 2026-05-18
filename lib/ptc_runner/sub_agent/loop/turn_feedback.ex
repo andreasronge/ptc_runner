@@ -119,7 +119,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec build_error_feedback(String.t(), Definition.t(), map()) :: String.t()
   def build_error_feedback(error_message, agent, state) do
-    wrapped = UntrustedRenderer.wrap(error_message, "error")
+    wrapped = UntrustedRenderer.wrap_with_preamble(error_message, "error")
     base = "Error:\n#{wrapped}"
 
     append_turn_info(base, agent, state)
