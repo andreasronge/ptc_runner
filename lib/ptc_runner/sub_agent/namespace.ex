@@ -35,8 +35,13 @@ defmodule PtcRunner.SubAgent.Namespace do
       iex> PtcRunner.SubAgent.Namespace.render(%{data: %{count: 42}})
       ";; No tools available\\n\\n;; === data/ ===\\ndata/count                    ; integer, sample: 42"
 
-      iex> PtcRunner.SubAgent.Namespace.render(%{memory: %{total: 100}, has_println: false})
-      ";; No tools available\\n\\n;; === user/ (your prelude) ===\\ntotal                         ; = integer, sample: 100"
+      iex> result = PtcRunner.SubAgent.Namespace.render(%{memory: %{total: 100}, has_println: false})
+      iex> result =~ "No tools available"
+      true
+      iex> result =~ "integer, sample: 100"
+      true
+      iex> result =~ "untrusted_ptc_output"
+      true
   """
   @spec render(map()) :: String.t()
   def render(config) do

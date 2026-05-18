@@ -2,6 +2,7 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
   @moduledoc "Renders tool call history and println output."
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.SubAgent.UntrustedRenderer
 
   @doc """
   Render tool calls made during successful turns.
@@ -42,22 +43,28 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
   Render println output from successful turns.
 
   Returns `nil` when `has_println` is false (no output section needed),
-  otherwise a formatted list with header and output lines.
+  otherwise a formatted list with header and output lines wrapped in
+  an untrusted data envelope.
 
   ## Examples
 
       iex> PtcRunner.SubAgent.Namespace.ExecutionHistory.render_output([], 15, false)
       nil
 
-      iex> PtcRunner.SubAgent.Namespace.ExecutionHistory.render_output(["hello", "world"], 15, true)
-      ";; Output:\\nhello\\nworld"
+      iex> result = PtcRunner.SubAgent.Namespace.ExecutionHistory.render_output(["hello", "world"], 15, true)
+      iex> result =~ "hello\\nworld"
+      true
+      iex> result =~ "untrusted_ptc_output"
+      true
   """
   @spec render_output([String.t()], non_neg_integer(), boolean()) :: String.t() | nil
   def render_output(_prints, _limit, false), do: nil
 
+  def render_output([], _limit, true), do: ";; Output:"
+
   def render_output(prints, limit, true) do
-    # FIFO: keep most recent when limit exceeded
     prints_to_render = Enum.take(prints, -limit)
-    [";; Output:" | prints_to_render] |> Enum.join("\n")
+    content = Enum.join(prints_to_render, "\n")
+    ";; Output:\n" <> UntrustedRenderer.wrap(content, "println")
   end
 end

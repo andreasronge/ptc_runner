@@ -38,8 +38,10 @@ defmodule PtcRunner.SubAgent.NamespaceTest do
       config = %{memory: %{total: 100}, has_println: false}
       result = Namespace.render(config)
 
-      assert result ==
-               ";; No tools available\n\n;; === user/ (your prelude) ===\ntotal                         ; = integer, sample: 100"
+      assert result =~ ";; No tools available"
+      assert result =~ ";; === user/ (your prelude) ==="
+      assert result =~ "integer, sample: 100"
+      assert result =~ "<untrusted_ptc_output source=\"memory\">"
     end
 
     test "joins sections with blank lines" do

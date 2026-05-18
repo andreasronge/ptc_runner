@@ -27,6 +27,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.TraceContext
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
@@ -1029,7 +1030,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Format ExecutionError into a human-readable error string preserving the data field
   defp format_execution_error(%ExecutionError{reason: :tool_error, message: name, data: data}) do
-    "Tool '#{name}' failed: #{inspect(data)}"
+    wrapped_data = UntrustedRenderer.wrap(inspect(data), "tool_error")
+    "Tool '#{name}' failed:\n#{wrapped_data}"
   end
 
   defp format_execution_error(%ExecutionError{} = e), do: Exception.message(e)
