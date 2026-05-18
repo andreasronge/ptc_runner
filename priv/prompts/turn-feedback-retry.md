@@ -19,9 +19,9 @@ Context variables:
 
 <!-- PTC_PROMPT_START -->
 {{#is_final_retry}}
-FINAL RETRY (Retry {{current_retry}} of {{total_retries}}) - you must call (return result) or (fail response) next.
+FINAL RETRY {{current_retry}}/{{total_retries}}: call `(return result)` or `(fail response)`.
 {{/is_final_retry}}
 {{^is_final_retry}}
-Turn {{next_turn}}: Retry {{current_retry}} of {{total_retries}} ({{retries_remaining}} retries remaining)
+Turn {{next_turn}} retry {{current_retry}}/{{total_retries}}; {{retries_remaining}} left.
 {{/is_final_retry}}
 <!-- PTC_PROMPT_END -->
