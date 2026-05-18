@@ -44,9 +44,9 @@ runs:
       id: cache-babashka
       with:
         path: _build/tools
-        key: babashka-${{ runner.os }}-1.4.192
+        key: babashka-${{ runner.os }}-1.4.192-sha256-v1
 
     - name: Install Babashka
       if: steps.cache-babashka.outputs.cache-hit != 'true'
-      run: mix ptc.install_babashka
+      run: mix ptc.install_babashka --force
       shell: bash
