@@ -114,33 +114,38 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistoryTest do
       assert result == ";; Output:"
     end
 
-    test "renders single print line" do
+    test "renders single print line wrapped in untrusted envelope" do
       result = ExecutionHistory.render_output(["hello"], 15, true)
-      assert result == ";; Output:\nhello"
+      assert result =~ ";; Output:"
+      assert result =~ "<untrusted_ptc_output source=\"println\">"
+      assert result =~ "hello"
+      assert result =~ "</untrusted_ptc_output>"
     end
 
-    test "renders multiple print lines without prefix" do
+    test "renders multiple print lines wrapped in untrusted envelope" do
       result = ExecutionHistory.render_output(["hello", "world", "test"], 15, true)
 
-      assert result == ";; Output:\nhello\nworld\ntest"
+      assert result =~ ";; Output:"
+      assert result =~ "hello\nworld\ntest"
+      assert result =~ "<untrusted_ptc_output source=\"println\">"
     end
 
     test "FIFO keeps most recent when limit exceeded" do
       prints = ["oldest", "middle", "newest"]
       result = ExecutionHistory.render_output(prints, 2, true)
 
-      # oldest is dropped, middle and newest kept
-      assert result == ";; Output:\nmiddle\nnewest"
+      assert result =~ "middle\nnewest"
+      refute result =~ "oldest"
+      assert result =~ "<untrusted_ptc_output"
     end
 
     test "preserves original formatting in output lines" do
       prints = ["  indented", "UPPERCASE", "with:special:chars"]
       result = ExecutionHistory.render_output(prints, 15, true)
 
-      lines = String.split(result, "\n")
-      assert Enum.at(lines, 1) == "  indented"
-      assert Enum.at(lines, 2) == "UPPERCASE"
-      assert Enum.at(lines, 3) == "with:special:chars"
+      assert result =~ "  indented"
+      assert result =~ "UPPERCASE"
+      assert result =~ "with:special:chars"
     end
   end
 end
