@@ -12,7 +12,7 @@ System prompt for text mode structured JSON output.
 <!-- PTC_PROMPT_START -->
 
 <output_format>
-Return only valid JSON matching the expected format. No markdown, no explanation.
+Return only valid structured JSON matching the expected format. No markdown, no explanation.
 </output_format>
 
 <!-- PTC_PROMPT_END -->
