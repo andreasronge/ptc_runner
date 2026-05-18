@@ -152,18 +152,11 @@ defmodule PtcRunner.LispTelemetryTest do
     end
 
     test ":exception event fires when run/2 itself raises and carries caller + kind/reason/stacktrace" do
-      # An invalid (non-string, non-keyword) opts value forces a raise inside
-      # the span body. Use a tools value that fails Tool.new for a non-binary
-      # name? Easier: pass non-string source — Parser will likely raise.
-      # Cleanest path: pass :tools as a non-enumerable to force a runtime crash
-      # inside do_run.
-      #
-      # We use a custom telemetry handler that raises to verify our :exception
-      # path — but raising inside a handler doesn't exercise the span exception
-      # path (telemetry catches handler errors). Instead, directly cause a
-      # runtime failure inside the span by passing a source that's not a binary.
-      assert_raise FunctionClauseError, fn ->
-        Lisp.run(:not_a_binary, caller: :text_mode)
+      # Force a raise inside the span body by passing non-enumerable tools.
+      # normalize_tools calls Enum.reduce_while, which raises Protocol.UndefinedError
+      # for non-enumerable values. This happens before the bounded compile process.
+      assert_raise Protocol.UndefinedError, fn ->
+        Lisp.run("1", tools: :not_enumerable, caller: :text_mode)
       end
 
       assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
