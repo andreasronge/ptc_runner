@@ -13,7 +13,7 @@ Error feedback for text mode JSON validation failures.
 <!-- PTC_PROMPT_START -->
 
 <error_feedback>
-Invalid JSON or wrong shape.
+Response was not valid JSON or had the wrong shape.
 
 Error: {{error_message}}
 
