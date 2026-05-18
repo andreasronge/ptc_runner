@@ -68,6 +68,67 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     assert get_resp_header(conn, "www-authenticate") == [~s(Bearer error="invalid_token")]
   end
 
+  test "loopback bind rejects hostile Host before reading MCP POST body" do
+    conn =
+      conn(
+        :post,
+        "/mcp",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
+      )
+      |> auth()
+      |> with_host("attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
+  end
+
+  test "missing Origin is allowed when Host is loopback" do
+    conn =
+      conn(
+        :post,
+        "/mcp",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
+      )
+      |> auth()
+      |> with_host("127.0.0.1")
+      |> call()
+
+    assert conn.status == 200
+    assert get_resp_header(conn, "mcp-session-id") != []
+  end
+
+  test "invalid browser Origin is rejected even with loopback Host" do
+    conn =
+      conn(
+        :post,
+        "/mcp",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
+      )
+      |> auth()
+      |> with_host("127.0.0.1")
+      |> put_req_header("origin", "http://attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
+  end
+
+  test "POST rejects present non-JSON content types" do
+    conn =
+      conn(
+        :post,
+        "/mcp",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
+      )
+      |> auth()
+      |> put_req_header("content-type", "text/plain")
+      |> call()
+
+    assert conn.status == 415
+    assert conn.resp_body == "unsupported media type"
+  end
+
   test "initialize creates a session and later notification returns 202" do
     init = %{
       "jsonrpc" => "2.0",
@@ -221,6 +282,17 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       |> call()
 
     assert conn.status == 404
+  end
+
+  test "loopback bind rejects hostile Host on DELETE" do
+    conn =
+      conn(:delete, "/mcp")
+      |> auth()
+      |> with_host("attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
   end
 
   test "deleted owner index allows same owner to initialize again" do
@@ -592,7 +664,13 @@ defmodule PtcRunnerMcp.HttpRouterTest do
   end
 
   defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @token)
+
+  defp call(%{host: host} = conn) when host in ["example.com", "www.example.com"],
+    do: conn |> with_host("127.0.0.1") |> Router.call([])
+
   defp call(conn), do: Router.call(conn, [])
+
+  defp with_host(conn, host), do: %{conn | host: host, port: 7332}
 
   defp attach_http_telemetry do
     handler_id = "http-router-test-#{System.unique_integer([:positive])}"
