@@ -2,7 +2,7 @@
 
 **Related docs:**
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
-- [Clojure Core Audit](clojure-core-audit.md) — function-level coverage of Clojure core
+- [Clojure Core Audit](conformance/clojure-core-audit.md) — function-level coverage of Clojure core
 
 ---
 
@@ -3252,20 +3252,35 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 
 The `catalog/` op budget is separate from the `tool/mcp-call` budget; catalog discovery never consumes upstream-call quota.
 
-### 9.8 Clojure Namespace Compatibility
+### 9.8 Namespace Compatibility
 
-LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normalizes these to built-in functions at analysis time.
+LLMs often generate code with namespace-qualified symbols. PTC-Lisp does not
+evaluate namespace declarations (`ns`, `require`, `refer`, `import`), but it
+does allow a fixed set of namespace-qualified symbols. These normalize to
+built-ins or reserved runtime operations at analysis time.
 
 **Supported namespaces:**
 
-| Namespace | Shorthand | Category |
-|-----------|-----------|----------|
-| `clojure.string` | `str`, `string` | String functions |
-| `clojure.core` | `core` | Core functions |
-| `clojure.set` | `set` | Set functions |
-| `System` | - | Java System properties/time |
-| `java.util.Date` | - | Java Date constructors |
-| `java.time.LocalDate` | `LocalDate` | Java Date parsing (ISO-8601) |
+| Group | Namespace(s) | Category |
+|-------|--------------|----------|
+| Clojure compatibility | `clojure.core`, `core` | Core functions |
+| Clojure compatibility | `clojure.string`, `str`, `string` | String functions |
+| Clojure compatibility | `clojure.set`, `set` | Set functions |
+| Clojure compatibility | `clojure.walk`, `walk` | Tree traversal functions |
+| Clojure compatibility | `regex` | Regex helpers (`re-find`, `re-pattern`, etc.; underlying vars are audited as `clojure.core`) |
+| Java compatibility | `Math` | Math functions |
+| Java compatibility | `System` | Java System properties/time |
+| Java compatibility | `Double` | Double constants |
+| Java compatibility | `Interop` | General interop helpers |
+| Java compatibility | `LocalDate`, `java.time.LocalDate` | Java Date parsing (ISO-8601) |
+| Java compatibility | `Instant`, `java.time.Instant` | Java Instant parsing (ISO-8601) |
+| Java compatibility | `java.util.Date.` | Java Date constructors |
+| PTC runtime/helper | `data` | Context access |
+| PTC runtime/helper | `tool` | Registered tool invocation |
+| PTC runtime/helper | `catalog` | Upstream MCP catalog discovery |
+| PTC runtime/helper | `budget` | Remaining-budget introspection |
+| PTC runtime/helper | `json` | JSON parse/generate helpers |
+| PTC runtime/helper | `mcp` | MCP result unwrap helpers |
 
 **Examples of normalization:**
 
@@ -3278,6 +3293,18 @@ LLMs often generate code with Clojure-style namespaced symbols. PTC-Lisp normali
 ;; Core functions work too:
 (clojure.core/map inc xs)          ; → (map inc xs)
 (core/filter even? xs)             ; → (filter even? xs)
+
+;; Tree traversal functions work via clojure.walk:
+(clojure.walk/prewalk f data)      ; → (prewalk f data)
+(walk/postwalk f data)             ; → (postwalk f data)
+
+;; Regex helpers can be qualified when that improves clarity:
+(regex/re-find #"error" line)      ; → (re-find #"error" line)
+
+;; Java compatibility namespaces:
+(Math/sqrt 9)                      ; → (sqrt 9)
+(System/currentTimeMillis)         ; → (currentTimeMillis)
+(Instant/parse "2026-05-18T12:00:00Z") ; → (parse "2026-05-18T12:00:00Z")
 ```
 
 **Error handling:**
@@ -3290,9 +3317,14 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 
 (clojure.set/project relations [:id])
 ;; Error: project is not available. Set functions: set, set?, vec, vector, contains?, intersection, union, difference
+
+(clojure.walk/stringify-keys data)
+;; Error: stringify-keys is not available. Walk functions: prewalk, postwalk, walk
 ```
 
-**Note:** The `data/` and `tool/` namespaces are reserved for context access and tool invocation respectively. Clojure-style namespaces cannot be used for these purposes.
+**Note:** The `data/` and `tool/` namespaces are reserved for context access
+and tool invocation respectively. They are not aliases for Clojure
+namespaces.
 
 ---
 
@@ -3718,7 +3750,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 
 ### 13.2 Functions Excluded from Core
 
-For a complete function-level coverage report, see [Clojure Core Audit](clojure-core-audit.md).
+For a complete function-level coverage report, see [Clojure Core Audit](conformance/clojure-core-audit.md).
 
 Key exclusions: `iterate`, `repeat`, `cycle` (infinite sequences), infinite `(range)` (finite `range` is supported: see §8.1), and transducers.
 

@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       mix ptc.clojure_audit --namespace core   # Audit only clojure.core
       mix ptc.clojure_audit --namespace string # Audit only clojure.string
       mix ptc.clojure_audit --namespace set    # Audit only clojure.set
+      mix ptc.clojure_audit --namespace walk   # Audit only clojure.walk
       mix ptc.clojure_audit --namespace math   # Audit only java.lang.Math
       mix ptc.clojure_audit --skip-llm         # Skip LLM classification
       mix ptc.clojure_audit --model MODEL_ID   # Use a specific model
@@ -18,10 +19,11 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
   ## Output
 
   Writes audit markdown files:
-  - `docs/clojure-core-audit.md` — clojure.core vars
-  - `docs/clojure-string-audit.md` — clojure.string vars
-  - `docs/clojure-set-audit.md` — clojure.set vars
-  - `docs/java-math-audit.md` — java.lang.Math methods
+  - `docs/conformance/clojure-core-audit.md` — clojure.core vars
+  - `docs/conformance/clojure-string-audit.md` — clojure.string vars
+  - `docs/conformance/clojure-set-audit.md` — clojure.set vars
+  - `docs/conformance/clojure-walk-audit.md` — clojure.walk vars
+  - `docs/conformance/java-math-audit.md` — java.lang.Math methods
 
   Status legend:
   - ✅ supported — implemented in PTC-Lisp
@@ -39,28 +41,35 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
 
   @namespace_configs %{
     "core" => %{
-      output: "docs/clojure-core-audit.md",
+      output: "docs/conformance/clojure-core-audit.md",
       title: "Clojure Core Audit for PTC-Lisp",
       description: "Comparison of `clojure.core` vars against PTC-Lisp builtins.",
       vars_fn: :clojure_core_vars,
       match_fn: :match_core
     },
     "string" => %{
-      output: "docs/clojure-string-audit.md",
+      output: "docs/conformance/clojure-string-audit.md",
       title: "Clojure String Audit for PTC-Lisp",
       description: "Comparison of `clojure.string` vars against PTC-Lisp builtins.",
       vars_fn: :clojure_string_vars,
       match_fn: :match_by_category
     },
     "set" => %{
-      output: "docs/clojure-set-audit.md",
+      output: "docs/conformance/clojure-set-audit.md",
       title: "Clojure Set Audit for PTC-Lisp",
       description: "Comparison of `clojure.set` vars against PTC-Lisp builtins.",
       vars_fn: :clojure_set_vars,
       match_fn: :match_by_category
     },
+    "walk" => %{
+      output: "docs/conformance/clojure-walk-audit.md",
+      title: "Clojure Walk Audit for PTC-Lisp",
+      description: "Comparison of `clojure.walk` vars against PTC-Lisp builtins.",
+      vars_fn: :clojure_walk_vars,
+      match_fn: :match_by_category
+    },
     "math" => %{
-      output: "docs/java-math-audit.md",
+      output: "docs/conformance/java-math-audit.md",
       title: "Java Math Audit for PTC-Lisp",
       description: "Comparison of `java.lang.Math` methods against PTC-Lisp builtins.",
       vars_fn: :java_math_vars,
@@ -91,7 +100,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       case opts[:namespace] do
         nil -> Map.keys(@namespace_configs)
         ns when is_map_key(@namespace_configs, ns) -> [ns]
-        other -> Mix.raise("Unknown namespace: #{other}. Use: core, string, set, math")
+        other -> Mix.raise("Unknown namespace: #{other}. Use: core, string, set, walk, math")
       end
 
     unless skip_llm do
@@ -142,6 +151,7 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       |> Enum.sort_by(fn {name, _, _, _} -> name end)
 
     markdown = generate_markdown(all_entries, config)
+    File.mkdir_p!(Path.dirname(config.output))
     File.write!(config.output, markdown)
 
     counts = Enum.frequencies_by(all_entries, fn {_, _, status, _} -> status end)
@@ -866,6 +876,22 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
       {"subset?", "Is set1 a subset of set2?"},
       {"superset?", "Is set1 a superset of set2?"},
       {"union", "Return a set that is the union of the input sets"}
+    ]
+  end
+
+  @doc false
+  def clojure_walk_vars do
+    [
+      {"keywordize-keys", "Recursively transforms all map keys from strings to keywords"},
+      {"macroexpand-all", "Recursively performs all possible macroexpansions in form"},
+      {"postwalk", "Performs a depth-first, post-order traversal of form"},
+      {"postwalk-demo", "Demonstrates postwalk by printing each form as it is walked"},
+      {"postwalk-replace", "Recursively replaces keys in smap with their values, leaves first"},
+      {"prewalk", "Performs a pre-order traversal of form"},
+      {"prewalk-demo", "Demonstrates prewalk by printing each form as it is walked"},
+      {"prewalk-replace", "Recursively replaces keys in smap with their values, root first"},
+      {"stringify-keys", "Recursively transforms all map keys from keywords to strings"},
+      {"walk", "Traverses form by applying inner to children and outer to the result"}
     ]
   end
 

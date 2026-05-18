@@ -271,10 +271,11 @@ defmodule PtcRunner.MixProject do
         "docs/clojure-conformance-gaps.md",
         # Generated Reference (mix ptc.gen_docs)
         "docs/function-reference.md",
-        "docs/clojure-core-audit.md",
-        "docs/clojure-string-audit.md",
-        "docs/clojure-set-audit.md",
-        "docs/java-math-audit.md",
+        "docs/conformance/clojure-core-audit.md",
+        "docs/conformance/clojure-string-audit.md",
+        "docs/conformance/clojure-set-audit.md",
+        "docs/conformance/clojure-walk-audit.md",
+        "docs/conformance/java-math-audit.md",
         "docs/java-interop.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",

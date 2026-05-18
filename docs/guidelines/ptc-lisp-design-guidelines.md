@@ -40,6 +40,26 @@ Dot-prefixed methods such as `.substring`, `.indexOf`, and `.length` exist becau
 
 For example, `.indexOf` returns `-1` when not found and `.substring` raises for invalid indices. Clojure/PTC-named helpers can choose safer data-shaped behavior, such as `index-of` returning `nil`.
 
+## Namespace Compatibility
+
+PTC-Lisp does not support general Clojure namespace forms such as `ns`,
+`require`, `refer`, or `import`. Namespaced symbols are an explicit,
+allowlisted surface with two meanings:
+
+- **Clojure compatibility namespaces** such as `clojure.string/` and
+  `clojure.set/` expose Clojure-derived functions under their familiar names.
+  They should resolve only to the functions intentionally exposed by that
+  namespace; cross-namespace fallback makes the advertised namespace misleading
+  and should fail with a helpful list of available functions.
+- **PTC capability namespaces** such as `tool/`, `data/`, `json/`, `mcp/`,
+  `budget/`, and `catalog/` are owned by PTC-Lisp. They do not claim Clojure
+  library compatibility and should be documented in prompts only when relevant
+  to the current agent mode or enabled capability.
+
+Prefer real Clojure namespaces for Clojure-derived functions when they exist.
+Use short PTC-owned namespaces for non-standard capabilities. Tests should cover
+both accepted namespaced calls and rejected unknown or cross-category members.
+
 ## When Extending
 
 New syntax or builtins fit best when they help LLM-generated code transform data predictably inside the sandbox. Prefer small, deterministic, bounded features with clear examples and tests.

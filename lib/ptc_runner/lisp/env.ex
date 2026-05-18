@@ -74,6 +74,8 @@ defmodule PtcRunner.Lisp.Env do
     :core => :core,
     :"clojure.set" => :set,
     :set => :set,
+    :"clojure.walk" => :walk,
+    :walk => :walk,
     :regex => :regex,
     :Math => :math,
     :Interop => :interop,
@@ -148,6 +150,7 @@ defmodule PtcRunner.Lisp.Env do
       true
   """
   defdelegate builtins_by_category(category), to: PtcRunner.Lisp.Registry
+  defdelegate builtins_by_namespace(ns), to: PtcRunner.Lisp.Registry
 
   @doc """
   Get a human-readable name for a category.

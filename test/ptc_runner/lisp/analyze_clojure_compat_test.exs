@@ -65,6 +65,26 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       raw = {:ns_symbol, :"clojure.core", :reduce}
       assert {:ok, {:var, :reduce}} = Analyze.analyze(raw)
     end
+
+    test "clojure.core/str normalizes to str even though it is displayed as string" do
+      raw = {:ns_symbol, :"clojure.core", :str}
+      assert {:ok, {:var, :str}} = Analyze.analyze(raw)
+    end
+
+    test "clojure.core/subs normalizes to subs even though it is displayed as string" do
+      raw = {:ns_symbol, :"clojure.core", :subs}
+      assert {:ok, {:var, :subs}} = Analyze.analyze(raw)
+    end
+
+    test "clojure.core/re-find normalizes to re-find even though it is displayed as regex" do
+      raw = {:ns_symbol, :"clojure.core", :"re-find"}
+      assert {:ok, {:var, :"re-find"}} = Analyze.analyze(raw)
+    end
+
+    test "clojure.core/abs normalizes to abs even though it is displayed as math" do
+      raw = {:ns_symbol, :"clojure.core", :abs}
+      assert {:ok, {:var, :abs}} = Analyze.analyze(raw)
+    end
   end
 
   describe "core shorthand namespace" do
@@ -86,10 +106,34 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
+  describe "clojure.walk namespace normalization" do
+    test "clojure.walk/prewalk normalizes to prewalk" do
+      raw = {:ns_symbol, :"clojure.walk", :prewalk}
+      assert {:ok, {:var, :prewalk}} = Analyze.analyze(raw)
+    end
+
+    test "clojure.walk/postwalk normalizes to postwalk" do
+      raw = {:ns_symbol, :"clojure.walk", :postwalk}
+      assert {:ok, {:var, :postwalk}} = Analyze.analyze(raw)
+    end
+
+    test "clojure.walk/walk normalizes to walk" do
+      raw = {:ns_symbol, :"clojure.walk", :walk}
+      assert {:ok, {:var, :walk}} = Analyze.analyze(raw)
+    end
+  end
+
   describe "set shorthand namespace" do
     test "set/contains? normalizes to contains?" do
       raw = {:ns_symbol, :set, :contains?}
       assert {:ok, {:var, :contains?}} = Analyze.analyze(raw)
+    end
+  end
+
+  describe "walk shorthand namespace" do
+    test "walk/prewalk normalizes to prewalk" do
+      raw = {:ns_symbol, :walk, :prewalk}
+      assert {:ok, {:var, :prewalk}} = Analyze.analyze(raw)
     end
   end
 
@@ -164,6 +208,15 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       assert msg =~ "set"
       assert msg =~ "contains?"
     end
+
+    test "clojure.walk/stringify-keys gives helpful error with walk functions" do
+      raw = {:ns_symbol, :"clojure.walk", :"stringify-keys"}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "stringify-keys is not available"
+      assert msg =~ "Walk functions:"
+      assert msg =~ "prewalk"
+      assert msg =~ "postwalk"
+    end
   end
 
   describe "unknown function in call position" do
@@ -204,20 +257,40 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
-  describe "cross-category builtins are normalized (permissive for LLM robustness)" do
-    test "str/map normalizes to map (core function via string namespace)" do
+  describe "cross-category builtins are rejected" do
+    test "str/map does not normalize to core map" do
       raw = {:ns_symbol, :str, :map}
-      assert {:ok, {:var, :map}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "map is not available"
+      assert msg =~ "String functions:"
     end
 
-    test "core/join normalizes to join (string function via core namespace)" do
+    test "core/join does not normalize to string join" do
       raw = {:ns_symbol, :core, :join}
-      assert {:ok, {:var, :join}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "join is not available"
+      assert msg =~ "Core functions:"
     end
 
-    test "set/filter normalizes to filter (core function via set namespace)" do
+    test "set/filter does not normalize to core filter" do
       raw = {:ns_symbol, :set, :filter}
-      assert {:ok, {:var, :filter}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "filter is not available"
+      assert msg =~ "Set functions:"
+    end
+
+    test "walk/map does not normalize to core map" do
+      raw = {:ns_symbol, :walk, :map}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "map is not available"
+      assert msg =~ "Walk functions:"
+    end
+
+    test "clojure.walk/+ does not normalize to core +" do
+      raw = {:ns_symbol, :"clojure.walk", :+}
+      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
+      assert msg =~ "+ is not available"
+      assert msg =~ "Walk functions:"
     end
   end
 end

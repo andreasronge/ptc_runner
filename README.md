@@ -265,9 +265,9 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 ### Reference
 
 - **[Signature Syntax](docs/signature-syntax.md)** - Input/output type contracts
-- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write (a Clojure subset: 211 of 534 `clojure.core` vars, plus `clojure.string`, `clojure.set`, and `java.lang.Math`)
+- **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write (a Clojure subset: 211 of 534 `clojure.core` vars, plus `clojure.string`, `clojure.set`, `clojure.walk`, and `java.lang.Math`)
 - **[Function Reference](docs/function-reference.md)** - All built-in functions with signatures
-- **Clojure Conformance** - [Core](docs/clojure-core-audit.md) | [String](docs/clojure-string-audit.md) | [Set](docs/clojure-set-audit.md) | [Math](docs/java-math-audit.md) | [Java Interop](docs/java-interop.md)
+- **Clojure Conformance** - [Core](docs/conformance/clojure-core-audit.md) | [String](docs/conformance/clojure-string-audit.md) | [Set](docs/conformance/clojure-set-audit.md) | [Walk](docs/conformance/clojure-walk-audit.md) | [Math](docs/conformance/java-math-audit.md) | [Java Interop](docs/java-interop.md)
 - **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy by model
 
 PTC-Lisp follows Clojure where that is safe and bounded. Intentional divergences favor sandbox safety and recoverable signal values for Clojure-named helpers; Java-named dot methods keep Java semantics.

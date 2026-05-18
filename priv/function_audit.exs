@@ -2967,6 +2967,68 @@
       notes: ""
     }
   ],
+  clojure_walk_audit: [
+    %{
+      name: "keywordize-keys",
+      status: :candidate,
+      description: "Recursively transforms all map keys from strings to keywords",
+      notes: "pure recursive map transformation"
+    },
+    %{
+      name: "macroexpand-all",
+      status: :not_relevant,
+      description: "Recursively performs all possible macroexpansions in form",
+      notes: "macros are not supported in PTC-Lisp"
+    },
+    %{
+      name: "postwalk",
+      status: :supported,
+      description: "Performs a depth-first, post-order traversal of form",
+      notes: ""
+    },
+    %{
+      name: "postwalk-demo",
+      status: :not_relevant,
+      description: "Demonstrates postwalk by printing each form as it is walked",
+      notes: "debug/demo side-effect helper"
+    },
+    %{
+      name: "postwalk-replace",
+      status: :candidate,
+      description: "Recursively replaces keys in smap with their values, leaves first",
+      notes: "pure recursive data transformation"
+    },
+    %{
+      name: "prewalk",
+      status: :supported,
+      description: "Performs a pre-order traversal of form",
+      notes: ""
+    },
+    %{
+      name: "prewalk-demo",
+      status: :not_relevant,
+      description: "Demonstrates prewalk by printing each form as it is walked",
+      notes: "debug/demo side-effect helper"
+    },
+    %{
+      name: "prewalk-replace",
+      status: :candidate,
+      description: "Recursively replaces keys in smap with their values, root first",
+      notes: "pure recursive data transformation"
+    },
+    %{
+      name: "stringify-keys",
+      status: :candidate,
+      description: "Recursively transforms all map keys from keywords to strings",
+      notes: "pure recursive map transformation"
+    },
+    %{
+      name: "walk",
+      status: :supported,
+      description: "Traverses form by applying inner to children and outer to the result",
+      notes: ""
+    }
+  ],
   java_math_audit: [
     %{name: "abs", status: :supported, description: "Returns the absolute value", notes: ""},
     %{

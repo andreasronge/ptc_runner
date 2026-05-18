@@ -6,7 +6,7 @@
 
 303 functions and special forms.
 
-See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](clojure-core-audit.md) | [Clojure String](clojure-string-audit.md) | [Clojure Set](clojure-set-audit.md) | [Java Math](java-math-audit.md)
+See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](conformance/clojure-core-audit.md) | [Clojure String](conformance/clojure-string-audit.md) | [Clojure Set](conformance/clojure-set-audit.md) | [Clojure Walk](conformance/clojure-walk-audit.md) | [Java Math](conformance/java-math-audit.md)
 
 ## Table of Contents
 

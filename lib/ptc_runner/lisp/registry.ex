@@ -27,6 +27,8 @@ defmodule PtcRunner.Lisp.Registry do
   See also: `PtcRunner.Lisp.Env`, `PtcRunner.Lisp.Analyze`
   """
 
+  alias PtcRunner.Lisp.Env
+
   @registry_path "priv/functions.exs"
   @audit_path "priv/function_audit.exs"
 
@@ -85,6 +87,18 @@ defmodule PtcRunner.Lisp.Registry do
   def clojure_set_audit, do: @audit.clojure_set_audit
 
   @doc """
+  Returns all clojure.walk audit entries.
+
+  ## Examples
+
+      iex> entries = PtcRunner.Lisp.Registry.clojure_walk_audit()
+      iex> is_list(entries) and length(entries) > 5
+      true
+  """
+  @spec clojure_walk_audit() :: [map()]
+  def clojure_walk_audit, do: @audit.clojure_walk_audit
+
+  @doc """
   Returns all java.lang.Math audit entries.
 
   ## Examples
@@ -129,6 +143,48 @@ defmodule PtcRunner.Lisp.Registry do
   end
 
   @doc """
+  Returns env-dispatched builtin names that are supported for the given
+  compatibility namespace.
+
+  Unlike `builtins_by_category/1`, this represents namespace membership rather
+  than presentation grouping. For example, `clojure.core/str` is valid even
+  though `str` is displayed in the String Functions section.
+  """
+  @spec builtins_by_namespace(atom()) :: [atom()]
+  def builtins_by_namespace(ns) when ns in [:"clojure.core", :core] do
+    supported_core =
+      clojure_core_audit()
+      |> Enum.filter(&(&1.status == :supported))
+      |> MapSet.new(& &1.name)
+
+    implemented()
+    |> Enum.filter(fn entry ->
+      entry.dispatch == :env and
+        entry.clojure_var != nil and
+        MapSet.member?(supported_core, entry.clojure_var)
+    end)
+    |> Enum.map(&String.to_atom(&1.name))
+  end
+
+  def builtins_by_namespace(ns) when ns in [:"clojure.string", :str, :string],
+    do: builtins_by_category(:string)
+
+  def builtins_by_namespace(ns) when ns in [:"clojure.set", :set],
+    do: builtins_by_category(:set)
+
+  def builtins_by_namespace(ns) when ns in [:"clojure.walk", :walk],
+    do: builtins_by_category(:walk)
+
+  def builtins_by_namespace(ns) do
+    ns
+    |> Env.namespace_category()
+    |> case do
+      nil -> []
+      category -> builtins_by_category(category)
+    end
+  end
+
+  @doc """
   Returns a human-readable name for a category.
 
   ## Examples
@@ -142,6 +198,7 @@ defmodule PtcRunner.Lisp.Registry do
   @spec category_name(atom()) :: String.t()
   def category_name(:string), do: "String"
   def category_name(:set), do: "Set"
+  def category_name(:walk), do: "Walk"
   def category_name(:regex), do: "Regex"
   def category_name(:math), do: "Math"
   def category_name(:interop), do: "Interop"

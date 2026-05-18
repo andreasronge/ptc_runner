@@ -117,10 +117,11 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   @bounded_namespaces ~w(
     data tool catalog budget json mcp
     str string set regex
+    walk
     Math Interop System Double
     LocalDate Instant
     java.time.LocalDate java.time.Instant java.util.Date.
-    clojure.core clojure.string clojure.set
+    clojure.core clojure.string clojure.set clojure.walk
     core
   )a
 

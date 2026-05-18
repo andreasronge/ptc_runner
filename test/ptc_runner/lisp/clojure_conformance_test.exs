@@ -574,7 +574,8 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
     @describetag :clojure
 
     # Based on examples from https://clojuredocs.org/clojure.walk/walk
-    # Note: In Clojure these are in clojure.walk namespace, PTC-Lisp provides them at top level
+    # Note: In Clojure these are in clojure.walk namespace; PTC-Lisp provides
+    # them at top level and through clojure.walk/ namespace normalization.
 
     test "walk with multiplication and sum" do
       # (walk #(* 2 %) #(apply + %) [1 2 3 4 5]) => 30
