@@ -6,32 +6,31 @@ Core language reference for PTC-Lisp. Optional — included by default, can be o
 <!-- date: 2026-05-18 -->
 <!-- prompt-guidelines: priv/prompts/README.md -->
 <!-- audience: ptc-lisp-system-prompt -->
-<!-- budget: target<=1700 bytes, hard<=2000 bytes -->
+<!-- budget: target<=1100 bytes, hard<=1500 bytes -->
 <!-- changes: Renamed from lisp-base.md as part of 2-axis prompt refactor -->
 <!-- priority: supported Java interop shape; unavailable forms and namespaces -->
 
 <!-- PTC_PROMPT_START -->
 
 <java_interop>
-Minimal Java interop for Date/Time and string methods only:
-- `(java.util.Date.)` / `(java.util.Date. arg)` — current time or construct from millis/ISO-8601 string
-- `(java.time.LocalDate/parse "2026-01-15")` — parse ISO-8601 date
-- `(.getTime date)` — Unix millis from Date object
-- `(System/currentTimeMillis)` — current time in millis
+Only this Java shape works:
+- `(java.util.Date.)`, `(java.util.Date. millis-or-iso)`, `(.getTime date)`
+- `(java.time.LocalDate/parse "2026-01-15")`
+- `(System/currentTimeMillis)`
 - String methods: `.contains`, `.indexOf`, `.lastIndexOf`, `.toLowerCase`, `.toUpperCase`, `.startsWith`, `.endsWith`
-
-No other Java interop is supported.
+No other Java interop.
 </java_interop>
 
 <restrictions>
-- Comments (`;`) MUST be on their own line, never inline — `;` mid-line breaks operators like `<=` and `->>`
-- NOT available: lazy-seq, atom, ref, future, promise, try/catch/throw, dotimes, iterate, repeat, cycle, transients, metadata, **namespace declaration (`ns` / `require` / `refer` / `import`)**, macros, general Java interop, I/O (except println). A fixed allowlist of namespaces *is* available: `tool/`, `data/`, `catalog/`, `budget/`, `clojure.core/`, `clojure.string/`, `clojure.set/`, `clojure.walk/`, `regex/`, `Math/`, `System/`, `Double/`, `LocalDate/`, `Instant/`, `json/`, `mcp/`.
-- No mutable state: `atom`, `swap!`, `reset!`, `@deref` are NOT supported. Use `reduce` or `map`/`filter` instead of `doseq` + `swap!` to accumulate results.
+- Comments: only own-line `;;`; no inline `;` (breaks `<=`, `->>`).
+- Not available: `ns`, `require`, `refer`, `import`, macros, lazy seqs, atoms/refs, futures/promises, try/catch/throw, dotimes, iterate/repeat/cycle, transients, metadata, I/O except `println`, general Java interop.
+- Use `reduce`, `map`, `filter`; no `atom`/`swap!`/`reset!`/`@deref`.
+- Namespaces are fixed: `tool/`, `data/`, `catalog/`, `budget/`, `clojure.core/`, `clojure.string/`, `clojure.set/`, `clojure.walk/`, `regex/`, `Math/`, `System/`, `Double/`, `LocalDate/`, `Instant/`, `json/`, `mcp/`.
 </restrictions>
 
 <json>
-- `(json/parse-string s)`, `(json/generate-string v)` — Cheshire-style; `nil` on failure (no raise; map keys parse as strings).
-- `(mcp/text r)`, `(mcp/json r)` — extract MCP `content[0].text` / parse it. `mcp/json` prefers `r["structuredContent"]`.
+- `(json/parse-string s)`, `(json/generate-string v)`; parse returns `nil` on failure, keys are strings.
+- `(mcp/text r)`, `(mcp/json r)`; `mcp/json` prefers `r["structuredContent"]`.
 </json>
 
 <!-- PTC_PROMPT_END -->

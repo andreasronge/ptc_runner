@@ -16,9 +16,9 @@ Context variables:
 
 <!-- PTC_PROMPT_START -->
 {{#has_retries}}
-FINAL WORK TURN - tools stripped, you must call (return result) or (fail response). If your response has errors, you will have {{retry_count}} correction attempt(s).
+FINAL WORK TURN: no tools. Call `(return result)` or `(fail response)`. {{retry_count}} correction attempt(s) if invalid.
 {{/has_retries}}
 {{^has_retries}}
-FINAL WORK TURN - tools stripped, you must call (return result) or (fail response).
+FINAL WORK TURN: no tools. Call `(return result)` or `(fail response)`.
 {{/has_retries}}
 <!-- PTC_PROMPT_END -->

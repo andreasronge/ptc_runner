@@ -6,7 +6,7 @@ Return convention for multi-turn: use (return ...) / (fail ...) explicitly.
 <!-- date: 2026-05-18 -->
 <!-- prompt-guidelines: priv/prompts/README.md -->
 <!-- audience: ptc-lisp-system-prompt -->
-<!-- budget: target<=1900 bytes, hard<=2200 bytes -->
+<!-- budget: target<=900 bytes, hard<=1300 bytes -->
 <!-- changes: Extracted from lisp-addon-multi_turn.md as part of 2-axis prompt refactor -->
 <!-- priority: inspect before return; do not combine println/tool calls with return -->
 
@@ -15,53 +15,25 @@ Return convention for multi-turn: use (return ...) / (fail ...) explicitly.
 <return_rules>
 Use `(println ...)` to inspect, `(return answer)` when done.
 
-Explore first, return last. If you can answer without calling tools, you may `return` immediately. Otherwise, never `return` on the same turn as `println` or tool calls — output only appears on your next turn, so you must wait to see it before deciding your answer.
+Explore first, return last. If no tools are needed, `return` immediately. Otherwise, never `return` in the same turn as `println` or tool calls; you must see their next-turn output first.
 
-Verify before returning. Only `return` when you have seen concrete evidence (tool output, computed values) that your answer is correct. A guess is worse than another turn of exploration.
+Return only after concrete evidence: tool output, printed values, or computed values already visible to you. A guess is worse than another exploration turn.
 
 ```clojure
-;; BAD — you call the tool and return a guess without seeing the result
+;; BAD: tool result unseen
 (def data (tool/search {:query "revenue"}))
-(return {:revenue 42000})  ; you never saw what `data` contains!
+(return {:revenue 42000})
 
-;; GOOD — inspect first, return next turn
+;; GOOD: inspect, then return next turn
 (def data (tool/search {:query "revenue"}))
-(println "data:" data)     ; wait to see this before deciding
-```
-
-Using println and return in the same turn does not make sense since you will return before seeing the printed value.
-
-For complex tasks, use comments for reasoning:
-
-Turn 1:
-
-```clojure
-;; Fetch and inspect — don't know the response structure yet
-(def data (tool/get-items {:status "active"}))
-(println "keys:" (keys data))
-(println "first:" (first (:items data)))
-```
-
-Turn 2:
-
-```clojure
-;; Data has :items key with maps containing :id — extract and verify
-(def ids (map :id (:items data)))
-(println "Found" (count ids) "items:" ids)
-```
-
-Turn 3:
-
-```clojure
-;; Verified 5 item IDs — return
-(return ids)
+(println "data:" data)
 ```
 
 ```clojure
-(return {:result data})           ; success - exits immediately
-(fail {:reason :not_found :message "User not found"})  ; error - exits immediately
+(return {:result data})
+(fail {:reason :not_found :message "User not found"})
 ```
 
-`return`/`fail` exit immediately. Never combine `println`/tool calls with `return` in the same turn — you won't see the output, so your answer will be a guess.
+`return`/`fail` exit immediately. Do not combine them with tool calls or `println`.
 </return_rules>
 <!-- PTC_PROMPT_END -->

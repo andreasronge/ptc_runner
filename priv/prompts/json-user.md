@@ -20,7 +20,7 @@ User message template for text mode structured JSON output.
 {{output_instruction}}
 {{field_descriptions}}
 
-Example format:
+Example:
 ```json
 {{example_output}}
 ```

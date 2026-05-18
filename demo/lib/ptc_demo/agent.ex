@@ -638,16 +638,14 @@ defmodule PtcDemo.Agent do
   @role_prefix "You are a data analyst answering questions about datasets."
 
   # For single-shot (max_turns == 1), strip the Tools section that mentions return/fail
-  defp build_system_prompt(prompt_profile, 1) do
+  defp build_system_prompt(_prompt_profile, 1) do
     fn base_prompt ->
       # Remove the entire "# Available Tools" section
       stripped =
         base_prompt
         |> String.replace(~r/# Available Tools.*?(?=\n#|\z)/s, "")
 
-      language_spec = PtcDemo.Prompts.get(prompt_profile)
-
-      [@role_prefix, stripped, language_spec]
+      [@role_prefix, stripped]
       |> Enum.join("\n\n")
     end
   end

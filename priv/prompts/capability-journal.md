@@ -6,51 +6,34 @@ Journal, task caching, and semantic progress for multi-turn mode.
 <!-- date: 2026-05-18 -->
 <!-- prompt-guidelines: priv/prompts/README.md -->
 <!-- audience: ptc-lisp-system-prompt -->
-<!-- budget: target<=2400 bytes, hard<=3000 bytes -->
+<!-- budget: target<=1000 bytes, hard<=1400 bytes -->
 <!-- changes: Renamed from lisp-addon-journal.md as part of 2-axis prompt refactor -->
 <!-- priority: task IDs are semantic string literals; verify before step-done -->
 
 <!-- PTC_PROMPT_START -->
 
 <journal_restrictions>
-- `(task "id" expr)` — journaled execution: if ID was already completed, returns cached result; otherwise evaluates expr and records it
-- `(step-done "id" "summary")` — report progress on a plan step; `(task-reset "id")` — clear a cached task
+- `(task "id" expr)`: cached idempotent step. Completed ID returns cached result; failure is not cached.
+- `(step-done "id" "summary")`: mark plan progress.
+- `(task-reset "id")`: clear cached task.
 </journal_restrictions>
 
 <journaled_tasks>
-Use `(task "id" expr)` to record idempotent steps. If the task ID was already completed in a previous turn, the cached result is returned without re-executing. If the task fails, the result is NOT recorded.
-
 ```clojure
-;; First execution: calls tool and records result
 (task "fetch-user" (tool/get-user {:id 123}))
-
-;; Later turn: returns cached result without calling tool again
 (task "fetch-user" (tool/get-user {:id 123}))
 ```
 
-Task IDs must be string literals. The Mission Log in the system prompt shows which tasks have completed.
-
-Semantic IDs: Encode intent and data in IDs — use `"charge_order_42"` not `"step_1"`. Never use bare numbers like `"1"` or `"2"` as task IDs — these collide with plan step IDs and cause false progress. One task per side-effect; avoid nesting tasks inside other tasks.
-
-Reusing an ID returns the cached result. If you retry with different arguments, you must use a different ID — otherwise you silently get the old result.
+Task IDs must be string literals. Use semantic IDs with intent/data (`"charge_order_42"`), not bare `"1"`/`"2"` or `"step_1"`. One task per side effect. Do not nest tasks. New args need a new ID or `task-reset`; otherwise old cache returns.
 </journaled_tasks>
 
 <semantic_progress>
-When a plan is provided, each turn should complete one step: fetch/compute, verify the result, then call `(step-done "id" "summary")`. The step-done call marks the step as done in the Progress checklist.
-
-Verify before marking done. If a page contains conflicting values (e.g., old examples vs. current text), search for all candidates and reason through which is correct before calling `step-done`.
-
-Use `(task-reset "id")` to clear a cached task result from the journal. Call `step-done` at top level in `do` blocks — it does not work inside `pmap`/`pcalls`/`map` closures.
-
-Checklist update: `step-done` summaries appear in the Progress checklist on the next turn. If the current turn errors, summaries are discarded.
+With a plan: fetch/compute, verify, then `(step-done "id" "summary")`. Verify before marking done, especially conflicting sources. Call `step-done` at top level, not inside `map`/`pmap`/closures. If the turn errors, progress is discarded.
 
 ```clojure
-;; Typical turn: fetch, verify, mark done
 (def page (task "fetch-docs" (tool/fetch_page {:url "https://example.com/docs"})))
 (println "Length:" (count (:text page)))
 (step-done "1" (str "Fetched docs, " (count (:text page)) " chars"))
-
-;; Clear a cached task to re-execute it
 (task-reset "fetch-docs")
 ```
 </semantic_progress>

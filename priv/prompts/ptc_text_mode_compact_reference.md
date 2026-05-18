@@ -7,44 +7,26 @@ ptc_transport: :tool_call`) system prompts when `ptc_reference: :compact`.
 <!-- date: 2026-05-18 -->
 <!-- prompt-guidelines: priv/prompts/README.md -->
 <!-- audience: combined-text-ptc-system-prompt -->
-<!-- budget: target<=2100 bytes, hard<=2500 bytes -->
+<!-- budget: target<=1100 bytes, hard<=1500 bytes -->
 <!-- priority: native ptc_lisp_execute call shape and app-tool namespace split -->
 
 <!-- PTC_PROMPT_START -->
 <ptc_lisp_reference>
-You can call the native `ptc_lisp_execute` tool with a `program` argument
-containing a small PTC-Lisp program. Use it for deterministic computation,
-data transformation, or app-tool orchestration. The program runs in a
-sandboxed BEAM process and its result is returned to you as a tool result.
+Call native `ptc_lisp_execute` with `program` containing a small PTC-Lisp program. Use for deterministic computation, data transforms, or app-tool orchestration. Result returns as the tool result.
 
 Common forms:
-- `(def name value)` — bind a name in this program
-- `(let [name value ...] body)`, `(if test then else)` — local bindings and branching
-- `map`, `filter`, `reduce`, `get`, `get-in` — transform maps/lists returned by tools
-- `(tool/name {:key val})` — call an app tool from inside the program
-- `(return value)` — produce the program's final value (terminates execution; produces a successful tool result for the LLM)
-- `(println ...)` — debug output between turns
-- Raw JSON strings: `(json/parse-string s)` and `(json/generate-string v)`.
+- `(def name value)`, `(let [name value ...] body)`, `(if test then else)`
+- `map`, `filter`, `reduce`, `get`, `get-in`
+- `(tool/name {:key val})` calls an app tool inside the program
+- `(return value)` terminates with success
+- `(println ...)` prints debug for the next turn
+- `(json/parse-string s)`, `(json/generate-string v)`
 
-App tools must be invoked from inside `ptc_lisp_execute` as `(tool/name {...})` —
-never as native function calls. Only `ptc_lisp_execute` itself is callable
-natively in this mode.
+Inside PTC-Lisp, app tools are `(tool/name {...})`; only `ptc_lisp_execute` is native-callable in this mode.
 
-Cache reuse (`full_result_cached: true`). When you call an app tool natively
-and the tool is configured with `expose: :both, cache: true`, the runtime
-returns a metadata preview to you and retains the full result in the
-program's tool cache for the rest of this run. A subsequent
-`(tool/name {...})` call from inside `ptc_lisp_execute` with the same
-canonical arguments reuses the cached value — the tool function does NOT
-run again — so you can escalate to a program without re-paying the
-upstream cost. Example:
+Cache reuse: if a native app-tool result says `full_result_cached: true`, the same `(tool/name {...})` call with canonical same args inside `ptc_lisp_execute` reuses the cached full result; upstream tool does not run again.
 
 ```
-;; Turn 1 (native): call search_logs(query: "error") → get a metadata
-;; preview, e.g. {full_result_cached: true, count: 1842, ...}.
-;;
-;; Turn 2 (program): reuse the cached rows by calling the same tool with
-;; the same args from inside ptc_lisp_execute.
 (def rows (tool/search_logs {:query "error"}))
 (def errors (filter (fn [r] (= (get r "level") "error")) rows))
 (return (count errors))
