@@ -2,6 +2,7 @@ defmodule PtcRunnerMcp.AgenticTest do
   use ExUnit.Case, async: false
 
   import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
+  import PtcRunnerMcp.TestSupport.WaitHelpers, only: [wait_for_files: 2]
 
   alias PtcRunnerMcp.{
     AgenticConfig,
@@ -695,27 +696,6 @@ defmodule PtcRunnerMcp.AgenticTest do
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.map(&Jason.decode!/1)
-  end
-
-  defp wait_for_files(dir, expected, timeout_ms \\ 1_000) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    do_wait_for_files(dir, expected, deadline)
-  end
-
-  defp do_wait_for_files(dir, expected, deadline) do
-    files = File.ls!(dir) |> Enum.filter(&String.ends_with?(&1, ".jsonl"))
-
-    cond do
-      length(files) >= expected ->
-        files
-
-      System.monotonic_time(:millisecond) > deadline ->
-        flunk("expected at least #{expected} jsonl files; got #{length(files)}")
-
-      true ->
-        Process.sleep(20)
-        do_wait_for_files(dir, expected, deadline)
-    end
   end
 
   defp restore_app_env(key, nil), do: Elixir.Application.delete_env(:ptc_runner_mcp, key)
