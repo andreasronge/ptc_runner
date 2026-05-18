@@ -140,4 +140,39 @@ defmodule PtcRunner.SandboxTest do
       assert result2 == 2
     end
   end
+
+  # Regression tests for #993: binary-heavy programs must respect max_heap
+  describe "shared binary memory accounting (#993)" do
+    test "run_bounded kills binary-heavy function under tight heap cap" do
+      assert {:error, {:memory_exceeded, _bytes}} =
+               PtcRunner.Sandbox.run_bounded(
+                 fn -> String.duplicate("x", 20_000_000) end,
+                 max_heap: 1_000,
+                 timeout: 5_000
+               )
+    end
+
+    test "execute kills binary-heavy eval under tight heap cap" do
+      binary_eval = fn _ast, _ctx ->
+        _big = String.duplicate("x", 20_000_000)
+        {:ok, "done", %{}}
+      end
+
+      context = PtcRunner.Context.new()
+
+      assert {:error, {:memory_exceeded, _bytes}} =
+               PtcRunner.Sandbox.execute(:ignored, context,
+                 eval_fn: binary_eval,
+                 max_heap: 1_000,
+                 timeout: 5_000
+               )
+    end
+
+    test "small string results still work under normal heap cap" do
+      assert {:ok, result} =
+               PtcRunner.Sandbox.run_bounded(fn -> String.duplicate("x", 100) end)
+
+      assert byte_size(result) == 100
+    end
+  end
 end
