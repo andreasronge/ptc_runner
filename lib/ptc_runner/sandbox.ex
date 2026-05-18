@@ -12,6 +12,15 @@ defmodule PtcRunner.Sandbox do
   | Timeout | 1,000 ms | `:timeout` |
   | Max Heap | ~10 MB (1,250,000 words) | `:max_heap` |
 
+  The `:max_heap` limit is enforced via BEAM's `:max_heap_size` process flag
+  with `include_shared_binaries: true`, so it accounts for both process-local
+  heap terms and shared (refc) binaries referenced by the process. This prevents
+  binary-heavy programs from exceeding the memory budget via off-heap allocations.
+
+  Note that this is a per-process BEAM budget, not a whole-node or container
+  memory limit. For adversarial multi-tenant deployments, back this with an
+  OS/container memory limit around the VM or an isolated worker process.
+
   ## Configuration
 
   Limits can be set per-call:
@@ -92,7 +101,11 @@ defmodule PtcRunner.Sandbox do
     parent = self()
 
     spawn_opts =
-      [{:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}, :monitor] ++
+      [
+        {:max_heap_size,
+         %{size: max_heap, kill: true, error_logger: false, include_shared_binaries: true}},
+        :monitor
+      ] ++
         if link?, do: [:link], else: []
 
     # When linking, the parent must trap exits so that an abnormal
@@ -225,7 +238,11 @@ defmodule PtcRunner.Sandbox do
           result = fun.()
           send(parent, {:bounded_result, self(), result})
         end,
-        [{:max_heap_size, %{size: max_heap, kill: true, error_logger: false}}, :monitor]
+        [
+          {:max_heap_size,
+           %{size: max_heap, kill: true, error_logger: false, include_shared_binaries: true}},
+          :monitor
+        ]
       )
 
     receive do
