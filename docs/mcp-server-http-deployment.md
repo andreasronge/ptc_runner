@@ -115,3 +115,9 @@ sessions return `404` on later use.
 | `--http-session-ttl-ms` | `3600000` | Absolute protocol-session lifetime. |
 | `--http-session-idle-timeout-ms` | `900000` | Idle protocol-session timeout. |
 | `--http-instance-label` | hostname | Label stamped into HTTP logs/telemetry/traces. |
+
+For loopback binds, the MCP endpoint rejects requests whose
+`Host`/authority is not loopback. Missing `Origin` remains valid for
+non-browser clients, but invalid browser `Origin` values are rejected.
+POST requests with a present `Content-Type` must be JSON
+(`application/json` or a `+json` media type).

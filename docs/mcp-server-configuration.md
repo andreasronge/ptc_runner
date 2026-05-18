@@ -91,6 +91,12 @@ HTTP emits sanitized telemetry under `[:ptc_runner_mcp, :http, ...]`
 and logs request stop lines to stderr. Raw bearer tokens and raw
 `MCP-Session-Id` values are not logged.
 
+When the HTTP listener is bound to loopback, `/mcp` also requires a
+loopback `Host`/authority value. This lets non-browser clients omit
+`Origin` while still rejecting DNS-rebinding requests that arrive with a
+public attacker-controlled host. POST requests with a present
+`Content-Type` must use `application/json` or a `+json` media type.
+
 ## Response profiles
 
 `ptc_lisp_execute` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.

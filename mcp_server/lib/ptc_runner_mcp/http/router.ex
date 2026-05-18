@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.Http.Router do
 
   use Plug.Router
 
-  alias PtcRunnerMcp.Http.{Auth, Origin, Session, SessionRegistry, Telemetry}
+  alias PtcRunnerMcp.Http.{Auth, Host, Origin, Session, SessionRegistry, Telemetry}
   alias PtcRunnerMcp.{JsonRpc, Limits, Log, Version}
 
   plug(:match)
@@ -65,11 +65,13 @@ defmodule PtcRunnerMcp.Http.Router do
       {:error, {:auth, reason}} -> auth_error(conn, reason)
       {:error, :missing_session} -> Plug.Conn.send_resp(conn, 400, "missing MCP-Session-Id")
       {:error, :origin} -> Plug.Conn.send_resp(conn, 403, "forbidden")
+      {:error, :host} -> Plug.Conn.send_resp(conn, 403, "forbidden")
     end
   end
 
   defp route_mcp(%{method: "POST"} = conn, cfg) do
-    with {:ok, owner} <- authenticate(conn, cfg),
+    with :ok <- acceptable_content_type(conn),
+         {:ok, owner} <- authenticate(conn, cfg),
          {:ok, body, conn} <- read_body_capped(conn, cfg),
          {:ok, decoded} <- decode_body(body) do
       if registry_draining?() do
@@ -83,6 +85,12 @@ defmodule PtcRunnerMcp.Http.Router do
 
       {:error, :origin} ->
         Plug.Conn.send_resp(conn, 403, "forbidden")
+
+      {:error, :host} ->
+        Plug.Conn.send_resp(conn, 403, "forbidden")
+
+      {:error, :unsupported_media_type} ->
+        Plug.Conn.send_resp(conn, 415, "unsupported media type")
 
       {:error, :empty_body} ->
         Plug.Conn.send_resp(conn, 400, "empty body")
@@ -213,17 +221,49 @@ defmodule PtcRunnerMcp.Http.Router do
   end
 
   defp authenticate(conn, cfg) do
-    if Origin.allowed?(conn, cfg) do
-      case Auth.authenticate(conn, cfg) do
-        {:ok, owner} ->
-          {:ok, owner}
+    cond do
+      not Host.allowed?(conn, cfg) ->
+        {:error, :host}
 
-        {:error, reason} ->
-          Telemetry.emit([:auth, :failure], %{count: 1}, base_meta(conn, cfg, %{reason: reason}))
-          {:error, {:auth, reason}}
-      end
+      Origin.allowed?(conn, cfg) ->
+        case Auth.authenticate(conn, cfg) do
+          {:ok, owner} ->
+            {:ok, owner}
+
+          {:error, reason} ->
+            Telemetry.emit(
+              [:auth, :failure],
+              %{count: 1},
+              base_meta(conn, cfg, %{reason: reason})
+            )
+
+            {:error, {:auth, reason}}
+        end
+
+      true ->
+        {:error, :origin}
+    end
+  end
+
+  defp acceptable_content_type(conn) do
+    case Plug.Conn.get_req_header(conn, "content-type") do
+      [] -> :ok
+      [content_type | _] -> json_content_type?(content_type)
+    end
+  end
+
+  defp json_content_type?(content_type) do
+    media_type =
+      content_type
+      |> String.split(";", parts: 2)
+      |> hd()
+      |> String.downcase()
+      |> String.trim()
+
+    if media_type == "application/json" or String.ends_with?(media_type, "+json") do
+      :ok
     else
-      {:error, :origin}
+      {:error, :unsupported_media_type}
     end
   end
 
