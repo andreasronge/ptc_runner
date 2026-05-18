@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent do
   ## See Also
 
   - [Getting Started](guides/subagent-getting-started.md) - Full walkthrough
-  - [Core Concepts](guides/subagent-concepts.md) - Context, memory, firewall
+  - [Core Concepts](guides/subagent-concepts.md) - Context and memory
   - [Patterns](guides/subagent-patterns.md) - Composition and orchestration
   - [Text Mode + PTC-Lisp Compute](guides/text-mode-ptc-compute.md) - Combined mode (`output: :text, ptc_transport: :tool_call`)
   - `new/1` - All struct fields and options
@@ -139,7 +139,7 @@ defmodule PtcRunner.SubAgent do
       iex> email_tools = %{"list_emails" => fn _args -> [] end}
       iex> agent = PtcRunner.SubAgent.new(
       ...>   prompt: "Find urgent emails for {{user}}",
-      ...>   signature: "(user :string) -> {count :int, _ids [:int]}",
+      ...>   signature: "(user :string) -> {count :int, ids [:int]}",
       ...>   tools: email_tools,
       ...>   max_turns: 10
       ...> )

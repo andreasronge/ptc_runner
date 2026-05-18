@@ -19,7 +19,7 @@ Turn 3: LLM calls return with final answer
 ```elixir
 {:ok, step} = SubAgent.run(
   "Find urgent emails from Acme",
-  signature: "{summary :string, _ids [:int]}",
+  signature: "{summary :string, ids [:int]}",
   tools: %{
     "search_emails" => &MyApp.Email.search/1,
     "count_results" => &MyApp.Email.count/1
@@ -38,7 +38,7 @@ Turn 3: LLM calls return with final answer
 The LLM sees in its next prompt:
 ```
 Program Result:
-{:results [{id: 101, subject: "Urgent...", _body: <Firewalled>}, ...]}
+{:results [{id: 101, subject: "Urgent...", body: "..."}, ...]}
 (8 more items omitted. Full data available in data/results)
 ```
 
@@ -48,7 +48,7 @@ Program Result:
 (let [urgent (filter (fn [e] (includes? (:subject e) "Urgent")) data/results)]
   (return {
     :summary (str "Found " (count urgent) " urgent emails")
-    :_ids (mapv :id urgent)
+    :ids (mapv :id urgent)
   }))
 ```
 
@@ -57,7 +57,6 @@ Program Result:
 | Data Type | Lisp Context | LLM Prompt |
 |-----------|--------------|------------|
 | Normal fields | Full value | Visible |
-| Firewalled (`_`) | Full value | `<Firewalled>` |
 | Large lists | Full list | Sample (first N) |
 | Large strings | Full string | Truncated |
 | Memory | Full value | Hidden |
@@ -318,7 +317,7 @@ key                            ; Access stored value
 
 ## See Also
 
-- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Core Concepts](subagent-concepts.md) - Context and memory
 - [Context Compaction](subagent-compaction.md) - Pressure-triggered trimming for long-running multi-turn agents
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Prompt Customization](subagent-prompts.md) - LLM-specific prompts and language specs

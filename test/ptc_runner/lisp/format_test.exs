@@ -237,42 +237,30 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
-  describe "to_clojure/2 hidden field filtering" do
-    test "filters hidden keys in top-level maps" do
+  describe "to_clojure/2 underscore-prefixed keys" do
+    test "renders underscore-prefixed keys in top-level maps" do
       {result, _} = Format.to_clojure(%{id: 1, _secret: "hidden"})
 
       assert result =~ ":id 1"
-      refute result =~ "_secret"
-      refute result =~ "hidden"
+      assert result =~ ":_secret \"hidden\""
     end
 
-    test "filters hidden keys in nested maps within lists" do
+    test "renders underscore-prefixed keys in nested maps within lists" do
       data = [%{id: 1, _secret: "hidden"}, %{id: 2, _token: "also-hidden"}]
       {result, _} = Format.to_clojure(data)
 
       assert result =~ ":id 1"
       assert result =~ ":id 2"
-      refute result =~ "_secret"
-      refute result =~ "_token"
-      refute result =~ "hidden"
-      refute result =~ "also-hidden"
+      assert result =~ ":_secret \"hidden\""
+      assert result =~ ":_token \"also-hidden\""
     end
 
-    test "filters hidden keys in deeply nested structures" do
+    test "renders underscore-prefixed keys in deeply nested structures" do
       data = %{users: [%{name: "Alice", _password: "secret123"}]}
       {result, _} = Format.to_clojure(data)
 
       assert result =~ "Alice"
-      refute result =~ "_password"
-      refute result =~ "secret123"
-    end
-
-    test "respects filter_hidden: false option" do
-      {result, _} = Format.to_clojure(%{id: 1, _secret: "visible"}, filter_hidden: false)
-
-      assert result =~ ":id 1"
-      assert result =~ "_secret"
-      assert result =~ "visible"
+      assert result =~ ":_password \"secret123\""
     end
 
     test "handles string keys with underscore prefix" do
@@ -280,8 +268,7 @@ defmodule PtcRunner.Lisp.FormatTest do
       {result, _} = Format.to_clojure(data)
 
       assert result =~ "\"id\" 1"
-      refute result =~ "_secret"
-      refute result =~ "hidden"
+      assert result =~ "\"_secret\" \"hidden\""
     end
   end
 
@@ -297,18 +284,16 @@ defmodule PtcRunner.Lisp.FormatTest do
       assert result =~ "...} (2/5)"
     end
 
-    test "maps use compact hint format with count after hidden filtering" do
+    test "maps use compact hint format" do
       map = %{a: 1, b: 2, c: 3, d: 4, e: 5}
       {result, true} = Format.to_clojure(map, limit: 2)
       assert result =~ "...} (2/5)"
     end
 
-    test "map total excludes hidden fields" do
+    test "map total includes underscore-prefixed fields" do
       map = %{a: 1, b: 2, _secret: "hidden", _token: "also-hidden"}
       {result, true} = Format.to_clojure(map, limit: 1)
-      assert result =~ "(1/2)"
-      refute result =~ "_secret"
-      refute result =~ "_token"
+      assert result =~ "(1/4)"
     end
   end
 

@@ -26,7 +26,7 @@ Traditional approaches fail with large datasets:
 
 ptc_runner is well-suited for RLM because:
 
-- **Context firewall**: Large data stays in `data/*`, never bloats the prompt
+- **Programmatic data access**: Large data can stay in runtime context and be summarized by PTC-Lisp programs
 - **Native parallelism**: `pmap` spawns concurrent BEAM processes
 - **Pre-chunking**: `PtcRunner.Chunker` handles chunking in Elixir (recommended)
 - **Budget introspection**: `(budget/remaining)` enables adaptive strategies
@@ -357,6 +357,6 @@ mix run examples/parallel_workers/run.exs
 ## See Also
 
 - [Composition Patterns](subagent-patterns.md) - SubAgents as tools, orchestration
-- [Core Concepts](subagent-concepts.md) - Context firewall, memory model
+- [Core Concepts](subagent-concepts.md) - Context and memory
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) - `pmap`, `partition`, etc.
 - [Observability](subagent-observability.md) - Tracking parallel execution

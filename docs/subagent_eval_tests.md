@@ -138,72 +138,11 @@ Available names: #{inspect(Map.keys(user_ns))}
 
 ---
 
-### 3. Context Firewall (`_` prefix)
+### 3. Large Context Summarization
 
-**What we're testing:** Agent can operate on firewalled data without seeing its contents.
+**What we're testing:** Agent uses PTC-Lisp to summarize large context without returning unnecessary raw data.
 
-**Implementation Clue: Metadata Alongside Hidden Data**
-
-```elixir
-# Test setup - what goes into data/
-context = %{
-  # Visible to LLM in prompt
-  customer_count: 150,
-  email_domains: ["gmail.com", "company.com", "yahoo.com"],
-
-  # Hidden from LLM prompt, but accessible in programs
-  _customer_emails: ["alice@gmail.com", "bob@company.com", ...]
-}
-```
-
-```elixir
-%{
-  name: "firewall-count-hidden",
-  level: 3,
-  setup: {:firewall_context, :customer_emails},
-  query: "Count how many customer emails are from gmail.com domains",
-  expect: :integer,
-  constraint: {:gt, 0},
-  assertions: [
-    {:accessed_firewalled, ["_customer_emails"]},  # Did use the hidden data
-    {:no_leak, ["_customer_emails"]}               # Didn't return raw values
-  ]
-}
-```
-
-**Edge Cases to Handle:**
-
-| Edge Case | Detection | Mitigation |
-|-----------|-----------|------------|
-| Helpful Narcissist | LLM says "I can't see the emails" | Prompt: "The runtime can access fields you cannot see. Use `data/_fieldname`." |
-| Data Leak | Program returns `(first data/_emails)` | Filter firewalled values from `:return` before next turn |
-| Probe Attempts | LLM tries `(println data/_emails)` | Sandbox blocks side-effect functions on firewalled data |
-
-**Firewall Leak Detection:**
-
-```elixir
-defmodule PtcDemo.TestRunner.FirewallCheck do
-  def check_no_leak(result, firewalled_keys) do
-    return_value = result.return
-
-    # Deep check: no firewalled values appear in return
-    firewalled_keys
-    |> Enum.all?(fn key ->
-      original_value = get_in(result.context, [key])
-      not contains_value?(return_value, original_value)
-    end)
-  end
-end
-```
-
-**Prompt Addition for Firewall Tests:**
-
-```
-Some context fields are prefixed with '_' (e.g., data/_emails).
-You cannot see their contents, but your programs CAN access them.
-The PTC runtime will evaluate expressions like (count data/_emails) correctly.
-Never try to return or display firewalled data directly.
-```
+Underscore-prefixed keys are ordinary keys. Tests must not rely on `_` as a prompt-hiding or confidentiality mechanism.
 
 ---
 
@@ -436,7 +375,6 @@ DO NOT hardcode specific calculations like (* amount 0.0725).
 ```
 demo/lib/ptc_demo/test_runner/
 ├── assertions.ex        # Check turn_count, tool_called, etc.
-├── firewall_check.ex    # Detect data leaks
 ├── tool_tracker.ex      # Track sub-agent/tool usage
 ├── compile_validator.ex # Two-phase compile tests
 └── def_tracker.ex       # Track def bindings and symbol references
@@ -454,7 +392,6 @@ defmodule PtcDemo.TestRunner.Result do
     :turn_count,
     :tool_calls,         # %{"tool_name" => count}
     :def_bindings,       # [{name, value}] established via (def name value)
-    :firewalled_access,  # ["_field1", "_field2"]
     :errors_received,    # List of error messages agent saw
     :assertions_results  # %{assertion_name => :pass | {:fail, reason}}
   ]
@@ -492,11 +429,10 @@ mix ptc_demo.eval --category nested_agents
 3. Create 3-5 `def` accumulation tests
 4. Add naming drift detection
 
-### Phase 3: Context Firewall (Week 2)
-1. Implement `FirewallCheck` module
-2. Add firewall leak detection to sandbox
-3. Create 3-5 firewall test cases
-4. Add prompt instructions for firewalled access
+### Phase 3: Large Context Summarization (Week 2)
+1. Create 3-5 large-context summarization test cases
+2. Add context bloat monitoring
+3. Verify agents return compact summaries instead of raw payloads
 
 ### Phase 4: Nested Agents (Week 3)
 1. Implement `ToolTracker` module
@@ -525,7 +461,7 @@ mix ptc_demo.eval --category nested_agents
 | Error Recovery (Easy) | 95%+ | Empty result handling |
 | Error Recovery (Hard) | 80%+ | Function name traps - strong models pass on 1st try |
 | Memory Persistence | 90%+ | Naming drift is fixable |
-| Context Firewall | 95%+ | Security-critical |
+| Large Context Summarization | 95%+ | Prevents context bloat |
 | Nested Agents | 70%+ | Complex orchestration |
 | Compiled Agents | 85%+ | Hardcoding is common |
 | Turn Budget | 90%+ | Efficiency metric |
@@ -565,7 +501,7 @@ mix ptc_demo.eval --category nested_agents
 
 ## Open Questions
 
-1. **Firewall security**: Should firewalled data ever be allowed in `:return`? Current plan: hard block.
+1. **Sensitive data**: Should a future API support opaque handles or taint tracking for hidden-but-computable data?
 
 2. **Nested agent depth**: Should we test 3-level nesting (agent -> agent -> agent)? Probably overkill for v1.
 

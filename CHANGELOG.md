@@ -102,6 +102,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used as a value (e.g. `(first filter)`) now renders as type
   `function` rather than the leaky `unknown`.
 
+### Removed
+
+- Remove the underscore-prefix context firewall convention. `_`-prefixed keys
+  are now ordinary visible fields in prompt inventories, formatting, execution
+  history, signatures, and namespace export. Addresses H5 from #987.
+
 ## [0.10.1] - 2026-05-04
 
 ### Fixed
@@ -794,4 +800,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.3.1]: https://github.com/andreasronge/ptc_runner/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/andreasronge/ptc_runner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/andreasronge/ptc_runner/compare/v0.1.0...v0.2.0
-

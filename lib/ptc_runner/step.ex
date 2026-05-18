@@ -148,7 +148,7 @@ defmodule PtcRunner.Step do
   Pass a successful step's return and signature to the next step:
 
       {:ok, step1} = SubAgent.run("Find emails",
-        signature: "() -> {count :int, _ids [:int]}",
+        signature: "() -> {count :int, ids [:int]}",
         llm: llm
       )
 
@@ -165,17 +165,15 @@ defmodule PtcRunner.Step do
         llm: llm
       )
 
-  ### Accessing Firewalled Data
-
-  Fields prefixed with `_` are hidden from LLM history but available in `return`:
+  ### Accessing Return Data
 
       {:ok, step} = SubAgent.run("Find emails",
-        signature: "() -> {count :int, _email_ids [:int]}",
+        signature: "() -> {count :int, email_ids [:int]}",
         llm: llm
       )
 
-      step.return.count      #=> 5 (visible to LLM)
-      step.return._email_ids #=> [101, 102, 103, 104, 105] (hidden from LLM)
+      step.return.count     #=> 5
+      step.return.email_ids #=> [101, 102, 103, 104, 105]
   """
 
   defstruct [

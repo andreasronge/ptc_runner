@@ -52,7 +52,7 @@ Demonstrates an LLM acting as an **orchestrator** that dispatches work to parall
 
 ## The Solution: Parallel Orchestration with PTC-Lisp
 
-- **Context firewall**: Large data stays in `data/*`, never bloats the prompt
+- **Context namespacing**: Large data stays in `data/*` instead of the prompt body
 - **Native parallelism**: `pmap` spawns concurrent BEAM processes
 - **Pre-chunking**: `PtcRunner.Chunker` handles chunking in Elixir
 - **Budget control**: `token_limit` prevents runaway costs

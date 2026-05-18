@@ -123,43 +123,40 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.compaction == false
     end
 
-    test "rejects json mode with firewall field in signature" do
-      assert_raise ArgumentError,
-                   ~r/output: :text signature cannot have firewall fields \(_hidden\)/,
-                   fn ->
-                     SubAgent.new(
-                       prompt: "Test",
-                       output: :text,
-                       signature: "() -> {_hidden :string}"
-                     )
-                   end
+    test "accepts text mode with underscore-prefixed field in signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {_hidden :string}"
+        )
+
+      assert agent.output == :text
     end
 
-    test "rejects json mode with nested firewall field in signature" do
-      assert_raise ArgumentError,
-                   ~r/output: :text signature cannot have firewall fields \(_nested\)/,
-                   fn ->
-                     SubAgent.new(
-                       prompt: "Test",
-                       output: :text,
-                       signature: "() -> {x {_nested :int}}"
-                     )
-                   end
+    test "accepts text mode with nested underscore-prefixed field in signature" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {x {_nested :int}}"
+        )
+
+      assert agent.output == :text
     end
 
-    test "rejects json mode with firewall field in array element" do
-      assert_raise ArgumentError,
-                   ~r/output: :text signature cannot have firewall fields \(_secret\)/,
-                   fn ->
-                     SubAgent.new(
-                       prompt: "Test",
-                       output: :text,
-                       signature: "() -> {items [{name :string, _secret :string}]}"
-                     )
-                   end
+    test "accepts text mode with underscore-prefixed field in array element" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {items [{name :string, _secret :string}]}"
+        )
+
+      assert agent.output == :text
     end
 
-    test "accepts json mode with non-firewall nested fields" do
+    test "accepts json mode with nested fields" do
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -181,7 +178,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :text
     end
 
-    test "accepts json mode with optional fields (non-firewall)" do
+    test "accepts json mode with optional fields" do
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -192,17 +189,15 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :text
     end
 
-    test "rejects json mode with firewall field inside optional map field" do
-      # Optional map field containing another map with firewall field
-      assert_raise ArgumentError,
-                   ~r/output: :text signature cannot have firewall fields \(_id\)/,
-                   fn ->
-                     SubAgent.new(
-                       prompt: "Test",
-                       output: :text,
-                       signature: "() -> {data {user :string, _id :int}}"
-                     )
-                   end
+    test "accepts text mode with underscore-prefixed field inside map field" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          output: :text,
+          signature: "() -> {data {user :string, _id :int}}"
+        )
+
+      assert agent.output == :text
     end
   end
 
@@ -347,7 +342,7 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       assert agent.output == :ptc_lisp
     end
 
-    test "ptc_lisp mode allows firewall fields in signature" do
+    test "ptc_lisp mode allows underscore-prefixed fields in signature" do
       agent =
         SubAgent.new(
           prompt: "Test",

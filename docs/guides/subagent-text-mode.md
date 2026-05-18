@@ -93,7 +93,7 @@ step.return  #=> "Elixir is a dynamic, functional language..."  (raw string)
 step.return["result"]  #=> 42
 ```
 
-**Constraints:** Signature is optional. Tools are optional. When no signature or a `:string` return type is used, text mode returns a raw string. When a complex return type (map, list, float, int) is used, text mode returns JSON. Compaction and firewall fields are not supported.
+**Constraints:** Signature is optional. Tools are optional. When no signature or a `:string` return type is used, text mode returns a raw string. When a complex return type (map, list, float, int) is used, text mode returns JSON. Compaction is not supported.
 
 ## How It Works
 
