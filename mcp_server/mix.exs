@@ -11,7 +11,6 @@ defmodule PtcRunnerMcp.MixProject do
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      package: package(),
       aliases: aliases(),
       releases: releases(),
       description: "MCP server exposing PtcRunner's PTC-Lisp sandbox over stdio JSON-RPC.",
@@ -66,7 +65,8 @@ defmodule PtcRunnerMcp.MixProject do
 
   defp deps do
     [
-      # Path dep for in-tree dev; replaced by hex range when published.
+      # Path dep because the MCP server is built from this repository as a
+      # standalone release artifact, not published as its own package.
       {:ptc_runner, path: "..", override: true},
       {:jason, "~> 1.4"},
       {:req_llm, "~> 1.11"},
@@ -89,15 +89,6 @@ defmodule PtcRunnerMcp.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false}
-    ]
-  end
-
-  defp package do
-    [
-      maintainers: ["Andreas Ronge"],
-      licenses: ["Apache-2.0"],
-      links: %{"GitHub" => @source_url},
-      files: ~w(bench lib priv mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 

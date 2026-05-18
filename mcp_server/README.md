@@ -1,10 +1,7 @@
 # ptc_runner_mcp
 
-[![Hex.pm](https://img.shields.io/hexpm/v/ptc_runner_mcp.svg)](https://hex.pm/packages/ptc_runner_mcp)
-[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/ptc_runner_mcp)
-
 An [MCP](https://modelcontextprotocol.io/) server that exposes
-[PtcRunner](https://hex.pm/packages/ptc_runner)'s PTC-Lisp sandbox to any
+[PtcRunner](../README.md)'s PTC-Lisp sandbox to any
 MCP client (Claude Desktop, Cursor, Cline, Claude Code, …) over stdio
 JSON-RPC, with an opt-in Streamable HTTP mode for private-network
 deployments. The default tool, `ptc_lisp_execute`, accepts a PTC-Lisp
@@ -23,6 +20,25 @@ JS execution servers, security model, architecture), see
 ## Install
 
 Requires Elixir 1.15+ / Erlang OTP 26+ (see `mcp_server/mix.exs`).
+
+The intended distribution channel is a standalone `ptc_runner_mcp`
+binary from GitHub Releases. Until those artifacts are published, build
+the local Mix release from source.
+
+### Planned GitHub releases
+
+Release artifacts should be archives containing the Mix release output
+for one OS/architecture pair. The first supported target should be
+Apple Silicon macOS, with Intel macOS, Linux, and Windows added as CI
+coverage and packaging are proven.
+
+Expected channels:
+
+- Snapshot builds from the latest `main`, published as prerelease
+  artifacts for testing current work.
+- Versioned releases from tags, published as stable GitHub Releases.
+- `SHA256SUMS` for every archive, generated in CI after packaging and
+  verified by install scripts before extraction.
 
 ### Source build (Mix release)
 
@@ -200,7 +216,7 @@ ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
 - Agentic mode (`ptc_task`): [`docs/agentic-mode.md`](../docs/agentic-mode.md)
 - Diagnostics (`ptc_debug`): [`docs/mcp-debug.md`](../docs/mcp-debug.md)
 - Getting-started walkthrough: [`docs/guides/mcp-getting-started.md`](../docs/guides/mcp-getting-started.md)
-- PTC-Lisp language reference: <https://hexdocs.pm/ptc_runner>
+- PTC-Lisp language reference: [`docs/ptc-lisp-specification.md`](../docs/ptc-lisp-specification.md)
 - PtcRunner repo: <https://github.com/andreasronge/ptc_runner>
 - Model Context Protocol: <https://modelcontextprotocol.io/>
 
