@@ -183,7 +183,7 @@ defmodule PtcRunner.SubAgent.Signature.ParserTest do
                Parser.parse("{user_id :int}")
     end
 
-    test "parses firewalled field (underscore prefix)" do
+    test "parses underscore-prefixed field" do
       assert {:ok, {:signature, [], {:map, [{"_email_ids", {:list, :int}}]}}} =
                Parser.parse("{_email_ids [:int]}")
     end

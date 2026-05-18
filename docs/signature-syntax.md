@@ -189,24 +189,6 @@ This allows LLMs to write idiomatic Clojure-style code while Elixir tools receiv
 
 ---
 
-## Firewalled Fields
-
-Prefix with `_` to hide from LLM prompts:
-
-```elixir
-signature: "{summary :string, count :int, _email_ids [:int]}"
-```
-
-Firewalled fields:
-- **Available** in Lisp context (`data/_email_ids`)
-- **Available** to Elixir code (`step.return["_email_ids"]`)
-- **Hidden** from LLM prompt text (shown as `<Firewalled>`)
-- **Hidden** from parent LLM when agent is used as tool
-
-This protects LLM context windows while preserving data flow.
-
----
-
 ## Examples
 
 ### Simple Output
@@ -247,12 +229,11 @@ signature: """
 """
 ```
 
-### Firewalled Data
+### Underscore Fields
 
 ```elixir
 signature: "{summary :string, _raw_data [:map]}"
-# Parent sees: {summary :string}
-# Elixir gets: %{summary: "...", _raw_data: [...]}
+# The underscore is part of the field name. It does not hide the value.
 ```
 
 ---

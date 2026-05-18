@@ -248,8 +248,7 @@ defmodule PtcRunner.SubAgent.PromptGenerateTest do
       assert SystemPrompt.generate(agent) =~ "(return {:a {:b 42}})"
     end
 
-    test "handles firewalled fields in signatures" do
-      # Firewalled fields should be visible in the expected output format
+    test "handles underscore-prefixed fields in signatures" do
       agent = SubAgent.new(prompt: "T", signature: "{_id :int, status :string}")
       prompt = SystemPrompt.generate(agent)
 

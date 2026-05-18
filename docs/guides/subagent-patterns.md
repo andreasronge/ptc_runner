@@ -445,7 +445,7 @@ tools = %{
   "email-agent" => SubAgent.as_tool(
     SubAgent.new(
       prompt: "Find urgent emails needing follow-up",
-      signature: "() -> {_email_ids [:int]}",
+      signature: "() -> {email_ids [:int]}",
       tools: email_tools
     )
   ),
@@ -453,7 +453,7 @@ tools = %{
   "calendar-agent" => SubAgent.as_tool(
     SubAgent.new(
       prompt: "Schedule meetings for emails: {{email_ids}}",
-      signature: "(email_ids [:int]) -> {_meeting_ids [:int]}",
+      signature: "(email_ids [:int]) -> {meeting_ids [:int]}",
       tools: calendar_tools
     )
   )
@@ -514,5 +514,5 @@ The `plan:` field accepts a string list (auto-numbered) or `{id, description}` t
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [RLM Patterns](subagent-rlm-patterns.md) - Recursive Language Model patterns
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
-- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall
+- [Core Concepts](subagent-concepts.md) - Context and memory
 - `PtcRunner.SubAgent` - API reference

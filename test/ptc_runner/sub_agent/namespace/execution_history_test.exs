@@ -79,37 +79,27 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistoryTest do
       assert result == ";; Tool calls made:\n;   search({:q \"test\"})"
     end
 
-    test "filters out underscore-prefixed arg keys silently" do
+    test "renders underscore-prefixed arg keys" do
       calls = [%{name: "api_call", args: %{_token: "secret123", query: "data"}}]
       result = ExecutionHistory.render_tool_calls(calls, 20)
 
-      # Non-hidden value should be shown
       assert result =~ ":query \"data\""
-      # Secret key and value should NOT appear
-      refute result =~ "_token"
-      refute result =~ "secret123"
-      # No hidden annotation (silent filtering)
-      refute result =~ "hidden"
+      assert result =~ ":_token \"secret123\""
     end
 
-    test "filters multiple underscore-prefixed args silently" do
+    test "renders multiple underscore-prefixed args" do
       calls = [%{name: "auth", args: %{_key: "key123", user: "alice"}}]
       result = ExecutionHistory.render_tool_calls(calls, 20)
 
       assert result =~ ":user \"alice\""
-      refute result =~ "_key"
-      refute result =~ "key123"
+      assert result =~ ":_key \"key123\""
     end
 
-    test "handles all hidden args" do
+    test "handles all underscore-prefixed args" do
       calls = [%{name: "secret_call", args: %{_a: 1, _b: 2}}]
       result = ExecutionHistory.render_tool_calls(calls, 20)
 
-      # All args hidden, shows empty map
-      assert result =~ "secret_call({})"
-      # No actual values shown
-      refute result =~ ":_a"
-      refute result =~ ":_b"
+      assert result =~ "secret_call({:_a 1 :_b 2})"
     end
   end
 

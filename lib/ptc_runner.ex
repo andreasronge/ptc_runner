@@ -26,7 +26,7 @@ defmodule PtcRunner do
   ## Guides
 
   - [Getting Started](guides/subagent-getting-started.md) - First SubAgent walkthrough
-  - [Core Concepts](guides/subagent-concepts.md) - Context, memory, firewall convention
+  - [Core Concepts](guides/subagent-concepts.md) - Context and memory
   - [Patterns](guides/subagent-patterns.md) - Composition and orchestration
   """
 end

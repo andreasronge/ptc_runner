@@ -48,7 +48,7 @@ defmodule PtcRunner.SubAgent.Namespace.User do
       ";; === user/ (your prelude) ===\\ntotal                         ; = integer"
 
       iex> PtcRunner.SubAgent.Namespace.User.render(%{_secret: "token123"}, [])
-      ";; === user/ (your prelude) ===\\n_secret                       ; = string, [Hidden]"
+      ";; === user/ (your prelude) ===\\n_secret                       ; = string, sample: \\"token123\\""
   """
   @spec render(map(), keyword()) :: String.t() | nil
   def render(memory, _opts) when map_size(memory) == 0, do: nil
@@ -152,7 +152,6 @@ defmodule PtcRunner.SubAgent.Namespace.User do
   defp get_return_type(_), do: nil
 
   # Format values: name ; = type with optional sample
-  # Hidden values (names starting with `_`) show [Hidden] instead of sample
   defp format_values(values, opts) do
     has_println = Keyword.get(opts, :has_println, false)
 
@@ -161,18 +160,12 @@ defmodule PtcRunner.SubAgent.Namespace.User do
       name_str = display_name(name)
       # Pad name to 30 chars for alignment
       padded_name = String.pad_trailing(name_str, 30)
-      is_hidden = String.starts_with?(name_str, "_")
 
-      cond do
-        is_hidden ->
-          "#{padded_name}; = #{type_label}, [Hidden]"
-
-        has_println ->
-          "#{padded_name}; = #{type_label}"
-
-        true ->
-          sample = SampleFormatter.format(value, opts)
-          "#{padded_name}; = #{type_label}, sample: #{sample}"
+      if has_println do
+        "#{padded_name}; = #{type_label}"
+      else
+        sample = SampleFormatter.format(value, opts)
+        "#{padded_name}; = #{type_label}, sample: #{sample}"
       end
     end)
   end

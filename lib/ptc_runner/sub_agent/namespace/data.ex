@@ -29,7 +29,7 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
       ";; === data/ ===\\ndata/count                    ; integer, sample: 42"
 
       iex> PtcRunner.SubAgent.Namespace.Data.render(%{_token: "secret"})
-      ";; === data/ ===\\ndata/_token                   ; string, [Hidden] [Firewalled]"
+      ";; === data/ ===\\ndata/_token                   ; string, sample: \\"secret\\""
 
       iex> PtcRunner.SubAgent.Namespace.Data.render(%{x: 5}, field_descriptions: %{x: "Input value"})
       ";; === data/ ===\\ndata/x                        ; integer, sample: 5 -- Input value"
@@ -66,20 +66,13 @@ defmodule PtcRunner.SubAgent.Namespace.Data do
 
   defp format_entry(name, value, param_types, field_descriptions, opts) do
     name_str = to_string(name)
-    is_firewalled = String.starts_with?(name_str, "_")
 
     # Get type - prefer signature type, fall back to runtime inference
     type_label = get_type_label(name_str, value, param_types)
 
     # Build the line parts
     padded_name = String.pad_trailing("data/#{name_str}", @name_width)
-
-    sample_part =
-      if is_firewalled do
-        "[Hidden] [Firewalled]"
-      else
-        "sample: #{SampleFormatter.format(value, opts)}"
-      end
+    sample_part = "sample: #{SampleFormatter.format(value, opts)}"
 
     desc_part =
       case get_field_description(name, field_descriptions) do

@@ -386,8 +386,8 @@ pretending the library is a chat library.
 * [SubAgent Examples](ptc_runner_llm_agent.livemd) — broader survey of the SubAgent API
 * [Text Mode guide](https://hexdocs.pm/ptc_runner/subagent-text-mode.html) — all four
   variants of `:text` mode (plain / structured / tool+text / tool+structured)
-* [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context,
-  memory, firewall fields
+* [Core Concepts](https://hexdocs.pm/ptc_runner/subagent-concepts.html) — context
+  and memory
 * [Observability & Tracing](observability_and_tracing.livemd) — how to inspect what
   each mission did
 

@@ -13,7 +13,7 @@ defmodule PtcRunner.SubAgent.Signature.RendererTest do
       assert Renderer.to_lisp_key("first_name_last") == "first-name-last"
     end
 
-    test "preserves leading underscore for firewalled names" do
+    test "preserves leading underscore" do
       assert Renderer.to_lisp_key("_email_ids") == "_email-ids"
     end
 

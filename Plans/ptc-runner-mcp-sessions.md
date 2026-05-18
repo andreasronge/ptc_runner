@@ -623,17 +623,11 @@ History and trace fields are bounded before commit:
 Only explicit `def` and `defn` bindings persist. Ordinary expression
 results persist only in bounded `*1`, `*2`, `*3` history.
 
-### 11.2 Hidden Bindings
+### 11.2 Sensitive Bindings
 
-Existing renderers hide samples for names starting with `_`. Sessions
-SHOULD preserve that convention:
-
-```clojure
-(def _token "...") ; inspect shows type and [Hidden], not sample
-```
-
-This is only display hygiene, not a secret vault. Session tools MUST
-still run configured redaction before storing print/tool-call history.
+PTC-Lisp bindings, including names starting with `_`, are ordinary values.
+Sessions MUST NOT treat binding names as a confidentiality boundary. Session
+tools MUST run configured redaction before storing print/tool-call history.
 
 ### 11.3 Session Access Policy
 

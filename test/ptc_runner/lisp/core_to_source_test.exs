@@ -336,6 +336,24 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert step2.memory["label"] == "hello"
     end
 
+    test "exports underscore-prefixed memory names" do
+      {:ok, step} =
+        PtcRunner.Lisp.run(~S"""
+        (do
+          (def _scratch 42)
+          (defn _helper [] _scratch))
+        """)
+
+      source = CoreToSource.export_namespace(step.memory)
+
+      assert source =~ "def _scratch"
+      assert source =~ "def _helper"
+
+      {:ok, step2} = PtcRunner.Lisp.run(source)
+      assert step2.memory["_scratch"] == 42
+      assert is_tuple(step2.memory["_helper"])
+    end
+
     test "exported namespace round-trips: helpers remain callable" do
       {:ok, step} =
         PtcRunner.Lisp.run("""

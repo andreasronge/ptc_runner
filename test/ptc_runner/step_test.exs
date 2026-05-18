@@ -290,10 +290,10 @@ defmodule PtcRunner.StepTest do
         return: %{count: 5},
         fail: nil,
         memory: %{},
-        signature: "() -> {count :int, _ids [:int]}"
+        signature: "() -> {count :int, ids [:int]}"
       }
 
-      assert step.signature == "() -> {count :int, _ids [:int]}"
+      assert step.signature == "() -> {count :int, ids [:int]}"
     end
 
     test "signature can be nil" do

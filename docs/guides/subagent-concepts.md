@@ -1,6 +1,6 @@
 # Core Concepts
 
-This guide covers the foundational concepts for library users: context management, the firewall convention, and how agents complete their work.
+This guide covers the foundational concepts for library users: context management, memory, and how agents complete their work.
 
 ## How SubAgents Work
 
@@ -16,9 +16,9 @@ You don't write PTC-Lisp - the LLM does. You configure the agent with Elixir.
 
 **Alternative: Text Mode.** For classification, extraction, or tool-based tasks without PTC-Lisp, use `output: :text`. The behavior auto-detects based on whether tools are provided and the return type. See [Text Mode Guide](subagent-text-mode.md).
 
-## The Context Firewall
+## SubAgent Context Boundaries
 
-SubAgents solve a fundamental problem: LLMs need information to make decisions, but context windows are expensive and limited. The **Context Firewall** lets agents work with large datasets while keeping the parent context lean.
+SubAgents solve a fundamental problem: LLMs need information to make decisions, but context windows are expensive and limited. SubAgents let agents work with large datasets through tools and return compact, validated summaries to the parent.
 
 ```
 ┌─────────────┐                      ┌─────────────┐
@@ -26,7 +26,7 @@ SubAgents solve a fundamental problem: LLMs need information to make decisions, 
 │ (strategic) │     emails"          │ (isolated)  │
 │             │                      │             │
 │  Context:   │      CONTRACT:       │  Has tools: │
-│  ~100 tokens│   {summary, _ids}    │  - list     │
+│  ~100 tokens│   {summary, ids}     │  - list     │
 │             │                      │  - search   │
 │             │ ◄── validated ─────  │             │
 │             │     data only        │  Processes  │
@@ -36,37 +36,20 @@ SubAgents solve a fundamental problem: LLMs need information to make decisions, 
 
 The parent only sees what the signature exposes. Heavy data stays inside the SubAgent.
 
-## The Firewall Convention (`_` prefix)
-
-Fields prefixed with `_` are **firewalled** - available to your Elixir code but hidden from LLM prompts:
+## Chaining Return Data
 
 ```elixir
-signature: "{summary :string, count :int, _email_ids [:int]}"
-```
-
-Visibility rules:
-
-| Location | Normal Fields | Firewalled (`_`) |
-|----------|---------------|------------------|
-| LLM prompt history | Visible | Hidden |
-| Elixir `step.return` | Included | Included |
-
-The firewall protects LLM context windows, not your Elixir code. Your application always has full access.
-
-### Example: Email Processing
-
-```elixir
-# Step 1: Find emails (returns firewalled IDs)
+# Step 1: Find emails
 {:ok, step1} = PtcRunner.SubAgent.run(
   "Find all urgent emails",
-  signature: "{summary :string, count :int, _email_ids [:int]}",
+  signature: "{summary :string, count :int, email_ids [:int]}",
   tools: email_tools,
   llm: llm
 )
 
 step1.return.summary     #=> "Found 3 urgent emails"
 step1.return.count       #=> 3
-step1.return._email_ids  #=> [101, 102, 103]  # Available to Elixir!
+step1.return.email_ids   #=> [101, 102, 103]
 
 # Step 2: Chain to next agent
 {:ok, step2} = PtcRunner.SubAgent.run(
@@ -77,7 +60,7 @@ step1.return._email_ids  #=> [101, 102, 103]  # Available to Elixir!
 )
 ```
 
-In Step 2, the LLM knows there are 3 emails (public) but cannot see the actual IDs (firewalled). The generated program can still access them if needed.
+In Step 2, chained return data is ordinary context. Do not put secrets or sensitive identifiers into SubAgent return data unless it is acceptable for generated programs and prompt/context renderers to see them.
 
 ## Context
 

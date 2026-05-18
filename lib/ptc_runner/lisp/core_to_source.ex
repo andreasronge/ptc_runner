@@ -403,11 +403,11 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp internal_key?(key) when is_atom(key) do
     name = Atom.to_string(key)
-    String.starts_with?(name, "_") or String.starts_with?(name, "__ptc_")
+    String.starts_with?(name, "__ptc_")
   end
 
   defp internal_key?(key) when is_binary(key) do
-    String.starts_with?(key, "_") or String.starts_with?(key, "__ptc_")
+    String.starts_with?(key, "__ptc_")
   end
 
   defp internal_key?(_), do: false
