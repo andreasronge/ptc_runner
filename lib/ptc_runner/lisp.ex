@@ -62,10 +62,12 @@ defmodule PtcRunner.Lisp do
     - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
+    - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
     - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
     - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools.
     - `:max_heap` - Max heap size in words (default: 1_250_000)
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
+    - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
@@ -248,6 +250,9 @@ defmodule PtcRunner.Lisp do
   defp safe_length(list) when is_list(list), do: length(list)
   defp safe_length(_), do: 0
 
+  @default_max_program_bytes 1_000_000
+  @default_compile_timeout 5_000
+
   @spec do_run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   defp do_run(source, opts) do
     ctx = Keyword.get(opts, :context, %{})
@@ -258,6 +263,8 @@ defmodule PtcRunner.Lisp do
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
     max_symbols = Keyword.get(opts, :max_symbols, 10_000)
+    max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
+    compile_timeout = Keyword.get(opts, :compile_timeout, @default_compile_timeout)
     turn_history = Keyword.get(opts, :turn_history, [])
     max_print_length = Keyword.get(opts, :max_print_length)
     filter_context = Keyword.get(opts, :filter_context, true)
@@ -270,37 +277,29 @@ defmodule PtcRunner.Lisp do
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
     strict_data = Keyword.get(opts, :strict_data, false)
     catalog_exec = Keyword.get(opts, :catalog_exec)
-    # Phase 4: when `link: true`, the sandbox child is spawned linked to
-    # the caller (in addition to monitored). MCP server uses this so a
-    # cancelled call's worker, when killed, takes the sandbox child
-    # with it. Default `false` preserves the legacy behavior.
     link_sandbox = Keyword.get(opts, :link, false)
 
-    # Normalize tools to Tool structs
-    with {:ok, normalized_tools} <- normalize_tools(raw_tools),
-         {:ok, parsed_signature} <- parse_signature(signature_str) do
-      # Note: tool_executor handles {:error, reason} returns and unknown tools by raising
-      # ExecutionError. This matches the behavior in SubAgent.Loop.ToolNormalizer,
-      # which handles the SubAgent execution path.
-      tool_executor = fn name, args ->
-        execute_tool(normalized_tools, name, args)
-      end
-
-      # Build tools_meta lookup: %{name => %{cache: bool}}
-      tools_meta =
-        Map.new(normalized_tools, fn {name, tool} -> {name, %{cache: tool.cache}} end)
-
-      opts = %{
+    # Preflight: reject oversized source before any parsing
+    if is_binary(source) and byte_size(source) > max_program_bytes do
+      {:error,
+       Step.error(
+         :program_too_large,
+         "program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}",
+         memory,
+         %{},
+         journal: journal
+       )}
+    else
+      do_run_inner(source, %{
         ctx: ctx,
         memory: memory,
-        normalized_tools: normalized_tools,
-        tool_executor: tool_executor,
-        parsed_signature: parsed_signature,
+        raw_tools: raw_tools,
         signature_str: signature_str,
         float_precision: float_precision,
         timeout: timeout,
         max_heap: max_heap,
         max_symbols: max_symbols,
+        compile_timeout: compile_timeout,
         turn_history: turn_history,
         max_print_length: max_print_length,
         filter_context: filter_context,
@@ -310,12 +309,35 @@ defmodule PtcRunner.Lisp do
         trace_context: trace_context,
         journal: journal,
         tool_cache: tool_cache,
-        tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
         catalog_exec: catalog_exec,
         link: link_sandbox
-      }
+      })
+    end
+  end
+
+  defp do_run_inner(source, %{raw_tools: raw_tools, memory: memory, journal: journal} = params) do
+    signature_str = params.signature_str
+
+    # Normalize tools to Tool structs
+    with {:ok, normalized_tools} <- normalize_tools(raw_tools),
+         {:ok, parsed_signature} <- parse_signature(signature_str) do
+      tool_executor = fn name, args ->
+        execute_tool(normalized_tools, name, args)
+      end
+
+      tools_meta =
+        Map.new(normalized_tools, fn {name, tool} -> {name, %{cache: tool.cache}} end)
+
+      opts =
+        Map.merge(params, %{
+          normalized_tools: normalized_tools,
+          tool_executor: tool_executor,
+          parsed_signature: parsed_signature,
+          signature_str: signature_str,
+          tools_meta: tools_meta
+        })
 
       execute_program(source, opts)
     else
@@ -337,6 +359,12 @@ defmodule PtcRunner.Lisp do
   Parses and analyzes the source, then checks for undefined variables.
   Returns `:ok` if valid, or `{:error, messages}` with a list of error strings.
 
+  Accepts optional keyword options to configure compile-phase limits:
+
+    * `:compile_timeout` - Timeout in ms for bounded compile (default: 5000)
+    * `:max_heap` - Max heap words for bounded compile (default: 1_250_000)
+    * `:max_program_bytes` - Max source size in bytes (default: 1_000_000)
+
   ## Examples
 
       iex> PtcRunner.Lisp.validate("(and (map? data/result) (> (count data/result) 0))")
@@ -348,20 +376,128 @@ defmodule PtcRunner.Lisp do
       iex> PtcRunner.Lisp.validate("(let [x 1] (> x 0))")
       :ok
   """
-  @spec validate(String.t()) :: :ok | {:error, [String.t()]}
-  def validate(source) when is_binary(source) do
-    with {:ok, raw_ast} <- Parser.parse(source),
-         {:ok, core_ast} <- Analyze.analyze(raw_ast) do
-      case collect_undefined_vars(core_ast, MapSet.new()) do
-        [] -> :ok
-        undefined -> {:error, Enum.uniq(undefined)}
-      end
+  @spec validate(String.t(), keyword()) :: :ok | {:error, [String.t()]}
+  def validate(source, opts \\ [])
+
+  def validate(source, opts) when is_binary(source) do
+    max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
+    compile_timeout = Keyword.get(opts, :compile_timeout, @default_compile_timeout)
+    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+
+    if byte_size(source) > max_program_bytes do
+      {:error, ["program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}"]}
     else
-      {:error, reason} -> {:error, [format_validate_error(reason)]}
+      validate_bounded(source, compile_timeout, max_heap)
+    end
+  end
+
+  defp validate_bounded(source, compile_timeout, max_heap) do
+    compile_fn = fn ->
+      with {:ok, raw_ast} <- Parser.parse(source),
+           {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+        case collect_undefined_vars(core_ast, MapSet.new()) do
+          [] -> :ok
+          undefined -> {:error, Enum.uniq(undefined)}
+        end
+      else
+        {:error, reason} -> {:error, [format_validate_error(reason)]}
+      end
+    end
+
+    case PtcRunner.Sandbox.run_bounded(compile_fn,
+           timeout: compile_timeout,
+           max_heap: max_heap
+         ) do
+      {:ok, result} ->
+        result
+
+      {:error, {:timeout, ms}} ->
+        {:error, ["compilation exceeded #{ms}ms limit"]}
+
+      {:error, {:memory_exceeded, bytes}} ->
+        {:error, ["compilation exceeded #{bytes} byte heap limit"]}
+
+      {:error, {:execution_error, msg}} ->
+        {:error, ["compilation failed: #{msg}"]}
     end
   end
 
   defp execute_program(source, opts) do
+    %{
+      memory: memory,
+      normalized_tools: normalized_tools,
+      max_symbols: max_symbols,
+      compile_timeout: compile_timeout,
+      journal: journal
+    } = opts
+
+    compile_fn = fn ->
+      with {:ok, raw_ast} <- Parser.parse(source),
+           :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
+           {:ok, core_ast} <- Analyze.analyze(raw_ast),
+           :ok <- check_undefined_vars(core_ast, memory, journal),
+           :ok <- check_undefined_tools(core_ast, normalized_tools, memory, journal) do
+        {:ok, core_ast}
+      end
+    end
+
+    compile_max_heap =
+      Application.get_env(:ptc_runner, :default_max_heap, 1_250_000)
+
+    compile_opts = [timeout: compile_timeout, max_heap: compile_max_heap]
+
+    case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
+      {:ok, {:ok, core_ast}} ->
+        execute_eval(core_ast, opts)
+
+      {:ok, {:error, _} = compile_error} ->
+        handle_compile_error(compile_error, memory, journal)
+
+      {:error, {:timeout, ms}} ->
+        {:error,
+         Step.error(
+           :compile_timeout,
+           "compilation exceeded #{ms}ms limit",
+           memory,
+           %{},
+           journal: journal
+         )}
+
+      {:error, {:memory_exceeded, bytes}} ->
+        {:error,
+         Step.error(
+           :compile_memory_exceeded,
+           "compilation exceeded #{bytes} byte heap limit",
+           memory,
+           %{},
+           journal: journal
+         )}
+
+      {:error, {:execution_error, msg}} ->
+        {:error,
+         Step.error(:compile_error, "compilation failed: #{msg}", memory, %{}, journal: journal)}
+    end
+  end
+
+  defp handle_compile_error({:error, {:parse_error, msg}}, memory, journal) do
+    {:error, Step.error(:parse_error, msg, memory, %{}, journal: journal)}
+  end
+
+  defp handle_compile_error({:error, %Step{} = step}, _memory, _journal) do
+    {:error, step}
+  end
+
+  defp handle_compile_error({:error, {reason_atom, _, _} = reason}, memory, journal)
+       when is_atom(reason_atom) do
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+  end
+
+  defp handle_compile_error({:error, {reason_atom, _} = reason}, memory, journal)
+       when is_atom(reason_atom) do
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+  end
+
+  defp execute_eval(core_ast, opts) do
     %{
       ctx: ctx,
       memory: memory,
@@ -372,7 +508,6 @@ defmodule PtcRunner.Lisp do
       float_precision: float_precision,
       timeout: timeout,
       max_heap: max_heap,
-      max_symbols: max_symbols,
       turn_history: turn_history,
       max_print_length: max_print_length,
       filter_context: filter_context,
@@ -388,183 +523,146 @@ defmodule PtcRunner.Lisp do
       catalog_exec: catalog_exec
     } = opts
 
-    with {:ok, raw_ast} <- Parser.parse(source),
-         :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
-         {:ok, core_ast} <- Analyze.analyze(raw_ast),
-         :ok <- check_undefined_vars(core_ast, memory, journal),
-         :ok <- check_undefined_tools(core_ast, normalized_tools, memory, journal) do
-      # Filter context to only include data keys accessed by the program
-      # This reduces memory pressure by not loading unused datasets
-      filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
+    filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
+    context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
 
-      # Build Context for sandbox (turn_history passed for completeness, used via eval_fn)
-      context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
-
-      # Build eval options (only include options if set)
-      eval_opts =
-        [
-          max_print_length: max_print_length,
-          budget: budget,
-          pmap_timeout: pmap_timeout,
-          pmap_max_concurrency: pmap_max_concurrency,
-          trace_context: trace_context,
-          journal: journal,
-          tool_cache: tool_cache,
-          tools_meta: tools_meta,
-          max_tool_calls: max_tool_calls,
-          strict_data: strict_data,
-          catalog_exec: catalog_exec
-        ]
-        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-
-      # Wrapper to adapt Lisp eval signature to sandbox's expected (ast, context) -> result
-      eval_fn = fn _ast, sandbox_context ->
-        try do
-          Eval.eval_with_context(
-            core_ast,
-            sandbox_context.ctx,
-            sandbox_context.memory,
-            Env.initial(),
-            tool_executor,
-            sandbox_context.turn_history,
-            eval_opts
-          )
-        rescue
-          e in ExecutionError ->
-            {:error, {e.reason, e.message, e.data}}
-
-          e in PtcRunner.ToolExecutionError ->
-            # Tool error with eval_ctx preserved (contains recorded tool_calls)
-            {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
-
-          e ->
-            # Unexpected exception (e.g., ArgumentError in a built-in) — not a tool failure
-            {:error, {:runtime_error, Exception.message(e)}}
-        end
-      end
-
-      sandbox_opts = [
-        timeout: timeout,
-        max_heap: max_heap,
-        eval_fn: eval_fn,
-        link: Map.get(opts, :link, false)
+    eval_opts =
+      [
+        max_print_length: max_print_length,
+        budget: budget,
+        pmap_timeout: pmap_timeout,
+        pmap_max_concurrency: pmap_max_concurrency,
+        trace_context: trace_context,
+        journal: journal,
+        tool_cache: tool_cache,
+        tools_meta: tools_meta,
+        max_tool_calls: max_tool_calls,
+        strict_data: strict_data,
+        catalog_exec: catalog_exec
       ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-      case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
-        {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
-          # For return signal, we return the value but wrap it in the sentinel for SubAgent to detect
-          step =
-            apply_memory_contract({:__ptc_return__, value}, float_precision, eval_ctx)
+    eval_fn = fn _ast, sandbox_context ->
+      try do
+        Eval.eval_with_context(
+          core_ast,
+          sandbox_context.ctx,
+          sandbox_context.memory,
+          Env.initial(),
+          tool_executor,
+          sandbox_context.turn_history,
+          eval_opts
+        )
+      rescue
+        e in ExecutionError ->
+          {:error, {e.reason, e.message, e.data}}
 
-          {:ok, %{step | usage: metrics}}
+        e in PtcRunner.ToolExecutionError ->
+          {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
 
-        {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
-          step =
-            apply_memory_contract({:__ptc_fail__, value}, float_precision, eval_ctx)
-
-          {:ok, %{step | usage: metrics}}
-
-        {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
-          # Error with eval_ctx preserved (e.g., from tool execution error)
-          reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
-
-          # Extract child_trace_ids from both direct tool calls and pmap/pcalls
-          tool_child_traces =
-            eval_ctx.tool_calls
-            |> Enum.filter(&Map.has_key?(&1, :child_trace_id))
-            |> Enum.map(& &1.child_trace_id)
-
-          pmap_child_traces =
-            eval_ctx.pmap_calls
-            |> Enum.flat_map(& &1.child_trace_ids)
-
-          child_traces = tool_child_traces ++ pmap_child_traces
-
-          # Extract child_steps from tool calls and pmap/pcalls
-          tool_child_steps =
-            eval_ctx.tool_calls
-            |> Enum.filter(&Map.has_key?(&1, :child_step))
-            |> Enum.map(& &1.child_step)
-
-          pmap_child_steps =
-            eval_ctx.pmap_calls
-            |> Enum.flat_map(&Map.get(&1, :child_steps, []))
-
-          child_steps = tool_child_steps ++ pmap_child_steps
-
-          # Strip child_step/child_steps from tool/pmap_calls
-          cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
-          cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
-
-          step = %Step{
-            return: nil,
-            fail: %{reason: reason_atom, message: format_error(reason)},
-            memory: memory,
-            signature: nil,
-            usage: metrics,
-            turns: nil,
-            trace_id: nil,
-            parent_trace_id: nil,
-            field_descriptions: nil,
-            prints: eval_ctx.prints,
-            tool_calls: cleaned_tool_calls,
-            pmap_calls: cleaned_pmap_calls,
-            catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
-            child_traces: child_traces,
-            child_steps: child_steps,
-            journal: eval_ctx.journal,
-            summaries: eval_ctx.summaries,
-            tool_cache: eval_ctx.tool_cache
-          }
-
-          {:error, step}
-
-        {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
-          step =
-            apply_memory_contract(value, float_precision, eval_ctx)
-
-          step_with_usage = %{step | usage: metrics}
-
-          # Validate signature if provided
-          case validate_return_value(parsed_signature, signature_str, step_with_usage) do
-            {:ok, validated_step} -> {:ok, validated_step}
-            {:error, reason} -> {:error, reason}
-          end
-
-        {:error, {:timeout, ms}} ->
-          {:error,
-           Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
-
-        {:error, {:memory_exceeded, bytes}} ->
-          Logger.warning("PTC-Lisp execution killed: heap limit #{bytes} bytes exceeded")
-
-          {:error,
-           Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory, %{},
-             journal: journal
-           )}
-
-        {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
-          # Handle 3-tuple error format: {:error, {:type_error, message, data}}
-          {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
-
-        {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
-          # Handle 2-tuple error format: {:error, {:type_error, message}}
-          {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+        e ->
+          {:error, {:runtime_error, Exception.message(e)}}
       end
-    else
-      {:error, {:parse_error, msg}} ->
-        {:error, Step.error(:parse_error, msg, memory, %{}, journal: journal)}
+    end
 
-      {:error, %Step{} = step} ->
-        # Pass through Step errors from check_symbol_limit
+    sandbox_opts = [
+      timeout: timeout,
+      max_heap: max_heap,
+      eval_fn: eval_fn,
+      link: Map.get(opts, :link, false)
+    ]
+
+    case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
+      {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
+        step =
+          apply_memory_contract({:__ptc_return__, value}, float_precision, eval_ctx)
+
+        {:ok, %{step | usage: metrics}}
+
+      {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
+        step =
+          apply_memory_contract({:__ptc_fail__, value}, float_precision, eval_ctx)
+
+        {:ok, %{step | usage: metrics}}
+
+      {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
+        reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+
+        tool_child_traces =
+          eval_ctx.tool_calls
+          |> Enum.filter(&Map.has_key?(&1, :child_trace_id))
+          |> Enum.map(& &1.child_trace_id)
+
+        pmap_child_traces =
+          eval_ctx.pmap_calls
+          |> Enum.flat_map(& &1.child_trace_ids)
+
+        child_traces = tool_child_traces ++ pmap_child_traces
+
+        tool_child_steps =
+          eval_ctx.tool_calls
+          |> Enum.filter(&Map.has_key?(&1, :child_step))
+          |> Enum.map(& &1.child_step)
+
+        pmap_child_steps =
+          eval_ctx.pmap_calls
+          |> Enum.flat_map(&Map.get(&1, :child_steps, []))
+
+        child_steps = tool_child_steps ++ pmap_child_steps
+
+        cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
+        cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
+
+        step = %Step{
+          return: nil,
+          fail: %{reason: reason_atom, message: format_error(reason)},
+          memory: memory,
+          signature: nil,
+          usage: metrics,
+          turns: nil,
+          trace_id: nil,
+          parent_trace_id: nil,
+          field_descriptions: nil,
+          prints: eval_ctx.prints,
+          tool_calls: cleaned_tool_calls,
+          pmap_calls: cleaned_pmap_calls,
+          catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
+          child_traces: child_traces,
+          child_steps: child_steps,
+          journal: eval_ctx.journal,
+          summaries: eval_ctx.summaries,
+          tool_cache: eval_ctx.tool_cache
+        }
+
         {:error, step}
 
+      {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
+        step =
+          apply_memory_contract(value, float_precision, eval_ctx)
+
+        step_with_usage = %{step | usage: metrics}
+
+        case validate_return_value(parsed_signature, signature_str, step_with_usage) do
+          {:ok, validated_step} -> {:ok, validated_step}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, {:timeout, ms}} ->
+        {:error,
+         Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
+
+      {:error, {:memory_exceeded, bytes}} ->
+        Logger.warning("PTC-Lisp execution killed: heap limit #{bytes} bytes exceeded")
+
+        {:error,
+         Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory, %{},
+           journal: journal
+         )}
+
       {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
-        # Preserve specific error atoms from Analyze phase (e.g., {:invalid_arity, :if, "msg"})
         {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
 
       {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
-        # Handle other 2-tuple errors from Analyze phase
         {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
     end
   end
