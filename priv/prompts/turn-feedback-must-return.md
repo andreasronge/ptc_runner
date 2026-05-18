@@ -7,8 +7,12 @@ Context variables:
 - `retry_count`: integer, number of retry turns remaining
 
 <!-- version: 2 -->
-<!-- date: 2026-03-24 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: turn-feedback-message -->
+<!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Removed auto_return conditionals — only explicit return mode remains -->
+<!-- variables: has_retries, retry_count -->
 
 <!-- PTC_PROMPT_START -->
 {{#has_retries}}

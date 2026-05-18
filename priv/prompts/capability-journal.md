@@ -3,8 +3,12 @@
 Journal, task caching, and semantic progress for multi-turn mode.
 
 <!-- version: 1 -->
-<!-- date: 2026-03-23 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: ptc-lisp-system-prompt -->
+<!-- budget: target<=2400 bytes, hard<=3000 bytes -->
 <!-- changes: Renamed from lisp-addon-journal.md as part of 2-axis prompt refactor -->
+<!-- priority: task IDs are semantic string literals; verify before step-done -->
 
 <!-- PTC_PROMPT_START -->
 

@@ -4,7 +4,11 @@ Compact reference card appended to combined-mode (`output: :text,
 ptc_transport: :tool_call`) system prompts when `ptc_reference: :compact`.
 
 <!-- version: 1 -->
-<!-- date: 2026-05-06 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: combined-text-ptc-system-prompt -->
+<!-- budget: target<=2100 bytes, hard<=2500 bytes -->
+<!-- priority: native ptc_lisp_execute call shape and app-tool namespace split -->
 
 <!-- PTC_PROMPT_START -->
 <ptc_lisp_reference>
@@ -13,11 +17,14 @@ containing a small PTC-Lisp program. Use it for deterministic computation,
 data transformation, or app-tool orchestration. The program runs in a
 sandboxed BEAM process and its result is returned to you as a tool result.
 
-Core forms (everything you need for combined mode):
+Common forms:
 - `(def name value)` — bind a name in this program
+- `(let [name value ...] body)`, `(if test then else)` — local bindings and branching
+- `map`, `filter`, `reduce`, `get`, `get-in` — transform maps/lists returned by tools
 - `(tool/name {:key val})` — call an app tool from inside the program
 - `(return value)` — produce the program's final value (terminates execution; produces a successful tool result for the LLM)
 - `(println ...)` — debug output between turns
+- Raw JSON strings: `(json/parse-string s)` and `(json/generate-string v)`.
 
 App tools must be invoked from inside `ptc_lisp_execute` as `(tool/name {...})` —
 never as native function calls. Only `ptc_lisp_execute` itself is callable

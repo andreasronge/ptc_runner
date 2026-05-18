@@ -3,8 +3,12 @@
 Return convention for multi-turn: use (return ...) / (fail ...) explicitly.
 
 <!-- version: 1 -->
-<!-- date: 2026-03-23 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: ptc-lisp-system-prompt -->
+<!-- budget: target<=1900 bytes, hard<=2200 bytes -->
 <!-- changes: Extracted from lisp-addon-multi_turn.md as part of 2-axis prompt refactor -->
+<!-- priority: inspect before return; do not combine println/tool calls with return -->
 
 <!-- PTC_PROMPT_START -->
 

@@ -38,6 +38,9 @@ defmodule PtcRunner.Prompts do
 
       <!-- version: 1 -->
       <!-- date: 2026-01-01 -->
+      <!-- prompt-guidelines: priv/prompts/README.md -->
+      <!-- audience: audience-name -->
+      <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 
       <!-- PTC_PROMPT_START -->
       Actual prompt content here.

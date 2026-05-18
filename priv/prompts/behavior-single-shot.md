@@ -3,7 +3,10 @@
 Rules for single-shot execution (one turn, no memory).
 
 <!-- version: 1 -->
-<!-- date: 2026-03-23 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: ptc-lisp-system-prompt -->
+<!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Renamed from lisp-addon-single_shot.md as part of 2-axis prompt refactor -->
 
 <!-- PTC_PROMPT_START -->

@@ -3,7 +3,10 @@
 Shared rules for multi-turn execution. Combined with a return-mode fragment (explicit or auto).
 
 <!-- version: 1 -->
-<!-- date: 2026-03-23 -->
+<!-- date: 2026-05-18 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: ptc-lisp-system-prompt -->
+<!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Extracted shared core from lisp-addon-multi_turn.md -->
 
 <!-- PTC_PROMPT_START -->
