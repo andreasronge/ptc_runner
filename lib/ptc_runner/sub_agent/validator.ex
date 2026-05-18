@@ -447,13 +447,12 @@ defmodule PtcRunner.SubAgent.Validator do
   defp reserved_tool_name?(_), do: false
 
   defp validate_text_mode_constraints!(opts) do
-    # Text mode: no compaction, no firewall fields (when signature present)
+    # Text mode: no compaction
     validate_text_no_compaction!(opts)
 
     # Only validate signature-related constraints when signature is present
     case Keyword.fetch(opts, :signature) do
       {:ok, sig} when is_binary(sig) ->
-        validate_text_no_firewall_fields!(opts)
         validate_text_all_params_used!(opts)
         validate_section_fields!(opts)
 
@@ -472,54 +471,6 @@ defmodule PtcRunner.SubAgent.Validator do
         :ok
     end
   end
-
-  defp validate_text_no_firewall_fields!(opts) do
-    alias PtcRunner.SubAgent.Signature
-
-    case Keyword.fetch(opts, :signature) do
-      {:ok, sig} when is_binary(sig) ->
-        case Signature.parse(sig) do
-          {:ok, {:signature, _params, output_type}} ->
-            case find_firewall_field(output_type) do
-              nil ->
-                :ok
-
-              field_name ->
-                raise ArgumentError,
-                      "output: :text signature cannot have firewall fields (#{field_name})"
-            end
-
-          {:error, _} ->
-            :ok
-        end
-
-      _ ->
-        :ok
-    end
-  end
-
-  # Recursively check a type for firewall fields (fields starting with "_")
-  # Returns the first firewall field name found, or nil if none
-  defp find_firewall_field({:map, fields}) do
-    Enum.find_value(fields, fn {field_name, field_type} ->
-      if String.starts_with?(field_name, "_") do
-        field_name
-      else
-        find_firewall_field(field_type)
-      end
-    end)
-  end
-
-  defp find_firewall_field({:list, element_type}) do
-    find_firewall_field(element_type)
-  end
-
-  defp find_firewall_field({:optional, inner_type}) do
-    find_firewall_field(inner_type)
-  end
-
-  # Primitives and other types don't contain fields
-  defp find_firewall_field(_), do: nil
 
   # Text mode: validate all signature params are used in prompt (via variables or sections)
   defp validate_text_all_params_used!(opts) do

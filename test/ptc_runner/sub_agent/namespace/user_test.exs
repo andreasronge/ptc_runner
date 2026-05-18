@@ -87,8 +87,7 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       assert result =~ "counter"
       assert result =~ "; = integer, sample: 1"
       assert result =~ "_token"
-      assert result =~ "; = string, [Hidden]"
-      refute result =~ "secret"
+      assert result =~ "; = string, sample: \"secret\""
     end
 
     test "sorts mixed atom and binary memory keys by display name" do
@@ -193,39 +192,29 @@ defmodule PtcRunner.SubAgent.Namespace.UserTest do
       assert Enum.at(lines, 4) =~ "total"
     end
 
-    test "hides value with underscore-prefixed name" do
+    test "renders value with underscore-prefixed name" do
       result = User.render(%{_secret: "token123"}, [])
 
-      # Type should be shown, but not the sample value
       assert result =~ "_secret"
-      assert result =~ "; = string, [Hidden]"
-      refute result =~ "token123"
-      refute result =~ "sample:"
+      assert result =~ "; = string, sample: \"token123\""
     end
 
-    test "hides multiple underscore-prefixed values" do
+    test "renders multiple underscore-prefixed values" do
       result = User.render(%{_key: "abc", _token: 42, visible: "data"}, [])
 
       assert result =~ "_key"
-      assert result =~ "; = string, [Hidden]"
+      assert result =~ "; = string, sample: \"abc\""
       assert result =~ "_token"
-      # _token is integer, should show type but [Hidden]
-      assert result =~ "; = integer, [Hidden]"
-      # visible should show sample
+      assert result =~ "; = integer, sample: 42"
       assert result =~ "visible"
       assert result =~ "sample: \"data\""
-      # Hidden values should not appear
-      refute result =~ "abc"
-      refute result =~ " 42"
     end
 
-    test "hides underscore-prefixed values even with has_println true" do
+    test "omits samples for underscore-prefixed values with has_println true" do
       result = User.render(%{_secret: "token", normal: 5}, has_println: true)
 
-      # Hidden value shows [Hidden] regardless of has_println
       assert result =~ "_secret"
-      assert result =~ "; = string, [Hidden]"
-      # Normal value should not show sample (has_println behavior)
+      assert result =~ "; = string"
       assert result =~ "normal"
       assert result =~ "; = integer"
       refute result =~ "sample:"

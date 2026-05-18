@@ -162,7 +162,7 @@ defmodule PtcRunner.SubAgent.SignatureTest do
       assert :ok = Signature.validate(sig, %{})
     end
 
-    test "firewalled field example" do
+    test "underscore-prefixed field example" do
       {:ok, sig} = Signature.parse("() -> {summary :string, count :int, _email_ids [:int]}")
 
       assert :ok =

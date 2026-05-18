@@ -76,7 +76,6 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 - **Secure code mode**: [PTC-Lisp](docs/ptc-lisp-specification.md) executes generated programs in a BEAM-native sandbox with process isolation, timeouts, and heap limits
 - **Two agent modes**: PTC-Lisp for multi-turn agentic workflows with tools, or [text mode](docs/guides/subagent-text-mode.md) for direct LLM responses with optional native tool calling
 - **Signatures**: Type contracts (`{sentiment :string, score :float}`) that validate outputs and drive auto-retry on mismatch
-- **Context firewall**: `_` prefixed fields stay in BEAM memory, hidden from LLM prompts
 - **Transactional memory**: `def` persists data across turns without bloating context
 - **Composable SubAgents**: Nest agents as tools with isolated state and turn budgets
 - **[Recursive agents (RLM)](https://arxiv.org/pdf/2512.24601)**: Agents call themselves via `:self` tools to subdivide large inputs
@@ -96,14 +95,6 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
                                    #(tool/get_orders {:id data/user_id})
                                    #(tool/get_stats {:id data/user_id}))]
   {:user user :order_count (count orders) :stats stats})
-```
-
-**Context firewall** - keep large data out of LLM prompts:
-
-```elixir
-# The LLM sees: %{summary: "Found 3 urgent emails"}
-# Elixir gets: %{summary: "...", _email_ids: [101, 102, 103]}
-signature: "{summary :string, _email_ids [:int]}"
 ```
 
 **Ad-hoc LLM judgment from code** - the LLM writes programs that call other LLMs, with typed responses and parallel execution:
@@ -254,7 +245,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 
 - **[Getting Started](docs/guides/subagent-getting-started.md)** - Build your first SubAgent
 - **[LLM Setup](docs/guides/subagent-llm-setup.md)** - Providers, streaming, custom adapters, framework integration
-- **[Core Concepts](docs/guides/subagent-concepts.md)** - Context, memory, and the firewall convention
+- **[Core Concepts](docs/guides/subagent-concepts.md)** - Context and memory
 - **[PTC-Lisp Transport](docs/guides/subagent-ptc-transport.md)** - `ptc_transport: :content` (default) vs `:tool_call` (opt-in)
 - **[Text Mode + PTC-Lisp Compute](docs/guides/text-mode-ptc-compute.md)** - Combined mode (`output: :text, ptc_transport: :tool_call`) for chat agents that escalate to deterministic compute
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition

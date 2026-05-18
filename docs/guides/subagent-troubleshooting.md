@@ -108,13 +108,7 @@ Common issues and solutions when working with SubAgents.
 
 **Solutions:**
 
-1. **Use the firewall convention** for large data:
-   ```elixir
-   # _ids hidden from LLM prompts but available to programs
-   signature: "{summary :string, _ids [:int]}"
-   ```
-
-2. **Set prompt limits**:
+1. **Set prompt limits**:
    ```elixir
    PtcRunner.SubAgent.run(prompt,
      prompt_limit: %{list: 3, string: 500},  # Truncate in prompts
@@ -122,7 +116,7 @@ Common issues and solutions when working with SubAgents.
    )
    ```
 
-3. **Enable compaction** for long-running multi-turn agents:
+2. **Enable compaction** for long-running multi-turn agents:
    ```elixir
    PtcRunner.SubAgent.run(prompt,
      compaction: true,  # Trims older turns once turn/token threshold is hit

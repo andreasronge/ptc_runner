@@ -9,8 +9,6 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
   Returns `;; No tool calls made` for empty list, otherwise formatted list
   with header and entries.
 
-  Hidden fields (keys starting with `_`) are filtered out by `Format.to_clojure`.
-
   ## Examples
 
       iex> PtcRunner.SubAgent.Namespace.ExecutionHistory.render_tool_calls([], 20)
@@ -22,7 +20,7 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
 
       iex> call = %{name: "search", args: %{query: "test", _token: "secret123"}}
       iex> PtcRunner.SubAgent.Namespace.ExecutionHistory.render_tool_calls([call], 20)
-      ";; Tool calls made:\\n;   search({:query \\"test\\"})"
+      ";; Tool calls made:\\n;   search({:_token \\"secret123\\" :query \\"test\\"})"
   """
   @spec render_tool_calls([map()], non_neg_integer()) :: String.t()
   def render_tool_calls([], _limit), do: ";; No tool calls made"

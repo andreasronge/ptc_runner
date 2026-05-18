@@ -140,16 +140,16 @@ Signatures are short type contracts:
 ```elixir
 "{name :string, price :float}"                       # output only
 "(query :string) -> [{id :int, title :string}]"      # input + output
-"{count :int, _email_ids [:int]}"                    # firewalled field
+"{count :int, _email_ids [:int]}"                    # ordinary field name
 ```
 
 Effects:
 
 - Sent to the LLM in the system prompt so it knows what shape to return.
 - Validated against `step.return` after `(return ...)`. Mismatch → error.
-- Fields prefixed with `_` are **firewalled**: returned to your Elixir code
-  but stripped from prompt history (use for large opaque data). **PTC-Lisp
-  mode only** — the validator rejects firewall fields under `output: :text`.
+- Fields prefixed with `_` are ordinary fields. The underscore is part of the
+  field name and does not hide the value from generated programs, prompt
+  history, tool arguments, `println`, or `str`.
 
 If the LLM struggles, loosen with `:any` or `?` (optional) before adding retries.
 

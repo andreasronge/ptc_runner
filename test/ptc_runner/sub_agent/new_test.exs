@@ -27,7 +27,7 @@ defmodule PtcRunner.SubAgent.NewTest do
       agent =
         SubAgent.new(
           prompt: "Find urgent emails for {{user}}",
-          signature: "(user :string) -> {count :int, _ids [:int]}",
+          signature: "(user :string) -> {count :int, ids [:int]}",
           tools: email_tools,
           max_turns: 10,
           prompt_limit: %{max_length: 1000},
@@ -38,7 +38,7 @@ defmodule PtcRunner.SubAgent.NewTest do
         )
 
       assert agent.prompt == "Find urgent emails for {{user}}"
-      assert agent.signature == "(user :string) -> {count :int, _ids [:int]}"
+      assert agent.signature == "(user :string) -> {count :int, ids [:int]}"
       assert agent.tools == email_tools
       assert agent.max_turns == 10
       assert agent.prompt_limit == %{max_length: 1000}

@@ -90,7 +90,7 @@ SubAgent.new(
 )
 ```
 
-**Constraints:** Signature is optional. Tools are optional. Compaction and firewall fields are not supported.
+**Constraints:** Signature is optional. Tools are optional. Compaction is not supported.
 
 See [Text Mode Guide](subagent-text-mode.md) for Mustache syntax, validation rules, tool calling, and examples.
 
@@ -416,16 +416,6 @@ This separation enables testing, composition, and reuse.
 
 SubAgents also support fields for documentation (`description`, `field_descriptions`, `context_descriptions`), output formatting (`format_options`, `float_precision`), and memory limits (`memory_limit`, `memory_strategy`). See `PtcRunner.SubAgent.new/1` for all options.
 
-## The Firewall Convention
-
-Fields prefixed with `_` are **firewalled** - available to your Elixir code and the agent's programs, but hidden from LLM prompt history:
-
-```elixir
-signature: "{summary :string, count :int, _email_ids [:int]}"
-```
-
-This keeps parent agent context lean while preserving full data access. See [Core Concepts](subagent-concepts.md) for details.
-
 ## State Persistence
 
 Use `def` to store values that persist across turns within a single `run`:
@@ -517,7 +507,7 @@ See [Phoenix Streaming](phoenix-streaming.md) for a full LiveView integration re
 - [Text Mode + PTC-Lisp Compute](text-mode-ptc-compute.md) - Combined mode (`output: :text, ptc_transport: :tool_call`) for chat agents that escalate to deterministic compute
 - [Output Modes in an App Loop](../../livebooks/output_modes_in_app_loops.livemd) - Runnable livebook showing how to pick `:text` plain, `:text` structured, or `:ptc_lisp` per user message
 - [Phoenix Streaming](phoenix-streaming.md) - Real-time streaming in LiveView
-- [Core Concepts](subagent-concepts.md) - Context, memory, and the firewall convention
+- [Core Concepts](subagent-concepts.md) - Context and memory
 - [Observability](subagent-observability.md) - Telemetry, debug mode, and tracing
 - [Patterns](subagent-patterns.md) - Chaining, orchestration, and composition
 - [Signature Syntax](../signature-syntax.md) - Full signature syntax reference
