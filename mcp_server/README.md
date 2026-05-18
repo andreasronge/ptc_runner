@@ -8,8 +8,7 @@ An [MCP](https://modelcontextprotocol.io/) server that exposes
 MCP client (Claude Desktop, Cursor, Cline, Claude Code, …) over stdio
 JSON-RPC, with an opt-in Streamable HTTP mode for private-network
 deployments. The default tool, `ptc_lisp_execute`, accepts a PTC-Lisp
-program plus optional `context` and `output_schema` (or legacy
-`signature`), runs it in an isolated BEAM process (1 s wall-clock,
+program plus optional `context` and `output_schema`, runs it in an isolated BEAM process (1 s wall-clock,
 10 MB memory; 10 s / 100 MB in [aggregator mode](../docs/aggregator-mode.md)),
 and returns a structured result. No filesystem, no network, no
 arbitrary process exec — only PTC-Lisp built-ins and `println`.

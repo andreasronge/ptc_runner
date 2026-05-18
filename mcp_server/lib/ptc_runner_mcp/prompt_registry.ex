@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.PromptRegistry do
   @moduledoc false
 
-  alias PtcRunner.PtcToolProtocol
+  alias PtcRunner.{PromptLoader, PtcToolProtocol}
   alias PtcRunnerMcp.{CatalogConfig, CatalogDescription}
   alias PtcRunnerMcp.Upstream.Catalog
 
@@ -14,10 +14,17 @@ defmodule PtcRunnerMcp.PromptRegistry do
   }
 
   @authoring_card_path Path.expand(
-                         Path.join([__DIR__, "..", "..", "priv", "mcp_authoring_card.md"])
+                         Path.join([
+                           __DIR__,
+                           "..",
+                           "..",
+                           "priv",
+                           "prompts",
+                           "mcp_authoring_card.md"
+                         ])
                        )
   @external_resource @authoring_card_path
-  @authoring_card File.read!(@authoring_card_path)
+  @authoring_card @authoring_card_path |> File.read!() |> PromptLoader.extract_content()
 
   @aggregator_authoring_card_path Path.expand(
                                     Path.join([
@@ -25,11 +32,14 @@ defmodule PtcRunnerMcp.PromptRegistry do
                                       "..",
                                       "..",
                                       "priv",
+                                      "prompts",
                                       "mcp_aggregator_authoring_card.md"
                                     ])
                                   )
   @external_resource @aggregator_authoring_card_path
-  @aggregator_authoring_card File.read!(@aggregator_authoring_card_path)
+  @aggregator_authoring_card @aggregator_authoring_card_path
+                             |> File.read!()
+                             |> PromptLoader.extract_content()
 
   @session_authoring_card_path Path.expand(
                                  Path.join([
@@ -37,17 +47,14 @@ defmodule PtcRunnerMcp.PromptRegistry do
                                    "..",
                                    "..",
                                    "priv",
+                                   "prompts",
                                    "mcp_session_authoring_card.md"
                                  ])
                                )
   @external_resource @session_authoring_card_path
-  @session_authoring_card (case File.read(@session_authoring_card_path) do
-                             {:ok, body} ->
-                               body
-
-                             _ ->
-                               "PTC-Lisp sessions persist explicit `(def ...)` and `(defn ...)` bindings across eval calls. `println` output is captured; `*1`, `*2`, and `*3` reference the last three successful eval results."
-                           end)
+  @session_authoring_card @session_authoring_card_path
+                          |> File.read!()
+                          |> PromptLoader.extract_content()
 
   @cards %{
     mcp_no_tools_capability:
@@ -436,17 +443,15 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp mcp_aggregator_quick_contract do
     """
-    Execute a PTC-Lisp program in PtcRunner's sandbox for deterministic computation, filtering, aggregation, and orchestration over configured upstream MCP servers.
+    Run one stateless PTC-Lisp program for compute plus upstream MCP calls.
 
-    Quick aggregator contract:
-    - Call upstream tools inside the program as `(tool/mcp-call {:server "<name>" :tool "<tool>" :args {...}})`.
-    - World-fault failures such as timeout, oversize, upstream error, cap exhaustion, or unavailable upstream return `nil` and are recorded in `upstream_calls`.
-    - A successful top-level JSON `null` returns `:json-null`, not `nil`.
-    - Unwrap upstream MCP envelopes with `(mcp/text r)` for text and `(mcp/json r)` for structured JSON.
-    - Use `catalog/search-tools`, `catalog/list-tools`, or `catalog/describe-tool` when catalog details are not inline or a schema is unfamiliar.
-    - Return compact maps, vectors, or strings; do not return full upstream envelopes unless the caller asked for them.
-
-    Each invocation of `ptc_lisp_execute` is independent; there is no memory of prior calls.
+    Aggregator contract:
+    - Call upstreams: `(tool/mcp-call {:server s :tool t :args {...}})`.
+    - Result is the upstream value or `nil`; do not expect `{:ok ...}` envelopes.
+    - World faults return `nil` and appear in `upstream_calls`; code faults raise.
+    - JSON `null` => `:json-null`; unwrap with `(mcp/text r)` or `(mcp/json r)`.
+    - Use catalog/search-tools, catalog/list-tools, catalog/describe-tool as needed.
+    - Return compact maps, vectors, or strings.
     """
     |> String.trim()
   end
@@ -456,7 +461,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   end
 
   defp mcp_session_eval_detail do
-    "Evaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
+    "Evaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.\n\nOptionally validates the return value against `output_schema` (JSON Schema). On validation success, the response includes `validated` structured JSON. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
   end
 
   defp mcp_session_inspect_description do

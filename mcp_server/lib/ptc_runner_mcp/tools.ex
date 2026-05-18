@@ -10,23 +10,20 @@ defmodule PtcRunnerMcp.Tools do
 
   Phase 2 wired real `Lisp.run/2` execution through
   `PtcRunnerMcp.Sandbox` and enforced `:max_program_bytes` and
-  `:max_concurrent_calls` (§ 11). Phase 3 wires the remaining two
-  arguments per § 9.3 / § 9.4:
+  `:max_concurrent_calls` (§ 11). Phase 3 wires the remaining
+  arguments:
 
     * `context` — JSON object whose keys land as `data/<key>` bindings
       inside the program. Validated for shape, key syntax, and
       encoded byte size before a concurrency permit is acquired.
-    * `signature` — PTC signature string, parsed via
-      `PtcToolProtocol.parse_signature/1` and used for return-value
-      validation only. Parse failure is `args_error`; mismatch
-      between the parsed signature and the program's return is
-      `validation_error`.
+    * `output_schema` — JSON Schema object converted to the internal
+      return validator. Schema failure is `args_error`; mismatch
+      between the schema and the program's return is `validation_error`.
 
   Both validations short-circuit before `ConcurrencyGate.try_acquire/1`
   so a malformed argument never consumes a permit.
   """
 
-  alias PtcRunner.PtcToolProtocol
   alias PtcRunner.SubAgent.Signature
 
   alias PtcRunnerMcp.{
@@ -224,7 +221,7 @@ defmodule PtcRunnerMcp.Tools do
 
   @doc """
   The verbatim authoring-card markdown shipped at
-  `mcp_server/priv/mcp_authoring_card.md`.
+  `mcp_server/priv/prompts/mcp_authoring_card.md`.
 
   Read at compile time via `@external_resource`; edits to the source
   file trigger a recompile of this module.
@@ -276,7 +273,7 @@ defmodule PtcRunnerMcp.Tools do
 
   @doc """
   The verbatim aggregator-mode authoring-card markdown shipped at
-  `mcp_server/priv/mcp_aggregator_authoring_card.md`. Read at compile
+  `mcp_server/priv/prompts/mcp_aggregator_authoring_card.md`. Read at compile
   time via `@external_resource`.
   """
   @spec aggregator_authoring_card() :: String.t()
@@ -446,7 +443,7 @@ defmodule PtcRunnerMcp.Tools do
   Handle a `tools/call` request.
 
   For `name: "ptc_lisp_execute"`, validates `program` (§ 9.2),
-  `context` (§ 9.3), and `signature` (§ 9.4) before acquiring a
+  `context` and `output_schema` before acquiring a
   concurrency permit. All argument-shape failures emit `args_error`
   without consuming a permit. The permit is held only while the
   underlying `Lisp.run/2` is in flight and is released even on
@@ -929,65 +926,22 @@ defmodule PtcRunnerMcp.Tools do
     end)
   end
 
-  # § 9.4: validate that `signature`, when present, is a string and
-  # parses cleanly. Parse failure short-circuits BEFORE permit
-  # acquisition.
-  defp validate_signature(args) do
-    case Map.fetch(args, "signature") do
-      :error ->
-        {:ok, nil}
-
-      {:ok, nil} ->
-        {:ok, nil}
-
-      {:ok, value} when not is_binary(value) ->
-        {:error, "argument `signature` must be a string, got #{type_label(value)}"}
-
-      {:ok, value} ->
-        if String.trim(value) == "any" do
-          {:ok, nil}
-        else
-          case PtcToolProtocol.parse_signature(value) do
-            {:ok, parsed} -> {:ok, parsed}
-            {:error, reason} -> {:error, "argument `signature` is malformed: #{reason}"}
-          end
-        end
-    end
-  end
-
   @doc """
-  Parse the `output_schema` / `signature` pair from an MCP tools/call
-  arguments map. Mutually exclusive — supplying both is an args_error.
+  Parse the `output_schema` argument from an MCP tools/call arguments map.
+
   Returns `{:ok, parsed_signature}` (or `{:ok, nil}` when neither was
   supplied) or `{:error, message}`. Public so `PtcRunnerMcp.Sessions`
   can reuse the same gate from `ptc_session_eval` validation.
-
-  `signature: "any"` normalizes to nil in validate_signature/1, so it
-  must not trigger the mutex gate — treat it as absent here too.
   """
   @spec validate_output_contract(map()) ::
           {:ok, Sandbox.parsed_signature() | nil} | {:error, String.t()}
   def validate_output_contract(args) when is_map(args) do
-    sig_present =
-      case Map.fetch(args, "signature") do
-        {:ok, nil} -> false
-        {:ok, v} when is_binary(v) -> String.trim(v) != "any"
-        {:ok, _} -> true
-        :error -> false
-      end
+    case Map.fetch(args, "signature") do
+      {:ok, _value} ->
+        {:error, "argument `signature` is no longer supported; use `output_schema`"}
 
-    schema_present = match?({:ok, v} when not is_nil(v), Map.fetch(args, "output_schema"))
-
-    cond do
-      sig_present and schema_present ->
-        {:error,
-         "arguments `output_schema` and `signature` are mutually exclusive — provide one or neither"}
-
-      schema_present ->
+      :error ->
         validate_output_schema(args)
-
-      true ->
-        validate_signature(args)
     end
   end
 
@@ -1034,10 +988,6 @@ defmodule PtcRunnerMcp.Tools do
         "output_schema" => %{
           "type" => "object",
           "description" => output_schema_description_for(profile)
-        },
-        "signature" => %{
-          "type" => "string",
-          "description" => signature_description_for(profile)
         }
       },
       "required" => ["program"]
@@ -1049,25 +999,13 @@ defmodule PtcRunnerMcp.Tools do
       ~s|`validated` JSON value when supplied. Supported types: string, integer, number, | <>
       ~s|boolean, array (with items), object (with properties/required). | <>
       ~s|Example: {"type": "object", "properties": {"count": {"type": "integer"}}, | <>
-      ~s|"required": ["count"]}. Mutually exclusive with `signature`.|
+      ~s|"required": ["count"]}.|
   end
 
   defp output_schema_description_for(:mcp_aggregator) do
     "Optional JSON Schema for return validation. Omit for exploratory upstream calls. " <>
       "Supported types: string, integer, number, boolean, array (with items), " <>
-      "object (with properties/required). Mutually exclusive with `signature`."
-  end
-
-  defp signature_description_for(:mcp_no_tools) do
-    "Advanced/legacy. PTC signature syntax for return validation, e.g. " <>
-      "'() -> {count :int}'. Prefer `output_schema` (JSON Schema) for typed output. " <>
-      "Mutually exclusive with `output_schema`."
-  end
-
-  defp signature_description_for(:mcp_aggregator) do
-    "Advanced/legacy. Usually omit in aggregator mode. Prefer `output_schema` for " <>
-      "typed output. Only use when you know the exact PTC signature syntax, " <>
-      "e.g. '() -> {count :int}'. Mutually exclusive with `output_schema`."
+      "object (with properties/required)."
   end
 
   defp prepend_response_profile_note(description, capability_profile, :slim) do

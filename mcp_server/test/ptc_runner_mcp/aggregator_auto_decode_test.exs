@@ -133,7 +133,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
                    (= (get-in r ["content" 0 "type"]) "text")
                    (= (get-in r ["content" 0 "mimeType"]) "application/json")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false, "envelope: #{inspect(env, limit: :infinity)}"
@@ -163,7 +163,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get-in r ["structuredContent" "@id"]) "x"))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -186,7 +186,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get-in r ["structuredContent" "k"]) "v"))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -213,7 +213,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (not (contains? r "structuredContent")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -231,7 +231,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (not (contains? r "structuredContent")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -249,7 +249,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (not (contains? r "structuredContent")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -298,7 +298,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
                    (= (get-in r ["content" 0 "text"]) "{not json")
                    (= (get-in r ["content" 0 "mimeType"]) "application/json")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true,
@@ -350,7 +350,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get-in r ["structuredContent" "upstream-says"]) "this"))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -381,7 +381,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get-in r ["structuredContent" "x"]) 1))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -407,7 +407,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get r "structuredContent") :json-null))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true,
@@ -429,7 +429,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
               (and (= (get r "structuredContent") false)
                    (not= (get r "structuredContent") :json-null)))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true,
@@ -447,7 +447,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get r "structuredContent") 0))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -464,7 +464,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "j" :args {}})]
               (= (get r "structuredContent") ""))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -482,7 +482,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
               (and (vector? (get r "structuredContent"))
                    (empty? (get r "structuredContent"))))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true
@@ -515,7 +515,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
       env =
         call(
           ~S|(nil? (tool/mcp-call {:server "alpha" :tool "fail" :args {}}))|,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(env)["validated"] == true,
@@ -567,7 +567,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
               (and (contains? r "content")
                    (contains? r "structuredContent")))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(promoted_env)["validated"] == true,
@@ -580,7 +580,7 @@ defmodule PtcRunnerMcp.AggregatorAutoDecodeTest do
               (and (contains? r "content")
                    (not (contains? r "structuredContent"))))
           |,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert structured(plain_env)["validated"] == true,

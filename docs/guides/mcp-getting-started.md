@@ -74,8 +74,8 @@ in the standard MCP `tools/call` envelope:
 
 The `result` field (`"user=> 3"`) is an LLM-facing preview — an
 EDN/Clojure rendering of the program's final expression, not a
-programmatic value. To get a typed value back, supply a `signature`
-(step 4 below).
+programmatic value. To get a typed value back, supply an
+`output_schema` (step 4 below).
 
 Note: each MCP `tools/call` is one-shot — `defn`'d names do NOT
 persist into the next call. The response intentionally omits any
@@ -128,12 +128,12 @@ A few points worth knowing up front:
 - Keys may not contain `/` (would shadow the namespace) or be empty;
   either causes `args_error`.
 
-## 4. Add `signature`: get a typed `validated` value back
+## 4. Add `output_schema`: get a typed `validated` value back
 
 The `result` field is a preview string. To consume the program's
-return value programmatically, pass a `signature`. On match, the
-response carries a structured `validated` JSON value alongside the
-preview.
+return value programmatically, pass JSON Schema in `output_schema`. On
+match, the response carries a structured `validated` JSON value
+alongside the preview.
 
 ```json
 {
@@ -151,7 +151,14 @@ preview.
           {"label": "c", "value": 12}
         ]
       },
-      "signature": "() -> {total :int, count :int}"
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer" },
+          "count": { "type": "integer" }
+        },
+        "required": ["total", "count"]
+      }
     }
   }
 }
@@ -175,18 +182,15 @@ Successful response:
 
 `validated.total` is a real JSON `42` — your client can read it
 directly; no parsing of the preview string. If the program returned a
-shape that did not match the signature (e.g. `:total` was a string),
+shape that did not match the schema (e.g. `:total` was a string),
 the response would have `isError: true` and `reason:
 "validation_error"`, with a `feedback` string the calling LLM can use
 to self-correct.
 
-Signatures are the only path to programmatic data on this surface.
-Without one, the response carries the LLM-readable preview only — by
-design, to keep the boundary between LLM-facing text and machine-
-facing JSON sharp.
-
-For the full signature grammar (records, lists, tuples, optionals),
-see [`docs/signature-syntax.md`](../signature-syntax.md).
+`output_schema` is the path to programmatic data on this surface.
+Without it, the response carries the LLM-readable preview only — by
+design, to keep the boundary between LLM-facing text and machine-facing
+JSON sharp.
 
 ## 5. Inspect a trace file
 

@@ -86,7 +86,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|(nil? (tool/mcp-call {:server "alpha" :tool "fail" :args {}}))|,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false, "envelope was: #{inspect(env, limit: :infinity)}"
@@ -120,7 +120,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|(nil? (tool/mcp-call {:server "alpha" :tool "weird" :args {}}))|,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false
@@ -200,7 +200,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|(= (tool/mcp-call {:server "alpha" :tool "null" :args {}}) :json-null)|,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false
@@ -281,7 +281,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|(nil? (tool/mcp-call {:server "alpha" :tool "fail" :args {}}))|,
-          %{"signature" => ":bool"}
+          %{"output_schema" => %{"type" => "boolean"}}
         )
 
       # Phase 4 contract: still normalized to nil + world-fault.

@@ -21,8 +21,8 @@ defmodule PtcRunnerMcp.CatalogConfig do
   """
 
   @default_catalog_mode :auto
-  @default_catalog_inline_max_chars 12_000
-  @default_catalog_inline_max_tools 40
+  @default_catalog_inline_max_chars 800
+  @default_catalog_inline_max_tools 8
   @default_max_catalog_ops_per_program 25
   @default_max_catalog_result_bytes 262_144
 

@@ -488,7 +488,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       env =
         Tools.call_with_gate(%{
           "program" => ~S|(= (tool/mcp-call {:server "alpha" :tool "null" :args {}}) :json-null)|,
-          "signature" => ":bool"
+          "output_schema" => %{"type" => "boolean"}
         })
 
       assert env["isError"] == false
@@ -509,7 +509,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "mixed" :args {}})]
               (and (map? r) (nil? (get r "a")) (= (get r "b") 1)))
           |,
-          "signature" => ":bool"
+          "output_schema" => %{"type" => "boolean"}
         })
 
       assert env["isError"] == false, "envelope was: #{inspect(env, limit: :infinity)}"
@@ -661,9 +661,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert desc =~ "nil"
       assert desc =~ ":json-null"
       assert desc =~ "upstream_calls"
-      assert desc =~ "Authoring rules"
-      assert desc =~ "Unwrap upstream results before filtering"
-      assert desc =~ "use `output_schema` (JSON Schema) instead of `signature`"
+      assert desc =~ "Aggregator authoring"
+      assert desc =~ "Unwrap with"
+      assert desc =~ "Use `output_schema` for typed final results"
     end
 
     test "annotations match §8.2 (destructiveHint: true, readOnlyHint: false)" do

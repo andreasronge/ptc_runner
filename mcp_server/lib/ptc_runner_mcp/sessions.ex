@@ -720,12 +720,7 @@ defmodule PtcRunnerMcp.Sessions do
           "output_schema" => %{
             "type" => "object",
             "description" =>
-              "JSON Schema validated against the program's return value. Mutually exclusive with `signature`. On mismatch, the eval is rejected and session state is not committed."
-          },
-          "signature" => %{
-            "type" => "string",
-            "description" =>
-              "PTC signature syntax (e.g. `-> {count: int}`). Mutually exclusive with `output_schema`. On mismatch, the eval is rejected and session state is not committed."
+              "JSON Schema validated against the program's return value. On mismatch, the eval is rejected and session state is not committed."
           }
         },
         "additionalProperties" => false

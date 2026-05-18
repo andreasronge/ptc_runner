@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   @moduledoc """
   Regression coverage for GitHub issue #944 finding #5: `ptc_session_eval`
-  must accept `output_schema` / `signature` and validate the program's
-  return value, mirroring the stateless `ptc_lisp_execute` contract.
+  must accept `output_schema` and validate the program's return value,
+  mirroring the stateless `ptc_lisp_execute` contract.
 
   Validation failure does NOT commit the session candidate state — the
   eval is rejected, same precedent as `session_limit_exceeded`. Side
@@ -75,17 +75,25 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
       assert after_failure["memory"]["stored_keys"] == ["baseline"]
     end
 
-    test "signature alternative to output_schema works the same way" do
+    test "legacy signature is rejected" do
       session_id = start_session()
 
-      response =
-        eval(session_id, "{:count (+ 1 2)}", signature: "() -> {count :int}")
+      envelope =
+        Tools.call(%{
+          "name" => "ptc_session_eval",
+          "arguments" => %{
+            "session_id" => session_id,
+            "program" => "{:count (+ 1 2)}",
+            "signature" => "() -> {count :int}"
+          }
+        })
 
-      assert response["status"] == "ok"
-      assert response["validated"] == %{"count" => 3}
+      assert envelope["isError"] == true
+      assert envelope["structuredContent"]["reason"] == "session_args_error"
+      assert envelope["structuredContent"]["message"] =~ "no longer supported"
     end
 
-    test "both output_schema and signature is an args_error before the gate" do
+    test "output_schema with legacy signature is an args_error before the gate" do
       session_id = start_session()
 
       envelope =
@@ -101,7 +109,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
       assert envelope["isError"] == true
       assert envelope["structuredContent"]["reason"] == "session_args_error"
-      assert envelope["structuredContent"]["message"] =~ "mutually exclusive"
+      assert envelope["structuredContent"]["message"] =~ "no longer supported"
     end
 
     test "malformed output_schema is an args_error" do
@@ -186,33 +194,33 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
       assert followup["result"] == "user=> 7"
     end
 
-    # Regression for codex P2-2: when the contract validates to JSON null,
-    # the response must keep "validated": null — distinct from "no contract
-    # was supplied". Otherwise a caller can't tell the two cases apart.
-    # `output_schema` doesn't accept type "null", so this uses the optional
-    # signature syntax `:int?`.
-    test "nil return value with an optional signature emits an explicit null `validated`" do
+    test "legacy optional signature is rejected" do
       session_id = start_session()
 
-      response = eval(session_id, "nil", signature: "() -> :int?")
+      envelope =
+        Tools.call(%{
+          "name" => "ptc_session_eval",
+          "arguments" => %{
+            "session_id" => session_id,
+            "program" => "nil",
+            "signature" => "() -> :int?"
+          }
+        })
 
-      assert response["status"] == "ok"
-      # "validated" must be present and explicitly null — distinct from
-      # the no-contract case where the field is absent entirely.
-      assert Map.has_key?(response, "validated")
-      assert response["validated"] == nil
+      assert envelope["isError"] == true
+      assert envelope["structuredContent"]["reason"] == "session_args_error"
+      assert envelope["structuredContent"]["message"] =~ "no longer supported"
     end
 
-    test "tool advertises output_schema and signature in inputSchema" do
+    test "tool advertises output_schema but not signature in inputSchema" do
       tool =
         Tools.list()["tools"]
         |> Enum.find(&(&1["name"] == "ptc_session_eval"))
 
       props = tool["inputSchema"]["properties"]
       assert Map.has_key?(props, "output_schema")
-      assert Map.has_key?(props, "signature")
+      refute Map.has_key?(props, "signature")
       assert props["output_schema"]["type"] == "object"
-      assert props["signature"]["type"] == "string"
     end
   end
 
@@ -226,7 +234,6 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
     args =
       Enum.reduce(extra, base, fn
         {:output_schema, v}, acc -> Map.put(acc, "output_schema", v)
-        {:signature, v}, acc -> Map.put(acc, "signature", v)
       end)
 
     call!("ptc_session_eval", args)

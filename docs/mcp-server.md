@@ -6,8 +6,8 @@ JSON-RPC by default, with an opt-in Streamable HTTP listener for
 private-network deployments. It exposes `ptc_lisp_execute` to MCP
 clients (Claude Desktop, Cursor, Cline, Claude Code, MCP Inspector,
 agentic applications, …). The tool
-accepts a PTC-Lisp program plus optional `context` and `output_schema`
-(or legacy `signature`), runs it in an isolated BEAM sandbox, and
+accepts a PTC-Lisp program plus optional `context` and `output_schema`,
+runs it in an isolated BEAM sandbox, and
 returns a structured result.
 
 The server has no LLM of its own. The MCP client's LLM does the
@@ -87,7 +87,7 @@ look like this:
 |---|---|---|---|
 | Sandboxing | BEAM process, no I/O, no FS, no net (by construction) | Container or `seccomp` (operator-configured) | Container, VM2, or `vm` module (operator-configured) |
 | Authoring overhead for the LLM | Zero — every program is a self-contained expression | Imports, virtualenv awareness, library knowledge | `require`, `import`, package availability |
-| Schema validation of the return value | First-class — `signature` field, structured `validated` payload | None (server returns raw stdout / repr) | None (server returns raw value or `JSON.stringify`) |
+| Schema validation of the return value | First-class — `output_schema` JSON Schema, structured `validated` payload | None (server returns raw stdout / repr) | None (server returns raw value or `JSON.stringify`) |
 | Stable wire format | Yes — same R22/R23 contract as in-process PtcRunner | None standardized | None standardized |
 | Network access from the program | None directly — opt-in only via configured upstream MCP servers in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
 | Filesystem access from the program | None directly — opt-in only via filesystem-MCP upstreams in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
@@ -151,8 +151,7 @@ Each `tools/call` request flows top-to-bottom:
    passing the concurrency semaphore (`max_concurrent_calls`,
    default 8). Excess calls return immediately with `reason: "busy"`
    instead of queuing.
-3. The worker validates `program` / `context` / `output_schema` (or
-   legacy `signature`), builds fresh `Lisp.run/2` opts (empty memory,
+3. The worker validates `program` / `context` / `output_schema`, builds fresh `Lisp.run/2` opts (empty memory,
    empty tool cache, no journal reuse), and invokes
    `PtcToolProtocol.lisp_run/2`.
 4. `:ptc_runner` runs the program in an isolated BEAM process with a
@@ -316,8 +315,7 @@ the full set.
   PTC-Lisp language reference.
 - [`docs/function-reference.md`](function-reference.md) — every
   built-in function with its signature.
-- [`docs/signature-syntax.md`](signature-syntax.md) — the grammar
-  used by the legacy `signature` argument and by `output_schema`'s
-  Lisp form.
+- [`docs/signature-syntax.md`](signature-syntax.md) — internal PTC
+  return-type grammar used behind `output_schema` validation.
 - [Model Context Protocol](https://modelcontextprotocol.io/) — the
   upstream protocol spec.

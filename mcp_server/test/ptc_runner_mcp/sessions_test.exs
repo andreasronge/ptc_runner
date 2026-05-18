@@ -78,12 +78,12 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert start["description"] == PromptRegistry.render(:mcp_session_start_description, [])
     assert eval["description"] == PromptRegistry.render(:mcp_session_eval_description, [])
 
-    assert start["description"] =~ "# PTC-Lisp sessions"
+    assert start["description"] =~ "PTC-Lisp sessions:"
     assert start["description"] =~ "Creates a new empty stateful PTC-Lisp session."
 
     assert eval["description"] =~ "Explicit definitions persist across calls"
     assert eval["description"] =~ "output_schema"
-    assert eval["description"] =~ "signature"
+    refute eval["description"] =~ "signature"
     assert eval["description"] =~ "validation_error"
   end
 
@@ -107,8 +107,9 @@ defmodule PtcRunnerMcp.SessionsTest do
     session_card =
       :ptc_runner_mcp
       |> :code.priv_dir()
-      |> Path.join("mcp_session_authoring_card.md")
+      |> Path.join("prompts/mcp_session_authoring_card.md")
       |> File.read!()
+      |> PtcRunner.PromptLoader.extract_content()
 
     assert PromptRegistry.render(:mcp_session_start_description, []) ==
              session_card <> "\n\nCreates a new empty stateful PTC-Lisp session."
@@ -116,7 +117,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert PromptRegistry.render(:mcp_session_eval_description, []) ==
              session_card <>
                "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not." <>
-               "\n\nOptionally validates the return value against a structured contract: pass `output_schema` (a JSON Schema describing the answer shape) or `signature` (PTC signature syntax — mutually exclusive with `output_schema`). On validation success, the response includes a `validated` field with the encoded structured value. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
+               "\n\nOptionally validates the return value against `output_schema` (JSON Schema). On validation success, the response includes `validated` structured JSON. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
   end
 
   test "session prompt registry pins metadata order for start and eval descriptions" do

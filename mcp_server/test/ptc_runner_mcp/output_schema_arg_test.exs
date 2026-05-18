@@ -8,7 +8,7 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
     * Successful JSON Schema → validated field in response
     * Validation failure (type mismatch) → `validation_error`
     * Unsupported JSON Schema features → `args_error`
-    * Mutual exclusivity with `signature`
+    * Legacy `signature` rejection
     * Scalar, array, and nested object schemas
   """
   use ExUnit.Case, async: false
@@ -107,26 +107,21 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
     end
   end
 
-  describe "mutual exclusivity with signature" do
-    test "both output_schema and signature present returns args_error" do
+  describe "legacy signature rejection" do
+    test "signature present returns args_error" do
       env =
         call(%{
           "program" => "{:count 1}",
-          "output_schema" => %{
-            "type" => "object",
-            "properties" => %{"count" => %{"type" => "integer"}},
-            "required" => ["count"]
-          },
           "signature" => "() -> {count :int}"
         })
 
       assert env["isError"] == true
       sc = env["structuredContent"]
       assert sc["reason"] == "args_error"
-      assert sc["message"] =~ "mutually exclusive"
+      assert sc["message"] =~ "no longer supported"
     end
 
-    test "output_schema with null signature is accepted (null = absent)" do
+    test "output_schema with null signature is rejected" do
       env =
         call(%{
           "program" => "{:count 1}",
@@ -138,23 +133,24 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
           "signature" => nil
         })
 
-      assert env["isError"] == false
-      assert env["structuredContent"]["validated"] == %{"count" => 1}
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+      assert env["structuredContent"]["message"] =~ "no longer supported"
     end
 
-    test "null output_schema falls through to signature" do
+    test "null output_schema is rejected" do
       env =
         call(%{
           "program" => "{:count 1}",
-          "output_schema" => nil,
-          "signature" => "() -> {count :int}"
+          "output_schema" => nil
         })
 
-      assert env["isError"] == false
-      assert env["structuredContent"]["validated"] == %{"count" => 1}
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+      assert env["structuredContent"]["message"] =~ "output_schema"
     end
 
-    test ~S|signature: "any" with output_schema is accepted ("any" means absent)| do
+    test ~S|signature: "any" is rejected| do
       env =
         call(%{
           "program" => "{:count 1}",
@@ -166,8 +162,9 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
           "signature" => "any"
         })
 
-      assert env["isError"] == false
-      assert env["structuredContent"]["validated"] == %{"count" => 1}
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "args_error"
+      assert env["structuredContent"]["message"] =~ "no longer supported"
     end
   end
 
@@ -498,10 +495,9 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
       assert desc =~ "JSON Schema"
     end
 
-    test "signature description marks it as advanced/legacy" do
+    test "signature is not advertised" do
       %{"tools" => [tool]} = Tools.list()
-      desc = tool["inputSchema"]["properties"]["signature"]["description"]
-      assert desc =~ "Advanced/legacy"
+      refute Map.has_key?(tool["inputSchema"]["properties"], "signature")
     end
 
     test "authoring card mentions output_schema" do
