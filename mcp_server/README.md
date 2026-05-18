@@ -41,6 +41,13 @@ _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp version
 # → ptc_runner_mcp 0.1.0
 ```
 
+The MCP `initialize` response advertises the package version plus build
+metadata. When built from a git checkout, `serverInfo.version` uses SemVer
+build metadata such as `0.1.0+abc123def456`, and `serverInfo.build` includes
+the compile-time `git_commit` and `git_dirty` fields. CI or packaging scripts
+can override these with `PTC_RUNNER_MCP_GIT_COMMIT` and
+`PTC_RUNNER_MCP_GIT_DIRTY`.
+
 ### In-tree development
 
 From `mcp_server/`:
