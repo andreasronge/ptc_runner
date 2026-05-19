@@ -93,6 +93,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
         )
 
       assert env["isError"] == false, "envelope was: #{inspect(env, limit: :infinity)}"
+
       assert structured(env)["validated"] == true,
              "expected program to see tagged tool_error, got: #{inspect(env, limit: :infinity)}"
 

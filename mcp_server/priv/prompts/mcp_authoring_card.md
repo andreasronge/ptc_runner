@@ -11,7 +11,6 @@
 PTC-Lisp authoring:
 - Deterministic sandboxed Clojure subset. Program = one or more top-level forms; final value is the result.
 - `context` keys are under `data/`: pass `{"records":[...]}`, read `data/records`. No `context` binding.
-- `output_schema` validates the return value with JSON Schema and returns structured `validated` JSON.
 - `(fail v)` terminates with an error value for domain failures.
 - JSON: `(json/parse-string s)`, `(json/generate-string v)`; parse failure returns `nil`.
 - No mutable state, filesystem, network, or general Java interop. I/O is `println` only.

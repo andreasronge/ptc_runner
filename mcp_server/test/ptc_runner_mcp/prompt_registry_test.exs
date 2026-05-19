@@ -135,6 +135,7 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
 
   test "file-backed MCP cards are extracted before rendering" do
     for key <- [
+          :mcp_no_tools_capability,
           :mcp_no_tools_authoring_card,
           :mcp_aggregator_authoring_card,
           :mcp_session_authoring_card
