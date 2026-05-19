@@ -1,7 +1,6 @@
 defmodule PtcRunnerMcp.ToolsTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.PtcToolProtocol
   alias PtcRunnerMcp.Tools
 
   describe "tool_entry/0" do
@@ -38,8 +37,8 @@ defmodule PtcRunnerMcp.ToolsTest do
   end
 
   describe "advertised description" do
-    test "starts with the :mcp_no_tools profile string byte-for-byte, then \\n\\n, then the card" do
-      profile = PtcToolProtocol.tool_description(:mcp_no_tools)
+    test "starts with the no-tools capability card, then \\n\\n, then the authoring card" do
+      profile = PtcRunnerMcp.PromptRegistry.card_text(:mcp_no_tools_capability)
       card = Tools.authoring_card()
       expected = profile <> "\n\n" <> card
 
@@ -59,13 +58,12 @@ defmodule PtcRunnerMcp.ToolsTest do
       refute desc =~ "Call app tools as `(tool/name ...)`"
     end
 
-    test "contains all five § 8.4 anchors" do
+    test "contains the no-tools authoring anchors" do
       desc = Tools.advertised_description()
       assert desc =~ "Clojure subset"
-      assert desc =~ "data/"
-      assert desc =~ "output_schema"
+      assert desc =~ "context"
       assert desc =~ "(fail"
-      assert desc =~ "No cross-call memory"
+      assert desc =~ "there is no memory of prior calls"
     end
   end
 

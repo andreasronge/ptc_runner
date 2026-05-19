@@ -340,20 +340,20 @@ defmodule PtcRunnerMcp.Upstream.Connection do
     # take this Connection down.
     Process.flag(:trap_exit, true)
 
-    # Snapshot the parent pid (the DynamicSupervisor in production,
-    # or the test caller in the standalone fallback path). Codex
-    # review of `3c2754d` flagged that the catch-all `:EXIT` handler
-    # was swallowing supervisor shutdown — `terminate/2` then never
-    # ran `impl.stop/1`, the subprocess didn't see stdin EOF, and
-    # the supervisor's 5 s `:shutdown` timeout had to escalate to
-    # `:kill`. Tracking the parent here lets us distinguish a
-    # supervisor shutdown EXIT (stop ourselves cleanly) from an
-    # impl `start_link/2` init-time stop EXIT (silently absorb).
-    parent_pid =
-      case Process.info(self(), :links) do
-        {:links, [pid | _]} when is_pid(pid) -> pid
-        _ -> nil
-      end
+    # Snapshot the OTP parent pid (the DynamicSupervisor in production,
+    # or the test caller in the standalone fallback path). Codex review
+    # of `3c2754d` flagged that the catch-all `:EXIT` handler was
+    # swallowing supervisor shutdown — `terminate/2` then never ran
+    # `impl.stop/1`, the subprocess didn't see stdin EOF, and the
+    # supervisor's 5 s `:shutdown` timeout had to escalate to `:kill`.
+    #
+    # Use `$ancestors`, not `Process.info(self(), :links)`: a process can
+    # have multiple links and their order is not an ownership contract.
+    # Picking the first link made owner-down tests flaky because a
+    # transient linked process could be mistaken for the parent; when it
+    # exited, the Connection stopped before the test installed its
+    # monitor.
+    parent_pid = otp_parent_pid()
 
     owner_ref =
       case owner do
@@ -505,6 +505,13 @@ defmodule PtcRunnerMcp.Upstream.Connection do
   # ----------------------------------------------------------------
   # Private helpers
   # ----------------------------------------------------------------
+
+  defp otp_parent_pid do
+    case Process.get(:"$ancestors") do
+      [pid | _] when is_pid(pid) -> pid
+      _ -> nil
+    end
+  end
 
   defp do_ensure_started(state) do
     start_at = System.monotonic_time(:millisecond)

@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.PromptRegistry do
   @moduledoc false
 
-  alias PtcRunner.{PromptLoader, PtcToolProtocol}
+  alias PtcRunner.PromptLoader
   alias PtcRunnerMcp.{CatalogConfig, CatalogDescription}
   alias PtcRunnerMcp.Upstream.Catalog
 
@@ -25,6 +25,21 @@ defmodule PtcRunnerMcp.PromptRegistry do
                        )
   @external_resource @authoring_card_path
   @authoring_card @authoring_card_path |> File.read!() |> PromptLoader.extract_content()
+
+  @no_tools_description_path Path.expand(
+                               Path.join([
+                                 __DIR__,
+                                 "..",
+                                 "..",
+                                 "priv",
+                                 "prompts",
+                                 "mcp_no_tools_description.md"
+                               ])
+                             )
+  @external_resource @no_tools_description_path
+  @no_tools_description @no_tools_description_path
+                        |> File.read!()
+                        |> PromptLoader.extract_content()
 
   @aggregator_authoring_card_path Path.expand(
                                     Path.join([
@@ -375,7 +390,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     if Map.has_key?(@cards, key), do: render_card(key)
   end
 
-  defp render_card(:mcp_no_tools_capability), do: PtcToolProtocol.tool_description(:mcp_no_tools)
+  defp render_card(:mcp_no_tools_capability), do: @no_tools_description
   defp render_card(:mcp_no_tools_authoring_card), do: @authoring_card
   defp render_card(:mcp_aggregator_authoring_card), do: @aggregator_authoring_card
   defp render_card(:mcp_agentic_dialect_card), do: agentic_dialect_authoring_card()

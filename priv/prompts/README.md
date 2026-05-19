@@ -78,10 +78,18 @@ are explicitly added to that list later.
 The 2000-byte hard cap for MCP `tools/list` descriptions is an external client
 constraint. Keep the first 800 to 1000 bytes useful on their own.
 
+## MCP Prompt Ownership
+
+MCP-specific tool-description text lives under `mcp_server/priv/prompts/` and
+is composed by `PtcRunnerMcp.PromptRegistry`. Keep MCP capability summaries,
+surface-specific authoring cards, and session/aggregator cards there. Core
+`PtcRunner.PtcToolProtocol` may keep legacy or in-process tool descriptions,
+but MCP `tools/list` descriptions should not depend on core prompt strings.
+
 ## Naming
 
-Files use kebab-case, except the compact combined-mode card keeps its historic
-underscore name.
+Files use kebab-case, except the compact combined-mode card and MCP server
+`mcp_` files keep their historic underscore names.
 
 | Prefix | Category | Used By |
 |--------|----------|---------|
@@ -114,7 +122,8 @@ prompt wording, composition, or budgets.
 | `turn-feedback-must-return.md` | `PtcRunner.Prompts.must_return_warning/0` | `PtcRunner.SubAgent.Loop.TurnFeedback` | Explicit-return final work turn | Inserted before final work turn | retry counts | template render | provider user feedback |
 | `turn-feedback-retry.md` | `PtcRunner.Prompts.retry_feedback/0` | `PtcRunner.SubAgent.Loop.TurnFeedback` | Explicit-return retry turns | Inserted during retry phase | retry counters | template render | provider user feedback |
 | `ptc_text_mode_compact_reference.md` | `PtcRunner.Prompts.ptc_text_mode_compact_reference/0` | `PtcRunner.SubAgent.SystemPrompt` | Combined text + PTC-Lisp | Appended to system prompt when compact reference is enabled | app-tool inventory appended outside the file | blank line / inventory section | provider system message |
-| `mcp_no_tools_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | capability description, then file card | none | blank line | MCP `tools/list` description |
+| `mcp_no_tools_description.md` | `PtcRunnerMcp.PromptRegistry.card_text/1` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | Capability description before authoring card | none | blank line in composed description | MCP `tools/list` description |
+| `mcp_no_tools_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | no-tools description file, then authoring card | none | blank line | MCP `tools/list` description |
 | `mcp_aggregator_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_aggregator` | quick contract, file card, optional catalog | optional upstream catalog text | blank line | MCP `tools/list` description |
 | `mcp_session_start_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_session` | session file card, start detail | none | blank line | MCP `tools/list` description |
 | `mcp_session_eval_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_session` | session file card, eval detail | optional schema/signature args at call time | blank line | MCP `tools/list` description |

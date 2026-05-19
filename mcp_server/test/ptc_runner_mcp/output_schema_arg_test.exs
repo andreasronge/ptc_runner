@@ -500,9 +500,9 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
       refute Map.has_key?(tool["inputSchema"]["properties"], "signature")
     end
 
-    test "authoring card mentions output_schema" do
+    test "authoring card keeps output_schema out of no-tools prompt text" do
       card = Tools.authoring_card()
-      assert card =~ "output_schema"
+      refute card =~ "output_schema"
     end
   end
 end

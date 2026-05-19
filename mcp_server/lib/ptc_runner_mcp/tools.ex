@@ -4,9 +4,7 @@ defmodule PtcRunnerMcp.Tools do
 
   Per `Plans/ptc-runner-mcp-server.md` § 8.1, the server advertises
   exactly one tool, `ptc_lisp_execute`. The advertised description is
-  the canonical `:mcp_no_tools` profile string from
-  `PtcRunner.PtcToolProtocol`, followed by exactly two newlines, then
-  the package-owned authoring card (§ 8.4).
+  composed by `PtcRunnerMcp.PromptRegistry` from MCP-owned prompt cards.
 
   Phase 2 wired real `Lisp.run/2` execution through
   `PtcRunnerMcp.Sandbox` and enforced `:max_program_bytes` and
@@ -236,9 +234,9 @@ defmodule PtcRunnerMcp.Tools do
 
   Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.1) refactors the
   former `advertised_description/0` into a profile-aware builder.
-  For `:mcp_no_tools`, the output is byte-for-byte identical to v1:
+  For `:mcp_no_tools`, the output is:
 
-      tool_description(:mcp_no_tools) <> "\\n\\n" <> authoring_card()
+      card_text(:mcp_no_tools_capability) <> "\\n\\n" <> authoring_card()
 
   The `opts` keyword is the seam aggregator mode will use to inject
   runtime catalog text in Phase 3 (`catalog: catalog_string_or_nil`).

@@ -17,7 +17,7 @@ defmodule PtcRunnerMcp.StdioLifecycleTest do
     ref = Process.monitor(stdio)
 
     assert_receive {Stdio, {:exited, :eof}}, 1_000
-    assert_receive {:DOWN, ^ref, :process, ^stdio, :normal}, 1_000
+    assert_down_normal_or_already_gone(ref, stdio)
 
     StringIO.close(io)
   end
@@ -40,5 +40,15 @@ defmodule PtcRunnerMcp.StdioLifecycleTest do
 
     GenServer.stop(stdio, :normal)
     StringIO.close(io)
+  end
+
+  defp assert_down_normal_or_already_gone(ref, pid) do
+    receive do
+      {:DOWN, ^ref, :process, ^pid, reason} when reason in [:normal, :noproc] ->
+        :ok
+    after
+      1_000 ->
+        flunk("expected #{inspect(pid)} to stop after EOF")
+    end
   end
 end
