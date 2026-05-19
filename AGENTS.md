@@ -38,6 +38,10 @@ They are your best source of knowledge for making decisions.
 Run `mix usage_rules.*` tasks from the repo root by default. Some nested Mix projects, such as
 `mcp_server/`, may not define these tasks; if a task is unavailable there, retry from the repo root.
 
+Use `mix usage_rules.search_docs` first when the exact dependency module or
+function is uncertain. Only call `mix usage_rules.docs` with a confirmed module
+or `Module.function/arity` returned by search/docs; `usage_rules.docs` does not not accept package filters such as `-p`.
+
 ## Modules & functions in the current app and dependencies
 
 When looking for docs for modules & functions that are dependencies of the current project,
