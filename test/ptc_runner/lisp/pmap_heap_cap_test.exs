@@ -269,19 +269,25 @@ defmodule PtcRunner.Lisp.PmapHeapCapTest do
 
   describe "timeout classification is distinct from memory_exceeded" do
     test "a slow pmap worker yields :timeout, not :memory_exceeded" do
-      # A worker that spins past the deadline without allocating. The
-      # shared deadline elapses; ParallelRunner classifies this as
-      # `:timeout` — a different, stable reason from a heap kill.
-      #
-      # `(loop ...)` of 10_000 cheap iterations with a tiny timeout
-      # reliably outlives the deadline without growing the heap.
-      slow_program =
-        "(pmap (fn [x] (loop [i 0] (if (< i 10000) (recur (+ i 1)) i))) [1 2 3 4])"
+      tools = %{
+        "sleep" => fn _ ->
+          Process.sleep(50)
+          :done
+        end
+      }
+
+      # Keep the outer sandbox timeout generous and trip the shared
+      # pmap deadline directly. Using the outer timeout here makes the
+      # assertion depend on scheduler timing rather than ParallelRunner's
+      # timeout classification path.
+      slow_program = "(pmap (fn [_] (tool/sleep {})) [1 2 3 4])"
 
       assert {:error, step} =
                Lisp.run(slow_program,
+                 tools: tools,
                  max_heap: @small_max_heap,
-                 timeout: 1,
+                 timeout: @generous_timeout,
+                 pmap_timeout: 1,
                  pmap_max_concurrency: 4
                )
 
