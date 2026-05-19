@@ -214,96 +214,57 @@ Higher-order use **MUST** wrap it in a closure:
 
 ### Return-value handling
 
-A successful call returns the upstream's JSON payload converted
-to PTC-Lisp data (string, number, boolean, list, map). The
-program treats it as an ordinary value:
+A successful call returns tagged PTC-Lisp data. The program checks `:ok`
+and then treats `:value` as an ordinary value:
 
 ```clojure
 (def repos
-  (tool/mcp-call {:server "github"
-                  :tool "search_repos"
-                  :args {:query "infra" :limit 50}}))
+  (let [r (tool/mcp-call {:server "github"
+                          :tool "search_repos"
+                          :args {:query "infra" :limit 50}})]
+    (if (:ok r)
+      (:value r)
+      (fail (:message r)))))
 
 (count repos)              ;; just a number
 (map :name repos)          ;; pluck a field per repo
 ```
 
-### JSON helpers (`json/*`, `mcp/*`)
+### JSON helpers (`json/*`)
+
+`tool/mcp-call` returns tagged data. Always inspect `:ok` before using
+`:value`.
+
+| Shape | Meaning |
+|---|---|
+| `{:ok true :value payload :value_kind :json}` | `payload` came from `structuredContent` or parsed JSON text. |
+| `{:ok true :value text :value_kind :text}` | First MCP text content was not JSON. |
+| `{:ok true :value nil :value_kind :none}` | The call succeeded, but no default payload was selected. |
+| `{:ok false :reason kw :message text}` | Recoverable upstream/tool failure. |
 
 Many MCP upstreams wrap their payload in the standard envelope
 `%{"content" => [%{"type" => "text", "text" => "..."}]}`, sometimes
-with the typed JSON also placed in `"structuredContent"`. PTC-Lisp
-provides four helpers so programs don't hand-roll `get-in` chains
-or parse JSON-as-text by hand:
-
-| Helper | Returns |
-|---|---|
-| `(json/parse-string s)` | parsed JSON value, or `nil` on failure (string keys; never raises) |
-| `(json/generate-string v)` | JSON-encoded string, or `nil` on non-encodable input (atoms outside `true/false/nil`, atom-keyed maps, tuples, PIDs) |
-| `(mcp/text r)` | `r["content"][0]["text"]`, or `nil` for any non-conforming shape |
-| `(mcp/json r)` | `r["structuredContent"]` if the key is present (preserving `:json-null` / `false` / `0` / `""` / `[]` verbatim), else `(json/parse-string (mcp/text r))` |
-
-The aggregator also auto-promotes `content[0].text` into
-`structuredContent` when the upstream declares
-`mimeType: "application/json"` or any `+json` suffix
-(RFC 6839). The promotion is additive — `content[]` is preserved —
-so reading via either channel works. Programs that hit the
-auto-decode path can simply destructure:
+with typed JSON in `"structuredContent"`. The aggregator unwraps the
+common domain payload for you:
 
 ```clojure
-;; Upstream emits content[0]={text:"{\"items\":[...]}", mimeType:"application/json"}.
-;; Aggregator auto-decodes; structuredContent appears for free.
-(def result (tool/mcp-call {:server "issues" :tool "list" :args {}}))
-(get-in result ["structuredContent" "items"])
-
-;; Or use mcp/json — works whether structuredContent came from
-;; auto-decode, native upstream support, or text-parse fallback.
-(get (mcp/json result) "items")
-```
-
-The previous regex-split workaround for upstreams returning
-JSON-as-text is obsolete.
-
-### `:json-null` semantics
-
-`nil` and `:json-null` are distinct:
-
-| Value | Meaning |
-|---|---|
-| `nil` | The call **did not succeed**. World-fault failure. Recorded in `upstream_calls` with a reason. |
-| `:json-null` | The call **succeeded** and returned JSON `null` as its top-level payload. Recorded as `status: ok`. |
-
-This invariant matters because an upstream that legitimately
-returns JSON `null` would otherwise be indistinguishable from a
-failed call. The `:json-null` rewrite is **top-level only** —
-nested `null` inside maps and arrays remains `nil`.
-
-Programs that don't care about the distinction can treat
-`:json-null` as truthy and continue:
-
-```clojure
-(when result
-  (process result))           ;; runs for both real values and :json-null
-```
-
-Programs that care can compare explicitly:
-
-```clojure
-(if (= result :json-null)
-  "got null"
-  (process result))
+(let [r (tool/mcp-call {:server "issues" :tool "list" :args {}})]
+  (if (:ok r)
+    (get (:value r) "items")
+    (fail (:message r))))
 ```
 
 ### World-fault vs programmer-fault
 
 | Class | Behavior | When |
 |---|---|---|
-| **World-fault** | `(tool/mcp-call ...)` returns `nil`; entry recorded in `upstream_calls`; program continues | Upstream couldn't be started, returned a JSON-RPC error, timed out, oversized response, per-program cap exhausted |
+| **World-fault** | `(tool/mcp-call ...)` returns `{:ok false :reason kw :message text}`; entry recorded in `upstream_calls`; program continues | Upstream couldn't be started, returned a JSON-RPC error, timed out, oversized response, per-program cap exhausted, or returned an MCP `isError` envelope |
 | **Programmer-fault** | Raises a runtime error; program terminates | Unknown server, unknown tool on a healthy upstream, malformed args |
 
 World-faults are **expected runtime conditions** — write
-defensive code: `(when result ...)`, `(remove nil? results)`,
-`(filter some? batch)`.
+defensive code: inspect `:ok` before using `:value`, keep successful
+results with `(filter :ok batch)`, and inspect `:reason` / `:message`
+when a call fails.
 
 Programmer-faults are **defects in the program** — the message
 identifies the bad call site so the LLM can fix the program and
@@ -471,12 +432,15 @@ Read a single text file via the filesystem MCP and return its
 contents:
 
 ```clojure
-(tool/mcp-call {:server "fs"
-                :tool   "read_text_file"
-                :args   {:path "/tmp/sandbox/notes.md"}})
+(let [r (tool/mcp-call {:server "fs"
+                        :tool   "read_text_file"
+                        :args   {:path "/tmp/sandbox/notes.md"}})]
+  (if (:ok r)
+    (:value r)
+    (fail (:message r))))
 ```
 
-The program is one expression; its value is the response.
+The program is one expression; its value is the unwrapped file body.
 
 ### Example 2 — Cross-server filter
 
@@ -484,15 +448,21 @@ List GitHub PRs and filter to those mentioning a particular
 file path discovered from the filesystem upstream:
 
 ```clojure
+(def unwrap
+  (fn [r]
+    (if (:ok r)
+      (:value r)
+      (fail (:message r)))))
+
 (def open-prs
-  (tool/mcp-call {:server "github"
-                  :tool   "list_prs"
-                  :args   {:state "open" :limit 50}}))
+  (unwrap (tool/mcp-call {:server "github"
+                          :tool   "list_prs"
+                          :args   {:state "open" :limit 50}})))
 
 (def watched-paths
-  (tool/mcp-call {:server "fs"
-                  :tool   "read_text_file"
-                  :args   {:path "/etc/watched-paths.txt"}}))
+  (unwrap (tool/mcp-call {:server "fs"
+                          :tool   "read_text_file"
+                          :args   {:path "/etc/watched-paths.txt"}})))
 
 (def watch-set
   (set (clojure.string/split-lines watched-paths)))
@@ -524,14 +494,14 @@ Fetch ten upstream items in parallel:
         ids))
 
 ;; Drop world-fault failures (e.g. one ID was unknown):
-(def good (remove nil? items))
+(def good (map :value (filter :ok items)))
 
 (map :name good)
 ```
 
 `pmap` parallelism is bounded by the per-program upstream-call
-cap (see Limits in §9 of the spec). The `(remove nil? ...)`
-idiom is the canonical way to handle partial failure.
+cap (see Limits in §9 of the spec). Filter on `:ok` before taking
+`:value` to handle partial failure.
 
 ## Error reference
 
@@ -546,12 +516,13 @@ idiom is the canonical way to handle partial failure.
 | `no upstream '<name>' configured` | `:server` value is not in the configured upstreams |
 | `no tool '<tool>' in upstream '<server>'` | `:tool` value is not in the upstream's `tools/list` (only raised when the upstream is healthy and the cache can prove absence) |
 
-### World-fault (returns `nil`, recorded in `upstream_calls`)
+### World-fault (returns tagged error, recorded in `upstream_calls`)
 
 | `reason` | Cause |
 |---|---|
 | `upstream_unavailable` | The upstream couldn't be started, its `initialize` handshake failed, or it's in its post-crash recovery window |
 | `upstream_error` | The upstream returned a JSON-RPC error to a `tools/call` |
+| `tool_error` | The upstream returned a successful MCP envelope with `"isError": true` |
 | `timeout` | The upstream call exceeded `upstream_call_timeout_ms` |
 | `response_too_large` | The upstream's response exceeded `max_upstream_response_bytes` before decode |
 | `cap_exhausted` | The program made more than `max_upstream_calls_per_program` calls |

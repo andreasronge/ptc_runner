@@ -56,4 +56,48 @@ defmodule PtcRunnerMcp.AggregatorConfigTest do
       assert AggregatorConfig.read_only?()
     end
   end
+
+  describe "raw envelope policy" do
+    test "resolves tool, upstream, global, false precedence" do
+      AggregatorConfig.set(%{
+        raw_envelope_default: true,
+        upstreams: %{
+          "alpha" => %{
+            raw_envelope: false,
+            tools: %{"debug" => %{raw_envelope: true}}
+          }
+        }
+      })
+
+      assert AggregatorConfig.raw_envelope_enabled?("alpha", "debug")
+      refute AggregatorConfig.raw_envelope_enabled?("alpha", "normal")
+      assert AggregatorConfig.raw_envelope_enabled?("beta", "anything")
+
+      AggregatorConfig.set(%{})
+      refute AggregatorConfig.raw_envelope_enabled?("beta", "anything")
+    end
+
+    @tag :tmp_dir
+    test "loads policy keys without leaving them in stdio transport config", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "upstreams.json")
+
+      File.write!(
+        path,
+        Jason.encode!(%{
+          "upstreams" => %{
+            "alpha" => %{
+              "command" => "echo",
+              "raw_envelope" => true,
+              "tools" => %{"read" => %{"raw_envelope" => false}}
+            }
+          }
+        })
+      )
+
+      args = Application.parse_args(["--upstreams-config", path])
+
+      assert %{upstreams: [%{config: %{command: "echo"}}]} =
+               Application.load_aggregator_config(args)
+    end
+  end
 end

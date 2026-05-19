@@ -126,7 +126,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
     test "search → describe → mcp-call returns compact result" do
       put_fake_with_tools("warehouse", 3, "Warehouse inventory", ["stock"],
         handler: fn _tool_name ->
-          fn args, _opts -> {:ok, %{"count" => args["item_id"]}} end
+          fn args, _opts -> {:ok, %{"structuredContent" => %{"count" => args["item_id"]}}} end
         end
       )
 
@@ -164,7 +164,9 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
     test "search server-level → list-tools → describe → mcp-call" do
       put_fake_with_tools("analytics", 2, "Analytics platform", ["metrics"],
         handler: fn tool_name ->
-          fn _args, _opts -> {:ok, %{"tool" => tool_name, "value" => 42}} end
+          fn _args, _opts ->
+            {:ok, %{"structuredContent" => %{"tool" => tool_name, "value" => 42}}}
+          end
         end
       )
 

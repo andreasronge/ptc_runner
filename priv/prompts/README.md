@@ -24,7 +24,7 @@ Prompts are operational cards, not conformance docs.
   repo-doc references, or "see docs" instructions inside extracted prompt
   content.
 - Mention contextual namespaces only in surfaces where they are usable: `tool/`,
-  `data/`, `catalog/`, `budget/`, and `mcp/`.
+  `data/`, `catalog/`, and `budget/`.
 - Keep MCP helper examples out of non-MCP prompt surfaces.
 - Do not claim general Java interop. List only the supported compatibility
   shape.

@@ -138,6 +138,7 @@ defmodule PtcRunnerMcp.Tools do
           "type" => "string",
           "enum" => [
             "upstream_unavailable",
+            "tool_error",
             "upstream_error",
             "timeout",
             "response_too_large",
@@ -1018,7 +1019,7 @@ defmodule PtcRunnerMcp.Tools do
     aggregator_note =
       case capability_profile do
         :mcp_aggregator ->
-          " Upstream world faults return nil inside the PTC-Lisp program; unhandled " <>
+          " Upstream world faults return tagged {:ok false ...} values inside the PTC-Lisp program; unhandled " <>
             "repairable failures are summarized in error text."
 
         _ ->

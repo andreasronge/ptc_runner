@@ -251,7 +251,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     # The ledger entry is `status: "error"` with the byte count.
     [entry] = sc["upstream_calls"]
     assert entry["status"] == "error"
-    assert entry["reason"] == "upstream_error"
+    assert entry["reason"] == "tool_error"
     assert entry["result_bytes"] == encoded_size
     assert entry["oversize"] == false
 

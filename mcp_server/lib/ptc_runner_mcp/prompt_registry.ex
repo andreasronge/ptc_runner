@@ -77,16 +77,6 @@ defmodule PtcRunnerMcp.PromptRegistry do
         prompt_fun: :mcp_no_tools_authoring_card,
         trust: :authoritative
       }),
-    mcp_aggregator_quick_contract:
-      Map.merge(@common_card, %{
-        id: :mcp_aggregator_quick_contract,
-        dimensions: [:execution_surface, :completion_contract, :catalog_discovery],
-        dynamic_boundary: :before_dynamic_catalog,
-        placement: :quick_contract,
-        profile: :mcp_aggregator,
-        prompt_fun: :mcp_aggregator_quick_contract,
-        trust: :authoritative
-      }),
     mcp_aggregator_authoring_card:
       Map.merge(@common_card, %{
         id: :mcp_aggregator_authoring_card,
@@ -282,7 +272,6 @@ defmodule PtcRunnerMcp.PromptRegistry do
       :mcp_no_tools_authoring_card
     ],
     mcp_aggregator_description: [
-      :mcp_aggregator_quick_contract,
       :mcp_aggregator_authoring_card,
       :mcp_dynamic_catalog
     ],
@@ -388,7 +377,6 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp render_card(:mcp_no_tools_capability), do: PtcToolProtocol.tool_description(:mcp_no_tools)
   defp render_card(:mcp_no_tools_authoring_card), do: @authoring_card
-  defp render_card(:mcp_aggregator_quick_contract), do: mcp_aggregator_quick_contract()
   defp render_card(:mcp_aggregator_authoring_card), do: @aggregator_authoring_card
   defp render_card(:mcp_agentic_dialect_card), do: agentic_dialect_authoring_card()
   defp render_card(:mcp_agentic_final_recap), do: agentic_final_recap()
@@ -439,21 +427,6 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_part(:mcp_agentic_final_recap, _opts, _catalog, _catalog_mode) do
     [render_card(:mcp_agentic_final_recap)]
-  end
-
-  defp mcp_aggregator_quick_contract do
-    """
-    Run one stateless PTC-Lisp program for compute plus upstream MCP calls.
-
-    Aggregator contract:
-    - Call upstreams: `(tool/mcp-call {:server s :tool t :args {...}})`.
-    - Result is the upstream value or `nil`; do not expect `{:ok ...}` envelopes.
-    - World faults return `nil` and appear in `upstream_calls`; code faults raise.
-    - JSON `null` => `:json-null`; unwrap with `(mcp/text r)` or `(mcp/json r)`.
-    - Use catalog/search-tools, catalog/list-tools, catalog/describe-tool as needed.
-    - Return compact maps, vectors, or strings.
-    """
-    |> String.trim()
   end
 
   defp mcp_session_start_detail do
@@ -538,11 +511,9 @@ defmodule PtcRunnerMcp.PromptRegistry do
     ptc_task MCP-call contract:
     Call upstream tools with `(tool/mcp-call {:server "<configured-name>" :tool "<upstream-tool>" :args {}})`.
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
-    In `ptc_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is the upstream MCP envelope. Apply `(mcp/text ...)` or `(mcp/json ...)` to `(:value r)`, not to `r`.
-    Prefer `(mcp/text ...)` for human-readable upstream text and use string helpers on it. Do not parse `mcp/text` as JSON unless the text itself is JSON.
-    Use `(mcp/json ...)` only when the catalog, output hint, or tool description says JSON or structured data.
+    In `ptc_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is already the unwrapped upstream payload; read it directly.
     #{agentic_unknown_content_guidance(catalog)}
-    If `(mcp/json ...)` returns nil or an unexpected shape, inspect `(mcp/text ...)` before failing.
+    If `(:value r)` has an unexpected shape, handle or fail with a clear message.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.
     Programmer faults such as malformed arguments, unknown servers, or unknown tools terminate the generated program.
     """
@@ -551,7 +522,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_unknown_content_guidance(catalog) when is_binary(catalog) do
     if String.contains?(catalog, "-> :unknown_content") do
-      "For `-> :unknown_content` tools, inspect the MCP envelope before assuming JSON."
+      "For `-> :unknown_content` tools, inspect `:value` before assuming a shape."
     else
       ""
     end

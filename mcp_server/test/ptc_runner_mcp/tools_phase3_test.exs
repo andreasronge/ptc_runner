@@ -75,15 +75,6 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
     test "MCP prompt registry exposes aggregator description metadata" do
       assert [
                %{
-                 id: :mcp_aggregator_quick_contract,
-                 surface: :mcp_direct_ptc_lisp_execute,
-                 audience: :mcp_tool_description,
-                 profile: :mcp_aggregator,
-                 placement: :quick_contract,
-                 dynamic_boundary: :before_dynamic_catalog,
-                 trust: :authoritative
-               },
-               %{
                  id: :mcp_aggregator_authoring_card,
                  placement: :after_quick_contract,
                  dynamic_boundary: :before_dynamic_catalog,
@@ -128,7 +119,6 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert_quick_contract_in_first_chunk(first_2kb)
 
-      assert_before(description, "Aggregator contract:", "Aggregator authoring:")
       assert_before(description, "Aggregator contract:", "Configured upstream MCP servers:")
     end
 
@@ -339,11 +329,10 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   defp assert_quick_contract_in_first_chunk(text) do
     for marker <- [
           "(tool/mcp-call",
-          "World faults",
-          "return `nil`",
-          ":json-null",
-          "mcp/text",
-          "mcp/json",
+          "inspect `:ok`",
+          ":value payload",
+          ":reason kw",
+          ":raw",
           "catalog/",
           "compact"
         ] do

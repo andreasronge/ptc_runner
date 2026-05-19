@@ -12,14 +12,18 @@ defmodule PtcRunnerMcp.AggregatorConfig do
 
   @typedoc "Aggregator-mode configuration stored in persistent_term."
   @type t :: %{
-          read_only: boolean()
+          read_only: boolean(),
+          raw_envelope_default: boolean(),
+          upstreams: map()
         }
 
   @doc "Default aggregator config."
   @spec defaults() :: t()
   def defaults do
     %{
-      read_only: @default_read_only
+      read_only: @default_read_only,
+      raw_envelope_default: false,
+      upstreams: %{}
     }
   end
 
@@ -49,4 +53,25 @@ defmodule PtcRunnerMcp.AggregatorConfig do
   """
   @spec read_only?() :: boolean()
   def read_only?, do: get().read_only == true
+
+  @doc """
+  True when raw MCP envelope retention is enabled for an upstream tool.
+  """
+  @spec raw_envelope_enabled?(String.t(), String.t()) :: boolean()
+  def raw_envelope_enabled?(server, tool) when is_binary(server) and is_binary(tool) do
+    config = get()
+    upstream = get_in(config, [:upstreams, server]) || %{}
+    tool_config = get_in(upstream, [:tools, tool]) || %{}
+
+    cond do
+      is_boolean(Map.get(tool_config, :raw_envelope)) ->
+        tool_config.raw_envelope
+
+      is_boolean(Map.get(upstream, :raw_envelope)) ->
+        upstream.raw_envelope
+
+      true ->
+        config.raw_envelope_default == true
+    end
+  end
 end

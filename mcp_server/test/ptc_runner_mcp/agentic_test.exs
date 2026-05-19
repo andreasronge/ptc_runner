@@ -312,7 +312,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert env["isError"] == false
       sc = env["structuredContent"]
       assert sc["status"] == "ok"
-      assert sc["structured_result"] == %{"fallback" => "upstream_error"}
+      assert sc["structured_result"] == %{"fallback" => :upstream_error}
 
       assert [%{"status" => "error", "reason" => "upstream_error", "error" => "404"}] =
                sc["upstream_calls"]
@@ -350,7 +350,11 @@ defmodule PtcRunnerMcp.AgenticTest do
     test "read-only multi-turn can recover from a missing terminal form and records actual turns" do
       :ok = AggregatorConfig.set(%{read_only: true})
       :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2})
-      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, %{"seen" => true}} end})
+
+      :ok =
+        put_fake("alpha", %{
+          "ok" => fn _, _ -> {:ok, %{"structuredContent" => %{"seen" => true}}} end
+        })
 
       {:ok, sequence} =
         Agent.start_link(fn ->
@@ -368,7 +372,12 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert env["isError"] == false
       sc = env["structuredContent"]
       assert sc["execution"]["turn_count"] == 2
-      assert sc["structured_result"] == %{"ok" => true, "value" => %{"seen" => true}}
+
+      assert sc["structured_result"] == %{
+               "ok" => true,
+               "value" => %{"seen" => true},
+               "value_kind" => :json
+             }
 
       assert [
                %{"status" => "ok", "turn" => 1},
@@ -422,7 +431,9 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       :ok =
         put_fake("alpha", %{
-          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+          "write" =>
+            {fn _, _ -> {:ok, %{"structuredContent" => %{"written" => true}}} end,
+             %{"destructiveHint" => true}}
         })
 
       {:ok, _} = Registry.ensure_started("alpha", @registry_name)
@@ -494,7 +505,9 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       :ok =
         put_fake("alpha", %{
-          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+          "write" =>
+            {fn _, _ -> {:ok, %{"structuredContent" => %{"written" => true}}} end,
+             %{"destructiveHint" => true}}
         })
 
       {:ok, _} = Registry.ensure_started("alpha", @registry_name)
@@ -531,7 +544,9 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       :ok =
         put_fake("alpha", %{
-          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+          "write" =>
+            {fn _, _ -> {:ok, %{"structuredContent" => %{"written" => true}}} end,
+             %{"destructiveHint" => true}}
         })
 
       {:ok, _} = Registry.ensure_started("alpha", @registry_name)
@@ -549,7 +564,12 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       assert env["isError"] == false
       sc = env["structuredContent"]
-      assert sc["structured_result"] == %{"ok" => true, "value" => %{"written" => true}}
+
+      assert sc["structured_result"] == %{
+               "ok" => true,
+               "value" => %{"written" => true},
+               "value_kind" => :json
+             }
 
       assert [
                %{"status" => "ok", "effect" => "write", "turn" => 1}
@@ -564,7 +584,9 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       :ok =
         put_fake("alpha", %{
-          "write" => {fn _, _ -> {:ok, %{"written" => true}} end, %{"destructiveHint" => true}}
+          "write" =>
+            {fn _, _ -> {:ok, %{"structuredContent" => %{"written" => true}}} end,
+             %{"destructiveHint" => true}}
         })
 
       {:ok, _} = Registry.ensure_started("alpha", @registry_name)

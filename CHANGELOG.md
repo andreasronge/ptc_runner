@@ -36,22 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error class at zero prompt cost (`cons` was already supported). Documented
   as DIV-25 in `docs/clojure-conformance-gaps.md`. Closes #779.
 
-- **PTC-Lisp MCP unwrap helpers** — `(mcp/text r)` and `(mcp/json r)`
-  are now available unconditionally in every PTC-Lisp run. `mcp/text`
-  returns `r["content"][0]["text"]` (the well-known MCP envelope
-  shape) or `nil` for any non-conforming input — including the
-  `:json-null` sentinel, content[0] items whose `"type"` is not
-  exactly `"text"`, and missing/non-binary `"text"` fields. `mcp/json`
-  is the "give me the typed JSON of this result" helper: it
-  consults `r["structuredContent"]` first (preserving the `:json-null`
-  sub-field sentinel via short-circuit, per Plans/json-support.md
-  §6.2), then falls back to `(json/parse-string (mcp/text r))`. Both
-  helpers are pure shape inspectors with no MCP-protocol dependency,
-  follow the DIV-* convention, and **never raise**. The §1
-  motivating use case — replacing the brittle `re-find` regex split
-  workaround for upstreams returning JSON-as-text in
-  `content[0].text` — is now `(mcp/json (tool/mcp-call ...))`. See
-  `Plans/json-support.md` §5.
+- **PTC-Lisp MCP call result contract** — `(tool/mcp-call ...)` now
+  returns tagged data directly: `{:ok true :value payload
+  :value_kind :json|:text|:none}` for successful calls, or `{:ok false
+  :reason kw :message text}` for recoverable upstream/tool failures.
+  `mcp/text` and `mcp/json` are no longer exposed; use `(:value r)` after
+  checking `(:ok r)`.
 
 - **PTC-Lisp JSON builtins** — `(json/parse-string s)` and
   `(json/generate-string v)` are now available unconditionally in every
@@ -62,9 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   atom-keyed maps, tuples, PIDs, references, and functions by returning
   `nil` rather than silently coercing them. Both functions follow the
   DIV-* convention and **never raise** — failures surface as `nil` so
-  programs without try/catch can guard cleanly. The analyzer also
-  recognizes the `mcp/` namespace as forward-compat for Phase B
-  (`mcp/text` / `mcp/json` land in a follow-up). Documented under
+  programs without try/catch can guard cleanly. Documented under
   `docs/clojure-conformance-gaps.md` as DIV-23 and DIV-24, and in
   `Plans/json-support.md` §4. Cheshire users get an analyzer redirect:
   `(cheshire.core/parse-string ...)` now points at `json/parse-string`.

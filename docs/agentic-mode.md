@@ -201,8 +201,7 @@ results. Supported conversions include JSON Schema `string`,
 `:map`. If an upstream omits `outputSchema`, the generated catalog
 marks the tool as `-> :unknown_content`. That means the upstream did
 not advertise a domain output schema; the planner should inspect the
-MCP envelope with `(mcp/text result)` or `(mcp/json result)` based on
-the actual content and tool description instead of assuming JSON.
+tagged `tool/mcp-call` result's `:value` before assuming a shape.
 
 ## Real-provider smoke
 

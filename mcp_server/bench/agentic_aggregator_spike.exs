@@ -326,9 +326,7 @@ defmodule Bench.AgenticAggregatorSpike do
     Rules:
     - Return PTC-Lisp only. No Markdown fences. No explanation.
     - Do not include or discuss MCP `signature`; you are writing only `program`.
-    - For GitHub `search_issues` results, MUST use this robust unwrap pattern:
-      `(let [r (tool/mcp-call {...}) data (json/parse-string (mcp/text r))] ...)`.
-    - Do NOT use `(mcp/json r)` for `search_issues` in this task.
+    - For GitHub `search_issues` results, inspect `(:ok r)` and use `(:value r)`.
     - Return selected fields only. Avoid returning full upstream envelopes.
     - Keep output under 1 KB.
     - For this task, prefer queries with `in:title authentication` and
@@ -627,8 +625,8 @@ defmodule Bench.AgenticAggregatorSpike do
                                           :args {:owner "github"
                                                  :repo "github-mcp-server"
                                                  :issue_number n}})
-                        j (mcp/json r)]
-                    (or (get j "structuredContent") j)))
+                        j (:value r)]
+                    j))
           items [(fetch 2224) (fetch 2075)]]
       (clojure.string/join
         "\n"

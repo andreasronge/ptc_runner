@@ -10,7 +10,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
 
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunnerMcp.Agentic.Ledger
-  alias PtcRunnerMcp.{AggregatorConfig, Limits}
+  alias PtcRunnerMcp.{AggregatorConfig, Limits, McpResult, RawEnvelopePolicy}
   alias PtcRunnerMcp.Upstream.Registry
 
   @allowed_keys %{
@@ -140,13 +140,12 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
 
   @doc "Builds the Lisp-facing tagged success value."
   @spec tagged_success(term()) :: map()
-  def tagged_success(value), do: %{ok: true, value: value}
+  def tagged_success(value), do: McpResult.success(value)
 
   @doc "Builds the Lisp-facing tagged world-fault value."
-  @spec tagged_error(atom() | String.t(), String.t()) :: map()
-  def tagged_error(reason, message) when is_binary(message) do
-    %{ok: false, reason: reason_string(reason), message: message}
-  end
+  @spec tagged_error(atom(), String.t()) :: map()
+  def tagged_error(reason, message) when is_atom(reason) and is_binary(message),
+    do: McpResult.error(reason, message)
 
   defp normalize_args!(args) do
     case normalize_args(args) do
@@ -296,11 +295,11 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
         # `upstream_error_bytes` — but the program *did* receive the
         # full envelope, so we record its size (matching the
         # `ptc_lisp_execute` aggregator path).
-        {:world_fault, :upstream_error, extract_is_error_detail(value), total_duration,
-         result_bytes(value)}
+        {:tool_error, server, tool, :tool_error, McpResult.tool_error_message(value),
+         total_duration, result_bytes(value), value}
 
       {:ok, value} ->
-        {:ok, value, total_duration}
+        {:ok, server, tool, value, total_duration}
 
       {:error, reason, detail}
       when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
@@ -326,14 +325,30 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     end
   end
 
-  defp complete_and_tag({:ok, value, duration}, ledger, id, _started_at) do
+  defp complete_and_tag({:ok, server, tool, value, duration}, ledger, id, _started_at) do
     :ok =
       Ledger.complete_success(ledger, id,
         duration_ms: duration,
         result_bytes: result_bytes(value)
       )
 
-    tagged_success(value)
+    McpResult.success(value, raw?: RawEnvelopePolicy.enabled?(server, tool))
+  end
+
+  defp complete_and_tag(
+         {:tool_error, server, tool, reason, detail, duration, result_bytes, envelope},
+         ledger,
+         id,
+         _started_at
+       ) do
+    :ok =
+      Ledger.complete_error(ledger, id, reason_string(reason), detail,
+        duration_ms: duration,
+        result_bytes: result_bytes,
+        oversize: false
+      )
+
+    McpResult.error(reason, detail, envelope, raw?: RawEnvelopePolicy.enabled?(server, tool))
   end
 
   defp complete_and_tag(
@@ -348,8 +363,8 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     # actually received (counted into `upstream_error_bytes`), `nil`
     # for every world-fault where no full payload reached the program
     # (transport errors, oversize, cap, ensure-failed). `reason` is
-    # always one of the `Upstream.reason/0` atoms (plus
-    # `:cap_exhausted`).
+    # always one of the `Upstream.reason/0` atoms (plus `:cap_exhausted`
+    # and tool-level `:tool_error`).
     :ok =
       Ledger.complete_error(ledger, id, reason_string(reason), detail,
         duration_ms: duration,
@@ -357,7 +372,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
         oversize: reason == :response_too_large
       )
 
-    tagged_error(reason, detail)
+    McpResult.error(reason, detail)
   end
 
   defp complete_wrapper_error(ledger, id, started_at, message) do
@@ -379,13 +394,6 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   defp tool_name(%{name: name}) when is_binary(name), do: name
   defp tool_name(%{"name" => name}) when is_binary(name), do: name
   defp tool_name(_), do: nil
-
-  defp extract_is_error_detail(%{"content" => [%{"type" => "text", "text" => text} | _]})
-       when is_binary(text) do
-    text
-  end
-
-  defp extract_is_error_detail(value), do: inspect(value, limit: 50, printable_limit: 500)
 
   defp result_bytes(value) do
     case Jason.encode(value) do

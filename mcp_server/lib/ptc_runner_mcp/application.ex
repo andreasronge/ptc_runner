@@ -69,8 +69,10 @@ defmodule PtcRunnerMcp.Application do
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
 
-    %{upstreams: upstreams, credentials: bindings} = load_aggregator_config(args)
-    apply_aggregator_config(args)
+    %{upstreams: upstreams, credentials: bindings, raw_envelope_policy: raw_envelope_policy} =
+      load_aggregator_config(args)
+
+    apply_aggregator_config(args, raw_envelope_policy)
     apply_catalog_config(args)
     apply_agentic_config(args)
     apply_debug_config(args)
@@ -269,7 +271,7 @@ defmodule PtcRunnerMcp.Application do
   # default precedence for non-limit aggregator behavior.
   @doc false
   @spec apply_aggregator_config(map()) :: :ok
-  def apply_aggregator_config(args) when is_map(args) do
+  def apply_aggregator_config(args, raw_envelope_policy \\ %{}) when is_map(args) do
     AggregatorConfig.set(%{
       read_only:
         read_bool(
@@ -277,7 +279,14 @@ defmodule PtcRunnerMcp.Application do
           :aggregator_read_only,
           "PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY",
           AggregatorConfig.defaults().read_only
-        )
+        ),
+      raw_envelope_default:
+        Map.get(
+          raw_envelope_policy,
+          :raw_envelope_default,
+          AggregatorConfig.defaults().raw_envelope_default
+        ),
+      upstreams: Map.get(raw_envelope_policy, :upstreams, %{})
     })
   end
 
@@ -1055,7 +1064,7 @@ defmodule PtcRunnerMcp.Application do
 
     case path do
       nil ->
-        %{upstreams: [], credentials: %{}}
+        %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
 
       path when is_binary(path) ->
         case File.read(path) do
@@ -1063,7 +1072,7 @@ defmodule PtcRunnerMcp.Application do
             parse_aggregator_body(body, path)
 
           {:error, :enoent} ->
-            %{upstreams: [], credentials: %{}}
+            %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
 
           {:error, reason} ->
             Log.log(:warn, "upstreams_config_read_failed", %{
@@ -1071,18 +1080,20 @@ defmodule PtcRunnerMcp.Application do
               reason: to_string(:file.format_error(reason))
             })
 
-            %{upstreams: [], credentials: %{}}
+            %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
         end
     end
   end
 
-  defp parse_aggregator_body("", _path), do: %{upstreams: [], credentials: %{}}
+  defp parse_aggregator_body("", _path),
+    do: %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
 
   defp parse_aggregator_body(body, path) do
     case Jason.decode(body) do
       {:ok, %{"upstreams" => map} = decoded} when is_map(map) ->
         bindings = parse_credentials_block!(decoded, path)
         entries = parse_upstream_entries(map, path)
+        raw_envelope_policy = parse_raw_envelope_policy(decoded)
         :ok = validate_auth_binding_refs!(map, bindings, path)
         # §4.5: HTTP upstreams require `:req` to be loaded. Phase 1
         # configs are stdio-only and `transport:` is absent on every
@@ -1090,7 +1101,7 @@ defmodule PtcRunnerMcp.Application do
         # adds full `transport: "http"` parsing (URL / proxy / insecure
         # gates); 2A only checks dep presence.
         :ok = check_http_deps!(map, path)
-        %{upstreams: entries, credentials: bindings}
+        %{upstreams: entries, credentials: bindings, raw_envelope_policy: raw_envelope_policy}
 
       {:ok, _other} ->
         Log.log(:warn, "upstreams_config_invalid", %{
@@ -1098,7 +1109,7 @@ defmodule PtcRunnerMcp.Application do
           reason: "missing top-level :upstreams key"
         })
 
-        %{upstreams: [], credentials: %{}}
+        %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
 
       {:error, reason} ->
         Log.log(:warn, "upstreams_config_invalid", %{
@@ -1106,7 +1117,7 @@ defmodule PtcRunnerMcp.Application do
           reason: inspect(reason, limit: 50)
         })
 
-        %{upstreams: [], credentials: %{}}
+        %{upstreams: [], credentials: %{}, raw_envelope_policy: %{}}
     end
   end
 
@@ -1127,6 +1138,35 @@ defmodule PtcRunnerMcp.Application do
 
     entries
   end
+
+  defp parse_raw_envelope_policy(decoded) when is_map(decoded) do
+    %{
+      raw_envelope_default: Map.get(decoded, "raw_envelope") == true,
+      upstreams:
+        decoded
+        |> Map.get("upstreams", %{})
+        |> Enum.into(%{}, fn {name, config} ->
+          {name, parse_raw_envelope_upstream(config)}
+        end)
+    }
+  end
+
+  defp parse_raw_envelope_upstream(config) when is_map(config) do
+    %{
+      raw_envelope: raw_envelope_value(config),
+      tools:
+        config
+        |> Map.get("tools", %{})
+        |> Enum.into(%{}, fn {tool, tool_config} ->
+          {tool, %{raw_envelope: raw_envelope_value(tool_config)}}
+        end)
+    }
+  end
+
+  defp parse_raw_envelope_upstream(_), do: %{raw_envelope: nil, tools: %{}}
+
+  defp raw_envelope_value(%{"raw_envelope" => value}) when is_boolean(value), do: value
+  defp raw_envelope_value(_), do: nil
 
   # Phase 2E: dispatch on the `transport:` field. Stdio is the default
   # (transport absent → stdio, preserving Phase 1 behavior). HTTP routes
@@ -2015,6 +2055,7 @@ defmodule PtcRunnerMcp.Application do
   # HTTP config keys where the resulting plaintext would land in
   # logs / `inspect/1` of upstream config.
   @metadata_keys ["description", "capabilities"]
+  @raw_envelope_policy_keys ["raw_envelope", "tools"]
 
   defp extract_upstream_metadata(config) when is_map(config) do
     description = validate_metadata_description(Map.get(config, "description"))
@@ -2025,7 +2066,7 @@ defmodule PtcRunnerMcp.Application do
       |> maybe_put(:description, description)
       |> maybe_put(:capabilities, capabilities)
 
-    transport_config = Map.drop(config, @metadata_keys)
+    transport_config = Map.drop(config, @metadata_keys ++ @raw_envelope_policy_keys)
     {metadata, transport_config}
   end
 

@@ -2,8 +2,8 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
   @moduledoc """
   Phase 4 hardening (Plans/ptc-runner-mcp-aggregator.md §16 entry 2):
   upstream `tools/call` results with `isError: true` MUST be
-  normalized to `nil` and recorded as
-  `status: "error", reason: "upstream_error"` in `upstream_calls`.
+  normalized to tagged failure data and recorded as
+  `status: "error", reason: "tool_error"` in `upstream_calls`.
 
   Pre-fix the JSON-RPC call itself succeeded, so the aggregator
   recorded `status: "ok"` and the program received the upstream's
@@ -13,15 +13,13 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
   These tests pin the post-fix semantics:
 
     1. `isError: true` with the standard MCP `content[0].text` shape
-       → program sees `nil`, entry has `reason: "upstream_error"`,
+       → program sees `:ok false`, entry has `reason: "tool_error"`,
        `error` carries the extracted text.
     2. `isError: false` is unchanged — program sees the value,
        entry has `status: "ok"`.
     3. An upstream that omits `isError` entirely (the common
        success case for many MCP servers) is treated as success.
-    4. Top-level JSON `null` STILL becomes `:json-null` per §7.3 —
-       the isError check must not interfere with the
-       null-sentinel rewrite.
+    4. Top-level JSON `null` returns `:ok true, :value nil`.
   """
 
   use ExUnit.Case, async: false
@@ -69,7 +67,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
   defp upstream_calls(env), do: structured(env)["upstream_calls"] || []
 
   describe "isError: true normalization (§16 entry 2)" do
-    test "upstream isError: true with content[0].text → program sees nil + upstream_error entry" do
+    test "upstream isError: true with content[0].text → program sees tagged tool_error" do
       # Mirrors filesystem-MCP's ENOENT shape exactly:
       #     %{"content" => [%{"text" => "ENOENT: ...", "type" => "text"}],
       #       "isError" => true}
@@ -85,22 +83,24 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       env =
         call(
-          ~S|(nil? (tool/mcp-call {:server "alpha" :tool "fail" :args {}}))|,
+          ~S|
+            (let [r (tool/mcp-call {:server "alpha" :tool "fail" :args {}})]
+              (and (not (:ok r))
+                   (= (:reason r) :tool_error)
+                   (= (:message r) "test failure msg")))
+          |,
           %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false, "envelope was: #{inspect(env, limit: :infinity)}"
-      # Program saw `nil` — discriminating against the pre-fix
-      # behavior where the program would see the full envelope
-      # map (truthy under `nil?`) and `validated` would be `false`.
       assert structured(env)["validated"] == true,
-             "expected program to see nil, got envelope: #{inspect(env, limit: :infinity)}"
+             "expected program to see tagged tool_error, got: #{inspect(env, limit: :infinity)}"
 
       [entry] = upstream_calls(env)
       assert entry["server"] == "alpha"
       assert entry["tool"] == "fail"
       assert entry["status"] == "error"
-      assert entry["reason"] == "upstream_error"
+      assert entry["reason"] == "tool_error"
       assert entry["error"] == "test failure msg"
 
       assert is_integer(entry["duration_ms"]) and entry["duration_ms"] >= 0
@@ -119,7 +119,12 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       env =
         call(
-          ~S|(nil? (tool/mcp-call {:server "alpha" :tool "weird" :args {}}))|,
+          ~S|
+            (let [r (tool/mcp-call {:server "alpha" :tool "weird" :args {}})]
+              (and (not (:ok r))
+                   (= (:reason r) :tool_error)
+                   (includes? (:message r) "details")))
+          |,
           %{"output_schema" => %{"type" => "boolean"}}
         )
 
@@ -128,10 +133,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       [entry] = upstream_calls(env)
       assert entry["status"] == "error"
-      assert entry["reason"] == "upstream_error"
-      # The fallback prefixes with "upstream isError envelope:" so
-      # the operator knows it's the non-canonical shape branch.
-      assert entry["error"] =~ "upstream isError envelope"
+      assert entry["reason"] == "tool_error"
       assert entry["error"] =~ "details"
     end
 
@@ -149,7 +151,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(~S|
           (let [r (tool/mcp-call {:server "alpha" :tool "ok" :args {}})]
-            (get-in r ["content" 0 "text"]))
+            (:value r))
         |)
 
       assert env["isError"] == false
@@ -179,7 +181,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(~S|
           (let [r (tool/mcp-call {:server "alpha" :tool "no_iserr" :args {}})]
-            (get-in r ["content" 0 "text"]))
+            (:value r))
         |)
 
       assert env["isError"] == false
@@ -189,25 +191,22 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       assert entry["status"] == "ok"
     end
 
-    test "top-level JSON null STILL becomes :json-null sentinel (regression for §7.3)" do
-      # Phase 4 hardening must not interact with §7.3. A bare
-      # JSON null is not a map, so the isError check (which
-      # pattern-matches `%{"isError" => true}`) never triggers,
-      # and the existing `:json-null` rewrite path runs as
-      # before.
+    test "top-level JSON null becomes tagged JSON nil" do
       put_fake("alpha", %{"null" => fn _, _ -> {:ok, nil} end})
 
       env =
         call(
-          ~S|(= (tool/mcp-call {:server "alpha" :tool "null" :args {}}) :json-null)|,
+          ~S|
+            (let [r (tool/mcp-call {:server "alpha" :tool "null" :args {}})]
+              (and (:ok r) (nil? (:value r)) (= (:value_kind r) :json)))
+          |,
           %{"output_schema" => %{"type" => "boolean"}}
         )
 
       assert env["isError"] == false
 
       assert structured(env)["validated"] == true,
-             "the program saw something other than :json-null — " <>
-               "isError check leaked into the null-sentinel path: " <>
+             "the program saw something other than tagged JSON nil: " <>
                inspect(env, limit: :infinity)
 
       [entry] = upstream_calls(env)
@@ -234,7 +233,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       assert env["isError"] == false
       [entry] = upstream_calls(env)
       assert entry["status"] == "error"
-      assert entry["reason"] == "upstream_error"
+      assert entry["reason"] == "tool_error"
 
       assert String.length(entry["error"]) < String.length(huge),
              "error string was not truncated"
@@ -280,20 +279,23 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       env =
         call(
-          ~S|(nil? (tool/mcp-call {:server "alpha" :tool "fail" :args {}}))|,
+          ~S|
+            (let [r (tool/mcp-call {:server "alpha" :tool "fail" :args {}})]
+              (and (not (:ok r)) (= (:reason r) :tool_error)))
+          |,
           %{"output_schema" => %{"type" => "boolean"}}
         )
 
-      # Phase 4 contract: still normalized to nil + world-fault.
+      # Phase 4 contract: still normalized to a tagged world-fault.
       assert env["isError"] == false,
              "envelope should not be an error: #{inspect(env, limit: :infinity)}"
 
       assert structured(env)["validated"] == true,
-             "program did not see nil: #{inspect(env, limit: :infinity)}"
+             "program did not see tagged tool_error: #{inspect(env, limit: :infinity)}"
 
       [entry] = upstream_calls(env)
       assert entry["status"] == "error"
-      assert entry["reason"] == "upstream_error"
+      assert entry["reason"] == "tool_error"
 
       # Discriminating assertions for the codex finding:
       #

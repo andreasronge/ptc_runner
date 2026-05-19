@@ -14,7 +14,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
   Programmer-fault failures **raise** `PtcRunner.Lisp.ExecutionError`
   (the exception PTC-Lisp's tool executor reraises into the program's
-  runtime error). World-fault failures **return `nil`** and record an
+  runtime error). World-fault failures return tagged
+  `{:ok false, :reason reason, :message message}` data and record an
   `upstream_calls` entry via the collector.
 
     * `:server` value not in upstreams config → programmer-fault
@@ -23,18 +24,27 @@ defmodule PtcRunnerMcp.AggregatorTools do
       programmer-fault `runtime_error: no tool '<tool>' in upstream '<server>'`.
     * Args missing / not JSON-encodable → programmer-fault
       `runtime_error: tool '<server>.<tool>' rejected args: <reason>`.
-    * `ensure_started/1` failed → world-fault `nil` + `upstream_unavailable`.
-    * Per-program cap hit → world-fault `nil` + `cap_exhausted`.
+    * `ensure_started/1` failed → world-fault tagged error + `upstream_unavailable`.
+    * Per-program cap hit → world-fault tagged error + `cap_exhausted`.
     * Upstream call returns error / timeout / oversized → world-fault
-      `nil` + corresponding reason.
+      tagged error + corresponding reason.
   """
 
   alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunnerMcp.{McpResult, RawEnvelopePolicy}
   alias PtcRunnerMcp.Upstream
   alias PtcRunnerMcp.Upstream.Registry
   alias PtcRunnerMcp.UpstreamCalls
 
   @tool_name "mcp-call"
+  @allowed_arg_keys %{
+    "server" => :server,
+    "tool" => :tool,
+    "args" => :args,
+    server: :server,
+    tool: :tool,
+    args: :args
+  }
 
   @doc """
   Builds the tools map for `Sandbox.execute(..., tools: ...)`.
@@ -73,8 +83,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
           dispatch(call_context, registry, server, tool, call_args, request_id)
 
         :cap_exhausted ->
-          # §7.1: cap is world-fault — return nil, entry already recorded.
-          nil
+          McpResult.error(:cap_exhausted, "cap_exhausted")
       end
     end
   end
@@ -84,9 +93,10 @@ defmodule PtcRunnerMcp.AggregatorTools do
   # ----------------------------------------------------------------
 
   defp validate_args(args) do
-    server = Map.get(args, "server")
-    tool = Map.get(args, "tool")
-    call_args = Map.get(args, "args")
+    normalized = normalize_top_level_keys!(args)
+    server = Map.get(normalized, :server)
+    tool = Map.get(normalized, :tool)
+    call_args = Map.get(normalized, :args)
 
     cond do
       not is_binary(server) or server == "" ->
@@ -125,6 +135,22 @@ defmodule PtcRunnerMcp.AggregatorTools do
       true ->
         {server, tool, call_args}
     end
+  end
+
+  defp normalize_top_level_keys!(args) do
+    Enum.reduce(args, %{}, fn {key, value}, acc ->
+      case Map.fetch(@allowed_arg_keys, key) do
+        {:ok, normalized_key} ->
+          if Map.has_key?(acc, normalized_key) do
+            raise_programmer_fault("tool/mcp-call got duplicate key #{inspect(normalized_key)}")
+          else
+            Map.put(acc, normalized_key, value)
+          end
+
+        :error ->
+          raise_programmer_fault("tool/mcp-call got unknown key #{inspect(key)}")
+      end
+    end)
   end
 
   # ----------------------------------------------------------------
@@ -218,12 +244,12 @@ defmodule PtcRunnerMcp.AggregatorTools do
     # `tools/call` round-trip) decomposed per spec §16. Operators
     # subscribe to the `[:upstream, :call, :stop]` event and read
     # both fields off the metadata to attribute cold-start vs
-    # steady-state cost; programs see only the unwrapped payload.
+    # steady-state cost; programs see tagged `McpResult` data.
     :telemetry.span([:ptc_runner_mcp, :upstream, :call], telemetry_meta, fn ->
       result = do_dispatch(call_context, registry, server, tool, call_args)
       {result, stop_meta(telemetry_meta, result)}
     end)
-    |> unwrap_for_program()
+    |> tag_for_program(server, tool)
   end
 
   defp do_dispatch(call_context, registry, server, tool, call_args) do
@@ -431,54 +457,46 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # `{:ok, %{"isError" => true, ...}}` is a *tool-level* error
         # — the JSON-RPC call itself succeeded, but the upstream
         # signaled application failure inside the result envelope.
-        # Per §7.1 this is a world-fault: programs see `nil`, and
-        # `upstream_calls` records `status: "error"`,
-        # `reason: "upstream_error"`. The detail is extracted from
-        # `content[0].text` when shaped that way (the MCP convention
-        # for human-readable error messages); otherwise we inspect
-        # the value as a fallback.
+        # Per §7.1 this is a world-fault: programs see tagged
+        # `:tool_error` data, and `upstream_calls` records
+        # `status: "error"`, `reason: "tool_error"`. The bounded
+        # detail is extracted from `content[0].text` when shaped that
+        # way (the MCP convention for human-readable error messages);
+        # otherwise we inspect the value as a fallback.
         #
-        # The check runs BEFORE the §7.3 `:json-null` rewrite so
-        # top-level JSON null is unaffected (a bare `nil` value is
-        # not a map and never matches the `isError` branch).
+        # The check runs before value unwrapping so an `isError: true`
+        # envelope cannot be mistaken for a successful text payload.
         case classify_value(value) do
-          :upstream_error ->
-            detail = extract_is_error_detail(value)
+          :tool_error ->
+            detail = McpResult.tool_error_message(value)
 
             # A tool-level error envelope's bytes are NOT useful
             # compression (§4.1) — they go into `upstream_error_bytes`,
             # so we still record the size for diagnostics but the entry
             # is `status: "error"`.
             entry =
-              UpstreamCalls.error_entry(server, tool, :upstream_error, detail, total_duration,
+              UpstreamCalls.error_entry(server, tool, :tool_error, detail, total_duration,
                 result_bytes: result_bytes
               )
 
             UpstreamCalls.record(call_context, entry)
-            {:world_fault, :upstream_error, detail, durations}
+            {:world_fault, :tool_error, detail, durations, value}
 
           :ok ->
             # Pipeline ordering (Plans/json-support.md §6.4 — single
             # source of truth):
             #
-            #   classify_value (above) → auto-decode → §7.3 :json-null
+            #   classify_value (above) → auto-decode telemetry → tagged unwrap
             #
             # Auto-decode runs HERE — after classify_value short-
             # circuits world-faults (so `isError: true` envelopes never
             # reach this branch and never trigger a spurious
-            # `:auto_decode` telemetry event), and BEFORE the §7.3
-            # top-level `:json-null` rewrite (so promotion operates on
-            # the upstream's original map, not on a `:json-null`
-            # keyword). The maybe_auto_decode/3 helper preserves the
-            # original `content[]` and only adds `structuredContent`
+            # `:auto_decode` telemetry event), and before tagged
+            # unwrapping (so promotion operates on the upstream's
+            # original map). The maybe_auto_decode/3 helper preserves
+            # the original `content[]` and only adds `structuredContent`
             # when all four §6.1 preconditions hold.
-            promoted = maybe_auto_decode(value, server, tool)
-
-            # §7.3: `:json-null` rewrite is **top-level only**. If the
-            # successful payload is itself JSON null, hand back the
-            # keyword sentinel so `nil` retains its "this call did not
-            # succeed" meaning. Nested nils are unchanged.
-            rewritten = if is_nil(promoted), do: :"json-null", else: promoted
+            _promoted_for_telemetry = maybe_auto_decode(value, server, tool)
 
             entry =
               UpstreamCalls.success_entry(server, tool, total_duration,
@@ -486,7 +504,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
               )
 
             UpstreamCalls.record(call_context, entry)
-            {:ok, rewritten, durations}
+            {:ok, value, durations}
         end
 
       {:error, reason, detail}
@@ -528,12 +546,17 @@ defmodule PtcRunnerMcp.AggregatorTools do
     end
   end
 
-  # The closure returns the value visible to the program: a real
-  # value on success, or `nil` on world-fault. Telemetry receives a
-  # richer shape (the raw result + reason + durations), which we
-  # strip here.
-  defp unwrap_for_program({:ok, value, _durations}), do: value
-  defp unwrap_for_program({:world_fault, _reason, _detail, _durations}), do: nil
+  defp tag_for_program({:ok, value, _durations}, server, tool) do
+    McpResult.success(value, raw?: RawEnvelopePolicy.enabled?(server, tool))
+  end
+
+  defp tag_for_program({:world_fault, reason, detail, _durations}, _server, _tool) do
+    McpResult.error(reason, detail)
+  end
+
+  defp tag_for_program({:world_fault, reason, detail, _durations, envelope}, server, tool) do
+    McpResult.error(reason, detail, envelope, raw?: RawEnvelopePolicy.enabled?(server, tool))
+  end
 
   defp stop_meta(meta, {:ok, _value, durations}) do
     meta
@@ -548,32 +571,22 @@ defmodule PtcRunnerMcp.AggregatorTools do
     |> Map.merge(durations)
   end
 
+  defp stop_meta(meta, {:world_fault, reason, _detail, durations, _envelope}) do
+    meta
+    |> Map.put(:status, :error)
+    |> Map.put(:reason, reason)
+    |> Map.merge(durations)
+  end
+
   # ----------------------------------------------------------------
   # Helpers
   # ----------------------------------------------------------------
-
-  # Cap on the extracted error detail string. Upstream MCP servers
-  # can put arbitrarily long text inside `content[0].text` (stack
-  # traces, full file dumps, etc.). 500 codepoints is enough for a
-  # human-readable diagnostic in `upstream_calls[].error` without
-  # bloating the response envelope.
-  #
-  # The cap is in **codepoints, not bytes**. A byte-aligned cap
-  # (`<<head::binary-size(500), _::binary>>`) can slice through a
-  # multi-byte UTF-8 codepoint mid-encoding (e.g., a Chinese stack
-  # trace, or 600× `é` = 1200 bytes), producing an invalid UTF-8
-  # binary. That binary is then stored in `upstream_calls[].error`
-  # and crashes `Jason.encode!/1` when the response envelope is
-  # built — i.e., the same encoding-family failure Phase 4 was
-  # supposed to harden against. `String.slice/3` always cuts on
-  # codepoint boundaries and returns a valid UTF-8 string.
-  @is_error_detail_cap 500
 
   # Phase 4 hardening: classify a successful upstream payload. A
   # map whose `"isError"` key is `true` is a tool-level failure
   # (§16 entry 2 / amended §7.1) and surfaces as a world-fault.
   # Everything else is a plain success.
-  defp classify_value(%{"isError" => true}), do: :upstream_error
+  defp classify_value(%{"isError" => true}), do: :tool_error
   defp classify_value(_), do: :ok
 
   # Plans/json-support.md §6 auto-decode promotion. Pure shape
@@ -724,40 +737,6 @@ defmodule PtcRunnerMcp.AggregatorTools do
       measurements,
       metadata
     )
-  end
-
-  # Extract a human-readable detail from an upstream's `isError: true`
-  # envelope. The MCP convention is
-  #
-  #     %{"content" => [%{"type" => "text", "text" => "<msg>"}, ...],
-  #       "isError" => true}
-  #
-  # so `content[0].text` is the human-readable error. If the upstream
-  # uses a different shape (no content list, non-text first item,
-  # etc.) we fall back to `inspect/2` so the LLM still sees something
-  # diagnostic. The result is capped at `@is_error_detail_cap`
-  # codepoints (see the constant's docstring for why codepoints,
-  # not bytes).
-  defp extract_is_error_detail(%{"content" => [%{"text" => text} | _]}) when is_binary(text) do
-    cap_detail(text)
-  end
-
-  defp extract_is_error_detail(value) do
-    cap_detail("upstream isError envelope: #{inspect(value, limit: 50, printable_limit: 200)}")
-  end
-
-  defp cap_detail(text) when is_binary(text) do
-    # `String.length/1` counts codepoints; `String.slice/3` cuts on
-    # codepoint boundaries. Always-valid UTF-8 out, regardless of
-    # input script. We compare on `String.length` (not `byte_size`)
-    # so a mostly-ASCII string under the cap stays unmodified, and
-    # a multi-byte string above the cap is trimmed to exactly
-    # `@is_error_detail_cap` codepoints + a single ellipsis.
-    if String.length(text) > @is_error_detail_cap do
-      String.slice(text, 0, @is_error_detail_cap) <> "…"
-    else
-      text
-    end
   end
 
   defp tool_name_of(%{name: n}) when is_binary(n), do: n

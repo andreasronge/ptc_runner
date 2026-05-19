@@ -242,7 +242,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
-  # `json/` and `mcp/` use namespace-qualified env keys (e.g., `:"json/parse-string"`)
+  # `json/` uses namespace-qualified env keys (e.g., `:"json/parse-string"`)
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
   # and `qualified_namespace_lookup/2` (Plans/json-support.md §4.4 OQ-5 option (a)).
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
@@ -1207,7 +1207,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # interned before any user input reaches the analyzer (avoids the
   # `String.to_existing_atom/1` race where the analyzer module loads before
   # Env's `builtin_bindings/0` runs).
-  @qualified_namespaces [:json, :mcp]
+  @qualified_namespaces [:json]
 
   @qualified_namespace_tables (for ns <- @qualified_namespaces, into: %{} do
                                  prefix = Atom.to_string(ns) <> "/"
@@ -1301,7 +1301,6 @@ defmodule PtcRunner.Lisp.Analyze do
       "catalog/",
       "budget/",
       "json/",
-      "mcp/",
       "clojure.core/",
       "core/",
       "clojure.string/",

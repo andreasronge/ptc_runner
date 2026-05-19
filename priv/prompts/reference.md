@@ -25,12 +25,11 @@ No other Java interop.
 - Comments: only own-line `;;`; no inline `;` (breaks `<=`, `->>`).
 - Not available: `ns`, `require`, `refer`, `import`, macros, lazy seqs, atoms/refs, futures/promises, try/catch/throw, dotimes, iterate/repeat/cycle, transients, metadata, I/O except `println`, general Java interop.
 - Use `reduce`, `map`, `filter`; no `atom`/`swap!`/`reset!`/`@deref`.
-- Namespaces are fixed: `tool/`, `data/`, `catalog/`, `budget/`, `clojure.core/`, `clojure.string/`, `clojure.set/`, `clojure.walk/`, `regex/`, `Math/`, `System/`, `Double/`, `LocalDate/`, `Instant/`, `json/`, `mcp/`.
+- Namespaces are fixed: `tool/`, `data/`, `catalog/`, `budget/`, `clojure.core/`, `clojure.string/`, `clojure.set/`, `clojure.walk/`, `regex/`, `Math/`, `System/`, `Double/`, `LocalDate/`, `Instant/`, `json/`.
 </restrictions>
 
 <json>
 - `(json/parse-string s)`, `(json/generate-string v)`; parse returns `nil` on failure, keys are strings.
-- `(mcp/text r)`, `(mcp/json r)`; `mcp/json` prefers `r["structuredContent"]`.
 </json>
 
 <!-- PTC_PROMPT_END -->
