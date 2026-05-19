@@ -195,13 +195,9 @@ defmodule PtcRunnerMcp.Sandbox do
     #
     # except for runtime-floor tiny limits, where one worker at the BEAM
     # minimum is the tightest enforceable cap.
+
     # § 9.3: a `data/<key>` reference for an absent key must produce
     # a runtime_error naming the binding, not silently return nil.
-    # No :signature passed to Lisp.run/2 — MCP performs signature
-    # validation post-hoc via `PtcToolProtocol.validate_return/2` so
-    # parse errors are caught before permit acquisition (§ 9.4) and
-    # validation errors render through the MCP `validation_error`
-    # path with `to_json_value/1` for the `validated` field (§ 13).
     base =
       ([
          caller: :mcp,
@@ -217,6 +213,12 @@ defmodule PtcRunnerMcp.Sandbox do
       |> then(fn opts ->
         if catalog_exec, do: Keyword.put(opts, :catalog_exec, catalog_exec), else: opts
       end)
+
+    # No :signature passed to Lisp.run/2 — MCP performs signature
+    # validation post-hoc via `PtcToolProtocol.validate_return/2` so
+    # parse errors are caught before permit acquisition (§ 9.4) and
+    # validation errors render through the MCP `validation_error`
+    # path with `to_json_value/1` for the `validated` field (§ 13).
 
     # Phase 4: when called from a per-call worker (Stdio), `link: true`
     # tells the inner `PtcRunner.Sandbox` to spawn its child linked
