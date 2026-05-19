@@ -88,6 +88,7 @@ defmodule PtcRunnerMcp.Sandbox do
   # which trips on virtually any allocation — preserving "tight cap
   # → tight enforcement" semantics.
   @min_max_heap_words 233
+  @default_max_parallel_workers 8
 
   @typedoc "Already-parsed signature term, or `nil` when no signature was supplied."
   @type parsed_signature :: term() | nil
@@ -181,31 +182,38 @@ defmodule PtcRunnerMcp.Sandbox do
     # crashing the spawn.
     timeout_ms = Limits.program_timeout_ms()
 
-    max_heap_words =
-      max(
-        @min_max_heap_words,
-        div(Limits.program_memory_limit_bytes(), @bytes_per_word)
-      )
+    max_heap_words = max_heap_words_from_limit()
 
+    # Preserve MCP's configured program memory limit as an aggregate
+    # parallel-worker budget. Lisp.run/2 defaults to
+    # `worker_max_heap == max_heap` and `max_parallel_workers == 8`,
+    # which is appropriate for in-process callers but would multiply
+    # MCP's user-facing program limit by 8 for pmap/pcalls. Derive an
+    # MCP-specific per-worker cap so:
+    #
+    #   max_parallel_workers * worker_max_heap <= max_heap_words
+    #
+    # except for runtime-floor tiny limits, where one worker at the BEAM
+    # minimum is the tightest enforceable cap.
+    # § 9.3: a `data/<key>` reference for an absent key must produce
+    # a runtime_error naming the binding, not silently return nil.
+    # No :signature passed to Lisp.run/2 — MCP performs signature
+    # validation post-hoc via `PtcToolProtocol.validate_return/2` so
+    # parse errors are caught before permit acquisition (§ 9.4) and
+    # validation errors render through the MCP `validation_error`
+    # path with `to_json_value/1` for the `validated` field (§ 13).
     base =
-      [
-        caller: :mcp,
-        profile: profile,
-        memory: %{},
-        tools: tools,
-        tool_cache: %{},
-        context: context,
-        timeout: timeout_ms,
-        max_heap: max_heap_words,
-        # § 9.3: a `data/<key>` reference for an absent key must produce
-        # a runtime_error naming the binding, not silently return nil.
-        strict_data: true
-        # No :signature passed to Lisp.run/2 — MCP performs signature
-        # validation post-hoc via `PtcToolProtocol.validate_return/2` so
-        # parse errors are caught before permit acquisition (§ 9.4) and
-        # validation errors render through the MCP `validation_error`
-        # path with `to_json_value/1` for the `validated` field (§ 13).
-      ]
+      ([
+         caller: :mcp,
+         profile: profile,
+         memory: %{},
+         tools: tools,
+         tool_cache: %{},
+         context: context,
+         timeout: timeout_ms,
+         max_heap: max_heap_words,
+         strict_data: true
+       ] ++ parallel_limit_opts(max_heap_words))
       |> then(fn opts ->
         if catalog_exec, do: Keyword.put(opts, :catalog_exec, catalog_exec), else: opts
       end)
@@ -335,5 +343,27 @@ defmodule PtcRunnerMcp.Sandbox do
       String.contains?(reason_str, "memory") -> :memory_limit
       true -> :runtime_error
     end
+  end
+
+  @doc false
+  @spec max_heap_words_from_limit(pos_integer()) :: pos_integer()
+  def max_heap_words_from_limit(limit_bytes \\ Limits.program_memory_limit_bytes())
+      when is_integer(limit_bytes) and limit_bytes > 0 do
+    max(@min_max_heap_words, div(limit_bytes, @bytes_per_word))
+  end
+
+  @doc false
+  @spec parallel_limit_opts(pos_integer()) :: keyword(pos_integer())
+  def parallel_limit_opts(max_heap_words)
+      when is_integer(max_heap_words) and max_heap_words > 0 do
+    max_parallel_workers =
+      min(@default_max_parallel_workers, max(1, div(max_heap_words, @min_max_heap_words)))
+
+    worker_max_heap = max(@min_max_heap_words, div(max_heap_words, max_parallel_workers))
+
+    [
+      worker_max_heap: worker_max_heap,
+      max_parallel_workers: max_parallel_workers
+    ]
   end
 end

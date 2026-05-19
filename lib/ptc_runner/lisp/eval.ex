@@ -20,7 +20,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.ClosureCapture
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
-  alias PtcRunner.Lisp.Eval.{Apply, Patterns}
+  alias PtcRunner.Lisp.Eval.{Apply, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
@@ -450,56 +450,71 @@ defmodule PtcRunner.Lisp.Eval do
         coll_list = Enum.to_list(coll_val)
         count = length(coll_list)
 
+        # Security H1: every pmap/pcalls worker — top-level and nested —
+        # is spawned with a FIXED `max_heap_size` (`worker_max_heap`),
+        # NOT divided by concurrency. A shared `ParallelBudget` semaphore
+        # (`parallel_budget`) caps how many workers may be alive at once
+        # across the whole run, so aggregate live parallel heap is
+        # bounded by `max_parallel_workers * worker_max_heap` at any
+        # nesting depth. The worker's `EvalContext` keeps the SAME
+        # `worker_max_heap` and `parallel_budget`, so a nested
+        # pmap/pcalls inherits both. `pmap_deadline` is inherited so all
+        # nested calls share one deadline.
+        worker_max_heap = eval_ctx2.worker_max_heap
+        concurrency = bounded_concurrency(eval_ctx2.pmap_max_concurrency)
+        deadline_mono = parallel_deadline(eval_ctx2)
+        worker_eval_ctx = %{eval_ctx2 | pmap_deadline: deadline_mono}
+
         # Convert the function value to a callable (may be a tuple for builtins)
         # The closure captures a read-only snapshot of the environment at creation time
-        callable_fn = value_to_erlang_fn(fn_val, eval_ctx2)
+        callable_fn = value_to_erlang_fn(fn_val, worker_eval_ctx)
 
         # Capture trace context for propagation into worker processes
         trace_ctx = TraceContext.capture()
 
-        # Execute in parallel using Task.async_stream
-        # Limit concurrency to available schedulers to prevent resource exhaustion
-        # when LLM generates pmap over large collections (e.g., unbounded search results)
-        # Timeout is configurable via pmap_timeout for LLM-backed tool calls
-        results =
-          coll_list
-          |> Task.async_stream(
-            fn elem ->
-              # Re-attach trace context in worker process
-              TraceContext.attach(trace_ctx)
+        worker_fun = fn elem ->
+          try do
+            TraceContext.take_child_result()
+            value = Callable.call(callable_fn, [elem])
 
-              try do
-                TraceContext.take_child_result()
-                value = Callable.call(callable_fn, [elem])
+            case TraceContext.take_child_result() do
+              {trace_id, child_step} -> {:ok, {:ok, value, trace_id, child_step}}
+              nil -> {:ok, {:ok, value, nil, nil}}
+            end
+          rescue
+            e in PtcRunner.ToolExecutionError ->
+              {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
 
-                case TraceContext.take_child_result() do
-                  {trace_id, child_step} -> {:ok, value, trace_id, child_step}
-                  nil -> {:ok, value, nil, nil}
-                end
-              rescue
-                e in PtcRunner.ToolExecutionError ->
-                  {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
+            e in ExecutionError ->
+              # Re-surface stable error atoms from a nested pmap/pcalls
+              # (heap kill / shared-deadline timeout) instead of
+              # flattening them into a generic :pmap_error string.
+              {:error, nested_parallel_error(e)}
 
-                e ->
-                  {:error, {:pmap_error, Exception.message(e)}}
-              catch
-                {:return_signal, _, _} ->
-                  {:error, {:pmap_error, "return called inside pmap"}}
+            e ->
+              {:error, {:pmap_error, Exception.message(e)}}
+          catch
+            {:return_signal, _, _} ->
+              {:error, {:pmap_error, "return called inside pmap"}}
 
-                {:fail_signal, _, _} ->
-                  {:error, {:pmap_error, "fail called inside pmap"}}
-              end
-            end,
-            timeout: eval_ctx2.pmap_timeout,
-            ordered: true,
-            max_concurrency: eval_ctx2.pmap_max_concurrency
+            {:fail_signal, _, _} ->
+              {:error, {:pmap_error, "fail called inside pmap"}}
+          end
+        end
+
+        runner_result =
+          ParallelRunner.run(coll_list, worker_fun,
+            worker_max_heap: worker_max_heap,
+            max_concurrency: concurrency,
+            budget: eval_ctx2.parallel_budget,
+            deadline_mono: deadline_mono,
+            trace_ctx: trace_ctx
           )
-          |> Enum.to_list()
 
         # Collect results and child trace IDs
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
-        case collect_parallel_results(results, :pmap) do
+        case collect_runner_results(runner_result, :pmap) do
           {:ok, values, child_trace_ids, child_steps} ->
             # Count successes and errors
             success_count = length(values)
@@ -540,6 +555,13 @@ defmodule PtcRunner.Lisp.Eval do
         timestamp = DateTime.utc_now()
         count = length(fn_vals)
 
+        # Security H1: fixed per-worker heap cap + shared slot budget —
+        # see the pmap clause above for the full rationale.
+        worker_max_heap = eval_ctx2.worker_max_heap
+        concurrency = bounded_concurrency(eval_ctx2.pmap_max_concurrency)
+        deadline_mono = parallel_deadline(eval_ctx2)
+        worker_eval_ctx = %{eval_ctx2 | pmap_deadline: deadline_mono}
+
         # Convert each function value to an Erlang function (zero-arity thunk)
         # Use a try/rescue to catch validation errors (wrong arity, non-callable)
         try do
@@ -547,51 +569,51 @@ defmodule PtcRunner.Lisp.Eval do
             fn_vals
             |> Enum.with_index()
             |> Enum.map(fn {fn_val, idx} ->
-              {pcalls_fn_to_erlang(fn_val, eval_ctx2), idx}
+              {pcalls_fn_to_erlang(fn_val, worker_eval_ctx), idx}
             end)
 
           # Capture trace context for propagation into worker processes
           trace_ctx = TraceContext.capture()
 
-          # Execute all thunks in parallel using Task.async_stream
-          # Limit concurrency to prevent resource exhaustion
-          # Timeout is configurable via pmap_timeout for LLM-backed tool calls
-          results =
-            erlang_fns
-            |> Task.async_stream(
-              fn {erlang_fn, idx} ->
-                # Re-attach trace context in worker process
-                TraceContext.attach(trace_ctx)
+          worker_fun = fn {erlang_fn, idx} ->
+            try do
+              TraceContext.take_child_result()
+              value = erlang_fn.()
 
-                try do
-                  TraceContext.take_child_result()
-                  value = erlang_fn.()
+              case TraceContext.take_child_result() do
+                {trace_id, child_step} -> {:ok, {:ok, value, trace_id, idx, child_step}}
+                nil -> {:ok, {:ok, value, nil, idx, nil}}
+              end
+            rescue
+              e in ExecutionError ->
+                # Re-surface stable error atoms from a nested
+                # pmap/pcalls (heap kill / shared-deadline timeout).
+                {:error, nested_parallel_error(e, idx)}
 
-                  case TraceContext.take_child_result() do
-                    {trace_id, child_step} -> {:ok, value, trace_id, idx, child_step}
-                    nil -> {:ok, value, nil, idx, nil}
-                  end
-                rescue
-                  e ->
-                    {:error, {:pcalls_error, idx, Exception.message(e)}}
-                catch
-                  {:return_signal, _, _} ->
-                    {:error, {:pcalls_error, idx, "return called inside pcalls"}}
+              e ->
+                {:error, {:pcalls_error, idx, Exception.message(e)}}
+            catch
+              {:return_signal, _, _} ->
+                {:error, {:pcalls_error, idx, "return called inside pcalls"}}
 
-                  {:fail_signal, _, _} ->
-                    {:error, {:pcalls_error, idx, "fail called inside pcalls"}}
-                end
-              end,
-              timeout: eval_ctx2.pmap_timeout,
-              ordered: true,
-              max_concurrency: eval_ctx2.pmap_max_concurrency
+              {:fail_signal, _, _} ->
+                {:error, {:pcalls_error, idx, "fail called inside pcalls"}}
+            end
+          end
+
+          runner_result =
+            ParallelRunner.run(erlang_fns, worker_fun,
+              worker_max_heap: worker_max_heap,
+              max_concurrency: concurrency,
+              budget: eval_ctx2.parallel_budget,
+              deadline_mono: deadline_mono,
+              trace_ctx: trace_ctx
             )
-            |> Enum.to_list()
 
           # Collect results and child trace IDs
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
-          case collect_parallel_results(results, :pcalls) do
+          case collect_runner_results(runner_result, :pcalls) do
             {:ok, values, child_trace_ids, child_steps} ->
               # Count successes and errors
               success_count = length(values)
@@ -1244,36 +1266,100 @@ defmodule PtcRunner.Lisp.Eval do
   # Parallel execution helpers (shared by pmap and pcalls)
   # ============================================================
 
-  # Unified helper to collect parallel results with child trace IDs and child steps
-  # Works for both pmap and pcalls result formats
-  defp collect_parallel_results(results, type) do
-    collect_parallel_results(results, [], [], [], type)
+  # Defensive bound on the local pmap/pcalls scheduling window. The HARD
+  # aggregate cap is the global `ParallelBudget` semaphore;
+  # `pmap_max_concurrency` is only a per-call window size. Clamp to a
+  # positive integer.
+  defp bounded_concurrency(conc) when is_integer(conc) and conc > 0, do: conc
+  defp bounded_concurrency(_), do: 1
+
+  # Resolve the shared absolute deadline for a parallel operation. The
+  # OUTERMOST pmap/pcalls computes `now + pmap_timeout`; a nested call
+  # inherits the parent's `pmap_deadline` unchanged so N branches cannot
+  # multiply total wall time.
+  defp parallel_deadline(%EvalContext{pmap_deadline: deadline}) when is_integer(deadline),
+    do: deadline
+
+  defp parallel_deadline(%EvalContext{pmap_timeout: timeout}),
+    do: System.monotonic_time(:millisecond) + timeout
+
+  # Adapt a `ParallelRunner.run/3` result to the
+  # `{:ok, values, trace_ids, child_steps}` / `{:error, reason}` shape
+  # the pmap/pcalls clauses expect.
+  defp collect_runner_results({:ok, internal_results}, _type) do
+    {values, trace_ids, child_steps} =
+      Enum.reduce(internal_results, {[], [], []}, fn result, {vals, tids, steps} ->
+        {:ok, val, trace_id, child_step} = extract_parallel_result(result)
+        {[val | vals], [trace_id | tids], [child_step | steps]}
+      end)
+
+    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps)}
   end
 
-  defp collect_parallel_results([], acc, trace_ids, child_steps, _type) do
-    {:ok, Enum.reverse(acc), Enum.reverse(trace_ids), Enum.reverse(child_steps)}
+  defp collect_runner_results({:error, reason}, type) do
+    {:error, classify_runner_error(reason, type)}
   end
 
-  defp collect_parallel_results([{:ok, result} | rest], acc, trace_ids, child_steps, type) do
-    case extract_parallel_result(result) do
-      {:ok, val, trace_id, child_step} ->
-        collect_parallel_results(
-          rest,
-          [val | acc],
-          [trace_id | trace_ids],
-          [child_step | child_steps],
-          type
-        )
+  # Map `ParallelRunner`'s stable error reasons onto the pmap/pcalls
+  # error shape.
+  #
+  # P3 fix: heap/timeout/capacity failures are surfaced as the 3-tuple
+  # `{reason_atom, message, nil}`. `Lisp.execute_program/2` routes
+  # 3-tuples through `format_error/1` (which renders `"reason: msg"`)
+  # and tags the step with `reason_atom` directly — so `step.fail.reason`
+  # stays `:memory_exceeded` / `:timeout` / `:parallel_capacity_exceeded`
+  # AND the message reads cleanly. The 2-tuple `{:memory_exceeded, bytes}`
+  # shape is reserved for the sandbox-process heap kill, where element 2
+  # really is a numeric byte limit.
+  defp classify_runner_error({:memory_exceeded, _index}, _type),
+    do: {:memory_exceeded, "a parallel worker exceeded its per-worker heap cap", nil}
 
-      {:error, reason} ->
-        {:error, reason}
-    end
+  defp classify_runner_error({:timeout, _index}, _type),
+    do: {:timeout, "the parallel operation exceeded its deadline", nil}
+
+  defp classify_runner_error(:parallel_capacity_exceeded, _type),
+    do:
+      {:parallel_capacity_exceeded,
+       "the parallel worker budget is exhausted; reduce nesting or collection size", nil}
+
+  # A nested capacity/heap/timeout failure re-surfaced by
+  # `nested_parallel_error/1,2` arrives as a `{reason, message}` tuple —
+  # normalise it through the same clauses above.
+  defp classify_runner_error({:parallel_capacity_exceeded, _msg}, type),
+    do: classify_runner_error(:parallel_capacity_exceeded, type)
+
+  defp classify_runner_error({:runtime_error, index, detail}, type),
+    do: {parallel_error_type(type), "parallel worker #{index} crashed: #{inspect(detail)}"}
+
+  defp classify_runner_error({:pmap_error, _} = err, _type), do: err
+  defp classify_runner_error({:pcalls_error, _, _} = err, _type), do: err
+  defp classify_runner_error(other, type), do: {parallel_error_type(type), inspect(other)}
+
+  defp parallel_error_type(:pmap), do: :pmap_error
+  defp parallel_error_type(:pcalls), do: :pcalls_error
+
+  # Stable parallel error atoms that must survive nesting unchanged so
+  # the security/capacity outcome is deterministic at any depth.
+  @nested_stable_reasons [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+
+  # Re-surface a nested pmap/pcalls failure caught as an ExecutionError
+  # inside a pmap worker. A stable reason keeps its atom; anything else
+  # stays a generic :pmap_error.
+  defp nested_parallel_error(%ExecutionError{reason: reason, message: msg})
+       when reason in @nested_stable_reasons do
+    {reason, msg}
   end
 
-  defp collect_parallel_results([{:exit, reason} | _rest], _acc, _trace_ids, _child_steps, type) do
-    error_type = if type == :pmap, do: :pmap_error, else: :pcalls_error
-    {:error, {error_type, "parallel task failed: #{inspect(reason)}"}}
+  defp nested_parallel_error(%ExecutionError{message: msg}), do: {:pmap_error, msg}
+
+  # pcalls variant — same, but produces the 3-tuple pcalls error shape.
+  defp nested_parallel_error(%ExecutionError{reason: reason, message: msg}, _idx)
+       when reason in @nested_stable_reasons do
+    {reason, msg}
   end
+
+  defp nested_parallel_error(%ExecutionError{message: msg}, idx),
+    do: {:pcalls_error, idx, msg}
 
   # Extract value, trace_id, and child_step from different result formats
   defp extract_parallel_result({:ok, val, trace_id, child_step})
@@ -1285,7 +1371,6 @@ defmodule PtcRunner.Lisp.Eval do
     do: {:ok, val, trace_id, child_step}
 
   defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id, nil}
-  defp extract_parallel_result({:error, _reason} = error), do: error
 
   # ============================================================
   # Pcalls helpers
@@ -1315,12 +1400,24 @@ defmodule PtcRunner.Lisp.Eval do
           prints: eval_ctx.prints,
           max_print_length: eval_ctx.max_print_length,
           pmap_timeout: eval_ctx.pmap_timeout,
+          pmap_max_concurrency: eval_ctx.pmap_max_concurrency,
+          # Security H1: propagate the heap caps + shared worker-slot
+          # budget so a nested pmap/pcalls inside this thunk caps and
+          # counts its workers, and the shared deadline so nested calls
+          # don't multiply total wall time.
+          max_heap: eval_ctx.max_heap,
+          worker_max_heap: eval_ctx.worker_max_heap,
+          parallel_budget: eval_ctx.parallel_budget,
+          pmap_deadline: eval_ctx.pmap_deadline,
           catalog_exec: eval_ctx.catalog_exec
       }
 
       case do_eval(body, ctx) do
-        {:ok, result, _ctx2} -> result
-        {:error, reason} -> raise "pcalls function failed: #{inspect(reason)}"
+        {:ok, result, _ctx2} ->
+          result
+
+        {:error, reason} ->
+          raise_pcalls_body_error(reason)
       end
     end
   end
@@ -1344,6 +1441,28 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp pcalls_fn_to_erlang(value, %EvalContext{}) do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
+  end
+
+  # A nested pmap/pcalls failure (heap kill, deadline, exhausted worker
+  # budget) raises structured so a surrounding worker re-surfaces the
+  # stable atom; every other body error keeps the legacy RuntimeError
+  # shape. Parallel errors arrive as 2- or 3-tuples.
+  @spec raise_pcalls_body_error(term()) :: no_return()
+  defp raise_pcalls_body_error({atom, _} = reason) when atom in @nested_stable_reasons do
+    raise_pcalls_parallel_error(atom, reason)
+  end
+
+  defp raise_pcalls_body_error({atom, _, _} = reason) when atom in @nested_stable_reasons do
+    raise_pcalls_parallel_error(atom, reason)
+  end
+
+  defp raise_pcalls_body_error(reason) do
+    raise "pcalls function failed: #{inspect(reason)}"
+  end
+
+  @spec raise_pcalls_parallel_error(atom(), term()) :: no_return()
+  defp raise_pcalls_parallel_error(atom, reason) do
+    raise ExecutionError, reason: atom, message: "pcalls function failed: #{inspect(reason)}"
   end
 
   # ============================================================

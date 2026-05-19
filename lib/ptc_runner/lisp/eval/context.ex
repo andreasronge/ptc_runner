@@ -41,6 +41,27 @@ defmodule PtcRunner.Lisp.Eval.Context do
     max_tool_calls: nil,
     pmap_timeout: @default_pmap_timeout,
     pmap_max_concurrency: @default_pmap_max_concurrency,
+    # Absolute monotonic-time deadline (ms) shared by an in-progress
+    # pmap/pcalls operation and all of its nested parallel calls. `nil`
+    # outside any parallel operation; the outermost pmap/pcalls sets it
+    # to `now + pmap_timeout` and nested calls inherit it unchanged, so
+    # N parallel branches cannot multiply total wall time.
+    pmap_deadline: nil,
+    # Per-process heap cap (in words) applied to the sandbox process.
+    # `nil` means no sandbox cap is configured.
+    max_heap: nil,
+    # FIXED `max_heap_size` (in words) applied to every pmap/pcalls
+    # worker — top-level and nested alike — at spawn time. NOT divided
+    # by concurrency: division is unsound for nested parallelism (a
+    # parent worker is alive while its nested children run). Defaults to
+    # the sandbox `max_heap`; overridable. `nil` means no per-worker cap.
+    worker_max_heap: nil,
+    # Shared `PtcRunner.Lisp.Eval.ParallelBudget` slot semaphore — the
+    # HARD global cap on how many pmap/pcalls workers may be alive at
+    # once across the whole `Lisp.run`. ONE object per top-level run;
+    # nested pmap/pcalls inherit and reuse the SAME object. `nil` when
+    # no global cap is configured (uncounted parallel execution).
+    parallel_budget: nil,
     prints: [],
     tool_calls: [],
     pmap_calls: [],
@@ -153,6 +174,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
           pmap_max_concurrency: pos_integer(),
+          pmap_deadline: integer() | nil,
+          max_heap: pos_integer() | nil,
+          worker_max_heap: pos_integer() | nil,
+          parallel_budget: PtcRunner.Lisp.Eval.ParallelBudget.t() | nil,
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
@@ -179,6 +204,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
   - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
   - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`)
+  - `:max_heap` - Sandbox per-process heap cap in words (default: nil).
+  - `:worker_max_heap` - FIXED `max_heap_size` (in words) for every
+    pmap/pcalls worker, top-level and nested (default: the `:max_heap`
+    value). Not divided by concurrency. See `PtcRunner.Lisp.Eval.ParallelRunner`.
+  - `:parallel_budget` - shared `PtcRunner.Lisp.Eval.ParallelBudget`
+    semaphore bounding the number of parallel workers alive at once
+    across the whole run (default: nil = uncounted).
   - `:trace_context` - Trace context for nested agent tracing (default: nil)
 
   ## Examples
@@ -214,6 +246,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       pmap_max_concurrency:
         Keyword.get(opts, :pmap_max_concurrency, @default_pmap_max_concurrency),
+      max_heap: Keyword.get(opts, :max_heap),
+      worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
+      parallel_budget: Keyword.get(opts, :parallel_budget),
       budget: Keyword.get(opts, :budget),
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),

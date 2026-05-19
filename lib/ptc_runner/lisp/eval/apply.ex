@@ -132,6 +132,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
 
+      e in ExecutionError ->
+        # A nested pmap/pcalls failure (`:memory_exceeded` / `:timeout`)
+        # raised through a closure run by a regular HOF (map/filter/...).
+        # Surface its stable reason instead of letting it crash the
+        # sandbox as `:execution_error`. Non-parallel ExecutionErrors
+        # (e.g. tool errors) are re-raised to keep their semantics.
+        reraise_unless_parallel(e, __STACKTRACE__)
+
       e in ArithmeticError ->
         {:error, {:arithmetic_error, Exception.message(e)}}
 
@@ -271,6 +279,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         e in RuntimeError ->
           # Catch errors from closure evaluation (destructuring, arity, eval errors)
           {:error, {:type_error, Exception.message(e), converted_args}}
+
+        e in ExecutionError ->
+          # See the `{:normal, fun}` clause: surface nested parallel
+          # `:memory_exceeded` / `:timeout` rather than crash the sandbox.
+          reraise_unless_parallel(e, __STACKTRACE__)
       end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
@@ -624,10 +637,24 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_context.tool_exec,
         eval_context.turn_history,
         pmap_timeout: eval_context.pmap_timeout,
+        pmap_max_concurrency: eval_context.pmap_max_concurrency,
+        # Security H1: propagate the sandbox cap, the FIXED per-worker
+        # heap cap, and the shared worker-slot budget so a nested
+        # pmap/pcalls invoked from inside this closure caps and counts
+        # its workers against the same global budget.
+        max_heap: eval_context.max_heap,
+        worker_max_heap: eval_context.worker_max_heap,
+        parallel_budget: eval_context.parallel_budget,
         catalog_exec: eval_context.catalog_exec
       )
 
-    eval_ctx = %{eval_ctx | locals: closure_locals(metadata, bindings)}
+    eval_ctx = %{
+      eval_ctx
+      | locals: closure_locals(metadata, bindings),
+        # Security H1: propagate the shared parallel deadline so a
+        # nested pmap/pcalls inside this closure inherits it.
+        pmap_deadline: eval_context.pmap_deadline
+    }
 
     case do_eval_fn.(body, eval_ctx) do
       {:ok, result, final_ctx} ->
@@ -637,8 +664,38 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         result
 
       {:error, reason} ->
-        raise RuntimeError, Helpers.format_closure_error(reason)
+        raise_closure_error(reason)
     end
+  end
+
+  # Stable parallel error reasons that must survive nesting unchanged.
+  @parallel_reasons [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+
+  # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
+  # deadline, exhausted worker budget) is raised as `ExecutionError`
+  # carrying the structured reason, so the surrounding pmap/pcalls worker
+  # can re-surface the stable atom instead of flattening it into a
+  # string. Every other closure error keeps the legacy `RuntimeError`
+  # shape that `do_apply_fun/4`'s rescue clauses convert into `{:error,
+  # ...}`. Parallel errors arrive as 2- or 3-tuples.
+  @spec raise_closure_error(term()) :: no_return()
+  defp raise_closure_error({atom, _} = reason) when atom in @parallel_reasons do
+    raise_parallel_closure_error(atom, reason)
+  end
+
+  defp raise_closure_error({atom, _, _} = reason) when atom in @parallel_reasons do
+    raise_parallel_closure_error(atom, reason)
+  end
+
+  defp raise_closure_error(reason) do
+    raise RuntimeError, Helpers.format_closure_error(reason)
+  end
+
+  @spec raise_parallel_closure_error(atom(), term()) :: no_return()
+  defp raise_parallel_closure_error(atom, reason) do
+    raise PtcRunner.Lisp.ExecutionError,
+      reason: atom,
+      message: Helpers.format_closure_error(reason)
   end
 
   # Side-effect accumulation via Process dictionary.
@@ -722,6 +779,20 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: data}),
     do: {reason, message, data}
 
+  # An `ExecutionError` raised from a closure run inside a regular HOF.
+  # If it carries a nested-parallel reason (`:memory_exceeded`,
+  # `:timeout`, `:parallel_capacity_exceeded`) surface it as a structured
+  # error tuple so the stable reason reaches the caller. Anything else
+  # (e.g. `:tool_error`) is re-raised unchanged.
+  defp reraise_unless_parallel(%ExecutionError{reason: reason} = e, _stacktrace)
+       when reason in @parallel_reasons do
+    {:error, execution_error_tuple(e)}
+  end
+
+  defp reraise_unless_parallel(%ExecutionError{} = e, stacktrace) do
+    reraise e, stacktrace
+  end
+
   # ============================================================
   # Closure Execution Helpers
   # ============================================================
@@ -785,6 +856,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             prints: caller_ctx.prints,
             max_print_length: caller_ctx.max_print_length,
             pmap_timeout: caller_ctx.pmap_timeout,
+            pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
+            # Security H1: propagate the heap caps + shared worker-slot
+            # budget into nested closure evaluation so a nested
+            # pmap/pcalls caps and counts its workers, and the shared
+            # deadline so nested calls share one wall clock.
+            max_heap: caller_ctx.max_heap,
+            worker_max_heap: caller_ctx.worker_max_heap,
+            parallel_budget: caller_ctx.parallel_budget,
+            pmap_deadline: caller_ctx.pmap_deadline,
             tool_calls: caller_ctx.tool_calls,
             pmap_calls: caller_ctx.pmap_calls,
             tool_cache: caller_ctx.tool_cache,

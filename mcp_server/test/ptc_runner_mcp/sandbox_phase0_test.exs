@@ -189,5 +189,22 @@ defmodule PtcRunnerMcp.SandboxPhase0Test do
       assert payload["status"] == "error"
       assert payload["reason"] == "memory_limit"
     end
+
+    test "parallel worker limits preserve the MCP aggregate memory budget" do
+      max_heap_words = div(10 * 1024 * 1024, :erlang.system_info(:wordsize))
+
+      opts = Sandbox.parallel_limit_opts(max_heap_words)
+
+      assert opts[:max_parallel_workers] == 8
+      assert opts[:worker_max_heap] > 0
+      assert opts[:worker_max_heap] * opts[:max_parallel_workers] <= max_heap_words
+    end
+
+    test "tiny MCP memory budgets use the tightest single-worker cap" do
+      opts = Sandbox.parallel_limit_opts(233)
+
+      assert opts[:max_parallel_workers] == 1
+      assert opts[:worker_max_heap] == 233
+    end
   end
 end
