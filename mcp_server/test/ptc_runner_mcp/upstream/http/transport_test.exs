@@ -61,6 +61,24 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       |> send_resp(200, body)
     end
 
+    defp handle(:ok_sse_initialize, conn, _opts) do
+      body =
+        Jason.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => 1,
+          "result" => %{
+            "protocolVersion" => "2025-06-18",
+            "capabilities" => %{},
+            "serverInfo" => %{"name" => "sse-fixture", "version" => "1"}
+          }
+        })
+
+      conn
+      |> put_resp_header("mcp-session-id", "session-from-sse")
+      |> put_resp_content_type("text/event-stream")
+      |> send_resp(200, "event: message\ndata: #{body}\n\n")
+    end
+
     # 202 Accepted, empty body — handshake step 2 / notifications POST.
     defp handle(:accepted_202, conn, _opts) do
       send_resp(conn, 202, "")
@@ -232,6 +250,20 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       assert {:error, :upstream_error, detail} = Transport.post(post_opts(url))
       assert detail =~ "boom"
       assert detail =~ "-32000"
+    end
+  end
+
+  describe "post_with_meta/1 handshake response mapping" do
+    test "200 text/event-stream initialize preserves headers and decoded JSON-RPC envelope" do
+      %{url: url} = start_fixture(:ok_sse_initialize)
+
+      assert {:ok, %{status: 200, headers: headers, body: body}} =
+               Transport.post_with_meta(post_opts(url))
+
+      assert headers["mcp-session-id"] == ["session-from-sse"]
+      assert body["id"] == 1
+      assert body["result"]["protocolVersion"] == "2025-06-18"
+      assert body["result"]["serverInfo"]["name"] == "sse-fixture"
     end
   end
 

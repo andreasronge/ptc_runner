@@ -325,7 +325,7 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
     {:error, :response_too_large, "http response exceeded cap of #{max} bytes"}
   end
 
-  defp map_response_with_meta(200, headers, {:ok, body, false}, _jsonrpc_id, _max_bytes) do
+  defp map_response_with_meta(200, headers, {:ok, body, false}, jsonrpc_id, max_bytes) do
     case content_type(headers) do
       :json ->
         case Jason.decode(body) do
@@ -339,10 +339,10 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
             {:error, :upstream_error, "200 body is not valid JSON: #{Exception.message(e)}"}
         end
 
-      _ ->
-        # initialize / notifications / tools/list responses we care
-        # about for handshake are JSON. SSE / other on initialize is
-        # a server contract violation for v1.
+      :sse ->
+        decode_sse_response_with_meta(headers, body, jsonrpc_id, max_bytes)
+
+      :other ->
         {:error, :upstream_error,
          "handshake response had unexpected content-type (expected application/json)"}
     end
@@ -468,6 +468,27 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
           # anything reaching here is a JSON-RPC message that's
           # neither result nor error — server contract violation.
           {:error, :upstream_error, "200 SSE message has neither result nor error"}
+
+        {:error, :stream_closed_before_response, detail} ->
+          {:error, :upstream_unavailable, detail}
+
+        {:error, :response_too_large, detail} ->
+          {:error, :response_too_large, detail}
+      end
+    else
+      Log.log(:warn, "http_transport_sse_decoder_unavailable", %{})
+      {:error, :upstream_unavailable, "sse decoder not loaded"}
+    end
+  end
+
+  defp decode_sse_response_with_meta(headers, body, jsonrpc_id, max_bytes) do
+    if Code.ensure_loaded?(SseDecoder) do
+      case SseDecoder.decode_stream([body],
+             request_id: jsonrpc_id,
+             max_bytes: max_bytes
+           ) do
+        {:ok, message} when is_map(message) ->
+          {:ok, %{status: 200, headers: headers, body: message}}
 
         {:error, :stream_closed_before_response, detail} ->
           {:error, :upstream_unavailable, detail}
