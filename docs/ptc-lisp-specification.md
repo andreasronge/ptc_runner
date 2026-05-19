@@ -3843,9 +3843,27 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 | Resource | Default | Notes |
 |----------|---------|-------|
 | Timeout | 1,000 ms | Execution time limit |
-| Max Heap | ~10 MB | Memory limit (1,250,000 words) |
+| Max Heap | ~10 MB | Sandbox-process memory limit (1,250,000 words) |
+| Worker Max Heap | = Max Heap | Fixed per-worker `pmap`/`pcalls` heap cap |
+| Max Parallel Workers | 8 | Global cap on live `pmap`/`pcalls` workers |
 | Max Tool Calls | 10 | Per-program tool invocation limit |
 | Loop/Recur Iterations | 1,000 | Per-loop/recur jump limit; ordinary non-tail recursion is bounded by timeout and heap |
+
+Every `pmap`/`pcalls` worker process — top-level *and* nested — is
+spawned with a **fixed** `max_heap_size` of `Worker Max Heap` words (the
+cap is NOT divided by concurrency). The number of such workers alive at
+once, across the whole program and at every nesting depth, is bounded by
+a shared slot budget of `Max Parallel Workers`. Aggregate live parallel
+heap is therefore bounded by `Max Parallel Workers × Worker Max Heap`.
+
+- A worker that exceeds its fixed heap cap is killed; the program fails
+  with `:memory_exceeded`.
+- A `pmap`/`pcalls` that cannot obtain a worker slot — e.g. deeply
+  nested parallelism that would exceed the global budget — fails with
+  `:parallel_capacity_exceeded` (there is no sequential fallback).
+- The whole parallel operation (including nested `pmap`/`pcalls`) shares
+  one deadline derived from `pmap_timeout`; exceeding it fails with
+  `:timeout`.
 
 *Note: Hosts may configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 

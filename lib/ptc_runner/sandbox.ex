@@ -11,11 +11,31 @@ defmodule PtcRunner.Sandbox do
   |----------|---------|--------|
   | Timeout | 1,000 ms | `:timeout` |
   | Max Heap | ~10 MB (1,250,000 words) | `:max_heap` |
+  | Worker Max Heap | = `:max_heap` | `:worker_max_heap` |
+  | Max Parallel Workers | 8 | `:max_parallel_workers` |
 
-  The `:max_heap` limit is enforced via BEAM's `:max_heap_size` process flag
-  with `include_shared_binaries: true`, so it accounts for both process-local
-  heap terms and shared (refc) binaries referenced by the process. This prevents
-  binary-heavy programs from exceeding the memory budget via off-heap allocations.
+  `:max_heap` sets a `max_heap_size` flag on the sandbox process. That
+  flag is per-process and is *not* inherited by child processes, so the
+  PTC-Lisp `pmap`/`pcalls` builtins spawn each worker (via
+  `PtcRunner.Lisp.Eval.ParallelRunner`) with its OWN fixed
+  `max_heap_size` of `:worker_max_heap` words. The number of parallel
+  workers alive at once — across the whole run, at every nesting depth —
+  is capped by a shared slot semaphore of `:max_parallel_workers`
+  (`PtcRunner.Lisp.Eval.ParallelBudget`). Aggregate live parallel heap
+  is therefore bounded by:
+
+      max_parallel_workers × worker_max_heap
+
+  A pmap/pcalls worker that cannot obtain a slot fails the run with
+  `:parallel_capacity_exceeded` (no sequential fallback). The top-level
+  sandbox process is not counted as a parallel slot.
+
+  The `:max_heap` sandbox limit and each `:worker_max_heap` parallel-worker
+  limit are enforced via BEAM's `:max_heap_size` process flag with
+  `include_shared_binaries: true`, so they account for both process-local heap
+  terms and shared (refc) binaries referenced by the process. This prevents
+  binary-heavy programs from exceeding the memory budget via off-heap
+  allocations.
 
   Note that this is a per-process BEAM budget, not a whole-node or container
   memory limit. For adversarial multi-tenant deployments, back this with an
