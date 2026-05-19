@@ -70,8 +70,8 @@ defmodule PtcRunnerMcp.Http.Router do
   end
 
   defp route_mcp(%{method: "POST"} = conn, cfg) do
-    with :ok <- acceptable_content_type(conn),
-         {:ok, owner} <- authenticate(conn, cfg),
+    with {:ok, owner} <- authenticate(conn, cfg),
+         :ok <- acceptable_content_type(conn),
          {:ok, body, conn} <- read_body_capped(conn, cfg),
          {:ok, decoded} <- decode_body(body) do
       if registry_draining?() do
@@ -223,6 +223,7 @@ defmodule PtcRunnerMcp.Http.Router do
   defp authenticate(conn, cfg) do
     cond do
       not Host.allowed?(conn, cfg) ->
+        Telemetry.emit([:host, :rejected], %{count: 1}, base_meta(conn, cfg))
         {:error, :host}
 
       Origin.allowed?(conn, cfg) ->
