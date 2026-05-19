@@ -297,15 +297,15 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
   end
 
   describe "Phase 4 hardening: isError: true normalization (§16 entry 2)" do
-    test "reading a nonexistent file returns nil + upstream_error in upstream_calls",
+    test "reading a nonexistent file returns tagged tool_error in upstream_calls",
          %{tmpdir: tmpdir} do
       # filesystem-MCP returns `{"content": [{"text": "ENOENT: ..."
       # ...}], "isError": true}` for a missing path. Pre-fix this
-      # surfaced as a non-`nil` value with `status: "ok"` in
-      # `upstream_calls` — silently breaking the §7.1 world-fault
+      # surfaced as a successful value with `status: "ok"` in
+      # `upstream_calls` — silently breaking the world-fault
       # contract for tool-level errors. Post-fix the program sees
-      # `nil` and the entry is `status: "error"`, `reason:
-      # "upstream_error"`, with the ENOENT message captured in
+      # tagged `:tool_error` data and the entry is `status: "error"`,
+      # `reason: "tool_error"`, with the ENOENT message captured in
       # `error`.
       missing = Path.join(tmpdir, "definitely_not_there.txt")
 
@@ -316,28 +316,27 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       (let [r (tool/mcp-call {:server "#{@upstream_name}"
                               :tool "read_text_file"
                               :args {:path #{Jason.encode!(missing)}}})]
-        {:was-nil (nil? r)})
+        {:ok (:ok r) :reason (:reason r)})
       """
 
       env = Tools.call_with_gate(%{"program" => program})
 
       assert env["isError"] == false,
-             "expected program to complete cleanly with nil, got: #{inspect(env, limit: :infinity)}"
+             "expected program to complete cleanly with tagged error, got: #{inspect(env, limit: :infinity)}"
 
       structured = env["structuredContent"]
       assert structured["status"] == "ok"
-      # The program saw `nil` from `tool/mcp-call`. Pre-fix it
-      # would have seen the error envelope map (truthy under
-      # `nil?`).
-      assert structured["result"] =~ "was-nil true",
-             "expected program to observe nil from missing file, " <>
+      assert structured["result"] =~ "ok false"
+
+      assert structured["result"] =~ "reason :tool_error",
+             "expected program to observe tagged tool_error from missing file, " <>
                "got: #{inspect(structured["result"])}"
 
       assert [entry] = structured["upstream_calls"]
       assert entry["server"] == @upstream_name
       assert entry["tool"] == "read_text_file"
       assert entry["status"] == "error"
-      assert entry["reason"] == "upstream_error"
+      assert entry["reason"] == "tool_error"
       assert is_binary(entry["error"]) and entry["error"] != ""
 
       assert entry["error"] =~ ~r/(ENOENT|not allowed|outside allowed|does not exist|Failed)/i,

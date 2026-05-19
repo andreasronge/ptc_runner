@@ -609,7 +609,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "annotations" => annotations,
       "call_example" => build_call_example(server, name, arg_keys, required),
       "response_notes" =>
-        "Returns an MCP content envelope. Use mcp/text or mcp/json helpers according to the upstream result shape."
+        "Returns tagged data whose :value is already the unwrapped upstream payload."
     }
   end
 

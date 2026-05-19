@@ -82,7 +82,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
   describe "(tool/mcp-call ...) dispatch" do
     test "first call to a configured upstream succeeds, returning the upstream's value" do
-      put_fake("alpha", %{"echo" => fn args, _ -> {:ok, %{"echo" => args["msg"]}} end})
+      put_fake("alpha", %{
+        "echo" => fn args, _ -> {:ok, %{"structuredContent" => %{"echo" => args["msg"]}}} end
+      })
 
       env =
         call(~S|
@@ -479,35 +481,39 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     end
   end
 
-  describe ":json-null sentinel (§7.3)" do
-    test "successful upstream returning JSON null → :json-null keyword" do
+  describe "tagged unwrapped result" do
+    test "successful upstream returning JSON null → tagged JSON nil" do
       put_fake("alpha", %{"null" => fn _, _ -> {:ok, nil} end})
 
-      # A program that compares the result against the sentinel
-      # surfaces a deterministic boolean in `validated`.
       env =
         Tools.call_with_gate(%{
-          "program" => ~S|(= (tool/mcp-call {:server "alpha" :tool "null" :args {}}) :json-null)|,
+          "program" => ~S|
+            (let [r (tool/mcp-call {:server "alpha" :tool "null" :args {}})]
+              (and (:ok r) (nil? (:value r)) (= (:value_kind r) :json)))
+          |,
           "output_schema" => %{"type" => "boolean"}
         })
 
       assert env["isError"] == false
-      # The validated value is true: the sentinel substitution
-      # happened and the program saw `:json-null`, not `nil`.
       assert structured(env)["validated"] == true
 
       [entry] = upstream_calls(env)
       assert entry["status"] == "ok"
     end
 
-    test "nested JSON null inside a successful payload is left as nil" do
-      put_fake("alpha", %{"mixed" => fn _, _ -> {:ok, %{"a" => nil, "b" => 1}} end})
+    test "successful structured payload is under :value" do
+      put_fake("alpha", %{
+        "mixed" => fn _, _ -> {:ok, %{"structuredContent" => %{"a" => nil, "b" => 1}}} end
+      })
 
       env =
         Tools.call_with_gate(%{
           "program" => ~S|
             (let [r (tool/mcp-call {:server "alpha" :tool "mixed" :args {}})]
-              (and (map? r) (nil? (get r "a")) (= (get r "b") 1)))
+              (and (:ok r)
+                   (= (:value_kind r) :json)
+                   (nil? (get (:value r) "a"))
+                   (= (get (:value r) "b") 1)))
           |,
           "output_schema" => %{"type" => "boolean"}
         })
@@ -518,7 +524,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
   end
 
   describe "per-program upstream-call cap (§7.1 cap_exhausted)" do
-    test "(N+1)th call returns nil + cap_exhausted (sequential)" do
+    test "(N+1)th call returns tagged cap_exhausted (sequential)" do
       Limits.set(Map.put(Limits.defaults(), :max_upstream_calls_per_program, 2))
 
       put_fake("alpha", %{"x" => fn args, _ -> {:ok, args["i"]} end})
@@ -652,17 +658,14 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert Tools.configured_aggregator_mode?()
 
       desc = Tools.tool_entry()["description"]
-      # Phase 1a description includes:
-      #   * the `(tool/mcp-call ...)` form
-      #   * the `nil` failure convention
-      #   * the `:json-null` sentinel
-      #   * the `upstream_calls` envelope field
+      # Aggregator description includes the call shape and tagged
+      # unwrapped result contract early in the tool description.
       assert desc =~ "tool/mcp-call"
-      assert desc =~ "nil"
-      assert desc =~ ":json-null"
-      assert desc =~ "upstream_calls"
-      assert desc =~ "Aggregator authoring"
-      assert desc =~ "Unwrap with"
+      assert desc =~ "inspect `:ok`"
+      assert desc =~ ":value payload"
+      assert desc =~ ":value` is already unwrapped"
+      assert desc =~ ":raw"
+      assert desc =~ "Aggregator contract"
       assert desc =~ "Use `output_schema` for typed final results"
     end
 

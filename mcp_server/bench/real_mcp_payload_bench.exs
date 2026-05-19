@@ -346,7 +346,7 @@ defmodule RealMcpPayloadBench.Cases do
         native_args: %{},
         ptc_program: """
         (let [r (tool/mcp-call {:server "gmail" :tool "list_email_labels" :args {}})
-              txt (mcp/text r)]
+              txt (:value r)]
           {:chars (count txt)
            :label-lines (count (filter #(.startsWith % "ID: ") (split-lines txt)))})
         """,
@@ -366,7 +366,7 @@ defmodule RealMcpPayloadBench.Cases do
                                 :tool "search_emails"
                                 :args {:query "newer_than:1d -in:sent -in:trash -in:spam"
                                        :maxResults 3}})]
-          (mcp/text r))
+          (:value r))
         """,
         ptc_signature: "() -> :string"
       },
@@ -384,7 +384,7 @@ defmodule RealMcpPayloadBench.Cases do
                                 :tool "search_emails"
                                 :args {:query "newer_than:30d -in:sent -in:trash -in:spam"
                                        :maxResults 100}})
-              txt (mcp/text r)
+              txt (:value r)
               lines (split-lines txt)
               subjects (filter #(.startsWith % "Subject: ") lines)]
           {:matched-messages (count (filter #(.startsWith % "ID: ") lines))
@@ -409,7 +409,7 @@ defmodule RealMcpPayloadBench.Cases do
                                 :tool "search_emails"
                                 :args {:query "newer_than:180d (invoice OR receipt OR faktura OR kvitto) -in:sent -in:trash -in:spam"
                                        :maxResults 100}})
-              txt (mcp/text r)
+              txt (:value r)
               lines (split-lines txt)
               subjects (filter #(.startsWith % "Subject: ") lines)
               senders (filter #(.startsWith % "From: ") lines)]
@@ -435,7 +435,7 @@ defmodule RealMcpPayloadBench.Cases do
                                 :tool "search_emails"
                                 :args {:query "is:unread -in:sent -in:trash -in:spam"
                                        :maxResults 100}})
-              txt (mcp/text r)
+              txt (:value r)
               lines (split-lines txt)]
           {:matched-messages (count (filter #(.startsWith % "ID: ") lines))
            :subject-count (count (filter #(.startsWith % "Subject: ") lines))

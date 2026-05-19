@@ -2478,42 +2478,6 @@
       divergences: nil
     },
     %{
-      name: "mcp/json",
-      description:
-        "Extract typed JSON from an MCP tool-result envelope. Returns structuredContent if set, else parses content[0].text.",
-      binding: :normal,
-      category: :mcp,
-      dispatch: :env,
-      signatures: ["(mcp/json result)"],
-      since: nil,
-      section: "MCP",
-      ptc_extension?: false,
-      examples: [],
-      notes:
-        "Precedence (§5.2): structuredContent first (preserves :json-null sub-field per §6.2), then (json/parse-string (mcp/text result)) as fallback. Returns nil when both paths fail. Never raises.",
-      see_also: ["mcp/text", "json/parse-string"],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
-      name: "mcp/text",
-      description:
-        "Extract content[0].text from an MCP tool-result envelope; nil for any non-conforming input.",
-      binding: :normal,
-      category: :mcp,
-      dispatch: :env,
-      signatures: ["(mcp/text result)"],
-      since: nil,
-      section: "MCP",
-      ptc_extension?: false,
-      examples: [],
-      notes:
-        "Returns nil for non-map input (including :json-null), missing/non-list content, empty content, or content[0] whose type is not exactly \"text\". Never scans past index 0 — programs needing later items use get-in.",
-      see_also: ["mcp/json"],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
       name: "mod",
       description: "Modulo (floored division, result sign matches divisor)",
       binding: :normal,

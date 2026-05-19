@@ -111,23 +111,21 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
     assert count(prompt, "ptc_task MCP-call contract:") == 1
     assert count(prompt, "In `ptc_task`, `tool/mcp-call` returns a tagged map") == 1
-    assert prompt =~ "Prefer `(mcp/text ...)` for human-readable upstream text"
-    assert prompt =~ "Do not parse `mcp/text` as JSON unless the text itself is JSON"
-    assert prompt =~ "unexpected shape, inspect `(mcp/text ...)`"
+    assert prompt =~ "`(:value r)` is already the unwrapped upstream payload"
+    assert prompt =~ "unexpected shape, handle or fail"
     assert prompt =~ "inspect `:ok`"
     refute prompt =~ ":tag"
     refute prompt =~ "returns `nil`"
     refute prompt =~ "tool/mcp-call returns nil"
   end
 
-  test "direct aggregator and agentic planner keep distinct mcp-call failure contracts" do
+  test "direct aggregator and agentic planner share tagged mcp-call contract" do
     direct = Tools.advertised_description(:mcp_aggregator, catalog: nil)
     agentic = Prompt.system_prompt(catalog: "docs:\n  search()")
 
-    assert direct =~ "return `nil`"
-    assert direct =~ ":json-null"
-    refute direct =~ "tagged map"
-    refute direct =~ "inspect `:ok`"
+    assert direct =~ "tagged data"
+    assert direct =~ "inspect `:ok`"
+    refute direct =~ ":json-null"
 
     assert agentic =~ "returns a tagged map"
     assert agentic =~ "inspect `:ok`"
@@ -142,8 +140,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
           "fs:\n  list_directory(path: string) -> :unknown_content - Results use [FILE] prefixes"
       )
 
-    assert prompt =~
-             "For `-> :unknown_content` tools, inspect the MCP envelope before assuming JSON."
+    assert prompt =~ "For `-> :unknown_content` tools, inspect `:value` before assuming a shape."
 
     typed_prompt =
       Prompt.system_prompt(catalog: "docs:\n  search(q: string) -> {items [:string]}")

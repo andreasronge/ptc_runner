@@ -442,14 +442,3 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 |----------|-----------|-------------|
 | `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
-
-
-
-## MCP
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `mcp/json` | `(mcp/json result)` | Extract typed JSON from an MCP tool-result envelope. Returns structuredContent if set, else parses content[0].text. |
-| `mcp/text` | `(mcp/text result)` | Extract content[0].text from an MCP tool-result envelope; nil for any non-conforming input. |
-
-

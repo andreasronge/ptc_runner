@@ -85,7 +85,12 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
 
     test "returns a tagged success map and completes the ledger entry" do
       :ok = AggregatorConfig.set(%{read_only: true})
-      :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, %{"answer" => 42}} end})
+
+      :ok =
+        put_fake("alpha", %{
+          "ok" => fn _, _ -> {:ok, %{"structuredContent" => %{"answer" => 42}}} end
+        })
+
       {:ok, ledger} = Ledger.start_link()
 
       result =
@@ -96,7 +101,7 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
           turn: 2
         )
 
-      assert result == %{ok: true, value: %{"answer" => 42}}
+      assert result == %{ok: true, value: %{"answer" => 42}, value_kind: :json}
 
       assert [
                %{
@@ -185,7 +190,7 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
              ] = Ledger.entries(ledger)
 
       send(upstream_pid, :release_upstream)
-      assert Task.await(task) == %{ok: true, value: "done"}
+      assert Task.await(task) == %{ok: true, value: "done", value_kind: :text}
       assert [%{status: :ok}] = Ledger.entries(ledger)
     end
 
@@ -201,7 +206,7 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
           registry: @registry_name
         )
 
-      assert result == %{ok: false, reason: "timeout", message: "too slow"}
+      assert result == %{ok: false, reason: :timeout, message: "too slow"}
 
       assert [
                %{
@@ -215,6 +220,34 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
              ] = Ledger.entries(ledger)
     end
 
+    test "caps tool-level isError details in result and ledger entry" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      long_error = String.duplicate("é", 600)
+
+      :ok =
+        put_fake("alpha", %{
+          "err" => fn _, _ ->
+            {:ok, %{"isError" => true, "content" => [%{"type" => "text", "text" => long_error}]}}
+          end
+        })
+
+      {:ok, ledger} = Ledger.start_link()
+
+      result =
+        McpCall.call(
+          %{server: "alpha", tool: "err", args: %{}},
+          ledger: ledger,
+          registry: @registry_name
+        )
+
+      expected = String.duplicate("é", 500) <> "…"
+      assert result == %{ok: false, reason: :tool_error, message: expected}
+      assert String.valid?(result.message)
+
+      assert [%{status: :error, error_reason: "tool_error", error: ^expected}] =
+               Ledger.entries(ledger)
+    end
+
     test "enforces the per-program upstream call cap across one built tool closure" do
       :ok = AggregatorConfig.set(%{read_only: true})
       :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
@@ -223,8 +256,8 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
 
       args = %{"server" => "alpha", "tool" => "ok", "args" => %{}}
 
-      assert mcp_call.(args) == %{ok: true, value: true}
-      assert mcp_call.(args) == %{ok: false, reason: "cap_exhausted", message: "cap_exhausted"}
+      assert mcp_call.(args) == %{ok: true, value: true, value_kind: :json}
+      assert mcp_call.(args) == %{ok: false, reason: :cap_exhausted, message: "cap_exhausted"}
 
       assert [
                %{status: :ok},

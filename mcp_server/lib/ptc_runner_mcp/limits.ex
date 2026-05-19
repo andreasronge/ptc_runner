@@ -165,7 +165,8 @@ defmodule PtcRunnerMcp.Limits do
   Default: 50. Set via `--max-upstream-calls-per-program` flag or
   `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` env var.
   Enforced via a closure-captured `:counters.new(1, [])` ref per
-  `tools/call` (§6.4); the (cap+1)th call returns `nil` and records
+  `tools/call` (§6.4); the (cap+1)th call returns tagged
+  `{:ok false, :reason :cap_exhausted, :message ...}` data and records
   `cap_exhausted` (§7.1).
   """
   @spec max_upstream_calls_per_program() :: pos_integer()
