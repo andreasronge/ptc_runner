@@ -127,7 +127,7 @@ defmodule PtcRunner.Sandbox do
           Process.flag(:priority, :normal)
           result = eval_fn.(ast, context)
           memory = get_process_memory()
-          send(parent, {:result, result, memory})
+          send(parent, {:result, self(), result, memory})
         end,
         spawn_opts
       )
@@ -135,7 +135,7 @@ defmodule PtcRunner.Sandbox do
     try do
       # Wait for result with timeout
       receive do
-        {:result, result, memory} ->
+        {:result, ^pid, result, memory} ->
           end_time = System.monotonic_time(:millisecond)
           duration = end_time - start_time
 
@@ -170,6 +170,13 @@ defmodule PtcRunner.Sandbox do
           Process.demonitor(ref, [:flush])
           if link?, do: Process.unlink(pid)
           Process.exit(pid, :kill)
+
+          receive do
+            {:result, ^pid, _result, _memory} -> :ok
+          after
+            0 -> :ok
+          end
+
           {:error, {:timeout, timeout}}
       end
     after
