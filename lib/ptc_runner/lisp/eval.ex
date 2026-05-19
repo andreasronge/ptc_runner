@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Eval.{Apply, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
+  require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
@@ -1338,15 +1339,11 @@ defmodule PtcRunner.Lisp.Eval do
   defp parallel_error_type(:pmap), do: :pmap_error
   defp parallel_error_type(:pcalls), do: :pcalls_error
 
-  # Stable parallel error atoms that must survive nesting unchanged so
-  # the security/capacity outcome is deterministic at any depth.
-  @nested_stable_reasons [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
-
   # Re-surface a nested pmap/pcalls failure caught as an ExecutionError
   # inside a pmap worker. A stable reason keeps its atom; anything else
   # stays a generic :pmap_error.
   defp nested_parallel_error(%ExecutionError{reason: reason, message: msg})
-       when reason in @nested_stable_reasons do
+       when reason in ExecutionError.stable_parallel_reasons() do
     {reason, msg}
   end
 
@@ -1354,7 +1351,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # pcalls variant — same, but produces the 3-tuple pcalls error shape.
   defp nested_parallel_error(%ExecutionError{reason: reason, message: msg}, _idx)
-       when reason in @nested_stable_reasons do
+       when reason in ExecutionError.stable_parallel_reasons() do
     {reason, msg}
   end
 
@@ -1448,11 +1445,13 @@ defmodule PtcRunner.Lisp.Eval do
   # stable atom; every other body error keeps the legacy RuntimeError
   # shape. Parallel errors arrive as 2- or 3-tuples.
   @spec raise_pcalls_body_error(term()) :: no_return()
-  defp raise_pcalls_body_error({atom, _} = reason) when atom in @nested_stable_reasons do
+  defp raise_pcalls_body_error({atom, _} = reason)
+       when atom in ExecutionError.stable_parallel_reasons() do
     raise_pcalls_parallel_error(atom, reason)
   end
 
-  defp raise_pcalls_body_error({atom, _, _} = reason) when atom in @nested_stable_reasons do
+  defp raise_pcalls_body_error({atom, _, _} = reason)
+       when atom in ExecutionError.stable_parallel_reasons() do
     raise_pcalls_parallel_error(atom, reason)
   end
 
