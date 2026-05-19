@@ -18,6 +18,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.ExecutionError
+  require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Math
@@ -668,9 +669,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Stable parallel error reasons that must survive nesting unchanged.
-  @parallel_reasons [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
-
   # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
   # deadline, exhausted worker budget) is raised as `ExecutionError`
   # carrying the structured reason, so the surrounding pmap/pcalls worker
@@ -679,11 +677,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # shape that `do_apply_fun/4`'s rescue clauses convert into `{:error,
   # ...}`. Parallel errors arrive as 2- or 3-tuples.
   @spec raise_closure_error(term()) :: no_return()
-  defp raise_closure_error({atom, _} = reason) when atom in @parallel_reasons do
+  defp raise_closure_error({atom, _} = reason)
+       when atom in ExecutionError.stable_parallel_reasons() do
     raise_parallel_closure_error(atom, reason)
   end
 
-  defp raise_closure_error({atom, _, _} = reason) when atom in @parallel_reasons do
+  defp raise_closure_error({atom, _, _} = reason)
+       when atom in ExecutionError.stable_parallel_reasons() do
     raise_parallel_closure_error(atom, reason)
   end
 
@@ -785,7 +785,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # error tuple so the stable reason reaches the caller. Anything else
   # (e.g. `:tool_error`) is re-raised unchanged.
   defp reraise_unless_parallel(%ExecutionError{reason: reason} = e, _stacktrace)
-       when reason in @parallel_reasons do
+       when reason in ExecutionError.stable_parallel_reasons() do
     {:error, execution_error_tuple(e)}
   end
 
