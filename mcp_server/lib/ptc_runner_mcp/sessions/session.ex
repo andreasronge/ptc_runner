@@ -13,6 +13,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   alias PtcRunner.PtcToolProtocol
   alias PtcRunnerMcp.Limits, as: McpLimits
   alias PtcRunnerMcp.PayloadMetrics
+  alias PtcRunnerMcp.Sandbox
   alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
 
   @bytes_per_word :erlang.system_info(:wordsize)
@@ -726,24 +727,26 @@ defmodule PtcRunnerMcp.Sessions.Session do
   @doc false
   @spec lisp_opts(map(), String.t(), map()) :: keyword()
   def lisp_opts(snapshot, _program, opts) when is_map(snapshot) and is_map(opts) do
-    [
-      memory: snapshot.memory,
-      turn_history: snapshot.turn_history,
-      context: Map.get(opts, :context, %{}),
-      tools: Map.get(opts, :tools, []),
-      tool_cache: %{},
-      caller: :mcp,
-      profile: Map.get(opts, :profile, :mcp_no_tools),
-      timeout: Map.get(opts, :timeout, McpLimits.program_timeout_ms()),
-      max_heap:
-        Map.get(
-          opts,
-          :max_heap,
-          max(@min_max_heap_words, div(McpLimits.program_memory_limit_bytes(), @bytes_per_word))
-        ),
-      strict_data: true,
-      link: true
-    ]
+    max_heap =
+      Map.get(
+        opts,
+        :max_heap,
+        max(@min_max_heap_words, div(McpLimits.program_memory_limit_bytes(), @bytes_per_word))
+      )
+
+    ([
+       memory: snapshot.memory,
+       turn_history: snapshot.turn_history,
+       context: Map.get(opts, :context, %{}),
+       tools: Map.get(opts, :tools, []),
+       tool_cache: %{},
+       caller: :mcp,
+       profile: Map.get(opts, :profile, :mcp_no_tools),
+       timeout: Map.get(opts, :timeout, McpLimits.program_timeout_ms()),
+       max_heap: max_heap,
+       strict_data: true,
+       link: true
+     ] ++ Sandbox.parallel_limit_opts(max_heap))
     |> maybe_put(:catalog_exec, Map.get(opts, :catalog_exec))
   end
 

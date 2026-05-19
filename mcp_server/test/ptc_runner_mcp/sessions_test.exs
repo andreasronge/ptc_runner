@@ -13,6 +13,7 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.Sessions.Limits, as: SessionLimits
   alias PtcRunnerMcp.Sessions.Owner
   alias PtcRunnerMcp.Sessions.Registry
+  alias PtcRunnerMcp.Sessions.Session
   alias PtcRunnerMcp.Stdio
   alias PtcRunnerMcp.Test.JsonRpcHarness
   alias PtcRunnerMcp.Tools
@@ -40,6 +41,14 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     refute "ptc_session_start" in names
     refute "ptc_session_eval" in names
+  end
+
+  test "session Lisp opts preserve the aggregate parallel memory budget" do
+    snapshot = %{memory: %{}, turn_history: []}
+    opts = Session.lisp_opts(snapshot, "(+ 1 2)", %{max_heap: 1_250_000})
+
+    assert opts[:max_parallel_workers] == 8
+    assert opts[:worker_max_heap] * opts[:max_parallel_workers] <= opts[:max_heap]
   end
 
   test "session tools advertise output schemas when enabled" do

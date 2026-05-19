@@ -43,6 +43,15 @@ defmodule PtcRunner.Lisp do
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.ParallelBudget
+
+  # Default capacity of the global parallel-worker slot semaphore (see
+  # `PtcRunner.Lisp.Eval.ParallelBudget`). Conservative: with the
+  # default ~10 MB (`1_250_000`-word) `worker_max_heap`, the aggregate
+  # worst-case parallel heap is bounded at roughly `8 × 10 MB = 80 MB`.
+  # The top-level sandbox process is NOT counted as a slot. Overridable
+  # per call via the `:max_parallel_workers` option to `run/2`.
+  @default_max_parallel_workers 8
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Step
@@ -64,8 +73,10 @@ defmodule PtcRunner.Lisp do
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
     - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
-    - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools.
-    - `:max_heap` - Max heap size in words (default: 1_250_000)
+    - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
+    - `:max_heap` - Sandbox-process max heap size in words (default: 1_250_000)
+    - `:worker_max_heap` - Fixed `max_heap_size` (words) for every pmap/pcalls worker, top-level and nested (default: the `:max_heap` value)
+    - `:max_parallel_workers` - Global cap on pmap/pcalls worker processes alive at once across the whole run, at any nesting depth (default: 8). Aggregate live parallel heap ≈ `max_parallel_workers * worker_max_heap`. A pmap/pcalls that cannot get a slot fails with `:parallel_capacity_exceeded`.
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
@@ -262,6 +273,13 @@ defmodule PtcRunner.Lisp do
     float_precision = Keyword.get(opts, :float_precision)
     timeout = Keyword.get(opts, :timeout, 1000)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    # Security H1: every pmap/pcalls worker runs under this FIXED heap
+    # cap (default: the sandbox `max_heap`), and the global
+    # `max_parallel_workers` semaphore caps how many such workers are
+    # alive at once across the whole run. Aggregate live parallel heap
+    # is therefore bounded by `max_parallel_workers * worker_max_heap`.
+    worker_max_heap = Keyword.get(opts, :worker_max_heap, max_heap)
+    max_parallel_workers = Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers)
     max_symbols = Keyword.get(opts, :max_symbols, 10_000)
     max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
     compile_timeout = Keyword.get(opts, :compile_timeout, @default_compile_timeout)
@@ -298,6 +316,8 @@ defmodule PtcRunner.Lisp do
         float_precision: float_precision,
         timeout: timeout,
         max_heap: max_heap,
+        worker_max_heap: worker_max_heap,
+        max_parallel_workers: max_parallel_workers,
         max_symbols: max_symbols,
         compile_timeout: compile_timeout,
         turn_history: turn_history,
@@ -321,7 +341,8 @@ defmodule PtcRunner.Lisp do
     signature_str = params.signature_str
 
     # Normalize tools to Tool structs
-    with {:ok, normalized_tools} <- normalize_tools(raw_tools),
+    with :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
+         {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
       tool_executor = fn name, args ->
         execute_tool(normalized_tools, name, args)
@@ -350,6 +371,33 @@ defmodule PtcRunner.Lisp do
       {:error, {:invalid_signature, msg}} ->
         {:error,
          Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{}, journal: journal)}
+
+      {:error, {:invalid_config, msg}} ->
+        {:error, Step.error(:invalid_config, msg, memory, %{}, journal: journal)}
+    end
+  end
+
+  # P2: validate operator-supplied parallel-worker config before it can
+  # reach `Process.spawn`, where a bad `max_heap_size` value would raise
+  # a raw `ArgumentError`. `worker_max_heap` must be a positive integer
+  # (a valid `max_heap_size` spawn value) or `nil`; `max_parallel_workers`
+  # must be a positive integer.
+  defp validate_parallel_config(worker_max_heap, max_parallel_workers) do
+    cond do
+      not (is_nil(worker_max_heap) or (is_integer(worker_max_heap) and worker_max_heap > 0)) ->
+        {:error,
+         {:invalid_config,
+          ":worker_max_heap must be a positive integer (heap words) or nil, got " <>
+            inspect(worker_max_heap)}}
+
+      not (is_integer(max_parallel_workers) and max_parallel_workers > 0) ->
+        {:error,
+         {:invalid_config,
+          ":max_parallel_workers must be a positive integer, got " <>
+            inspect(max_parallel_workers)}}
+
+      true ->
+        :ok
     end
   end
 
@@ -508,6 +556,8 @@ defmodule PtcRunner.Lisp do
       float_precision: float_precision,
       timeout: timeout,
       max_heap: max_heap,
+      worker_max_heap: worker_max_heap,
+      max_parallel_workers: max_parallel_workers,
       turn_history: turn_history,
       max_print_length: max_print_length,
       filter_context: filter_context,
@@ -526,10 +576,15 @@ defmodule PtcRunner.Lisp do
     filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
     context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
 
+    parallel_budget = ParallelBudget.new(max_parallel_workers)
+
     eval_opts =
       [
         max_print_length: max_print_length,
         budget: budget,
+        max_heap: max_heap,
+        worker_max_heap: worker_max_heap,
+        parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
         pmap_max_concurrency: pmap_max_concurrency,
         trace_context: trace_context,
