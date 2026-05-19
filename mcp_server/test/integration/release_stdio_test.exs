@@ -119,6 +119,26 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       assert "ptc_debug" in names
     end
 
+    test "release start forwards --sessions through env.sh" do
+      frames = [
+        ReleaseRunner.init_request(1),
+        ReleaseRunner.initialized_notif(),
+        ReleaseRunner.tools_list_request(2),
+        ReleaseRunner.exit_notif()
+      ]
+
+      assert {:ok, replies, 0, _stderr} =
+               ReleaseRunner.run_session(frames, args: ["start", "--sessions"])
+
+      list_reply = Enum.find(replies, &(&1["id"] == 2))
+      names = Enum.map(list_reply["result"]["tools"], & &1["name"])
+
+      assert "ptc_lisp_execute" in names
+      assert "ptc_session_start" in names
+      assert "ptc_session_eval" in names
+      assert "ptc_session_close" in names
+    end
+
     test "initialize with compatibility-floor 2025-06-18 negotiates to 2025-06-18" do
       init_request =
         Map.put(ReleaseRunner.init_request(1), "params", %{

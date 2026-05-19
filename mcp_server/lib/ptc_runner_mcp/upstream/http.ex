@@ -1049,17 +1049,24 @@ defmodule PtcRunnerMcp.Upstream.Http do
     if state.session.handshake_complete? and Code.ensure_loaded?(Req) do
       headers = Session.headers_for_post(state.session, state.static_headers)
 
-      Req.request(
-        method: :delete,
-        url: state.url,
-        headers: headers,
-        finch: state.finch_name,
-        receive_timeout: 1_000,
-        connect_options: [timeout: 1_000],
-        retry: false
-      )
+      Req.request(delete_session_req_opts(state, headers))
     else
       :ok
+    end
+  end
+
+  defp delete_session_req_opts(state, headers) do
+    base_opts = [
+      method: :delete,
+      url: state.url,
+      headers: headers,
+      receive_timeout: 1_000,
+      retry: false
+    ]
+
+    case state.finch_name do
+      nil -> Keyword.put(base_opts, :connect_options, timeout: 1_000)
+      name when is_atom(name) -> Keyword.put(base_opts, :finch, name)
     end
   end
 
