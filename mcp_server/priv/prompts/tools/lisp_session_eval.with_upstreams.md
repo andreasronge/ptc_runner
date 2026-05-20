@@ -10,11 +10,26 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
-Evaluates PTC-Lisp against committed session memory, with upstream MCP calls available.
-- Requires `session_id` and `program`.
-- Explicit `def`/`defn` forms persist after successful evals; rejected evals do not commit state.
-- Call upstreams with `(tool/mcp-call {:server s :tool t :args {...}})`.
-- Inspect `:ok` before using `:value`; persist only derived values you need again.
-- `context` keys are under `data/`; context and temporary tool caches are not persisted.
-- Optional `output_schema` validates the program return. On mismatch, eval is rejected and session state is not committed.
+Evaluates PTC-Lisp against committed session memory
+- Requires `session_id` and `program`
+- `def`/`defn` persist for later evals in the same session
+- Use `let` for temporary values
+- Optional `output_schema` validates the program result; on mismatch, session state is not committed.
+
+Upstreams:
+`(tool/mcp-call {:server s :tool t :args {...}})`
+=> `{:ok true :value payload :value_kind :json|:text|:none}` or
+   `{:ok false :reason kw :message text}`.
+Check `:ok`; `:value` is unwrapped domain data.
+Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
+
+Unknown result shape:
+- Inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
+- Check `:ok` before using `:value`.
+Example:
+`(let [r (tool/mcp-call {:server s :tool t :args a})]
+   (if (:ok r)
+      (let [v (:value r)]
+      (if (string? v) v (json/generate-string v)))
+      (fail (:message r))))`
 <!-- PTC_PROMPT_END -->

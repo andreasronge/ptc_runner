@@ -18,17 +18,20 @@ Syntax:
 Data:
 - literals: `nil`, booleans, numbers, strings, keywords, vectors, maps, sets.
 - JSON parse maps use string keys.
+- Tool `context` keys get `data/` prefix: `{"records":[...]}` -> variable `data/records` only.
+- Debug shapes with `println` / `pr-str`.
 
 Helpers:
 - collections, strings, sets, walk, regex, math.
 - JSON: `(json/parse-string s)` -> data or `nil`; `(json/generate-string v)`.
 - Parallel: `(pmap f coll)`, `(pcalls f1 f2 ...)`.
+- Fail: `(fail v)`.
 
 Java:
 - `(java.util.Date.)`, `(java.util.Date. millis-or-iso)`, `(.getTime date)`.
 - `(java.time.LocalDate/parse "2026-01-15")`.
 - `(System/currentTimeMillis)`.
-- String methods: `.contains`, `.indexOf`, `.lastIndexOf`, `.toLowerCase`, `.toUpperCase`, `.startsWith`, `.endsWith`.
+- String methods: `.contains`, `.indexOf`, `.toLowerCase`, `.startsWith`, etc.
 
 No:
 - lazy seqs, atoms/refs, futures/promises, try/catch/throw, dotimes, iterate/repeat/cycle.

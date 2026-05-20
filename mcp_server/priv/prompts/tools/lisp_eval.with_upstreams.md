@@ -10,10 +10,9 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
-One stateless PTC-Lisp program. Final value = result. Use `println` briefly to inspect shapes.
-Context: `{"items":[...]}` -> `data/items`; no `context` binding.
-Example: `{"records":[{"name":"a"}]}` -> `(get (first data/records) "name")`; no `context`.
-Fail: `(fail v)`. No persistence across calls.
+One stateless PTC-Lisp program
+Final value = result
+No persistence across calls
 
 Upstreams:
 `(tool/mcp-call {:server s :tool t :args {...}})`
@@ -23,8 +22,12 @@ Check `:ok`; `:value` is unwrapped domain data, not MCP envelope. `:raw` optiona
 Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
 
 Unknown result shape:
-Catalog lookups return tool description strings.
-Inspect `(keys (:value r))` or `(pr-str (:value r))`.
-`(let [r (tool/mcp-call {:server s :tool t :args a}) v (:value r)]
-   (if (:ok r) (if (string? v) v (json/generate-string v)) (fail (:message r))))`
+- Inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
+- Check `:ok` before using `:value`.
+Example:
+`(let [r (tool/mcp-call {:server s :tool t :args a})]
+   (if (:ok r)
+      (let [v (:value r)]
+      (if (string? v) v (json/generate-string v)))
+      (fail (:message r))))`
 <!-- PTC_PROMPT_END -->
