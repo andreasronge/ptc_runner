@@ -51,9 +51,9 @@ defmodule PtcRunnerMcp.Upstream.Http do
   `cached_tools`, transitions to `:not_started`, and arms
   `backoff_until_ms`. The next `(tool/mcp-call …)` cold-starts a
   fresh impl with a fresh handshake. Same path applies to
-  `:auth_failed` (post-handshake 401 / 403 — wired here even though
-  Phase 2 has no auth, so Phase 3 only needs to add credential
-  rotation).
+  `:auth_failed` (post-handshake 401, plus per-request auth-resolution
+  failures — wired here even though Phase 2 has no auth, so Phase 3
+  only needs to add credential rotation).
 
   If two concurrent callers both detect session-loss, both cast —
   whichever arrives first triggers the stop, the rest are dropped by
@@ -276,8 +276,8 @@ defmodule PtcRunnerMcp.Upstream.Http do
   end
 
   defp classify_post_result({:error, :upstream_unavailable, "auth_failed"}, pid, _snap) do
-    # §4.3.1: post-handshake 401/403 is the spec's auth-rotation
-    # signal. Cast to the impl so it exits :auth_failed.
+    # §4.3.1: post-handshake 401 is the spec's auth-rotation signal.
+    # Cast to the impl so it exits :auth_failed.
     _ = safe_cast(pid, :auth_failed)
     {:error, :upstream_unavailable, "auth_failed"}
   end
@@ -424,7 +424,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
 
       {:error, _reason, detail} ->
         # §5.5 #7 third bullet: per-request auth-resolution failure is
-        # treated like 401/403 — caller sees `:upstream_unavailable`
+        # treated like a credential failure — caller sees `:upstream_unavailable`
         # with `"auth_failed: <specific>"`, and the impl exits
         # `:auth_failed` so Connection arms backoff and the next call
         # cold-starts with a fresh materialization (operators rotating
@@ -459,7 +459,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
   end
 
   def handle_cast(:auth_failed, state) do
-    # §4.3.1: post-handshake 401/403 auth-rotation signal.
+    # §4.3.1: post-handshake auth-rotation signal.
     Log.log(:info, "http_upstream_auth_failed", %{
       name: state.name,
       url: state.url

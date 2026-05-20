@@ -17,7 +17,8 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
                                                        403/404/429 — codex P1 fix for
                                                        commit `76f68de` that special-cased
                                                        404 before the JSON-RPC branch)
-    * `401`/`403` plain                              → `:upstream_unavailable, "auth_failed"`
+    * `401` plain                                    → `:upstream_unavailable, "auth_failed"`
+    * `403` plain                                    → `:upstream_unavailable, "http 403: <body>"`
     * `404` plain                                    → `:upstream_unavailable, "http 404"`
                                                        (caller `Upstream.Http` interprets
                                                        this plus a held session id as the
@@ -516,7 +517,7 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
         {:error, :upstream_error, formatted}
 
       :not_jsonrpc ->
-        plain_4xx(status)
+        plain_4xx(status, body)
     end
   end
 
@@ -534,11 +535,28 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   # Status-specific defaults for plain 4xx (no JSON-RPC error body).
   # `Upstream.Http.call/4` interprets `"http 404"` plus a held
   # session id as the §6.3 session-loss signal.
-  defp plain_4xx(401), do: {:error, :upstream_unavailable, "auth_failed"}
-  defp plain_4xx(403), do: {:error, :upstream_unavailable, "auth_failed"}
-  defp plain_4xx(404), do: {:error, :upstream_unavailable, "http 404"}
-  defp plain_4xx(429), do: {:error, :upstream_unavailable, "rate_limited"}
-  defp plain_4xx(status), do: {:error, :upstream_unavailable, "http #{status}"}
+  defp plain_4xx(401, _body), do: {:error, :upstream_unavailable, "auth_failed"}
+  defp plain_4xx(403, body), do: {:error, :upstream_unavailable, http_detail(403, body)}
+  defp plain_4xx(404, _body), do: {:error, :upstream_unavailable, "http 404"}
+  defp plain_4xx(429, _body), do: {:error, :upstream_unavailable, "rate_limited"}
+  defp plain_4xx(status, body), do: {:error, :upstream_unavailable, http_detail(status, body)}
+
+  defp http_detail(status, body) when is_binary(body) do
+    case body_snippet(body) do
+      "" -> "http #{status}"
+      snippet -> "http #{status}: #{snippet}"
+    end
+  end
+
+  defp http_detail(status, _body), do: "http #{status}"
+
+  defp body_snippet(body) do
+    body
+    |> String.replace_invalid()
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 200)
+  end
 
   # ----------------------------------------------------------------
   # 200 handling — JSON
