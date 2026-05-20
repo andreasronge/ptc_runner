@@ -119,7 +119,16 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
   @spec build_error_feedback(String.t(), Definition.t(), map()) :: String.t()
   def build_error_feedback(error_message, agent, state) do
-    wrapped = UntrustedRenderer.wrap_with_preamble(error_message, "error")
+    {error_preview, truncated?} = truncate_error(error_message, agent)
+
+    error_text =
+      if truncated? do
+        error_preview <> "\n... (truncated at #{feedback_max_chars(agent)} chars)"
+      else
+        error_preview
+      end
+
+    wrapped = UntrustedRenderer.wrap_with_preamble(error_text, "error")
     base = "Error:\n#{wrapped}"
 
     append_turn_info(base, agent, state)
@@ -136,7 +145,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   `append_turn_info/3` and `append_progress/4` output. Tool-call transport
   (Phase 4 of the PTC-Lisp tool-call plan) reuses `execution_feedback/3`
   directly so loop-control scaffolding (turn budgets, custom `progress_fn`
-  output) does not leak into the `ptc_lisp_execute` tool-result JSON.
+  output) does not leak into the `lisp_eval` tool-result JSON.
   """
   @spec format(Definition.t(), map(), map()) :: {String.t(), boolean(), term()}
   def format(agent, state, lisp_step) do
@@ -158,7 +167,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   then layers on `append_turn_info/3` and `append_progress/4` for content-mode
   multi-turn agents. The upcoming `:tool_call` transport (Phase 4 of the
   PTC-Lisp tool-call plan) reuses this function directly to populate the
-  `feedback` field of the `ptc_lisp_execute` tool-result JSON, ensuring loop
+  `feedback` field of the `lisp_eval` tool-result JSON, ensuring loop
   control scaffolding (turn budgets, `progress_fn` output) does not leak into
   native tool results.
 
@@ -175,7 +184,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     unconditionally for the structured field — the suppression rules that
     `format/3` applies to its human-readable string (single-turn agents,
     or turns with non-empty `prints`) do **not** affect this field. Phase 4
-    of the PTC-Lisp tool-call plan relies on this so the `ptc_lisp_execute`
+    of the PTC-Lisp tool-call plan relies on this so the `lisp_eval`
     tool-result JSON always carries the final value.
   - `:memory.changed` — map of `name => preview` for memory bindings that are
     new or whose value changed since the previous turn. String-keyed for
@@ -214,7 +223,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     # Unconditional structured fields — always rendered regardless of agent.max_turns
     # or whether prints is non-empty. These populate the structured `:result` and
     # `:memory.changed` fields, which Phase 4's tool-call transport reuses to build
-    # the `ptc_lisp_execute` tool-result JSON. The human-readable `feedback` string
+    # the `lisp_eval` tool-result JSON. The human-readable `feedback` string
     # below still applies the historical suppression rules (single-turn agents and
     # agents with println output omit the result preview / stored hint) so that
     # content-mode parity is preserved byte-for-byte.
@@ -451,6 +460,18 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
       {str, false}
     end
   end
+
+  defp truncate_error(str, agent) do
+    max_chars = feedback_max_chars(agent)
+
+    if String.length(str) > max_chars do
+      {String.slice(str, 0, max_chars), true}
+    else
+      {str, false}
+    end
+  end
+
+  defp feedback_max_chars(agent), do: Keyword.get(agent.format_options, :feedback_max_chars, 512)
 
   # Return only vars that are new or changed compared to previous turn
   defp changed_vars(prev_memory, current_memory) do
