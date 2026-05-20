@@ -92,6 +92,16 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       send_resp(conn, 403, "")
     end
 
+    defp handle(:host_blocked_403, conn, _opts) do
+      conn
+      |> put_resp_content_type("text/plain")
+      |> send_resp(403, ~s|Blocked request. This host ("::1:3333") is not allowed.|)
+    end
+
+    defp handle(:binary_body_403, conn, _opts) do
+      send_resp(conn, 403, <<255, 0, 65>>)
+    end
+
     defp handle(:rate_limited_429, conn, _opts) do
       send_resp(conn, 429, "")
     end
@@ -280,9 +290,26 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       assert {:error, :upstream_unavailable, "auth_failed"} = Transport.post(post_opts(url))
     end
 
-    test "403 → {:error, :upstream_unavailable, \"auth_failed\"}" do
+    test "403 preserves response detail instead of reporting auth_failed" do
       %{url: url} = start_fixture(:auth_403)
-      assert {:error, :upstream_unavailable, "auth_failed"} = Transport.post(post_opts(url))
+      assert {:error, :upstream_unavailable, "http 403"} = Transport.post(post_opts(url))
+    end
+
+    test "403 with host-allowlist body surfaces the body snippet" do
+      %{url: url} = start_fixture(:host_blocked_403)
+
+      assert {:error, :upstream_unavailable, detail} = Transport.post(post_opts(url))
+      assert detail =~ "http 403"
+      assert detail =~ "Blocked request"
+      assert detail =~ "::1:3333"
+    end
+
+    test "403 with non-UTF-8 body returns JSON-safe detail" do
+      %{url: url} = start_fixture(:binary_body_403)
+
+      assert {:error, :upstream_unavailable, detail} = Transport.post(post_opts(url))
+      assert String.valid?(detail)
+      assert {:ok, _json} = Jason.encode(%{"error" => detail})
     end
   end
 
@@ -312,7 +339,8 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
     test "4xx without JSON-RPC body → :upstream_unavailable" do
       %{url: url} = start_fixture(:bad_request_400_plain)
 
-      assert {:error, :upstream_unavailable, "http 400"} = Transport.post(post_opts(url))
+      assert {:error, :upstream_unavailable, "http 400: Bad Request"} =
+               Transport.post(post_opts(url))
     end
   end
 
