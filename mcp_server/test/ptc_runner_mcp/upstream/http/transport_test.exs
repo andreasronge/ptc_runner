@@ -346,6 +346,22 @@ defmodule PtcRunnerMcp.Upstream.Http.TransportTest do
       assert match?({:error, :upstream_unavailable, _}, result),
              "expected :upstream_unavailable, got: #{inspect(result)}"
     end
+
+    test "IPv6-literal URL still uses the caller-owned Finch pool" do
+      url = "http://[::1]:1/mcp"
+
+      result =
+        Transport.post(
+          post_opts(url,
+            connect_timeout_ms: 200,
+            finch: PtcRunnerMcp.Upstream.Http.TransportTest.Ipv6RegressionFinch
+          )
+        )
+
+      assert {:error, :upstream_unavailable, detail} = result
+      assert detail =~ "unknown registry"
+      assert detail =~ "Ipv6RegressionFinch"
+    end
   end
 
   # ─────── codex P1 #3 regression: 4xx + JSON-RPC body precedence ───────
