@@ -8,6 +8,10 @@ System prompt for text mode structured JSON output.
 <!-- audience: text-mode-json-system-prompt -->
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Wrap in XML tag -->
+<!-- used-by: PtcRunner.SubAgent.Loop.TextMode -->
+<!-- profiles: text output mode, JSON variant -->
+<!-- shown-in: provider system message unless a custom system prompt replaces it -->
+<!-- composed-with: json-user.md user message; json-error.md on retry -->
 
 <!-- PTC_PROMPT_START -->
 

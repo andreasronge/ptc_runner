@@ -9,6 +9,10 @@ User message template for text mode structured JSON output.
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Wrap sections in XML tags -->
 <!-- variables: task, output_instruction, field_descriptions -->
+<!-- used-by: PtcRunner.SubAgent.Loop.TextMode -->
+<!-- profiles: text output mode, JSON variant -->
+<!-- shown-in: provider user message for JSON text-mode calls -->
+<!-- composed-with: json-system.md system message; json-error.md on retry -->
 
 <!-- PTC_PROMPT_START -->
 

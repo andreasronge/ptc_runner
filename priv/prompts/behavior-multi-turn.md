@@ -8,6 +8,10 @@ Shared rules for multi-turn execution. Combined with a return-mode fragment (exp
 <!-- audience: ptc-lisp-system-prompt -->
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Extracted shared core from lisp-addon-multi_turn.md -->
+<!-- used-by: PtcRunner.Lisp.LanguageSpec via PtcRunner.Lisp.PromptRegistry -->
+<!-- profiles: explicit_return, explicit_journal -->
+<!-- shown-in: SubAgent PTC-Lisp system prompt for multi-turn profiles -->
+<!-- composed-with: reference.md before this card; behavior-return-explicit.md after; capability-journal.md optionally after -->
 
 <!-- PTC_PROMPT_START -->
 

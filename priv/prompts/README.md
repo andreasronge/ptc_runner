@@ -48,6 +48,12 @@ Optional fields:
 <!-- changes: Short maintainer-facing change note -->
 <!-- priority: Critical facts that must appear early -->
 <!-- variables: comma-separated template variables -->
+<!-- used-by: Primary module or runtime component that loads the prompt -->
+<!-- profiles: Runtime profiles or modes that include the prompt -->
+<!-- shown-in: Runtime message/surface where the rendered text appears -->
+<!-- composed-with: Other cards, templates, or dynamic text rendered nearby -->
+<!-- mcp-tools: MCP tool names that include this card, when applicable -->
+<!-- mcp-profiles: PromptRegistry profile keys that include this card -->
 ```
 
 `date:` is the last prompt-content or metadata-policy update date, not the file
@@ -60,7 +66,7 @@ prompts.
 Maintained prompt files are:
 
 - `priv/prompts/*.md`, excluding this README
-- `mcp_server/priv/prompts/*.md`
+- `mcp_server/priv/prompts/**/*.md`
 
 Generated prompt files and non-prompt docs/examples are out of scope unless they
 are explicitly added to that list later.
@@ -81,15 +87,20 @@ constraint. Keep the first 800 to 1000 bytes useful on their own.
 ## MCP Prompt Ownership
 
 MCP-specific tool-description text lives under `mcp_server/priv/prompts/` and
-is composed by `PtcRunnerMcp.PromptRegistry`. Keep MCP capability summaries,
-surface-specific authoring cards, and session/aggregator cards there. Core
-`PtcRunner.PtcToolProtocol` may keep legacy or in-process tool descriptions,
-but MCP `tools/list` descriptions should not depend on core prompt strings.
+is composed by `PtcRunnerMcp.PromptRegistry`. Each advertised MCP tool has a
+file-backed prompt under `mcp_server/priv/prompts/tools/`. PTC-Lisp catalog
+builtin guidance has one file per builtin under `mcp_server/priv/prompts/catalog/`
+and is rendered into upstream-enabled MCP descriptions or agentic planner
+prompts when catalog discovery is available. Core `PtcRunner.PtcToolProtocol`
+may keep legacy or in-process tool descriptions, but MCP `tools/list`
+descriptions should not depend on core prompt strings.
 
 ## Naming
 
-Files use kebab-case, except the compact combined-mode card and MCP server
-`mcp_` files keep their historic underscore names.
+Files use kebab-case for root PTC-Lisp prompt cards. MCP prompt files use the
+runtime names they describe: MCP tool prompt filenames match tool names under
+`mcp_server/priv/prompts/tools/`, and catalog builtin prompt filenames match the
+catalog operation names under `mcp_server/priv/prompts/catalog/`.
 
 | Prefix | Category | Used By |
 |--------|----------|---------|
@@ -99,6 +110,8 @@ Files use kebab-case, except the compact combined-mode card and MCP server
 | `tool-calling-` | Text-mode tool-calling system prompt | `PtcRunner.SubAgent.Loop.TextMode` |
 | `turn-feedback-` | Retry/final-turn feedback | `PtcRunner.SubAgent.Loop.TurnFeedback` |
 | `ptc_text_mode_` | Combined text + PTC-Lisp compact reference | `PtcRunner.SubAgent.SystemPrompt` |
+| `mcp_server/priv/prompts/tools/` | MCP `tools/list` tool descriptions | `PtcRunnerMcp.PromptRegistry` |
+| `mcp_server/priv/prompts/catalog/` | PTC-Lisp catalog builtin guidance for MCP upstream discovery | `PtcRunnerMcp.CatalogPrompt` |
 | none | Shared PTC-Lisp reference | `PtcRunner.Lisp.LanguageSpec` |
 
 ## Prompt Usage Matrix
@@ -122,12 +135,13 @@ prompt wording, composition, or budgets.
 | `turn-feedback-must-return.md` | `PtcRunner.Prompts.must_return_warning/0` | `PtcRunner.SubAgent.Loop.TurnFeedback` | Explicit-return final work turn | Inserted before final work turn | retry counts | template render | provider user feedback |
 | `turn-feedback-retry.md` | `PtcRunner.Prompts.retry_feedback/0` | `PtcRunner.SubAgent.Loop.TurnFeedback` | Explicit-return retry turns | Inserted during retry phase | retry counters | template render | provider user feedback |
 | `ptc_text_mode_compact_reference.md` | `PtcRunner.Prompts.ptc_text_mode_compact_reference/0` | `PtcRunner.SubAgent.SystemPrompt` | Combined text + PTC-Lisp | Appended to system prompt when compact reference is enabled | app-tool inventory appended outside the file | blank line / inventory section | provider system message |
-| `mcp_no_tools_description.md` | `PtcRunnerMcp.PromptRegistry.card_text/1` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | Capability description before authoring card | none | blank line in composed description | MCP `tools/list` description |
-| `mcp_no_tools_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | no-tools description file, then authoring card | none | blank line | MCP `tools/list` description |
-| `mcp_aggregator_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_aggregator` | quick contract, file card, optional catalog | optional upstream catalog text | blank line | MCP `tools/list` description |
-| `mcp_session_start_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_session` | session file card, start detail | none | blank line | MCP `tools/list` description |
-| `mcp_session_eval_description` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_session` | session file card, eval detail | optional schema/signature args at call time | blank line | MCP `tools/list` description |
-| hardcoded MCP detail/quick-contract cards | in-code functions in `PtcRunnerMcp.PromptRegistry` | `PtcRunnerMcp.Tools`, agentic planner | MCP direct/session/agentic profiles | Profile-specific | optional operator text or catalog | blank line | MCP descriptions and agentic system prompts |
+| `mcp_server/priv/prompts/tools/lisp_eval.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_no_tools` | Complete stateless one-shot tool description | none | blank line | MCP `tools/list` description |
+| `mcp_server/priv/prompts/tools/lisp_eval.with_upstreams.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Tools` | `:mcp_aggregator` | Complete stateless one-shot upstream-enabled description | optional upstream catalog text | blank line | MCP `tools/list` description |
+| `mcp_server/priv/prompts/tools/lisp_session_*.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Sessions` | `:mcp_session` | Per-session-tool description | upstream guidance only in `lisp_session_eval.with_upstreams.md` | blank line | MCP `tools/list` description |
+| `mcp_server/priv/prompts/tools/lisp_task.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Agentic` | `:mcp_agentic_task` | Agentic task tool description | optional capability summary appended in code | blank line | MCP `tools/list` description |
+| `mcp_server/priv/prompts/tools/lisp_debug.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.DebugTool` | `:mcp_debug` | Debug tool description | none | blank line | MCP `tools/list` description |
+| `mcp_server/priv/prompts/catalog/*.md` | `PtcRunnerMcp.CatalogPrompt` | `PtcRunnerMcp.CatalogDescription`, `PtcRunnerMcp.PromptRegistry` | upstream-enabled MCP descriptions and agentic lazy catalog prompt | One prompt per `catalog/*` PTC-Lisp builtin | configured server/tool catalog data elsewhere | newline | MCP description or agentic prompt |
+| agentic planner cards | in-code functions in `PtcRunnerMcp.PromptRegistry` | agentic planner | `:mcp_agentic_task` | Profile-specific planner prompt cards | optional operator text or catalog | blank line | agentic system prompt |
 | optional dynamic upstream catalog text | runtime catalog renderers | `PtcRunnerMcp.PromptRegistry` | aggregator and agentic MCP profiles | After authoritative cards | upstream server/tool inventory | blank line | MCP description or agentic prompt |
 
 ## Prompt Test Guidance
@@ -146,9 +160,15 @@ without freezing ordinary prose.
 
 ## Adding a Prompt
 
-1. Create `priv/prompts/category-name.md` with metadata and prompt markers.
-2. Add the file path, `@external_resource`, loaded content, and public function
-   to `PtcRunner.Prompts`.
-3. Add or update `PtcRunner.Lisp.PromptRegistry` metadata when the prompt is a
-   PTC-Lisp card/profile member.
-4. Update this README's tables and usage matrix.
+1. Create the prompt file with metadata and prompt markers in the right prompt
+   tree: root `priv/prompts/` for core PTC-Lisp prompts,
+   `mcp_server/priv/prompts/tools/` for advertised MCP tools, or
+   `mcp_server/priv/prompts/catalog/` for catalog builtins.
+2. For root PTC-Lisp prompts, add the file path, `@external_resource`, loaded
+   content, and public function to `PtcRunner.Prompts`.
+3. For MCP tool prompts, add the file to `PtcRunnerMcp.PromptRegistry` prompt
+   specs and profile/card metadata.
+4. For catalog builtin prompts, add the file to `PtcRunnerMcp.CatalogPrompt`.
+5. Add or update prompt registry metadata when the prompt is a card/profile
+   member.
+6. Update this README's tables and usage matrix.

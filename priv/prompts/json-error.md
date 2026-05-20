@@ -9,6 +9,10 @@ Error feedback for text mode JSON validation failures.
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Wrap in XML tag -->
 <!-- variables: error_message, invalid_response -->
+<!-- used-by: PtcRunner.SubAgent.Loop.TextMode -->
+<!-- profiles: text output mode, JSON variant retry -->
+<!-- shown-in: provider user feedback message after JSON parse/shape failure -->
+<!-- composed-with: json-system.md and json-user.md from the original attempt -->
 
 <!-- PTC_PROMPT_START -->
 
