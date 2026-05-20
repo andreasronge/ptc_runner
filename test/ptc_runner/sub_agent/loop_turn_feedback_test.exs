@@ -817,6 +817,26 @@ defmodule PtcRunner.SubAgent.LoopTurnFeedbackTest do
       assert feedback =~ "abort"
     end
 
+    test "error feedback truncates large runtime previews" do
+      agent =
+        SubAgent.new(
+          prompt: "task",
+          tools: %{},
+          max_turns: 3,
+          format_options: [feedback_max_chars: 40]
+        )
+
+      state = build_state()
+      error_message = "type_error: " <> String.duplicate("a", 80) <> "tail"
+
+      feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
+
+      assert feedback =~ "<untrusted_ptc_output source=\"error\">"
+      assert feedback =~ "type_error: "
+      assert feedback =~ "... (truncated at 40 chars)"
+      refute feedback =~ "tail"
+    end
+
     test "preamble appears once when multiple untrusted blocks are present" do
       agent = SubAgent.new(prompt: "task", tools: %{}, max_turns: 3)
       state = build_state()

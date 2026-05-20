@@ -19,11 +19,14 @@ PtcRunner.Dotenv.load()
 defmodule Bench.AgenticRealEval do
   @moduledoc false
 
-  alias PtcRunnerMcp.{Agentic, AgenticConfig, CatalogConfig}
+  alias PtcRunnerMcp.{AgenticConfig, CatalogConfig, JsonRpc, TraceConfig, TraceFile}
 
   @repo_root Path.expand(Path.join([__DIR__, "..", ".."]))
-  @tmp_dir Path.join(@repo_root, "tmp/agentic-real-eval")
+  @mcp_root Path.expand(Path.join(__DIR__, ".."))
+  @tmp_dir Path.join(@mcp_root, "tmp/agentic-real-eval")
+  @fixture_dir Path.join(@tmp_dir, "filesystem-fixture")
   @upstreams_path Path.join(@tmp_dir, "upstreams.json")
+  @trace_dir Path.join(@tmp_dir, "traces")
   @default_json_out Path.join(@repo_root, "tmp/agentic_real_eval.json")
   @default_md_out Path.join(@repo_root, "tmp/agentic_real_eval.md")
 
@@ -165,6 +168,7 @@ defmodule Bench.AgenticRealEval do
   end
 
   defp boot_mcp do
+    prepare_filesystem_fixture!()
     write_upstreams_config!()
 
     System.put_env("PTC_RUNNER_MCP_UPSTREAMS", @upstreams_path)
@@ -175,21 +179,31 @@ defmodule Bench.AgenticRealEval do
     System.put_env("PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS", "1400")
     System.put_env("PTC_RUNNER_MCP_AGENTIC_MAX_TURNS", "3")
     System.put_env("PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS", "2")
+    System.put_env("PTC_RUNNER_MCP_TRACE_DIR", @trace_dir)
+    System.put_env("PTC_RUNNER_MCP_TRACE_PAYLOADS", "full")
 
     Application.put_env(:ptc_runner_mcp, :attach_stdio, false)
 
     case Application.ensure_all_started(:ptc_runner_mcp) do
       {:ok, _apps} ->
         PtcRunnerMcp.Log.set_level("error")
+        enable_trace_files!()
         start_upstream_subsystem!()
 
       {:error, {:already_started, _app}} ->
         PtcRunnerMcp.Log.set_level("error")
+        enable_trace_files!()
         start_upstream_subsystem!()
 
       {:error, reason} ->
         raise "failed to start :ptc_runner_mcp: #{inspect(reason)}"
     end
+  end
+
+  defp enable_trace_files! do
+    File.rm_rf!(@trace_dir)
+    File.mkdir_p!(@trace_dir)
+    TraceConfig.set(%{trace_dir: @trace_dir, trace_payloads: :full, trace_max_files: 2_000})
   end
 
   defp start_upstream_subsystem! do
@@ -207,6 +221,39 @@ defmodule Bench.AgenticRealEval do
     :ok
   end
 
+  defp prepare_filesystem_fixture! do
+    File.rm_rf!(@fixture_dir)
+    File.mkdir_p!(Path.join(@fixture_dir, "docs"))
+    File.mkdir_p!(Path.join(@fixture_dir, "notes"))
+
+    write_fixture_file!("README.md", [
+      "PTC Runner Fixture",
+      "",
+      "Stable benchmark root for MCP filesystem evals."
+    ])
+
+    write_fixture_file!(".gitignore", ["tmp", "node_modules"])
+    write_fixture_file!("alpha.txt", ["alpha"])
+    write_fixture_file!("docs/short.md", ["short doc", "line two", "line three", "line four"])
+
+    write_fixture_file!("notes/long.md", [
+      "long note",
+      "line two",
+      "line three",
+      "line four",
+      "line five",
+      "line six",
+      "line seven",
+      "line eight"
+    ])
+  end
+
+  defp write_fixture_file!(relative_path, lines) do
+    path = Path.join(@fixture_dir, relative_path)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, Enum.join(lines, "\n") <> "\n")
+  end
+
   defp write_upstreams_config! do
     File.mkdir_p!(@tmp_dir)
 
@@ -214,10 +261,11 @@ defmodule Bench.AgenticRealEval do
       "upstreams" => %{
         "filesystem" => %{
           "command" => "npx",
+          "cd" => @fixture_dir,
           "args" => [
             "--yes",
             "@modelcontextprotocol/server-filesystem@2026.1.14",
-            @repo_root
+            @fixture_dir
           ],
           "handshake_timeout_ms" => 60_000
         }
@@ -267,12 +315,12 @@ defmodule Bench.AgenticRealEval do
         max_turns: 1,
         retry_turns: 0,
         task:
-          "Read README.md, mcp_server/README.md, and docs/aggregator-mode.md. Count lines in each and return only the path with the most lines and the three counts.",
+          "Read README.md, docs/short.md, and notes/long.md. Count lines in each and return only the path with the most lines and the three counts.",
         constraints: %{"max_items" => 3},
         pass: fn payload, result ->
           answer = answer(payload)
 
-          ok?(payload) and String.contains?(answer, "mcp_server/README.md") and
+          ok?(payload) and String.contains?(answer, "notes/long.md") and
             (count_tool(payload, "read_text_file") >= 3 or count_tool(payload, "read_file") >= 3 or
                count_tool(payload, "read_multiple_files") >= 1) and result.upstream_ok_count >= 1
         end
@@ -349,20 +397,8 @@ defmodule Bench.AgenticRealEval do
     })
 
     started = System.monotonic_time(:millisecond)
-
-    envelope =
-      with {:ok, validated} <-
-             Agentic.validate(%{
-               "task" => test_case.task,
-               "constraints" => test_case.constraints
-             })
-             |> normalize_validation_result() do
-        Agentic.run_validated(validated,
-          request_id: "#{test_case.name}-#{catalog_mode}-#{run}"
-        )
-      else
-        {:error, payload} -> payload
-      end
+    request_id = "#{test_case.name}-#{catalog_mode}-#{run}"
+    envelope = call_lisp_task_via_json_rpc(request_id, test_case)
 
     duration_ms = System.monotonic_time(:millisecond) - started
     payload = result_payload(envelope)
@@ -372,6 +408,7 @@ defmodule Bench.AgenticRealEval do
 
     %{
       "run" => run,
+      "request_id" => request_id,
       "case" => test_case.name,
       "category" => test_case.category,
       "model" => model,
@@ -388,15 +425,63 @@ defmodule Bench.AgenticRealEval do
       "execution" => Map.get(payload, "execution", %{}),
       "ptc_metrics" => Map.get(payload, "ptc_metrics", %{}),
       "upstream_calls" => Map.get(payload, "upstream_calls", []),
+      "upstream_results" => Map.get(payload, "upstream_results", []),
+      "trace_path" => trace_path_for(request_id),
       "program" => program,
       "metrics" => Map.from_struct(metrics)
     }
   end
 
-  defp normalize_validation_result({:ok, validated}), do: {:ok, validated}
+  defp call_lisp_task_via_json_rpc(request_id, test_case) do
+    frame = %{
+      "jsonrpc" => "2.0",
+      "id" => request_id,
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "lisp_task",
+        "arguments" => %{
+          "task" => test_case.task,
+          "constraints" => test_case.constraints
+        }
+      }
+    }
 
-  defp normalize_validation_result({:error, envelope}) do
-    {:error, result_payload(envelope)}
+    case JsonRpc.dispatch({:ok, frame}) do
+      {:async_call, ^request_id, work_fn, _on_busy, _on_discard, :continue} ->
+        work_fn.()
+
+      {:reply, %{"result" => envelope}, _lifecycle} ->
+        envelope
+
+      other ->
+        %{
+          "isError" => true,
+          "structuredContent" => %{
+            "status" => "error",
+            "reason" => "json_rpc_error",
+            "message" => inspect(other)
+          }
+        }
+    end
+  end
+
+  defp trace_path_for(request_id) do
+    hash = TraceFile.request_id_hash8(request_id)
+
+    case File.ls(@trace_dir) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&(String.contains?(&1, hash) and String.ends_with?(&1, ".jsonl")))
+        |> Enum.sort()
+        |> List.last()
+        |> case do
+          nil -> nil
+          file -> Path.join(@trace_dir, file)
+        end
+
+      {:error, _reason} ->
+        nil
+    end
   end
 
   defp result_payload(%{"structuredContent" => payload}) when is_map(payload), do: payload
@@ -581,6 +666,7 @@ defmodule Bench.AgenticRealEval do
         Reason: #{inspect(result["reason"])}
         Message: #{inspect(result["message"])}
         Answer: #{inspect(result["answer"], printable_limit: 800)}
+        Trace: #{result["trace_path"] || "none"}
 
         ```clojure
         #{result["program"]}
