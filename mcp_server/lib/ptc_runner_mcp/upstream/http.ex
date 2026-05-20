@@ -937,8 +937,17 @@ defmodule PtcRunnerMcp.Upstream.Http do
     # Req rejects `:connect_options` together with `:finch` (the
     # pool owns connect-time configuration when caller-supplied).
     # `:transport_opts` is the Mint-level option that takes
-    # `:timeout` for the TCP/TLS handshake.
-    conn_opts = [transport_opts: [timeout: state.connect_timeout_ms]]
+    # `:timeout` for the TCP/TLS handshake. Direct IPv6-literal
+    # connections also need `:inet6`; proxied requests connect to the
+    # proxy host, so proxy address-family handling is left to Mint.
+    transport_opts =
+      if ipv6_literal_url?(state.url) and is_nil(state.proxy) do
+        [timeout: state.connect_timeout_ms, inet6: true]
+      else
+        [timeout: state.connect_timeout_ms]
+      end
+
+    conn_opts = [transport_opts: transport_opts]
 
     with {:ok, conn_opts} <- maybe_put_proxy(conn_opts, state.proxy) do
       pool_opts = [size: state.pool_size, conn_opts: conn_opts]
@@ -1016,6 +1025,13 @@ defmodule PtcRunnerMcp.Upstream.Http do
     case sanitized do
       "" -> "Anon"
       s -> s
+    end
+  end
+
+  defp ipv6_literal_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) -> String.contains?(host, ":")
+      _ -> false
     end
   end
 

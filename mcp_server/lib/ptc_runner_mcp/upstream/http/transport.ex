@@ -201,10 +201,9 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   # ----------------------------------------------------------------
 
   defp do_post(req_opts, max_response_bytes) do
-    full_opts = build_req_opts(req_opts, max_response_bytes)
     jsonrpc_id = req_opts.jsonrpc_id
 
-    case Req.post(full_opts) do
+    case request(req_opts, max_response_bytes) do
       {:ok, %{status: status, headers: resp_headers} = resp} ->
         body_state = extract_body_state(resp)
         map_response(status, resp_headers, body_state, jsonrpc_id, max_response_bytes)
@@ -242,12 +241,138 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
       into: cap_collector(max_response_bytes)
     ]
 
-    case finch do
-      nil ->
+    cond do
+      is_nil(finch) ->
         Keyword.put(base_opts, :connect_options, timeout: connect_timeout_ms)
 
-      name when is_atom(name) ->
-        Keyword.put(base_opts, :finch, name)
+      is_atom(finch) ->
+        Keyword.put(base_opts, :finch, finch)
+    end
+  end
+
+  defp request(%{finch: finch, url: url} = req_opts, max_response_bytes)
+       when is_atom(finch) and is_binary(url) do
+    if ipv6_literal_url?(url) do
+      finch_request(req_opts, max_response_bytes)
+    else
+      req_opts
+      |> build_req_opts(max_response_bytes)
+      |> Req.post()
+    end
+  end
+
+  defp request(req_opts, max_response_bytes) do
+    req_opts
+    |> build_req_opts(max_response_bytes)
+    |> Req.post()
+  end
+
+  # Req implicitly sets `:inet6` for IPv6-literal URL hosts before
+  # choosing the Finch pool, then rejects that combination with a
+  # caller-owned `:finch`. For this narrow case we call Finch directly
+  # so the request still uses PtcRunner's per-upstream pool.
+  defp finch_request(req_opts, max_response_bytes) do
+    %{
+      url: url,
+      headers: headers,
+      body: body,
+      request_timeout_ms: request_timeout_ms,
+      finch: finch
+    } = req_opts
+
+    request = Finch.build(:post, url, ipv6_headers(url, headers), body)
+
+    acc = %{
+      status: nil,
+      headers: %{},
+      private: %{
+        cap_state: %{bytes: 0, chunks: [], overflow: false, cap: max_response_bytes}
+      }
+    }
+
+    try do
+      case Finch.stream_while(request, finch, acc, &finch_stream/2,
+             receive_timeout: request_timeout_ms
+           ) do
+        {:ok, resp} -> {:ok, resp}
+        {:error, exception, _acc} -> {:error, exception}
+        {:error, exception} -> {:error, exception}
+      end
+    rescue
+      e -> {:error, e}
+    end
+  end
+
+  defp finch_stream({:status, status}, resp) do
+    {:cont, %{resp | status: status}}
+  end
+
+  defp finch_stream({:headers, fields}, resp) do
+    headers =
+      Enum.reduce(fields, resp.headers, fn {name, value}, acc ->
+        Map.update(acc, String.downcase(name), [value], &[value | &1])
+      end)
+
+    {:cont, %{resp | headers: headers}}
+  end
+
+  defp finch_stream({:data, data}, resp) do
+    state = resp.private.cap_state
+    new_size = state.bytes + byte_size(data)
+
+    cond do
+      state.overflow ->
+        {:halt, resp}
+
+      new_size > state.cap ->
+        {:halt, put_in(resp.private.cap_state.overflow, true)}
+
+      true ->
+        state = %{state | bytes: new_size, chunks: [state.chunks, data]}
+        {:cont, put_in(resp.private.cap_state, state)}
+    end
+  end
+
+  defp finch_stream({:trailers, _fields}, resp), do: {:cont, resp}
+
+  defp ipv6_headers(url, headers) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host, port: port} when is_binary(host) ->
+        headers
+        |> reject_header("host")
+        |> maybe_put_ipv6_host_header(host, scheme, port)
+
+      _ ->
+        headers
+    end
+  end
+
+  defp maybe_put_ipv6_host_header(headers, host, scheme, port) do
+    if String.contains?(host, ":") do
+      [{"host", ipv6_host_header(host, scheme, port)} | headers]
+    else
+      headers
+    end
+  end
+
+  defp ipv6_host_header(host, scheme, port) do
+    bracketed = "[#{host}]"
+
+    if default_port?(scheme, port) do
+      bracketed
+    else
+      "#{bracketed}:#{port}"
+    end
+  end
+
+  defp default_port?("http", 80), do: true
+  defp default_port?("https", 443), do: true
+  defp default_port?(_scheme, _port), do: false
+
+  defp ipv6_literal_url?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) -> String.contains?(host, ":")
+      _ -> false
     end
   end
 
@@ -303,10 +428,9 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   end
 
   defp do_post_with_meta(req_opts, max_response_bytes) do
-    full_opts = build_req_opts(req_opts, max_response_bytes)
     jsonrpc_id = req_opts.jsonrpc_id
 
-    case Req.post(full_opts) do
+    case request(req_opts, max_response_bytes) do
       {:ok, %{status: status, headers: resp_headers} = resp} ->
         body_state = extract_body_state(resp)
         map_response_with_meta(status, resp_headers, body_state, jsonrpc_id, max_response_bytes)
@@ -647,11 +771,17 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
   # invariant on the wire path too.
   defp ensure_user_agent(headers) do
     headers
-    |> Enum.reject(fn
-      {k, _} when is_binary(k) -> String.downcase(k) == "user-agent"
+    |> reject_header("user-agent")
+    |> Kernel.++([{"user-agent", user_agent()}])
+  end
+
+  defp reject_header(headers, name) do
+    name = String.downcase(name)
+
+    Enum.reject(headers, fn
+      {k, _} when is_binary(k) -> String.downcase(k) == name
       _ -> false
     end)
-    |> Kernel.++([{"user-agent", user_agent()}])
   end
 
   defp user_agent do
