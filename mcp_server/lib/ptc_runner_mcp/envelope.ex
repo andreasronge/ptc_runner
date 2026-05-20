@@ -284,7 +284,15 @@ defmodule PtcRunnerMcp.Envelope do
     %{"status" => Map.get(structured, "status", "ok")}
     |> maybe_put("result", Map.get(structured, "result"))
     |> maybe_put("validated", Map.get(structured, "validated"), keep_nil?: false)
+    |> maybe_put("validated_preview", Map.get(structured, "validated_preview"), keep_nil?: false)
+    |> maybe_put_true(
+      "validated_preview_truncated",
+      Map.get(structured, "validated_preview_truncated")
+    )
+    |> maybe_put("validated_bytes", Map.get(structured, "validated_bytes"), keep_nil?: false)
+    |> maybe_put("upstream_results", Map.get(structured, "upstream_results"), keep_nil?: false)
     |> maybe_put_true("truncated", Map.get(structured, "truncated"))
+    |> maybe_put_true("output_truncated", Map.get(structured, "output_truncated"))
   end
 
   @doc false
@@ -295,6 +303,9 @@ defmodule PtcRunnerMcp.Envelope do
     |> maybe_put("message", Map.get(structured, "message"))
     |> maybe_put("feedback", Map.get(structured, "feedback"))
     |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put_true("truncated", Map.get(structured, "truncated"))
+    |> maybe_put_true("output_truncated", Map.get(structured, "output_truncated"))
+    |> maybe_put_true("feedback_truncated", Map.get(structured, "feedback_truncated"))
     |> maybe_put("upstream_calls", compact_upstream_errors(Map.get(structured, "upstream_calls")),
       keep_nil?: false
     )

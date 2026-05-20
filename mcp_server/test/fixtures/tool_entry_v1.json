@@ -35,11 +35,20 @@
           "feedback": {
             "type": "string"
           },
+          "feedback_truncated": {
+            "type": "boolean"
+          },
+          "output_truncated": {
+            "type": "boolean"
+          },
           "prints": {
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "prints_truncated": {
+            "type": "boolean"
           },
           "result": {
             "type": "string"
@@ -50,7 +59,17 @@
           "truncated": {
             "type": "boolean"
           },
-          "validated": {}
+          "validated": {},
+          "validated_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "validated_preview": {
+            "type": "string"
+          },
+          "validated_preview_truncated": {
+            "type": "boolean"
+          }
         },
         "required": [
           "status",
@@ -65,8 +84,14 @@
           "feedback": {
             "type": "string"
           },
+          "feedback_truncated": {
+            "type": "boolean"
+          },
           "message": {
             "type": "string"
+          },
+          "output_truncated": {
+            "type": "boolean"
           },
           "reason": {
             "enum": [
@@ -89,6 +114,9 @@
           },
           "status": {
             "const": "error"
+          },
+          "truncated": {
+            "type": "boolean"
           }
         },
         "required": [

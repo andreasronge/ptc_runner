@@ -21,18 +21,24 @@ Several capabilities are opt-in and add their own top-level tools:
 
 - [Aggregator mode](aggregator-mode.md) lets PTC-Lisp programs call
   configured upstream MCP servers via `(tool/mcp-call ...)`.
-- [Agentic mode](agentic-mode.md) adds `ptc_task`, a
+- [Agentic mode](agentic-mode.md) adds `lisp_task`, a
   natural-language task tool backed by a planner LLM (requires
   aggregator mode).
-- [Stateful sessions](#stateful-sessions) add `ptc_session_*` tools
+- [Stateful sessions](#stateful-sessions) add `lisp_session_*` tools
   that persist `(def ...)` bindings, the last three results, and
   bounded history.
-- [`ptc_debug`](mcp-debug.md) exposes in-process telemetry rollups
+- [`lisp_debug`](mcp-debug.md) exposes in-process telemetry rollups
   for diagnostics.
 
-`ptc_lisp_execute` itself is rendered through one of three
+`lisp_eval` itself is rendered through one of three
 [response profiles](mcp-server-configuration.md#response-profiles)
 (`slim` / `structured` / `debug`), defaulting to `slim`.
+Those profiles also control client-facing output limits for prints,
+feedback, schema-validated values, and final envelope size. Oversized
+validated values are exact-or-absent: the server omits `validated` and
+returns `validated_preview`, `validated_bytes`, and
+`output_truncated` metadata instead of putting a partial value under
+`validated`.
 
 This document is the conceptual overview. For install + client
 configuration, see [`mcp_server/README.md`](../mcp_server/README.md);

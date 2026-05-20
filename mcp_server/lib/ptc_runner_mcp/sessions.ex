@@ -15,7 +15,9 @@ defmodule PtcRunnerMcp.Sessions do
     CatalogConfig,
     Envelope,
     Limits,
+    OutputLimits,
     PromptRegistry,
+    ResponseProfile,
     Tools,
     UpstreamCalls
   }
@@ -530,8 +532,23 @@ defmodule PtcRunnerMcp.Sessions do
        )}
   end
 
-  defp envelope({:ok, response}), do: Envelope.success(response)
-  defp envelope({:error, response}) when is_map(response), do: Envelope.error_envelope(response)
+  defp envelope({:ok, response}) do
+    profile = ResponseProfile.current()
+
+    response
+    |> OutputLimits.shape_session_payload(:ok, profile)
+    |> Envelope.success()
+    |> OutputLimits.limit_envelope(profile)
+  end
+
+  defp envelope({:error, response}) when is_map(response) do
+    profile = ResponseProfile.current()
+
+    response
+    |> OutputLimits.shape_session_payload(:error, profile)
+    |> Envelope.error_envelope()
+    |> OutputLimits.limit_envelope(profile)
+  end
 
   defp start_session_args(args) do
     case validate_start_args(args) do
@@ -832,7 +849,15 @@ defmodule PtcRunnerMcp.Sessions do
         "result" => %{"type" => "string"},
         "prints" => %{"type" => "array"},
         "text" => %{"type" => "string"},
-        "closed" => %{"type" => "boolean"}
+        "closed" => %{"type" => "boolean"},
+        "truncated" => %{"type" => "boolean"},
+        "output_truncated" => %{"type" => "boolean"},
+        "prints_truncated" => %{"type" => "boolean"},
+        "feedback_truncated" => %{"type" => "boolean"},
+        "validated" => %{},
+        "validated_preview" => %{"type" => "string"},
+        "validated_preview_truncated" => %{"type" => "boolean"},
+        "validated_bytes" => %{"type" => "integer", "minimum" => 0}
       },
       overrides
     )

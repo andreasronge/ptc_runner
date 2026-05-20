@@ -68,7 +68,13 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
               "prints" => %{"type" => "array", "items" => %{"type" => "string"}},
               "feedback" => %{"type" => "string"},
               "truncated" => %{"type" => "boolean"},
-              "validated" => %{}
+              "output_truncated" => %{"type" => "boolean"},
+              "prints_truncated" => %{"type" => "boolean"},
+              "feedback_truncated" => %{"type" => "boolean"},
+              "validated" => %{},
+              "validated_preview" => %{"type" => "string"},
+              "validated_preview_truncated" => %{"type" => "boolean"},
+              "validated_bytes" => %{"type" => "integer", "minimum" => 0}
             }
           },
           %{
@@ -94,7 +100,10 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
               },
               "message" => %{"type" => "string"},
               "feedback" => %{"type" => "string"},
-              "result" => %{"type" => "string"}
+              "result" => %{"type" => "string"},
+              "truncated" => %{"type" => "boolean"},
+              "output_truncated" => %{"type" => "boolean"},
+              "feedback_truncated" => %{"type" => "boolean"}
             }
           }
         ]

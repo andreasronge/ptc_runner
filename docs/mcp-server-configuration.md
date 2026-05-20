@@ -52,10 +52,10 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--max-session-tool-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES` | `131072` (128 KiB) | Persisted tool-call history byte cap. |
 | `--max-session-upstream-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES` | `50` | Maximum persisted upstream-call history entries. |
 | `--max-session-upstream-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES` | `131072` (128 KiB) | Persisted upstream-call history byte cap. |
-| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `ptc_lisp_execute` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
-| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `ptc_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
-| `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `ptc_debug` (clamped to `[10, 5000]`). |
-| `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `ptc_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
+| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `lisp_eval` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
+| `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `lisp_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
+| `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `lisp_debug` (clamped to `[10, 5000]`). |
+| `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `lisp_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
 
 ## Streamable HTTP flags
 
@@ -99,7 +99,7 @@ public attacker-controlled host. POST requests with a present
 
 ## Response profiles
 
-`ptc_lisp_execute` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.
+`lisp_eval` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.
 
 | Profile | `content[0].text` | `structuredContent` | `outputSchema` advertised | Observability fields |
 |---|---|---|---|---|
@@ -107,11 +107,23 @@ public attacker-controlled host. POST requests with a present
 | **`structured`** | concise text | compact `{status, result, …}` (errors add `reason`/`message`/`feedback` and a trimmed error-only `upstream_calls`) | yes (compact) | `ptc_metrics` omitted; `upstream_calls` carried *only* on errors and trimmed to the failed entries (no `duration_ms` / `result_bytes` / per-entry observability), so the model still has enough to repair the program |
 | **`debug`** | the result, mirrored | full payload (also mirrored as text) | yes (full) | full `ptc_metrics`, full `upstream_calls` (all entries with timings/byte counts), and the rest of the verbose payload |
 
-`--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. If you combine `--debug-tool --response-profile slim`, the client-facing response stays slim while the `ptc_debug` recorder still gets the full pre-slim payload internally.
+`--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. If you combine `--debug-tool --response-profile slim`, the client-facing response stays slim while the `lisp_debug` recorder still gets the full pre-slim payload internally.
+
+### Client-facing output limits
+
+MCP tool results are additionally shaped by profile-derived output limits before they are returned to the client. These limits are not separate CLI flags yet; they are intentionally tied to `--response-profile`.
+
+| Profile | Print output | `validated` exact value | Final envelope guard |
+|---|---|---|---|
+| `slim` | max 20 entries / 8 KiB encoded | always omitted; `validated_preview`, `validated_bytes`, and `output_truncated` are used when validation was requested | 32 KiB; may fall back to text-only |
+| `structured` | max 50 entries / 16 KiB encoded | kept only when JSON-encoded value is ≤ 32 KiB; otherwise omitted with preview/byte metadata | 96 KiB; preserves minimal `structuredContent` on fallback |
+| `debug` | max 200 entries / 64 KiB encoded | kept only when JSON-encoded value is ≤ 128 KiB; otherwise omitted with preview/byte metadata | 512 KiB; preserves minimal `structuredContent` on fallback |
+
+`validated` is exact-or-absent. The server does not put partial values under `validated`; when the exact value is omitted, clients should look for `validated_preview`, `validated_bytes`, `validated_preview_truncated`, `truncated`, and `output_truncated`. `feedback` is also capped by profile (`8 KiB` / `16 KiB` / `64 KiB`). The final envelope guard is a last resort: it drops heavy optional fields and, for `structured` / `debug`, keeps machine-readable `structuredContent` with at least `status`, `truncated`, and `output_truncated`.
 
 **Why `slim` by default — wire cost.** Measured by the local payload bench (drives a real `@modelcontextprotocol/server-filesystem` upstream; bytes ÷ 4 ≈ tokens; deterministic frame-byte counting, *not* LLM authoring cost):
 
-| Per `ptc_lisp_execute` call | `slim` | `structured` | `debug` | native MCP, direct |
+| Per `lisp_eval` call | `slim` | `structured` | `debug` | native MCP, direct |
 |---|---|---|---|---|
 | read one file, return it whole | ~67 t | ~123 t | ~873 t | ~105 t |
 | return the first line of 3 files (1 program vs 3 round-trips) | ~36 t | ~60 t | ~924 t | ~284 t |
