@@ -9,7 +9,7 @@ defmodule PtcRunner.TraceLog do
 
   The simplest way to capture a trace is with `with_trace/2`:
 
-      {:ok, step, trace_path} = TraceLog.with_trace(fn ->
+      {:ok, {:ok, step}, trace_path} = TraceLog.with_trace(fn ->
         SubAgent.run(agent, llm: my_llm())
       end)
 
@@ -158,12 +158,12 @@ defmodule PtcRunner.TraceLog do
 
   ## Examples
 
-      {:ok, step, trace_path} = TraceLog.with_trace(fn ->
+      {:ok, {:ok, step}, trace_path} = TraceLog.with_trace(fn ->
         SubAgent.run(agent, llm: my_llm())
       end)
 
       # With typed trace header
-      {:ok, step, path} = TraceLog.with_trace(
+      {:ok, {:ok, step}, path} = TraceLog.with_trace(
         fn -> SubAgent.run(agent, llm: my_llm()) end,
         trace_kind: "benchmark",
         query: "How many products?"

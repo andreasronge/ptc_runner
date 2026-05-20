@@ -58,6 +58,8 @@ summary = TurnAnalysis.aggregate(all_metrics)
 - `mean_turns_on_pass` — average turns used on successful runs (nil if none)
 - `recoverable_error_salvage_rate` — of runs with any failed turn, fraction that still passed
 - `budget_exhausted_rate` — fraction that ran out of turns
+- `mean_input_tokens`, `mean_output_tokens`, `mean_total_tokens` — average token usage across all runs
+- `mean_total_tokens_on_pass` — average total tokens on successful runs (nil if none)
 
 ## Statistical Comparison (`Statistics`)
 

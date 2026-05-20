@@ -194,7 +194,7 @@ For progress visibility, use the `plan:` option to define step labels. A progres
 | `max_turns` | `5` | Maximum LLM turns before timeout |
 | `timeout` | `5000` | Per-turn sandbox timeout (ms) |
 | `max_heap` | `nil` | Per-turn sandbox heap limit (words, nil = app config or ~10MB) |
-| `mission_timeout` | `60000` | Total mission timeout (ms) |
+| `mission_timeout` | `nil` | Total mission timeout (ms, nil = no limit) |
 | `memory_limit` | `1_048_576` | Max bytes for memory map (1MB) |
 | `memory_strategy` | `:strict` | `:strict` (fatal) or `:rollback` (recover) on memory limit exceeded |
 | `float_precision` | `2` | Decimal places for floats in results |

@@ -116,12 +116,12 @@ For detailed offline analysis, use `PtcRunner.TraceLog.with_trace/2` to capture 
 alias PtcRunner.TraceLog
 
 # Capture a trace (recommended)
-{:ok, step, trace_path} = TraceLog.with_trace(fn ->
+{:ok, {:ok, step}, trace_path} = TraceLog.with_trace(fn ->
   SubAgent.run(agent, llm: my_llm())
 end)
 
 # With custom path and metadata
-{:ok, step, path} = TraceLog.with_trace(
+{:ok, {:ok, step}, path} = TraceLog.with_trace(
   fn -> SubAgent.run(agent, llm: my_llm()) end,
   path: "traces/debug.jsonl",
   meta: %{query: "test query", preset: "simple"}
