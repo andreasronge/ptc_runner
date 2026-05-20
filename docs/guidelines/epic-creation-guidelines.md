@@ -47,12 +47,7 @@ Brief description of what this epic accomplishes.
 
 ## Task Sizing
 
-Each task should:
-- Deliver testable value (can write an E2E test)
-- Fit in one PR (typically 100-500 lines)
-- Have clear boundaries
-
-See [Issue Creation Guidelines](issue-creation-guidelines.md) for more on sizing.
+Size each child task as a single right-sized issue. See [Issue Creation Guidelines — Sizing](issue-creation-guidelines.md#sizing) for the full criteria (testable value, ~100-500 lines, clear scope, and the too-large/too-small signals).
 
 ## References
 

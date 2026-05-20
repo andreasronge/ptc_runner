@@ -72,7 +72,7 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `sum`, `avg` | Simple collection aggregators (§8) |
 | `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Field-based collection aggregators (§8) |
 | `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
-| `re-pattern`, `#"..."` | Compile string to regex (§8.8) |
+| `re-pattern`, `#"..."` | Compile string to regex (§8.10) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
 | `float`, `double`, `int` | Type coercion (to float / to integer) |
 | `call` | Tool invocation special form (§9) |
@@ -3720,7 +3720,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 - `#()` accepts a single expression as the body
 - `%`, `%1`, `%2`, etc. are parameter placeholders; `%&` captures rest args (not regular symbols within `#()`)
 - Nested `#()` is not allowed ([DIV-17](clojure-conformance-gaps.md#div-17-nested--not-allowed))
-- Recursion is supported via `recur` (no self-reference by name, see §5.9)
+- Recursion is supported via `recur` (no self-reference by name, see §5.16)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
 
