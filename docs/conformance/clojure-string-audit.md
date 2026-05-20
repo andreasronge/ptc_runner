@@ -22,7 +22,7 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace |  |
+| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace | Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 counts as blank here but not in Clojure |
 | `capitalize` | 🔲 candidate | Converts first character to upper-case, rest to lower-case | pure string transformation |
 | `ends-with?` | ✅ supported | True if s ends with substr |  |
 | `escape` | 🔲 candidate | Return a new string applying cmap to each character | pure character mapping |
@@ -38,8 +38,8 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 | `split` | ✅ supported | Splits string on regex or string |  |
 | `split-lines` | ✅ supported | Splits string on \n or \r\n |  |
 | `starts-with?` | ✅ supported | True if s starts with substr |  |
-| `trim` | ✅ supported | Removes whitespace from both ends of string |  |
+| `trim` | ✅ supported | Removes whitespace from both ends of string | Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
 | `trim-newline` | ✅ supported | Removes all trailing newline or return characters |  |
-| `triml` | ✅ supported | Removes whitespace from the left side of string |  |
-| `trimr` | ✅ supported | Removes whitespace from the right side of string |  |
+| `triml` | ✅ supported | Removes whitespace from the left side of string | Unicode whitespace (Elixir String.trim_leading), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
+| `trimr` | ✅ supported | Removes whitespace from the right side of string | Unicode whitespace (Elixir String.trim_trailing), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
 | `upper-case` | ✅ supported | Converts string to all upper-case |  |

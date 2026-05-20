@@ -2775,7 +2775,8 @@
       name: "blank?",
       status: :supported,
       description: "True if s is nil, empty, or contains only whitespace",
-      notes: ""
+      notes:
+        "Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 counts as blank here but not in Clojure"
     },
     %{
       name: "capitalize",
@@ -2866,7 +2867,8 @@
       name: "trim",
       status: :supported,
       description: "Removes whitespace from both ends of string",
-      notes: ""
+      notes:
+        "Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
     },
     %{
       name: "trim-newline",
@@ -2878,13 +2880,15 @@
       name: "triml",
       status: :supported,
       description: "Removes whitespace from the left side of string",
-      notes: ""
+      notes:
+        "Unicode whitespace (Elixir String.trim_leading), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
     },
     %{
       name: "trimr",
       status: :supported,
       description: "Removes whitespace from the right side of string",
-      notes: ""
+      notes:
+        "Unicode whitespace (Elixir String.trim_trailing), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
     },
     %{
       name: "upper-case",
