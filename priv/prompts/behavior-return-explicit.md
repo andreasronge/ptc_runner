@@ -9,6 +9,10 @@ Return convention for multi-turn: use (return ...) / (fail ...) explicitly.
 <!-- budget: target<=900 bytes, hard<=1300 bytes -->
 <!-- changes: Extracted from lisp-addon-multi_turn.md as part of 2-axis prompt refactor -->
 <!-- priority: inspect before return; do not combine println/tool calls with return -->
+<!-- used-by: PtcRunner.Lisp.LanguageSpec via PtcRunner.Lisp.PromptRegistry -->
+<!-- profiles: explicit_return, explicit_journal -->
+<!-- shown-in: SubAgent PTC-Lisp system prompt for explicit return profiles -->
+<!-- composed-with: reference.md and behavior-multi-turn.md before this card; capability-journal.md optionally after -->
 
 <!-- PTC_PROMPT_START -->
 

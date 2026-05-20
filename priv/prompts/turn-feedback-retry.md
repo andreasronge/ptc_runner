@@ -16,6 +16,10 @@ Context variables:
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Initial version -->
 <!-- variables: is_final_retry, current_retry, total_retries, retries_remaining, next_turn -->
+<!-- used-by: PtcRunner.SubAgent.Loop.TurnFeedback -->
+<!-- profiles: explicit return retry phase -->
+<!-- shown-in: provider user feedback message after failed return validation -->
+<!-- composed-with: validation feedback and retry counters supplied by code -->
 
 <!-- PTC_PROMPT_START -->
 {{#is_final_retry}}

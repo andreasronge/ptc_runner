@@ -13,6 +13,10 @@ Context variables:
 <!-- budget: target<=1000 bytes, hard<=1500 bytes -->
 <!-- changes: Removed auto_return conditionals — only explicit return mode remains -->
 <!-- variables: has_retries, retry_count -->
+<!-- used-by: PtcRunner.SubAgent.Loop.TurnFeedback -->
+<!-- profiles: explicit return final work turn -->
+<!-- shown-in: provider user feedback message before the final work turn -->
+<!-- composed-with: current loop state and retry counters supplied by code -->
 
 <!-- PTC_PROMPT_START -->
 {{#has_retries}}

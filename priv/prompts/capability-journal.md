@@ -9,6 +9,10 @@ Journal, task caching, and semantic progress for multi-turn mode.
 <!-- budget: target<=1000 bytes, hard<=1400 bytes -->
 <!-- changes: Renamed from lisp-addon-journal.md as part of 2-axis prompt refactor -->
 <!-- priority: task IDs are semantic string literals; verify before step-done -->
+<!-- used-by: PtcRunner.Lisp.LanguageSpec via PtcRunner.Lisp.PromptRegistry -->
+<!-- profiles: explicit_journal -->
+<!-- shown-in: SubAgent PTC-Lisp system prompt when journal capability is enabled -->
+<!-- composed-with: reference.md, behavior-multi-turn.md, and behavior-return-explicit.md before this card -->
 
 <!-- PTC_PROMPT_START -->
 
