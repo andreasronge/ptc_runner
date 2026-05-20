@@ -12,8 +12,8 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 
 | Status | Count |
 |--------|-------|
-| Supported | 12 |
-| Candidate | 8 |
+| Supported | 16 |
+| Candidate | 4 |
 | Not Relevant | 1 |
 | Not Classified | 0 |
 | **Total** | **21** |
@@ -22,7 +22,7 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `blank?` | 🔲 candidate | True if s is nil, empty, or contains only whitespace | pure string predicate |
+| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace |  |
 | `capitalize` | 🔲 candidate | Converts first character to upper-case, rest to lower-case | pure string transformation |
 | `ends-with?` | ✅ supported | True if s ends with substr |  |
 | `escape` | 🔲 candidate | Return a new string applying cmap to each character | pure character mapping |
@@ -39,7 +39,7 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 | `split-lines` | ✅ supported | Splits string on \n or \r\n |  |
 | `starts-with?` | ✅ supported | True if s starts with substr |  |
 | `trim` | ✅ supported | Removes whitespace from both ends of string |  |
-| `trim-newline` | 🔲 candidate | Removes all trailing newline or return characters | pure string transformation |
-| `triml` | 🔲 candidate | Removes whitespace from the left side of string | pure string transformation |
-| `trimr` | 🔲 candidate | Removes whitespace from the right side of string | pure string transformation |
+| `trim-newline` | ✅ supported | Removes all trailing newline or return characters |  |
+| `triml` | ✅ supported | Removes whitespace from the left side of string |  |
+| `trimr` | ✅ supported | Removes whitespace from the right side of string |  |
 | `upper-case` | ✅ supported | Converts string to all upper-case |  |

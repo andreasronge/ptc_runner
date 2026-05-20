@@ -2773,9 +2773,9 @@
   clojure_string_audit: [
     %{
       name: "blank?",
-      status: :candidate,
+      status: :supported,
       description: "True if s is nil, empty, or contains only whitespace",
-      notes: "pure string predicate"
+      notes: ""
     },
     %{
       name: "capitalize",
@@ -2870,21 +2870,21 @@
     },
     %{
       name: "trim-newline",
-      status: :candidate,
+      status: :supported,
       description: "Removes all trailing newline or return characters",
-      notes: "pure string transformation"
+      notes: ""
     },
     %{
       name: "triml",
-      status: :candidate,
+      status: :supported,
       description: "Removes whitespace from the left side of string",
-      notes: "pure string transformation"
+      notes: ""
     },
     %{
       name: "trimr",
-      status: :candidate,
+      status: :supported,
       description: "Removes whitespace from the right side of string",
-      notes: "pure string transformation"
+      notes: ""
     },
     %{
       name: "upper-case",

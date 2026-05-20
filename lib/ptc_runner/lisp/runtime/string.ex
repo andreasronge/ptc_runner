@@ -156,6 +156,38 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
+  True if the value is nil, empty, or contains only whitespace.
+  - (blank? nil) returns true
+  - (blank? "") returns true
+  - (blank? "  \\t\\n") returns true
+  - (blank? "hello") returns false
+  """
+  def blank?(nil), do: true
+  def blank?(s) when is_binary(s), do: String.trim(s) == ""
+
+  @doc """
+  Remove all trailing newline (`\\n`) or carriage-return (`\\r`) characters.
+  - (trim-newline "hello\\n") returns "hello"
+  - (trim-newline "hello\\r\\n") returns "hello"
+  - (trim-newline "hello  ") returns "hello  "
+  """
+  def trim_newline(s) when is_binary(s) do
+    String.replace(s, ~r/[\r\n]+$/, "")
+  end
+
+  @doc """
+  Trim leading whitespace.
+  - (triml "  hello  ") returns "hello  "
+  """
+  def triml(s) when is_binary(s), do: String.trim_leading(s)
+
+  @doc """
+  Trim trailing whitespace.
+  - (trimr "  hello  ") returns "  hello"
+  """
+  def trimr(s) when is_binary(s), do: String.trim_trailing(s)
+
+  @doc """
   Replace all occurrences of a pattern in a string.
   - (replace "hello" "l" "L") returns "heLLo"
   - (replace "aaa" "a" "b") returns "bbb"

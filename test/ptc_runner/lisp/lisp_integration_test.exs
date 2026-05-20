@@ -294,6 +294,18 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == ["a", "b", "c"]
     end
 
+    test "clojure.string/blank? works end-to-end" do
+      assert {:ok, %{return: true}} = Lisp.run(~S|(clojure.string/blank? "  \t\n")|)
+      assert {:ok, %{return: true}} = Lisp.run(~S|(str/blank? nil)|)
+      assert {:ok, %{return: false}} = Lisp.run(~S|(string/blank? "x")|)
+    end
+
+    test "clojure.string trim helpers work end-to-end" do
+      assert {:ok, %{return: "a"}} = Lisp.run(~S|(clojure.string/trim-newline "a\r\n")|)
+      assert {:ok, %{return: "a  "}} = Lisp.run(~S|(str/triml "  a  ")|)
+      assert {:ok, %{return: "  a"}} = Lisp.run(~S|(string/trimr "  a  ")|)
+    end
+
     test "core/map works end-to-end" do
       source = "(core/map inc [1 2 3])"
       {:ok, %{return: result}} = Lisp.run(source)
