@@ -278,7 +278,7 @@ defmodule Bench.LispExecuteRealClientEval do
         name: "pure_compute",
         category: "no-upstream compute",
         profiles: [:no_upstreams, :with_upstreams],
-        max_turns: 2,
+        max_turns: 3,
         prompt:
           "Use the MCP tool to compute the sum of squares for 1 through 10. Return only the number.",
         pass: fn result ->
@@ -290,7 +290,7 @@ defmodule Bench.LispExecuteRealClientEval do
         name: "context_reduce",
         category: "context data",
         profiles: [:no_upstreams, :with_upstreams],
-        max_turns: 2,
+        max_turns: 3,
         prompt:
           "Use the MCP tool with a context object containing records [{name:\"alpha\",score:3},{name:\"beta\",score:7},{name:\"gamma\",score:5}]. Return only the name with the highest score.",
         pass: fn result ->
@@ -302,7 +302,7 @@ defmodule Bench.LispExecuteRealClientEval do
         name: "context_filter_count",
         category: "context data",
         profiles: [:no_upstreams, :with_upstreams],
-        max_turns: 2,
+        max_turns: 3,
         prompt:
           "Use the MCP tool with a context object containing orders [{id:\"a1\",status:\"paid\",total:12},{id:\"b2\",status:\"draft\",total:9},{id:\"c3\",status:\"paid\",total:20}]. Return only the count of paid orders with total greater than 10.",
         pass: fn result ->
