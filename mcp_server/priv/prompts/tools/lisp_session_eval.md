@@ -1,6 +1,13 @@
 # lisp_session_eval
 
-Composed with: `../reference.md` after this card.
+<!-- version: 1 -->
+<!-- date: 2026-05-20 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: mcp-tools-list -->
+<!-- budget: target<=1000 bytes, hard<=2000 bytes -->
+<!-- mcp-tools: lisp_session_eval -->
+<!-- mcp-profiles: mcp_session_eval_description -->
+<!-- composed-with: reference.md after this card -->
 
 <!-- PTC_PROMPT_START -->
 Evaluates PTC-Lisp against committed session memory.

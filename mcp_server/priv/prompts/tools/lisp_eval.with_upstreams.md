@@ -1,6 +1,13 @@
 # lisp_eval with upstreams
 
-Composed with: `../reference.md` after this card; optional dynamic catalog after reference.
+<!-- version: 1 -->
+<!-- date: 2026-05-20 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: mcp-tools-list -->
+<!-- budget: target<=1500 bytes, hard<=2000 bytes -->
+<!-- mcp-tools: lisp_eval -->
+<!-- mcp-profiles: mcp_aggregator_description -->
+<!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
 One stateless PTC-Lisp program. Final value = result. Use `println` briefly to inspect shapes.
