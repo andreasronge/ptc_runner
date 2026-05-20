@@ -58,7 +58,7 @@ defmodule PtcRunnerMcp.TracingTest do
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_lisp_execute", "arguments" => args}
+      "params" => %{"name" => "lisp_eval", "arguments" => args}
     }
 
     # Phase 4: tools/call dispatch is async. To keep tracing tests

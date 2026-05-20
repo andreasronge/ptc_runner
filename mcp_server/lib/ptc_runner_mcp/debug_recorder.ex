@@ -5,7 +5,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
 
   See `Plans/ptc-runner-mcp-debug-tool.md` § 5.1 / § 7 step 4. The
   recorder runs at the recognized-tool dispatch boundary for
-  `ptc_lisp_execute` and `ptc_task` only — never `ptc_debug`. It is a
+  `lisp_eval` and `lisp_task` only — never `lisp_debug`. It is a
   side effect of serving the request: `record_outcome/4` swallows and
   `warn`-logs any failure so it can never affect the response.
 
@@ -17,20 +17,20 @@ defmodule PtcRunnerMcp.DebugRecorder do
   alias PtcRunnerMcp.{DebugConfig, Log, TraceConfig, TracePayload, Version}
 
   @recognized_tools [
-    "ptc_lisp_execute",
-    "ptc_task",
-    "ptc_session_start",
-    "ptc_session_eval",
-    "ptc_session_inspect",
-    "ptc_session_list",
-    "ptc_session_forget",
-    "ptc_session_close"
+    "lisp_eval",
+    "lisp_task",
+    "lisp_session_start",
+    "lisp_session_eval",
+    "lisp_session_inspect",
+    "lisp_session_list",
+    "lisp_session_forget",
+    "lisp_session_close"
   ]
 
   # JSON-RPC `id` is client-controlled and bounded only by `--max-frame-bytes`
   # (default 8 MiB). The ring is bounded by *count*, not bytes, so storing a
   # multi-MiB id per entry would retain hundreds of MiB. Cap what we keep —
-  # 256 bytes matches `ptc_debug get`'s own `request_id` limit, so anything we
+  # 256 bytes matches `lisp_debug get`'s own `request_id` limit, so anything we
   # keep verbatim is still a usable lookup key (a longer id can't be passed to
   # `get` anyway).
   @max_stored_request_id_bytes 256
@@ -77,13 +77,13 @@ defmodule PtcRunnerMcp.DebugRecorder do
       :ok
   end
 
-  @doc ~S(True iff `params["name"]` is `ptc_lisp_execute` or `ptc_task`.)
+  @doc ~S(True iff `params["name"]` is `lisp_eval` or `lisp_task`.)
   @spec recognized?(map()) :: boolean()
   def recognized?(params) when is_map(params), do: Map.get(params, "name") in @recognized_tools
   def recognized?(_), do: false
 
   # An `unknown_tool` envelope means the request named a recognized
-  # tool that is not currently advertised (e.g. `ptc_task` without
+  # tool that is not currently advertised (e.g. `lisp_task` without
   # `--agentic`). Per § 5.1 those requests are NOT recorded — they
   # can't be attributed to a live tool.
   defp unknown_tool?(%{"structuredContent" => %{"reason" => "unknown_tool"}}), do: true
@@ -99,7 +99,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
     level = TraceConfig.trace_payloads()
 
     sc =
-      Map.get(envelope, "__ptc_debug_structured") ||
+      Map.get(envelope, "__lisp_debug_structured") ||
         Map.get(envelope, "structuredContent", %{})
 
     is_error = Map.get(envelope, "isError", false) == true
@@ -138,10 +138,10 @@ defmodule PtcRunnerMcp.DebugRecorder do
       # envelope's `ptc_metrics` block verbatim (string-keyed) into the
       # ring record. It's pure counts/ratios — no payload — so no extra
       # redaction is needed. `nil` when the envelope had no
-      # `ptc_metrics` (no-tools `ptc_lisp_execute`, or a pure-compute
+      # `ptc_metrics` (no-tools `lisp_eval`, or a pure-compute
       # aggregator program with 0 upstream calls).
       ptc_metrics: ptc_metrics(sc),
-      agentic: if(tool == "ptc_task", do: agentic_block(sc, args))
+      agentic: if(tool == "lisp_task", do: agentic_block(sc, args))
     }
 
     PtcRunnerMcp.DebugBuffer.record(record)
@@ -189,11 +189,11 @@ defmodule PtcRunnerMcp.DebugRecorder do
   # each `upstream_calls[]` entry. `error` (a free-text detail string)
   # is already `Redactor.scrub/1`-ed at construction time
   # (`UpstreamCalls.error_entry/6` / `Ledger`), but we drop it here
-  # anyway — `ptc_debug` surfaces *reasons*, not raw error text — to
+  # anyway — `lisp_debug` surfaces *reasons*, not raw error text — to
   # keep the redaction surface minimal (spec § 8 "residual leakage").
   # `result_bytes` (`integer | null`) and `oversize` (`boolean`) are
   # pure numbers/flags per `Plans/ptc-runner-mcp-payload-reduction.md`
-  # §4.1 / §4.5 and are kept so `ptc_debug stats.payload_reduction`
+  # §4.1 / §4.5 and are kept so `lisp_debug stats.payload_reduction`
   # and `get` can surface them.
   defp redacted_upstream_calls(sc) do
     case Map.get(sc, "upstream_calls") do
@@ -218,7 +218,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
   defp normalize_result_bytes(n) when is_integer(n) and n >= 0, do: n
   defp normalize_result_bytes(_), do: nil
 
-  # Build the `agentic` sub-map for an executed `ptc_task` call from
+  # Build the `agentic` sub-map for an executed `lisp_task` call from
   # the envelope's `planner` / `execution` fields. For validation-error
   # / `busy` records (no `planner`/`execution`), returns `nil`.
   defp agentic_block(sc, _args) do

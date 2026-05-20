@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.ResponseProfile do
   @moduledoc """
-  Boot-time configuration for `ptc_lisp_execute` response rendering.
+  Boot-time configuration for `lisp_eval` response rendering.
 
   This is deliberately separate from the MCP capability profile
   (`:mcp_no_tools` vs `:mcp_aggregator`). Capability controls what the

@@ -74,9 +74,9 @@ defmodule PtcRunnerMcp.AggregatorTools do
       # Programmer-fault checks raise `ExecutionError`; the PTC-Lisp
       # tool executor reraises it into the program's runtime error
       # path, terminating the program (per §7.2).
-      {server, tool, call_args} = validate_args(args)
+      {server, tool, call_args} = validate_args(args, registry)
       check_configured(registry, server, tool)
-      check_args_encodable(server, tool, call_args)
+      check_args_encodable(registry, server, tool, call_args)
 
       case check_cap(call_context, server, tool) do
         :proceed ->
@@ -92,7 +92,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
   # Step 1: structural validation of (tool/mcp-call ...) args
   # ----------------------------------------------------------------
 
-  defp validate_args(args) do
+  defp validate_args(args, registry) do
     normalized = normalize_top_level_keys!(args)
     server = Map.get(normalized, :server)
     tool = Map.get(normalized, :tool)
@@ -106,7 +106,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # upstream name, so this is the recover-by-reading-the-catalog
         # path.
         raise_programmer_fault(
-          "tool/mcp-call requires :server (string), got #{inspect_short(server)}"
+          "tool/mcp-call requires :server (string), got #{inspect_short(server)}" <>
+            configured_servers_hint(registry)
         )
 
       not is_binary(tool) or tool == "" ->
@@ -114,7 +115,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # the error to a specific server entry in the catalog without
         # re-reading the program.
         raise_programmer_fault(
-          "tool/mcp-call on upstream '#{server}' requires :tool (string), got #{inspect_short(tool)}"
+          "tool/mcp-call on upstream '#{server}' requires :tool (string), got #{inspect_short(tool)}" <>
+            tool_discovery_hint(server)
         )
 
       is_nil(call_args) ->
@@ -129,7 +131,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # never gets populated for programmer-fault failures that
         # short-circuit before any upstream call is attempted).
         raise_programmer_fault(
-          "tool '#{server}.#{tool}' rejected args: :args must be a map, got #{inspect_short(call_args)}"
+          "tool '#{server}.#{tool}' rejected args: :args must be a map, got #{inspect_short(call_args)}" <>
+            describe_tool_hint(registry, server, tool)
         )
 
       true ->
@@ -161,7 +164,9 @@ defmodule PtcRunnerMcp.AggregatorTools do
     if Registry.configured?(server, registry) do
       check_known_tool(registry, server, tool)
     else
-      raise_programmer_fault("no upstream '#{server}' configured")
+      raise_programmer_fault(
+        "no upstream '#{server}' configured" <> configured_servers_hint(registry)
+      )
     end
   end
 
@@ -178,7 +183,10 @@ defmodule PtcRunnerMcp.AggregatorTools do
         if tool_known?(tools, tool) do
           :ok
         else
-          raise_programmer_fault("no tool '#{tool}' in upstream '#{server}'")
+          raise_programmer_fault(
+            "no tool '#{tool}' in upstream '#{server}'" <>
+              known_tools_hint(server, tool, tools)
+          )
         end
     end
   end
@@ -187,14 +195,15 @@ defmodule PtcRunnerMcp.AggregatorTools do
     Enum.any?(tools, fn t -> tool_name_of(t) == tool end)
   end
 
-  defp check_args_encodable(server, tool, call_args) do
+  defp check_args_encodable(registry, server, tool, call_args) do
     case Jason.encode(call_args) do
       {:ok, _json} ->
         :ok
 
       {:error, reason} ->
         raise_programmer_fault(
-          "tool '#{server}.#{tool}' rejected args: not JSON-encodable (#{inspect_short(reason)})"
+          "tool '#{server}.#{tool}' rejected args: not JSON-encodable (#{inspect_short(reason)})" <>
+            describe_tool_hint(registry, server, tool)
         )
     end
   end
@@ -405,7 +414,10 @@ defmodule PtcRunnerMcp.AggregatorTools do
         if tool_known?(tools, tool) do
           :ok
         else
-          raise_programmer_fault("no tool '#{tool}' in upstream '#{server}'")
+          raise_programmer_fault(
+            "no tool '#{tool}' in upstream '#{server}'" <>
+              known_tools_hint(server, tool, tools)
+          )
         end
 
       nil ->
@@ -483,6 +495,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
             {:world_fault, :tool_error, detail, durations, value}
 
           :ok ->
+            {unwrapped_value, value_kind} = McpResult.unwrap(value)
+
             # Pipeline ordering (Plans/json-support.md §6.4 — single
             # source of truth):
             #
@@ -500,7 +514,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
             entry =
               UpstreamCalls.success_entry(server, tool, total_duration,
-                result_bytes: result_bytes
+                result_bytes: result_bytes,
+                result_overview: UpstreamCalls.result_overview(unwrapped_value, value_kind)
               )
 
             UpstreamCalls.record(call_context, entry)
@@ -550,13 +565,20 @@ defmodule PtcRunnerMcp.AggregatorTools do
     McpResult.success(value, raw?: RawEnvelopePolicy.enabled?(server, tool))
   end
 
-  defp tag_for_program({:world_fault, reason, detail, _durations}, _server, _tool) do
+  defp tag_for_program({:world_fault, reason, detail, _durations}, server, tool) do
+    detail = maybe_append_world_fault_hint(reason, detail, server, tool)
     McpResult.error(reason, detail)
   end
 
   defp tag_for_program({:world_fault, reason, detail, _durations, envelope}, server, tool) do
+    detail = maybe_append_world_fault_hint(reason, detail, server, tool)
     McpResult.error(reason, detail, envelope, raw?: RawEnvelopePolicy.enabled?(server, tool))
   end
+
+  defp maybe_append_world_fault_hint(:tool_error, detail, server, tool),
+    do: detail <> describe_tool_hint(Registry, server, tool)
+
+  defp maybe_append_world_fault_hint(_reason, detail, _server, _tool), do: detail
 
   defp stop_meta(meta, {:ok, _value, durations}) do
     meta
@@ -581,6 +603,93 @@ defmodule PtcRunnerMcp.AggregatorTools do
   # ----------------------------------------------------------------
   # Helpers
   # ----------------------------------------------------------------
+
+  defp configured_servers_hint(registry) do
+    case configured_server_names(registry) do
+      [] ->
+        "\nHint: use (catalog/list-servers) to inspect configured upstreams."
+
+      names ->
+        "\nConfigured upstreams: #{Enum.join(Enum.take(names, 8), ", ")}." <>
+          "\nHint: use (catalog/list-servers) or (catalog/search-tools \"query\" {:limit 8})."
+    end
+  end
+
+  defp tool_discovery_hint(server) do
+    "\nHint: use (catalog/list-tools \"#{server}\" {:limit 20}) or " <>
+      "(catalog/search-tools \"query\" {:limit 8})."
+  end
+
+  defp describe_tool_hint(registry, server, tool) do
+    summary =
+      case find_cached_tool(registry, server, tool) do
+        nil -> ""
+        cached_tool -> tool_summary_hint(cached_tool)
+      end
+
+    summary <>
+      "\nHint: use (catalog/describe-tool \"#{server}\" \"#{tool}\") for input_schema, call_example, and response notes."
+  end
+
+  defp known_tools_hint(server, attempted_tool, tools) do
+    names =
+      tools
+      |> Enum.map(&tool_name_of/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort()
+
+    known =
+      case Enum.take(names, 8) do
+        [] -> ""
+        shown -> "\nKnown tools include: #{Enum.join(shown, ", ")}."
+      end
+
+    did_you_mean =
+      case closest_tool_name(attempted_tool, names) do
+        nil ->
+          ""
+
+        candidate ->
+          "\nDid you mean \"#{candidate}\"? Use (catalog/describe-tool \"#{server}\" \"#{candidate}\")."
+      end
+
+    known <> did_you_mean <> tool_discovery_hint(server)
+  end
+
+  defp configured_server_names(registry) do
+    registry
+    |> GenServer.call(:all_routings)
+    |> Map.keys()
+    |> Enum.sort()
+  catch
+    :exit, _ -> []
+  end
+
+  defp find_cached_tool(registry, server, tool) do
+    case Registry.cached_tools(server, registry) do
+      tools when is_list(tools) -> Enum.find(tools, &(tool_name_of(&1) == tool))
+      _ -> nil
+    end
+  end
+
+  defp tool_summary_hint(tool) do
+    case tool_description_of(tool) do
+      nil -> ""
+      "" -> ""
+      description -> "\nTool summary: #{truncate(description, 180)}"
+    end
+  end
+
+  defp closest_tool_name(_attempted_tool, []), do: nil
+
+  defp closest_tool_name(attempted_tool, names) when is_binary(attempted_tool) do
+    {candidate, score} =
+      names
+      |> Enum.map(&{&1, String.jaro_distance(attempted_tool, &1)})
+      |> Enum.max_by(fn {_name, score} -> score end, fn -> {nil, 0.0} end)
+
+    if score >= 0.82, do: candidate
+  end
 
   # Phase 4 hardening: classify a successful upstream payload. A
   # map whose `"isError"` key is `true` is a tool-level failure
@@ -742,6 +851,18 @@ defmodule PtcRunnerMcp.AggregatorTools do
   defp tool_name_of(%{name: n}) when is_binary(n), do: n
   defp tool_name_of(%{"name" => n}) when is_binary(n), do: n
   defp tool_name_of(_), do: nil
+
+  defp tool_description_of(%{description: d}) when is_binary(d), do: d
+  defp tool_description_of(%{"description" => d}) when is_binary(d), do: d
+  defp tool_description_of(_), do: nil
+
+  defp truncate(text, max_length) when is_binary(text) do
+    if String.length(text) > max_length do
+      String.slice(text, 0, max_length) <> "..."
+    else
+      text
+    end
+  end
 
   defp raise_programmer_fault(message) do
     raise ExecutionError, reason: :runtime_error, message: message

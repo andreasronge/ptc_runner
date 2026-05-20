@@ -2,8 +2,8 @@ defmodule PtcRunnerMcp.AgenticConfig do
   @moduledoc """
   Boot-time configuration for experimental agentic aggregator mode.
 
-  Agentic mode is opt-in. It exposes `ptc_task` only when ordinary
-  aggregator mode is active, and it never changes `ptc_lisp_execute`.
+  Agentic mode is opt-in. It exposes `lisp_task` only when ordinary
+  aggregator mode is active, and it never changes `lisp_eval`.
   """
 
   @defaults %{

@@ -27,7 +27,7 @@ defmodule PtcRunnerMcp.TestSupport.SoakHelpers do
 
   def start_session do
     %{"structuredContent" => sc} =
-      Tools.call(%{"name" => "ptc_session_start", "arguments" => %{}})
+      Tools.call(%{"name" => "lisp_session_start", "arguments" => %{}})
 
     sc["session_id"]
   end
@@ -35,7 +35,7 @@ defmodule PtcRunnerMcp.TestSupport.SoakHelpers do
   def eval_ok!(session_id, program) do
     response =
       Tools.call(%{
-        "name" => "ptc_session_eval",
+        "name" => "lisp_session_eval",
         "arguments" => %{"session_id" => session_id, "program" => program}
       })
 
@@ -46,7 +46,7 @@ defmodule PtcRunnerMcp.TestSupport.SoakHelpers do
 
   def close_session!(session_id) do
     Tools.call(%{
-      "name" => "ptc_session_close",
+      "name" => "lisp_session_close",
       "arguments" => %{"session_id" => session_id}
     })
   end

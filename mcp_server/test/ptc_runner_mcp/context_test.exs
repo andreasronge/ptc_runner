@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.ContextTest do
   @moduledoc """
   Phase 3 (§ 9.3) coverage for the `context` argument of
-  `tools/call name: "ptc_lisp_execute"`.
+  `tools/call name: "lisp_eval"`.
 
   Covers `Plans/ptc-runner-mcp-server.md` § 16 rows:
 
@@ -35,7 +35,7 @@ defmodule PtcRunnerMcp.ContextTest do
   end
 
   defp call(args) do
-    Tools.call(%{"name" => "ptc_lisp_execute", "arguments" => args})
+    Tools.call(%{"name" => "lisp_eval", "arguments" => args})
   end
 
   describe "context shape validation (§ 9.3)" do

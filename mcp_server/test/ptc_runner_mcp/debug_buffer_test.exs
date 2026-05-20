@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.DebugBufferTest do
   @moduledoc """
   Direct tests for `PtcRunnerMcp.DebugBuffer` — the in-memory ring
-  buffer backing `ptc_debug`. Covers FIFO eviction, windowing,
+  buffer backing `lisp_debug`. Covers FIFO eviction, windowing,
   stats aggregation (including upstream + agentic buckets), and
   graceful degradation when the process is absent.
 
@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     base = %{
       request_id: "req-#{System.unique_integer([:positive])}",
       ts: DateTime.utc_now(),
-      tool: "ptc_lisp_execute",
+      tool: "lisp_eval",
       status: :ok,
       is_error: false,
       reason: nil,
@@ -98,17 +98,17 @@ defmodule PtcRunnerMcp.DebugBufferTest do
   test "stats: counts, error_rate, by_reason, window, percentiles" do
     pid = start_buffer(50)
 
-    record_sync(pid, rec(tool: "ptc_lisp_execute", status: :ok, duration_ms: 10))
-    record_sync(pid, rec(tool: "ptc_lisp_execute", status: :ok, duration_ms: 20))
+    record_sync(pid, rec(tool: "lisp_eval", status: :ok, duration_ms: 10))
+    record_sync(pid, rec(tool: "lisp_eval", status: :ok, duration_ms: 20))
 
     record_sync(
       pid,
-      rec(tool: "ptc_lisp_execute", status: :error, reason: "timeout", duration_ms: 1000)
+      rec(tool: "lisp_eval", status: :error, reason: "timeout", duration_ms: 1000)
     )
 
     record_sync(
       pid,
-      rec(tool: "ptc_task", status: :error, reason: "args_error", duration_ms: 5, agentic: nil)
+      rec(tool: "lisp_task", status: :error, reason: "args_error", duration_ms: 5, agentic: nil)
     )
 
     stats = DebugBuffer.stats([])
@@ -118,7 +118,7 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     assert stats.window.calls == 4
     assert stats.errors.by_reason == %{"timeout" => 1, "args_error" => 1}
 
-    le = stats.by_tool["ptc_lisp_execute"]
+    le = stats.by_tool["lisp_eval"]
     assert le.calls == 3
     assert le.ok == 2
     assert le.error == 1
@@ -183,16 +183,16 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     assert uc.by_server["slack"].by_reason == %{"cap_exhausted" => 1}
   end
 
-  test "stats: agentic block present only when ptc_task records exist" do
+  test "stats: agentic block present only when lisp_task records exist" do
     pid = start_buffer(50)
 
-    record_sync(pid, rec(tool: "ptc_lisp_execute"))
+    record_sync(pid, rec(tool: "lisp_eval"))
     assert DebugBuffer.stats([]).agentic == nil
 
     record_sync(
       pid,
       rec(
-        tool: "ptc_task",
+        tool: "lisp_task",
         agentic: %{
           planner_status: :ok,
           planner_duration_ms: 100,
@@ -206,7 +206,7 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     record_sync(
       pid,
       rec(
-        tool: "ptc_task",
+        tool: "lisp_task",
         status: :error,
         reason: "planner_error",
         agentic: %{

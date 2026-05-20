@@ -2,9 +2,9 @@
 #
 # Deterministically measures how catalog mode and fleet size affect:
 #
-#   * the server-side planner system prompt used by `ptc_task`
-#   * the client-visible `ptc_task` tool entry advertised by tools/list
-#   * the client-visible `ptc_lisp_execute` tool entry for comparison
+#   * the server-side planner system prompt used by `lisp_task`
+#   * the client-visible `lisp_task` tool entry advertised by tools/list
+#   * the client-visible `lisp_eval` tool entry for comparison
 #
 # No LLM/provider calls are made. Synthetic upstream catalogs are frozen
 # through the same persistent-term seams used at boot.
@@ -157,7 +157,7 @@ defmodule AgenticPromptBench.Helpers do
 
     tools = Tools.list()["tools"]
     task = fetch_tool!(tools, Agentic.tool_name())
-    execute = fetch_tool!(tools, "ptc_lisp_execute")
+    execute = fetch_tool!(tools, "lisp_eval")
     system_prompt = Prompt.system_prompt(catalog_mode: mode)
     effective_mode = effective_catalog_mode(entries, mode)
     task_entry_bytes = encoded_bytes(task)
@@ -167,14 +167,14 @@ defmodule AgenticPromptBench.Helpers do
       "effective_catalog_mode" => Atom.to_string(effective_mode),
       "planner_system_prompt_bytes" => byte_size(system_prompt),
       "planner_system_prompt_tokens_est" => tokens(system_prompt),
-      "ptc_task_description_bytes" => byte_size(task["description"]),
-      "ptc_task_description_tokens_est" => tokens(task["description"]),
-      "ptc_task_tool_entry_bytes" => task_entry_bytes,
-      "ptc_task_tool_entry_tokens_est" => tokens(task_entry_bytes),
-      "ptc_lisp_execute_description_bytes" => byte_size(execute["description"]),
-      "ptc_lisp_execute_description_tokens_est" => tokens(execute["description"]),
-      "ptc_lisp_execute_tool_entry_bytes" => execute_entry_bytes,
-      "ptc_lisp_execute_tool_entry_tokens_est" => tokens(execute_entry_bytes)
+      "lisp_task_description_bytes" => byte_size(task["description"]),
+      "lisp_task_description_tokens_est" => tokens(task["description"]),
+      "lisp_task_tool_entry_bytes" => task_entry_bytes,
+      "lisp_task_tool_entry_tokens_est" => tokens(task_entry_bytes),
+      "lisp_eval_description_bytes" => byte_size(execute["description"]),
+      "lisp_eval_description_tokens_est" => tokens(execute["description"]),
+      "lisp_eval_tool_entry_bytes" => execute_entry_bytes,
+      "lisp_eval_tool_entry_tokens_est" => tokens(execute_entry_bytes)
     }
   end
 
@@ -397,11 +397,11 @@ defmodule AgenticPromptBench.Report do
     rows = [
       {"effective catalog mode", "effective_catalog_mode", :text},
       {"planner system-prompt bytes (~tokens)", "planner_system_prompt_bytes", :bytes},
-      {"ptc_task description bytes (~tokens)", "ptc_task_description_bytes", :bytes},
-      {"ptc_task tool-entry bytes (~tokens)", "ptc_task_tool_entry_bytes", :bytes},
-      {"ptc_lisp_execute description bytes (~tokens)", "ptc_lisp_execute_description_bytes",
+      {"lisp_task description bytes (~tokens)", "lisp_task_description_bytes", :bytes},
+      {"lisp_task tool-entry bytes (~tokens)", "lisp_task_tool_entry_bytes", :bytes},
+      {"lisp_eval description bytes (~tokens)", "lisp_eval_description_bytes",
        :bytes},
-      {"ptc_lisp_execute tool-entry bytes (~tokens)", "ptc_lisp_execute_tool_entry_bytes",
+      {"lisp_eval tool-entry bytes (~tokens)", "lisp_eval_tool_entry_bytes",
        :bytes},
       {"delta vs :auto planner bytes (~tokens)", "planner_delta_vs_auto", :delta}
     ]
@@ -431,17 +431,17 @@ defmodule AgenticPromptBench.Report do
       token_delta(inline["planner_system_prompt_bytes"], auto["planner_system_prompt_bytes"])
 
     task_lazy_tokens =
-      token_delta(lazy["ptc_task_description_bytes"], auto["ptc_task_description_bytes"])
+      token_delta(lazy["lisp_task_description_bytes"], auto["lisp_task_description_bytes"])
 
     task_inline_tokens =
-      token_delta(inline["ptc_task_description_bytes"], auto["ptc_task_description_bytes"])
+      token_delta(inline["lisp_task_description_bytes"], auto["lisp_task_description_bytes"])
 
     IO.puts("")
 
     IO.puts(
       "Summary: with this fleet, --catalog-mode lazy changes the planner system prompt by " <>
-        "#{signed(planner_lazy_tokens)} estimated tokens per ptc_task invocation vs :auto; " <>
-        ":inline changes it by #{signed(planner_inline_tokens)}. The ptc_task description " <>
+        "#{signed(planner_lazy_tokens)} estimated tokens per lisp_task invocation vs :auto; " <>
+        ":inline changes it by #{signed(planner_inline_tokens)}. The lisp_task description " <>
         "(paid once per session) moves by #{signed(task_lazy_tokens)} / #{signed(task_inline_tokens)} " <>
         "estimated tokens for lazy / inline vs :auto."
     )

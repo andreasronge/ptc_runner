@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   @moduledoc """
-  Deterministic compact summaries for the `ptc_task` advertised surface.
+  Deterministic compact summaries for the `lisp_task` advertised surface.
 
   The renderer consumes the structured frozen catalog snapshot rather than
   parsing the human-oriented upstream catalog text.
@@ -11,17 +11,17 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
 
   @default_max_bytes 800
 
-  # This pointer is shown to MCP clients in the `ptc_task` tool
-  # description. `ptc_task` callers describe what they want in plain
+  # This pointer is shown to MCP clients in the `lisp_task` tool
+  # description. `lisp_task` callers describe what they want in plain
   # English — they do not write PTC-Lisp themselves. The pointer
   # therefore stays on the agentic surface: it tells the calling LLM
   # that the catalog is loaded lazily by the internal planner, so it
-  # should still ask `ptc_task` (no need to pre-discover servers).
+  # should still ask `lisp_task` (no need to pre-discover servers).
   # The planner's own system prompt has a separate lazy block (in
   # `PtcRunnerMcp.Agentic.Prompt`) that does instruct it to call
   # `(catalog/...)` from inside the generated PTC-Lisp program.
   @lazy_pointer "Upstream catalog is loaded lazily (catalog mode: lazy); " <>
-                  "ptc_task's internal planner discovers configured upstream servers " <>
+                  "lisp_task's internal planner discovers configured upstream servers " <>
                   "and their tools at runtime. Describe the task you want in plain English " <>
                   "and the planner will pick the right upstream calls."
 

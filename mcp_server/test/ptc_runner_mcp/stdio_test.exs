@@ -25,7 +25,7 @@ defmodule PtcRunnerMcp.StdioTest do
     assert reply["result"]["protocolVersion"] == "2025-11-25"
   end
 
-  test "tools/call ptc_lisp_execute (+ 1 2) returns success envelope", %{harness: h} do
+  test "tools/call lisp_eval (+ 1 2) returns success envelope", %{harness: h} do
     [reply] =
       JsonRpcHarness.roundtrip(
         %{
@@ -33,7 +33,7 @@ defmodule PtcRunnerMcp.StdioTest do
           "id" => 2,
           "method" => "tools/call",
           "params" => %{
-            "name" => "ptc_lisp_execute",
+            "name" => "lisp_eval",
             "arguments" => %{"program" => "(+ 1 2)"}
           }
         },
@@ -96,7 +96,7 @@ defmodule PtcRunnerMcp.StdioTest do
     [parse_err, list_reply] = replies
     assert parse_err["error"]["code"] == -32_700
     assert list_reply["id"] == 9
-    assert [%{"name" => "ptc_lisp_execute"}] = list_reply["result"]["tools"]
+    assert [%{"name" => "lisp_eval"}] = list_reply["result"]["tools"]
   end
 
   test "two consecutive frames in one feed are dispatched in order", %{harness: h} do

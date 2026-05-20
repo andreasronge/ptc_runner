@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
   Soak test: drive the built `ptc_runner_mcp` Mix release as a real OS
   subprocess over stdio, exercising the production-shape transport
   (NDJSON-framed JSON-RPC over real POSIX pipes) with many stateless
-  `ptc_lisp_execute` calls.
+  `lisp_eval` calls.
 
   This is the only soak test that can catch leaks living in the
   framing / stdio plumbing itself (the BEAM-internal soaks all drive
@@ -12,7 +12,7 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
   Session start/eval/close churn is covered by
   `session_churn_soak_test.exs`. This release driver writes all frames
   up front through `ReleaseRunner`, so it cannot substitute dynamic
-  session IDs returned by `ptc_session_start`.
+  session IDs returned by `lisp_session_start`.
 
   ## Skips cleanly when
 
@@ -22,7 +22,7 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
   ## What's asserted
 
     1. Subprocess exits cleanly after the `exit` frame.
-    2. Every iteration's `ptc_lisp_execute` reply was `status: "ok"`.
+    2. Every iteration's `lisp_eval` reply was `status: "ok"`.
 
   ## What's logged
 
@@ -80,7 +80,7 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
       #{String.slice(stderr, max(byte_size(stderr) - 2048, 0), 2048)}
       """
 
-      # Every `ptc_lisp_execute` reply should be `status: "ok"`. We grep
+      # Every `lisp_eval` reply should be `status: "ok"`. We grep
       # `structuredContent.status` on the bodies — only call-result frames
       # have it.
       bad =
@@ -111,7 +111,7 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
     defp build_frames(iters) do
       eval_frames =
         Enum.map(1..iters, fn i ->
-          ReleaseRunner.tools_call_request(i + 1, "ptc_lisp_execute", %{
+          ReleaseRunner.tools_call_request(i + 1, "lisp_eval", %{
             "program" => "(+ 1 2 3)"
           })
         end)

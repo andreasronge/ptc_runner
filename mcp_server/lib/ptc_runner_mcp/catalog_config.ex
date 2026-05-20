@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.CatalogConfig do
 
   Per `Plans/ptc-runner-mcp-catalog-exposure.md` §5, these settings
   control how the aggregator exposes upstream tool catalogs in the
-  `ptc_lisp_execute` MCP tool description:
+  `lisp_eval` MCP tool description:
 
     * `:catalog_mode` — `:auto`, `:inline`, or `:lazy`.
     * `:catalog_inline_max_chars` — maximum rendered inline description
@@ -12,7 +12,7 @@ defmodule PtcRunnerMcp.CatalogConfig do
     * `:catalog_inline_max_tools` — maximum total upstream tool count
       in `auto` mode.
     * `:max_catalog_ops_per_program` — maximum catalog builtin calls
-      per `ptc_lisp_execute` invocation.
+      per `lisp_eval` invocation.
     * `:max_catalog_result_bytes` — maximum JSON-encoded result bytes
       from one catalog builtin.
 

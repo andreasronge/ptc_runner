@@ -68,7 +68,7 @@ defmodule PtcRunnerMcp.Integration.InspectorTest do
     end
   end
 
-  test "MCP Inspector CLI lists exactly one tool: ptc_lisp_execute", ctx do
+  test "MCP Inspector CLI lists exactly one tool: lisp_eval", ctx do
     if ctx[:skip] do
       # ExUnit has no clean "skip" — emit a passing test with a
       # message so CI dashboards still surface that the inspector
@@ -94,7 +94,7 @@ defmodule PtcRunnerMcp.Integration.InspectorTest do
         )
 
       cond do
-        exit_code == 0 and output =~ "ptc_lisp_execute" ->
+        exit_code == 0 and output =~ "lisp_eval" ->
           # Happy path — Inspector resolved, listed our single tool.
           assert true
 

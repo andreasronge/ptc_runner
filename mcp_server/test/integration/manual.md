@@ -23,7 +23,7 @@ The release binary is at
 `mcp_server/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp`.
 
 > **Phase 6a finding (open):** the release artifact does not bundle
-> `:crypto`, so any `tools/call name: "ptc_lisp_execute"` whose
+> `:crypto`, so any `tools/call name: "lisp_eval"` whose
 > `arguments.program` is set raises
 > `:crypto.hash/2 is undefined` inside the per-call worker and never
 > emits a reply. Skip the success-path manual cases below until that
@@ -47,7 +47,7 @@ Inspector opens a browser tab. Verify:
 - [ ] **Connect succeeds.** The status indicator goes green; no
       red banner. (If you see "Request timed out" — known
       cold-start limitation; reload and try again.)
-- [ ] **Tools tab shows exactly one tool:** `ptc_lisp_execute`,
+- [ ] **Tools tab shows exactly one tool:** `lisp_eval`,
       with the long description (PTC-Lisp authoring card) and an
       input schema with `program`, `context`, `signature` fields.
 - [ ] **Unknown-tool D1 gate.** In Inspector's "Tools" tab, edit
@@ -81,7 +81,7 @@ on macOS:
 Restart Claude Desktop. Verify:
 
 - [ ] **The hammer / tool icon shows `ptc-runner` connected** with
-      one tool (`ptc_lisp_execute`).
+      one tool (`lisp_eval`).
 - [ ] **No red error banner** at the bottom of the conversation.
 - [ ] **Unknown-tool D1 gate.** Ask Claude in the conversation:
       "Use the `nope` tool from ptc-runner with no arguments."
@@ -113,7 +113,7 @@ Place at `~/.cursor/mcp.json` (or `<project>/.cursor/mcp.json`):
 Restart Cursor. Verify:
 
 - [ ] **Settings → MCP** shows `ptc-runner` as Connected (green dot).
-- [ ] **Tool palette** lists `ptc_lisp_execute`.
+- [ ] **Tool palette** lists `lisp_eval`.
 - [ ] **Unknown-tool D1 gate** as above.
 - [ ] **Cursor restart** terminates the subprocess cleanly.
 

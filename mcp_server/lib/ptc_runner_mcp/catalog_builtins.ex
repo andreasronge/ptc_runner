@@ -125,7 +125,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           |> Enum.sort_by(&tool_name_of/1)
           |> Enum.drop(offset)
           |> Enum.take(limit)
-          |> Enum.map(fn tool -> compact_tool_entry(server, tool) end)
+          |> Enum.map(fn tool -> compact_tool_entry(server, tool) |> catalog_line() end)
 
         maybe_cap_list_result(sorted, catalog_config.max_catalog_result_bytes)
 
@@ -206,7 +206,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
         {-score, entry["server"] || "", entry["tool"] || ""}
       end)
       |> Enum.take(limit)
-      |> Enum.map(fn {_score, entry} -> entry end)
+      |> Enum.map(fn {_score, entry} -> catalog_line(entry) end)
 
     maybe_cap_list_result(all_results, catalog_config.max_catalog_result_bytes)
   end
@@ -585,6 +585,8 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "server" => server,
       "tool" => tool_name_of(tool),
       "summary" => tool_description(tool),
+      "input_schema" => tool_input_schema(tool),
+      "output_schema" => tool_output_schema(tool),
       "arg_keys" => tool_arg_keys(tool),
       "read_only" =>
         Map.get(annotations, "readOnlyHint", Map.get(annotations, :readOnlyHint, true))
@@ -604,6 +606,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "summary" => tool_description(tool),
       "description" => tool_full_description(tool),
       "input_schema" => input_schema,
+      "output_schema" => tool_output_schema(tool),
       "arg_keys" => arg_keys,
       "required" => required,
       "annotations" => annotations,
@@ -611,6 +614,38 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "response_notes" =>
         "Returns tagged data whose :value is already the unwrapped upstream payload."
     }
+    |> detailed_tool_text()
+  end
+
+  defp catalog_line(%{"tool" => nil} = entry) do
+    summary = compact_text(Map.get(entry, "summary") || "")
+    next = Map.get(entry, "next")
+    "#{entry["server"]}: #{summary} Use #{next}."
+  end
+
+  defp catalog_line(entry) when is_map(entry) do
+    server = Map.fetch!(entry, "server")
+    tool = Map.fetch!(entry, "tool")
+    args = render_args(Map.get(entry, "input_schema", %{}))
+    output = render_output(Map.get(entry, "output_schema"))
+    summary = compact_text(Map.get(entry, "summary") || "")
+    description = if summary == "", do: "", else: " - #{summary}"
+    "#{server}.#{tool}(#{args})#{output}#{description}"
+  end
+
+  defp detailed_tool_text(entry) when is_map(entry) do
+    line = catalog_line(entry)
+    call_example = Map.fetch!(entry, "call_example")
+
+    [
+      line,
+      "",
+      "Use:",
+      call_example,
+      "",
+      "Returns: tagged data; use `(:value r)` for the unwrapped upstream payload."
+    ]
+    |> Enum.join("\n")
   end
 
   defp build_call_example(server, name, arg_keys, required) do
@@ -660,6 +695,12 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp tool_annotations(%{"annotations" => a}) when is_map(a), do: a
   defp tool_annotations(_), do: %{}
 
+  defp tool_output_schema(%{output_schema: s}) when is_map(s), do: s
+  defp tool_output_schema(%{"output_schema" => s}) when is_map(s), do: s
+  defp tool_output_schema(%{outputSchema: s}) when is_map(s), do: s
+  defp tool_output_schema(%{"outputSchema" => s}) when is_map(s), do: s
+  defp tool_output_schema(_), do: nil
+
   defp tool_arg_keys(tool) do
     schema = tool_input_schema(tool)
 
@@ -687,6 +728,123 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       _ ->
         []
     end
+  end
+
+  defp render_args(schema) when is_map(schema) do
+    properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
+    required = Map.get(schema, "required", Map.get(schema, :required, []))
+
+    properties_by_string =
+      Map.new(properties, fn {key, value} -> {to_string(key), value} end)
+
+    required_names =
+      required
+      |> Enum.map(&to_string/1)
+      |> Enum.filter(&Map.has_key?(properties_by_string, &1))
+
+    required_set = MapSet.new(required_names)
+
+    optional_names =
+      properties_by_string
+      |> Map.keys()
+      |> Enum.reject(&MapSet.member?(required_set, &1))
+      |> Enum.sort()
+
+    (required_names ++ optional_names)
+    |> Enum.map_join(", ", fn name ->
+      optional = if MapSet.member?(required_set, name), do: "", else: "?"
+      "#{name}: #{render_arg_type(Map.fetch!(properties_by_string, name))}#{optional}"
+    end)
+  end
+
+  defp render_args(_), do: ""
+
+  defp render_output(schema) when is_map(schema) do
+    case render_output_type(schema) do
+      "" -> ""
+      type -> " -> #{type}"
+    end
+  end
+
+  defp render_output(_), do: ""
+
+  defp render_arg_type(schema) when is_map(schema) do
+    cond do
+      Map.has_key?(schema, "const") or Map.has_key?(schema, :const) ->
+        "const"
+
+      is_list(Map.get(schema, "enum", Map.get(schema, :enum))) ->
+        "enum"
+
+      true ->
+        case Map.get(schema, "type", Map.get(schema, :type)) do
+          "string" -> "string"
+          "integer" -> "integer"
+          "number" -> "number"
+          "boolean" -> "boolean"
+          "object" -> "object"
+          "array" -> "array"
+          list when is_list(list) -> Enum.map_join(list, "|", &to_string/1)
+          nil -> infer_arg_type(schema)
+          other -> to_string(other)
+        end
+    end
+  end
+
+  defp render_arg_type(_), do: "any"
+
+  defp infer_arg_type(schema) do
+    cond do
+      Map.has_key?(schema, "properties") or Map.has_key?(schema, :properties) -> "object"
+      Map.has_key?(schema, "items") or Map.has_key?(schema, :items) -> "array"
+      true -> "any"
+    end
+  end
+
+  defp render_output_type(schema) when is_map(schema) do
+    case Map.get(schema, "type", Map.get(schema, :type)) do
+      "string" -> ":string"
+      "integer" -> ":int"
+      "number" -> ":float"
+      "boolean" -> ":bool"
+      "array" -> "[:any]"
+      "object" -> render_output_object(schema)
+      _ -> ""
+    end
+  end
+
+  defp render_output_type(_), do: ""
+
+  defp render_output_object(schema) do
+    properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
+
+    if is_map(properties) and map_size(properties) > 0 do
+      required =
+        case Map.get(schema, "required", Map.get(schema, :required, [])) do
+          list when is_list(list) -> Enum.map(list, &to_string/1)
+          _ -> []
+        end
+
+      fields =
+        properties
+        |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+        |> Enum.take(5)
+        |> Enum.map_join(", ", fn {key, value} ->
+          key = to_string(key)
+          optional = if key in required, do: "", else: "?"
+          "#{key} #{render_output_type(value)}#{optional}"
+        end)
+
+      "{#{fields}}"
+    else
+      ":map"
+    end
+  end
+
+  defp compact_text(text) when is_binary(text) do
+    text
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
   end
 
   defp safe_to_atom(str) when is_binary(str) do

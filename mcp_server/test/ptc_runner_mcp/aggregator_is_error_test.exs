@@ -87,7 +87,8 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
             (let [r (tool/mcp-call {:server "alpha" :tool "fail" :args {}})]
               (and (not (:ok r))
                    (= (:reason r) :tool_error)
-                   (= (:message r) "test failure msg")))
+                   (string/starts-with? (:message r) "test failure msg")
+                   (string/includes? (:message r) "catalog/describe-tool")))
           |,
           %{"output_schema" => %{"type" => "boolean"}}
         )

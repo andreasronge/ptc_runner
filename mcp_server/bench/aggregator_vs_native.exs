@@ -11,7 +11,7 @@
 #                cost by serializing the request and response envelopes
 #                to JSON and dividing bytes by 4.
 #
-#   Scenario B — aggregator: one `ptc_lisp_execute` call whose program
+#   Scenario B — aggregator: one `lisp_eval` call whose program
 #                orchestrates the same upstream calls and returns only
 #                the transformed value (a 2-field map).
 #
@@ -366,7 +366,7 @@ run_scenario_a = fn ->
 end
 
 # ---------------------------------------------------------------------------
-# Scenario B — aggregator (one ptc_lisp_execute call).
+# Scenario B — aggregator (one lisp_eval call).
 # ---------------------------------------------------------------------------
 
 scenario_b_program = """
@@ -400,7 +400,7 @@ run_scenario_b = fn program ->
     "id" => 1,
     "method" => "tools/call",
     "params" => %{
-      "name" => "ptc_lisp_execute",
+      "name" => "lisp_eval",
       "arguments" => %{"program" => program}
     }
   }

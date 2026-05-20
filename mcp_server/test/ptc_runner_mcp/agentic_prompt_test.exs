@@ -31,7 +31,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
       "You are an agent that writes PTC-Lisp programs",
       "operator prefix",
       "PTC-Lisp dialect authoring:",
-      "ptc_task MCP-call contract:",
+      "lisp_task MCP-call contract:",
       "Upstream catalog:\nalpha:",
       "operator suffix",
       "Final MCP recap:"
@@ -47,48 +47,41 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert prompt =~ "Write-capable upstream calls may have side effects"
   end
 
-  test "agentic prompt profile pins trust boundaries and terminal recap placement" do
+  test "agentic prompt profile pins trust boundaries in render order" do
     assert [
              %{
                id: :mcp_agentic_preamble,
                dynamic_boundary: :static_card,
-               placement: :preamble,
                trust: :authoritative
              },
              %{
                id: :mcp_agentic_operator_prefix,
                dynamic_boundary: :operator_text,
-               placement: :after_preamble,
                trust: :operator_text
              },
              %{
                id: :mcp_agentic_dialect_card,
                dynamic_boundary: :static_card,
-               placement: :dialect_reference,
                trust: :authoritative
              },
              %{
                id: :mcp_agentic_mcp_call_contract,
                dynamic_boundary: :before_dynamic_catalog,
-               placement: :mcp_call_contract,
                trust: :authoritative
              },
              %{
                id: :mcp_agentic_catalog_section,
                dynamic_boundary: :dynamic_catalog,
-               placement: :after_mcp_call_contract,
                trust: :untrusted_data
              },
              %{
                id: :mcp_agentic_operator_suffix,
                dynamic_boundary: :operator_text,
-               placement: :before_terminal_recap,
                trust: :operator_text
              },
              %{
                id: :mcp_agentic_final_recap,
                dynamic_boundary: :terminal_authoritative_card,
-               placement: :terminal_recap,
                trust: :authoritative
              }
            ] = PromptRegistry.profile_metadata(:mcp_agentic_task_prompt)
@@ -106,11 +99,11 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert Prompt.system_prompt(opts) == PromptRegistry.render(:mcp_agentic_task_prompt, opts)
   end
 
-  test "prompt contains exactly one ptc_task MCP-call contract" do
+  test "prompt contains exactly one lisp_task MCP-call contract" do
     prompt = Prompt.system_prompt(catalog: "docs:\n  search()")
 
-    assert count(prompt, "ptc_task MCP-call contract:") == 1
-    assert count(prompt, "In `ptc_task`, `tool/mcp-call` returns a tagged map") == 1
+    assert count(prompt, "lisp_task MCP-call contract:") == 1
+    assert count(prompt, "In `lisp_task`, `tool/mcp-call` returns a tagged map") == 1
     assert prompt =~ "`(:value r)` is already the unwrapped upstream payload"
     assert prompt =~ "unexpected shape, handle or fail"
     assert prompt =~ "inspect `:ok`"
@@ -123,8 +116,8 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     direct = Tools.advertised_description(:mcp_aggregator, catalog: nil)
     agentic = Prompt.system_prompt(catalog: "docs:\n  search()")
 
-    assert direct =~ "tagged data"
-    assert direct =~ "inspect `:ok`"
+    assert direct =~ "{:ok true :value"
+    assert direct =~ "Check `:ok`"
     refute direct =~ ":json-null"
 
     assert agentic =~ "returns a tagged map"

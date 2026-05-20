@@ -406,7 +406,6 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   end
 
   defp reason_string(reason) when is_atom(reason), do: Atom.to_string(reason)
-  defp reason_string(reason) when is_binary(reason), do: reason
 
   defp raise_programmer_fault(message) do
     raise ExecutionError, reason: :runtime_error, message: message

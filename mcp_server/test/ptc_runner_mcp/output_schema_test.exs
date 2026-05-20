@@ -11,7 +11,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     * Concrete R22 / R23 payloads have all fields the schema's
       `required` arrays demand.
   """
-  # Calls the real `ptc_lisp_execute` tool, which reads process-wide
+  # Calls the real `lisp_eval` tool, which reads process-wide
   # MCP config and the production upstream registry name.
   use ExUnit.Case, async: false
 
@@ -148,7 +148,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     test "an R22 success payload has all success-branch required keys" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "(+ 1 2)"}
         })
 
@@ -167,7 +167,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     test "an R22 success payload does NOT include the memory field (issue #879)" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "(defn sum-tree [t] (reduce + t)) (sum-tree [1 2 3])"}
         })
 
@@ -181,7 +181,7 @@ defmodule PtcRunnerMcp.OutputSchemaTest do
     test "an R23 error payload has all error-branch required keys" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "(+ 1"}
         })
 

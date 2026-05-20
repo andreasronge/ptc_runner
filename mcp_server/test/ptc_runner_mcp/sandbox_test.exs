@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.SandboxTest do
   @moduledoc """
-  Phase 2 DoD coverage for `tools/call name: "ptc_lisp_execute"`,
+  Phase 2 DoD coverage for `tools/call name: "lisp_eval"`,
   exercising `PtcRunnerMcp.Tools.call/1` end-to-end.
 
   Covers `Plans/ptc-runner-mcp-server.md` § 15 Phase 2 DoD:
@@ -29,7 +29,7 @@ defmodule PtcRunnerMcp.SandboxTest do
 
   defp call_program(program) do
     Tools.call(%{
-      "name" => "ptc_lisp_execute",
+      "name" => "lisp_eval",
       "arguments" => %{"program" => program}
     })
   end

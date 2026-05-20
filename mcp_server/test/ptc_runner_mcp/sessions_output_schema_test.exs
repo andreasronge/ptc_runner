@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   @moduledoc """
-  Regression coverage for GitHub issue #944 finding #5: `ptc_session_eval`
+  Regression coverage for GitHub issue #944 finding #5: `lisp_session_eval`
   must accept `output_schema` and validate the program's return value,
-  mirroring the stateless `ptc_lisp_execute` contract.
+  mirroring the stateless `lisp_eval` contract.
 
   Validation failure does NOT commit the session candidate state — the
   eval is rejected, same precedent as `session_limit_exceeded`. Side
@@ -11,11 +11,12 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{ConcurrencyGate, Sessions, Tools}
+  alias PtcRunnerMcp.{ConcurrencyGate, ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
 
   setup do
+    old_profile = ResponseProfile.current()
     stop_sessions_processes()
     SessionsConfig.set(%{enabled: true})
     ConcurrencyGate.reset()
@@ -25,12 +26,13 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
       stop_sessions_processes()
       SessionsConfig.reset()
       ConcurrencyGate.reset()
+      ResponseProfile.set(old_profile)
     end)
 
     :ok
   end
 
-  describe "output_schema on ptc_session_eval" do
+  describe "output_schema on lisp_session_eval" do
     test "matching return value is committed and surfaces a `validated` field" do
       session_id = start_session()
 
@@ -50,6 +52,27 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
       assert response["validated"] == %{"count" => 6, "label" => "hello"}
 
       # State was committed — turn advanced.
+      assert response["session"]["turn"] == 1
+    end
+
+    test "oversized validated return is committed but omitted from the MCP payload" do
+      ResponseProfile.set(:structured)
+      session_id = start_session()
+
+      response =
+        eval(session_id, large_string_vector_program(),
+          output_schema: %{"type" => "array", "items" => %{"type" => "string"}}
+        )
+
+      assert response["status"] == "ok"
+      refute Map.has_key?(response, "validated")
+      assert is_binary(response["validated_preview"])
+      assert response["validated_bytes"] > 32 * 1024
+      assert response["output_truncated"] == true
+      assert response["truncated"] == true
+
+      # The eval still committed even though the client-facing exact
+      # validated copy was too large to include.
       assert response["session"]["turn"] == 1
     end
 
@@ -80,7 +103,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
       envelope =
         Tools.call(%{
-          "name" => "ptc_session_eval",
+          "name" => "lisp_session_eval",
           "arguments" => %{
             "session_id" => session_id,
             "program" => "{:count (+ 1 2)}",
@@ -98,7 +121,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
       envelope =
         Tools.call(%{
-          "name" => "ptc_session_eval",
+          "name" => "lisp_session_eval",
           "arguments" => %{
             "session_id" => session_id,
             "program" => "42",
@@ -117,7 +140,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
       envelope =
         Tools.call(%{
-          "name" => "ptc_session_eval",
+          "name" => "lisp_session_eval",
           "arguments" => %{
             "session_id" => session_id,
             "program" => "42",
@@ -199,7 +222,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
       envelope =
         Tools.call(%{
-          "name" => "ptc_session_eval",
+          "name" => "lisp_session_eval",
           "arguments" => %{
             "session_id" => session_id,
             "program" => "nil",
@@ -215,7 +238,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
     test "tool advertises output_schema but not signature in inputSchema" do
       tool =
         Tools.list()["tools"]
-        |> Enum.find(&(&1["name"] == "ptc_session_eval"))
+        |> Enum.find(&(&1["name"] == "lisp_session_eval"))
 
       props = tool["inputSchema"]["properties"]
       assert Map.has_key?(props, "output_schema")
@@ -225,7 +248,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   end
 
   defp start_session do
-    call!("ptc_session_start", %{})["session_id"]
+    call!("lisp_session_start", %{})["session_id"]
   end
 
   defp eval(session_id, program, extra \\ []) do
@@ -236,12 +259,22 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
         {:output_schema, v}, acc -> Map.put(acc, "output_schema", v)
       end)
 
-    call!("ptc_session_eval", args)
+    call!("lisp_session_eval", args)
   end
 
   defp call!(name, args) do
     envelope = Tools.call(%{"name" => name, "arguments" => args})
     envelope["structuredContent"]
+  end
+
+  defp large_string_vector_program do
+    value = String.duplicate("x", 80)
+
+    items =
+      1..500
+      |> Enum.map_join(" ", fn _ -> Jason.encode!(value) end)
+
+    "[" <> items <> "]"
   end
 
   defp stop_sessions_processes do

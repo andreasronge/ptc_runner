@@ -40,7 +40,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
   test "slim success emits text only" do
     env =
       Tools.call(%{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => "(+ 1 2)"}
       })
 
@@ -55,7 +55,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
   test "slim success renders prints compactly and omits empty/default fields" do
     env =
       Tools.call(%{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => ~S|(do (println "line 1") (+ 1 2))|}
       })
 
@@ -67,10 +67,27 @@ defmodule PtcRunnerMcp.SlimResponseTest do
     refute inspect(env) =~ "truncated"
   end
 
+  test "slim success caps total println output" do
+    env =
+      Tools.call(%{
+        "name" => "lisp_eval",
+        "arguments" => %{
+          "program" => ~S|(do (doseq [i (range 30)] (println "line" i)) 1)|
+        }
+      })
+
+    [block] = env["content"]
+    assert block["text"] =~ "line 0"
+    assert block["text"] =~ "line 19"
+    refute block["text"] =~ "line 20"
+    assert block["text"] =~ "[truncated]"
+    refute Map.has_key?(env, "structuredContent")
+  end
+
   test "slim error emits useful repair text and no structuredContent" do
     env =
       Tools.call(%{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => "(missing-fn 1)"}
       })
 
@@ -92,7 +109,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
 
     env =
       Tools.call(%{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => "(+ 1 2)"}
       })
 
@@ -101,12 +118,34 @@ defmodule PtcRunnerMcp.SlimResponseTest do
     assert env["content"] == [%{"type" => "text", "text" => "user=> 3"}]
   end
 
+  test "structured profile omits oversized validated data and keeps preview metadata" do
+    ResponseProfile.set(:structured)
+
+    env =
+      Tools.call(%{
+        "name" => "lisp_eval",
+        "arguments" => %{
+          "program" => large_string_vector_program(),
+          "output_schema" => array_string_schema()
+        }
+      })
+
+    sc = env["structuredContent"]
+    assert sc["status"] == "ok"
+    refute Map.has_key?(sc, "validated")
+    assert is_binary(sc["validated_preview"])
+    assert sc["validated_bytes"] > 32 * 1024
+    assert sc["output_truncated"] == true
+    assert sc["truncated"] == true
+    assert hd(env["content"])["text"] =~ "[truncated]"
+  end
+
   test "debug profile preserves the verbose envelope" do
     ResponseProfile.set(:debug)
 
     env =
       Tools.call(%{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => "(+ 1 2)"}
       })
 
@@ -152,7 +191,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
       "id" => 123,
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|
         }
@@ -163,7 +202,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
     env = work_fn.()
 
     refute Map.has_key?(env, "structuredContent")
-    refute Map.has_key?(env, "__ptc_debug_structured")
+    refute Map.has_key?(env, "__lisp_debug_structured")
 
     {:ok, rec} = DebugBuffer.get("123")
     [entry] = rec.upstream_calls
@@ -195,5 +234,19 @@ defmodule PtcRunnerMcp.SlimResponseTest do
       nil -> :ok
       pid -> if Process.alive?(pid), do: GenServer.stop(pid)
     end
+  end
+
+  defp large_string_vector_program do
+    value = String.duplicate("x", 80)
+
+    items =
+      1..500
+      |> Enum.map_join(" ", fn _ -> Jason.encode!(value) end)
+
+    "[" <> items <> "]"
+  end
+
+  defp array_string_schema do
+    %{"type" => "array", "items" => %{"type" => "string"}}
   end
 end

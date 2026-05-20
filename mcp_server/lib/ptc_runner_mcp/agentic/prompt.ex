@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.Agentic.Prompt do
   @moduledoc """
-  System prompt assembly for SubAgent-backed `ptc_task`.
+  System prompt assembly for SubAgent-backed `lisp_task`.
 
   MCP-controlled sections are ordered here so operator prefix/suffix text cannot
   replace the terminal or upstream-call contract.
@@ -15,7 +15,7 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
         }
 
   @doc """
-  Builds the SubAgent prompt payload for one `ptc_task` call.
+  Builds the SubAgent prompt payload for one `lisp_task` call.
   """
   @spec assemble(map(), keyword()) :: assembled()
   def assemble(validated, opts \\ []) when is_map(validated) do
@@ -37,7 +37,7 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
   @doc """
   Metadata for the later SubAgent adapter.
 
-  `ptc_task` owns the authoritative `mcp-call` card, so a generic SubAgent
+  `lisp_task` owns the authoritative `mcp-call` card, so a generic SubAgent
   renderer should not add a second tool description for this tool.
   """
   @spec tool_rendering() :: map()
@@ -49,7 +49,7 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
   end
 
   @doc """
-  Builds the user message for a single `ptc_task` request.
+  Builds the user message for a single `lisp_task` request.
   """
   @spec user_message(map()) :: String.t()
   def user_message(%{task: task} = validated) do

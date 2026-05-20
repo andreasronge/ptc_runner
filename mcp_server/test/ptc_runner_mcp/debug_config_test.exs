@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.DebugConfigTest do
   @moduledoc """
   CLI > env > default precedence and ring-size clamping for the opt-in
-  `ptc_debug` tool config. See `Plans/ptc-runner-mcp-debug-tool.md` § 4.
+  `lisp_debug` tool config. See `Plans/ptc-runner-mcp-debug-tool.md` § 4.
   """
   use ExUnit.Case, async: false
 

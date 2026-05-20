@@ -51,7 +51,7 @@ defmodule PtcRunnerMcp.CancellationTest do
       "id" => id,
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => program}
       }
     }) <> "\n"
@@ -471,7 +471,7 @@ defmodule PtcRunnerMcp.CancellationTest do
         assert is_integer(measurements.duration)
         assert measurements.duration > 0
         assert metadata.request_id == "900"
-        assert metadata.tool_name == "ptc_lisp_execute"
+        assert metadata.tool_name == "lisp_eval"
         assert metadata.status == :ok
         assert metadata.is_error == false
       after

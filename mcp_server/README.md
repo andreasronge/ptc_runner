@@ -4,7 +4,7 @@ An [MCP](https://modelcontextprotocol.io/) server that exposes
 [PtcRunner](../README.md)'s PTC-Lisp sandbox to any
 MCP client (Claude Desktop, Cursor, Cline, Claude Code, …) over stdio
 JSON-RPC, with an opt-in Streamable HTTP mode for private-network
-deployments. The default tool, `ptc_lisp_execute`, accepts a PTC-Lisp
+deployments. The default tool, `lisp_eval`, accepts a PTC-Lisp
 program plus optional `context` and `output_schema`, runs it in an isolated BEAM process (1 s wall-clock,
 10 MB memory; 10 s / 100 MB in [aggregator mode](../docs/aggregator-mode.md)),
 and returns a structured result. No filesystem, no network, no
@@ -103,7 +103,7 @@ on macOS (Windows / Linux equivalents apply) and add:
 }
 ```
 
-Restart Claude Desktop. The `ptc_lisp_execute` tool appears in the
+Restart Claude Desktop. The `lisp_eval` tool appears in the
 tool palette.
 
 ### Cline (VS Code) — `cline_mcp_settings.json`
@@ -182,11 +182,11 @@ to its own doc.
 
 | Feature | Default | Doc |
 |---|---|---|
-| `ptc_lisp_execute` (sealed sandbox) | on | [`docs/mcp-server.md`](../docs/mcp-server.md) |
+| `lisp_eval` (sealed sandbox) | on | [`docs/mcp-server.md`](../docs/mcp-server.md) |
 | **Aggregator mode** — call configured upstream MCP servers from inside the sandbox via `(tool/mcp-call ...)` | off; enabled by `--upstreams-config` | [`docs/aggregator-mode.md`](../docs/aggregator-mode.md) |
-| **Agentic mode** — `ptc_task`, a natural-language task tool backed by a planner LLM (requires aggregator mode) | off; `--agentic` | [`docs/agentic-mode.md`](../docs/agentic-mode.md) |
-| **Stateful sessions** — `ptc_session_*` tools that persist `(def ...)` bindings, `*1`/`*2`/`*3`, and history | off; `--sessions` | [`docs/mcp-server.md`](../docs/mcp-server.md#stateful-sessions) |
-| **Diagnostics** — `ptc_debug` for in-process telemetry rollups | off; `--debug-tool` | [`docs/mcp-debug.md`](../docs/mcp-debug.md) |
+| **Agentic mode** — `lisp_task`, a natural-language task tool backed by a planner LLM (requires aggregator mode) | off; `--agentic` | [`docs/agentic-mode.md`](../docs/agentic-mode.md) |
+| **Stateful sessions** — `lisp_session_*` tools that persist `(def ...)` bindings, `*1`/`*2`/`*3`, and history | off; `--sessions` | [`docs/mcp-server.md`](../docs/mcp-server.md#stateful-sessions) |
+| **Diagnostics** — `lisp_debug` for in-process telemetry rollups | off; `--debug-tool` | [`docs/mcp-debug.md`](../docs/mcp-debug.md) |
 | **Response profiles** — `slim` / `structured` / `debug` | `slim` | [`docs/mcp-server-configuration.md#response-profiles`](../docs/mcp-server-configuration.md#response-profiles) |
 | **Tracing** — per-call JSONL traces, viewable via `mix ptc.viewer` | off; `--trace-dir` | [`docs/mcp-server-configuration.md#tracing`](../docs/mcp-server-configuration.md#tracing) |
 | **Streamable HTTP** — private-network MCP endpoint with session ids, bearer auth, health/readiness, and HTTP telemetry | off; `--http` | [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md) |
@@ -213,8 +213,8 @@ ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
 - Configuration reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md)
 - HTTP deployment: [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
 - Aggregator mode: [`docs/aggregator-mode.md`](../docs/aggregator-mode.md)
-- Agentic mode (`ptc_task`): [`docs/agentic-mode.md`](../docs/agentic-mode.md)
-- Diagnostics (`ptc_debug`): [`docs/mcp-debug.md`](../docs/mcp-debug.md)
+- Agentic mode (`lisp_task`): [`docs/agentic-mode.md`](../docs/agentic-mode.md)
+- Diagnostics (`lisp_debug`): [`docs/mcp-debug.md`](../docs/mcp-debug.md)
 - Getting-started walkthrough: [`docs/guides/mcp-getting-started.md`](../docs/guides/mcp-getting-started.md)
 - PTC-Lisp language reference: [`docs/ptc-lisp-specification.md`](../docs/ptc-lisp-specification.md)
 - PtcRunner repo: <https://github.com/andreasronge/ptc_runner>

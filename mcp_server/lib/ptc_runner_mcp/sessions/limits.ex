@@ -192,7 +192,7 @@ defmodule PtcRunnerMcp.Sessions.Limits do
     {preview, _truncated?} = Format.to_clojure(value, limit: 20, printable_limit: 200)
 
     full_marker = %{
-      ptc_session_preview: true,
+      lisp_session_preview: true,
       reason: :max_history_entry_bytes,
       bytes: bytes,
       max_bytes: max_bytes,
@@ -208,7 +208,7 @@ defmodule PtcRunnerMcp.Sessions.Limits do
 
   defp compact_history_preview_marker(bytes, max_bytes) do
     marker = %{
-      ptc_session_preview: true,
+      lisp_session_preview: true,
       reason: :max_history_entry_bytes,
       bytes: bytes,
       max_bytes: max_bytes
@@ -217,7 +217,7 @@ defmodule PtcRunnerMcp.Sessions.Limits do
     if term_bytes(marker) <= max_bytes do
       marker
     else
-      %{ptc_session_preview: true}
+      %{lisp_session_preview: true}
     end
   end
 

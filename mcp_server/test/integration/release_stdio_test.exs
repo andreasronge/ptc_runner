@@ -25,7 +25,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
 
   ## Known limitation (Phase 5 production-code bug, FOUND in Phase 6a)
 
-  The `tools/call name: "ptc_lisp_execute"` happy-path is currently
+  The `tools/call name: "lisp_eval"` happy-path is currently
   blocked in the release artifact: `:crypto` is not bundled into the
   Mix release, and `PtcRunnerMcp.TracePayload.redact_program/2` calls
   `:crypto.hash(:sha256, ...)` unconditionally on every `tools/call`
@@ -37,7 +37,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
 
   Paths that do NOT touch `redact_program(program, level)` work
   fine: `initialize`, `tools/list`, `tools/call name: "<unknown>"`
-  (D1 gate), and `tools/call name: "ptc_lisp_execute"` with no
+  (D1 gate), and `tools/call name: "lisp_eval"` with no
   `program` (args_error).
   """
 
@@ -91,7 +91,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       assert length(tools) == 1
 
       tool = hd(tools)
-      assert tool["name"] == "ptc_lisp_execute"
+      assert tool["name"] == "lisp_eval"
       assert is_map(tool["inputSchema"])
       assert is_map(tool["outputSchema"])
       assert tool["annotations"]["readOnlyHint"] == true
@@ -115,8 +115,8 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       tools = list_reply["result"]["tools"]
       names = Enum.map(tools, & &1["name"])
 
-      assert "ptc_lisp_execute" in names
-      assert "ptc_debug" in names
+      assert "lisp_eval" in names
+      assert "lisp_debug" in names
     end
 
     test "release start forwards --sessions through env.sh" do
@@ -133,10 +133,10 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       list_reply = Enum.find(replies, &(&1["id"] == 2))
       names = Enum.map(list_reply["result"]["tools"], & &1["name"])
 
-      assert "ptc_lisp_execute" in names
-      assert "ptc_session_start" in names
-      assert "ptc_session_eval" in names
-      assert "ptc_session_close" in names
+      assert "lisp_eval" in names
+      assert "lisp_session_start" in names
+      assert "lisp_session_eval" in names
+      assert "lisp_session_close" in names
     end
 
     test "initialize with compatibility-floor 2025-06-18 negotiates to 2025-06-18" do
@@ -203,7 +203,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
-        ReleaseRunner.tools_call_request(300, "ptc_lisp_execute", %{}),
+        ReleaseRunner.tools_call_request(300, "lisp_eval", %{}),
         ReleaseRunner.exit_notif()
       ]
 
@@ -232,7 +232,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
-        ReleaseRunner.tools_call_request(100, "ptc_lisp_execute", %{
+        ReleaseRunner.tools_call_request(100, "lisp_eval", %{
           "program" => "(+ 1 2)"
         }),
         ReleaseRunner.exit_notif()

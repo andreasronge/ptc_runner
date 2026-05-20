@@ -48,7 +48,7 @@ PtcRunnerMcp.Log.set_level("error")
 #   § 6.1     — NDJSON framing
 #   § 6.3     — concurrency / per-call workers
 #   § 7       — handshake (`initialize` / `notifications/initialized`)
-#   § 9, § 10 — request / response contract for `ptc_lisp_execute`
+#   § 9, § 10 — request / response contract for `lisp_eval`
 
 defmodule PtcRunnerMcp.Bench.InBeamClient do
   @moduledoc false
@@ -87,7 +87,7 @@ defmodule PtcRunnerMcp.Bench.InBeamClient do
   end
 
   @doc """
-  Run `tools/call ptc_lisp_execute` and block until the reply arrives.
+  Run `tools/call lisp_eval` and block until the reply arrives.
   Returns the parsed JSON-RPC envelope.
   """
   @spec call_tool(t(), String.t(), map()) :: {:ok, map(), t()} | {:error, map(), t()}
@@ -95,7 +95,7 @@ defmodule PtcRunnerMcp.Bench.InBeamClient do
     arguments = Map.merge(%{"program" => program}, arguments_extra)
 
     request(state, "tools/call", %{
-      "name" => "ptc_lisp_execute",
+      "name" => "lisp_eval",
       "arguments" => arguments
     })
   end

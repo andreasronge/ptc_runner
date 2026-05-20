@@ -341,7 +341,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "slow",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => long_running_program(), "context" => %{}}
       }
     }
@@ -398,7 +398,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "hard-kill",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => long_running_program(), "context" => %{}}
       }
     }
@@ -444,7 +444,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "jsonrpc" => "2.0",
       "id" => "start-owned-session",
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_session_start", "arguments" => %{}}
+      "params" => %{"name" => "lisp_session_start", "arguments" => %{}}
     }
 
     conn =
@@ -474,7 +474,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "disconnect",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => long_running_program(), "context" => %{}}
       }
     }
@@ -506,7 +506,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "start",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_session_start",
+        "name" => "lisp_session_start",
         "arguments" => %{"owner" => %{"transport" => "stdio", "instance_id" => "forged"}}
       }
     }
@@ -526,7 +526,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "list",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_session_list",
+        "name" => "lisp_session_list",
         "arguments" => %{"owner" => %{"transport" => "stdio", "instance_id" => "forged"}}
       }
     }
@@ -636,7 +636,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       "id" => "trace-call",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_lisp_execute",
+        "name" => "lisp_eval",
         "arguments" => %{"program" => "(+ 1 2)", "context" => %{}}
       }
     }

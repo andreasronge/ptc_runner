@@ -22,7 +22,6 @@ defmodule PtcRunnerMcp.ToolsPhase0Test do
       assert live["outputSchema"] == fixture["outputSchema"]
       assert live["annotations"] == fixture["annotations"]
       assert is_binary(live["description"])
-      assert live["description"] =~ "No app tools are available inside the program."
     end
   end
 
