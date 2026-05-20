@@ -1,5 +1,12 @@
 # PTC-Lisp reference
 
+<!-- version: 1 -->
+<!-- date: 2026-05-20 -->
+<!-- prompt-guidelines: priv/prompts/README.md -->
+<!-- audience: mcp-tools-list -->
+<!-- budget: target<=1500 bytes, hard<=2000 bytes -->
+<!-- composed-with: composed after each tool card in upstream-enabled and no-tools descriptions -->
+
 <!-- PTC_PROMPT_START -->
 PTC-Lisp reference
 
