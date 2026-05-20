@@ -11,7 +11,7 @@ defmodule PtcRunner.LLM do
 
       config :ptc_runner, :llm_adapter, MyApp.LLMAdapter
 
-  Or the built-in adapter is used automatically when `{:req_llm, "~> 1.2"}` is
+  Or the built-in adapter is used automatically when `{:req_llm, "~> 1.8"}` is
   added to your dependencies.
 
   ## Usage
@@ -253,7 +253,7 @@ defmodule PtcRunner.LLM do
         No LLM adapter configured.
 
         Either:
-        1. Add {:req_llm, "~> 1.2"} to your deps for the built-in adapter
+        1. Add {:req_llm, "~> 1.8"} to your deps for the built-in adapter
         2. Set config :ptc_runner, :llm_adapter, YourAdapter
         """
       end

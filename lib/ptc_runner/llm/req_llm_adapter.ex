@@ -8,7 +8,7 @@ if Code.ensure_loaded?(ReqLLM) do
     - `openai-compat:base_url|model` → Any OpenAI-compatible API
     - `*` → ReqLLM (OpenRouter, Anthropic, Google, Bedrock, etc.)
 
-    Requires `{:req_llm, "~> 1.2"}` as a dependency.
+    Requires `{:req_llm, "~> 1.8"}` as a dependency.
 
     ## Prompt Caching
 

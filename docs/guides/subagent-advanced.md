@@ -186,7 +186,7 @@ Execute at scale with zero LLM cost:
 
 ```elixir
 results = Enum.map(all_reports, fn r ->
-  compiled.execute(%{report: r})
+  compiled.execute.(%{report: r}, [])
 end)
 ```
 

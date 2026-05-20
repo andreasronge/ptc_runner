@@ -308,5 +308,5 @@ This differs from in-process checkpointing (LangGraph's state snapshots) — Ptc
 
 - [Composition Patterns](subagent-patterns.md) — Chaining, parallel execution, orchestration
 - [Wire Transfer Example](../../examples/wire_transfer/README.md) — Full human-in-the-loop workflow
-- [PTC-Lisp Specification](../ptc-lisp-specification.md) — Sections 5.13–5.15: `task`, `step-done`, `task-reset`
+- [PTC-Lisp Specification](../ptc-lisp-specification.md) — Sections 5.18–5.20: `task`, `step-done`, `task-reset`
 - `PtcRunner.SubAgent.run/2` — API reference
