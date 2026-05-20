@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.Agentic.Ledger do
   @moduledoc """
-  Phase 0 contract for the per-`ptc_task` upstream-call ledger.
+  Phase 0 contract for the per-`lisp_task` upstream-call ledger.
 
-  The SubAgent-backed `ptc_task` adapter owns this ledger. Generated
+  The SubAgent-backed `lisp_task` adapter owns this ledger. Generated
   PTC-Lisp never writes ledger entries directly; it only calls the
   MCP-owned `tool/mcp-call` wrapper that records attempts here.
 
@@ -37,13 +37,14 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
           # completion; only the `response_too_large` world-fault sets
           # it `true`.
           optional(:oversize) => boolean(),
+          optional(:result_overview) => map(),
           optional(:error_reason) => String.t(),
           optional(:error) => String.t()
         }
 
   @type t :: pid()
 
-  @doc "Starts an in-memory ledger for one `ptc_task` call."
+  @doc "Starts an in-memory ledger for one `lisp_task` call."
   @spec start_link(keyword()) :: {:ok, t()}
   def start_link(_opts \\ []) do
     Agent.start_link(fn -> [] end)
@@ -119,6 +120,7 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
           |> Map.put(:oversize, Keyword.get(opts, :oversize, false) == true)
           |> maybe_put(:duration_ms, Keyword.get(opts, :duration_ms))
           |> maybe_put(:result_bytes, Keyword.get(opts, :result_bytes))
+          |> maybe_put(:result_overview, Keyword.get(opts, :result_overview))
           |> maybe_put(:error_reason, Keyword.get(opts, :error_reason))
           |> maybe_put(:error, Keyword.get(opts, :error))
 

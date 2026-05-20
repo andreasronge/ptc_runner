@@ -1,4 +1,4 @@
-# Tier-2 real-LLM agentic eval for `ptc_task`.
+# Tier-2 real-LLM agentic eval for `lisp_task`.
 #
 # This is intentionally not a CI-default benchmark. It spends real provider
 # tokens through OpenRouter and measures end-to-end behavior, not deterministic
@@ -40,7 +40,7 @@ defmodule Bench.AgenticRealEval do
             test_case <- cases,
             catalog_mode <- effective_catalog_modes(test_case, opts.catalog_modes),
             run <- 1..opts.runs do
-          run_case(run, model, catalog_mode, test_case)
+          run_case(run, model, catalog_mode, test_case, opts)
         end
 
       if results == [] do
@@ -75,6 +75,7 @@ defmodule Bench.AgenticRealEval do
           runs: :integer,
           case: :keep,
           catalog_modes: :string,
+          max_turns: :integer,
           json_out: :string,
           md_out: :string,
           fail_on_skip: :boolean,
@@ -97,6 +98,7 @@ defmodule Bench.AgenticRealEval do
         --runs=N             Runs per case/model/catalog-mode (default: 1)
         --case=NAME          Restrict to a case; repeatable
         --catalog-modes=a,b  Catalog modes: inline,lazy,auto (default: inline,lazy)
+        --max-turns=N        Override every selected case's max_turns
         --json-out=PATH      Write raw JSON report (default: ../tmp/agentic_real_eval.json)
         --md-out=PATH        Write markdown findings (default: ../tmp/agentic_real_eval.md)
         --fail-on-skip       Exit non-zero when prerequisites are missing
@@ -122,6 +124,7 @@ defmodule Bench.AgenticRealEval do
       runs: runs,
       case_names: Keyword.get_values(opts, :case),
       catalog_modes: catalog_modes,
+      max_turns_override: Keyword.get(opts, :max_turns),
       json_out: Keyword.get(opts, :json_out, @default_json_out),
       md_out: Keyword.get(opts, :md_out, @default_md_out),
       fail_on_skip: Keyword.get(opts, :fail_on_skip, false)
@@ -332,13 +335,14 @@ defmodule Bench.AgenticRealEval do
     end
   end
 
-  defp run_case(run, model, catalog_mode, test_case) do
+  defp run_case(run, model, catalog_mode, test_case, opts) do
     CatalogConfig.set(%{catalog_mode: catalog_mode})
+    max_turns = opts.max_turns_override || test_case.max_turns
 
     AgenticConfig.set(%{
       enabled: true,
       model: model,
-      max_turns: test_case.max_turns,
+      max_turns: max_turns,
       retry_turns: test_case.retry_turns,
       include_program: true,
       capability_summary: nil
@@ -372,7 +376,7 @@ defmodule Bench.AgenticRealEval do
       "category" => test_case.category,
       "model" => model,
       "catalog_mode" => Atom.to_string(catalog_mode),
-      "max_turns" => test_case.max_turns,
+      "max_turns" => max_turns,
       "retry_turns" => test_case.retry_turns,
       "passed" => passed?,
       "duration_ms" => duration_ms,
@@ -495,7 +499,7 @@ defmodule Bench.AgenticRealEval do
         ),
       "notes" => [
         "Real provider eval; results can drift by model/provider behavior.",
-        "catalog_op_mentions is inferred from generated program text because catalog op counts are not surfaced in ptc_task metrics yet."
+        "catalog_op_mentions is inferred from generated program text because catalog op counts are not surfaced in lisp_task metrics yet."
       ],
       "summary" => summarize_results(results),
       "results" => results
@@ -597,7 +601,7 @@ defmodule Bench.AgenticRealEval do
     and is not intended for default CI.
 
     catalog_op_mentions is inferred from generated program text because
-    `ptc_task` does not currently expose catalog op counts as structured
+    `lisp_task` does not currently expose catalog op counts as structured
     metrics.
 
     ## Summary

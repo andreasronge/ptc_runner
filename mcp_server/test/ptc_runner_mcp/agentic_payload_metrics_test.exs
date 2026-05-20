@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   @moduledoc """
-  Phase B′ + Phase B (agentic side): `ptc_metrics` on the `ptc_task`
+  Phase B′ + Phase B (agentic side): `ptc_metrics` on the `lisp_task`
   envelope, including the `server_side_llm` planner-cost line item.
 
   See `Plans/ptc-runner-mcp-payload-reduction.md` §4.3 / §4.1 / §7.
@@ -126,7 +126,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
 
     {:ok, _pid} = Registry.start_link(name: @registry_name)
     # At least one configured upstream so `configured_aggregator_mode?/0`
-    # is true and `ptc_task` is advertised. Individual tests override
+    # is true and `lisp_task` is advertised. Individual tests override
     # this with their own `put_fake/2` when they need a real tool.
     :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
     :ok = Catalog.freeze("alpha:\n  (unavailable at startup)")
@@ -143,7 +143,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
 
   defp put_fake(name, tools), do: Registry.put_fake(name, tools_config(tools), @registry_name)
 
-  defp call_task(task), do: Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => task}})
+  defp call_task(task), do: Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => task}})
 
   defp metrics(env), do: env["structuredContent"]["ptc_metrics"]
 
@@ -151,7 +151,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   # Stub-planner path — provider_reported: false
   # ============================================================
 
-  test "ptc_task envelope carries ptc_metrics with the upstream byte tally" do
+  test "lisp_task envelope carries ptc_metrics with the upstream byte tally" do
     upstream_value = Enum.to_list(1..40)
     upstream_size = byte_size(Jason.encode!(upstream_value))
     :ok = put_fake("alpha", %{"fetch" => fn _, _ -> {:ok, upstream_value} end})
@@ -162,6 +162,15 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     assert env["isError"] == false
     sc = env["structuredContent"]
     m = metrics(env)
+
+    [result_summary] = sc["upstream_results"]
+    assert result_summary["server"] == "alpha"
+    assert result_summary["tool"] == "fetch"
+    assert result_summary["status"] == "ok"
+    assert result_summary["value_kind"] == "json"
+    assert result_summary["shape"] == "list count=40"
+    assert result_summary["preview"] =~ "[1,2,3"
+    refute Map.has_key?(hd(sc["upstream_calls"]), "result_overview")
 
     assert m["schema_version"] == 1
     assert m["upstream_call_count"] == 1
@@ -197,7 +206,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     assert m["baseline"]["optimistic"]["available"] == false
   end
 
-  test "a pure-compute ptc_task still attaches ptc_metrics with a null ratio" do
+  test "a pure-compute lisp_task still attaches ptc_metrics with a null ratio" do
     Application.put_env(:ptc_runner_mcp, :agentic_planner, PureComputePlanner)
 
     env = call_task("just compute")
@@ -210,7 +219,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     assert is_map(m["server_side_llm"])
   end
 
-  test "an errored ptc_task envelope carries ptc_metrics with final_result_bytes 0 and null ratio" do
+  test "an errored lisp_task envelope carries ptc_metrics with final_result_bytes 0 and null ratio" do
     :ok =
       put_fake("alpha", %{"ok" => fn _, _ -> {:ok, %{"big" => String.duplicate("z", 2_000)}} end})
 
@@ -233,8 +242,8 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   # upstream envelope's bytes must land in `upstream_error_bytes` (the
   # program received the full payload) — not be dropped to `null`,
   # which would underreport errored tool payloads relative to the
-  # `ptc_lisp_execute` aggregator path.
-  test "ptc_task counts isError upstream envelope bytes in upstream_error_bytes" do
+  # `lisp_eval` aggregator path.
+  test "lisp_task counts isError upstream envelope bytes in upstream_error_bytes" do
     is_error_envelope = %{
       "isError" => true,
       "content" => [%{"type" => "text", "text" => String.duplicate("E", 1_500)}]
@@ -254,6 +263,12 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
     assert entry["reason"] == "tool_error"
     assert entry["result_bytes"] == encoded_size
     assert entry["oversize"] == false
+
+    [result_summary] = sc["upstream_results"]
+    assert result_summary["server"] == "alpha"
+    assert result_summary["tool"] == "err"
+    assert result_summary["status"] == "error"
+    assert result_summary["reason"] == "tool_error"
 
     m = metrics(env)
     assert m["upstream_error_count"] == 1

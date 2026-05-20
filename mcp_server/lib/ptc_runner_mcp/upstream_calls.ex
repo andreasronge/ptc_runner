@@ -286,6 +286,7 @@ defmodule PtcRunnerMcp.UpstreamCalls do
       "result_bytes" => normalize_result_bytes(Keyword.get(opts, :result_bytes)),
       "oversize" => false
     }
+    |> maybe_put_result_overview(Keyword.get(opts, :result_overview))
   end
 
   @doc """
@@ -336,6 +337,19 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   defp normalize_result_bytes(_), do: nil
 
   @doc """
+  Builds a compact, LLM-facing overview of a value returned by an upstream
+  tool after default MCP unwrapping.
+  """
+  @spec result_overview(term(), atom()) :: map()
+  def result_overview(value, value_kind) when is_atom(value_kind) do
+    %{
+      "value_kind" => Atom.to_string(value_kind),
+      "shape" => shape(value),
+      "preview" => preview(value)
+    }
+  end
+
+  @doc """
   Drains all `{:upstream_call_recorded, ref, entry}` messages from
   the current process's mailbox, returning them in arrival order.
 
@@ -368,6 +382,131 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   def decorate(payload, []) when is_map(payload), do: payload
 
   def decorate(payload, entries) when is_map(payload) and is_list(entries) do
-    Map.put(payload, "upstream_calls", entries)
+    payload
+    |> Map.put("upstream_calls", Enum.map(entries, &Map.delete(&1, "result_overview")))
+    |> maybe_put_upstream_results(entries)
   end
+
+  defp maybe_put_result_overview(entry, nil), do: entry
+
+  defp maybe_put_result_overview(entry, overview) when is_map(overview) do
+    Map.put(entry, "result_overview", overview)
+  end
+
+  defp maybe_put_result_overview(entry, _), do: entry
+
+  defp maybe_put_upstream_results(payload, entries) do
+    summaries =
+      entries
+      |> Enum.map(&compact_result_entry/1)
+      |> Enum.reject(&is_nil/1)
+
+    if summaries == [] do
+      payload
+    else
+      Map.put(payload, "upstream_results", summaries)
+    end
+  end
+
+  defp compact_result_entry(%{"status" => "ok", "result_overview" => overview} = entry)
+       when is_map(overview) do
+    %{
+      "server" => Map.get(entry, "server"),
+      "tool" => Map.get(entry, "tool"),
+      "status" => "ok"
+    }
+    |> Map.merge(overview)
+  end
+
+  defp compact_result_entry(%{"status" => "error"} = entry) do
+    %{
+      "server" => Map.get(entry, "server"),
+      "tool" => Map.get(entry, "tool"),
+      "status" => "error"
+    }
+    |> maybe_put("reason", Map.get(entry, "reason"))
+    |> maybe_put("error", Map.get(entry, "error"))
+  end
+
+  defp compact_result_entry(_), do: nil
+
+  defp shape(value) when is_map(value) do
+    keys = value |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+    "map keys=#{inspect(Enum.take(keys, 8))} count=#{length(keys)}"
+  end
+
+  defp shape(value) when is_list(value), do: "list count=#{length(value)}"
+  defp shape(value) when is_binary(value), do: "string bytes=#{byte_size(value)}"
+  defp shape(value) when is_integer(value), do: "integer"
+  defp shape(value) when is_float(value), do: "number"
+  defp shape(value) when is_boolean(value), do: "boolean"
+  defp shape(nil), do: "nil"
+  defp shape(_), do: "unknown"
+
+  defp preview(value) when is_binary(value), do: truncate(Redactor.scrub(value), 240)
+
+  defp preview(value) do
+    value
+    |> compact_value()
+    |> encode_or_inspect()
+    |> Redactor.scrub()
+    |> truncate(240)
+  end
+
+  defp compact_value(value) when is_map(value) do
+    value
+    |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+    |> Enum.take(8)
+    |> Map.new(fn {key, val} -> {to_string(key), compact_leaf(val)} end)
+  end
+
+  defp compact_value(value) when is_list(value) do
+    value
+    |> Enum.take(5)
+    |> Enum.map(&compact_leaf/1)
+  end
+
+  defp compact_value(value), do: compact_leaf(value)
+
+  defp compact_leaf(value) when is_binary(value), do: truncate(value, 120)
+  defp compact_leaf(value) when is_map(value), do: %{"type" => "map", "keys" => map_keys(value)}
+  defp compact_leaf(value) when is_list(value), do: %{"type" => "list", "count" => length(value)}
+  defp compact_leaf(value), do: value
+
+  defp map_keys(value) do
+    value
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+    |> Enum.sort()
+    |> Enum.take(8)
+  end
+
+  defp encode_or_inspect(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      {:error, _} -> inspect(value, limit: 20, printable_limit: 200)
+    end
+  end
+
+  defp truncate(text, max_bytes) when is_binary(text) and byte_size(text) <= max_bytes, do: text
+
+  defp truncate(text, max_bytes) when is_binary(text) do
+    truncate_utf8(text, max_bytes) <> "..."
+  end
+
+  defp truncate_utf8(_text, max_bytes) when max_bytes <= 0, do: ""
+
+  defp truncate_utf8(text, max_bytes) do
+    chunk = binary_part(text, 0, max_bytes)
+
+    if String.valid?(chunk) do
+      chunk
+    else
+      truncate_utf8(text, max_bytes - 1)
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end
