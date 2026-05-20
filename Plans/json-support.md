@@ -1012,7 +1012,7 @@ consistently advertised.
 ### 10.1 Aggregator authoring card
 
 **File:** `mcp_server/priv/mcp_aggregator_authoring_card.md`
-**Audience:** LLM clients calling `ptc_lisp_execute` against the
+**Audience:** LLM clients calling `lisp_eval` against the
 aggregator. This is the primary surface — LLMs read it before
 generating programs that traverse upstream MCP results.
 
@@ -1041,7 +1041,7 @@ the prompt.
 ### 10.2 Default (non-aggregator) authoring card
 
 **File:** `mcp_server/priv/mcp_authoring_card.md`
-**Audience:** LLM clients calling `ptc_lisp_execute` in default mode
+**Audience:** LLM clients calling `lisp_eval` in default mode
 (no upstream MCP servers). `json/*` is unconditionally registered;
 `mcp/*` is registered too but won't usually have anything to
 unwrap. Mention only `json/*` here — keep the card short.
@@ -1158,7 +1158,7 @@ as a follow-up open question.
 **No change recommended.** This single-line description
 (`mcp_server/lib/ptc_runner_mcp/tools.ex` line ~76) is the
 high-level "what does this tool do" pitch attached to
-`ptc_lisp_execute` in `tools/list`. Adding JSON-helper detail here
+`lisp_eval` in `tools/list`. Adding JSON-helper detail here
 would crowd out the more important `tool/mcp-call` / world-fault /
 `upstream_calls` framing. The authoring card (§10.1) is the right
 surface for builtin enumeration — it's already injected as a

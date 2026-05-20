@@ -195,12 +195,12 @@ controls how the LLM delivers programs to PtcRunner. Two values:
 | Value | Default? | Wire format |
 |-------|----------|-------------|
 | `:content` | yes | Markdown-fenced PTC-Lisp in the assistant message body. Existing behavior. |
-| `:tool_call` | opt-in | Native tool call to a single internal `ptc_lisp_execute` tool. The `program` argument carries the PTC-Lisp source. |
+| `:tool_call` | opt-in | Native tool call to a single internal `lisp_eval` tool. The `program` argument carries the PTC-Lisp source. |
 
 Both transports run programs in the same sandbox and call your app tools the
 same way — via `(tool/name ...)` forms inside the program. App tools are
 **never** exposed as native provider tools, including in `:tool_call` mode.
-Only `ptc_lisp_execute` is. This keeps the sandbox boundary, `max_tool_calls`
+Only `lisp_eval` is. This keeps the sandbox boundary, `max_tool_calls`
 budget, tool cache, and `pmap`/`pcalls` semantics identical across transports.
 
 ### When to use which
@@ -215,7 +215,7 @@ budget, tool cache, and `pmap`/`pcalls` semantics identical across transports.
   intermediate result before writing the next program).
 
 `:tool_call` turns one PTC-Lisp program into a ReAct-style loop: the model can
-call `ptc_lisp_execute` zero or more times, then return a final answer
+call `lisp_eval` zero or more times, then return a final answer
 directly. That extra round-tripping is a **tradeoff, not an upgrade** — pay
 for it deliberately. On some capable models (e.g., recent Anthropic) it can
 also *reduce* pass rate by encouraging the model to fragment one-program work
@@ -227,7 +227,7 @@ benchmark.
 
 ### Behavior in `:tool_call` mode
 
-- The LLM may call `ptc_lisp_execute` zero or more times, then return a final
+- The LLM may call `lisp_eval` zero or more times, then return a final
   answer directly as content. Direct final answers are validated against
   `signature:` exactly like `(return v)` in `:content` mode.
 - Direct final answers are allowed **before or after** any execution-tool
@@ -235,11 +235,11 @@ benchmark.
   one turn.
 - `(return v)` and `(fail v)` from inside a program still terminate the loop.
 - `max_tool_calls` continues to bound *app tools* invoked from inside the
-  program. Calls to `ptc_lisp_execute` itself do **not** count against that
+  program. Calls to `lisp_eval` itself do **not** count against that
   budget — the loop is bounded by `max_turns` and by the rule "exactly one
-  `ptc_lisp_execute` call per assistant turn."
+  `lisp_eval` call per assistant turn."
 - Markdown-fenced PTC-Lisp returned as content is *not* parsed in `:tool_call`
-  mode — the model is told to call `ptc_lisp_execute` instead.
+  mode — the model is told to call `lisp_eval` instead.
 
 ### Provider support
 
@@ -275,7 +275,7 @@ agent = PtcRunner.SubAgent.new(
 
 - Don't pass `ptc_transport` together with `output: :text` — raises
   `ArgumentError`. The transport only applies to PTC-Lisp programs.
-- Don't define an app tool named `ptc_lisp_execute`. The name is reserved
+- Don't define an app tool named `lisp_eval`. The name is reserved
   globally; the validator rejects it regardless of `ptc_transport`.
 
 For the full decision guide ("when to switch, when to stay") and a runnable

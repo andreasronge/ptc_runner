@@ -278,8 +278,8 @@ ephemeral per-request Plug process blocks. Concretely:
 
 Await-timeout invariant. HTTP uses a central
 `worker_await_timeout_ms/1` helper keyed by the specific tool's own
-configured budget (`ptc_lisp_execute`, `ptc_task`, and
-`ptc_session_eval` may differ). The Plug await timeout MUST strictly
+configured budget (`lisp_eval`, `lisp_task`, and
+`lisp_session_eval` may differ). The Plug await timeout MUST strictly
 exceed the worker's budget, so normal tool timeout handling wins the
 race and returns the existing timeout envelope. The Plug await is only a
 backstop for a wedged worker, crashed worker, missed terminal message,
@@ -974,7 +974,7 @@ at `GET /metrics` (§8.7). Target metric set:
 | `ptc_http_auth_failures_total` | counter | reason |
 | `ptc_http_cancelled_total` | counter | reason |
 | `ptc_concurrency_gate_saturation` | gauge | — (acquired / capacity from `ConcurrencyGate`) |
-| `ptc_lisp_execute_duration_ms` | histogram | outcome — from the existing `:ptc_runner` lifecycle events |
+| `lisp_eval_duration_ms` | histogram | outcome — from the existing `:ptc_runner` lifecycle events |
 
 All series carry an `instance` label. `owner_hash` / `session_hash`
 deliberately do **not** become metric labels — unbounded label
@@ -992,19 +992,19 @@ the existing `request_id`, which is now the HTTP correlation id from
 `--trace-max-files` FIFO cap behave as today; §6.1 notes the cap churns
 faster under many clients. `ptc_viewer` reads these files as-is.
 
-### 12.5 `ptc_debug` in HTTP Mode
+### 12.5 `lisp_debug` in HTTP Mode
 
-`ptc_debug` exposes the recent-calls ring buffer (`DebugBuffer`). That
+`lisp_debug` exposes the recent-calls ring buffer (`DebugBuffer`). That
 buffer is **per node**, not per session. In a multi-client HTTP
-deployment, an unscoped `ptc_debug` would let one client read another
+deployment, an unscoped `lisp_debug` would let one client read another
 client's programs, contexts, and results — a cross-client data leak.
 Therefore in HTTP mode:
 
-- `ptc_debug` MUST be either owner-scoped (a caller sees only ring
+- `lisp_debug` MUST be either owner-scoped (a caller sees only ring
   entries whose `owner_hash` matches its own authenticated owner) or
   disabled by default and enabled only by an explicit operator flag.
 - v1 chooses **disabled by default in HTTP mode**; owner-scoped
-  `ptc_debug` is a follow-up that depends on multi-token auth being
+  `lisp_debug` is a follow-up that depends on multi-token auth being
   meaningful (with one shared token, owner-scoping is a no-op anyway).
 - This is independent of `--trace-dir`, which writes operator-only
   files and is not reachable by MCP clients.
@@ -1135,7 +1135,7 @@ behavior-preserving refactor is reviewed in isolation.
   (instance label, request id, sanitized fields).
 - Extend per-call trace records with `mcp_session_hash` / `owner_hash`
   (§12.4).
-- Disable `ptc_debug` by default in HTTP mode (§12.5).
+- Disable `lisp_debug` by default in HTTP mode (§12.5).
 - Add redaction checks for auth token, raw session id, and upstream
   headers across logs, telemetry, metrics, and traces.
 - Add soak tests for session churn and concurrent clients.
@@ -1168,7 +1168,7 @@ for the previous phase is green.
 | Phase 1 | HTTP starts only with `--http`; stdio default unchanged; config/auth/origin/health/ready/router skeleton tests pass. | Recommended if supervision or config parsing is large; required if release boot behavior changes beyond child composition. |
 | Phase 2 | Two HTTP sessions can initialize and run request/notification/response flows; protocol version is per session; cancelled/crash/timeout mappings are implemented. | **Required, high effort.** Review session ownership, POST await semantics, version isolation, and response mappings. |
 | Phase 3 | Limit, cleanup, DELETE, disconnect, TTL/idle, shutdown drain, and permit-leak tests pass under concurrency. | **Required, high effort plus adversarial challenge if time allows.** This is the highest-risk service-hardening phase. |
-| Phase 4 | Logs/telemetry/traces/redaction/`ptc_debug` tests pass; soak tests are stable enough for CI or documented manual runs. | Required if redaction or trace/debug payload paths changed; otherwise recommended. |
+| Phase 4 | Logs/telemetry/traces/redaction/`lisp_debug` tests pass; soak tests are stable enough for CI or documented manual runs. | Required if redaction or trace/debug payload paths changed; otherwise recommended. |
 | Phase 4b | Prometheus endpoint tests pass; dependency footprint is accepted; no high-cardinality labels. | Recommended, focused on dependency/runtime impact and cardinality/security. |
 | Phase 5 | Docs match shipped flags and behavior; quickstart works against the release. | Optional docs review unless deployment guidance changed security posture. |
 
@@ -1257,7 +1257,7 @@ Router/integration tests:
 
 Concurrency tests:
 
-- Two initialized HTTP clients can call `ptc_lisp_execute` concurrently.
+- Two initialized HTTP clients can call `lisp_eval` concurrently.
 - Per-session in-flight cap rejects excess requests from one session
   without blocking another session.
 - Global `ConcurrencyGate` still rejects above global cap.
@@ -1295,7 +1295,7 @@ Observability tests:
 - HTTP log lines and trace records are run through `Credentials.Redactor`
   and contain no `Authorization`, raw `MCP-Session-Id`, or token bytes.
 - Trace records in HTTP mode carry `mcp_session_hash` + `owner_hash`.
-- `ptc_debug` is disabled by default in HTTP mode (§12.5).
+- `lisp_debug` is disabled by default in HTTP mode (§12.5).
 - A path collision among `/mcp`, `/health`, `/ready`, `/metrics` is
   rejected at startup.
 
@@ -1364,7 +1364,7 @@ The private-network deployment runbook. Sections:
   for the §6 flags and a **HTTP observability** section for the §6.1
   flags; cross-link the runbook. The existing **Tracing** section gains
   the HTTP per-session/per-owner trace fields.
-- `docs/mcp-debug.md` — document that `ptc_debug` is disabled by default
+- `docs/mcp-debug.md` — document that `lisp_debug` is disabled by default
   in HTTP mode and why (§12.5 cross-client leak).
 - `mcp_server/README.md` — a short HTTP quickstart (a few lines) plus a
   link to the runbook; keep README onboarding-only per the repo doc
@@ -1400,7 +1400,7 @@ The feature is complete when:
 - `GET /health` (liveness) and `GET /ready` (readiness) answer without
   auth; `/ready` flips to 503 on drain before `/health` changes.
 - At least two independent HTTP MCP clients can initialize and call
-  `ptc_lisp_execute` concurrently.
+  `lisp_eval` concurrently.
 - Session ids are issued, required after initialize, and deleted by
   DELETE.
 - Session-scoped requests are owner-checked; a mismatched owner gets
@@ -1415,7 +1415,7 @@ The feature is complete when:
   logs, telemetry, and traces; every record carries the instance label.
 - With `--http-metrics`, `/metrics` serves the §12.3 metric set with no
   high-cardinality owner/session labels.
-- `ptc_debug` is disabled by default in HTTP mode.
+- `lisp_debug` is disabled by default in HTTP mode.
 - Logs, telemetry, metrics, and traces do not include bearer tokens,
   raw session ids, programs, context payloads, or upstream secrets.
 - GET `/mcp` explicitly returns 405 with tests.
@@ -1471,7 +1471,7 @@ superseded rather than reusing it.
 | REQ-OBS-001 | HTTP logs include instance/request/session/owner-safe metadata and no sensitive raw values. | §12.1 | 4 | Log/redaction tests. |
 | REQ-OBS-002 | HTTP telemetry events emit documented measurements and sanitized metadata. | §12.2 | 4 | Telemetry tests. |
 | REQ-OBS-003 | Trace records include `mcp_session_hash` and `owner_hash`, never raw session ids or tokens. | §12.4 | 4 | Trace/redaction tests. |
-| REQ-OBS-004 | `ptc_debug` is disabled by default in HTTP mode. | §12.5 | 4 | Tool listing/call tests. |
+| REQ-OBS-004 | `lisp_debug` is disabled by default in HTTP mode. | §12.5 | 4 | Tool listing/call tests. |
 | REQ-METRICS-001 | Optional `/metrics` exposes the target Prometheus metrics with bounded labels. | §12.3 | 4b | Metrics endpoint/cardinality tests. |
 | REQ-DOC-001 | Deployment runbook documents private-network topology, TLS posture, health/readiness, monitoring, tracing, operations, and limits. | §16.1 | 5 | Docs review. |
 | REQ-DOC-002 | Existing docs and README distinguish stdio, server HTTP, upstream HTTP, HTTP protocol sessions, and PTC-Lisp sessions. | §16.2 | 5 | Docs review. |

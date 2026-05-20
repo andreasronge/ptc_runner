@@ -15,7 +15,7 @@ using **MUST** / **SHOULD** / **MAY** carry RFC 2119 normative weight.
 ## 1. Scope and Goals
 
 The aggregator extends the PtcRunner MCP server (v1) so a single
-`ptc_lisp_execute` call can invoke configured upstream MCP servers from
+`lisp_eval` call can invoke configured upstream MCP servers from
 inside the PTC-Lisp sandbox, compose their results deterministically,
 and return only the final value to the calling LLM.
 
@@ -366,7 +366,7 @@ mid-test (e.g., simulating a newly-configured upstream).
 
 ### 6.1 Tool advertisement
 
-The MCP server advertises **exactly one** tool (`ptc_lisp_execute`) in
+The MCP server advertises **exactly one** tool (`lisp_eval`) in
 both `:mcp_no_tools` and aggregator mode. Native re-exposure of
 upstream tools is out of scope (§3).
 
@@ -676,7 +676,7 @@ healthy upstream raise.
 
 ### 8.1 Tool advertisement description
 
-In aggregator mode, `tools/list` advertises `ptc_lisp_execute` with a
+In aggregator mode, `tools/list` advertises `lisp_eval` with a
 description equal to:
 
 ```elixir
@@ -787,7 +787,7 @@ count; the detail string is never parsed for a number). Only
 payload reduction (`ptc_metrics.upstream_result_bytes`); failed-call
 bytes and oversize bytes are reported separately. See
 `Plans/ptc-runner-mcp-payload-reduction.md` for the `ptc_metrics`
-envelope block and the `ptc_debug stats.payload_reduction` aggregate.
+envelope block and the `lisp_debug stats.payload_reduction` aggregate.
 
 Ordering: completion order, per §6.4.
 
@@ -1013,7 +1013,7 @@ Per §11. Lands in v1.
 
 DoD:
 
-- Existing MCP `tools/list` and `ptc_lisp_execute` calls remain
+- Existing MCP `tools/list` and `lisp_eval` calls remain
   byte-for-byte unchanged.
 - `Sandbox.execute(..., tools: [])` behaves identically to current MCP
   execution.
@@ -1262,7 +1262,7 @@ Scope:
     calling LLM orchestrates by issuing N separate `tools/call`s.
     Approximate this with a fixture or scripted client; do not
     require a real LLM in the loop unless you want to.
-  - **Aggregator**: single `ptc_lisp_execute` call; PTC-Lisp program
+  - **Aggregator**: single `lisp_eval` call; PTC-Lisp program
     composes the upstream calls.
 - Measure §14 fields:
   1. Token comparison (input + output for the calling LLM/client).
@@ -1292,7 +1292,7 @@ Conditional on Phase 2 decision-point results.
 
 Scope (subject to revision):
 
-- Inline upstream catalog in the `ptc_lisp_execute` description.
+- Inline upstream catalog in the `lisp_eval` description.
   Catalog format: one entry per upstream tool, one line each, in the
   shape `tool_name(arg: type, arg: type?) - description`. Args are
   rendered from the upstream's JSON Schema with optional fields
@@ -1325,7 +1325,7 @@ Out of scope until evidence justifies them:
 ### 13.1 Phase 0
 
 - Existing MCP `tools/list` output unchanged.
-- Existing `ptc_lisp_execute` calls unchanged.
+- Existing `lisp_eval` calls unchanged.
 - `Sandbox.execute(..., tools: [])` behaves identically to current MCP
   execution.
 - Telemetry metadata contains `caller: :mcp, profile: :mcp_no_tools`.
@@ -1402,7 +1402,7 @@ Before continuing to Phase 3 or revisiting deferred features (§3),
 collect:
 
 1. **Token comparison**: native multi-call MCP workflow vs single
-   `ptc_lisp_execute` aggregator call on a representative cross-server
+   `lisp_eval` aggregator call on a representative cross-server
    workload.
 2. **Program success rate**: can the calling LLM reliably write
    correct `(tool/mcp-call ...)` programs from the catalog?
@@ -1446,7 +1446,7 @@ Poor fit:
 Honest weaknesses:
 
 - Workflows requiring model judgment between tool calls force
-  multi-turn use of `ptc_lisp_execute`.
+  multi-turn use of `lisp_eval`.
 - Reliability for high-volume production workflows: a hand-written
   orchestrator beats LLM-generated PTC-Lisp at the 1000th run.
 - Tool catalog token cost when configured with many upstreams; the
@@ -1572,7 +1572,7 @@ Honest weaknesses:
   `Plans/phase2-decision-point-results.md`). One representative
   cross-server-filter workflow run two ways — naive multi-call (3
   separate `tools/call` requests) vs aggregator (one
-  `ptc_lisp_execute`). Headline numbers: 11.62× token ratio (4298 vs
+  `lisp_eval`). Headline numbers: 11.62× token ratio (4298 vs
   370, ~3928 token saving on a 3-file 1KB-each fixture); 100/100
   runtime success; 2.82× pmap speedup over sequential `(map ...)` at
   50ms per upstream call; clean `upstream_calls` envelope on
@@ -1620,7 +1620,7 @@ Honest weaknesses:
   behavior.
 - 2026-05-09 (phase3-shipped): Phase 3 merged as `d93c88f` after
   three codex review rounds. Inline upstream catalog rendered into
-  `ptc_lisp_execute`'s description per §12.5 format, frozen at boot
+  `lisp_eval`'s description per §12.5 format, frozen at boot
   via `:persistent_term` (one-shot write after eager-start completes;
   guarantees deterministic catalog text for the lifetime of the MCP
   process per §12.5's "rebuilt only on PtcRunner restart" rule).
@@ -1810,7 +1810,7 @@ modules.
 
 **DoD (verbatim §12.1):**
 
-- Existing MCP `tools/list` and `ptc_lisp_execute` calls remain
+- Existing MCP `tools/list` and `lisp_eval` calls remain
   byte-for-byte unchanged.
 - `Sandbox.execute(..., tools: [])` behaves identically to current
   MCP execution.

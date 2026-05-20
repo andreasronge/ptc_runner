@@ -158,7 +158,7 @@ program to PtcRunner. There are two values:
 | Transport | Default? | How the LLM delivers programs |
 |-----------|----------|-------------------------------|
 | `:content` | yes | Markdown-fenced PTC-Lisp in the assistant message body. Parsed by PtcRunner. |
-| `:tool_call` | opt-in | A native tool call to a single internal `ptc_lisp_execute` tool whose `program` argument is the PTC-Lisp source. |
+| `:tool_call` | opt-in | A native tool call to a single internal `lisp_eval` tool whose `program` argument is the PTC-Lisp source. |
 
 The two transports are functionally equivalent in what programs can express —
 same sandbox, same `(tool/...)` namespace for app tools, same memory / journal /
@@ -177,7 +177,7 @@ typically in **one** LLM turn. Lower latency, lower cost, simplest transcript.
   program).
 
 `:tool_call` turns one PTC-Lisp program into a ReAct-style loop: the model can
-call `ptc_lisp_execute` zero or more times, then return a final answer
+call `lisp_eval` zero or more times, then return a final answer
 directly. That extra round-tripping is a **tradeoff, not an upgrade** — pay for
 it deliberately.
 
@@ -187,7 +187,7 @@ tool calling. Models without it surface as `:llm_error` from the adapter
 to `:content`.
 
 **App tools stay inside PTC-Lisp.** Even in `:tool_call` mode, your app tools
-are *not* exposed as native provider tools. Only `ptc_lisp_execute` is. The LLM
+are *not* exposed as native provider tools. Only `lisp_eval` is. The LLM
 calls your tools the same way as in `:content` mode — as `(tool/name ...)`
 forms inside the PTC-Lisp program. This preserves the sandbox, the
 `max_tool_calls` budget, the tool cache, and parallel execution

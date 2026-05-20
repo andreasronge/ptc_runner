@@ -1,16 +1,16 @@
-# Agentic `ptc_task` Phase 0 Contract Notes
+# Agentic `lisp_task` Phase 0 Contract Notes
 
 Date: 2026-05-11
 
 This note records the shared contract boundary for implementing
-`Plans/agentic-ptc-task-subagent-spec.md`.
+`Plans/agentic-lisp-task-subagent-spec.md`.
 
 ## SubAgent Completion Mode
 
 `PtcRunner.SubAgent` now accepts:
 
 - `completion_mode: :implicit` — default, preserves existing behavior.
-- `completion_mode: :explicit` — reserved for `ptc_task`; Worker A owns full
+- `completion_mode: :explicit` — reserved for `lisp_task`; Worker A owns full
   enforcement that only `(return ...)` and `(fail ...)` are terminal.
 
 The no-tool single-shot fast path is limited to implicit mode, so explicit-mode

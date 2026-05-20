@@ -9,7 +9,7 @@ Aggregator mode does not advertise upstream tools individually. It
 adds `(tool/mcp-call ...)` to the PTC-Lisp sandbox — a programmatic
 primitive that calls configured upstream MCP servers and composes their
 results deterministically inside the sandbox. In an aggregator-only
-configuration, the MCP server advertises `ptc_lisp_execute`; optional
+configuration, the MCP server advertises `lisp_eval`; optional
 features such as sessions, diagnostics, or agentic tools may add their
 own top-level tools. One LLM-authored, sandboxed PTC-Lisp program
 replaces N round-trip `tools/call` invocations against the calling
@@ -28,7 +28,7 @@ Best fit:
 Poor fit:
 
 - Workflows requiring model judgment between tool calls (use
-  multi-turn `ptc_lisp_execute` instead, or hand-written
+  multi-turn `lisp_eval` instead, or hand-written
   application code).
 - Mature repeated workflows that should be hand-written
   application code.
@@ -272,7 +272,7 @@ retry on the next turn.
 
 ## Catalog
 
-In aggregator mode the `ptc_lisp_execute` tool description ends
+In aggregator mode the `lisp_eval` tool description ends
 with an inline catalog block — one entry per configured
 upstream's tools, in the shape:
 
@@ -536,8 +536,8 @@ detail string).
 The whole point of programmatic tool calling is that the program
 fetches from upstream MCP tools and **collapses** the results down to
 a small answer before handing it back. Aggregator-mode responses
-(`ptc_lisp_execute` with at least one upstream call, every
-`ptc_task`, and every `ptc_session_eval` whose turn made at least one
+(`lisp_eval` with at least one upstream call, every
+`lisp_task`, and every `lisp_session_eval` whose turn made at least one
 upstream call) carry a deterministic accounting of that, in a
 `ptc_metrics` block on the `structuredContent` envelope plus
 `result_bytes` / `oversize` on each `upstream_calls[]` entry. For
@@ -545,7 +545,7 @@ sessions the block is **per-eval** — it accounts for the calls drained
 this turn, not the session's cumulative `upstream_calls` history:
 
 ```jsonc
-// structuredContent (abridged) — ptc_lisp_execute, aggregator mode
+// structuredContent (abridged) — lisp_eval, aggregator mode
 {
   "result": "…the program's answer (812 bytes)…",
   "upstream_calls": [ { "server": "github", "tool": "search_issues",
@@ -588,20 +588,20 @@ On an error envelope, `final_result_bytes` is `0` and the ratio is
 optimistic baseline is always `{ "available": false }` — the server
 never invents it.
 
-**`ptc_task` planner cost.** A `ptc_task` response's `ptc_metrics`
+**`lisp_task` planner cost.** A `lisp_task` response's `ptc_metrics`
 also carries a `server_side_llm` line item — the planner LLM's
 prompt/completion byte sizes (always available) and provider token
 counts (`provider_reported: true` with real numbers when the LLM
 adapter surfaces `usage`, else `null` + byte estimates). The
-`payload_reduction_ratio` for `ptc_task` is answer/result-payload
+`payload_reduction_ratio` for `lisp_task` is answer/result-payload
 reduction *only*; an `efficiency_note` states verbatim that it
 excludes the planner cost. See [Agentic Mode](agentic-mode.md) for
 the planner contract.
 
-When `--debug-tool` is enabled, `ptc_debug op=stats` rolls these
+When `--debug-tool` is enabled, `lisp_debug op=stats` rolls these
 per-call blocks up into a `payload_reduction` aggregate — totals,
 p50/p95/max/weighted ratio (skipping `null`s), the top-N reducers,
-and (for windows containing `ptc_task` calls) an `agentic_planner`
-sub-block with the summed planner tokens/bytes. `ptc_debug recent` /
+and (for windows containing `lisp_task` calls) an `agentic_planner`
+sub-block with the summed planner tokens/bytes. `lisp_debug recent` /
 `get` records carry the per-call `ptc_metrics`. See
-[Diagnostics: ptc_debug](mcp-debug.md).
+[Diagnostics: lisp_debug](mcp-debug.md).

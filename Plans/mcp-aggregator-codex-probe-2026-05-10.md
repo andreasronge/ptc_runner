@@ -46,7 +46,7 @@ MCP server. The aggregator was started with:
 
 Prompt:
 
-> Use the MCP server named ptc_runner and its ptc_lisp_execute tool.
+> Use the MCP server named ptc_runner and its lisp_eval tool.
 > Search GitHub issues in github/github-mcp-server for recent open
 > issues mentioning authentication or OAuth. Use the aggregator to
 > filter/reduce the upstream result before returning it. Return only a
@@ -141,8 +141,8 @@ also changes cost, latency, privacy, determinism, and failure modes.
 
 The right shape is an explicit second profile, not a replacement:
 
-- `ptc_lisp_execute`: current deterministic code mode.
-- `ptc_task`: natural-language task mode backed by a cheap planner LLM.
+- `lisp_eval`: current deterministic code mode.
+- `lisp_task`: natural-language task mode backed by a cheap planner LLM.
 
 Spike questions:
 
@@ -159,7 +159,7 @@ Spike questions:
 Suggested spike implementation:
 
 - Add an opt-in `:mcp_agentic_aggregator` profile gated by config.
-- Add one MCP tool: `ptc_task`.
+- Add one MCP tool: `lisp_task`.
 - Inputs: `task`, optional `context`, optional `session_id`, optional
   `constraints`.
 - Server builds a compact prompt from the frozen upstream catalog,

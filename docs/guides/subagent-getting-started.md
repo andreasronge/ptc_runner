@@ -122,14 +122,14 @@ See [Text Mode Guide](subagent-text-mode.md) for multi-tool scenarios, limits, a
 
 ### Text Mode with Deterministic Compute (Combined Mode)
 
-LLMs are unreliable at tasks like counting characters, slicing strings, exact arithmetic, and other deterministic operations — tokenization hides individual characters, and the model's "calculator in its head" silently miscounts. Combined mode (`output: :text, ptc_transport: :tool_call`) gives the LLM an escape hatch: a `ptc_lisp_execute` tool the model can call to run a small program in a sandbox.
+LLMs are unreliable at tasks like counting characters, slicing strings, exact arithmetic, and other deterministic operations — tokenization hides individual characters, and the model's "calculator in its head" silently miscounts. Combined mode (`output: :text, ptc_transport: :tool_call`) gives the LLM an escape hatch: a `lisp_eval` tool the model can call to run a small program in a sandbox.
 
 ```elixir
 {:ok, step} = PtcRunner.SubAgent.run(
   "How many letter r in raspberry?",
   prompt: "You are a helpful assistant. For deterministic computation
            (counting, arithmetic, string manipulation), call
-           ptc_lisp_execute instead of computing in your head.",
+           lisp_eval instead of computing in your head.",
   output: :text,
   ptc_transport: :tool_call,
   llm: my_llm,
@@ -141,12 +141,12 @@ step.return  #=> "There are 3 letter r's in 'raspberry'."
 
 What happens under the hood:
 
-1. The LLM sees `ptc_lisp_execute` in the tool list plus a compact PTC-Lisp reference card in the system prompt (~270 tokens).
-2. It calls `ptc_lisp_execute` with a program like `(count (filter #(= \r %) "raspberry"))`.
+1. The LLM sees `lisp_eval` in the tool list plus a compact PTC-Lisp reference card in the system prompt (~270 tokens).
+2. It calls `lisp_eval` with a program like `(count (filter #(= \r %) "raspberry"))`.
 3. The runtime returns `3` as a tool result.
 4. The LLM composes the final text answer from that tool result.
 
-**No app tools are required.** Combined mode is useful even with zero tools registered — `ptc_lisp_execute` alone covers counting, regex matching, joining, sorting, slicing, and arbitrary arithmetic. When you do register app tools with `expose: :both, cache: true`, the LLM can also escalate large native results into PTC-Lisp programs without re-fetching (see [Text Mode + PTC-Lisp Compute](text-mode-ptc-compute.md) for that pattern).
+**No app tools are required.** Combined mode is useful even with zero tools registered — `lisp_eval` alone covers counting, regex matching, joining, sorting, slicing, and arbitrary arithmetic. When you do register app tools with `expose: :both, cache: true`, the LLM can also escalate large native results into PTC-Lisp programs without re-fetching (see [Text Mode + PTC-Lisp Compute](text-mode-ptc-compute.md) for that pattern).
 
 **When to use combined mode:**
 - Chat agents that occasionally need character counting, exact arithmetic, or list/string transformations.
@@ -155,7 +155,7 @@ What happens under the hood:
 
 **Trade-offs:**
 - The reference card adds ~270 tokens to every system prompt — a permanent tax. Worth it only if you actually expect deterministic-compute questions.
-- The model has to decide to escalate. The system-prompt nudge above ("call ptc_lisp_execute instead of computing in your head") matters; without it, smaller models will still try to count by themselves.
+- The model has to decide to escalate. The system-prompt nudge above ("call lisp_eval instead of computing in your head") matters; without it, smaller models will still try to count by themselves.
 
 ## Adding Tools
 

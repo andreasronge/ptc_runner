@@ -5,14 +5,14 @@
 | Status | Draft |
 | Date | 2026-05-12 |
 | Related | `Plans/ptc-runner-mcp-server.md` §10 response contract, `Plans/ptc-runner-mcp-aggregator.md`, `Plans/ptc-runner-mcp-debug-tool.md`, `Plans/ptc-runner-mcp-payload-reduction.md`, `mcp_server/bench/real_mcp_payload_bench.exs`, GitHub issue #905 |
-| Decision basis | Real Gmail MCP benchmark on 2026-05-12 showed that bad-fit PTC cases are dominated by verbose observability and mirrored `structuredContent`, not by PTC-Lisp execution itself. User preference: normal `ptc_lisp_execute` should return concise human-readable text; diagnostics belong behind `--debug-tool`. |
+| Decision basis | Real Gmail MCP benchmark on 2026-05-12 showed that bad-fit PTC cases are dominated by verbose observability and mirrored `structuredContent`, not by PTC-Lisp execution itself. User preference: normal `lisp_eval` should return concise human-readable text; diagnostics belong behind `--debug-tool`. |
 
 ## 1. Summary
 
 Change `ptc_runner_mcp` from "structured and observable by default" to
 **human-readable and slim by default**.
 
-Default `ptc_lisp_execute` responses should be optimized for the model
+Default `lisp_eval` responses should be optimized for the model
 consuming the tool result:
 
 - return concise text in `content[0].text`;
@@ -25,12 +25,12 @@ consuming the tool result:
 
 When `--debug-tool` is enabled without an explicit response profile,
 keep the existing verbose behavior: `structuredContent`,
-`upstream_calls`, `ptc_metrics`, mirrored text, and `ptc_debug` all
+`upstream_calls`, `ptc_metrics`, mirrored text, and `lisp_debug` all
 remain available. Debug mode is the operator's explicit signal that
 observability is worth response-size overhead.
 
 If an operator explicitly combines `--debug-tool` with
-`--response-profile slim`, the external `ptc_lisp_execute` response
+`--response-profile slim`, the external `lisp_eval` response
 stays slim, while the debug recorder receives the pre-slim structured
 payload internally. This keeps diagnostics useful without forcing
 normal model-facing tool results to carry observability payloads.
@@ -57,7 +57,7 @@ Important distinctions:
   return serialized JSON in a text block for backward compatibility.
   `SHOULD` is not `MUST`.
 
-Therefore a text-first `ptc_lisp_execute` can legally return:
+Therefore a text-first `lisp_eval` can legally return:
 
 ```json
 {
@@ -138,7 +138,7 @@ code. Use:
 
 The active tool contract is the composition of both axes:
 
-| Capability profile | Response profile | `ptc_lisp_execute` description | `outputSchema` |
+| Capability profile | Response profile | `lisp_eval` description | `outputSchema` |
 |---|---|---|---|
 | `:mcp_no_tools` | `:slim` | Text-only PTC-Lisp execution; no upstream tool-call fields promised | Omitted |
 | `:mcp_no_tools` | `:structured` | PTC-Lisp execution with compact typed result | Compact `structuredContent` schema |
@@ -181,7 +181,7 @@ For this spec:
 
 ## 5. Slim Success Shape
 
-For ordinary successful `ptc_lisp_execute` calls:
+For ordinary successful `lisp_eval` calls:
 
 ```json
 {
@@ -313,34 +313,34 @@ tests that rely on `structuredContent`.
 - `content[0].text` mirrors `structuredContent` as serialized JSON.
 - `upstream_calls` is present when calls were made.
 - `ptc_metrics` is present when applicable.
-- `ptc_debug` is advertised when `--debug-tool` is enabled.
+- `lisp_debug` is advertised when `--debug-tool` is enabled.
 
 One change is recommended even in debug mode: move long explanatory
 metric prose out of per-call `ptc_metrics` and into docs or
-`ptc_debug` metadata. Per-call metrics should be numeric and compact.
+`lisp_debug` metadata. Per-call metrics should be numeric and compact.
 However, this can be a follow-up after slim defaults land.
 
 ## 9. Tool Scope
 
-This spec applies first to `ptc_lisp_execute`.
+This spec applies first to `lisp_eval`.
 
 It must not globally change every `Envelope.success/1` or
 `Envelope.error_envelope/1` caller into slim output. Other tools may
 have their own advertised contracts:
 
-- `ptc_debug` is always a diagnostics tool and should keep structured,
+- `lisp_debug` is always a diagnostics tool and should keep structured,
   machine-readable output when advertised.
-- `ptc_task` has separate server-side LLM and task-result semantics; it
+- `lisp_task` has separate server-side LLM and task-result semantics; it
   should follow the same profile model later, but not as an accidental
   side effect of this change.
 - Unknown-tool, busy, shutting-down, and argument-validation envelopes
-  may use slim text if they are returned as `ptc_lisp_execute` tool
+  may use slim text if they are returned as `lisp_eval` tool
   results, but protocol-level JSON-RPC errors are unchanged.
 
 Implementation must make the response profile explicit at the
 tool-rendering boundary. Either:
 
-1. add `Envelope.success(payload, tool: :ptc_lisp_execute, response_profile: ...)`
+1. add `Envelope.success(payload, tool: :lisp_eval, response_profile: ...)`
    and keep non-PTC tools on fixed structured/debug rendering; or
 2. keep `Envelope.success/1` backward-compatible and add dedicated
    `Envelope.ptc_lisp_success/2` / `Envelope.ptc_lisp_error/2` helpers.
@@ -355,19 +355,19 @@ normal tool response.
 
 In slim mode:
 
-- `ptc_metrics` is not returned in `ptc_lisp_execute` responses.
+- `ptc_metrics` is not returned in `lisp_eval` responses.
 - When `--debug-tool` is enabled, the server records the pre-slim
   structured payload, upstream call summaries, result sizes, and metrics
   internally before rendering the external slim response.
 - When `--debug-tool` is disabled, the server does not do hidden metrics
   work for slim responses.
-- `ptc_debug stats` remains the way to inspect payload reduction,
+- `lisp_debug stats` remains the way to inspect payload reduction,
   upstream call counts, errors, latency, and top reducers.
 
 In debug mode:
 
 - current per-call `ptc_metrics` remains available;
-- `ptc_debug recent/get` can expose full per-call details.
+- `lisp_debug recent/get` can expose full per-call details.
 
 Important invariant:
 
@@ -376,7 +376,7 @@ Important invariant:
 
 ## 11. Tool Description And Output Schema
 
-The advertised `ptc_lisp_execute` tool must match the active response
+The advertised `lisp_eval` tool must match the active response
 profile and the active capability profile.
 
 For `slim`:
@@ -430,7 +430,7 @@ PTC_RUNNER_MCP_RESPONSE_PROFILE
 
 ### Phase 2 — PTC-Lisp envelope rendering
 
-Add profile-aware rendering for `ptc_lisp_execute` without changing
+Add profile-aware rendering for `lisp_eval` without changing
 unrelated tools by default:
 
 ```elixir
@@ -439,7 +439,7 @@ Envelope.ptc_lisp_error(payload, response_profile: ResponseProfile.current())
 ```
 
 Keep existing `success/1` and `error_envelope/1` backward-compatible
-for `ptc_debug`, `ptc_task`, and any tests that rely on the current
+for `lisp_debug`, `lisp_task`, and any tests that rely on the current
 structured envelope.
 
 Add helpers:
@@ -461,7 +461,7 @@ In `Tools.decorate_and_wrap/2`:
 If `DebugConfig.enabled?()` is true, record the pre-slim structured
 payload plus upstream call summaries and metrics before rendering the
 external response. This applies even when the explicit response profile
-is `slim`. `ptc_debug` should inspect the recorded internal payload, not
+is `slim`. `lisp_debug` should inspect the recorded internal payload, not
 infer diagnostics from the externally slimmed envelope.
 
 ### Phase 4 — Output schema and tools/list
@@ -491,7 +491,7 @@ Update `mcp_server/bench/real_mcp_payload_bench.exs` to run:
 native
 ptc_slim
 ptc_structured
-ptc_debug
+lisp_debug
 ```
 
 Report:
@@ -520,16 +520,16 @@ Add focused tests:
    `content`.
 7. `--debug-tool` infers `debug` profile when no explicit profile is
    set.
-8. Explicit `--response-profile slim --debug-tool` exposes `ptc_debug`
-   but keeps `ptc_lisp_execute` slim. This is important: diagnostics
+8. Explicit `--response-profile slim --debug-tool` exposes `lisp_debug`
+   but keeps `lisp_eval` slim. This is important: diagnostics
    tooling and response verbosity should be separable when explicitly
    requested.
 9. `tools/list` output schema matches the active profile.
 10. Release stdio integration covers at least `slim` and `debug`.
-11. `ptc_debug` still returns structured diagnostics when
+11. `lisp_debug` still returns structured diagnostics when
     `--response-profile slim --debug-tool` is used.
-12. `ptc_task` and `ptc_debug` do not accidentally inherit slim
-    rendering from `ptc_lisp_execute`.
+12. `lisp_task` and `lisp_debug` do not accidentally inherit slim
+    rendering from `lisp_eval`.
 13. `tools/list` descriptions and authoring cards do not promise
     `upstream_calls` in slim aggregator mode.
 14. `outputSchema` is omitted in slim mode, because slim mode omits
@@ -565,8 +565,8 @@ server actually returns `structuredContent` conforming to it.
 ### Tool contract drift
 
 The existing codebase uses one shared envelope helper for multiple MCP
-tools. A global change to that helper can silently alter `ptc_debug` or
-`ptc_task`. The implementation must keep each advertised tool's output
+tools. A global change to that helper can silently alter `lisp_debug` or
+`lisp_task`. The implementation must keep each advertised tool's output
 contract aligned with its `tools/list` entry.
 
 ### Authoring-card drift
@@ -606,11 +606,11 @@ PTC_RUNNER_MCP_RESPONSE_PROFILE=debug ptc_runner_mcp start
    Recommendation: `structured` uses human text; `debug` keeps JSON
    mirror for compatibility with existing tests and clients.
 
-3. Should `ptc_task` follow the same profiles?
+3. Should `lisp_task` follow the same profiles?
 
-   Recommendation: yes, but implement after `ptc_lisp_execute`. The
+   Recommendation: yes, but implement after `lisp_eval`. The
    same problem exists there, plus server-side LLM metrics. Until then,
-   `ptc_task` should keep its existing structured contract.
+   `lisp_task` should keep its existing structured contract.
 
 4. Should `--debug-tool` always force debug profile?
 
@@ -621,7 +621,7 @@ PTC_RUNNER_MCP_RESPONSE_PROFILE=debug ptc_runner_mcp start
 
 The feature is successful when:
 
-- default `ptc_lisp_execute` response size for tiny successful calls is
+- default `lisp_eval` response size for tiny successful calls is
   close to the text result size plus minimal MCP framing;
 - bad-fit benchmark cases show dramatically smaller PTC overhead than
   current verbose defaults, while still losing honestly when native is

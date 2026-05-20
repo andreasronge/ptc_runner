@@ -136,7 +136,7 @@ return value fails the signature.
 
 `SubAgent.new(ptc_transport: :tool_call, ...)` requires a provider/model with
 **native tool calling** — PtcRunner ships the LLM a single internal tool
-(`ptc_lisp_execute`) and expects native `tool_calls` back. See
+(`lisp_eval`) and expects native `tool_calls` back. See
 [`usage-rules/subagent.md`](subagent.md#ptc-lisp-transport-ptc_transport)
 for the full transport semantics; this section covers only provider
 compatibility.

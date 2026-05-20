@@ -183,7 +183,7 @@ For full control (or anonymous functions), pass an explicit signature string ins
 
 ### PTC-Lisp Transport (`ptc_transport`)
 
-For `output: :ptc_lisp` agents, `ptc_transport` controls how the LLM ships its program. `:content` (default) parses a markdown-fenced PTC-Lisp block from the assistant message — *one program, one deterministic orchestration*, lower latency and cost in a single LLM turn. `:tool_call` (opt-in) exposes a single internal `ptc_lisp_execute` tool to the provider's native tool-calling API; the model can call it zero or more times before returning a final answer directly. App tools stay inside PTC-Lisp in **both** transports — only `ptc_lisp_execute` is exposed natively.
+For `output: :ptc_lisp` agents, `ptc_transport` controls how the LLM ships its program. `:content` (default) parses a markdown-fenced PTC-Lisp block from the assistant message — *one program, one deterministic orchestration*, lower latency and cost in a single LLM turn. `:tool_call` (opt-in) exposes a single internal `lisp_eval` tool to the provider's native tool-calling API; the model can call it zero or more times before returning a final answer directly. App tools stay inside PTC-Lisp in **both** transports — only `lisp_eval` is exposed natively.
 
 | Transport | Default? | Use when |
 |-----------|----------|----------|

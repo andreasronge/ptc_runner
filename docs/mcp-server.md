@@ -3,7 +3,7 @@
 `ptc_runner_mcp` is a long-running process that speaks
 [Model Context Protocol](https://modelcontextprotocol.io/) over stdio
 JSON-RPC by default, with an opt-in Streamable HTTP listener for
-private-network deployments. It exposes `ptc_lisp_execute` to MCP
+private-network deployments. It exposes `lisp_eval` to MCP
 clients (Claude Desktop, Cursor, Cline, Claude Code, MCP Inspector,
 agentic applications, …). The tool
 accepts a PTC-Lisp program plus optional `context` and `output_schema`,
@@ -192,33 +192,33 @@ hashed owner/session ids. See
 
 ## Stateful Sessions
 
-By default, `ptc_lisp_execute` is stateless: every call starts with
+By default, `lisp_eval` is stateless: every call starts with
 empty Lisp memory and an empty tool cache. Starting the server with
 `--sessions` or `PTC_RUNNER_MCP_SESSIONS=true` adds explicit session
 tools:
 
-- `ptc_session_start`
-- `ptc_session_eval`
-- `ptc_session_inspect`
-- `ptc_session_list`
-- `ptc_session_forget`
-- `ptc_session_close`
+- `lisp_session_start`
+- `lisp_session_eval`
+- `lisp_session_inspect`
+- `lisp_session_list`
+- `lisp_session_forget`
+- `lisp_session_close`
 
 Session evals persist explicit `(def ...)` and `(defn ...)` bindings,
 the last three successful eval results (`*1`, `*2`, `*3`), captured
 `println` output, and bounded/redacted tool-call history. `let`
 bindings and ordinary intermediate values do not persist. Use
-`ptc_session_forget` to remove stale or large bindings and clear
+`lisp_session_forget` to remove stale or large bindings and clear
 bounded histories.
 
-`ptc_session_list` returns metadata-only live sessions for the current
+`lisp_session_list` returns metadata-only live sessions for the current
 owner. It does not render stored binding values or refresh session idle
 timers.
 
 Sessions are in-memory, owner-scoped, disabled by default, TTL/idle
 bounded, and allow at most one eval in a given session at a time.
-`ptc_session_eval` uses the same global concurrency gate as
-`ptc_lisp_execute`; a second eval on the same session returns
+`lisp_session_eval` uses the same global concurrency gate as
+`lisp_eval`; a second eval on the same session returns
 `session_busy` rather than queueing.
 
 ## Security model
@@ -311,9 +311,9 @@ the full set.
   upstream MCP servers from inside the sandbox via `(tool/mcp-call …)`,
   plus the payload-reduction metrics emitted on every aggregator
   response.
-- [`docs/agentic-mode.md`](agentic-mode.md) — `ptc_task`, the
+- [`docs/agentic-mode.md`](agentic-mode.md) — `lisp_task`, the
   natural-language planner tool layered on top of aggregator mode.
-- [`docs/mcp-debug.md`](mcp-debug.md) — the opt-in `ptc_debug`
+- [`docs/mcp-debug.md`](mcp-debug.md) — the opt-in `lisp_debug`
   diagnostics tool.
 - [Getting started guide](guides/mcp-getting-started.md) — short
   walkthrough from install to first schema-validated call.

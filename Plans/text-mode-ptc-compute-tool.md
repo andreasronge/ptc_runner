@@ -3,7 +3,7 @@
 ## Status
 
 The current v1 runtime rejects `output: :text, ptc_transport: :tool_call`
-because `Loop.TextMode` does not know how to execute `ptc_lisp_execute`,
+because `Loop.TextMode` does not know how to execute `lisp_eval`,
 share state with PTC-Lisp execution, or manage large native tool results.
 The rejection is scope discipline, not a statement that the combination
 is semantically invalid. This plan describes the path to enable it as an
@@ -83,12 +83,12 @@ this document; when a section below conflicts, this addendum wins.
     `PtcToolProtocol.tool_description(:in_process_with_app_tools)` MUST
     return the **exact** string currently in
     `lib/ptc_runner/sub_agent/loop/ptc_tool_call.ex:53` (the
-    `@ptc_lisp_execute_description` module attribute):
+    `@lisp_eval_description` module attribute):
 
     > "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for
     > deterministic computation and tool orchestration. Call app tools
     > as `(tool/name ...)` from inside the program — do not attempt to
-    > call app tools as native function calls; only `ptc_lisp_execute`
+    > call app tools as native function calls; only `lisp_eval`
     > is available natively."
 
     The byte-for-byte invariant on existing v1 PTC `:tool_call` behavior
@@ -160,7 +160,7 @@ this document; when a section below conflicts, this addendum wins.
     not `Loop.State` defaults.** Keep `Loop.State`'s default
     `tool_cache: nil` unchanged. In the combined-mode entry path
     inside `Loop.TextMode` (the same branch that registers
-    `ptc_lisp_execute`), set `state = %{state | tool_cache:
+    `lisp_eval`), set `state = %{state | tool_cache:
     state.tool_cache || %{}}` before the loop body runs. Pure
     `output: :text` paths MUST NOT touch `tool_cache`. The Tier 2b
     regression test asserts pure-text leaves it `nil`.
@@ -190,7 +190,7 @@ this document; when a section below conflicts, this addendum wins.
     tools exist.** Combined mode appends the compact card whenever
     `output: :text, ptc_transport: :tool_call, ptc_reference:
     :compact` regardless of how many tools are exposed `:both` or
-    `:ptc_lisp`. `ptc_lisp_execute` is useful for pure deterministic
+    `:ptc_lisp`. `lisp_eval` is useful for pure deterministic
     computation even with no app-tool inventory inside programs;
     omitting the card produces agents that don't know how to use it.
 
@@ -292,7 +292,7 @@ section below conflicts with the body of the plan, this addendum wins.
 
 Explore support for `output: :text` together with `ptc_transport: :tool_call`.
 In this mode, the agent remains a text/chat agent by default, but the
-provider also receives the internal `ptc_lisp_execute` native tool. The
+provider also receives the internal `lisp_eval` native tool. The
 LLM can answer directly for simple turns, call ordinary native app tools
 for simple lookups, or escalate to PTC-Lisp when it needs deterministic
 computation, filtering, joins, parallelism, or multi-tool orchestration.
@@ -315,7 +315,7 @@ The desired flow:
 3. PtcRunner returns a compact preview to the LLM and retains the full
    result in runtime state.
 4. If the preview is enough, the LLM answers directly.
-5. If the full data needs processing, the LLM calls `ptc_lisp_execute`.
+5. If the full data needs processing, the LLM calls `lisp_eval`.
 6. The PTC-Lisp program calls the same app tool with the same args and
    receives the cached full result without re-running the tool.
 
@@ -329,7 +329,7 @@ chat-shaped text agent.
 - Do not support `output: :text, ptc_transport: :content`. That remains
   nonsensical: text mode has no fenced PTC-Lisp parsing path.
 - Do not fake provider transcripts by rewriting previous native app-tool
-  calls into `ptc_lisp_execute` calls.
+  calls into `lisp_eval` calls.
 - Do not require a new handle namespace as the first design. Prefer
   shared tool cache semantics before adding a separate result-store API.
 - Do not integrate `*1`/`*2`/`*3` with native tool results in v1.
@@ -449,7 +449,7 @@ shared response shape. Do not reach into `Loop.PtcToolCall`,
 strings — including `:in_process_text_mode` — live in
 `PtcToolProtocol.tool_description/1`. The `:in_process_text_mode` profile
 states the `:both`-tool callability rule and the
-`ptc_lisp_execute`-exclusive-in-its-turn rule. **Cache-reuse guidance
+`lisp_eval`-exclusive-in-its-turn rule. **Cache-reuse guidance
 does NOT live in `tool_description/1`.** It lives in two places: (a) the
 compact PTC-Lisp reference card in the system prompt (see "System
 Prompt"), and (b) the `cache_hint` field inside the native preview
@@ -472,9 +472,9 @@ agent =
 The provider-native `tools` field includes:
 
 - app tools with `expose: :native` or `expose: :both`
-- the internal `ptc_lisp_execute` tool
+- the internal `lisp_eval` tool
 
-PTC-Lisp programs executed through `ptc_lisp_execute` see:
+PTC-Lisp programs executed through `lisp_eval` see:
 
 - app tools with `expose: :ptc_lisp` or `expose: :both`
 - `memory`, `journal`, `tool_cache`, and `turn_history` for the current
@@ -487,7 +487,7 @@ mode pins **v1 PTC `:tool_call` behavior verbatim**: only successful
 non-terminal program executions advance history. Concretely:
 
 - Initial value is `state.turn_history` (normally `[]`).
-- A successful `ptc_lisp_execute` program result that **does not call
+- A successful `lisp_eval` program result that **does not call
   `(return v)` or `(fail v)`** advances `turn_history` (the program's
   final expression value is pushed). This matches v1 PTC's
   `Loop.PtcToolCall.continue_with_intermediate/7` semantics.
@@ -500,8 +500,8 @@ non-terminal program executions advance history. Concretely:
   with Non-Goals: native results do not feed `*1`/`*2`/`*3` in v1.
 - Direct LLM text turns **never** advance `turn_history`.
 - Parse errors, runtime errors, validation errors (signature mismatch
-  on a `ptc_lisp_execute` return), budget errors, and protocol errors
-  (`multiple_tool_calls`, `mixed_with_ptc_lisp_execute`, `unknown_tool`)
+  on a `lisp_eval` return), budget errors, and protocol errors
+  (`multiple_tool_calls`, `mixed_with_lisp_eval`, `unknown_tool`)
   **never** advance `turn_history`.
 
 **Why pin `(return v)` as non-advancing.** Combined mode reframes
@@ -521,7 +521,7 @@ Text mode and PTC-Lisp mode currently make different assumptions:
 - `output: :ptc_lisp`: app tools are callable from PTC-Lisp via
   `(tool/name ...)`.
 - `output: :ptc_lisp, ptc_transport: :tool_call`: provider-native layer
-  exposes only `ptc_lisp_execute`; app tools remain inside PTC-Lisp.
+  exposes only `lisp_eval`; app tools remain inside PTC-Lisp.
 
 The combined text mode needs explicit exposure policy per tool.
 
@@ -552,7 +552,7 @@ Default `expose:` per mode:
 
 **Intentional gotcha — combined mode requires explicit PTC opt-in.** An
 agent that opts into combined mode but tags zero tools as `:both` or
-`:ptc_lisp` gets a working `ptc_lisp_execute` that has **no app tools
+`:ptc_lisp` gets a working `lisp_eval` that has **no app tools
 visible inside programs**. Programs can still compute, transform passed
 data, and use `memory` / `journal`, but `(tool/foo ...)` calls will be
 rejected at parse time. This is by design: combined mode forces
@@ -632,14 +632,14 @@ fields:
 ```
 At LLM request build time:
   native_request_tools = tools where expose ∈ [:native, :both]
-  if combined mode: native_request_tools ++ [ptc_lisp_execute]
+  if combined mode: native_request_tools ++ [lisp_eval]
 
 At PTC-Lisp inventory build time (system prompt + Lisp analyzer):
   ptc_lisp_inventory = tools where expose ∈ [:ptc_lisp, :both]
 
 If a PTC-Lisp program calls (tool/foo ...) where foo has expose: :native,
 the existing analyzer rejects at parse time:
-  "tool foo is not available inside ptc_lisp_execute (expose: :native);
+  "tool foo is not available inside lisp_eval (expose: :native);
   set expose: :both to make it callable from programs."
 ```
 
@@ -649,7 +649,7 @@ calls; this is a filter on the inventory it sees.
 ## Final-Output Semantics
 
 `(return v)`, `(fail v)`, and normal final expressions inside
-`ptc_lisp_execute` all produce **tool results**, not run-final answers.
+`lisp_eval` all produce **tool results**, not run-final answers.
 The LLM sees the tool result and decides what to do next. The agent's
 final answer is always its final text response, possibly coerced by
 signature.
@@ -676,7 +676,7 @@ text apology to the user, retry with different args, etc.
 
 **Why not short-circuit on `(return v)` matching the signature?**
 
-- Simplest mental model: `ptc_lisp_execute` is a tool like any other
+- Simplest mental model: `lisp_eval` is a tool like any other
   tool. Tools return data; the LLM decides what to do with it.
 - Matches every other TextMode tool's semantics. No special case in the
   loop.
@@ -688,19 +688,19 @@ text apology to the user, retry with different args, etc.
 
 ### Turn Budget Interaction
 
-`ptc_lisp_execute` consumes a turn like any other tool call. The
+`lisp_eval` consumes a turn like any other tool call. The
 "LLM gets one more turn to respond" guarantee above is **conditional on
 turn budget remaining** — it is not a reserved slot.
 
 Concrete rules:
 
-- If `max_turns` is reached after a `ptc_lisp_execute` call (so the
+- If `max_turns` is reached after a `lisp_eval` call (so the
   paired `role: :tool` message is the last thing the loop emits), the
   agent terminates via TextMode's existing `max_turns_exceeded` error
   path. No final text turn happens. `step.return` carries whatever the
   existing TextMode max-turns handling produces.
 - The universal pairing rule MUST still hold: the `tool_call_id` from
-  the `ptc_lisp_execute` invocation MUST be paired with a `role: :tool`
+  the `lisp_eval` invocation MUST be paired with a `role: :tool`
   message before termination, even when the loop is terminating due to
   budget exhaustion.
 - Users who need program execution followed by a text wrap-up MUST
@@ -784,7 +784,7 @@ assembles the tool-result content for the `role: :tool` message — same
 boundary where existing TextMode tool results are JSON-encoded today.
 Do not push this encoding into the LLM adapter or `PtcToolProtocol`.
 PTC-Lisp result rendering (the `result` and `prints` fields in the
-`ptc_lisp_execute` tool-result JSON) stays as EDN-rendered preview
+`lisp_eval` tool-result JSON) stays as EDN-rendered preview
 strings produced by `PtcToolProtocol` — that's a different surface
 with different ergonomic needs.
 
@@ -807,7 +807,7 @@ for compliance-sensitive workloads:
   },
   "sample_keys": ["id", "message"],
   "full_result_cached": true,
-  "cache_hint": "Call ptc_lisp_execute and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
+  "cache_hint": "Call lisp_eval and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
 }
 ```
 
@@ -881,23 +881,23 @@ preview function.
 
 ## Multi-Call Rule
 
-`ptc_lisp_execute` is exclusive in its assistant turn. Native app-tool
+`lisp_eval` is exclusive in its assistant turn. Native app-tool
 calls are otherwise multi-callable (matching existing TextMode
 behavior). Precedence — first match wins. "Unknown" means a native
 tool name the agent did not register; "valid" means it was registered
-and `expose ∈ [:native, :both]` (or it is `ptc_lisp_execute` itself
+and `expose ∈ [:native, :both]` (or it is `lisp_eval` itself
 in combined mode):
 
 | # | Turn shape | Behavior | Reason(s) |
 |---|---|---|---|
-| 1 | Multiple `ptc_lisp_execute` calls (any other calls present or not) | Reject all; pair one error per `tool_call_id` | `multiple_tool_calls` |
-| 2 | One `ptc_lisp_execute` + any other native call(s) (valid or unknown) | Reject all; pair one error per `tool_call_id` | `mixed_with_ptc_lisp_execute` |
-| 3 | One `ptc_lisp_execute` (alone) | Execute the program | n/a |
-| 4 | Native app-tool calls only — all valid, no `ptc_lisp_execute` | Execute all (existing TextMode behavior) | n/a |
-| 5 | Native app-tool calls only — mix of valid and unknown, no `ptc_lisp_execute` | Execute valid calls; pair `unknown_tool` errors for each unknown call | `unknown_tool` (per unknown id) |
-| 6 | Native app-tool calls only — all unknown, no `ptc_lisp_execute` | Pair `unknown_tool` errors for each | `unknown_tool` (per unknown id) |
+| 1 | Multiple `lisp_eval` calls (any other calls present or not) | Reject all; pair one error per `tool_call_id` | `multiple_tool_calls` |
+| 2 | One `lisp_eval` + any other native call(s) (valid or unknown) | Reject all; pair one error per `tool_call_id` | `mixed_with_lisp_eval` |
+| 3 | One `lisp_eval` (alone) | Execute the program | n/a |
+| 4 | Native app-tool calls only — all valid, no `lisp_eval` | Execute all (existing TextMode behavior) | n/a |
+| 5 | Native app-tool calls only — mix of valid and unknown, no `lisp_eval` | Execute valid calls; pair `unknown_tool` errors for each unknown call | `unknown_tool` (per unknown id) |
+| 6 | Native app-tool calls only — all unknown, no `lisp_eval` | Pair `unknown_tool` errors for each | `unknown_tool` (per unknown id) |
 
-**Reading the table.** Rows 1 and 2 are about `ptc_lisp_execute`
+**Reading the table.** Rows 1 and 2 are about `lisp_eval`
 exclusivity and reject the entire turn. Rows 4–6 cover pure-native
 turns where unknown handling is orthogonal to count: every unknown call
 gets paired with an error, every valid call executes. Rows 4 and 6 are
@@ -914,8 +914,8 @@ existing TextMode chat ergonomics.
 ```json
 {
   "status": "error",
-  "reason": "multiple_tool_calls" | "mixed_with_ptc_lisp_execute" | "unknown_tool",
-  "message": "<violation summary, e.g. 'exactly one ptc_lisp_execute call per assistant turn'>"
+  "reason": "multiple_tool_calls" | "mixed_with_lisp_eval" | "unknown_tool",
+  "message": "<violation summary, e.g. 'exactly one lisp_eval call per assistant turn'>"
 }
 ```
 
@@ -927,7 +927,7 @@ not in `PtcToolProtocol`.
 
 ### Budget Semantics
 
-- `ptc_lisp_execute` does not consume `max_tool_calls`. (Parity with
+- `lisp_eval` does not consume `max_tool_calls`. (Parity with
   v1 R19.)
 - Native app-tool calls do consume `max_tool_calls`. (Parity with
   today's TextMode.)
@@ -943,21 +943,21 @@ shared `PtcRunner.PtcToolProtocol` instead.
 Required runtime changes:
 
 - TextMode request construction includes app native tools (filtered per
-  `Exposure Filtering` rule) plus `ptc_lisp_execute`. The execution-tool's
+  `Exposure Filtering` rule) plus `lisp_eval`. The execution-tool's
   description is sourced from
   `PtcToolProtocol.tool_description(:in_process_text_mode)`.
-- TextMode recognizes `ptc_lisp_execute` as an internal native tool.
+- TextMode recognizes `lisp_eval` as an internal native tool.
 - Native app-tool execution and PTC-Lisp `(tool/name ...)` execution
   share normalized cache keys via `KeyNormalizer.canonical_cache_key/2`.
-- `ptc_lisp_execute` execution threads `memory`, `journal`,
+- `lisp_eval` execution threads `memory`, `journal`,
   `tool_cache`, `child_steps`, and `turn_history` through `Lisp.run/2`.
   All four are scoped to the current `SubAgent.run/2` invocation only.
-- Tool-result JSON for `ptc_lisp_execute` is rendered by
+- Tool-result JSON for `lisp_eval` is rendered by
   `PtcToolProtocol.render_success/2` / `render_error/3` — same renderers
   v1 PTC `:tool_call` and the MCP server use. No parallel rendering
   path.
 - Protocol-error rendering for `multiple_tool_calls`,
-  `mixed_with_ptc_lisp_execute`, and `unknown_tool` lives in
+  `mixed_with_lisp_eval`, and `unknown_tool` lives in
   `Loop.TextMode` (transport concern, surface-specific).
 - TextMode continues to allow normal native app-tool calls.
 - Multi-call enforcement per the "Multi-Call Rule" section.
@@ -981,15 +981,15 @@ where the LLM looks up native call shapes. The compact reference card
 does **NOT** duplicate native tool schemas. For `:both`-exposed tools,
 the card lists each as a one-line PTC entry only — name plus
 `(tool/name {...})` shape — so the LLM knows it's also callable from
-inside `ptc_lisp_execute`. For `:ptc_lisp`-only tools, the card carries
+inside `lisp_eval`. For `:ptc_lisp`-only tools, the card carries
 the same one-line PTC entry (those tools are absent from native
 `tools`, so the card is the only place they're advertised).
 
-The `ptc_lisp_execute` tool's description (separate from the prompt
+The `lisp_eval` tool's description (separate from the prompt
 section above) comes from
 `PtcToolProtocol.tool_description(:in_process_text_mode)`, which
 carries the capability note: app tools exposed as `:both` are callable
-as `(tool/name ...)` from inside the program; `ptc_lisp_execute` is
+as `(tool/name ...)` from inside the program; `lisp_eval` is
 exclusive in its assistant turn.
 
 **`ptc_reference:` option, pinned for v1:**
@@ -1025,7 +1025,7 @@ in v1 per Addendum #1.**
 
 `false` (i.e. "don't include any PTC-Lisp reference at all") is **not**
 a valid value in combined mode. The LLM needs at least the compact
-reference to use `ptc_lisp_execute` correctly; omitting it produces
+reference to use `lisp_eval` correctly; omitting it produces
 agents that misuse the tool. Users who don't want the prompt overhead
 should not opt into combined mode.
 
@@ -1042,7 +1042,7 @@ Concrete v1 invariants for retained native results:
   the run terminates. No LRU, no size-based eviction in v1.
 - **Memory risk documented.** Very large retained results consume
   runtime memory for the entire run. Mitigation guidance for users:
-  filter eagerly inside `ptc_lisp_execute`, return only the projection
+  filter eagerly inside `lisp_eval`, return only the projection
   the program needs, let the upstream's `full_result` get garbage-collected
   after the program returns.
 
@@ -1056,7 +1056,7 @@ are deferred to follow-up work — see "Deferred From v1" below.
 Trace output must keep the layers distinct:
 
 - native app-tool calls
-- internal native `ptc_lisp_execute` calls
+- internal native `lisp_eval` calls
 - app-tool calls made from inside PTC-Lisp
 - cached app-tool hits reused by PTC-Lisp after a native call
 
@@ -1090,7 +1090,7 @@ docs.
   preview. PTC-Lisp programs can still call `(tool/name ...)`, but
   each call re-executes the tool function — there is no shared cache
   between layers. Test pins the no-cache-reuse behavior.
-- The LLM calls `ptc_lisp_execute` and the program calls a tool with
+- The LLM calls `lisp_eval` and the program calls a tool with
   `expose: :native`. Rejected at parse time by the analyzer (see
   "Exposure Filtering"). Programs cannot reference `:native`-only tools.
 - The LLM calls a tool natively, then PTC-Lisp calls it with
@@ -1110,7 +1110,7 @@ docs.
 ## End-to-End Transcript
 
 Concrete combined-mode v1 flow against an `expose: :both, cache: true`
-app tool plus `ptc_lisp_execute`. Used as the canonical reference for
+app tool plus `lisp_eval`. Used as the canonical reference for
 implementers. Annotations in `;; comments` are this transcript's
 author-side commentary, not part of the wire data.
 
@@ -1161,13 +1161,13 @@ TOOL (tool_call_id: "call_1"): {
   },
   "sample_keys": ["id", "timestamp", "message"],
   "full_result_cached": true,
-  "cache_hint": "Call ptc_lisp_execute and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
+  "cache_hint": "Call lisp_eval and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
 }
 
-;; Turn 3 — LLM decides it needs to count, calls ptc_lisp_execute
+;; Turn 3 — LLM decides it needs to count, calls lisp_eval
 ASSISTANT (tool_calls): [
   {id: "call_2",
-   name: "ptc_lisp_execute",
+   name: "lisp_eval",
    args: {"program": "(def rows (tool/search_logs {:query \"error code 42\"}))\n(return {:total (count rows)})"}}
 ]
 
@@ -1234,7 +1234,7 @@ justification.
 ### Exposure Filtering
 
 - The LLM request's `tools` field in combined mode MUST include exactly:
-  `tools where expose ∈ [:native, :both]` plus `ptc_lisp_execute`.
+  `tools where expose ∈ [:native, :both]` plus `lisp_eval`.
 - The PTC-Lisp inventory (system prompt + analyzer) MUST include
   exactly: `tools where expose ∈ [:ptc_lisp, :both]`.
 - A PTC-Lisp program calling `(tool/foo ...)` where `foo` has
@@ -1246,7 +1246,7 @@ justification.
 - `(return v)`, `(fail v)`, and normal final expressions MUST produce
   tool results, not run-final answers. The LLM gets one more turn to
   respond **if turn budget remains**; if `max_turns` is exhausted by the
-  `ptc_lisp_execute` call, the loop terminates via TextMode's existing
+  `lisp_eval` call, the loop terminates via TextMode's existing
   `max_turns_exceeded` path with the `tool_call_id` paired (see "Turn
   Budget Interaction").
 - The agent's final answer in combined mode MUST come from the LLM's
@@ -1276,7 +1276,7 @@ justification.
 - The runtime MUST follow the precedence table in "Multi-Call Rule"
   exactly. Earlier rules win.
 - Protocol-error rendering for `multiple_tool_calls`,
-  `mixed_with_ptc_lisp_execute`, `unknown_tool` MUST live in
+  `mixed_with_lisp_eval`, `unknown_tool` MUST live in
   `Loop.TextMode`, not in `PtcToolProtocol`.
 - Every returned `tool_call_id` MUST be paired with a `role: :tool`
   message before the loop continues or terminates (universal pairing
@@ -1429,20 +1429,20 @@ ambiguity) is worth surfacing before downstream tiers depend on it.
 
 ### Tier 3 — Combined mode (sequential)
 
-**3a. TextMode `ptc_lisp_execute` happy path.**
-- Register `ptc_lisp_execute` in TextMode's request build (combined
+**3a. TextMode `lisp_eval` happy path.**
+- Register `lisp_eval` in TextMode's request build (combined
   mode only) using `tool_description(:in_process_text_mode)`.
 - Recognize and dispatch the tool, run the program via `Lisp.run/2`
   with `memory`, `journal`, `tool_cache`, `turn_history`,
   `child_steps` threaded.
 - Render success/error via `PtcToolProtocol.render_success/2` /
   `render_error/3`.
-- **Budget exemption.** `ptc_lisp_execute` invocations MUST NOT
+- **Budget exemption.** `lisp_eval` invocations MUST NOT
   increment `state.total_tool_calls` and MUST NOT count against
   `agent.max_tool_calls`. The current TextMode counter at
   `text_mode.ex:494` (commit `8091822`) counts every dispatched tool;
   add an explicit exclusion. Direct test: an agent with
-  `max_tool_calls: 1` MUST allow N `ptc_lisp_execute` calls in
+  `max_tool_calls: 1` MUST allow N `lisp_eval` calls in
   sequence (bounded only by `max_turns`). Native app-tool calls
   continue to consume the budget as today.
 - No multi-call rule yet; assume well-formed turns. Validator still
@@ -1450,7 +1450,7 @@ ambiguity) is worth surfacing before downstream tiers depend on it.
 
 **3b. `turn_history` semantics in combined mode.**
 - Per "`turn_history` Semantics In Combined Mode": only successful
-  `ptc_lisp_execute` results advance it. Native calls, direct text
+  `lisp_eval` results advance it. Native calls, direct text
   turns, and all error paths do not.
 - Tests cover each case directly.
 
@@ -1535,24 +1535,24 @@ suggestion as a blocker until resolved.
   `expose: :native` is rejected at parse time with a clear error.
 - Multiple native app-tool calls in a single assistant turn still work
   (existing TextMode behavior preserved).
-- Multi-call rule precedence: `ptc_lisp_execute` + unknown native tool
-  rejects all with `mixed_with_ptc_lisp_execute`, not `unknown_tool`.
-- Multi-call rule precedence: two `ptc_lisp_execute` calls reject all
+- Multi-call rule precedence: `lisp_eval` + unknown native tool
+  rejects all with `mixed_with_lisp_eval`, not `unknown_tool`.
+- Multi-call rule precedence: two `lisp_eval` calls reject all
   with `multiple_tool_calls`.
-- Single unknown native tool (no `ptc_lisp_execute`) returns one
+- Single unknown native tool (no `lisp_eval`) returns one
   `unknown_tool` error result; other valid native calls in the same
   turn proceed normally.
-- `ptc_lisp_execute` invocations do not consume `max_tool_calls`;
+- `lisp_eval` invocations do not consume `max_tool_calls`;
   native app-tool calls do. Direct test: `max_tool_calls: 1` with a
-  turn budget of 4 allows ≥2 sequential `ptc_lisp_execute` calls,
+  turn budget of 4 allows ≥2 sequential `lisp_eval` calls,
   while a single native call exhausts the budget.
-- `(return v)` inside `ptc_lisp_execute` produces a success tool-result;
+- `(return v)` inside `lisp_eval` produces a success tool-result;
   the LLM gets one more turn to respond **when budget remains**. The
   agent's final answer is the LLM's final text, not `v`.
-- `(fail v)` inside `ptc_lisp_execute` produces an error tool-result
+- `(fail v)` inside `lisp_eval` produces an error tool-result
   (`reason: "fail"`); the LLM gets one more turn to respond **when
   budget remains**.
-- `ptc_lisp_execute` invoked on the final available turn: tool-result
+- `lisp_eval` invoked on the final available turn: tool-result
   JSON is emitted and paired with the `tool_call_id`, then the loop
   terminates via TextMode's existing `max_turns_exceeded` path. No
   follow-up text turn happens. Test directly.

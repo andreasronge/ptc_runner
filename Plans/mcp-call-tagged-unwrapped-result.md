@@ -53,8 +53,8 @@ the default.
    reference, prompt cards, and analyzer guidance.
 5. Keep raw MCP envelope access possible through a server-side
    per-upstream/tool policy, without adding a second call shape.
-6. Align direct `ptc_lisp_execute` aggregator mode and agentic
-   `ptc_task` around the same `tool/mcp-call` return contract.
+6. Align direct `lisp_eval` aggregator mode and agentic
+   `lisp_task` around the same `tool/mcp-call` return contract.
 7. Keep MCP tool descriptions short and self-contained according to
    `priv/prompts/README.md`.
 8. Remove duplicated MCP description prose while changing the
@@ -461,26 +461,26 @@ catalog examples multiple times in the static card.
 ### 7.3 Session Description Duplication
 
 The session tools currently duplicate a full "PTC-Lisp sessions"
-preamble across both `ptc_session_start` and `ptc_session_eval`. Some
+preamble across both `lisp_session_start` and `lisp_session_eval`. Some
 duplication is defensible because MCP clients may load tool
 descriptions individually, but the duplicated preamble should be
 trimmed:
 
-- `ptc_session_eval` may keep the standalone session authoring model
+- `lisp_session_eval` may keep the standalone session authoring model
   because it is where generated code is evaluated.
-- `ptc_session_start` should be reduced to the minimal standalone
+- `lisp_session_start` should be reduced to the minimal standalone
   facts needed to create an empty session.
-- `ptc_session_inspect`, `ptc_session_list`, `ptc_session_forget`, and
-  `ptc_session_close` should stay short unless a concrete client
+- `lisp_session_inspect`, `lisp_session_list`, `lisp_session_forget`, and
+  `lisp_session_close` should stay short unless a concrete client
   failure shows they need more context.
 
 This cleanup can happen in the same prompt pass because it shares the
 same goal: lower MCP `tools/list` payload and reduce drift between
 duplicated prompt facts.
 
-### 7.4 Agentic `ptc_task` Prompt
+### 7.4 Agentic `lisp_task` Prompt
 
-Update the agentic MCP-call card in `PromptRegistry` so `ptc_task`
+Update the agentic MCP-call card in `PromptRegistry` so `lisp_task`
 uses the same result contract:
 
 - remove instructions to apply `mcp/text` or `mcp/json` to `(:value r)`
@@ -645,7 +645,7 @@ Add or update tests for:
 12. Direct aggregator mode rejects unknown top-level keys, forbidden
     raw-mode keys, and duplicate normalized keys as programmer faults.
 13. `isError: true` envelopes return `:ok false :reason :tool_error`
-   in both direct aggregator mode and agentic `ptc_task`.
+   in both direct aggregator mode and agentic `lisp_task`.
 14. MCP output schemas allow `tool_error` for diagnostic reason enums.
 15. `isError: true` diagnostics use `tool_error` in `upstream_calls`,
     agentic ledger output, debug summaries, and tests.

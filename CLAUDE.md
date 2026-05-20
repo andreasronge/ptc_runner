@@ -43,7 +43,7 @@ Run `mix precommit` before committing and `mix prepush` before `git push`. If ei
 - `docs/` - Specifications and guidelines
 - `demo/` - LLM integration testing and benchmarks (see `demo/README.md` for CLI options)
 - `priv/prompts/` - LLM prompt templates (compile-time; recompile after changes)
-- `mcp_server/` - Sibling Mix project (`ptc_runner_mcp` on Hex): stdio MCP server exposing `ptc_lisp_execute` to MCP clients
+- `mcp_server/` - Sibling Mix project (`ptc_runner_mcp` on Hex): stdio MCP server exposing `lisp_eval` to MCP clients
 - `ptc_viewer/` - Sibling Mix project: web-based trace viewer for SubAgent / planner runs (`mix ptc.viewer`)
 
 ## Architecture

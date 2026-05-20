@@ -19,7 +19,7 @@ SubAgent.new(prompt: "...", tools: tools, ptc_transport: :tool_call)
 | Transport | Default? | Wire format | Pick when |
 |-----------|----------|-------------|-----------|
 | `:content` | yes | Markdown-fenced PTC-Lisp in assistant message | One program is enough. Lowest latency, lowest cost, single LLM turn. |
-| `:tool_call` | opt-in | Native call to one internal `ptc_lisp_execute` tool whose `program` arg is the source | Native tool calling is materially more reliable than fenced-code parsing on this provider/model, or the workload truly needs iterative refinement. |
+| `:tool_call` | opt-in | Native call to one internal `lisp_eval` tool whose `program` arg is the source | Native tool calling is materially more reliable than fenced-code parsing on this provider/model, or the workload truly needs iterative refinement. |
 
 `:content` is the default and stays the default in this release. `:tool_call`
 is opt-in. Neither replaces the other.
@@ -40,15 +40,15 @@ same workload.
 
 ### `:tool_call` (opt-in)
 
-PtcRunner exposes exactly one provider-native tool, `ptc_lisp_execute`, whose
+PtcRunner exposes exactly one provider-native tool, `lisp_eval`, whose
 single argument is the PTC-Lisp source string. App tools are **not** exposed
-as native tools — only `ptc_lisp_execute` is. App tools remain available
+as native tools — only `lisp_eval` is. App tools remain available
 inside the sandboxed program as `(tool/name ...)`, identically to
 `:content` mode.
 
 Per assistant turn, the LLM may:
 
-- Call `ptc_lisp_execute` once. PtcRunner runs the program, returns the result
+- Call `lisp_eval` once. PtcRunner runs the program, returns the result
   as a tool-result message, and the loop continues to the next turn.
 - Return a final answer directly as content (no tool call). PtcRunner
   validates the answer against `signature:` exactly like `(return v)` would.
@@ -60,7 +60,7 @@ Per assistant turn, the LLM may:
   call.
 
 `:tool_call` therefore turns one PTC-Lisp program into a ReAct-style loop: the
-model calls `ptc_lisp_execute` zero or more times, looks at intermediate
+model calls `lisp_eval` zero or more times, looks at intermediate
 results, and writes the next program (or the final answer). That extra
 round-tripping is a **tradeoff, not an upgrade**.
 
@@ -71,7 +71,7 @@ my app tools natively?" The deliberate two-layer model is:
 
 | Layer | What it is | How the LLM invokes it |
 |-------|------------|------------------------|
-| Provider-native | Exactly one tool: `ptc_lisp_execute`. | Native function-calling on the LLM provider. |
+| Provider-native | Exactly one tool: `lisp_eval`. | Native function-calling on the LLM provider. |
 | PTC-Lisp | All app tools registered on the agent. | From inside a PTC-Lisp program: `(tool/name ...)`. |
 
 Keeping app tools inside the sandbox preserves the guarantees PtcRunner exists
@@ -132,15 +132,15 @@ It is tempting to read `:tool_call` as the modern, production-grade option and
   sandbox, or the tool surface. It only changes how the program string is
   delivered.
 - **`:tool_call` adds turns.** A workload that takes one turn in `:content`
-  often takes two or three in `:tool_call` (call `ptc_lisp_execute`, get
+  often takes two or three in `:tool_call` (call `lisp_eval`, get
   result, return final answer). Pay for the extra turns deliberately.
 - **`:tool_call` can hurt reliability on capable models.** Models that
   already emit fenced code cleanly (e.g., recent Anthropic) sometimes do
   *worse* on `:tool_call`: the loop encourages them to fragment one-program
-  work into multiple `ptc_lisp_execute` calls, replan between turns, or
+  work into multiple `lisp_eval` calls, replan between turns, or
   embed the answer in conversational prose. This is not hypothetical —
   measure before switching.
-- **Each `:tool_call` turn re-ships the `ptc_lisp_execute` schema.**
+- **Each `:tool_call` turn re-ships the `lisp_eval` schema.**
   In practice that's ~800 input tokens of overhead per turn. On simple
   workloads, this can dominate the total prompt cost.
 
@@ -190,7 +190,7 @@ details.
 
 - Don't pass `ptc_transport` together with `output: :text` — raises
   `ArgumentError`. The transport only applies to PTC-Lisp programs.
-- Don't define an app tool named `ptc_lisp_execute`. The name is reserved
+- Don't define an app tool named `lisp_eval`. The name is reserved
   globally; the validator rejects it regardless of `ptc_transport`.
 - Don't switch transports mid-conversation. `ptc_transport` is part of the
   agent contract; pick once per agent and stay there.
