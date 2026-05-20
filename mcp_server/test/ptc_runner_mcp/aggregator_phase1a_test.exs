@@ -308,6 +308,20 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["status"] == "error"
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "no upstream 'ghost' configured"
+      assert structured(env)["message"] =~ "Configured upstreams: alpha"
+      assert structured(env)["message"] =~ "(catalog/search-tools \"query\" {:limit 8})"
+    end
+
+    test "missing :tool hints catalog discovery for that upstream" do
+      put_fake("alpha", %{"known" => fn _, _ -> {:ok, "ok"} end})
+
+      env = call(~S|(tool/mcp-call {:server "alpha" :args {}})|)
+
+      assert env["isError"] == true
+      assert structured(env)["reason"] == "runtime_error"
+      assert structured(env)["message"] =~ "requires :tool"
+      assert structured(env)["message"] =~ ~s|(catalog/list-tools "alpha" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(catalog/search-tools "query" {:limit 8})|
     end
 
     test "unknown tool on a started upstream → runtime_error" do
@@ -321,6 +335,22 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "no tool 'unknown' in upstream 'alpha'"
+      assert structured(env)["message"] =~ "Known tools include: known"
+      assert structured(env)["message"] =~ ~s|(catalog/list-tools "alpha" {:limit 20})|
+    end
+
+    test "unknown tool suggests a close cached match and describe-tool" do
+      put_fake("alpha", %{"list_directory" => fn _, _ -> {:ok, "ok"} end})
+
+      _warm = call(~S|(tool/mcp-call {:server "alpha" :tool "list_directory" :args {}})|)
+
+      env = call(~S|(tool/mcp-call {:server "alpha" :tool "list_directry" :args {}})|)
+
+      assert env["isError"] == true
+      assert structured(env)["message"] =~ ~s|Did you mean "list_directory"?|
+
+      assert structured(env)["message"] =~
+               ~s|(catalog/describe-tool "alpha" "list_directory")|
     end
 
     test "unknown tool on a NOT-started upstream → world-fault upstream_unavailable (§7.4 cold start)" do
@@ -386,6 +416,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       assert structured(env)["message"] =~
                "no tool 'missspelled' in upstream 'fake-x'"
+
+      assert structured(env)["message"] =~ "Known tools include: search"
+      assert structured(env)["message"] =~ ~s|(catalog/list-tools "fake-x" {:limit 20})|
 
       # The Fake's `call/4` MUST NOT be invoked: programmer-fault
       # surfaces BEFORE the upstream call, so the test-only counter
@@ -475,6 +508,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "rejected args"
+      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "alpha" "x")|
       # The upstream fun must NOT have been invoked (§7.2: the rejection
       # happens before the upstream call is attempted).
       assert :counters.get(called, 1) == 0
@@ -661,12 +695,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # Aggregator description includes the call shape and tagged
       # unwrapped result contract early in the tool description.
       assert desc =~ "tool/mcp-call"
-      assert desc =~ "inspect `:ok`"
-      assert desc =~ ":value payload"
-      assert desc =~ ":value` is already unwrapped"
-      assert desc =~ ":raw"
-      assert desc =~ "Aggregator contract"
-      assert desc =~ "Use `output_schema` for typed final results"
+      assert desc =~ "Check `:ok`"
     end
 
     test "annotations match §8.2 (destructiveHint: true, readOnlyHint: false)" do
@@ -748,11 +777,60 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert Jason.decode!(mirror)["upstream_calls"] == structured["upstream_calls"]
     end
 
+    test "upstream_results summarizes successful upstream result shape" do
+      put_fake("alpha", %{
+        "x" => fn _, _ ->
+          {:ok,
+           %{
+             "structuredContent" => %{
+               "content" => "[FILE] README.md\n[DIR] lib",
+               "count" => 2
+             }
+           }}
+        end
+      })
+
+      env = call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {}})|)
+
+      assert [
+               %{
+                 "server" => "alpha",
+                 "tool" => "x",
+                 "status" => "ok",
+                 "value_kind" => "json",
+                 "shape" => shape,
+                 "preview" => preview
+               }
+             ] = structured(env)["upstream_results"]
+
+      assert shape =~ "map keys="
+      assert shape =~ "content"
+      assert preview =~ "\"content\""
+      assert preview =~ "[FILE] README.md"
+      refute Map.has_key?(hd(upstream_calls(env)), "result_overview")
+    end
+
+    test "upstream_results previews are valid UTF-8 when truncated mid-codepoint" do
+      put_fake("alpha", %{
+        "x" => fn _, _ ->
+          {:ok, String.duplicate("a", 239) <> "é"}
+        end
+      })
+
+      env = call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {}})|)
+      preview = structured(env)["upstream_results"] |> hd() |> Map.fetch!("preview")
+
+      assert String.valid?(preview)
+      assert preview == String.duplicate("a", 239) <> "..."
+      assert {:ok, _} = Jason.encode(env)
+    end
+
     test "upstream_calls is omitted when empty (no upstream calls made)" do
       put_fake("alpha", %{})
 
       env = call("(+ 1 2)")
       refute Map.has_key?(structured(env), "upstream_calls")
+      refute Map.has_key?(structured(env), "upstream_results")
     end
   end
 

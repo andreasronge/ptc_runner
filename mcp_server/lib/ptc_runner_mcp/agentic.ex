@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Agentic do
     Envelope,
     Limits,
     PayloadMetrics,
+    PromptRegistry,
     UpstreamCalls
   }
 
@@ -27,7 +28,7 @@ defmodule PtcRunnerMcp.Agentic do
 
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
-  @tool_name "ptc_task"
+  @tool_name "lisp_task"
 
   @doc false
   @spec tool_name() :: String.t()
@@ -276,7 +277,9 @@ defmodule PtcRunnerMcp.Agentic do
   defp planner_stop_meta({:error, kind, _message, _meta}), do: %{status: :error, reason: kind}
 
   defp project_subagent_result({:ok, step}, ledger, planner_log, validated, cfg) do
-    calls = ledger_payload(ledger)
+    entries = Ledger.entries(ledger)
+    calls = ledger_payload(entries)
+    upstream_results = Projection.upstream_results(entries)
     planner = planner_payload(planner_log)
 
     {rendered, render_warnings} =
@@ -301,6 +304,7 @@ defmodule PtcRunnerMcp.Agentic do
         "upstream_calls" => calls,
         "trace_id" => step.trace_id
       }
+      |> maybe_put_upstream_results(upstream_results)
       |> maybe_put_program(final_program(step), cfg)
       |> put_ptc_metrics(final_result_bytes_for(answer, structured_result), calls, planner_log)
 
@@ -310,7 +314,8 @@ defmodule PtcRunnerMcp.Agentic do
   defp project_subagent_result({:error, step}, ledger, planner_log, _validated, cfg) do
     planner = planner_payload(planner_log)
     side_effecting_attempted? = Ledger.side_effecting_attempted?(ledger)
-    calls = ledger_payload(ledger)
+    entries = Ledger.entries(ledger)
+    calls = ledger_payload(entries)
 
     partial = %{
       "planner" => planner,
@@ -319,6 +324,7 @@ defmodule PtcRunnerMcp.Agentic do
         "turn_count" => length(step.turns || [])
       },
       "upstream_calls" => calls,
+      "upstream_results" => Projection.upstream_results(entries),
       "program" => final_program(step),
       "trace_id" => step.trace_id,
       # On error `final_result_bytes` is 0 and the ratio is `null`
@@ -337,17 +343,20 @@ defmodule PtcRunnerMcp.Agentic do
     )
   end
 
-  defp ledger_payload(ledger) do
-    ledger
-    |> Ledger.entries()
-    |> Projection.ledger_entries()
+  defp ledger_payload(entries) when is_list(entries) do
+    Projection.ledger_entries(entries)
   end
+
+  defp maybe_put_upstream_results(payload, []), do: payload
+
+  defp maybe_put_upstream_results(payload, results) when is_list(results),
+    do: Map.put(payload, "upstream_results", results)
 
   # ----------------------------------------------------------------
   # `ptc_metrics` decoration (Plans/ptc-runner-mcp-payload-reduction.md §4.3)
   # ----------------------------------------------------------------
 
-  # `ptc_task`'s `final_result_bytes` is the JSON byte size of the
+  # `lisp_task`'s `final_result_bytes` is the JSON byte size of the
   # user-facing answer subset `{answer, structured_result}` (§4.3 /
   # §7 #9). Encode failures (vanishingly rare for already-rendered
   # JSON) collapse to 0 — the ratio then degrades to `null`, which is
@@ -364,8 +373,8 @@ defmodule PtcRunnerMcp.Agentic do
   end
 
   defp task_ptc_metrics(final_result_bytes, calls, planner_log) do
-    # `prints_bytes: 0` — `ptc_task` has no `prints` array; the 0 is
-    # shape parity with the `ptc_lisp_execute` block (§4.3).
+    # `prints_bytes: 0` — `lisp_task` has no `prints` array; the 0 is
+    # shape parity with the `lisp_eval` block (§4.3).
     PayloadMetrics.build(final_result_bytes, 0, calls,
       server_side_llm: server_side_llm_input(planner_log)
     )
@@ -530,6 +539,7 @@ defmodule PtcRunnerMcp.Agentic do
       "execution" => Map.get(partial, "execution", %{}),
       "upstream_calls" => Map.get(partial, "upstream_calls", [])
     }
+    |> maybe_put_upstream_results(Map.get(partial, "upstream_results", []))
     |> maybe_put_program(Map.get(partial, "program"), cfg)
     |> maybe_put_trace_id(Map.get(partial, "trace_id"))
     |> maybe_put_ptc_metrics(Map.get(partial, "ptc_metrics"))
@@ -668,7 +678,7 @@ defmodule PtcRunnerMcp.Agentic do
     }
   end
 
-  # `Plans/ptc-runner-mcp-payload-reduction.md` §5: the `ptc_task`
+  # `Plans/ptc-runner-mcp-payload-reduction.md` §5: the `lisp_task`
   # `outputSchema` gains an optional `ptc_metrics` object and the
   # `upstream_calls[]` items document the new `result_bytes` /
   # `oversize` fields. Both are additive — no `additionalProperties`
@@ -711,6 +721,7 @@ defmodule PtcRunnerMcp.Agentic do
           ],
           "properties" => %{
             "upstream_calls" => upstream_calls_schema,
+            "upstream_results" => %{"type" => "array"},
             "ptc_metrics" => @ptc_metrics_property
           }
         },
@@ -727,6 +738,7 @@ defmodule PtcRunnerMcp.Agentic do
           ],
           "properties" => %{
             "upstream_calls" => upstream_calls_schema,
+            "upstream_results" => %{"type" => "array"},
             "ptc_metrics" => @ptc_metrics_property
           }
         }
@@ -735,14 +747,14 @@ defmodule PtcRunnerMcp.Agentic do
   end
 
   defp tool_description do
-    """
-    Use this tool for bounded plain-English tasks over the configured upstream MCP servers. Describe the result you want; the aggregator will plan and execute internal upstream calls.
+    base = PromptRegistry.render(:lisp_task_description, [])
+    summary = capability_summary_for_tool_description()
 
-    Available upstream capabilities:
-    #{capability_summary_for_tool_description()}
-
-    Do not try to call upstream MCP servers through this tool. Ask for the outcome in plain English.
-    """
+    if summary in [nil, ""] do
+      base
+    else
+      base <> "\n\nAvailable upstream capabilities:\n" <> summary
+    end
   end
 
   defp capability_summary_for_tool_description do

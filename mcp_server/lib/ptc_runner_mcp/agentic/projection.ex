@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.Agentic.Projection do
   @moduledoc """
-  Shared response-projection constants for SubAgent-backed `ptc_task`.
+  Shared response-projection constants for SubAgent-backed `lisp_task`.
 
   Phase 0 keeps these names in one place so adapter, ledger, and tests do not
   invent divergent atoms or JSON reason strings.
@@ -23,11 +23,19 @@ defmodule PtcRunnerMcp.Agentic.Projection do
     Enum.map(entries, &ledger_entry/1)
   end
 
+  @doc "Projects compact LLM-facing upstream result summaries."
+  @spec upstream_results([map()]) :: [map()]
+  def upstream_results(entries) when is_list(entries) do
+    entries
+    |> Enum.map(&upstream_result/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
   defp ledger_entry(entry) do
     # `result_bytes` (`integer | null`) and `oversize` (`boolean`) per
     # `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 — always present
-    # on the projection so the `ptc_task` `upstream_calls[]` shape
-    # matches the `ptc_lisp_execute` one. An `:attempted`-only entry
+    # on the projection so the `lisp_task` `upstream_calls[]` shape
+    # matches the `lisp_eval` one. An `:attempted`-only entry
     # (interrupted before completion) has neither key in the ledger →
     # `result_bytes: null`, `oversize: false`.
     %{
@@ -44,6 +52,27 @@ defmodule PtcRunnerMcp.Agentic.Projection do
     |> maybe_put("reason", Map.get(entry, :error_reason))
     |> maybe_put("error", Map.get(entry, :error))
   end
+
+  defp upstream_result(%{status: :ok, result_overview: overview} = entry) when is_map(overview) do
+    %{
+      "server" => Map.fetch!(entry, :server),
+      "tool" => Map.fetch!(entry, :tool),
+      "status" => "ok"
+    }
+    |> Map.merge(overview)
+  end
+
+  defp upstream_result(%{status: :error} = entry) do
+    %{
+      "server" => Map.fetch!(entry, :server),
+      "tool" => Map.fetch!(entry, :tool),
+      "status" => "error"
+    }
+    |> maybe_put("reason", Map.get(entry, :error_reason))
+    |> maybe_put("error", Map.get(entry, :error))
+  end
+
+  defp upstream_result(_entry), do: nil
 
   defp normalize_result_bytes(n) when is_integer(n) and n >= 0, do: n
   defp normalize_result_bytes(_), do: nil

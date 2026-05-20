@@ -3,14 +3,14 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   Agentic-only `tool/mcp-call` wrapper foundation.
 
   This module is deliberately separate from `PtcRunnerMcp.AggregatorTools`.
-  The public `ptc_lisp_execute` adapter keeps its existing raw-value / `nil`
-  world-fault semantics; `ptc_task` will consume this module later to expose
+  The public `lisp_eval` adapter keeps its existing raw-value / `nil`
+  world-fault semantics; `lisp_task` will consume this module later to expose
   tagged success and world-fault values to generated PTC-Lisp.
   """
 
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunnerMcp.Agentic.Ledger
-  alias PtcRunnerMcp.{AggregatorConfig, Limits, McpResult, RawEnvelopePolicy}
+  alias PtcRunnerMcp.{AggregatorConfig, Limits, McpResult, RawEnvelopePolicy, UpstreamCalls}
   alias PtcRunnerMcp.Upstream.Registry
 
   @allowed_keys %{
@@ -294,7 +294,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
         # are NOT useful compression — they go into
         # `upstream_error_bytes` — but the program *did* receive the
         # full envelope, so we record its size (matching the
-        # `ptc_lisp_execute` aggregator path).
+        # `lisp_eval` aggregator path).
         {:tool_error, server, tool, :tool_error, McpResult.tool_error_message(value),
          total_duration, result_bytes(value), value}
 
@@ -326,10 +326,13 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   end
 
   defp complete_and_tag({:ok, server, tool, value, duration}, ledger, id, _started_at) do
+    {unwrapped_value, value_kind} = McpResult.unwrap(value)
+
     :ok =
       Ledger.complete_success(ledger, id,
         duration_ms: duration,
-        result_bytes: result_bytes(value)
+        result_bytes: result_bytes(value),
+        result_overview: UpstreamCalls.result_overview(unwrapped_value, value_kind)
       )
 
     McpResult.success(value, raw?: RawEnvelopePolicy.enabled?(server, tool))
