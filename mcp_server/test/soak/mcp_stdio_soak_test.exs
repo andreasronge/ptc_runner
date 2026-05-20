@@ -45,9 +45,6 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
   @moduletag :soak
   @moduletag timeout: :infinity
 
-  @release_skip_reason "release binary missing - run `MIX_ENV=prod mix release --overwrite` first " <>
-                         "(expected at #{ReleaseRunner.release_bin()})"
-
   if ReleaseRunner.release_built?() do
     alias PtcRunnerMcp.TestSupport.MemorySoak
 
@@ -120,6 +117,11 @@ defmodule PtcRunnerMcp.McpStdioSoakTest do
       {frames ++ [ReleaseRunner.exit_notif()], iters + 1}
     end
   else
+    # Defined here, in the only branch that reads it: when a release binary is
+    # present the `if` branch compiles instead and this attribute is never set,
+    # so `mix test --warnings-as-errors` stays clean regardless of build state.
+    @release_skip_reason "release binary missing - run `MIX_ENV=prod mix release --overwrite` first " <>
+                           "(expected at #{ReleaseRunner.release_bin()})"
     @tag skip: @release_skip_reason
     test "stdio stateless eval loop returns ok for every request"
   end
