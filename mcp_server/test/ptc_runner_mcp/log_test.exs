@@ -14,7 +14,7 @@ defmodule PtcRunnerMcp.LogTest do
 
     line =
       ExUnit.CaptureIO.capture_io(:stderr, fn ->
-        Log.log(:info, "test_event", %{request_id: 7, tool: "ptc_lisp_execute"})
+        Log.log(:info, "test_event", %{request_id: 7, tool: "lisp_eval"})
       end)
 
     assert String.ends_with?(line, "\n")
@@ -25,7 +25,7 @@ defmodule PtcRunnerMcp.LogTest do
     assert decoded["level"] == "info"
     assert is_binary(decoded["ts"])
     assert decoded["request_id"] == "7"
-    assert decoded["fields"] == %{"tool" => "ptc_lisp_execute"}
+    assert decoded["fields"] == %{"tool" => "lisp_eval"}
   end
 
   test "below-level events emit nothing" do

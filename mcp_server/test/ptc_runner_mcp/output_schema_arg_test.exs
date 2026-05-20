@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.OutputSchemaArgTest do
   @moduledoc """
   Coverage for the `output_schema` argument of
-  `tools/call name: "ptc_lisp_execute"`.
+  `tools/call name: "lisp_eval"`.
 
   Covers:
 
@@ -22,7 +22,7 @@ defmodule PtcRunnerMcp.OutputSchemaArgTest do
   end
 
   defp call(args) do
-    Tools.call(%{"name" => "ptc_lisp_execute", "arguments" => args})
+    Tools.call(%{"name" => "lisp_eval", "arguments" => args})
   end
 
   describe "output_schema shape validation" do

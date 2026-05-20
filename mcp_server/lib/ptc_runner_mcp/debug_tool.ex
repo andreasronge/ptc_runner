@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.DebugTool do
   @moduledoc """
-  The opt-in `ptc_debug` diagnostics tool.
+  The opt-in `lisp_debug` diagnostics tool.
 
-  See `Plans/ptc-runner-mcp-debug-tool.md` § 6. Mirrors how `ptc_task`
+  See `Plans/ptc-runner-mcp-debug-tool.md` § 6. Mirrors how `lisp_task`
   lives in `PtcRunnerMcp.Agentic`: this module owns the tool entry,
   the input/output schemas, argument validation, and `call/1` which
   dispatches `op` (`stats` | `recent` | `get`) to
@@ -10,7 +10,7 @@ defmodule PtcRunnerMcp.DebugTool do
   `op=get` from `--trace-dir` when set, and enforces
   `--max-debug-response-bytes`.
 
-  `ptc_debug` is dispatched synchronously by `PtcRunnerMcp.JsonRpc`
+  `lisp_debug` is dispatched synchronously by `PtcRunnerMcp.JsonRpc`
   with no concurrency permit, and is never written to the ring buffer.
   All operations are read-only.
   """
@@ -20,26 +20,23 @@ defmodule PtcRunnerMcp.DebugTool do
     DebugBuffer,
     DebugConfig,
     Envelope,
+    PromptRegistry,
     TraceConfig,
     TraceFile
   }
 
-  @tool_name "ptc_debug"
-
-  @description """
-  Read-only diagnostics for this MCP server. Inspect recent `tools/call` activity: aggregate stats (success/error rates, latency, error reasons, per-tool and upstream-call breakdown), the most recent calls, or one call's redacted record by `request_id`. Data is a bounded in-memory window since the server last started; payloads are redacted. Use this to investigate whether programs, the aggregator, or agentic tasks are behaving well.\
-  """
+  @tool_name "lisp_debug"
 
   @doc false
   @spec tool_name() :: String.t()
   def tool_name, do: @tool_name
 
-  @doc "The `ptc_debug` tool entry returned in `tools/list` (when enabled)."
+  @doc "The `lisp_debug` tool entry returned in `tools/list` (when enabled)."
   @spec tool_entry() :: map()
   def tool_entry do
     %{
       "name" => @tool_name,
-      "description" => @description,
+      "description" => PromptRegistry.render(:lisp_debug_description, []),
       "inputSchema" => input_schema(),
       "outputSchema" => output_schema(),
       "annotations" => %{
@@ -56,7 +53,7 @@ defmodule PtcRunnerMcp.DebugTool do
   @frame_cushion_bytes 8
 
   @doc """
-  Handle a `tools/call name: "ptc_debug"` request.
+  Handle a `tools/call name: "lisp_debug"` request.
 
   `frame_reserve_bytes` is how many bytes the surrounding JSON-RPC
   success frame (`{"jsonrpc":"2.0","id":<id>,"result":...}`) adds around
@@ -373,7 +370,7 @@ defmodule PtcRunnerMcp.DebugTool do
     end
   end
 
-  # Bound the read. `ptc_debug` runs synchronously in the Stdio process, so a
+  # Bound the read. `lisp_debug` runs synchronously in the Stdio process, so a
   # multi-MB trace (e.g. `--trace-payloads full` with a large `context`) must
   # not be slurped into memory and decoded before `capped_envelope/2` can drop
   # it — that would stall all JSON-RPC handling. Stat first: if the raw file is

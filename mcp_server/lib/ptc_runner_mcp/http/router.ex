@@ -328,7 +328,7 @@ defmodule PtcRunnerMcp.Http.Router do
     Version.negotiate(requested)
   end
 
-  defp worker_await_timeout_ms(%{"params" => %{"name" => "ptc_task"}}),
+  defp worker_await_timeout_ms(%{"params" => %{"name" => "lisp_task"}}),
     do: PtcRunnerMcp.AgenticConfig.get().task_timeout_ms + 1_000
 
   defp worker_await_timeout_ms(_frame), do: Limits.program_timeout_ms() + 1_000

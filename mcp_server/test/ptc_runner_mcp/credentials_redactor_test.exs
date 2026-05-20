@@ -152,7 +152,7 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
       event = %{
         "event" => "ptc_runner_mcp.call.stop",
         "metadata" => %{
-          "tool_name" => "ptc_lisp_execute",
+          "tool_name" => "lisp_eval",
           "reason" => "boom: deep-secret-aaaaaaaaaaa happened"
         },
         "measurements" => %{"duration" => 42}
@@ -161,7 +161,7 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
       out = Redactor.scrub_deep(event)
 
       assert out["event"] == "ptc_runner_mcp.call.stop"
-      assert out["metadata"]["tool_name"] == "ptc_lisp_execute"
+      assert out["metadata"]["tool_name"] == "lisp_eval"
       refute String.contains?(out["metadata"]["reason"], "deep-secret-aaaaaaaaaaa")
       assert String.contains?(out["metadata"]["reason"], "[REDACTED]")
       assert out["measurements"]["duration"] == 42
@@ -250,7 +250,7 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
       # before the `write_to_active/1` call) — together they
       # guarantee the JSONL never carries the secret.
       metadata = %{
-        tool_name: "ptc_lisp_execute",
+        tool_name: "lisp_eval",
         reason: "auth_failed: trace-handler-secret-zzz exposed"
       }
 

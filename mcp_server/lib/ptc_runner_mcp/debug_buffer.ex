@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.DebugBuffer do
   @moduledoc """
   In-memory ring buffer of recent `tools/call` records, backing the
-  opt-in `ptc_debug` diagnostics tool.
+  opt-in `lisp_debug` diagnostics tool.
 
   See `Plans/ptc-runner-mcp-debug-tool.md` § 5. A `GenServer` owns a
   private ETS `:ordered_set` keyed by a monotonically increasing
@@ -409,7 +409,7 @@ defmodule PtcRunnerMcp.DebugBuffer do
   end
 
   defp agentic_stats(records) do
-    tasks = Enum.filter(records, &(&1.tool == "ptc_task"))
+    tasks = Enum.filter(records, &(&1.tool == "lisp_task"))
 
     if tasks == [] do
       nil
@@ -554,12 +554,12 @@ defmodule PtcRunnerMcp.DebugBuffer do
   end
 
   # The `agentic_planner` sub-block — present only when the window has
-  # ≥ 1 `ptc_task` call carrying `ptc_metrics.server_side_llm`.
+  # ≥ 1 `lisp_task` call carrying `ptc_metrics.server_side_llm`.
   defp agentic_planner_stats(with_metrics) do
     tasks =
       with_metrics
       |> Enum.filter(fn {r, m} ->
-        r.tool == "ptc_task" and is_map(Map.get(m, "server_side_llm"))
+        r.tool == "lisp_task" and is_map(Map.get(m, "server_side_llm"))
       end)
       |> Enum.map(fn {_r, m} -> Map.get(m, "server_side_llm") end)
 

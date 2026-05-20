@@ -148,7 +148,7 @@ defmodule PtcRunnerMcp.StdioLatin1Test do
             "id" => 1,
             "method" => "tools/call",
             "params" => %{
-              "name" => "ptc_lisp_execute",
+              "name" => "lisp_eval",
               "arguments" => %{"program" => ~S|(str "smart-quote em-dash —")|}
             }
           }) <> "\n"
@@ -197,7 +197,7 @@ defmodule PtcRunnerMcp.StdioLatin1Test do
             "id" => 7,
             "method" => "tools/call",
             "params" => %{
-              "name" => "ptc_lisp_execute",
+              "name" => "lisp_eval",
               "arguments" => %{"program" => ~S|(str "delta — gamma")|}
             }
           }) <> "\n"

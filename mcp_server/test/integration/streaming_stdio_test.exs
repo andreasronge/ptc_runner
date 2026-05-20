@@ -97,9 +97,8 @@ defmodule PtcRunnerMcp.Integration.StreamingStdioTest do
     init_notif = Jason.encode!(ReleaseRunner.initialized_notif()) <> "\n"
 
     call =
-      Jason.encode!(
-        ReleaseRunner.tools_call_request(2, "ptc_lisp_execute", %{"program" => "(+ 1 2 3)"})
-      ) <> "\n"
+      Jason.encode!(ReleaseRunner.tools_call_request(2, "lisp_eval", %{"program" => "(+ 1 2 3)"})) <>
+        "\n"
 
     true = Port.command(port, init_notif)
     true = Port.command(port, call)

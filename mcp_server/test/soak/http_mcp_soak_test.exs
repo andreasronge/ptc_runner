@@ -12,8 +12,8 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
   Scenarios:
 
     * initialize -> notifications/initialized -> stateless
-      `ptc_lisp_execute` -> DELETE
-    * initialize -> `ptc_session_start` -> forced HTTP registry stop
+      `lisp_eval` -> DELETE
+    * initialize -> `lisp_session_start` -> forced HTTP registry stop
       and restart
 
   ## Run
@@ -104,7 +104,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
     {before, aft} =
       MemorySoak.measure(registry_iters, fn _phase ->
         session_id = initialize!(url)
-        ptc_session_id = start_ptc_session!(url, session_id)
+        lisp_session_id = start_ptc_session!(url, session_id)
         owner = Owner.http(session_id)
 
         assert [_] = Registry.list(owner)
@@ -113,7 +113,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
         wait_until(fn -> Registry.list(owner) == [] end)
         start_registry!(cfg)
 
-        refute ptc_session_id in Enum.map(Registry.list(owner), & &1.id)
+        refute lisp_session_id in Enum.map(Registry.list(owner), & &1.id)
       end)
 
     assert_registry_empty!()
@@ -167,7 +167,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
           "id" => "eval",
           "method" => "tools/call",
           "params" => %{
-            "name" => "ptc_lisp_execute",
+            "name" => "lisp_eval",
             "arguments" => %{"program" => program, "context" => %{}}
           }
         },
@@ -186,7 +186,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
           "jsonrpc" => "2.0",
           "id" => "start-session",
           "method" => "tools/call",
-          "params" => %{"name" => "ptc_session_start", "arguments" => %{}}
+          "params" => %{"name" => "lisp_session_start", "arguments" => %{}}
         },
         session_id: session_id
       )

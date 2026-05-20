@@ -1,10 +1,10 @@
 defmodule PtcRunnerMcp.DebugToolTest do
   @moduledoc """
-  Integration tests for the opt-in `ptc_debug` diagnostics tool.
+  Integration tests for the opt-in `lisp_debug` diagnostics tool.
 
   Covers `Plans/ptc-runner-mcp-debug-tool.md` § 10: `stats` over a mix
   of ok / timeout / runtime-error calls; validation-error and `busy`
-  rejections are recorded; `ptc_debug`'s own calls are not; `recent`
+  rejections are recorded; `lisp_debug`'s own calls are not; `recent`
   ordering / filters; `get` ring vs trace-file source + glob
   miss/collision fallback; ring eviction; the disabled-server case;
   redaction at `--trace-payloads none`; aggregator-mode `upstream_calls`
@@ -93,7 +93,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     :exit, _reason -> :ok
   end
 
-  # Dispatch `tools/call ptc_lisp_execute/ptc_task` via JsonRpc, running
+  # Dispatch `tools/call lisp_eval/lisp_task` via JsonRpc, running
   # the per-call work_fn inline (which also records into the ring).
   defp call_tool(id, name, args) do
     frame = %{
@@ -109,15 +109,15 @@ defmodule PtcRunnerMcp.DebugToolTest do
     end
   end
 
-  defp call_execute(id, args), do: call_tool(id, "ptc_lisp_execute", args)
+  defp call_execute(id, args), do: call_tool(id, "lisp_eval", args)
 
-  # Dispatch `tools/call ptc_debug` via JsonRpc (synchronous path).
+  # Dispatch `tools/call lisp_debug` via JsonRpc (synchronous path).
   defp call_debug(id, args) do
     frame = %{
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_debug", "arguments" => args}
+      "params" => %{"name" => "lisp_debug", "arguments" => args}
     }
 
     {:reply, %{"result" => env}, _} = JsonRpc.dispatch({:ok, frame})
@@ -153,7 +153,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert is_binary(s["window"]["from"])
     assert is_binary(s["window"]["to"])
 
-    le = s["by_tool"]["ptc_lisp_execute"]
+    le = s["by_tool"]["lisp_eval"]
     assert le["calls"] == 4
     assert le["ok"] == 2
     assert le["error"] == 2
@@ -248,7 +248,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
           "jsonrpc" => "2.0",
           "id" => 200,
           "method" => "tools/call",
-          "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => long}}
+          "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => long}}
         }) <> "\n"
       )
 
@@ -261,7 +261,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
           "jsonrpc" => "2.0",
           "id" => 201,
           "method" => "tools/call",
-          "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => "(+ 1 2)"}}
+          "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => "(+ 1 2)"}}
         }) <> "\n"
       )
 
@@ -291,7 +291,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert busy_rec.agentic == nil
   end
 
-  test "ptc_debug's own calls are NOT recorded" do
+  test "lisp_debug's own calls are NOT recorded" do
     :ok = enable_debug()
 
     _ = call_execute(1, %{"program" => "(+ 1 2)"})
@@ -301,33 +301,33 @@ defmodule PtcRunnerMcp.DebugToolTest do
 
     s = sc(call_debug(10, %{"op" => "stats"}))
     assert s["ring_count"] == 1
-    assert Map.keys(s["by_tool"]) == ["ptc_lisp_execute"]
-    refute Map.has_key?(s["by_tool"], "ptc_debug")
+    assert Map.keys(s["by_tool"]) == ["lisp_eval"]
+    refute Map.has_key?(s["by_tool"], "lisp_debug")
 
     r = sc(call_debug(11, %{"op" => "recent", "limit" => 50}))
     request_ids = Enum.map(r["calls"], & &1["request_id"])
     assert request_ids == ["1"]
   end
 
-  test "stats records ptc_session_list calls" do
+  test "stats records lisp_session_list calls" do
     :ok = enable_debug()
     :ok = enable_sessions()
 
-    env = call_tool(1, "ptc_session_list", %{})
+    env = call_tool(1, "lisp_session_list", %{})
     assert sc(env)["status"] == "ok"
     _ = flush_ring()
 
     s = sc(call_debug(10, %{"op" => "stats"}))
-    assert s["by_tool"]["ptc_session_list"]["calls"] == 1
+    assert s["by_tool"]["lisp_session_list"]["calls"] == 1
   end
 
-  test "unknown-tool requests (disabled ptc_task) are NOT recorded" do
+  test "unknown-tool requests (disabled lisp_task) are NOT recorded" do
     :ok = enable_debug()
 
-    # Without aggregator + --agentic, `ptc_task` is not advertised: a
-    # `tools/call ptc_task` returns `unknown_tool` and must not enter
+    # Without aggregator + --agentic, `lisp_task` is not advertised: a
+    # `tools/call lisp_task` returns `unknown_tool` and must not enter
     # the ring (§ 5.1: unknown-tool requests are not recorded).
-    env = call_tool(1, "ptc_task", %{"task" => "do stuff"})
+    env = call_tool(1, "lisp_task", %{"task" => "do stuff"})
     assert env["isError"] == true
     assert sc(env)["reason"] == "unknown_tool"
 
@@ -336,7 +336,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
 
     s = sc(call_debug(10, %{"op" => "stats"}))
     assert s["ring_count"] == 1
-    refute Map.has_key?(s["by_tool"], "ptc_task")
+    refute Map.has_key?(s["by_tool"], "lisp_task")
     assert DebugBuffer.get("1") == :not_found
   end
 
@@ -439,7 +439,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     DebugBuffer.record(%{
       request_id: "colliding",
       ts: DateTime.utc_now(),
-      tool: "ptc_lisp_execute",
+      tool: "lisp_eval",
       status: :ok,
       is_error: false,
       reason: nil,
@@ -530,7 +530,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert g["source"] == "trace_file"
     refute Map.has_key?(g, "record")
     assert g["note"] =~ "not inlined"
-    # The prior-run payload is never read, so it cannot leak through ptc_debug.
+    # The prior-run payload is never read, so it cannot leak through lisp_debug.
     refute Jason.encode!(env) =~ secret
   end
 
@@ -551,7 +551,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
       "jsonrpc" => "2.0",
       "id" => big_id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_debug", "arguments" => %{"op" => "recent", "limit" => 200}}
+      "params" => %{"name" => "lisp_debug", "arguments" => %{"op" => "recent", "limit" => 200}}
     }
 
     {:reply, reply, _} = JsonRpc.dispatch({:ok, frame})
@@ -599,12 +599,12 @@ defmodule PtcRunnerMcp.DebugToolTest do
   # disabled server
   # ----------------------------------------------------------------
 
-  test "without --debug-tool: ptc_debug absent from tools/list, unknown_tool on call, no DebugBuffer" do
+  test "without --debug-tool: lisp_debug absent from tools/list, unknown_tool on call, no DebugBuffer" do
     disable_debug()
 
     list = PtcRunnerMcp.Tools.list()
     names = Enum.map(list["tools"], & &1["name"])
-    refute "ptc_debug" in names
+    refute "lisp_debug" in names
 
     env = call_debug(1, %{"op" => "stats"})
     assert env["isError"] == true
@@ -613,7 +613,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert Process.whereis(DebugBuffer) == nil
   end
 
-  test "without --debug-tool: a ptc_debug call goes through the generic unknown-tool trace path" do
+  test "without --debug-tool: a lisp_debug call goes through the generic unknown-tool trace path" do
     dir = Path.join(System.tmp_dir!(), "ptc_dbg_unk_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
@@ -626,7 +626,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert sc(env)["reason"] == "unknown_tool"
 
     # Like any other unknown tool, the call is traced: a per-call JSONL file
-    # under --trace-dir for this request id (no special-casing of ptc_debug).
+    # under --trace-dir for this request id (no special-casing of lisp_debug).
     hash8 = PtcRunnerMcp.TraceFile.request_id_hash8(1)
 
     files =
@@ -636,10 +636,10 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert files != []
   end
 
-  test "with --debug-tool: ptc_debug present in tools/list with read-only annotations" do
+  test "with --debug-tool: lisp_debug present in tools/list with read-only annotations" do
     :ok = enable_debug()
     list = PtcRunnerMcp.Tools.list()
-    entry = Enum.find(list["tools"], &(&1["name"] == "ptc_debug"))
+    entry = Enum.find(list["tools"], &(&1["name"] == "lisp_debug"))
     assert entry
 
     assert entry["annotations"] == %{
@@ -651,8 +651,8 @@ defmodule PtcRunnerMcp.DebugToolTest do
 
     assert entry["inputSchema"]["required"] == ["op"]
     assert entry["inputSchema"]["additionalProperties"] == false
-    # `ptc_debug` is listed after `ptc_lisp_execute`.
-    assert List.last(Enum.map(list["tools"], & &1["name"])) == "ptc_debug"
+    # `lisp_debug` is listed after `lisp_eval`.
+    assert List.last(Enum.map(list["tools"], & &1["name"])) == "lisp_debug"
 
     # outputSchema must also cover the standard `args_error` payload so strict
     # clients validating `structuredContent` don't reject the server's own
@@ -664,7 +664,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     assert err
     assert "args_error" in err["properties"]["reason"]["enum"]
 
-    # And the actual envelope a failed `ptc_debug` call returns matches it.
+    # And the actual envelope a failed `lisp_debug` call returns matches it.
     bad = sc(call_debug(99, %{}))
     assert bad["status"] == "error"
     assert bad["reason"] == "args_error"
@@ -676,7 +676,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
   # validation
   # ----------------------------------------------------------------
 
-  test "ptc_debug arg validation: unknown op, missing request_id, bad types → args_error" do
+  test "lisp_debug arg validation: unknown op, missing request_id, bad types → args_error" do
     :ok = enable_debug()
 
     bad_op = call_debug(1, %{"op" => "nope"})
@@ -728,7 +728,7 @@ defmodule PtcRunnerMcp.DebugToolTest do
     refute Map.has_key?(call["program"], "preview")
 
     g = sc(call_debug(11, %{"op" => "get", "request_id" => "1"}))
-    # The secret must not appear anywhere in any ptc_debug output.
+    # The secret must not appear anywhere in any lisp_debug output.
     refute String.contains?(Jason.encode!(r), secret)
     refute String.contains?(Jason.encode!(g), secret)
   end

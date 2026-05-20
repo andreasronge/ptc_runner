@@ -357,7 +357,7 @@ defmodule PtcRunnerMcp.Application do
   end
 
   # Public-but-undocumented seam used by tests to verify CLI > env >
-  # default precedence for the opt-in `ptc_debug` tool config
+  # default precedence for the opt-in `lisp_debug` tool config
   # (`Plans/ptc-runner-mcp-debug-tool.md` § 4).
   @doc false
   @spec apply_debug_config(map()) :: :ok
@@ -978,7 +978,7 @@ defmodule PtcRunnerMcp.Application do
   # In :test, the application starts an empty supervisor; tests
   # construct the stdio loop themselves with a fake IO device.
   #
-  # The `ptc_debug` ring buffer (`DebugBuffer`) is supervised here too,
+  # The `lisp_debug` ring buffer (`DebugBuffer`) is supervised here too,
   # but only when `--debug-tool` is set. It is listed **last** so that
   # under `:rest_for_one` a `DebugBuffer` crash restarts nothing after
   # it — an optional diagnostics failure must degrade to "no
@@ -1055,7 +1055,8 @@ defmodule PtcRunnerMcp.Application do
   @doc false
   @spec load_aggregator_config(map()) :: %{
           upstreams: [%{name: String.t(), impl: module(), config: map(), metadata: map()}],
-          credentials: %{String.t() => Credentials.Binding.t()}
+          credentials: %{String.t() => Credentials.Binding.t()},
+          raw_envelope_policy: map()
         }
   def load_aggregator_config(args) do
     path =

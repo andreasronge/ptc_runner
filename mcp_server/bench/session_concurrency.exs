@@ -1,5 +1,5 @@
 # Concurrency benchmark for the MCP session path — many concurrent
-# sessions, each driven through many multi-turn `ptc_session_eval`
+# sessions, each driven through many multi-turn `lisp_session_eval`
 # calls. This is the layer above `PtcRunner.Lisp.run/2`: per-session
 # GenServer, the begin_eval/commit_eval protocol, projection, and
 # limit checks.
@@ -41,20 +41,20 @@ SessionsConfig.set(%{
 
 start_session = fn ->
   %{"structuredContent" => %{"session_id" => id}} =
-    Sessions.call(%{"name" => "ptc_session_start", "arguments" => %{}})
+    Sessions.call(%{"name" => "lisp_session_start", "arguments" => %{}})
 
   id
 end
 
 eval = fn id ->
   Sessions.call(%{
-    "name" => "ptc_session_eval",
+    "name" => "lisp_session_eval",
     "arguments" => %{"session_id" => id, "program" => program}
   })
 end
 
 close = fn id ->
-  Sessions.call(%{"name" => "ptc_session_close", "arguments" => %{"session_id" => id}})
+  Sessions.call(%{"name" => "lisp_session_close", "arguments" => %{"session_id" => id}})
 end
 
 # warmup
@@ -85,7 +85,7 @@ start_samples =
     elapsed
   end
 
-IO.puts("ptc_session_start  median #{median.(start_samples)} us  (start+close cycle)")
+IO.puts("lisp_session_start  median #{median.(start_samples)} us  (start+close cycle)")
 
 # --- per-turn latency: session eval vs bare Lisp.run ----------------
 IO.puts("\n=== Per-turn cost: session eval vs bare Lisp.run/2 ===")
@@ -96,7 +96,7 @@ close.(sid)
 
 bare_samples = for _ <- 1..5000, do: us.(fn -> Lisp.run(program) end)
 
-IO.puts("ptc_session_eval   median #{median.(turn_samples)} us")
+IO.puts("lisp_session_eval   median #{median.(turn_samples)} us")
 IO.puts("bare Lisp.run/2    median #{median.(bare_samples)} us")
 IO.puts("session-layer overhead ≈ #{median.(turn_samples) - median.(bare_samples)} us/turn")
 

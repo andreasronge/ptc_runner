@@ -10,10 +10,10 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
   entry, the GenServer's state grows.
 
   Each iteration:
-    1. `ptc_session_start` (create supervised Session GenServer)
-    2. one `ptc_session_eval` (commits state, exercises the snapshot
+    1. `lisp_session_start` (create supervised Session GenServer)
+    2. one `lisp_session_eval` (commits state, exercises the snapshot
        reserve/commit flow)
-    3. `ptc_session_close` (Registry.mark_closed + child termination)
+    3. `lisp_session_close` (Registry.mark_closed + child termination)
 
   Assertions:
     * Process count returns to baseline (±tolerance).
@@ -65,7 +65,7 @@ defmodule PtcRunnerMcp.SessionChurnSoakTest do
     MemorySoak.assert_atoms_per_iter!(before, aft, iters)
   end
 
-  # `ptc_session_close` makes the Session GenServer reply then `:stop`
+  # `lisp_session_close` makes the Session GenServer reply then `:stop`
   # itself, and casts `mark_closed` to the Registry. The Session pid is
   # dead by the time `Tools.call` returns, but the Registry's pending
   # `:mark_closed` cast may still be in flight. `:sys.get_state/1` issues

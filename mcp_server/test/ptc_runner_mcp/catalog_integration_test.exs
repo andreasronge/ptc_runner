@@ -136,8 +136,9 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       env =
         call(~S"""
         (let [results (catalog/search-tools "warehouse" {:limit 5})
-              first_tool (get (first results) "tool")
-              server (get (first results) "server")
+              first_line (first results)
+              server (first (clojure.string/split first_line #"\."))
+              first_tool (first (clojure.string/split (second (clojure.string/split first_line #"\.")) #"\("))
               detail (catalog/describe-tool server first_tool)]
           (tool/mcp-call {:server server
                           :tool first_tool
@@ -175,9 +176,9 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       env =
         call(~S"""
         (let [search (catalog/search-tools "analytics" {:limit 5})
-              server (get (first search) "server")
+              server (first (clojure.string/split (first search) #":"))
               tools (catalog/list-tools server {:limit 10})
-              first_tool (get (first tools) "tool")
+              first_tool (first (clojure.string/split (second (clojure.string/split (first tools) #"\.")) #"\("))
               detail (catalog/describe-tool server first_tool)]
           (tool/mcp-call {:server server
                           :tool first_tool

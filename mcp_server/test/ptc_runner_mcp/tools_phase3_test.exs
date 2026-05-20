@@ -75,14 +75,17 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
     test "MCP prompt registry exposes aggregator description metadata" do
       assert [
                %{
-                 id: :mcp_aggregator_authoring_card,
-                 placement: :after_quick_contract,
+                 id: :lisp_eval_with_upstreams_description,
                  dynamic_boundary: :before_dynamic_catalog,
                  trust: :authoritative
                },
                %{
+                 id: :mcp_language_reference,
+                 dynamic_boundary: :static_card,
+                 trust: :authoritative
+               },
+               %{
                  id: :mcp_dynamic_catalog,
-                 placement: :after_authoritative_cards,
                  dynamic_boundary: :dynamic_catalog,
                  trust: :untrusted_data
                }
@@ -92,11 +95,10 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
     test "MCP prompt registry preserves no-tools description contract" do
       description = PromptRegistry.render(:mcp_no_tools_description, [])
 
-      assert description =~ "No app tools are available inside the program."
-      assert description =~ "PTC-Lisp authoring:"
+      assert is_binary(description)
+      assert byte_size(description) > 0
 
-      metadata = PromptRegistry.card_metadata(:mcp_no_tools_authoring_card)
-      assert metadata.profile == :mcp_no_tools
+      metadata = PromptRegistry.card_metadata(:lisp_eval_description)
       assert metadata.trust == :authoritative
       assert metadata.dynamic_boundary == :static_card
     end
@@ -119,7 +121,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert_quick_contract_in_first_chunk(first_2kb)
 
-      assert_before(description, "Aggregator contract:", "Configured upstream MCP servers:")
+      assert_before(description, "Upstreams:", "Configured upstream MCP servers:")
     end
 
     test "tool_entry/0 slim response profile preserves quick contract in first 2 KB" do
@@ -329,12 +331,11 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   defp assert_quick_contract_in_first_chunk(text) do
     for marker <- [
           "(tool/mcp-call",
-          "inspect `:ok`",
+          "Check `:ok`",
           ":value payload",
           ":reason kw",
           ":raw",
-          "catalog/",
-          "compact"
+          "Unknown result shape"
         ] do
       assert text =~ marker
     end

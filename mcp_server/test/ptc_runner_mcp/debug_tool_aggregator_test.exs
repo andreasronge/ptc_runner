@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.DebugToolAggregatorTest do
   @moduledoc """
-  `ptc_debug` integration with aggregator mode (`upstream_calls`
+  `lisp_debug` integration with aggregator mode (`upstream_calls`
   aggregation) and agentic mode (`agentic` block in `stats`).
 
   See `Plans/ptc-runner-mcp-debug-tool.md` § 10. `async: false`
@@ -93,7 +93,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => program}}
+      "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => program}}
     }
 
     {:async_call, ^id, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
@@ -105,7 +105,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_task", "arguments" => %{"task" => task}}
+      "params" => %{"name" => "lisp_task", "arguments" => %{"task" => task}}
     }
 
     {:async_call, ^id, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
@@ -117,7 +117,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_debug", "arguments" => args}
+      "params" => %{"name" => "lisp_debug", "arguments" => args}
     }
 
     {:reply, %{"result" => env}, _} = JsonRpc.dispatch({:ok, frame})
@@ -167,7 +167,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     # The error envelope itself surfaced as `ok` overall (world-fault nil),
     # so the call's `status` in the ring is "ok" — only the upstream
     # entry is an error. by_tool counts the *call*, not the upstream.
-    assert s["by_tool"]["ptc_lisp_execute"]["calls"] == 2
+    assert s["by_tool"]["lisp_eval"]["calls"] == 2
 
     # `get` (ring fallback, no --trace-dir) returns the FULL record:
     # `upstream_calls` is the per-call entry list, not just a count.
@@ -185,7 +185,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert rec2["upstream_calls"] == 1
   end
 
-  test "agentic mode: agentic block appears in stats; ptc_debug not counted in by_tool" do
+  test "agentic mode: agentic block appears in stats; lisp_debug not counted in by_tool" do
     :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
     :ok = Catalog.freeze("alpha:\n  (none)")
     :ok = AgenticConfig.set(%{enabled: true, model: "stub:model"})
@@ -196,13 +196,13 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert env["isError"] == false
     assert env["structuredContent"]["status"] == "ok"
 
-    # A plain ptc_debug call must not pollute by_tool.
+    # A plain lisp_debug call must not pollute by_tool.
     _ = call_debug(2, %{"op" => "stats"})
     _ = flush_ring()
 
     s = call_debug(10, %{"op" => "stats"})
-    assert Map.has_key?(s["by_tool"], "ptc_task")
-    refute Map.has_key?(s["by_tool"], "ptc_debug")
+    assert Map.has_key?(s["by_tool"], "lisp_task")
+    refute Map.has_key?(s["by_tool"], "lisp_debug")
 
     a = s["agentic"]
     assert a["tasks"] == 1
@@ -213,7 +213,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
 
     # The per-call record carries the agentic sub-map.
     {:ok, rec} = DebugBuffer.get("1")
-    assert rec.tool == "ptc_task"
+    assert rec.tool == "lisp_task"
     assert is_map(rec.agentic)
     assert rec.agentic.planner_status in [:ok, :error]
 
@@ -221,7 +221,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert g["record"]["agentic"]["planner_status"] in ["ok", "error"]
   end
 
-  test "agentic mode: multiple ptc_task calls aggregate in by_tool + agentic" do
+  test "agentic mode: multiple lisp_task calls aggregate in by_tool + agentic" do
     :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
     :ok = Catalog.freeze("alpha:\n  (none)")
     :ok = AgenticConfig.set(%{enabled: true, model: "stub:model"})
@@ -233,7 +233,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     _ = flush_ring()
 
     s = call_debug(10, %{"op" => "stats"})
-    assert s["by_tool"]["ptc_task"]["calls"] == 2
+    assert s["by_tool"]["lisp_task"]["calls"] == 2
     assert s["agentic"]["tasks"] == 2
   end
 
@@ -309,7 +309,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert pr["estimated_tokens"]["upstream_result"] ==
              div(pr["total_upstream_result_bytes"] + 3, 4)
 
-    # No ptc_task calls in this window → no agentic_planner sub-block.
+    # No lisp_task calls in this window → no agentic_planner sub-block.
     refute Map.has_key?(pr, "agentic_planner")
 
     # recent surfaces ptc_metrics on the per-call view; get keeps the
@@ -328,7 +328,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     assert entry["oversize"] == false
   end
 
-  test "payload_reduction.agentic_planner appears when the window has ptc_task calls" do
+  test "payload_reduction.agentic_planner appears when the window has lisp_task calls" do
     :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
     :ok = Catalog.freeze("alpha:\n  (none)")
     :ok = AgenticConfig.set(%{enabled: true, model: "stub:model"})

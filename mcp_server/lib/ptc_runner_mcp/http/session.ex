@@ -368,7 +368,7 @@ defmodule PtcRunnerMcp.Http.Session do
   defp maybe_put_http_owner(frame, _session_id), do: frame
 
   defp success_reply(id, result) when is_map(result) do
-    %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__ptc_debug_structured")}
+    %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__lisp_debug_structured")}
   end
 
   defp error_reply(id, code, message) do

@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.CatalogDescription do
   @moduledoc """
-  Mode-aware catalog description rendering for the `ptc_lisp_execute`
+  Mode-aware catalog description rendering for the `lisp_eval`
   MCP tool description.
 
   Per `Plans/ptc-runner-mcp-catalog-exposure.md` §5-§6, the catalog
@@ -16,6 +16,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   """
 
   alias PtcRunnerMcp.CatalogConfig
+  alias PtcRunnerMcp.CatalogPrompt
   alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
 
   @type snapshot_entry :: %{
@@ -26,7 +27,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
         }
 
   @doc """
-  Returns the catalog description fragment for the `ptc_lisp_execute`
+  Returns the catalog description fragment for the `lisp_eval`
   tool description, or `nil` if no catalog should be rendered.
 
   Reads the frozen snapshot and config, resolves the effective mode,
@@ -211,14 +212,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   end
 
   defp render_discovery_block do
-    """
-    Discover tools inside the program:
-
-    (catalog/search-tools "query" {:limit 8})
-    (catalog/list-tools "server-name" {:limit 20})
-    (catalog/describe-tool "server-name" "tool-name")
-    (tool/mcp-call {:server "server-name" :tool "tool-name" :args {...}})\
-    """
+    CatalogPrompt.discovery_block()
   end
 
   defp has_unknown_catalogs?(entries) do

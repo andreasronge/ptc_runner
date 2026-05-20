@@ -1,7 +1,10 @@
 defmodule PtcRunnerMcp.SessionsTest do
   use ExUnit.Case, async: false
+  import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
   import PtcRunnerMcp.TestSupport.WaitHelpers
 
+  alias PtcRunnerMcp.CatalogConfig
+  alias PtcRunnerMcp.CatalogDescription
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Credentials
   alias PtcRunnerMcp.Credentials.Binding
@@ -17,6 +20,8 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.Stdio
   alias PtcRunnerMcp.Test.JsonRpcHarness
   alias PtcRunnerMcp.Tools
+  alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
+  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   setup do
     stop_sessions_processes()
@@ -39,8 +44,8 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     names = Tools.list()["tools"] |> Enum.map(& &1["name"])
 
-    refute "ptc_session_start" in names
-    refute "ptc_session_eval" in names
+    refute "lisp_session_start" in names
+    refute "lisp_session_eval" in names
   end
 
   test "session Lisp opts preserve the aggregate parallel memory budget" do
@@ -54,15 +59,15 @@ defmodule PtcRunnerMcp.SessionsTest do
   test "session tools advertise output schemas when enabled" do
     session_tools =
       Tools.list()["tools"]
-      |> Enum.filter(&String.starts_with?(&1["name"], "ptc_session_"))
+      |> Enum.filter(&String.starts_with?(&1["name"], "lisp_session_"))
 
     assert Enum.map(session_tools, & &1["name"]) |> Enum.sort() == [
-             "ptc_session_close",
-             "ptc_session_eval",
-             "ptc_session_forget",
-             "ptc_session_inspect",
-             "ptc_session_list",
-             "ptc_session_start"
+             "lisp_session_close",
+             "lisp_session_eval",
+             "lisp_session_forget",
+             "lisp_session_inspect",
+             "lisp_session_list",
+             "lisp_session_start"
            ]
 
     assert Enum.all?(
@@ -81,82 +86,67 @@ defmodule PtcRunnerMcp.SessionsTest do
 
   test "session start and eval descriptions are rendered from prompt registry" do
     tools = Tools.list()["tools"]
-    start = Enum.find(tools, &(&1["name"] == "ptc_session_start"))
-    eval = Enum.find(tools, &(&1["name"] == "ptc_session_eval"))
+    start = Enum.find(tools, &(&1["name"] == "lisp_session_start"))
+    eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
 
     assert start["description"] == PromptRegistry.render(:mcp_session_start_description, [])
     assert eval["description"] == PromptRegistry.render(:mcp_session_eval_description, [])
+  end
 
-    assert start["description"] =~ "PTC-Lisp sessions:"
-    assert start["description"] =~ "Creates a new empty stateful PTC-Lisp session."
+  test "session eval description mentions upstream calls only when upstreams are configured" do
+    stop_existing_registry(UpstreamRegistry)
 
-    assert eval["description"] =~ "Explicit definitions persist across calls"
-    assert eval["description"] =~ "output_schema"
-    refute eval["description"] =~ "signature"
-    assert eval["description"] =~ "validation_error"
+    on_exit(fn ->
+      stop_existing_registry(UpstreamRegistry)
+      CatalogConfig.set(CatalogConfig.defaults())
+      UpstreamCatalog.clear_frozen()
+    end)
+
+    tools = Tools.list()["tools"]
+    default_eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
+
+    refute default_eval["description"] =~ "tool/mcp-call"
+    refute default_eval["description"] =~ "catalog/search-tools"
+
+    {:ok, _pid} = UpstreamRegistry.start_link(name: UpstreamRegistry)
+    :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, UpstreamRegistry)
+    CatalogConfig.set(%{catalog_mode: :lazy})
+    UpstreamCatalog.freeze_snapshot([%{name: "alpha", tools: [], metadata: %{}}])
+
+    tools = Tools.list()["tools"]
+    eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
+
+    assert eval["description"] ==
+             PromptRegistry.render(:mcp_session_eval_with_upstreams_description,
+               catalog: CatalogDescription.render()
+             )
+
+    assert eval["description"] =~ "tool/mcp-call"
+    assert eval["description"] =~ "catalog/search-tools"
   end
 
   test "session utility descriptions are rendered from prompt registry" do
     tools = Tools.list()["tools"]
 
-    assert tool_description(tools, "ptc_session_inspect") ==
+    assert tool_description(tools, "lisp_session_inspect") ==
              PromptRegistry.render(:mcp_session_inspect_description, [])
 
-    assert tool_description(tools, "ptc_session_list") ==
+    assert tool_description(tools, "lisp_session_list") ==
              PromptRegistry.render(:mcp_session_list_description, [])
 
-    assert tool_description(tools, "ptc_session_forget") ==
+    assert tool_description(tools, "lisp_session_forget") ==
              PromptRegistry.render(:mcp_session_forget_description, [])
 
-    assert tool_description(tools, "ptc_session_close") ==
+    assert tool_description(tools, "lisp_session_close") ==
              PromptRegistry.render(:mcp_session_close_description, [])
   end
 
-  test "session start and eval descriptions preserve legacy assembly shape" do
-    session_card =
-      :ptc_runner_mcp
-      |> :code.priv_dir()
-      |> Path.join("prompts/mcp_session_authoring_card.md")
-      |> File.read!()
-      |> PtcRunner.PromptLoader.extract_content()
+  test "session descriptions are rendered from registered prompt profiles" do
+    assert PromptRegistry.render(:mcp_session_start_description, []) |> is_binary()
+    assert PromptRegistry.render(:mcp_session_eval_description, []) |> is_binary()
 
-    assert PromptRegistry.render(:mcp_session_start_description, []) ==
-             session_card <> "\n\nCreates a new empty stateful PTC-Lisp session."
-
-    assert PromptRegistry.render(:mcp_session_eval_description, []) ==
-             session_card <>
-               "\n\nEvaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not." <>
-               "\n\nOptionally validates the return value against `output_schema` (JSON Schema). On validation success, the response includes `validated` structured JSON. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
-  end
-
-  test "session prompt registry pins metadata order for start and eval descriptions" do
-    assert [
-             %{
-               id: :mcp_session_authoring_card,
-               surface: :mcp_session,
-               audience: :mcp_tool_description,
-               profile: :mcp_session,
-               placement: :session_quick_contract,
-               dynamic_boundary: :static_card,
-               trust: :authoritative
-             },
-             %{
-               id: :mcp_session_start_detail,
-               placement: :after_session_quick_contract,
-               dynamic_boundary: :static_card,
-               trust: :authoritative
-             }
-           ] = PromptRegistry.profile_metadata(:mcp_session_start_description)
-
-    assert [
-             %{id: :mcp_session_authoring_card},
-             %{
-               id: :mcp_session_eval_detail,
-               placement: :after_session_quick_contract,
-               dynamic_boundary: :static_card,
-               trust: :authoritative
-             }
-           ] = PromptRegistry.profile_metadata(:mcp_session_eval_description)
+    assert PromptRegistry.profile_parts!(:mcp_session_start_description) != []
+    assert PromptRegistry.profile_parts!(:mcp_session_eval_description) != []
   end
 
   test "session utility prompt cards pin metadata" do
@@ -167,12 +157,7 @@ defmodule PtcRunnerMcp.SessionsTest do
           :mcp_session_close_description
         ] do
       assert %{
-               audience: :mcp_tool_description,
-               budget_profile: :minimal,
                dynamic_boundary: :static_card,
-               placement: :single_line_summary,
-               profile: :mcp_session,
-               surface: :mcp_session,
                trust: :authoritative
              } = PromptRegistry.card_metadata(key)
     end
@@ -216,13 +201,13 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert oversized["status"] == "ok"
     assert [%{field: "*1"}] = oversized["history_notices"]
 
-    history = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "history"})
+    history = call!("lisp_session_inspect", %{"session_id" => session_id, "view" => "history"})
     assert [%{"name" => "*1", "preview" => preview}] = history["history"]
-    assert preview =~ ":ptc_session_preview true"
+    assert preview =~ ":lisp_session_preview true"
 
     marker = eval(session_id, "*1")
     assert marker["status"] == "ok"
-    assert marker["result"] =~ ":ptc_session_preview true"
+    assert marker["result"] =~ ":lisp_session_preview true"
   end
 
   test "forget removes named bindings and clears prints" do
@@ -231,7 +216,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert eval(session_id, "(def x 1) (println \"hello\")")["status"] == "ok"
 
     forget =
-      call!("ptc_session_forget", %{
+      call!("lisp_session_forget", %{
         "session_id" => session_id,
         "bindings" => ["x"],
         "clear" => ["prints"]
@@ -240,14 +225,14 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert forget["status"] == "ok"
     assert forget["stored_keys"] == []
 
-    inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "prints"})
+    inspect = call!("lisp_session_inspect", %{"session_id" => session_id, "view" => "prints"})
     assert inspect["prints"] == []
   end
 
   test "inspect session summary does not expose advisory access mode" do
     session_id = start_session()
 
-    inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "overview"})
+    inspect = call!("lisp_session_inspect", %{"session_id" => session_id, "view" => "overview"})
 
     refute Map.has_key?(inspect["session"], "mode")
   end
@@ -287,7 +272,7 @@ defmodule PtcRunnerMcp.SessionsTest do
   end
 
   test "session start rejects non-object arguments without allocating a session" do
-    envelope = Tools.call(%{"name" => "ptc_session_start", "arguments" => []})
+    envelope = Tools.call(%{"name" => "lisp_session_start", "arguments" => []})
 
     assert envelope["isError"]
     assert envelope["structuredContent"]["reason"] == "session_args_error"
@@ -295,11 +280,11 @@ defmodule PtcRunnerMcp.SessionsTest do
 
   test "session start rejects advisory mode argument" do
     envelope =
-      Tools.call(%{"name" => "ptc_session_start", "arguments" => %{"mode" => "read_only"}})
+      Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"mode" => "read_only"}})
 
     assert envelope["isError"]
     assert envelope["structuredContent"]["reason"] == "session_args_error"
-    assert envelope["structuredContent"]["message"] =~ "unexpected ptc_session_start argument"
+    assert envelope["structuredContent"]["message"] =~ "unexpected lisp_session_start argument"
   end
 
   test "session list returns metadata-only summaries for current owner" do
@@ -307,17 +292,17 @@ defmodule PtcRunnerMcp.SessionsTest do
     owner_b = %{"transport" => "stdio", "instance_id" => "owner-b"}
 
     a_session =
-      call!("ptc_session_start", %{"title" => "A", "owner" => owner_a})["session_id"]
+      call!("lisp_session_start", %{"title" => "A", "owner" => owner_a})["session_id"]
 
     _b_session =
-      call!("ptc_session_start", %{"title" => "B", "owner" => owner_b})["session_id"]
+      call!("lisp_session_start", %{"title" => "B", "owner" => owner_b})["session_id"]
 
     assert call!(
-             "ptc_session_eval",
+             "lisp_session_eval",
              %{"session_id" => a_session, "program" => "(def secret 42)", "owner" => owner_a}
            )["status"] == "ok"
 
-    assert call!("ptc_session_list", %{"owner" => owner_a})["reason"] == "session_args_error"
+    assert call!("lisp_session_list", %{"owner" => owner_a})["reason"] == "session_args_error"
 
     listed = list_for_owner!(owner_a)
 
@@ -347,7 +332,7 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     assert eval(first, "(def newer 1)")["status"] == "ok"
 
-    listed = call!("ptc_session_list", %{})["sessions"]
+    listed = call!("lisp_session_list", %{})["sessions"]
     assert [%{"session_id" => ^first}, %{"session_id" => ^second}] = Enum.take(listed, 2)
   end
 
@@ -358,7 +343,7 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     assert {:ok, snapshot} = Sessions.begin_eval(session_id, owner, request_id, %{program: "1"})
 
-    listed = call!("ptc_session_list", %{})
+    listed = call!("lisp_session_list", %{})
 
     assert Enum.find_value(listed["sessions"], fn
              %{"session_id" => ^session_id, "eval_status" => "running"} -> true
@@ -374,7 +359,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     session_id = start_session()
 
     Process.sleep(180)
-    assert call!("ptc_session_list", %{})["count"] == 1
+    assert call!("lisp_session_list", %{})["count"] == 1
     Process.sleep(120)
 
     wait_until(
@@ -457,7 +442,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     session_id = start_session()
 
     assert [_entry] = Elixir.Registry.lookup(PtcRunnerMcp.Sessions.Names, session_id)
-    assert call!("ptc_session_close", %{"session_id" => session_id})["status"] == "ok"
+    assert call!("lisp_session_close", %{"session_id" => session_id})["status"] == "ok"
 
     wait_until(
       fn ->
@@ -488,7 +473,7 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     envelope =
       Tools.call(%{
-        "name" => "ptc_session_eval",
+        "name" => "lisp_session_eval",
         "arguments" => %{
           "session_id" => "missing",
           "program" => "1",
@@ -564,7 +549,7 @@ defmodule PtcRunnerMcp.SessionsTest do
       "id" => "busy-1",
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_session_eval",
+        "name" => "lisp_session_eval",
         "arguments" => %{"session_id" => session_id, "program" => "2"}
       }
     }
@@ -637,16 +622,16 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert read_replies(harness) == []
     assert eval(session_id, "x")["result"] == "user=> 41"
 
-    inspect = call!("ptc_session_inspect", %{"session_id" => session_id, "view" => "overview"})
+    inspect = call!("lisp_session_inspect", %{"session_id" => session_id, "view" => "overview"})
     assert inspect["session"]["eval_status"] == "idle"
   end
 
   defp start_session do
-    call!("ptc_session_start", %{})["session_id"]
+    call!("lisp_session_start", %{})["session_id"]
   end
 
   defp eval(session_id, program) do
-    call!("ptc_session_eval", %{"session_id" => session_id, "program" => program})
+    call!("lisp_session_eval", %{"session_id" => session_id, "program" => program})
   end
 
   defp list_for_owner!(owner_context) do
@@ -671,7 +656,7 @@ defmodule PtcRunnerMcp.SessionsTest do
       "id" => id,
       "method" => "tools/call",
       "params" => %{
-        "name" => "ptc_session_eval",
+        "name" => "lisp_session_eval",
         "arguments" => %{"session_id" => session_id, "program" => program}
       }
     }

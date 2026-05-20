@@ -4,9 +4,9 @@ defmodule PtcRunnerMcp.ToolsTest do
   alias PtcRunnerMcp.Tools
 
   describe "tool_entry/0" do
-    test "advertises exactly one tool named ptc_lisp_execute" do
+    test "advertises exactly one tool named lisp_eval" do
       %{"tools" => [tool]} = Tools.list()
-      assert tool["name"] == "ptc_lisp_execute"
+      assert tool["name"] == "lisp_eval"
     end
 
     test "annotations match § 8.1" do
@@ -37,10 +37,8 @@ defmodule PtcRunnerMcp.ToolsTest do
   end
 
   describe "advertised description" do
-    test "starts with the no-tools capability card, then \\n\\n, then the authoring card" do
-      profile = PtcRunnerMcp.PromptRegistry.card_text(:mcp_no_tools_capability)
-      card = Tools.authoring_card()
-      expected = profile <> "\n\n" <> card
+    test "is rendered by the prompt registry" do
+      expected = PtcRunnerMcp.PromptRegistry.render(:mcp_no_tools_description, [])
 
       assert Tools.advertised_description() == expected
 
@@ -48,28 +46,15 @@ defmodule PtcRunnerMcp.ToolsTest do
       assert tool["description"] == expected
     end
 
-    test "contains the protocol-prefix anchor" do
-      desc = Tools.advertised_description()
-      assert desc =~ "No app tools are available inside the program."
-    end
-
-    test "does NOT contain the in-process-with-app-tools anchor" do
+    test "does not leak in-process app-tool guidance" do
       desc = Tools.advertised_description()
       refute desc =~ "Call app tools as `(tool/name ...)`"
-    end
-
-    test "contains the no-tools authoring anchors" do
-      desc = Tools.advertised_description()
-      assert desc =~ "Clojure subset"
-      assert desc =~ "context"
-      assert desc =~ "(fail"
-      assert desc =~ "there is no memory of prior calls"
     end
   end
 
   describe "call/1 — argument validation (§ 9.2)" do
     test "missing program returns args_error" do
-      env = Tools.call(%{"name" => "ptc_lisp_execute", "arguments" => %{}})
+      env = Tools.call(%{"name" => "lisp_eval", "arguments" => %{}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
@@ -78,7 +63,7 @@ defmodule PtcRunnerMcp.ToolsTest do
     end
 
     test "missing arguments object treated as empty (program required)" do
-      env = Tools.call(%{"name" => "ptc_lisp_execute"})
+      env = Tools.call(%{"name" => "lisp_eval"})
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "args_error"
@@ -87,7 +72,7 @@ defmodule PtcRunnerMcp.ToolsTest do
     test "non-string program returns args_error" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => 42}
         })
 
@@ -98,7 +83,7 @@ defmodule PtcRunnerMcp.ToolsTest do
     test "whitespace-only program returns args_error" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "   \n\t  "}
         })
 
@@ -125,7 +110,7 @@ defmodule PtcRunnerMcp.ToolsTest do
     test "(+ 1 2) returns isError=false with EDN-rendered result" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "(+ 1 2)"}
         })
 
@@ -147,7 +132,7 @@ defmodule PtcRunnerMcp.ToolsTest do
     test "the :mcp_no_tools profile never decorates with ptc_metrics" do
       env =
         Tools.call(%{
-          "name" => "ptc_lisp_execute",
+          "name" => "lisp_eval",
           "arguments" => %{"program" => "(+ 1 2)"}
         })
 

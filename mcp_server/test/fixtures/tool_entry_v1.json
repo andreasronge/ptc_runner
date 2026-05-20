@@ -27,7 +27,7 @@
     ],
     "type": "object"
   },
-  "name": "ptc_lisp_execute",
+  "name": "lisp_eval",
   "outputSchema": {
     "oneOf": [
       {

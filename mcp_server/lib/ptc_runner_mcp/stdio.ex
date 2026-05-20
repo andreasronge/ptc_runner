@@ -13,7 +13,7 @@ defmodule PtcRunnerMcp.Stdio do
       and the reader resyncs at the next newline.
     * stdin EOF triggers a clean exit (§ 6.4) — all in-flight workers
       are killed, no further responses emitted.
-    * `tools/call name: "ptc_lisp_execute"` runs in a per-call worker
+    * `tools/call name: "lisp_eval"` runs in a per-call worker
       process spawned by this GenServer (§ 6.3, § 11). Workers are
       monitored; the in-flight permit is acquired by stdio before
       spawn and released on `:DOWN`. `notifications/cancelled` looks
@@ -687,7 +687,7 @@ defmodule PtcRunnerMcp.Stdio do
         })
 
         write_reply(state, success_reply(request_id, envelope))
-        # Record the `busy` rejection into the `ptc_debug` ring (the
+        # Record the `busy` rejection into the `lisp_debug` ring (the
         # recorder must observe gate rejections — § 5.1). The callback
         # is fault-isolated by `DebugRecorder`, but wrap defensively
         # anyway: a recording failure must never affect serving.
@@ -868,7 +868,7 @@ defmodule PtcRunnerMcp.Stdio do
   # ----------------------------------------------------------------
 
   defp success_reply(id, result) when is_map(result) do
-    %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__ptc_debug_structured")}
+    %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__lisp_debug_structured")}
   end
 
   defp error_reply(id, code, message) do

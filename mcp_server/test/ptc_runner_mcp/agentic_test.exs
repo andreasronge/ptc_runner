@@ -174,7 +174,7 @@ defmodule PtcRunnerMcp.AgenticTest do
           max_output_tokens: 321
         })
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == false
       assert_receive {:llm_call, "ollama:agentic-test", req}
@@ -185,30 +185,30 @@ defmodule PtcRunnerMcp.AgenticTest do
   end
 
   describe "tool advertisement" do
-    test "ptc_task is hidden without upstreams or when disabled" do
-      assert tool_names() == ["ptc_lisp_execute"]
+    test "lisp_task is hidden without upstreams or when disabled" do
+      assert tool_names() == ["lisp_eval"]
 
       {:ok, _pid} = Registry.start_link(name: @registry_name)
       :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
       :ok = Catalog.freeze("alpha:\n  (unavailable at startup)")
 
-      assert tool_names() == ["ptc_lisp_execute"]
+      assert tool_names() == ["lisp_eval"]
     end
 
-    test "ptc_task is advertised only in agentic aggregator mode" do
+    test "lisp_task is advertised only in agentic aggregator mode" do
       {:ok, _pid} = Registry.start_link(name: @registry_name)
       :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
       :ok = Catalog.freeze("alpha:\n  (unavailable at startup)")
       :ok = AgenticConfig.set(%{enabled: true})
 
-      assert tool_names() == ["ptc_lisp_execute", "ptc_task"]
-      task = Enum.find(Tools.list()["tools"], &(&1["name"] == "ptc_task"))
+      assert tool_names() == ["lisp_eval", "lisp_task"]
+      task = Enum.find(Tools.list()["tools"], &(&1["name"] == "lisp_task"))
       assert task["description"] =~ "plain-English tasks"
       refute task["description"] =~ "mcp/text"
     end
   end
 
-  describe "ptc_task execution" do
+  describe "lisp_task execution" do
     setup do
       {:ok, _pid} = Registry.start_link(name: @registry_name)
       :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
@@ -222,7 +222,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{
             "task" => "return items",
             "constraints" => %{
@@ -245,7 +245,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     test "markdown fences are stripped before execution" do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, FencedPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == false
       assert env["structuredContent"]["structured_result"] == 42
@@ -254,7 +254,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     test "explanatory planner output fails the explicit SubAgent terminal contract" do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, ExplanatoryPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "ptc_max_turns_exceeded"
@@ -264,7 +264,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 1, retry_turns: 1})
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, ExplanatoryPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "ptc_budget_exhausted"
@@ -273,7 +273,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     test "generated-code contract failures keep ptc-prefixed reasons" do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, BareExpressionPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "ptc_must_return_missing"
@@ -284,7 +284,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{"task" => "find signature.txt"}
         })
 
@@ -295,7 +295,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     test "planner crashes are converted to planner_error envelopes" do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, RaisingPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "answer"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "answer"}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
@@ -307,7 +307,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       :ok = put_fake("alpha", %{"err" => fn _, _ -> {:error, :upstream_error, "404"} end})
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, UpstreamErrorPlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "call upstream"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "call upstream"}})
 
       assert env["isError"] == false
       sc = env["structuredContent"]
@@ -329,7 +329,7 @@ defmodule PtcRunnerMcp.AgenticTest do
         RuntimeErrorAfterUpstreamPlanner
       )
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "call then fail"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "call then fail"}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
@@ -367,7 +367,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "call twice"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "call twice"}})
 
       assert env["isError"] == false
       sc = env["structuredContent"]
@@ -393,7 +393,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "recover"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "recover"}})
 
       assert env["isError"] == false
       sc = env["structuredContent"]
@@ -412,7 +412,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{"task" => "recover from runtime error"}
         })
 
@@ -449,7 +449,8 @@ defmodule PtcRunnerMcp.AgenticTest do
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, SequencePlanner)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write then continue"}})
+      env =
+        Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "write then continue"}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
@@ -483,7 +484,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{"task" => "unknown side effect then runtime error"}
         })
 
@@ -522,7 +523,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{"task" => "write on final turn without terminal form"}
         })
 
@@ -560,7 +561,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write and return"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "write and return"}})
 
       assert env["isError"] == false
       sc = env["structuredContent"]
@@ -602,7 +603,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
 
-      env = Tools.call(%{"name" => "ptc_task", "arguments" => %{"task" => "write and fail"}})
+      env = Tools.call(%{"name" => "lisp_task", "arguments" => %{"task" => "write and fail"}})
 
       assert env["isError"] == true
       sc = env["structuredContent"]
@@ -619,7 +620,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       env =
         Tools.call(%{
-          "name" => "ptc_task",
+          "name" => "lisp_task",
           "arguments" => %{
             "task" => "answer",
             "constraints" => %{"preferred_fields" => [String.duplicate("x", 100)]}
@@ -632,7 +633,7 @@ defmodule PtcRunnerMcp.AgenticTest do
     end
   end
 
-  describe "ptc_task tracing" do
+  describe "lisp_task tracing" do
     setup do
       {:ok, _pid} = Registry.start_link(name: @registry_name)
       :ok = Registry.put_fake("alpha", %{tools: %{}}, @registry_name)
@@ -700,7 +701,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       "jsonrpc" => "2.0",
       "id" => id,
       "method" => "tools/call",
-      "params" => %{"name" => "ptc_task", "arguments" => args}
+      "params" => %{"name" => "lisp_task", "arguments" => args}
     }
 
     case JsonRpc.dispatch({:ok, frame}) do

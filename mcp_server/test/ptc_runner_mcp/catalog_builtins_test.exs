@@ -80,6 +80,13 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
     {exec, call_context}
   end
 
+  defp tool_names_from_lines(lines) do
+    Enum.map(lines, fn line ->
+      [_, name] = Regex.run(~r/^[^.]+\.([^(]+)\(/, line)
+      name
+    end)
+  end
+
   # ============================================================
   # catalog/summary
   # ============================================================
@@ -159,21 +166,68 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert is_list(result)
       assert length(result) == 2
 
-      tool_names = Enum.map(result, & &1["tool"])
+      tool_names = tool_names_from_lines(result)
       assert tool_names == Enum.sort(tool_names)
     end
 
-    test "returns compact tool entry shape" do
+    test "returns compact tool description strings" do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
       {:ok, [tool]} = exec.(:list_tools, ["github"])
 
-      assert tool["server"] == "github"
-      assert tool["tool"] == "search"
-      assert is_binary(tool["summary"])
-      assert is_list(tool["arg_keys"])
-      assert is_boolean(tool["read_only"])
+      assert tool =~ "github.search("
+      assert tool =~ "query: string"
+      assert tool =~ " - Tool search"
+    end
+
+    test "omits return type when upstream does not provide output_schema" do
+      schema = %{
+        name: "search",
+        description: "Search things",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"query" => %{"type" => "string"}},
+          "required" => ["query"]
+        }
+      }
+
+      config = %{tools: %{"search" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("github", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("github", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, [tool]} = exec.(:list_tools, ["github"])
+
+      assert tool == "github.search(query: string) - Search things"
+      refute tool =~ " -> "
+    end
+
+    test "renders return type when upstream provides output_schema" do
+      schema = %{
+        name: "search",
+        description: "Search things",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"query" => %{"type" => "string"}},
+          "required" => ["query"]
+        },
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"items" => %{"type" => "array"}, "next" => %{"type" => "string"}},
+          "required" => ["items"]
+        }
+      }
+
+      config = %{tools: %{"search" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("github", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("github", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, [tool]} = exec.(:list_tools, ["github"])
+
+      assert tool ==
+               "github.search(query: string) -> {items [:any], next :string?} - Search things"
     end
 
     test "unknown server is programmer fault" do
@@ -205,7 +259,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, offset} = exec.(:list_tools, ["srv", %{offset: 2}])
 
       assert length(offset) == 3
-      assert Enum.map(offset, & &1["tool"]) == Enum.map(Enum.drop(all, 2), & &1["tool"])
+      assert tool_names_from_lines(offset) == tool_names_from_lines(Enum.drop(all, 2))
     end
 
     test "invalid limit is programmer fault" do
@@ -253,7 +307,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert is_list(result)
       assert length(result) >= 2
 
-      tool_names = Enum.map(result, & &1["tool"])
+      tool_names = tool_names_from_lines(result)
       assert "search_issues" in tool_names
       assert "search_repos" in tool_names
     end
@@ -286,7 +340,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:search_tools, ["search"])
 
       assert [first | _] = result
-      assert first["tool"] == "search"
+      assert first =~ "srv.search("
     end
 
     test "tool name matches rank higher than description-only matches" do
@@ -303,7 +357,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:search_tools, ["users"])
 
       assert [first | _] = result
-      assert first["tool"] == "list_users"
+      assert first =~ "srv.list_users("
     end
 
     test "empty query is programmer fault" do
@@ -372,11 +426,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:search_tools, ["github"])
 
       assert [_ | _] = result
-      server_match = Enum.find(result, &(&1["tool"] == nil))
+      server_match = Enum.find(result, &String.starts_with?(&1, "github:"))
       assert server_match != nil
-      assert server_match["server"] == "github"
-      assert server_match["catalog_loaded"] == false
-      assert server_match["next"] =~ "catalog/list-tools"
+      assert server_match =~ "Catalog not loaded"
+      assert server_match =~ "catalog/list-tools"
     end
 
     test ":load true loads catalogs and returns tool-level matches" do
@@ -395,9 +448,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:search_tools, ["search", %{load: true}])
 
       assert [_ | _] = result
-      tool_match = Enum.find(result, &(&1["tool"] == "search_issues"))
+      tool_match = Enum.find(result, &String.starts_with?(&1, "github.search_issues("))
       assert tool_match != nil
-      assert tool_match["catalog_loaded"] == true
     end
 
     test "multi-server search returns results from all loaded servers" do
@@ -407,19 +459,18 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:search_tools, ["search"])
 
-      servers = Enum.map(result, & &1["server"]) |> Enum.uniq()
-      assert "github" in servers
-      assert "linear" in servers
+      assert Enum.any?(result, &String.starts_with?(&1, "github.search_issues("))
+      assert Enum.any?(result, &String.starts_with?(&1, "linear.search_tickets("))
     end
 
-    test "result includes catalog_loaded field" do
+    test "result includes server and tool name in the display string" do
       put_fake("srv", [{"tool_a", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:search_tools, ["tool"])
 
       assert [first | _] = result
-      assert first["catalog_loaded"] == true
+      assert first =~ "srv.tool_a("
     end
 
     test "result-size truncation via max_catalog_result_bytes" do
@@ -488,7 +539,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:search_tools, ["search", %{limit: 5}])
 
-      names = Enum.map(result, & &1["tool"])
+      names = tool_names_from_lines(result)
 
       # The actually-search-related tool must be present.
       assert "search_files" in names
@@ -569,7 +620,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:search_tools, ["warehouse", %{limit: 5}])
 
-      names = Enum.map(result, & &1["tool"])
+      names = tool_names_from_lines(result)
       assert "tool_a" in names
       assert "tool_b" in names
     end
@@ -584,7 +635,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:search_tools, ["issue"])
 
       assert [first | _] = result
-      assert first["tool"] == "getIssueComments"
+      assert first =~ "srv.getIssueComments("
     end
   end
 
@@ -599,15 +650,11 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:describe_tool, ["github", "search"])
 
-      assert result["server"] == "github"
-      assert result["tool"] == "search"
-      assert is_binary(result["summary"])
-      assert is_map(result["input_schema"])
-      assert result["arg_keys"] == ["query"]
-      assert result["required"] == ["query"]
-      assert is_binary(result["call_example"])
-      assert result["call_example"] =~ "tool/mcp-call"
-      assert is_binary(result["response_notes"])
+      assert is_binary(result)
+      assert result =~ "github.search(query: string)"
+      assert result =~ "Use:"
+      assert result =~ ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+      assert result =~ "Returns: tagged data"
     end
 
     test "call_example surfaces required args with :args clause" do
@@ -616,7 +663,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:describe_tool, ["github", "search"])
 
-      assert result["call_example"] ==
+      assert result =~
                ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
     end
 
@@ -634,11 +681,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:describe_tool, ["util", "ping"])
 
-      assert result["arg_keys"] == []
-      assert result["required"] == []
-
-      assert result["call_example"] ==
-               ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
+      assert result =~ "util.ping()"
+      assert result =~ ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
     end
 
     test "describe_tool surfaces input_schema fields for upstream-normalized tools" do
@@ -663,10 +707,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       {:ok, result} = exec.(:describe_tool, ["fs", "read_text_file"])
 
-      assert result["arg_keys"] == ["head", "path", "tail"]
-      assert result["required"] == ["path"]
-      assert result["input_schema"]["properties"]["path"]["type"] == "string"
-      assert result["call_example"] =~ ":args {:path ...}"
+      assert result =~ "fs.read_text_file(path: string, head: integer?, tail: integer?)"
+      assert result =~ ":args {:path ...}"
     end
 
     test "unknown tool is programmer fault" do

@@ -140,13 +140,13 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
       summary = CapabilitySummary.generate(entries, catalog_mode: :lazy, max_bytes: 50)
 
       assert summary == CapabilitySummary.lazy_pointer()
-      # `ptc_task` clients describe tasks in plain English; the lazy
+      # `lisp_task` clients describe tasks in plain English; the lazy
       # pointer must stay on the agentic surface (it must NOT instruct
       # the caller to use PTC-Lisp primitives meant for the internal
       # planner's system prompt).
       assert summary =~ "catalog mode: lazy"
       assert summary =~ "plain English"
-      refute summary =~ "ptc_lisp_execute"
+      refute summary =~ "lisp_eval"
       refute summary =~ "(catalog/list-servers"
       refute summary =~ "tool/mcp-call"
       refute summary =~ "- alpha:"

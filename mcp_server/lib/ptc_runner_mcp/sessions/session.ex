@@ -609,7 +609,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     end)
   end
 
-  # Mirrors the stateless `ptc_lisp_execute` decoration in `Tools`: when the
+  # Mirrors the stateless `lisp_eval` decoration in `Tools`: when the
   # eval made at least one upstream call, attach a per-eval `ptc_metrics`
   # block so session workflows have the same payload-reduction visibility
   # as one-shot programs. Non-aggregator runs drain to `[]` and skip this.

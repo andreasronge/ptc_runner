@@ -2,292 +2,115 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @moduledoc false
 
   alias PtcRunner.PromptLoader
-  alias PtcRunnerMcp.{CatalogConfig, CatalogDescription}
+  alias PtcRunnerMcp.{CatalogConfig, CatalogDescription, CatalogPrompt}
   alias PtcRunnerMcp.Upstream.Catalog
 
   @agentic_role "You are an agent that writes PTC-Lisp programs to fulfill plain-English tasks via the configured upstream MCP servers and return human-readable text."
 
-  @common_card %{
-    audience: :mcp_tool_description,
-    budget_profile: :compact,
-    surface: :mcp_direct_ptc_lisp_execute
-  }
+  @prompt_dir Path.expand(Path.join([__DIR__, "..", "..", "priv", "prompts"]))
+  @mcp_language_reference_path Path.join(@prompt_dir, "reference.md")
+  @external_resource @mcp_language_reference_path
 
-  @authoring_card_path Path.expand(
-                         Path.join([
-                           __DIR__,
-                           "..",
-                           "..",
-                           "priv",
-                           "prompts",
-                           "mcp_authoring_card.md"
-                         ])
-                       )
-  @external_resource @authoring_card_path
-  @authoring_card @authoring_card_path |> File.read!() |> PromptLoader.extract_content()
-
-  @no_tools_description_path Path.expand(
-                               Path.join([
-                                 __DIR__,
-                                 "..",
-                                 "..",
-                                 "priv",
-                                 "prompts",
-                                 "mcp_no_tools_description.md"
-                               ])
-                             )
-  @external_resource @no_tools_description_path
-  @no_tools_description @no_tools_description_path
-                        |> File.read!()
-                        |> PromptLoader.extract_content()
-
-  @aggregator_authoring_card_path Path.expand(
-                                    Path.join([
-                                      __DIR__,
-                                      "..",
-                                      "..",
-                                      "priv",
-                                      "prompts",
-                                      "mcp_aggregator_authoring_card.md"
-                                    ])
-                                  )
-  @external_resource @aggregator_authoring_card_path
-  @aggregator_authoring_card @aggregator_authoring_card_path
-                             |> File.read!()
-                             |> PromptLoader.extract_content()
-
-  @session_authoring_card_path Path.expand(
-                                 Path.join([
-                                   __DIR__,
-                                   "..",
-                                   "..",
-                                   "priv",
-                                   "prompts",
-                                   "mcp_session_authoring_card.md"
-                                 ])
-                               )
-  @external_resource @session_authoring_card_path
-  @session_authoring_card @session_authoring_card_path
+  @mcp_language_reference @mcp_language_reference_path
                           |> File.read!()
                           |> PromptLoader.extract_content()
 
-  @cards %{
-    mcp_no_tools_capability:
-      Map.merge(@common_card, %{
-        id: :mcp_no_tools_capability,
-        dimensions: [:execution_surface, :completion_contract],
-        dynamic_boundary: :static_card,
-        placement: :quick_contract,
-        profile: :mcp_no_tools,
-        prompt_fun: :mcp_no_tools_capability,
-        trust: :authoritative
-      }),
-    mcp_no_tools_authoring_card:
-      Map.merge(@common_card, %{
-        id: :mcp_no_tools_authoring_card,
-        dimensions: [:dialect, :completion_contract, :trust_boundary],
-        dynamic_boundary: :static_card,
-        placement: :after_quick_contract,
-        profile: :mcp_no_tools,
-        prompt_fun: :mcp_no_tools_authoring_card,
-        trust: :authoritative
-      }),
-    mcp_aggregator_authoring_card:
-      Map.merge(@common_card, %{
-        id: :mcp_aggregator_authoring_card,
-        dimensions: [:dialect, :execution_surface, :completion_contract, :trust_boundary],
-        dynamic_boundary: :before_dynamic_catalog,
-        placement: :after_quick_contract,
-        profile: :mcp_aggregator,
-        prompt_fun: :mcp_aggregator_authoring_card,
-        trust: :authoritative
-      }),
-    mcp_dynamic_catalog:
-      Map.merge(@common_card, %{
-        audience: :mcp_tool_description,
-        budget_profile: :compact,
-        id: :mcp_dynamic_catalog,
-        dimensions: [:catalog_discovery],
-        dynamic_boundary: :dynamic_catalog,
-        placement: :after_authoritative_cards,
-        profile: :mcp_aggregator,
-        trust: :untrusted_data
-      }),
-    mcp_agentic_preamble: %{
-      id: :mcp_agentic_preamble,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:execution_surface, :completion_contract],
-      dynamic_boundary: :static_card,
-      placement: :preamble,
-      profile: :mcp_agentic_task,
-      prompt_fun: :mcp_agentic_preamble,
-      surface: :mcp_agentic_task,
-      trust: :authoritative
-    },
-    mcp_agentic_operator_prefix: %{
-      id: :mcp_agentic_operator_prefix,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:trust_boundary],
-      dynamic_boundary: :operator_text,
-      placement: :after_preamble,
-      profile: :mcp_agentic_task,
-      surface: :mcp_agentic_task,
-      trust: :operator_text
-    },
-    mcp_agentic_dialect_card: %{
-      id: :mcp_agentic_dialect_card,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:dialect],
-      dynamic_boundary: :static_card,
-      placement: :dialect_reference,
-      profile: :mcp_agentic_task,
-      prompt_fun: :mcp_agentic_dialect_card,
-      surface: :mcp_agentic_task,
-      trust: :authoritative
-    },
-    mcp_agentic_mcp_call_contract: %{
-      id: :mcp_agentic_mcp_call_contract,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:execution_surface, :completion_contract],
-      dynamic_boundary: :before_dynamic_catalog,
-      placement: :mcp_call_contract,
-      profile: :mcp_agentic_task,
-      prompt_fun: :mcp_agentic_mcp_call_contract,
-      surface: :mcp_agentic_task,
-      trust: :authoritative
-    },
-    mcp_agentic_catalog_section: %{
-      id: :mcp_agentic_catalog_section,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:catalog_discovery],
-      dynamic_boundary: :dynamic_catalog,
-      placement: :after_mcp_call_contract,
-      profile: :mcp_agentic_task,
-      prompt_fun: :mcp_agentic_catalog_section,
-      surface: :mcp_agentic_task,
-      trust: :untrusted_data
-    },
-    mcp_agentic_operator_suffix: %{
-      id: :mcp_agentic_operator_suffix,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:trust_boundary],
-      dynamic_boundary: :operator_text,
-      placement: :before_terminal_recap,
-      profile: :mcp_agentic_task,
-      surface: :mcp_agentic_task,
-      trust: :operator_text
-    },
-    mcp_agentic_final_recap: %{
-      id: :mcp_agentic_final_recap,
-      audience: :mcp_agentic_planner_system_prompt,
-      budget_profile: :standard,
-      dimensions: [:trust_boundary, :completion_contract],
-      dynamic_boundary: :terminal_authoritative_card,
-      placement: :terminal_recap,
-      profile: :mcp_agentic_task,
-      prompt_fun: :mcp_agentic_final_recap,
-      surface: :mcp_agentic_task,
-      trust: :authoritative
-    },
-    mcp_session_authoring_card: %{
-      id: :mcp_session_authoring_card,
-      audience: :mcp_tool_description,
-      budget_profile: :compact,
-      dimensions: [:dialect, :execution_surface, :completion_contract],
-      dynamic_boundary: :static_card,
-      placement: :session_quick_contract,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_authoring_card,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_start_detail: %{
-      id: :mcp_session_start_detail,
-      audience: :mcp_tool_description,
-      budget_profile: :compact,
-      dimensions: [:execution_surface],
-      dynamic_boundary: :static_card,
-      placement: :after_session_quick_contract,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_start_detail,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_eval_detail: %{
-      id: :mcp_session_eval_detail,
-      audience: :mcp_tool_description,
-      budget_profile: :compact,
-      dimensions: [:execution_surface, :completion_contract],
-      dynamic_boundary: :static_card,
-      placement: :after_session_quick_contract,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_eval_detail,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_inspect_description: %{
-      id: :mcp_session_inspect_description,
-      audience: :mcp_tool_description,
-      budget_profile: :minimal,
-      dimensions: [:execution_surface],
-      dynamic_boundary: :static_card,
-      placement: :single_line_summary,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_inspect_description,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_list_description: %{
-      id: :mcp_session_list_description,
-      audience: :mcp_tool_description,
-      budget_profile: :minimal,
-      dimensions: [:execution_surface],
-      dynamic_boundary: :static_card,
-      placement: :single_line_summary,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_list_description,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_forget_description: %{
-      id: :mcp_session_forget_description,
-      audience: :mcp_tool_description,
-      budget_profile: :minimal,
-      dimensions: [:execution_surface],
-      dynamic_boundary: :static_card,
-      placement: :single_line_summary,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_forget_description,
-      surface: :mcp_session,
-      trust: :authoritative
-    },
-    mcp_session_close_description: %{
-      id: :mcp_session_close_description,
-      audience: :mcp_tool_description,
-      budget_profile: :minimal,
-      dimensions: [:execution_surface],
-      dynamic_boundary: :static_card,
-      placement: :single_line_summary,
-      profile: :mcp_session,
-      prompt_fun: :mcp_session_close_description,
-      surface: :mcp_session,
-      trust: :authoritative
-    }
+  @tool_prompt_specs %{
+    lisp_debug: "tools/lisp_debug.md",
+    lisp_eval: "tools/lisp_eval.md",
+    lisp_eval_with_upstreams: "tools/lisp_eval.with_upstreams.md",
+    lisp_session_close: "tools/lisp_session_close.md",
+    lisp_session_eval: "tools/lisp_session_eval.md",
+    lisp_session_eval_with_upstreams: "tools/lisp_session_eval.with_upstreams.md",
+    lisp_session_forget: "tools/lisp_session_forget.md",
+    lisp_session_inspect: "tools/lisp_session_inspect.md",
+    lisp_session_list: "tools/lisp_session_list.md",
+    lisp_session_start: "tools/lisp_session_start.md",
+    lisp_task: "tools/lisp_task.md"
   }
+
+  for {_key, relative_path} <- @tool_prompt_specs do
+    @external_resource Path.join(@prompt_dir, relative_path)
+  end
+
+  @tool_prompts Map.new(@tool_prompt_specs, fn {key, relative_path} ->
+                  text =
+                    @prompt_dir
+                    |> Path.join(relative_path)
+                    |> File.read!()
+                    |> PromptLoader.extract_content()
+
+                  {key, text}
+                end)
+
+  @static_authoritative_cards [
+    :mcp_language_reference,
+    :lisp_eval_description,
+    :mcp_agentic_preamble,
+    :mcp_agentic_dialect_card,
+    :lisp_session_start_description,
+    :lisp_session_eval_description,
+    :mcp_session_inspect_description,
+    :mcp_session_list_description,
+    :mcp_session_forget_description,
+    :mcp_session_close_description,
+    :lisp_task_description,
+    :lisp_debug_description
+  ]
+
+  @cards @static_authoritative_cards
+         |> Map.new(&{&1, %{id: &1, dynamic_boundary: :static_card, trust: :authoritative}})
+         |> Map.merge(%{
+           lisp_eval_with_upstreams_description: %{
+             id: :lisp_eval_with_upstreams_description,
+             dynamic_boundary: :before_dynamic_catalog,
+             trust: :authoritative
+           },
+           lisp_session_eval_with_upstreams_description: %{
+             id: :lisp_session_eval_with_upstreams_description,
+             dynamic_boundary: :before_dynamic_catalog,
+             trust: :authoritative
+           },
+           mcp_dynamic_catalog: %{
+             id: :mcp_dynamic_catalog,
+             dynamic_boundary: :dynamic_catalog,
+             trust: :untrusted_data
+           },
+           mcp_agentic_operator_prefix: %{
+             id: :mcp_agentic_operator_prefix,
+             dynamic_boundary: :operator_text,
+             trust: :operator_text
+           },
+           mcp_agentic_mcp_call_contract: %{
+             id: :mcp_agentic_mcp_call_contract,
+             dynamic_boundary: :before_dynamic_catalog,
+             trust: :authoritative
+           },
+           mcp_agentic_catalog_section: %{
+             id: :mcp_agentic_catalog_section,
+             dynamic_boundary: :dynamic_catalog,
+             trust: :untrusted_data
+           },
+           mcp_agentic_operator_suffix: %{
+             id: :mcp_agentic_operator_suffix,
+             dynamic_boundary: :operator_text,
+             trust: :operator_text
+           },
+           mcp_agentic_final_recap: %{
+             id: :mcp_agentic_final_recap,
+             dynamic_boundary: :terminal_authoritative_card,
+             trust: :authoritative
+           }
+         })
 
   @profiles %{
     mcp_no_tools_description: [
-      :mcp_no_tools_capability,
-      :mcp_no_tools_authoring_card
+      :lisp_eval_description,
+      :mcp_language_reference
     ],
     mcp_aggregator_description: [
-      :mcp_aggregator_authoring_card,
+      :lisp_eval_with_upstreams_description,
+      :mcp_language_reference,
       :mcp_dynamic_catalog
     ],
     mcp_agentic_task_prompt: [
@@ -300,12 +123,22 @@ defmodule PtcRunnerMcp.PromptRegistry do
       :mcp_agentic_final_recap
     ],
     mcp_session_start_description: [
-      :mcp_session_authoring_card,
-      :mcp_session_start_detail
+      :lisp_session_start_description
     ],
     mcp_session_eval_description: [
-      :mcp_session_authoring_card,
-      :mcp_session_eval_detail
+      :lisp_session_eval_description,
+      :mcp_language_reference
+    ],
+    mcp_session_eval_with_upstreams_description: [
+      :lisp_session_eval_with_upstreams_description,
+      :mcp_language_reference,
+      :mcp_dynamic_catalog
+    ],
+    lisp_task_description: [
+      :lisp_task_description
+    ],
+    lisp_debug_description: [
+      :lisp_debug_description
     ]
   }
 
@@ -317,7 +150,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   def render(:mcp_aggregator_description, opts) do
     catalog = Keyword.get(opts, :catalog)
-    render_profile(:mcp_aggregator_description, &aggregator_part(&1, catalog))
+    render_profile(:mcp_aggregator_description, &tool_description_part(&1, catalog))
   end
 
   def render(:mcp_agentic_task_prompt, opts) do
@@ -337,6 +170,23 @@ defmodule PtcRunnerMcp.PromptRegistry do
     render_profile(:mcp_session_eval_description, &static_part/1)
   end
 
+  def render(:mcp_session_eval_with_upstreams_description, opts) do
+    catalog = Keyword.get(opts, :catalog)
+
+    render_profile(
+      :mcp_session_eval_with_upstreams_description,
+      &tool_description_part(&1, catalog)
+    )
+  end
+
+  def render(:lisp_task_description, _opts) do
+    render_profile(:lisp_task_description, &static_part/1)
+  end
+
+  def render(:lisp_debug_description, _opts) do
+    render_profile(:lisp_debug_description, &static_part/1)
+  end
+
   def render(key, _opts) when is_atom(key), do: render_card_or_nil(key)
 
   @doc false
@@ -346,10 +196,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @doc false
   @spec card_metadata(atom()) :: map() | nil
   def card_metadata(key) when is_atom(key) do
-    case Map.get(@cards, key) do
-      nil -> nil
-      card -> Map.delete(card, :prompt_fun)
-    end
+    Map.get(@cards, key)
   end
 
   @doc false
@@ -390,18 +237,29 @@ defmodule PtcRunnerMcp.PromptRegistry do
     if Map.has_key?(@cards, key), do: render_card(key)
   end
 
-  defp render_card(:mcp_no_tools_capability), do: @no_tools_description
-  defp render_card(:mcp_no_tools_authoring_card), do: @authoring_card
-  defp render_card(:mcp_aggregator_authoring_card), do: @aggregator_authoring_card
+  defp render_card(:mcp_language_reference), do: @mcp_language_reference
+
+  defp render_card(:lisp_eval_description), do: tool_prompt(:lisp_eval)
+
+  defp render_card(:lisp_eval_with_upstreams_description),
+    do: tool_prompt(:lisp_eval_with_upstreams)
+
+  defp render_card(:mcp_dynamic_catalog), do: nil
+
+  defp render_card(:lisp_session_start_description), do: tool_prompt(:lisp_session_start)
+  defp render_card(:lisp_session_eval_description), do: tool_prompt(:lisp_session_eval)
+
+  defp render_card(:lisp_session_eval_with_upstreams_description),
+    do: tool_prompt(:lisp_session_eval_with_upstreams)
+
   defp render_card(:mcp_agentic_dialect_card), do: agentic_dialect_authoring_card()
   defp render_card(:mcp_agentic_final_recap), do: agentic_final_recap()
-  defp render_card(:mcp_session_authoring_card), do: @session_authoring_card
-  defp render_card(:mcp_session_start_detail), do: mcp_session_start_detail()
-  defp render_card(:mcp_session_eval_detail), do: mcp_session_eval_detail()
-  defp render_card(:mcp_session_inspect_description), do: mcp_session_inspect_description()
-  defp render_card(:mcp_session_list_description), do: mcp_session_list_description()
-  defp render_card(:mcp_session_forget_description), do: mcp_session_forget_description()
-  defp render_card(:mcp_session_close_description), do: mcp_session_close_description()
+  defp render_card(:mcp_session_inspect_description), do: tool_prompt(:lisp_session_inspect)
+  defp render_card(:mcp_session_list_description), do: tool_prompt(:lisp_session_list)
+  defp render_card(:mcp_session_forget_description), do: tool_prompt(:lisp_session_forget)
+  defp render_card(:mcp_session_close_description), do: tool_prompt(:lisp_session_close)
+  defp render_card(:lisp_task_description), do: tool_prompt(:lisp_task)
+  defp render_card(:lisp_debug_description), do: tool_prompt(:lisp_debug)
 
   defp render_card(key) do
     raise ArgumentError, "unknown MCP prompt card: #{inspect(key)}"
@@ -413,8 +271,10 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp static_part(card), do: [render_card(card)]
 
-  defp aggregator_part(:mcp_dynamic_catalog, catalog), do: dynamic_catalog_part(catalog)
-  defp aggregator_part(card, _catalog), do: static_part(card)
+  defp tool_description_part(:mcp_dynamic_catalog, catalog), do: dynamic_catalog_part(catalog)
+  defp tool_description_part(card, _catalog), do: static_part(card)
+
+  defp tool_prompt(key), do: Map.fetch!(@tool_prompts, key)
 
   defp agentic_part(:mcp_agentic_preamble, opts, _catalog, _catalog_mode) do
     [agentic_preamble(opts)]
@@ -442,30 +302,6 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_part(:mcp_agentic_final_recap, _opts, _catalog, _catalog_mode) do
     [render_card(:mcp_agentic_final_recap)]
-  end
-
-  defp mcp_session_start_detail do
-    "Creates a new empty stateful PTC-Lisp session."
-  end
-
-  defp mcp_session_eval_detail do
-    "Evaluates a PTC-Lisp program against committed session memory. Explicit definitions persist across calls; temporary tool caches do not.\n\nOptionally validates the return value against `output_schema` (JSON Schema). On validation success, the response includes `validated` structured JSON. On validation failure, the eval is REJECTED — session state is NOT committed and the response is a `validation_error`."
-  end
-
-  defp mcp_session_inspect_description do
-    "Returns a compact orientation view of a PTC-Lisp session."
-  end
-
-  defp mcp_session_list_description do
-    "Lists live PTC-Lisp sessions for the current owner without rendering stored values."
-  end
-
-  defp mcp_session_forget_description do
-    "Removes selected bindings or clears bounded session histories."
-  end
-
-  defp mcp_session_close_description do
-    "Closes a session and deletes its state."
   end
 
   defp agentic_preamble(opts) do
@@ -523,10 +359,10 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_mcp_call_card(catalog) do
     """
-    ptc_task MCP-call contract:
+    lisp_task MCP-call contract:
     Call upstream tools with `(tool/mcp-call {:server "<configured-name>" :tool "<upstream-tool>" :args {}})`.
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
-    In `ptc_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is already the unwrapped upstream payload; read it directly.
+    In `lisp_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is already the unwrapped upstream payload; read it directly.
     #{agentic_unknown_content_guidance(catalog)}
     If `(:value r)` has an unexpected shape, handle or fail with a clear message.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.
@@ -546,16 +382,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp agentic_unknown_content_guidance(_), do: ""
 
   defp agentic_upstream_catalog(_catalog, :lazy) do
-    """
-    Upstream catalog: not inlined (catalog mode: lazy).
-    Discover servers and tools at runtime from inside ptc_lisp_execute:
-      (catalog/list-servers)
-      (catalog/search-tools "<query>" {:limit 8})
-      (catalog/list-tools "<server>" {:limit 20})
-      (catalog/describe-tool "<server>" "<tool>")
-    Then call them with (tool/mcp-call {:server "<server>" :tool "<tool>" :args {...}}).
-    catalog/* ops have their own budget and never consume the upstream-call quota.\
-    """
+    CatalogPrompt.agentic_discovery_block()
   end
 
   defp agentic_upstream_catalog(catalog, :auto) do

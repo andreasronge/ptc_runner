@@ -2,7 +2,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
   @moduledoc """
   Phase A + Phase B integration: `result_bytes` / `oversize` on
   `upstream_calls[]` and the `ptc_metrics` envelope decoration for
-  `ptc_lisp_execute` (aggregator mode).
+  `lisp_eval` (aggregator mode).
 
   See `Plans/ptc-runner-mcp-payload-reduction.md` §4.1 / §4.2 / §7.
   Reuses the fake-upstream harness from `AggregatorPhase1aTest`.
@@ -110,7 +110,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
   # Phase B — ptc_metrics envelope decoration (§4.2)
   # ============================================================
 
-  describe "ptc_metrics on the ptc_lisp_execute aggregator envelope (§4.2)" do
+  describe "ptc_metrics on the lisp_eval aggregator envelope (§4.2)" do
     test "a program collapsing a large upstream result has a sane ratio" do
       big = %{"rows" => Enum.map(1..200, fn i -> %{"id" => i, "label" => "row-#{i}"} end)}
       upstream_size = byte_size(Jason.encode!(big))
@@ -128,7 +128,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       assert m["final_result_bytes"] > 0
       assert is_number(m["payload_reduction_ratio"])
       assert m["payload_reduction_ratio"] > 1.0
-      # No server_side_llm for ptc_lisp_execute.
+      # No server_side_llm for lisp_eval.
       refute Map.has_key?(m, "server_side_llm")
       assert m["baseline"]["optimistic"]["available"] == false
     end

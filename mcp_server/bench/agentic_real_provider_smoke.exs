@@ -1,4 +1,4 @@
-# Real-provider smoke for `ptc_task`.
+# Real-provider smoke for `lisp_task`.
 #
 # Usage from mcp_server/:
 #

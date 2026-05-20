@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
   @moduledoc """
-  Regression coverage for GitHub issue #944 finding #2: `ptc_session_eval`
+  Regression coverage for GitHub issue #944 finding #2: `lisp_session_eval`
   responses must carry a `ptc_metrics` block when the eval made upstream
-  calls, mirroring the stateless `ptc_lisp_execute` path.
+  calls, mirroring the stateless `lisp_eval` path.
 
   Combines the aggregator-mode setup from `AggregatorPhase1aTest` with
   the session enablement from `SessionsTest`.
@@ -156,11 +156,11 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
   end
 
   defp start_session do
-    call!("ptc_session_start", %{})["session_id"]
+    call!("lisp_session_start", %{})["session_id"]
   end
 
   defp eval(session_id, program) do
-    call!("ptc_session_eval", %{"session_id" => session_id, "program" => program})
+    call!("lisp_session_eval", %{"session_id" => session_id, "program" => program})
   end
 
   defp call!(name, args) do

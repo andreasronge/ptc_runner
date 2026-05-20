@@ -15,37 +15,6 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
     "see docs"
   ]
 
-  @required_card_fields MapSet.new([
-                          :audience,
-                          :budget_profile,
-                          :dimensions,
-                          :dynamic_boundary,
-                          :id,
-                          :placement,
-                          :profile,
-                          :surface,
-                          :trust
-                        ])
-
-  @dimensions MapSet.new([
-                :catalog_discovery,
-                :completion_contract,
-                :dialect,
-                :execution_surface,
-                :trust_boundary
-              ])
-
-  @audiences MapSet.new([
-               :mcp_agentic_planner_system_prompt,
-               :mcp_tool_description
-             ])
-
-  @budget_profiles MapSet.new([
-                     :compact,
-                     :minimal,
-                     :standard
-                   ])
-
   @dynamic_boundaries MapSet.new([
                         :before_dynamic_catalog,
                         :dynamic_catalog,
@@ -54,43 +23,30 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
                         :terminal_authoritative_card
                       ])
 
-  @profiles MapSet.new([
-              :mcp_aggregator,
-              :mcp_agentic_task,
-              :mcp_no_tools,
-              :mcp_session
-            ])
-
-  @surfaces MapSet.new([
-              :mcp_agentic_task,
-              :mcp_direct_ptc_lisp_execute,
-              :mcp_session
-            ])
-
   @trust_levels MapSet.new([
                   :authoritative,
                   :operator_text,
                   :untrusted_data
                 ])
 
-  test "all cards expose complete contract metadata using the MCP vocabulary" do
+  test "all cards expose only the metadata used by prompt assembly" do
     Enum.each(PromptRegistry.card_keys(), fn key ->
       metadata = PromptRegistry.card_metadata(key)
 
       assert metadata.id == key
-      assert MapSet.subset?(@required_card_fields, metadata |> Map.keys() |> MapSet.new())
-      assert MapSet.member?(@audiences, metadata.audience)
-      assert MapSet.member?(@budget_profiles, metadata.budget_profile)
+      assert Map.keys(metadata) |> Enum.sort() == [:dynamic_boundary, :id, :trust]
       assert MapSet.member?(@dynamic_boundaries, metadata.dynamic_boundary)
-      assert MapSet.member?(@profiles, metadata.profile)
-      assert MapSet.member?(@surfaces, metadata.surface)
       assert MapSet.member?(@trust_levels, metadata.trust)
-
-      assert is_list(metadata.dimensions)
-      assert metadata.dimensions != []
-      assert MapSet.subset?(MapSet.new(metadata.dimensions), @dimensions)
-      refute Map.has_key?(metadata, :prompt_fun)
     end)
+  end
+
+  test "MCP language reference is file-backed" do
+    text = PromptRegistry.card_text(:mcp_language_reference)
+
+    assert text =~ "PTC-Lisp reference"
+    assert text =~ "No `lambda`, `let*`"
+    refute text =~ "<java_interop>"
+    refute text =~ "<restrictions>"
   end
 
   test "all profiles reference registered cards and expose metadata in render order" do
@@ -119,7 +75,10 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
           :mcp_no_tools_description,
           :mcp_aggregator_description,
           :mcp_session_start_description,
-          :mcp_session_eval_description
+          :mcp_session_eval_description,
+          :mcp_session_eval_with_upstreams_description,
+          :lisp_debug_description,
+          :lisp_task_description
         ] do
       rendered = PromptRegistry.render(key, catalog: nil)
 
@@ -133,12 +92,40 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
     end
   end
 
+  test "rendered MCP tool descriptions do not repeat prompt lines" do
+    for key <- [
+          :mcp_no_tools_description,
+          :mcp_aggregator_description,
+          :mcp_session_start_description,
+          :mcp_session_eval_description,
+          :mcp_session_eval_with_upstreams_description,
+          :lisp_debug_description,
+          :lisp_task_description
+        ] do
+      duplicates =
+        key
+        |> PromptRegistry.render(catalog: nil)
+        |> repeated_prompt_lines()
+
+      assert duplicates == [],
+             "#{key} repeats prompt line(s): #{inspect(duplicates)}"
+    end
+  end
+
   test "file-backed MCP cards are extracted before rendering" do
     for key <- [
-          :mcp_no_tools_capability,
-          :mcp_no_tools_authoring_card,
-          :mcp_aggregator_authoring_card,
-          :mcp_session_authoring_card
+          :lisp_eval_description,
+          :lisp_eval_with_upstreams_description,
+          :mcp_language_reference,
+          :lisp_session_start_description,
+          :lisp_session_eval_description,
+          :lisp_session_eval_with_upstreams_description,
+          :mcp_session_list_description,
+          :mcp_session_inspect_description,
+          :mcp_session_forget_description,
+          :mcp_session_close_description,
+          :lisp_debug_description,
+          :lisp_task_description
         ] do
       text = PromptRegistry.card_text(key)
 
@@ -149,4 +136,86 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
       refute text =~ "PTC_PROMPT_END"
     end
   end
+
+  test "every advertised MCP tool has a prompt file" do
+    prompt_dir = Path.expand("../../priv/prompts/tools", __DIR__)
+
+    for file <- [
+          "lisp_eval.md",
+          "lisp_eval.with_upstreams.md",
+          "lisp_session_start.md",
+          "lisp_session_eval.md",
+          "lisp_session_eval.with_upstreams.md",
+          "lisp_session_list.md",
+          "lisp_session_inspect.md",
+          "lisp_session_forget.md",
+          "lisp_session_close.md",
+          "lisp_debug.md",
+          "lisp_task.md"
+        ] do
+      path = Path.join(prompt_dir, file)
+      assert File.exists?(path), "missing MCP tool prompt file #{path}"
+      assert File.read!(path) =~ "<!-- PTC_PROMPT_START -->"
+    end
+  end
+
+  test "one-shot lisp_eval prompt does not mention unavailable session tools" do
+    description = PromptRegistry.render(:mcp_no_tools_description, [])
+
+    refute description =~ "ptc_session"
+    refute description =~ "session tools"
+    assert description =~ "No persistence across calls."
+  end
+
+  test "execute and session eval descriptions include the shared MCP language reference" do
+    for key <- [
+          :mcp_no_tools_description,
+          :mcp_aggregator_description,
+          :mcp_session_eval_description,
+          :mcp_session_eval_with_upstreams_description
+        ] do
+      description = PromptRegistry.render(key, catalog: nil)
+
+      assert description =~ "PTC-Lisp reference"
+      assert description =~ "No `lambda`, `let*`"
+      refute description =~ "<java_interop>"
+      refute description =~ "<restrictions>"
+    end
+  end
+
+  test "session eval upstream guidance is isolated to the upstream-enabled profile" do
+    regular = PromptRegistry.render(:mcp_session_eval_description, [])
+
+    with_upstreams =
+      PromptRegistry.render(:mcp_session_eval_with_upstreams_description,
+        catalog: "catalog/search-tools"
+      )
+
+    refute regular =~ "tool/mcp-call"
+    refute regular =~ "catalog/search-tools"
+
+    assert with_upstreams =~ "tool/mcp-call"
+    assert with_upstreams =~ "catalog/search-tools"
+  end
+
+  defp repeated_prompt_lines(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map(&normalize_prompt_line/1)
+    |> Enum.reject(&ignore_dup_line?/1)
+    |> Enum.frequencies()
+    |> Enum.filter(fn {_line, count} -> count > 1 end)
+    |> Enum.map(fn {line, _count} -> line end)
+    |> Enum.sort()
+  end
+
+  defp normalize_prompt_line(line) do
+    line
+    |> String.trim()
+    |> String.replace(~r/\s+/, " ")
+  end
+
+  defp ignore_dup_line?(""), do: true
+  defp ignore_dup_line?("```"), do: true
+  defp ignore_dup_line?(_line), do: false
 end

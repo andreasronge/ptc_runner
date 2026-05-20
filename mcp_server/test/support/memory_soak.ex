@@ -200,30 +200,18 @@ defmodule PtcRunnerMcp.TestSupport.MemorySoak do
   end
 
   defp top_by_memory(n) do
-    if recon_loaded?() do
-      :recon.proc_count(:memory, n)
-    else
-      Process.list()
-      |> Enum.map(fn pid ->
-        case Process.info(pid, [:memory, :registered_name]) do
-          [{:memory, m}, name] -> {pid, m, name}
-          _ -> {pid, 0, []}
-        end
-      end)
-      |> Enum.sort_by(fn {_, m, _} -> -m end)
-      |> Enum.take(n)
-    end
+    Process.list()
+    |> Enum.map(fn pid ->
+      case Process.info(pid, [:memory, :registered_name]) do
+        [{:memory, m}, name] -> {pid, m, name}
+        _ -> {pid, 0, []}
+      end
+    end)
+    |> Enum.sort_by(fn {_, m, _} -> -m end)
+    |> Enum.take(n)
   end
 
-  defp bin_leak do
-    if recon_loaded?() do
-      :recon.bin_leak(50) |> Enum.reduce(0, fn {_, c, _}, acc -> acc + c end)
-    else
-      0
-    end
-  end
-
-  defp recon_loaded?, do: Code.ensure_loaded?(:recon)
+  defp bin_leak, do: 0
 
   def iteration_count, do: env_int("PTC_SOAK_ITERATIONS", 100)
   defp warmup_count, do: env_int("PTC_SOAK_WARMUP", 10)

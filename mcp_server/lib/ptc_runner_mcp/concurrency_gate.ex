@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.ConcurrencyGate do
   @moduledoc """
   Counting semaphore that enforces `:max_concurrent_calls` (§ 11) for
-  `tools/call name: "ptc_lisp_execute"`.
+  `tools/call name: "lisp_eval"`.
 
   Per `Plans/ptc-runner-mcp-server.md` § 11, this limit is applied as
   a non-queueing semaphore: when the cap is reached, additional

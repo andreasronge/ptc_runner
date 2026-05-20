@@ -81,12 +81,12 @@ defmodule PtcRunnerMcp.JsonRpcTest do
       {:reply, reply, :continue} = JsonRpc.dispatch({:ok, frame})
 
       assert reply["id"] == 2
-      assert [%{"name" => "ptc_lisp_execute"}] = reply["result"]["tools"]
+      assert [%{"name" => "lisp_eval"}] = reply["result"]["tools"]
     end
   end
 
   describe "tools/call" do
-    test "ptc_lisp_execute (+ 1 2) returns success envelope (isError=false)" do
+    test "lisp_eval (+ 1 2) returns success envelope (isError=false)" do
       # Phase 4: tools/call dispatch is async. JsonRpc returns an
       # `{:async_call, id, work_fn, on_busy, on_discard, lifecycle}` outcome; the
       # work_fn is the body that Stdio runs in a per-call worker. We
@@ -95,7 +95,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
         "jsonrpc" => "2.0",
         "id" => 3,
         "method" => "tools/call",
-        "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => "(+ 1 2)"}}
+        "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => "(+ 1 2)"}}
       }
 
       assert {:async_call, 3, work_fn, _on_busy, _on_discard, :continue} =
@@ -107,7 +107,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
       assert env["structuredContent"]["result"] == "user=> 3"
     end
 
-    test "ptc_lisp_execute with malformed args returns args_error synchronously" do
+    test "lisp_eval with malformed args returns args_error synchronously" do
       # Validation errors short-circuit before the async path: JsonRpc
       # returns {:reply, ..., :continue} with the rendered envelope,
       # so no worker is spawned and no permit is acquired.
@@ -115,7 +115,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
         "jsonrpc" => "2.0",
         "id" => 33,
         "method" => "tools/call",
-        "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{}}
+        "params" => %{"name" => "lisp_eval", "arguments" => %{}}
       }
 
       {:reply, reply, :continue} = JsonRpc.dispatch({:ok, frame})
@@ -196,7 +196,7 @@ defmodule PtcRunnerMcp.JsonRpcTest do
       frame = %{
         "jsonrpc" => "2.0",
         "method" => "tools/call",
-        "params" => %{"name" => "ptc_lisp_execute", "arguments" => %{"program" => "(+ 1 2)"}}
+        "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => "(+ 1 2)"}}
       }
 
       assert {:noreply, :continue} = JsonRpc.dispatch({:ok, frame})

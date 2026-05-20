@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.JsonRpc do
       (release-on-DOWN). When the caller is at its concurrency cap it
       writes a `busy` envelope instead and invokes `on_busy.(envelope)`
       — a 1-arity callback that records the rejected call into the
-      `ptc_debug` ring (no-op when the debug tool is disabled).
+      `lisp_debug` ring (no-op when the debug tool is disabled).
     * `{:cancel, request_id, lifecycle}` — `notifications/cancelled`
       with a `requestId`. The caller looks up the worker pid in its
       in-flight table; hits kill it (no reply emitted), misses are
@@ -231,10 +231,10 @@ defmodule PtcRunnerMcp.JsonRpc do
         {:reply, success_reply(id, envelope), :drain}
 
       DebugConfig.enabled?() and Map.get(params, "name") == DebugTool.tool_name() ->
-        # `ptc_debug` (only when `--debug-tool` is set): handled synchronously,
+        # `lisp_debug` (only when `--debug-tool` is set): handled synchronously,
         # NO concurrency permit, NOT through the async `Tools.call/1` path, and
         # NEVER written to the ring (no self-noise, no recursion). When
-        # `--debug-tool` is *off*, `ptc_debug` is just an unknown tool and
+        # `--debug-tool` is *off*, `lisp_debug` is just an unknown tool and
         # falls through to the generic unknown-tool branch below — so it gets
         # the same trace/telemetry treatment as any other unknown tool name.
         envelope = DebugTool.call(params, success_frame_overhead(id))
@@ -304,7 +304,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   # Validate the inner `arguments` synchronously, then return either:
   #
   #   * `{:reply, ..., :continue}` — args_error envelope, no worker
-  #     spawn. The args_error is recorded into the `ptc_debug` ring
+  #     spawn. The args_error is recorded into the `lisp_debug` ring
   #     here (it's a recognized-tool outcome — § 5.1).
   #   * `{:async_call, request_id, work_fn, on_busy, :continue}` —
   #     work_fn closes over the validated tuple and the raw params (for
@@ -315,7 +315,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   #     worker that runs work_fn(), and replies with the resulting
   #     envelope.
   #
-  # The `ptc_debug` ring records (success / args_error / busy) are
+  # The `lisp_debug` ring records (success / args_error / busy) are
   # built via `DebugRecorder.record_outcome/4`, which no-ops when
   # `--debug-tool` is disabled and swallows + `warn`-logs any failure
   # — it can never affect the response.
@@ -337,7 +337,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, args_error_envelope), :continue}
 
-      {:ok, :ptc_lisp_execute, {program, context, parsed_signature}} ->
+      {:ok, :lisp_eval, {program, context, parsed_signature}} ->
         work_fn =
           recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
@@ -361,7 +361,7 @@ defmodule PtcRunnerMcp.JsonRpc do
         {:async_call, id, work_fn, busy_record_fn(id, params, protocol_version), noop_fn(),
          :continue}
 
-      {:ok, :ptc_task, validated} ->
+      {:ok, :lisp_task, validated} ->
         work_fn =
           recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
@@ -380,7 +380,7 @@ defmodule PtcRunnerMcp.JsonRpc do
         {:async_call, id, work_fn, busy_record_fn(id, params, protocol_version), noop_fn(),
          :continue}
 
-      {:ok, :ptc_session_eval, validated} ->
+      {:ok, :lisp_session_eval, validated} ->
         work_fn =
           recorded_work_fn(id, params, opts, fn ->
             traced_tools_call(
@@ -414,7 +414,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   end
 
   # Wrap an executing closure so that after it produces the envelope we
-  # record the call into the `ptc_debug` ring with the measured
+  # record the call into the `lisp_debug` ring with the measured
   # duration. The recorder itself is fault-isolated; this wrapper adds
   # the timing only.
   defp recorded_work_fn(id, params, opts, run_fn) when is_function(run_fn, 0) do
@@ -463,32 +463,32 @@ defmodule PtcRunnerMcp.JsonRpc do
     _, _ -> :ok
   end
 
-  defp validate_tool_args(%{"name" => "ptc_lisp_execute"}, args) do
+  defp validate_tool_args(%{"name" => "lisp_eval"}, args) do
     case Tools.validate(args) do
       {:ok, program, context, parsed_signature} ->
-        {:ok, :ptc_lisp_execute, {program, context, parsed_signature}}
+        {:ok, :lisp_eval, {program, context, parsed_signature}}
 
       {:error, envelope} ->
         {:error, envelope}
     end
   end
 
-  defp validate_tool_args(%{"name" => "ptc_task"}, args) do
+  defp validate_tool_args(%{"name" => "lisp_task"}, args) do
     if Tools.agentic_advertised?() do
       case PtcRunnerMcp.Agentic.validate(args) do
-        {:ok, validated} -> {:ok, :ptc_task, validated}
+        {:ok, validated} -> {:ok, :lisp_task, validated}
         {:error, envelope} -> {:error, envelope}
       end
     else
-      {:error, Envelope.unknown_tool("ptc_task")}
+      {:error, Envelope.unknown_tool("lisp_task")}
     end
   end
 
-  defp validate_tool_args(%{"name" => "ptc_session_eval"}, args) do
+  defp validate_tool_args(%{"name" => "lisp_session_eval"}, args) do
     case Tools.validate_session_eval(args) do
       {:ok, validated} ->
         case Sessions.reserve_eval(validated, make_ref()) do
-          {:ok, reservation} -> {:ok, :ptc_session_eval, reservation}
+          {:ok, reservation} -> {:ok, :lisp_session_eval, reservation}
           {:error, response} -> {:error, Envelope.error_envelope(response)}
         end
 
@@ -497,7 +497,7 @@ defmodule PtcRunnerMcp.JsonRpc do
     end
   end
 
-  defp known_tool_name?(name) when name in ["ptc_lisp_execute", "ptc_task"], do: true
+  defp known_tool_name?(name) when name in ["lisp_eval", "lisp_task"], do: true
   defp known_tool_name?(name) when is_binary(name), do: Sessions.tool_name?(name)
   defp known_tool_name?(_), do: false
 
@@ -657,12 +657,12 @@ defmodule PtcRunnerMcp.JsonRpc do
   end
 
   defp strip_private_result(result) when is_map(result),
-    do: Map.delete(result, "__ptc_debug_structured")
+    do: Map.delete(result, "__lisp_debug_structured")
 
   defp strip_private_result(result), do: result
 
   # Bytes the JSON-RPC success frame adds *around* the `result` value, i.e.
-  # `{"jsonrpc":"2.0","id":<id>,"result":<value>}` minus `<value>`. `ptc_debug`'s
+  # `{"jsonrpc":"2.0","id":<id>,"result":<value>}` minus `<value>`. `lisp_debug`'s
   # `--max-debug-response-bytes` is a bound on the whole frame, so the
   # (client-chosen) `id` must count against it. Serialize with an empty-string
   # result placeholder and subtract its 2 bytes (`""`).

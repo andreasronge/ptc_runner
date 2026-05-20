@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.PayloadMetrics do
   @moduledoc """
-  Builds the `ptc_metrics` block decorated onto `ptc_lisp_execute`
-  (aggregator mode) and `ptc_task` response envelopes.
+  Builds the `ptc_metrics` block decorated onto `lisp_eval`
+  (aggregator mode) and `lisp_task` response envelopes.
 
   See `Plans/ptc-runner-mcp-payload-reduction.md` §4.2 / §4.3 / §7.
   This is a **pure** module — no I/O — so every honesty invariant
@@ -52,14 +52,14 @@ defmodule PtcRunnerMcp.PayloadMetrics do
   `server_side_llm` line item and the `efficiency_note` (§4.3).
 
   - `final_result_bytes` — byte size of the answer returned to the
-    client (the `ptc_lisp_execute` `result` field, or for `ptc_task`
+    client (the `lisp_eval` `result` field, or for `lisp_task`
     `byte_size(Jason.encode!(%{"answer" => .., "structured_result" => ..}))`).
     `0` on error or empty result.
   - `prints_bytes` — byte size of the serialized `prints` array (`0`
-    for `ptc_task`, which has no `prints`).
+    for `lisp_task`, which has no `prints`).
   - `upstream_calls_entries` — the list of `upstream_calls[]` entries
     (the §4.1 shape, string-keyed) the program produced.
-  - `opts` — `:server_side_llm` (a map) to attach the `ptc_task`
+  - `opts` — `:server_side_llm` (a map) to attach the `lisp_task`
     planner-cost block.
   """
   @spec build(non_neg_integer(), non_neg_integer(), [map()], keyword()) :: map()

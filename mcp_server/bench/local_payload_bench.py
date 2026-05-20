@@ -10,9 +10,9 @@
 # client actually pays context tokens for — across four paths:
 #
 #   native_fs       — call the filesystem server's tool directly.
-#   ptc_slim        — ptc_lisp_execute, --response-profile slim (default).
-#   ptc_structured  — ptc_lisp_execute, --response-profile structured.
-#   ptc_debug       — ptc_lisp_execute, --debug-tool (verbose: mirrored
+#   ptc_slim        — lisp_eval, --response-profile slim (default).
+#   ptc_structured  — lisp_eval, --response-profile structured.
+#   lisp_debug       — lisp_eval, --debug-tool (verbose: mirrored
 #                     structuredContent + ptc_metrics + upstream_calls).
 #
 # Reported per case: response-frame bytes and ~tokens (ceil(bytes/4)),
@@ -199,7 +199,7 @@ def main():
                      "--upstreams-config", ups, "--response-profile", "slim"],
         "ptc_structured": [MIX, "run", "--no-halt", "--no-compile", "--",
                            "--upstreams-config", ups, "--response-profile", "structured"],
-        "ptc_debug": [MIX, "run", "--no-halt", "--no-compile", "--",
+        "lisp_debug": [MIX, "run", "--no-halt", "--no-compile", "--",
                       "--upstreams-config", ups, "--debug-tool"],
     }
 
@@ -216,7 +216,7 @@ def main():
             cid = 100
             for cname, prog in ptc_programs.items():
                 ids[cname] = cid
-                frames.append(call_frame(cid, "ptc_lisp_execute", {"program": prog}))
+                frames.append(call_frame(cid, "lisp_eval", {"program": prog}))
                 cid += 1
             print(f"  running {prof} ...", file=sys.stderr)
             m = by_id(run_server(cmd, frames, cwd=MCP_DIR, settle=4.0, read_secs=12.0))
@@ -247,7 +247,7 @@ def main():
         v = acc.get((key, col), [0])
         return round(sum(v) / len(v))
 
-    cols = ["native_fs", "ptc_slim", "ptc_structured", "ptc_debug"]
+    cols = ["native_fs", "ptc_slim", "ptc_structured", "lisp_debug"]
     print(f"\nResponse-frame bytes (~tokens) — avg of {args.runs} run(s), sandbox={sandbox}\n")
     print(f"{'':<18}| " + " | ".join(f"{c:>16}" for c in cols))
     print("-" * 92)
@@ -265,7 +265,7 @@ def main():
         s = avg(cname, "ptc_slim")
         if not s:
             continue
-        for c in ("ptc_debug", "ptc_structured", "native_fs"):
+        for c in ("lisp_debug", "ptc_structured", "native_fs"):
             x = avg(cname, c)
             if not x:
                 continue

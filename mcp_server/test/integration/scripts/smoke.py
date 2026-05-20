@@ -105,7 +105,7 @@ def run_session(release_bin, frames, timeout_s=15):
 
 
 def case_handshake(release_bin):
-    """initialize + tools/list — must report exactly one tool: ptc_lisp_execute."""
+    """initialize + tools/list — must report exactly one tool: lisp_eval."""
     replies, code, _stderr = run_session(
         release_bin,
         [
@@ -129,7 +129,7 @@ def case_handshake(release_bin):
     tools = lst["result"]["tools"]
     if len(tools) != 1:
         return False, f"expected 1 tool, got {len(tools)}"
-    if tools[0]["name"] != "ptc_lisp_execute":
+    if tools[0]["name"] != "lisp_eval":
         return False, f"wrong tool name: {tools[0]['name']}"
 
     return True, "ok"
@@ -176,7 +176,7 @@ def case_args_error(release_bin):
         [
             init_frame(1),
             initialized_notif(),
-            tools_call_frame(8, "ptc_lisp_execute", {}),
+            tools_call_frame(8, "lisp_eval", {}),
             exit_notif(),
         ],
     )

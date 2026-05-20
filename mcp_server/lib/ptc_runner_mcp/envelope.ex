@@ -57,7 +57,7 @@ defmodule PtcRunnerMcp.Envelope do
 
   @doc """
   Build the `unknown_tool` envelope for any `tools/call` whose
-  `params.name` is not `"ptc_lisp_execute"`.
+  `params.name` is not `"lisp_eval"`.
 
   Per § 7.4 D1, unknown tool names are surfaced as a tool result, not
   as JSON-RPC `-32602`. Delegates to `render_error/3` so all error
@@ -73,7 +73,7 @@ defmodule PtcRunnerMcp.Envelope do
 
   Profile-aware: routes through `ptc_lisp_error/1` so a busy rejection
   honors the active response profile (slim text vs. structured vs.
-  debug) just like any other `ptc_lisp_execute` error.
+  debug) just like any other `lisp_eval` error.
   """
   @spec busy(pos_integer()) :: t()
   def busy(cap) when is_integer(cap) and cap > 0 do
@@ -173,7 +173,7 @@ defmodule PtcRunnerMcp.Envelope do
 
     feedback =
       Keyword.get(opts, :feedback) ||
-        "The MCP server exposes exactly one tool: `ptc_lisp_execute`." <>
+        "The MCP server exposes exactly one tool: `lisp_eval`." <>
           if is_binary(name) and name != "" do
             " The requested tool `#{name}` is not registered."
           else
@@ -236,7 +236,7 @@ defmodule PtcRunnerMcp.Envelope do
     }
   end
 
-  @doc "Wrap a `ptc_lisp_execute` success according to the response profile."
+  @doc "Wrap a `lisp_eval` success according to the response profile."
   @spec ptc_lisp_success(map(), keyword()) :: t()
   def ptc_lisp_success(structured, opts \\ []) when is_map(structured) do
     case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do
@@ -257,7 +257,7 @@ defmodule PtcRunnerMcp.Envelope do
     end
   end
 
-  @doc "Wrap a `ptc_lisp_execute` error according to the response profile."
+  @doc "Wrap a `lisp_eval` error according to the response profile."
   @spec ptc_lisp_error(map(), keyword()) :: t()
   def ptc_lisp_error(structured, opts \\ []) when is_map(structured) do
     case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do

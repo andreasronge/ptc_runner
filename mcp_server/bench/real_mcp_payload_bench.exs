@@ -6,7 +6,7 @@
 #        npx -y @gongrzhe/server-gmail-autoauth-mcp
 #
 #   2. PTC Runner aggregator variants:
-#        ptc_slim, ptc_structured, ptc_debug
+#        ptc_slim, ptc_structured, lisp_debug
 #
 # The harness measures client-visible JSON-RPC frame bytes rather than
 # only PTC's internal `ptc_metrics`, then reports cold and warm costs:
@@ -521,7 +521,7 @@ defmodule RealMcpPayloadBench.Report do
         "  native warm/cold est tokens: #{native["warm_est_tokens"]} / #{native["cold_est_tokens"]}, latency #{native["latency_ms"]}ms"
       )
 
-      Enum.each(["ptc_slim", "ptc_structured", "ptc_debug"], fn name ->
+      Enum.each(["ptc_slim", "ptc_structured", "lisp_debug"], fn name ->
         ptc = variants[name]
 
         IO.puts(
@@ -574,17 +574,17 @@ defmodule RealMcpPayloadBench.Report do
   defp ratio(num, den), do: Float.round(num / den, 3)
 
   defp summarize_ptc_variant(session, ptc_call, native_task_bytes, native_cold) do
-    ptc_task_bytes = ptc_call.request_bytes + ptc_call.response_bytes
-    ptc_cold = session.overhead["cold_overhead_bytes"] + ptc_task_bytes
+    lisp_task_bytes = ptc_call.request_bytes + ptc_call.response_bytes
+    ptc_cold = session.overhead["cold_overhead_bytes"] + lisp_task_bytes
     sc = get_in(ptc_call.reply, ["result", "structuredContent"]) || %{}
     ptc_metrics = Map.get(sc, "ptc_metrics")
     upstream_calls = Map.get(sc, "upstream_calls", [])
 
     %{
       "cold_bytes" => ptc_cold,
-      "warm_bytes" => ptc_task_bytes,
+      "warm_bytes" => lisp_task_bytes,
       "cold_est_tokens" => estimate_tokens(ptc_cold),
-      "warm_est_tokens" => estimate_tokens(ptc_task_bytes),
+      "warm_est_tokens" => estimate_tokens(lisp_task_bytes),
       "request_bytes" => ptc_call.request_bytes,
       "response_bytes" => ptc_call.response_bytes,
       "latency_ms" => ptc_call.latency_ms,
@@ -603,11 +603,11 @@ defmodule RealMcpPayloadBench.Report do
           ])
         end),
       "comparison" => %{
-        "warm_delta_bytes_ptc_minus_native" => ptc_task_bytes - native_task_bytes,
+        "warm_delta_bytes_ptc_minus_native" => lisp_task_bytes - native_task_bytes,
         "cold_delta_bytes_ptc_minus_native" => ptc_cold - native_cold,
-        "warm_ratio_ptc_over_native" => ratio(ptc_task_bytes, native_task_bytes),
+        "warm_ratio_ptc_over_native" => ratio(lisp_task_bytes, native_task_bytes),
         "cold_ratio_ptc_over_native" => ratio(ptc_cold, native_cold),
-        "ptc_warm_wins" => ptc_task_bytes < native_task_bytes,
+        "ptc_warm_wins" => lisp_task_bytes < native_task_bytes,
         "ptc_cold_wins" => ptc_cold < native_cold
       }
     }
@@ -684,8 +684,8 @@ ptc_sessions =
         {"RELEASE_DISTRIBUTION", "none"},
         {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}
       ]),
-    ptc_debug:
-      RealMcpPayloadBench.McpSession.start("ptc_debug", ptc_command.("debug"), [
+    lisp_debug:
+      RealMcpPayloadBench.McpSession.start("lisp_debug", ptc_command.("debug"), [
         {"RELEASE_DISTRIBUTION", "none"},
         {"PTC_RUNNER_MCP_LOG_LEVEL", "error"}
       ])
@@ -724,7 +724,7 @@ try do
               {session_after, ptc_call} =
                 RealMcpPayloadBench.McpSession.call_tool(
                   session,
-                  "ptc_lisp_execute",
+                  "lisp_eval",
                   ptc_args
                 )
 
@@ -764,7 +764,7 @@ try do
       "ptc_runner" => %{
         "ptc_slim" => ptc_command.("slim"),
         "ptc_structured" => ptc_command.("structured"),
-        "ptc_debug" => ptc_command.("debug")
+        "lisp_debug" => ptc_command.("debug")
       }
     },
     "tools" =>

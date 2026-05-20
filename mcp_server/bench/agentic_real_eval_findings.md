@@ -50,7 +50,7 @@ intended behavior for this harness when any real-provider case fails.
   call. The generated program referenced catalog operations, but the
   executor exhausted the one-turn limit after catalog/list handling failed.
 - `catalog_op_mentions` is inferred from generated program text because
-  `ptc_task` does not yet expose catalog operation counts as structured
+  `lisp_task` does not yet expose catalog operation counts as structured
   metrics.
 - ReqLLM warns that `openrouter:google/gemini-3.1-flash-lite` is not in
   its local model catalog. Provider-reported token fields were still

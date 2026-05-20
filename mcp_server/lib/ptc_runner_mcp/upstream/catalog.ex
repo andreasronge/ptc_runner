@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.Upstream.Catalog do
   @moduledoc """
   Renders the inline upstream catalog injected into the
-  `ptc_lisp_execute` tool description in aggregator mode.
+  `lisp_eval` tool description in aggregator mode.
 
   Per `Plans/ptc-runner-mcp-aggregator.md` §12.5 the catalog is one
   block per configured upstream, listing each tool's name, args, and
@@ -119,7 +119,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
 
   The shape is the same input accepted by `render_entries/1`:
   `%{name: String.t(), tools: list() | nil, impl: module() | nil, metadata: map()}`.
-  `ptc_task` capability summaries use this structured snapshot instead of
+  `lisp_task` capability summaries use this structured snapshot instead of
   parsing the human-oriented rendered catalog string.
   """
   @spec snapshot(atom() | pid()) :: [

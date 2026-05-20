@@ -29,13 +29,13 @@ defmodule PtcRunnerMcp.Sessions do
   @names_registry PtcRunnerMcp.Sessions.Names
 
   @sync_tool_names [
-    "ptc_session_start",
-    "ptc_session_list",
-    "ptc_session_inspect",
-    "ptc_session_forget",
-    "ptc_session_close"
+    "lisp_session_start",
+    "lisp_session_list",
+    "lisp_session_inspect",
+    "lisp_session_forget",
+    "lisp_session_close"
   ]
-  @async_tool_names ["ptc_session_eval"]
+  @async_tool_names ["lisp_session_eval"]
   @tool_names @sync_tool_names ++ @async_tool_names
 
   @type owner :: Owner.t()
@@ -107,7 +107,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   @doc "Handle a session `tools/call` outer params map and return an MCP envelope."
   @spec call(map()) :: map()
-  def call(%{"name" => "ptc_session_start", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_start", "arguments" => args}) when is_map(args) do
     args
     |> start_session_args()
     |> envelope()
@@ -118,34 +118,34 @@ defmodule PtcRunnerMcp.Sessions do
     Envelope.error_envelope(Projection.error(:session_args_error, "arguments must be an object"))
   end
 
-  def call(%{"name" => "ptc_session_start"}),
-    do: call(%{"name" => "ptc_session_start", "arguments" => %{}})
+  def call(%{"name" => "lisp_session_start"}),
+    do: call(%{"name" => "lisp_session_start", "arguments" => %{}})
 
-  def call(%{"name" => "ptc_session_list", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_list", "arguments" => args}) when is_map(args) do
     args
     |> list_session_args()
     |> envelope()
   end
 
-  def call(%{"name" => "ptc_session_eval", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_eval", "arguments" => args}) when is_map(args) do
     case validate_eval(args) do
       {:ok, validated} -> eval_validated(validated)
       {:error, envelope} -> envelope
     end
   end
 
-  def call(%{"name" => "ptc_session_inspect", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_inspect", "arguments" => args}) when is_map(args) do
     session_id = Map.get(args, "session_id")
     view = Map.get(args, "view", "overview")
     envelope(inspect(session_id, owner_context(args), view))
   end
 
-  def call(%{"name" => "ptc_session_forget", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_forget", "arguments" => args}) when is_map(args) do
     session_id = Map.get(args, "session_id")
     envelope(forget(session_id, owner_context(args), args))
   end
 
-  def call(%{"name" => "ptc_session_close", "arguments" => args}) when is_map(args) do
+  def call(%{"name" => "lisp_session_close", "arguments" => args}) when is_map(args) do
     session_id = Map.get(args, "session_id")
     reason = Map.get(args, "reason", "closed")
     envelope(close(session_id, owner_context(args), reason))
@@ -187,7 +187,7 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  @doc "Validate `ptc_session_eval` arguments before acquiring the global eval gate."
+  @doc "Validate `lisp_session_eval` arguments before acquiring the global eval gate."
   @spec validate_eval(map()) :: {:ok, map()} | {:error, map()}
   def validate_eval(args) when is_map(args) do
     with {:ok, session_id} <- required_string(args, "session_id"),
@@ -209,7 +209,7 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  @doc "Run a previously validated `ptc_session_eval` argument map."
+  @doc "Run a previously validated `lisp_session_eval` argument map."
   @spec eval_validated(map(), keyword()) :: map()
   def eval_validated(validated, opts \\ []) when is_map(validated) do
     eval_opts =
@@ -572,7 +572,7 @@ defmodule PtcRunnerMcp.Sessions do
         list(owner_context)
 
       _other ->
-        {:error, Projection.error(:session_args_error, "ptc_session_list takes no arguments")}
+        {:error, Projection.error(:session_args_error, "lisp_session_list takes no arguments")}
     end
   end
 
@@ -585,7 +585,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp validate_start_args(args) when is_map(args) do
     case Enum.find(Map.keys(args), &(not start_arg_key?(&1))) do
       nil -> :ok
-      key -> {:error, "unexpected ptc_session_start argument: #{key}"}
+      key -> {:error, "unexpected lisp_session_start argument: #{key}"}
     end
   end
 
@@ -696,7 +696,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp session_start_tool do
     %{
-      "name" => "ptc_session_start",
+      "name" => "lisp_session_start",
       "description" => PromptRegistry.render(:mcp_session_start_description, []),
       "inputSchema" => %{
         "type" => "object",
@@ -712,7 +712,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp session_list_tool do
     %{
-      "name" => "ptc_session_list",
+      "name" => "lisp_session_list",
       "description" => PromptRegistry.render(:mcp_session_list_description, []),
       "inputSchema" => %{
         "type" => "object",
@@ -724,9 +724,16 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp session_eval_tool do
+    opts =
+      if Tools.configured_aggregator_mode?() do
+        [catalog: PtcRunnerMcp.CatalogDescription.render()]
+      else
+        []
+      end
+
     %{
-      "name" => "ptc_session_eval",
-      "description" => PromptRegistry.render(:mcp_session_eval_description, []),
+      "name" => "lisp_session_eval",
+      "description" => PromptRegistry.render(session_eval_description_key(), opts),
       "inputSchema" => %{
         "type" => "object",
         "required" => ["session_id", "program"],
@@ -746,9 +753,17 @@ defmodule PtcRunnerMcp.Sessions do
     }
   end
 
+  defp session_eval_description_key do
+    if Tools.configured_aggregator_mode?() do
+      :mcp_session_eval_with_upstreams_description
+    else
+      :mcp_session_eval_description
+    end
+  end
+
   defp session_inspect_tool do
     %{
-      "name" => "ptc_session_inspect",
+      "name" => "lisp_session_inspect",
       "description" => PromptRegistry.render(:mcp_session_inspect_description, []),
       "inputSchema" => %{
         "type" => "object",
@@ -767,7 +782,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp session_forget_tool do
     %{
-      "name" => "ptc_session_forget",
+      "name" => "lisp_session_forget",
       "description" => PromptRegistry.render(:mcp_session_forget_description, []),
       "inputSchema" => %{
         "type" => "object",
@@ -790,7 +805,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp session_close_tool do
     %{
-      "name" => "ptc_session_close",
+      "name" => "lisp_session_close",
       "description" => PromptRegistry.render(:mcp_session_close_description, []),
       "inputSchema" => %{
         "type" => "object",

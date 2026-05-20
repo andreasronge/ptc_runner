@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.DebugConfig do
   @moduledoc """
-  Boot-time configuration for the opt-in `ptc_debug` diagnostics tool.
+  Boot-time configuration for the opt-in `lisp_debug` diagnostics tool.
 
   See `Plans/ptc-runner-mcp-debug-tool.md` § 4. Mirrors the
   `PtcRunnerMcp.AgenticConfig` / `PtcRunnerMcp.AggregatorConfig`
@@ -9,14 +9,14 @@ defmodule PtcRunnerMcp.DebugConfig do
 
   When `enabled` is `false` (the default) there is no `DebugBuffer`
   process, no recording hook work beyond a single `:persistent_term`
-  read per `tools/call`, and `ptc_debug` is not advertised in
+  read per `tools/call`, and `lisp_debug` is not advertised in
   `tools/list`.
   """
 
   @ring_size_min 10
   @ring_size_max 5_000
 
-  # A maximally-truncated `ptc_debug` envelope — worst case the
+  # A maximally-truncated `lisp_debug` envelope — worst case the
   # `op=get` "too large" shape: `op` + a 256-byte `request_id` +
   # `payload_policy` + `redaction_applied` + `found` + `truncated` +
   # the `note`, doubled into `content[0].text`, plus the JSON-RPC
@@ -65,7 +65,7 @@ defmodule PtcRunnerMcp.DebugConfig do
     :persistent_term.get({__MODULE__, :config}, defaults())
   end
 
-  @doc "True when the `ptc_debug` tool is enabled."
+  @doc "True when the `lisp_debug` tool is enabled."
   @spec enabled?() :: boolean()
   def enabled?, do: get().enabled == true
 

@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.Tools do
   `tools/list` and `tools/call` handlers.
 
   Per `Plans/ptc-runner-mcp-server.md` § 8.1, the server advertises
-  exactly one tool, `ptc_lisp_execute`. The advertised description is
+  exactly one tool, `lisp_eval`. The advertised description is
   composed by `PtcRunnerMcp.PromptRegistry` from MCP-owned prompt cards.
 
   Phase 2 wired real `Lisp.run/2` execution through
@@ -47,7 +47,7 @@ defmodule PtcRunnerMcp.Tools do
   alias PtcRunnerMcp.CatalogDescription
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
-  @tool_name "ptc_lisp_execute"
+  @tool_name "lisp_eval"
 
   # § 10.4 outputSchema. `oneOf` discriminated by `status`.
   # `result` is intentionally NOT in the success branch's `required`
@@ -238,25 +238,17 @@ defmodule PtcRunnerMcp.Tools do
   }
 
   @doc """
-  The verbatim authoring-card markdown shipped at
-  `mcp_server/priv/prompts/mcp_authoring_card.md`.
-
-  Read at compile time via `@external_resource`; edits to the source
-  file trigger a recompile of this module.
+  The rendered `lisp_eval` no-upstreams tool prompt.
   """
   @spec authoring_card() :: String.t()
-  def authoring_card, do: PromptRegistry.card_text(:mcp_no_tools_authoring_card)
+  def authoring_card, do: PromptRegistry.render(:mcp_no_tools_description, [])
 
   @doc """
-  The advertised `description` field for the `ptc_lisp_execute` tool,
+  The advertised `description` field for the `lisp_eval` tool,
   by capability profile.
 
   Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.1) refactors the
   former `advertised_description/0` into a profile-aware builder.
-  For `:mcp_no_tools`, the output is:
-
-      card_text(:mcp_no_tools_capability) <> "\\n\\n" <> authoring_card()
-
   The `opts` keyword is the seam aggregator mode will use to inject
   runtime catalog text in Phase 3 (`catalog: catalog_string_or_nil`).
   Phase 0 accepts and ignores `:catalog`; future profiles
@@ -290,12 +282,12 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   @doc """
-  The verbatim aggregator-mode authoring-card markdown shipped at
-  `mcp_server/priv/prompts/mcp_aggregator_authoring_card.md`. Read at compile
-  time via `@external_resource`.
+  The rendered `lisp_eval` with-upstreams tool prompt without a
+  dynamic catalog.
   """
   @spec aggregator_authoring_card() :: String.t()
-  def aggregator_authoring_card, do: PromptRegistry.card_text(:mcp_aggregator_authoring_card)
+  def aggregator_authoring_card,
+    do: PromptRegistry.render(:mcp_aggregator_description, catalog: nil)
 
   @doc """
   Backward-compatible alias for `advertised_description(:mcp_no_tools, [])`.
@@ -308,7 +300,7 @@ defmodule PtcRunnerMcp.Tools do
   def advertised_description, do: advertised_description(:mcp_no_tools, catalog: nil)
 
   @doc """
-  The advertised `outputSchema` for the `ptc_lisp_execute` tool, by
+  The advertised `outputSchema` for the `lisp_eval` tool, by
   capability profile.
 
   Phase 0 (`Plans/ptc-runner-mcp-aggregator.md` §11.4) makes the
@@ -406,7 +398,7 @@ defmodule PtcRunnerMcp.Tools do
     end
   end
 
-  @doc "The `ptc_lisp_execute` tool entry returned in `tools/list`."
+  @doc "The `lisp_eval` tool entry returned in `tools/list`."
   @spec tool_entry() :: map()
   def tool_entry do
     capability_profile = current_profile()
@@ -460,7 +452,7 @@ defmodule PtcRunnerMcp.Tools do
   @doc """
   Handle a `tools/call` request.
 
-  For `name: "ptc_lisp_execute"`, validates `program` (§ 9.2),
+  For `name: "lisp_eval"`, validates `program` (§ 9.2),
   `context` and `output_schema` before acquiring a
   concurrency permit. All argument-shape failures emit `args_error`
   without consuming a permit. The permit is held only while the
@@ -489,10 +481,10 @@ defmodule PtcRunnerMcp.Tools do
 
   def call(%{"name" => @tool_name}), do: handle_execute_with_gate(%{})
 
-  def call(%{"name" => "ptc_task", "arguments" => args}) when is_map(args),
+  def call(%{"name" => "lisp_task", "arguments" => args}) when is_map(args),
     do: handle_agentic_call(args)
 
-  def call(%{"name" => "ptc_task"}), do: handle_agentic_call(%{})
+  def call(%{"name" => "lisp_task"}), do: handle_agentic_call(%{})
 
   def call(%{"name" => name} = params) when is_binary(name) do
     if Sessions.tool_name?(name) do
@@ -528,7 +520,7 @@ defmodule PtcRunnerMcp.Tools do
 
   @doc """
   Validate the inner `arguments` map for `tools/call name:
-  "ptc_lisp_execute"`.
+  "lisp_eval"`.
 
   Returns `{:ok, program, context, parsed_signature}` when all three
   argument-shape checks pass, or `{:error, envelope}` with the
@@ -624,7 +616,7 @@ defmodule PtcRunnerMcp.Tools do
     if agentic_advertised?() do
       handle_agentic_with_gate(args)
     else
-      Envelope.unknown_tool("ptc_task")
+      Envelope.unknown_tool("lisp_task")
     end
   end
 
@@ -1083,7 +1075,7 @@ defmodule PtcRunnerMcp.Tools do
 
   defp maybe_attach_debug_structured(envelope, structured) do
     if DebugConfig.enabled?() do
-      Map.put(envelope, "__ptc_debug_structured", structured)
+      Map.put(envelope, "__lisp_debug_structured", structured)
     else
       envelope
     end

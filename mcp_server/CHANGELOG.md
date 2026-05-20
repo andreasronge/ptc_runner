@@ -11,8 +11,8 @@ revisions.
 
 ### Removed
 
-- Removed the MCP-facing `signature` argument from `ptc_lisp_execute`
-  and `ptc_session_eval`. Clients should use `output_schema` for
+- Removed the MCP-facing `signature` argument from `lisp_eval`
+  and `lisp_session_eval`. Clients should use `output_schema` for
   return validation. A present `signature` argument now returns
   `args_error`.
 
@@ -21,14 +21,14 @@ revisions.
 - Agentic prompt-size benchmark
   (`bench/agentic_prompt_bench.exs`). The deterministic tier-1 harness
   freezes synthetic upstream catalogs and measures server-side
-  `ptc_task` planner system-prompt bytes, client-visible `ptc_task`
-  tool-entry bytes, and `ptc_lisp_execute` tool-entry bytes across
+  `lisp_task` planner system-prompt bytes, client-visible `lisp_task`
+  tool-entry bytes, and `lisp_eval` tool-entry bytes across
   `--catalog-mode auto|inline|lazy`, small/medium/large fleet shapes,
   and `--agentic-capability-summary-max-bytes` sensitivity rows. It
   makes zero LLM/provider calls, supports `--runs` stability checks and
   `--out` JSON output, and is documented in README "Agentic mode".
 - Agentic real-provider eval harness (`bench/agentic_real_eval.exs`) for
-  issue #931. The tier-2 script runs `ptc_task` through OpenRouter
+  issue #931. The tier-2 script runs `lisp_task` through OpenRouter
   against a local filesystem MCP upstream, covers single-read,
   multi-file aggregation, lazy catalog discovery, error recovery, and
   negative-capability cases, and writes JSON plus Markdown findings.
@@ -36,8 +36,8 @@ revisions.
   `bench/agentic_real_eval_findings.md`.
 - PTC payload-reduction metrics
   (`Plans/ptc-runner-mcp-payload-reduction.md`). Aggregator-mode
-  responses (`ptc_lisp_execute` with ≥ 1 upstream call, and every
-  `ptc_task`) now carry a `ptc_metrics` block on `structuredContent`,
+  responses (`lisp_eval` with ≥ 1 upstream call, and every
+  `lisp_task`) now carry a `ptc_metrics` block on `structuredContent`,
   and each `upstream_calls[]` entry gains `result_bytes` (the byte
   size of the upstream response *as received* — pre-redaction,
   pre-ring, pre-envelope-cap; `null` when not cheaply known) and
@@ -53,26 +53,26 @@ revisions.
   `utf8_bytes_div_4` token estimates, and `baseline.conservative` /
   `baseline.optimistic` blocks (`optimistic.available: false` always —
   the no-PTC counterfactual is not measurable by the server). For
-  `ptc_task` the block also carries `server_side_llm` — the planner
+  `lisp_task` the block also carries `server_side_llm` — the planner
   LLM's prompt/completion byte sizes (always present, with the fixed
   system message included in `prompt_bytes`) and provider token counts
   (`provider_reported: true` with real numbers when the LLM adapter
   surfaces `usage`, else `null` + byte estimates) — and an
   `efficiency_note` stating the ratio excludes the planner cost.
   `ptc_metrics` is additive and never appears on the `:mcp_no_tools`
-  `ptc_lisp_execute` profile or on a 0-upstream-call aggregator
-  program; the aggregator and `ptc_task` `outputSchema`s advertise the
-  new optional fields. When `--debug-tool` is enabled, `ptc_debug
+  `lisp_eval` profile or on a 0-upstream-call aggregator
+  program; the aggregator and `lisp_task` `outputSchema`s advertise the
+  new optional fields. When `--debug-tool` is enabled, `lisp_debug
   op=stats` gains a `payload_reduction` aggregate (totals,
   p50/p95/max/weighted ratio skipping `null`s, `top_reducers` (≤ 10 by
   per-call ratio, newest tie-break), `estimated_tokens`, and — for
-  windows containing `ptc_task` calls — an `agentic_planner` sub-block
-  with the summed planner tokens/bytes), `ptc_debug recent` / `get`
+  windows containing `lisp_task` calls — an `agentic_planner` sub-block
+  with the summed planner tokens/bytes), `lisp_debug recent` / `get`
   records carry the per-call `ptc_metrics`, and the size-cap shrink
   drops `payload_reduction.top_reducers` first, then the
   `payload_reduction` block, before touching `by_server` / `by_tool`.
   No new CLI flags, no new telemetry events.
-- Opt-in `ptc_debug` diagnostics tool
+- Opt-in `lisp_debug` diagnostics tool
   (`Plans/ptc-runner-mcp-debug-tool.md`). Disabled by default; enable
   with `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL`. Read-only
   (`readOnlyHint: true, idempotentHint: true`); exposes three ops over
@@ -87,13 +87,13 @@ revisions.
   via a single bounded directory glob, else the ring record). Records
   every recognized-tool call that produced an envelope — successes,
   `args_error` validation failures, and `busy` gate rejections —
-  except `ptc_debug`'s own calls. Reuses the `--trace-payloads`
+  except `lisp_debug`'s own calls. Reuses the `--trace-payloads`
   redaction policy + `Credentials.Redactor.scrub/1`; every response
   echoes `payload_policy` and `redaction_applied: true`. Responses are
   hard-capped by `--max-debug-response-bytes` (default 64 KiB) with
   graceful truncation. The ring buffer (`DebugBuffer` GenServer + ETS)
   and the per-call recording hook exist only when `--debug-tool` is
-  set; `ptc_debug` is dispatched synchronously with no concurrency
+  set; `lisp_debug` is dispatched synchronously with no concurrency
   permit and is never written to the ring. The recorder is fully
   fault-isolated — a dead/overloaded `DebugBuffer` degrades to "no
   diagnostics", never to "tool call failed".
@@ -140,7 +140,7 @@ revisions.
   `decoded_bytes: 0` and `text_bytes` (size of the rejected text
   for cap correlation). No event fires when no text-content item is
   present or when the mimeType doesn't match.
-- Response profiles for `ptc_lisp_execute`
+- Response profiles for `lisp_eval`
   (`Plans/ptc-runner-mcp-slim-responses.md`). New `--response-profile`
   / `PTC_RUNNER_MCP_RESPONSE_PROFILE` flag selects `slim` (the new
   default — concise text in `content[0].text`, no `structuredContent`,
@@ -152,8 +152,8 @@ revisions.
   full payload, `ptc_metrics`, `upstream_calls`, full `outputSchema`).
   `--debug-tool` infers `debug` unless the profile is set explicitly;
   `--debug-tool --response-profile slim` keeps the client response
-  slim while still feeding the full pre-slim payload to the `ptc_debug`
-  recorder internally (the private `__ptc_debug_structured` carrier is
+  slim while still feeding the full pre-slim payload to the `lisp_debug`
+  recorder internally (the private `__lisp_debug_structured` carrier is
   stripped before the JSON-RPC frame is written). The tool description
   advertises the active profile. See README "Response profiles" and
   `bench/local_payload_bench.py` for the wire-cost comparison
@@ -185,7 +185,7 @@ revisions.
 
 ### Breaking changes
 
-- The default `ptc_lisp_execute` response shape is now `slim`
+- The default `lisp_eval` response shape is now `slim`
   (`Plans/ptc-runner-mcp-slim-responses.md`): `content[0].text` carries
   concise human-readable text (the value, or `<prints>…</prints>` +
   `<result>…` when the program printed), there is no
@@ -193,7 +193,7 @@ revisions.
   `signature` argument is present. `ptc_metrics`, `upstream_calls`,
   empty `prints`/`feedback`, and a default `truncated: false` are
   omitted. Clients that parsed `structuredContent` from
-  `ptc_lisp_execute` (or relied on the advertised `outputSchema`) must
+  `lisp_eval` (or relied on the advertised `outputSchema`) must
   start the server with `--response-profile structured` (compact
   machine-readable shape) or `--debug-tool` / `--response-profile
   debug` (the pre-existing verbose shape). The MCP v1 response contract
@@ -237,7 +237,7 @@ specification at `Plans/ptc-runner-mcp-server.md`.
 
 ### Request / response contract
 
-- Single tool advertised: `ptc_lisp_execute`. Description is
+- Single tool advertised: `lisp_eval`. Description is
   `PtcToolProtocol.tool_description(:mcp_no_tools)` followed by
   `\n\n` followed by the verbatim authoring card at
   `priv/prompts/mcp_authoring_card.md` (loaded via `@external_resource`).
