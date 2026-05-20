@@ -322,6 +322,12 @@ defmodule PtcRunnerMcp.Envelope do
         Map.has_key?(structured, "validated") ->
           preview(Map.get(structured, "validated"))
 
+        # `validated` was shaped into a preview (slim, or a structured value
+        # over budget) — render the preview so the value is never silently
+        # dropped if no string `result` accompanies it.
+        is_binary(Map.get(structured, "validated_preview")) ->
+          Map.fetch!(structured, "validated_preview")
+
         true ->
           ""
       end
