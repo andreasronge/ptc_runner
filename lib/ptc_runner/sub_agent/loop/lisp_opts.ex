@@ -5,7 +5,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
   Single source of truth: all three transports — the `:content` path in
   `PtcRunner.SubAgent.Loop`, the `:tool_call` path in
   `PtcRunner.SubAgent.Loop.PtcToolCall`, and combined-mode
-  `ptc_lisp_execute` dispatch in `PtcRunner.SubAgent.Loop.TextMode` —
+  `lisp_eval` dispatch in `PtcRunner.SubAgent.Loop.TextMode` —
   build their `Lisp.run/2` opts here. Past divergence between the
   copies (see issue #874) was a real bug class; resolving it requires
   one builder, not coordinated edits across three.

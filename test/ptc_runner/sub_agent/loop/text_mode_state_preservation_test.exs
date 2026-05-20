@@ -4,7 +4,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeStatePreservationTest do
   `output: :text` runs (no `ptc_transport: :tool_call`, no combined mode).
 
   These invariants exist so that future tiers (combined mode, native preview
-  cache wiring, `ptc_lisp_execute` dispatch) cannot silently regress the
+  cache wiring, `lisp_eval` dispatch) cannot silently regress the
   byte-identical pure-text contract laid out in
   `Plans/text-mode-ptc-compute-tool.md`:
 

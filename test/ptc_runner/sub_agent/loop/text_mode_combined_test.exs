@@ -517,7 +517,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
                    end
     end
 
-    test "end-to-end: real SubAgent.new/1 in combined mode dispatches ptc_lisp_execute" do
+    test "end-to-end: real SubAgent.new/1 in combined mode dispatches lisp_eval" do
       # Built via the real public API — no `into_combined/1`. This is the
       # bisectable cutoff: combined mode is now user-reachable.
       rows = [%{"id" => 1}, %{"id" => 2}, %{"id" => 3}]
@@ -534,12 +534,12 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
 
       llm =
         tool_calling_llm([
-          # Turn 1: model invokes ptc_lisp_execute with a small program
+          # Turn 1: model invokes lisp_eval with a small program
           %{
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{
                   "program" => "(count (tool/search {:q \"q\"}))"
                 }
@@ -693,7 +693,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
             tool_calls: [
               %{
                 id: "c2",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(count (tool/search {:q "x"}))|}
               }
             ],
@@ -743,7 +743,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
             tool_calls: [
               %{
                 id: "c2",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(get (tool/fetch {:k "x"}) "a")|}
               }
             ],
@@ -781,7 +781,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
             tool_calls: [
               %{
                 id: "c2",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(* 2 (tool/compute {:n 7}))"}
               }
             ],
@@ -825,7 +825,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
             tool_calls: [
               %{
                 id: "c2",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(tool/search {:was-improved true})|}
               }
             ],

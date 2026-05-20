@@ -1,21 +1,21 @@
 defmodule PtcRunner.PtcToolProtocol do
   @moduledoc """
-  Wire-format source of truth for the `ptc_lisp_execute` tool surface.
+  Wire-format source of truth for the `lisp_eval` tool surface.
 
   Owns the canonical tool description (per capability profile) and the
   shared response-payload renderers (`render_success/2`,
   `render_error/3`) used across:
 
     * **In-process v1 PTC `:tool_call`** — `output: :ptc_lisp,
-      ptc_transport: :tool_call` agents that expose `ptc_lisp_execute`
+      ptc_transport: :tool_call` agents that expose `lisp_eval`
       as the only provider-native tool. Profile:
       `:in_process_with_app_tools`.
     * **In-process text-mode (combined mode)** — `output: :text,
-      ptc_transport: :tool_call` agents that expose `ptc_lisp_execute`
+      ptc_transport: :tool_call` agents that expose `lisp_eval`
       alongside `:both`-tagged app tools. Profile:
       `:in_process_text_mode`.
     * **MCP server** — standalone JSON-RPC server that advertises
-      `ptc_lisp_execute` with no app tools available inside programs.
+      `lisp_eval` with no app tools available inside programs.
       Profile: `:mcp_no_tools`.
 
   The three feature plans share four conventions; this module is where
@@ -61,9 +61,9 @@ defmodule PtcRunner.PtcToolProtocol do
   # directly with no runtime concatenation. New profiles must extend
   # this list and add a substring-pinning test.
 
-  @in_process_with_app_tools_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation and tool orchestration. Call app tools as `(tool/name ...)` from inside the program — do not attempt to call app tools as native function calls; only `ptc_lisp_execute` is available natively."
+  @in_process_with_app_tools_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation and tool orchestration. Call app tools as `(tool/name ...)` from inside the program — do not attempt to call app tools as native function calls; only `lisp_eval` is available natively."
 
-  @in_process_text_mode_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, or multi-step data transformation. Call `:both`-exposed app tools as `(tool/name ...)` from inside the program. The same tools are also callable natively in this assistant turn, but not in the same turn as `ptc_lisp_execute`."
+  @in_process_text_mode_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, or multi-step data transformation. Call `:both`-exposed app tools as `(tool/name ...)` from inside the program. The same tools are also callable natively in this assistant turn, but not in the same turn as `lisp_eval`."
 
   @mcp_no_tools_description "Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation, filtering, aggregation, or multi-step data transformation. No app tools are available inside the program. Pass external data via the `context` argument; each invocation is independent — there is no memory of prior calls."
 
@@ -98,7 +98,7 @@ defmodule PtcRunner.PtcToolProtocol do
           | :validation_error
 
   @doc """
-  Capability profile for the `ptc_lisp_execute` tool description.
+  Capability profile for the `lisp_eval` tool description.
 
   Returns the canonical description string for the requested profile.
   Per Addendum #11, each profile is one constant returned directly —
@@ -116,7 +116,7 @@ defmodule PtcRunner.PtcToolProtocol do
   # ----------------------------------------------------------------
 
   @doc """
-  Render a successful `ptc_lisp_execute` invocation as JSON.
+  Render a successful `lisp_eval` invocation as JSON.
 
   Success payload shape: `status`, optional `result`, `prints`,
   `feedback`, top-level `truncated`, and (when `include_memory: true`,
@@ -209,7 +209,7 @@ defmodule PtcRunner.PtcToolProtocol do
   end
 
   @doc """
-  Render a successful `ptc_lisp_execute` invocation directly from a `Lisp.run/2` result.
+  Render a successful `lisp_eval` invocation directly from a `Lisp.run/2` result.
 
   High-level convenience wrapper over `render_success/2`. Builds the
   `:execution` map internally via
@@ -281,7 +281,7 @@ defmodule PtcRunner.PtcToolProtocol do
   end
 
   @doc """
-  Render an error `ptc_lisp_execute` response as JSON.
+  Render an error `lisp_eval` response as JSON.
 
   Every member of `error_reason()` is handled. Output payload keys:
 
@@ -343,7 +343,7 @@ defmodule PtcRunner.PtcToolProtocol do
   def lisp_run(source, opts \\ []), do: Lisp.run(source, opts)
 
   @doc """
-  Validate the `program` argument of a `ptc_lisp_execute` invocation.
+  Validate the `program` argument of a `lisp_eval` invocation.
 
   Shared across the in-process `:tool_call` and text-mode loop branches
   so the wire-format error wording for an absent, mistyped, or empty
@@ -358,27 +358,25 @@ defmodule PtcRunner.PtcToolProtocol do
       {:ok, "(+ 1 2)"}
 
       iex> PtcRunner.PtcToolProtocol.validate_program(nil)
-      {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
+      {:error, :args_error, "lisp_eval requires a non-empty `program` string argument."}
 
       iex> PtcRunner.PtcToolProtocol.validate_program(42)
-      {:error, :args_error, "ptc_lisp_execute `program` must be a string, got 42."}
+      {:error, :args_error, "lisp_eval `program` must be a string, got 42."}
 
       iex> PtcRunner.PtcToolProtocol.validate_program("   ")
-      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
+      {:error, :args_error, "lisp_eval `program` must be a non-empty string."}
   """
   @spec validate_program(term()) ::
           {:ok, String.t()} | {:error, :args_error, String.t()}
   def validate_program(nil),
-    do: {:error, :args_error, "ptc_lisp_execute requires a non-empty `program` string argument."}
+    do: {:error, :args_error, "lisp_eval requires a non-empty `program` string argument."}
 
   def validate_program(program) when not is_binary(program),
-    do:
-      {:error, :args_error,
-       "ptc_lisp_execute `program` must be a string, got #{inspect(program)}."}
+    do: {:error, :args_error, "lisp_eval `program` must be a string, got #{inspect(program)}."}
 
   def validate_program(program) when is_binary(program) do
     if String.trim(program) == "" do
-      {:error, :args_error, "ptc_lisp_execute `program` must be a non-empty string."}
+      {:error, :args_error, "lisp_eval `program` must be a non-empty string."}
     else
       {:ok, program}
     end

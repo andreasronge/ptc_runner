@@ -34,26 +34,26 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
 
   # Different adapters / providers emit tool-call entries in slightly
   # different shapes:
-  #   - Internal canonical: %{name: "ptc_lisp_execute", args: %{...}}
-  #   - OpenAI/Anthropic-via-ReqLLM: %{function: %{name: "ptc_lisp_execute"}}
-  # Treat both as a `ptc_lisp_execute` invocation for assertion purposes.
-  defp ptc_lisp_execute_calls(messages) when is_list(messages) do
+  #   - Internal canonical: %{name: "lisp_eval", args: %{...}}
+  #   - OpenAI/Anthropic-via-ReqLLM: %{function: %{name: "lisp_eval"}}
+  # Treat both as a `lisp_eval` invocation for assertion purposes.
+  defp lisp_eval_calls(messages) when is_list(messages) do
     messages
     |> Enum.flat_map(fn
       %{role: :assistant, tool_calls: calls} when is_list(calls) -> calls
       _ -> []
     end)
-    |> Enum.filter(&ptc_lisp_execute_call?/1)
+    |> Enum.filter(&lisp_eval_call?/1)
   end
 
-  defp ptc_lisp_execute_calls(_), do: []
+  defp lisp_eval_calls(_), do: []
 
-  defp ptc_lisp_execute_call?(%{name: "ptc_lisp_execute"}), do: true
-  defp ptc_lisp_execute_call?(%{function: %{name: "ptc_lisp_execute"}}), do: true
-  defp ptc_lisp_execute_call?(_), do: false
+  defp lisp_eval_call?(%{name: "lisp_eval"}), do: true
+  defp lisp_eval_call?(%{function: %{name: "lisp_eval"}}), do: true
+  defp lisp_eval_call?(_), do: false
 
   describe "Scenario 1: single tool-call to filter/aggregate, validated structured final answer" do
-    test "LLM calls ptc_lisp_execute to compute aggregates over a small dataset" do
+    test "LLM calls lisp_eval to compute aggregates over a small dataset" do
       # Domain-blind: opaque numeric records. No prompt hints about expected
       # values or shape beyond what the signature already declares.
       records = [
@@ -68,7 +68,7 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
         SubAgent.new(
           prompt: """
           Operate on the actual list bound to data/records (do not redeclare or
-          invent values). Compute, using the ptc_lisp_execute tool:
+          invent values). Compute, using the lisp_eval tool:
             - active_count: the number of records where :active is true
             - active_sum:   the sum of :value across those active records
           Then return {:active_count active_count :active_sum active_sum}.
@@ -86,11 +86,11 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
           collect_messages: true
         )
 
-      # At least one ptc_lisp_execute call observed in transcript.
-      calls = ptc_lisp_execute_calls(step.messages)
+      # At least one lisp_eval call observed in transcript.
+      calls = lisp_eval_calls(step.messages)
 
       assert calls != [],
-             "Expected >=1 ptc_lisp_execute call; got #{length(calls)}. " <>
+             "Expected >=1 lisp_eval call; got #{length(calls)}. " <>
                "Messages: #{inspect(step.messages, limit: :infinity, printable_limit: :infinity)}"
 
       # Final answer matches the signature shape.
@@ -107,10 +107,10 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
   end
 
   describe "Scenario 2: direct answer without calling the execution tool" do
-    test "simple factual prompt is answered directly with no ptc_lisp_execute call" do
+    test "simple factual prompt is answered directly with no lisp_eval call" do
       # The plan calls for "a simple prompt the LLM can answer directly". This
       # validates the direct-final-answer path (R9) through real provider
-      # behavior. We instruct the model unambiguously to skip ptc_lisp_execute
+      # behavior. We instruct the model unambiguously to skip lisp_eval
       # since the question requires no computation or tool orchestration.
       agent =
         SubAgent.new(
@@ -118,7 +118,7 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
           What is the chemical symbol for water? Answer in one word.
 
           IMPORTANT: This question requires no computation or tool orchestration.
-          Do NOT call the ptc_lisp_execute tool. Return the one-word answer
+          Do NOT call the lisp_eval tool. Return the one-word answer
           directly as the assistant message content.
           """,
           ptc_transport: :tool_call,
@@ -132,11 +132,11 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
           collect_messages: true
         )
 
-      # Zero ptc_lisp_execute calls in history.
-      calls = ptc_lisp_execute_calls(step.messages)
+      # Zero lisp_eval calls in history.
+      calls = lisp_eval_calls(step.messages)
 
       assert calls == [],
-             "Expected zero ptc_lisp_execute calls for a direct-answer prompt; got #{length(calls)}"
+             "Expected zero lisp_eval calls for a direct-answer prompt; got #{length(calls)}"
 
       # Final return is non-empty content.
       assert is_binary(step.return)
@@ -169,7 +169,7 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
         SubAgent.new(
           prompt: """
           You are given data/base (an ISO-8601 datetime string) and data/minutes (an integer).
-          Use the shift app tool from inside a ptc_lisp_execute program to compute the
+          Use the shift app tool from inside a lisp_eval program to compute the
           shifted datetime, then return a map with keys :base and :shifted (both ISO-8601 strings).
 
           Inside the program, call the app tool as (tool/shift {:base data/base :minutes data/minutes}).
@@ -188,9 +188,9 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
           collect_messages: true
         )
 
-      # Round-trip worked: at least one ptc_lisp_execute call.
-      calls = ptc_lisp_execute_calls(step.messages)
-      assert calls != [], "Expected >=1 ptc_lisp_execute call; got 0"
+      # Round-trip worked: at least one lisp_eval call.
+      calls = lisp_eval_calls(step.messages)
+      assert calls != [], "Expected >=1 lisp_eval call; got 0"
 
       ret = step.return
       assert is_map(ret), "Expected map return; got #{inspect(ret)}"
@@ -283,7 +283,7 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
           collect_messages: true
         )
 
-      calls = ptc_lisp_execute_calls(step.messages)
+      calls = lisp_eval_calls(step.messages)
 
       assert length(calls) >= 3,
              "expected ≥3 intermediate executions for paginated workflow; got #{length(calls)}. " <>
@@ -337,10 +337,10 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
              "Expected step.fail.reason == :failed; got #{inspect(step.fail)}"
 
       # The model used the execution tool rather than trying to fail directly.
-      calls = ptc_lisp_execute_calls(step.messages)
+      calls = lisp_eval_calls(step.messages)
 
       assert calls != [],
-             "Expected ≥1 ptc_lisp_execute call (model must use the tool to call fail); got 0. " <>
+             "Expected ≥1 lisp_eval call (model must use the tool to call fail); got 0. " <>
                "Messages: #{inspect(step.messages, limit: :infinity, printable_limit: :infinity)}"
 
       # The fail value is inspect/1-rendered into step.fail.message. The map

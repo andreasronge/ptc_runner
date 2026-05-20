@@ -1,6 +1,6 @@
 defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   @moduledoc """
-  Tier 3a — TextMode `ptc_lisp_execute` happy-path tests.
+  Tier 3a — TextMode `lisp_eval` happy-path tests.
 
   Combined mode = `output: :text, ptc_transport: :tool_call`. The
   validator still rejects this combo at agent construction (Tier 3e
@@ -10,9 +10,9 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
 
   Coverage:
 
-  - Combined-mode request includes `ptc_lisp_execute` with the
+  - Combined-mode request includes `lisp_eval` with the
     `:in_process_text_mode` profile description.
-  - Pure text mode does NOT include `ptc_lisp_execute`.
+  - Pure text mode does NOT include `lisp_eval`.
   - Happy path: program returns intermediate value, tool result rendered.
   - `(return v)` produces a tool result and the loop continues.
   - `(fail v)` produces an error tool result; loop continues if budget
@@ -22,7 +22,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   - Memory-limit fatal terminates with `{:error, step}`; rollback
     continues.
   - Budget exemption: `max_tool_calls: 1` allows ≥ 2 sequential
-    `ptc_lisp_execute` calls. Native calls still consume budget.
+    `lisp_eval` calls. Native calls still consume budget.
   - State threading: memory / journal / tool_cache / child_steps
     propagate.
   - PTC-Lisp `(tool/foo ...)` from inside a program hits a `:both`
@@ -51,11 +51,11 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   # ---------------------------------------------------------------------------
 
   describe "combined-mode request build" do
-    test "tool_schemas include ptc_lisp_execute with :in_process_text_mode description" do
+    test "tool_schemas include lisp_eval with :in_process_text_mode description" do
       schema = TextMode.combined_mode_tool_schema()
 
       assert schema["type"] == "function"
-      assert schema["function"]["name"] == "ptc_lisp_execute"
+      assert schema["function"]["name"] == "lisp_eval"
       desc = schema["function"]["description"]
 
       # Substring pin against the canonical :in_process_text_mode profile string.
@@ -76,7 +76,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
       refute combined_desc == in_process_desc
     end
 
-    test "combined-mode LLM request lists ptc_lisp_execute alongside native tools" do
+    test "combined-mode LLM request lists lisp_eval alongside native tools" do
       tools = %{
         "search" =>
           {fn _ -> [%{"id" => 1}] end, signature: "(q :string) -> [:any]", expose: :native}
@@ -96,10 +96,10 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
       assert_received {:llm_input, %{tools: tool_list}}
       names = Enum.map(tool_list, & &1["function"]["name"])
       assert "search" in names
-      assert "ptc_lisp_execute" in names
+      assert "lisp_eval" in names
     end
 
-    test "pure text mode (no combined) does NOT include ptc_lisp_execute" do
+    test "pure text mode (no combined) does NOT include lisp_eval" do
       tools = %{
         "search" => {fn _ -> [%{"id" => 1}] end, signature: "(q :string) -> [:any]"}
       }
@@ -116,7 +116,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
 
       assert_received {:llm_input, %{tools: tool_list}}
       names = Enum.map(tool_list, & &1["function"]["name"])
-      refute "ptc_lisp_execute" in names
+      refute "lisp_eval" in names
     end
   end
 
@@ -124,7 +124,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   # Happy-path dispatch
   # ---------------------------------------------------------------------------
 
-  describe "happy path: ptc_lisp_execute returns intermediate value" do
+  describe "happy path: lisp_eval returns intermediate value" do
     test "tool result rendered with status: ok; loop continues to final text" do
       tools = %{
         "search" =>
@@ -138,7 +138,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(+ 1 2)"}
               }
             ],
@@ -166,7 +166,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
       assert step.return == "done"
 
       # Confirm a :native exposure-layer event fired for the dispatch itself.
-      assert_received {:tool_event, %{tool_name: "ptc_lisp_execute", exposure_layer: :native}}
+      assert_received {:tool_event, %{tool_name: "lisp_eval", exposure_layer: :native}}
     end
   end
 
@@ -180,7 +180,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(return {:value 42})"}
               }
             ],
@@ -213,7 +213,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~S|(fail "boom")|}
               }
             ],
@@ -245,7 +245,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "((((not balanced"}
               }
             ],
@@ -272,7 +272,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(undefined-fn 1 2)"}
               }
             ],
@@ -306,7 +306,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(def big (str (range 0 1000)))"}
               }
             ],
@@ -337,7 +337,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(def big (str (range 0 1000)))"}
               }
             ],
@@ -372,26 +372,26 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   # ---------------------------------------------------------------------------
 
   describe "budget exemption (Tier 3a Addendum)" do
-    test "max_tool_calls: 1 allows ≥ 2 sequential ptc_lisp_execute calls" do
+    test "max_tool_calls: 1 allows ≥ 2 sequential lisp_eval calls" do
       llm =
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}}
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}
           },
           %{
             tool_calls: [
-              %{id: "c2", name: "ptc_lisp_execute", args: %{"program" => "(+ 3 4)"}}
+              %{id: "c2", name: "lisp_eval", args: %{"program" => "(+ 3 4)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}
           },
           %{
             tool_calls: [
-              %{id: "c3", name: "ptc_lisp_execute", args: %{"program" => "(+ 5 6)"}}
+              %{id: "c3", name: "lisp_eval", args: %{"program" => "(+ 5 6)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}
@@ -459,7 +459,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(def n 7) n|}
               }
             ],
@@ -470,7 +470,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c2",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(* 2 n)"}
               }
             ],
@@ -513,7 +513,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(tool/echo {:v 7})|}
               }
             ],
@@ -542,7 +542,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(tool/echo {:v 7})|}
               }
             ],
@@ -572,7 +572,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
   # ---------------------------------------------------------------------------
 
   describe "telemetry: exposure_layer" do
-    test "PTC-Lisp (tool/...) call emits :ptc_lisp; native ptc_lisp_execute emits :native" do
+    test "PTC-Lisp (tool/...) call emits :ptc_lisp; native lisp_eval emits :native" do
       tools = %{
         "echo" =>
           {fn args -> args end, signature: "(v :int) -> :any", expose: :both, cache: false}
@@ -584,7 +584,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~s|(tool/echo {:v 7})|}
               }
             ],
@@ -612,7 +612,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedPtcLispTest do
       events = collect_tool_events()
 
       assert Enum.any?(events, fn meta ->
-               meta.tool_name == "ptc_lisp_execute" and meta.exposure_layer == :native
+               meta.tool_name == "lisp_eval" and meta.exposure_layer == :native
              end)
 
       assert Enum.any?(events, fn meta ->

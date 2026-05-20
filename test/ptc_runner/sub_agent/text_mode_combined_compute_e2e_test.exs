@@ -12,7 +12,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
 
   ## Question under test
 
-  *Does the LLM actually call `ptc_lisp_execute` for a task it could plausibly
+  *Does the LLM actually call `lisp_eval` for a task it could plausibly
   answer in its head?* Counting the letter `r` in `raspberry` is the classic
   miscount — the answer is 3, models often say 2.
 
@@ -42,7 +42,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
   @mission """
   You are a helpful assistant. For deterministic computation
   (counting characters, exact arithmetic, string manipulation),
-  call ptc_lisp_execute instead of computing in your head.
+  call lisp_eval instead of computing in your head.
   Programs run in a sandbox and return deterministic results.
 
   How many letter 'r' in the word 'raspberry'?
@@ -73,7 +73,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
 
   # ---------------------------------------------------------------------------
   # Per-test telemetry capture: `[:tool, :call]` events with
-  # `exposure_layer: :native` for `ptc_lisp_execute` invocations.
+  # `exposure_layer: :native` for `lisp_eval` invocations.
 
   setup do
     table = :ets.new(:combined_compute_e2e_events, [:bag, :public])
@@ -120,12 +120,12 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
         collect_messages: true
       )
 
-    # Native ptc_lisp_execute calls (telemetry: exposure_layer: :native).
+    # Native lisp_eval calls (telemetry: exposure_layer: :native).
     native_ptc_events =
       table
       |> :ets.tab2list()
       |> Enum.filter(fn {_event, _meas, meta} ->
-        meta.tool_name == "ptc_lisp_execute" and meta.exposure_layer == :native
+        meta.tool_name == "lisp_eval" and meta.exposure_layer == :native
       end)
 
     # Programs the model wrote, pulled from assistant tool_calls in transcript.
@@ -135,7 +135,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
       |> Enum.flat_map(fn
         %{role: :assistant, tool_calls: calls} when is_list(calls) ->
           calls
-          |> Enum.filter(&ptc_lisp_execute_call?/1)
+          |> Enum.filter(&lisp_eval_call?/1)
           |> Enum.map(&extract_program/1)
 
         _ ->
@@ -155,9 +155,9 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
     }
   end
 
-  defp ptc_lisp_execute_call?(%{name: "ptc_lisp_execute"}), do: true
-  defp ptc_lisp_execute_call?(%{function: %{name: "ptc_lisp_execute"}}), do: true
-  defp ptc_lisp_execute_call?(_), do: false
+  defp lisp_eval_call?(%{name: "lisp_eval"}), do: true
+  defp lisp_eval_call?(%{function: %{name: "lisp_eval"}}), do: true
+  defp lisp_eval_call?(_), do: false
 
   defp extract_program(%{args: %{"program" => p}}), do: p
   defp extract_program(%{args: %{program: p}}), do: p

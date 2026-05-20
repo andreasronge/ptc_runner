@@ -605,7 +605,7 @@ defmodule PtcRunner.SubAgent.Loop do
   # the cleanest seam — see Phase 3 of the plan).
   #
   # In `:tool_call` mode the `tools` field contains exactly one entry
-  # (`ptc_lisp_execute`) regardless of how many app tools the agent
+  # (`lisp_eval`) regardless of how many app tools the agent
   # declares. App tools stay inside the system prompt's Tool Inventory
   # and are callable only from inside the sandbox via `(tool/name ...)`.
   #

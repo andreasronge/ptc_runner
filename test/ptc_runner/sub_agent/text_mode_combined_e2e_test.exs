@@ -9,7 +9,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
   `Plans/text-mode-ptc-compute-tool.md` (lines 1110–1196) against a real
   LLM provider. Specifically validates the cross-layer cache reuse path:
   a native `expose: :both, cache: true` tool seeds `state.tool_cache` from
-  a metadata-only preview, and a subsequent `ptc_lisp_execute` program
+  a metadata-only preview, and a subsequent `lisp_eval` program
   hits the canonical cache key without re-running the underlying tool.
 
   Run with:
@@ -154,7 +154,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
           prompt:
             "You are a support assistant. " <>
               "Tell me how many errors happened with code 42 last hour. " <>
-              "Use ptc_lisp_execute with a program that binds the result of " <>
+              "Use lisp_eval with a program that binds the result of " <>
               "(tool/search_logs {:query \"#{@canonical_query}\"}) and returns " <>
               "(count rows). Then tell the user the count in plain English.",
           output: :text,
@@ -200,15 +200,15 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
       assert length(cached.result) == @row_count
 
       # ---- Conversation shape ----
-      # At least one ptc_lisp_execute call. Native search_logs is NOT
+      # At least one lisp_eval call. Native search_logs is NOT
       # asserted because — empirically with haiku — the model often skips
-      # the native preview turn and goes straight to ptc_lisp_execute when
+      # the native preview turn and goes straight to lisp_eval when
       # the prompt names the tool inside a program. The cache-entry
       # assertion above already proves the runtime + canonical-key bridge.
-      ptc_calls = tool_calls_named(step.messages, "ptc_lisp_execute")
+      ptc_calls = tool_calls_named(step.messages, "lisp_eval")
 
       assert ptc_calls != [],
-             "Expected ≥1 ptc_lisp_execute call; got 0. " <>
+             "Expected ≥1 lisp_eval call; got 0. " <>
                "Messages: #{inspect(step.messages, limit: :infinity, printable_limit: 4000)}"
 
       # ---- Telemetry ----
@@ -216,7 +216,7 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
       # (tool/search_logs ...) call inside the program (Tier 3a).
       # `exposure_layer: :native` is OPTIONAL — only fires if the model
       # chose the two-step (native → ptc_lisp) flow rather than going
-      # straight to ptc_lisp_execute. We log layers to ease debugging
+      # straight to lisp_eval. We log layers to ease debugging
       # but assert only the always-fires layer.
       search_events = tool_call_events(table, "search_logs")
       layers = exposure_layers(search_events)
@@ -234,12 +234,12 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
     test "model can answer from native preview alone; cache still seeded",
          %{table: _table} do
       # The plan describes this as "needs only one row's worth of info"
-      # — but real models routinely escalate to ptc_lisp_execute even
+      # — but real models routinely escalate to lisp_eval even
       # when not strictly necessary, especially when a cache_hint is
-      # present in the preview ("Call ptc_lisp_execute and then..."). To
+      # present in the preview ("Call lisp_eval and then..."). To
       # keep this test from being flaky-by-design, we soften per the
       # task spec: assert the run completes and the cache entry is
-      # seeded. We do NOT assert the absence of a ptc_lisp_execute call.
+      # seeded. We do NOT assert the absence of a lisp_eval call.
       agent =
         SubAgent.new(
           prompt:
@@ -271,12 +271,12 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
   # Scenario 3 — robustness: combined mode with no `:both`-exposed tools
 
   describe "Scenario 3: combined mode with only :native tools" do
-    test "run completes; ptc_lisp_execute is still wired even without :both/:ptc_lisp tools" do
+    test "run completes; lisp_eval is still wired even without :both/:ptc_lisp tools" do
       # Per Addendum #19, the compact reference card MUST be present even
       # when zero PTC-callable tools exist (covered by
       # `system_prompt_combined_test.exs`). This test confirms the *runtime*
       # half: a combined-mode agent with only native tools still completes
-      # successfully against a real provider — the `ptc_lisp_execute` plumbing
+      # successfully against a real provider — the `lisp_eval` plumbing
       # doesn't trip on an empty ptc-tool inventory.
       native_only_tool = {
         fn _args -> "the answer is 7" end,

@@ -10,7 +10,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTurnHistoryTest do
   The contract pinned here is the bullet list under "`turn_history`
   Semantics In Combined Mode" in `Plans/text-mode-ptc-compute-tool.md`:
 
-    * Successful intermediate `ptc_lisp_execute` results advance
+    * Successful intermediate `lisp_eval` results advance
       `turn_history` (the program's final expression value is pushed,
       capped at the most recent three entries, truncated via
       `ResponseHandler.truncate_for_history/1`).
@@ -45,7 +45,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTurnHistoryTest do
   defp ptc_lisp_call(id, program) do
     %{
       tool_calls: [
-        %{id: id, name: "ptc_lisp_execute", args: %{"program" => program}}
+        %{id: id, name: "lisp_eval", args: %{"program" => program}}
       ],
       content: nil,
       tokens: %{input: 1, output: 1}
@@ -208,7 +208,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTurnHistoryTest do
       # When the LLM emits a content-only response (no tool calls), the
       # combined-mode loop terminates with that content as the final
       # answer. The invariant we care about: no tool message was
-      # produced (so no path through `ptc_lisp_execute` could have
+      # produced (so no path through `lisp_eval` could have
       # pushed a turn-history entry from this turn).
       llm =
         tool_calling_llm([

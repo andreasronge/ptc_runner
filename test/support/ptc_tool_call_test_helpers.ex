@@ -44,7 +44,7 @@ defmodule PtcRunner.TestSupport.PtcToolCallTestHelpers do
   end
 
   @doc """
-  Build a canned LLM response that calls the `ptc_lisp_execute` tool with
+  Build a canned LLM response that calls the `lisp_eval` tool with
   `program`.
 
   Options:
@@ -59,7 +59,7 @@ defmodule PtcRunner.TestSupport.PtcToolCallTestHelpers do
     %{
       content: content,
       tool_calls: [
-        %{id: id, name: "ptc_lisp_execute", args: %{"program" => program}}
+        %{id: id, name: "lisp_eval", args: %{"program" => program}}
       ],
       tokens: %{input: 0, output: 0}
     }

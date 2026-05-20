@@ -20,9 +20,9 @@ defmodule PtcRunner.PtcToolProtocolTest do
                PtcToolCall.tool_description()
     end
 
-    test ":in_process_with_app_tools — stable substring (only ptc_lisp_execute is native)" do
+    test ":in_process_with_app_tools — stable substring (only lisp_eval is native)" do
       desc = PtcToolProtocol.tool_description(:in_process_with_app_tools)
-      assert desc =~ "only `ptc_lisp_execute` is available natively"
+      assert desc =~ "only `lisp_eval` is available natively"
       assert desc =~ "Call app tools as `(tool/name ...)` from inside the program"
     end
 
@@ -30,7 +30,7 @@ defmodule PtcRunner.PtcToolProtocolTest do
       desc = PtcToolProtocol.tool_description(:in_process_text_mode)
 
       assert desc =~
-               "in this assistant turn, but not in the same turn as `ptc_lisp_execute`"
+               "in this assistant turn, but not in the same turn as `lisp_eval`"
 
       assert desc =~ "Call `:both`-exposed app tools as `(tool/name ...)` from inside the program"
     end

@@ -5,12 +5,12 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
   Pins the six-row precedence table from
   `Plans/text-mode-ptc-compute-tool.md` "Multi-Call Rule":
 
-    Row 1  Multiple `ptc_lisp_execute` calls (any other calls present
+    Row 1  Multiple `lisp_eval` calls (any other calls present
            or not) → reject all (`multiple_tool_calls`).
-    Row 2  Exactly one `ptc_lisp_execute` + any other native call
+    Row 2  Exactly one `lisp_eval` + any other native call
            (valid or unknown) → reject all
-           (`mixed_with_ptc_lisp_execute`).
-    Row 3  Exactly one `ptc_lisp_execute` alone → execute the program.
+           (`mixed_with_lisp_eval`).
+    Row 3  Exactly one `lisp_eval` alone → execute the program.
     Row 4  Native app-tool calls only — all valid → execute all.
     Row 5  Native app-tool calls only — mix of valid + unknown →
            execute valid; pair `unknown_tool` per unknown id.
@@ -65,17 +65,17 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Row 1 — multiple `ptc_lisp_execute` calls
+  # Row 1 — multiple `lisp_eval` calls
   # ---------------------------------------------------------------------------
 
-  describe "Row 1: multiple ptc_lisp_execute calls" do
-    test "two ptc_lisp_execute calls reject all with multiple_tool_calls" do
+  describe "Row 1: multiple lisp_eval calls" do
+    test "two lisp_eval calls reject all with multiple_tool_calls" do
       llm =
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}},
-              %{id: "c2", name: "ptc_lisp_execute", args: %{"program" => "(+ 3 4)"}}
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}},
+              %{id: "c2", name: "lisp_eval", args: %{"program" => "(+ 3 4)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}
@@ -105,7 +105,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
       assert step.return == "recovered"
     end
 
-    test "ptc_lisp_execute + ptc_lisp_execute + native_tool — Row 1 wins, native NOT invoked" do
+    test "lisp_eval + lisp_eval + native_tool — Row 1 wins, native NOT invoked" do
       counter = :atomics.new(1, [])
 
       tools = %{
@@ -120,8 +120,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}},
-              %{id: "c2", name: "ptc_lisp_execute", args: %{"program" => "(+ 3 4)"}},
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}},
+              %{id: "c2", name: "lisp_eval", args: %{"program" => "(+ 3 4)"}},
               %{id: "c3", name: "search", args: %{"q" => "x"}}
             ],
             content: nil,
@@ -148,11 +148,11 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Row 2 — one ptc_lisp_execute + other native call
+  # Row 2 — one lisp_eval + other native call
   # ---------------------------------------------------------------------------
 
-  describe "Row 2: ptc_lisp_execute + other native call" do
-    test "ptc_lisp_execute + valid native — both paired with mixed_with_ptc_lisp_execute" do
+  describe "Row 2: lisp_eval + other native call" do
+    test "lisp_eval + valid native — both paired with mixed_with_lisp_eval" do
       counter = :atomics.new(1, [])
 
       tools = %{
@@ -167,7 +167,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}},
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}},
               %{id: "c2", name: "search", args: %{"q" => "x"}}
             ],
             content: nil,
@@ -185,7 +185,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
       Enum.each(tool_msgs, fn m ->
         payload = Jason.decode!(m.content)
         assert payload["status"] == "error"
-        assert payload["reason"] == "mixed_with_ptc_lisp_execute"
+        assert payload["reason"] == "mixed_with_lisp_eval"
         refute Map.has_key?(payload, "feedback")
       end)
 
@@ -195,12 +195,12 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
       assert step.return == "recovered"
     end
 
-    test "ptc_lisp_execute + unknown native — both paired with mixed_with_ptc_lisp_execute (precedence wins over unknown_tool)" do
+    test "lisp_eval + unknown native — both paired with mixed_with_lisp_eval (precedence wins over unknown_tool)" do
       llm =
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}},
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}},
               %{id: "c2", name: "no_such_tool", args: %{"q" => "x"}}
             ],
             content: nil,
@@ -217,7 +217,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
 
       Enum.each(tool_msgs, fn m ->
         payload = Jason.decode!(m.content)
-        assert payload["reason"] == "mixed_with_ptc_lisp_execute"
+        assert payload["reason"] == "mixed_with_lisp_eval"
         refute payload["reason"] == "unknown_tool"
       end)
 
@@ -226,16 +226,16 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Row 3 — single ptc_lisp_execute alone (regression pin for Tier 3a path)
+  # Row 3 — single lisp_eval alone (regression pin for Tier 3a path)
   # ---------------------------------------------------------------------------
 
-  describe "Row 3: single ptc_lisp_execute alone" do
+  describe "Row 3: single lisp_eval alone" do
     test "executes program; tool result rendered via PtcToolProtocol.render_success/2" do
       llm =
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}}
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}
@@ -687,8 +687,8 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
         tool_calling_llm([
           %{
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(+ 1 2)"}},
-              %{id: "c2", name: "ptc_lisp_execute", args: %{"program" => "(+ 3 4)"}}
+              %{id: "c1", name: "lisp_eval", args: %{"program" => "(+ 1 2)"}},
+              %{id: "c2", name: "lisp_eval", args: %{"program" => "(+ 3 4)"}}
             ],
             content: nil,
             tokens: %{input: 1, output: 1}

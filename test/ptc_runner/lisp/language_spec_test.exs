@@ -6,6 +6,8 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
 
   doctest LanguageSpec
 
+  @reference_marker "PTC-Lisp reference"
+
   # ============================================================================
   # Canonical compositions
   # ============================================================================
@@ -15,7 +17,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
       prompt = LanguageSpec.get(:single_shot)
       assert is_binary(prompt)
       assert String.contains?(prompt, "<single_shot>")
-      assert String.contains?(prompt, "<restrictions>")
+      assert String.contains?(prompt, @reference_marker)
       # No multi-turn content
       refute String.contains?(prompt, "<state>")
       refute String.contains?(prompt, "<return_rules>")
@@ -24,7 +26,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test ":explicit_return contains reference + multi-turn + explicit return" do
       prompt = LanguageSpec.get(:explicit_return)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "<restrictions>")
+      assert String.contains?(prompt, @reference_marker)
       assert String.contains?(prompt, "<multi_turn_rules>")
       assert String.contains?(prompt, "<state>")
       assert String.contains?(prompt, "<return_rules>")
@@ -36,7 +38,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test ":explicit_journal contains reference + multi-turn + explicit return + journal" do
       prompt = LanguageSpec.get(:explicit_journal)
       assert is_binary(prompt)
-      assert String.contains?(prompt, "<restrictions>")
+      assert String.contains?(prompt, @reference_marker)
       assert String.contains?(prompt, "<state>")
       assert String.contains?(prompt, "(return answer)")
       assert String.contains?(prompt, "<journaled_tasks>")
@@ -52,13 +54,13 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
     test "canonical compositions include reference" do
       for key <- [:single_shot, :explicit_return, :explicit_journal] do
         prompt = LanguageSpec.get(key)
-        assert String.contains?(prompt, "<restrictions>"), "#{key} should contain reference"
+        assert String.contains?(prompt, @reference_marker), "#{key} should contain reference"
       end
     end
 
     test "reference can be omitted via profile" do
       result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :none})
-      refute String.contains?(result, "<restrictions>")
+      refute String.contains?(result, @reference_marker)
       assert String.contains?(result, "(return answer)")
     end
   end
@@ -166,7 +168,7 @@ defmodule PtcRunner.Lisp.LanguageSpecTest do
 
     test "tuple with reference: :full includes reference" do
       result = LanguageSpec.resolve_profile({:profile, :explicit_return, reference: :full})
-      assert String.contains?(result, "<restrictions>")
+      assert String.contains?(result, @reference_marker)
       assert String.contains?(result, "(return answer)")
     end
 
