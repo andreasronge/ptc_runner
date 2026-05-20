@@ -59,6 +59,36 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     assert Envelope.render_success_text(shaped) == ~s(["alpha" "beta"])
   end
 
+  test "prints are capped by encoded byte budget and the kept prefix stays within budget" do
+    # 10 prints of ~2 KB each (~20 KB total) — under slim's 20-entry cap, so the
+    # 8 KB byte budget is what fires.
+    big_prints = Enum.map(1..10, fn i -> "#{i}-" <> String.duplicate("x", 2_000) end)
+
+    shaped =
+      %{"status" => "ok", "prints" => big_prints}
+      |> OutputLimits.shape_lisp_payload(:ok, :slim)
+
+    kept = shaped["prints"]
+    assert length(kept) < length(big_prints)
+    assert shaped["prints_truncated"] == true
+    # The kept prefix must actually encode within the slim print budget...
+    assert byte_size(Jason.encode!(kept)) <= OutputLimits.policy(:slim).max_print_bytes
+    # ...and it must be a true prefix, in original order.
+    assert kept == Enum.take(big_prints, length(kept))
+  end
+
+  test "prints under budget are kept whole without a truncation flag" do
+    small = Enum.map(1..5, fn i -> "line #{i}" end)
+
+    shaped =
+      %{"status" => "ok", "prints" => small}
+      |> OutputLimits.shape_lisp_payload(:ok, :debug)
+
+    assert shaped["prints"] == small
+    refute Map.has_key?(shaped, "prints_truncated")
+    refute Map.has_key?(shaped, "truncated")
+  end
+
   test "final envelope guard shrinks valid MCP output instead of truncating raw JSON" do
     envelope =
       %{
