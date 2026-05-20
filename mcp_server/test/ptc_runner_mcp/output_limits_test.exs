@@ -20,7 +20,7 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     assert shaped["output_truncated"] == true
   end
 
-  test "zero validated cap still records validated byte size when exact value is omitted" do
+  test "slim omits the structured validated value but records its size and preview" do
     shaped =
       %{"status" => "ok", "validated" => ["alpha", "beta"]}
       |> OutputLimits.shape_lisp_payload(:ok, :slim)
@@ -28,7 +28,35 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     refute Map.has_key?(shaped, "validated")
     assert shaped["validated_bytes"] == byte_size(Jason.encode!(["alpha", "beta"]))
     assert is_binary(shaped["validated_preview"])
+    # A small value fits entirely in the preview — replacing the structured
+    # value with a string rendering is not truncation, so the shaped payload
+    # must not claim it was.
+    refute Map.has_key?(shaped, "truncated")
+    refute Map.has_key?(shaped, "output_truncated")
+    refute Map.has_key?(shaped, "validated_preview_truncated")
+  end
+
+  test "slim flags truncation only when the validated preview itself drops data" do
+    big = Enum.map(1..2_000, fn _ -> String.duplicate("x", 80) end)
+
+    shaped =
+      %{"status" => "ok", "validated" => big}
+      |> OutputLimits.shape_lisp_payload(:ok, :slim)
+
+    refute Map.has_key?(shaped, "validated")
+    assert is_binary(shaped["validated_preview"])
+    assert shaped["validated_preview_truncated"] == true
+    assert shaped["truncated"] == true
     assert shaped["output_truncated"] == true
+  end
+
+  test "slim success text renders the validated preview when the structured value was shaped away" do
+    # The post-shaping shape: `validated` removed, only the preview remains,
+    # and no string `result` accompanies it. The renderer must surface the
+    # preview rather than dropping the value.
+    shaped = %{"status" => "ok", "validated_preview" => ~s(["alpha" "beta"])}
+
+    assert Envelope.render_success_text(shaped) == ~s(["alpha" "beta"])
   end
 
   test "final envelope guard shrinks valid MCP output instead of truncating raw JSON" do

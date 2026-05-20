@@ -116,12 +116,17 @@ defmodule PtcRunnerMcp.OutputLimits do
 
   defp cap_feedback(payload, _limits), do: payload
 
+  # Slim policy (`max_validated_bytes: 0`): always replace the structured
+  # `validated` value with a string preview, regardless of size. This is a
+  # rendering choice, not a loss — `put_validated_preview/3` already flags
+  # `truncated` (via `mark_if`) when the preview itself drops data, so we do
+  # NOT mark truncated unconditionally here. Doing so falsely told clients a
+  # complete small value had been truncated.
   defp cap_validated(%{"validated" => value} = payload, %{max_validated_bytes: 0} = limits) do
     payload
     |> Map.delete("validated")
     |> maybe_put_validated_bytes(value)
     |> put_validated_preview(value, limits)
-    |> mark_truncated()
   end
 
   defp cap_validated(%{"validated" => value} = payload, limits) do

@@ -84,6 +84,24 @@ defmodule PtcRunnerMcp.SlimResponseTest do
     refute Map.has_key?(env, "structuredContent")
   end
 
+  test "slim success with output_schema shows the validated value without falsely flagging truncation" do
+    env =
+      Tools.call(%{
+        "name" => "lisp_eval",
+        "arguments" => %{
+          "program" => ~S|["alpha" "beta"]|,
+          "output_schema" => %{"type" => "array", "items" => %{"type" => "string"}}
+        }
+      })
+
+    assert env["isError"] == false
+    [block] = env["content"]
+    assert block["text"] =~ "alpha"
+    assert block["text"] =~ "beta"
+    refute block["text"] =~ "[truncated]"
+    refute Map.has_key?(env, "structuredContent")
+  end
+
   test "slim error emits useful repair text and no structuredContent" do
     env =
       Tools.call(%{
