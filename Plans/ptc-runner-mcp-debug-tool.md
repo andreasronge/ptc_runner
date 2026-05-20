@@ -4,30 +4,30 @@
 |---|---|
 | Status | Draft |
 | Date | 2026-05-11 |
-| Related | `Plans/ptc-runner-mcp-server.md` (§ 6.5–6.10 logging/tracing/telemetry, § 8 tool surface), `Plans/ptc-runner-mcp-aggregator.md` (aggregator/`upstream_calls`), `Plans/agentic-mcp-aggregator.md` + `Plans/agentic-ptc-task-subagent-spec.md` (`ptc_task`), `mcp_server/lib/ptc_runner_mcp/trace_handler.ex`, `mcp_server/lib/ptc_runner_mcp/trace_file.ex`, `mcp_server/lib/ptc_runner_mcp/json_rpc.ex` |
-| Decision basis | Author preference + Codex consult (2026-05-11): build an opt-in `ptc_debug` tool, ring-buffer first / trace-dir as enrichment, off by default behind its **own independent flag** |
-| Revision | rev 2 (2026-05-11), review-tightened: recording semantics pinned (the ring records every recognized-tool call that produced an envelope, incl. `args_error`/`busy`; `ptc_debug` excluded); trace-file `get` is one bounded directory glob; `ptc_debug` is dispatched synchronously with no concurrency permit; dedicated `--max-debug-response-bytes`; upstream buckets use the canonical `upstream_calls[].reason` vocabulary; Q1/Q2/Q4 resolved |
+| Related | `Plans/ptc-runner-mcp-server.md` (§ 6.5–6.10 logging/tracing/telemetry, § 8 tool surface), `Plans/ptc-runner-mcp-aggregator.md` (aggregator/`upstream_calls`), `Plans/agentic-mcp-aggregator.md` + `Plans/agentic-lisp-task-subagent-spec.md` (`lisp_task`), `mcp_server/lib/ptc_runner_mcp/trace_handler.ex`, `mcp_server/lib/ptc_runner_mcp/trace_file.ex`, `mcp_server/lib/ptc_runner_mcp/json_rpc.ex` |
+| Decision basis | Author preference + Codex consult (2026-05-11): build an opt-in `lisp_debug` tool, ring-buffer first / trace-dir as enrichment, off by default behind its **own independent flag** |
+| Revision | rev 2 (2026-05-11), review-tightened: recording semantics pinned (the ring records every recognized-tool call that produced an envelope, incl. `args_error`/`busy`; `lisp_debug` excluded); trace-file `get` is one bounded directory glob; `lisp_debug` is dispatched synchronously with no concurrency permit; dedicated `--max-debug-response-bytes`; upstream buckets use the canonical `upstream_calls[].reason` vocabulary; Q1/Q2/Q4 resolved |
 
 ## 1. Summary
 
-Add an opt-in MCP tool, `ptc_debug`, that lets an MCP **client LLM** investigate
-how well the MCP server — including aggregator mode and agentic (`ptc_task`)
+Add an opt-in MCP tool, `lisp_debug`, that lets an MCP **client LLM** investigate
+how well the MCP server — including aggregator mode and agentic (`lisp_task`)
 mode — is behaving, without the client needing filesystem access or having to
 grep raw JSONL.
 
-`ptc_debug` exposes three read-only operations over an in-memory ring buffer of
+`lisp_debug` exposes three read-only operations over an in-memory ring buffer of
 recent `tools/call` records:
 
 - `stats` — aggregate health: call counts, success/error rates, latency
-  percentiles, error-reason histogram, `ptc_lisp_execute` vs `ptc_task` split,
+  percentiles, error-reason histogram, `lisp_eval` vs `lisp_task` split,
   upstream-call outcomes, agentic planner stats — plus a self-description of
   *what* the client is looking at (ring vs trace files, window, redaction).
 - `recent` — the last N call records, optionally filtered to errors.
 - `get` — the full (redacted) record for one `request_id`; upgraded to the full
   on-disk trace when `--trace-dir` is configured.
 
-`ptc_debug` is **disabled by default** and advertised only when explicitly
-enabled by its own switch. It never changes `ptc_lisp_execute` or `ptc_task`,
+`lisp_debug` is **disabled by default** and advertised only when explicitly
+enabled by its own switch. It never changes `lisp_eval` or `lisp_task`,
 and it works regardless of whether aggregator/agentic mode is active.
 
 ## 2. Motivation
@@ -42,7 +42,7 @@ Today the only way to see "how is this server doing" is:
 
 None of these are reachable by an MCP client LLM over the stdio MCP connection.
 A client that wants to self-diagnose ("are my programs timing out?", "is the
-GitHub upstream flaky?", "is `ptc_task` planning badly?") has to ask the human
+GitHub upstream flaky?", "is `lisp_task` planning badly?") has to ask the human
 to go dig. We want the client to be able to ask the server directly and get a
 compact, structured answer.
 
@@ -63,10 +63,10 @@ compact, structured answer.
 
 ## 3. Core principles
 
-- `ptc_debug` is **experimental and disabled by default**.
+- `lisp_debug` is **experimental and disabled by default**.
 - It has its **own independent on/off switch** — not folded under `--agentic`
   or aggregator mode. It is orthogonal to both and useful even for a
-  no-tools `ptc_lisp_execute`-only server.
+  no-tools `lisp_eval`-only server.
 - It is **read-only**: no operation mutates server state. Tool annotations:
   `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`,
   `openWorldHint: false`.
@@ -74,7 +74,7 @@ compact, structured answer.
   side effect of serving `tools/call`. No `--trace-dir` required.
 - It records **every recognized-tool call that produced an MCP envelope** —
   success, application-level validation error (`args_error`), or concurrency-gate
-  `busy` rejection. `ptc_debug`'s own calls, unknown-tool requests, and transport
+  `busy` rejection. `lisp_debug`'s own calls, unknown-tool requests, and transport
   errors that occur before a tool name is known are *not* recorded (see § 5.1).
 - It **reuses the existing redaction stack**: the `--trace-payloads` policy
   (`§ 6.9`) and `PtcRunnerMcp.Credentials.Redactor.scrub/1`. It never emits
@@ -88,7 +88,7 @@ compact, structured answer.
   `ring_size`, `ring_count`, `trace_dir_enabled`, `payload_policy`, and the
   time `window`, so the client knows whether it is seeing "everything since
   boot" or "the last N calls in process memory".
-- `ptc_debug`'s own calls are **excluded** from the ring buffer (no self-noise,
+- `lisp_debug`'s own calls are **excluded** from the ring buffer (no self-noise,
   no recursion).
 
 ## 4. Configuration
@@ -101,7 +101,7 @@ New boot-time config, parsed once at startup with the standard precedence
 |---|---|---|---|---|
 | Enable the tool | `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | boolean | `false` |
 | Ring buffer capacity (records) | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | integer | `500` |
-| Max `ptc_debug` response size (bytes) | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | integer | `65536` |
+| Max `lisp_debug` response size (bytes) | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | integer | `65536` |
 
 Notes:
 
@@ -114,9 +114,9 @@ Notes:
   hook exist **only when `--debug-tool` is set**. When disabled there is no
   process, no ETS table, and only a single cheap `:persistent_term` read per call
   (the `DebugConfig.enabled?()` gate); the tool is not advertised in `tools/list`.
-- `ptc_debug` honors `--trace-payloads` (default `summary`). There is **no
+- `lisp_debug` honors `--trace-payloads` (default `summary`). There is **no
   separate debug payload knob in v1** (§ 12 Q1, resolved). Operators who enable
-  `ptc_debug` on a shared/production server should keep `--trace-payloads summary`
+  `lisp_debug` on a shared/production server should keep `--trace-payloads summary`
   (or `none`).
 - New module `PtcRunnerMcp.DebugConfig` follows the `AgenticConfig` /
   `AggregatorConfig` pattern: `defaults/0`, `set/1`, `get/0`, `enabled?/0` (plus
@@ -129,10 +129,10 @@ Notes:
 ### 5.1 What gets recorded
 
 **What is recorded.** The ring records one **call record** for every
-*recognized-tool* `tools/call` (`ptc_lisp_execute`, `ptc_task`) that produced an
+*recognized-tool* `tools/call` (`lisp_eval`, `lisp_task`) that produced an
 MCP envelope — successes, application-level validation errors (`args_error` —
 e.g. a malformed `signature` or oversized `program`), and concurrency-gate
-`busy`/overload rejections. It does **not** record: `ptc_debug`'s own calls
+`busy`/overload rejections. It does **not** record: `lisp_debug`'s own calls
 (successful or not); unknown-tool requests; or transport/JSON-RPC errors that
 happen before a tool name is known (oversized frame, malformed JSON-RPC) — those
 can't be attributed to a tool. Consequence: `args_error` and `busy` are first-
@@ -146,7 +146,7 @@ the only placement that sees all three of: a validation-error envelope, a gate
 `request_id` and the inner `arguments` (redacted at this point via the same
 `--trace-payloads` machinery), and — for executed calls — the final envelope,
 which already aggregates `upstream_calls` (aggregator mode) and
-`planner`/`execution`/`upstream_calls` (`ptc_task`). So the recorder reads
+`planner`/`execution`/`upstream_calls` (`lisp_task`). So the recorder reads
 envelope + timing; it does **not** correlate telemetry spans. (Implementation
 note: the concurrency gate currently lives in `Stdio`, just outside
 `traced_tools_call/3` — see the comment on `JsonRpc.traced_tools_call/3` — so the
@@ -172,7 +172,7 @@ storage):
 %{
   request_id: String.t(),          # full id; surfaced as-is in `recent`/`get`
   ts: DateTime.t(),                # call start, UTC
-  tool: String.t(),                # "ptc_lisp_execute" | "ptc_task"
+  tool: String.t(),                # "lisp_eval" | "lisp_task"
   status: :ok | :error,
   is_error: boolean(),             # MCP envelope `isError`
   reason: String.t() | nil,        # error reason string when status == :error
@@ -187,7 +187,7 @@ storage):
     %{server: String.t(), tool: String.t(), status: String.t(),
       duration_ms: non_neg_integer() | nil, reason: String.t() | nil}
   ],
-  agentic: %{                      # present only for tool == "ptc_task"
+  agentic: %{                      # present only for tool == "lisp_task"
     planner_status: :ok | :error,
     planner_duration_ms: non_neg_integer() | nil,
     planner_rejects: non_neg_integer(),  # validation rejects this task
@@ -247,7 +247,7 @@ On a same-millisecond hash collision it picks the newest by mtime. Then:
 - **Ring fallback / `found: false`** — no `--trace-dir`, no match, or read
   failure.
 
-This is the only disk access `ptc_debug` ever makes: one `File.ls` plus, when
+This is the only disk access `lisp_debug` ever makes: one `File.ls` plus, when
 inlining, one `File.stat` and one bounded `File.read` (the file is at most
 `--max-debug-response-bytes`).
 
@@ -259,8 +259,8 @@ trace-dir scan for `stats` is deferred (§ 12 Q3).
 
 ### 6.1 `tools/list`
 
-When `--debug-tool` is set, `Tools.list/0` appends a `ptc_debug` entry (after
-`ptc_lisp_execute` and, if present, `ptc_task`). When unset, nothing changes.
+When `--debug-tool` is set, `Tools.list/0` appends a `lisp_debug` entry (after
+`lisp_eval` and, if present, `lisp_task`). When unset, nothing changes.
 
 `description` (domain-blind, no test/benchmark hints):
 
@@ -296,7 +296,7 @@ When `--debug-tool` is set, `Tools.list/0` appends a `ptc_debug` entry (after
 
 Validation: unknown `op`, missing `request_id` for `op=get`, or bad types →
 the same `args_error` envelope path used by the other tools. No concurrency
-permit is consumed, and — per § 5.1 — `ptc_debug` calls are never written to the
+permit is consumed, and — per § 5.1 — `lisp_debug` calls are never written to the
 ring, valid or not.
 
 ### 6.3 `outputSchema`
@@ -318,9 +318,9 @@ on every variant: `op`, `payload_policy` (`"none"|"summary"|"full"`),
   "trace_dir_enabled": true,
   "window": { "from": "2026-05-11T08:01:02.123Z", "to": "2026-05-11T09:14:55.901Z", "calls": 137 },
   "by_tool": {
-    "ptc_lisp_execute": { "calls": 120, "ok": 110, "error": 10, "error_rate": 0.083,
+    "lisp_eval": { "calls": 120, "ok": 110, "error": 10, "error_rate": 0.083,
                           "duration_ms": { "p50": 12, "p95": 210, "max": 1400 } },
-    "ptc_task":         { "calls": 17,  "ok": 14,  "error": 3,  "error_rate": 0.176,
+    "lisp_task":         { "calls": 17,  "ok": 14,  "error": 3,  "error_rate": 0.176,
                           "duration_ms": { "p50": 1300, "p95": 2100, "max": 4500 } }
   },
   "errors": { "by_reason": { "timeout": 4, "runtime_error": 3, "args_error": 6, "busy": 1 } },
@@ -335,7 +335,7 @@ on every variant: `op`, `payload_policy` (`"none"|"summary"|"full"`),
 ```
 
 `agentic` and `upstream_calls` are omitted (or `null`) when the window contains
-no `ptc_task` calls / no upstream calls respectively. The keys under
+no `lisp_task` calls / no upstream calls respectively. The keys under
 `errors.by_reason` are the application-level error `reason` strings the server
 already emits (`timeout`, `runtime_error`, `args_error`, `busy`, …); the keys
 under `upstream_calls.by_reason` are exactly the canonical `upstream_calls[].reason`
@@ -362,7 +362,7 @@ additions.
   "redaction_applied": true,
   "count": 10,
   "calls": [
-    { "request_id": "abc-123", "ts": "2026-05-11T09:14:55.901Z", "tool": "ptc_lisp_execute",
+    { "request_id": "abc-123", "ts": "2026-05-11T09:14:55.901Z", "tool": "lisp_eval",
       "status": "error", "reason": "timeout", "duration_ms": 1001,
       "program": { "sha256": "…", "preview": "(loop …", "bytes": 312 },
       "context": { "items": { "type": "array", "count": 50 } },
@@ -426,7 +426,7 @@ it returns `{ "found": true, "source": "trace_file", "truncated": true, "note":
    `stats/1`, `recent/1`, `get/1`.
 4. **Recognized-tool dispatch wrapper** (in `PtcRunnerMcp.JsonRpc`, or in the
    `Stdio` worker around it — wherever the concurrency gate also lives): for a
-   `tools/call` whose name is `ptc_lisp_execute` or `ptc_task`, once the outcome
+   `tools/call` whose name is `lisp_eval` or `lisp_task`, once the outcome
    envelope exists — whether from an arg-validation failure, a gate `busy`
    rejection, or `traced_tools_call/3`'s execution — and if `DebugConfig.enabled?()`,
    build the redacted call record (reusing `TracePayload.redact_program/2`, the
@@ -434,14 +434,14 @@ it returns `{ "found": true, "source": "trace_file", "truncated": true, "note":
    `DebugBuffer.record/1`. The cast is wrapped so any failure is swallowed and
    `warn`-logged; it never affects the response.
 5. `PtcRunnerMcp.DebugTool` — new dedicated module (§ 12 Q2, resolved; mirrors how
-   `ptc_task` lives in `PtcRunnerMcp.Agentic`): `ptc_debug` arg validation +
+   `lisp_task` lives in `PtcRunnerMcp.Agentic`): `lisp_debug` arg validation +
    `call/1` dispatching `op` to `DebugBuffer`, formatting the `structuredContent`,
    enforcing `--max-debug-response-bytes`.
-6. `PtcRunnerMcp.JsonRpc` dispatch — `tools/call name=ptc_debug` is special-cased
+6. `PtcRunnerMcp.JsonRpc` dispatch — `tools/call name=lisp_debug` is special-cased
    **before the unknown-tool branch**: handled **synchronously, with no
    concurrency permit, and not through the async `Tools.call/1` path**, gated on
-   `DebugConfig.enabled?()` (else `unknown_tool`, mirroring the `ptc_task` gate on
-   `Tools.agentic_advertised?()`). `ptc_debug` is also excluded from the recorder
+   `DebugConfig.enabled?()` (else `unknown_tool`, mirroring the `lisp_task` gate on
+   `Tools.agentic_advertised?()`). `lisp_debug` is also excluded from the recorder
    in step 4.
 
 No changes to `:ptc_runner`. No new telemetry events (the recorder reads the
@@ -450,7 +450,7 @@ untouched.
 
 ## 8. Security & abuse considerations
 
-`ptc_debug` is a diagnostics surface; treat it as attack surface. Mitigations
+`lisp_debug` is a diagnostics surface; treat it as attack surface. Mitigations
 baked into this spec:
 
 - **Off by default**, behind an explicit `--debug-tool` flag, advertised only
@@ -462,7 +462,7 @@ baked into this spec:
 - **Residual leakage is still possible** even after redaction — error messages
   (always captured), upstream tool *names* and `upstream_calls` reasons,
   upstream server names, agentic planner outcomes, program SHA-256/preview at
-  `summary`. Document this: do not enable `ptc_debug` on a server that handles
+  `summary`. Document this: do not enable `lisp_debug` on a server that handles
   sensitive prompts/data unless you also set `--trace-payloads none`.
 - **Cross-client mixing.** A single server process serving multiple MCP clients
   pools all of their call records in one ring. The `debug_source: "ring_buffer"`
@@ -478,15 +478,15 @@ baked into this spec:
   O(ring_size) over in-memory data and never touch disk; `op=get`'s only disk
   access is one bounded directory glob (over a `--trace-max-files`-capped
   directory) plus a single file read, and only when `--trace-dir` is set.
-- **No self-amplification.** `ptc_debug` calls are excluded from the ring, so a
-  client spamming `ptc_debug` can't crowd out real records or recurse.
+- **No self-amplification.** `lisp_debug` calls are excluded from the ring, so a
+  client spamming `lisp_debug` can't crowd out real records or recurse.
 - **`record/1` can't break a call.** It's a swallowed cast; a broken/overloaded
   `DebugBuffer` degrades to "no diagnostics", never to "tool call failed".
 
 ## 9. Documentation deltas (ship with the feature)
 
 - `mcp_server/README.md` — new "Diagnostics" subsection: the `--debug-tool` /
-  `--debug-ring-size` flags, the three `ptc_debug` ops with example
+  `--debug-ring-size` flags, the three `lisp_debug` ops with example
   `structuredContent`, the redaction/`--trace-payloads` interaction, the
   off-by-default + single-trust-boundary guidance, and a cross-link to
   `ptc_viewer` (the human-facing trace UI) and to `--trace-dir` for full
@@ -502,14 +502,14 @@ baked into this spec:
 ## 10. Testing
 
 - **Integration over unit** (per repo testing guidelines):
-  - Server booted with `--debug-tool`: drive a few `ptc_lisp_execute` calls
-    (mix of `ok` / timeout / runtime error), then `tools/call ptc_debug op=stats`
+  - Server booted with `--debug-tool`: drive a few `lisp_eval` calls
+    (mix of `ok` / timeout / runtime error), then `tools/call lisp_debug op=stats`
     and assert counts, `error_rate`, `by_reason`, `window`, `debug_source`,
     `ring_size`, `ring_count`.
   - Validation-error and `busy` rejections **are** recorded: send a malformed
     `signature` (→ `args_error`) and saturate `--max-concurrent-calls` to force a
     `busy` envelope; assert both appear in `stats.errors.by_reason` and in
-    `recent`. `ptc_debug`'s own calls do **not** appear anywhere in `stats`.
+    `recent`. `lisp_debug`'s own calls do **not** appear anywhere in `stats`.
   - `op=recent` returns the calls newest-first; `errors_only=true` filters;
     `limit` caps; `since_seconds` filters.
   - `op=get` with a known `request_id` returns the redacted record:
@@ -518,18 +518,18 @@ baked into this spec:
     or collision falls back to `ring_buffer`; `found=false` for an unknown id.
   - Ring eviction: with `--debug-ring-size 10`, the 11th call evicts the 1st;
     `ring_count` never exceeds the size; `--debug-ring-size` clamping.
-  - Server booted **without** `--debug-tool`: `ptc_debug` is absent from
-    `tools/list` and `tools/call ptc_debug` returns `unknown_tool`; verify no
+  - Server booted **without** `--debug-tool`: `lisp_debug` is absent from
+    `tools/list` and `tools/call lisp_debug` returns `unknown_tool`; verify no
     `DebugBuffer` process is started.
   - Redaction: at `--trace-payloads none` the `program` field in `recent`/`get`
     is byte-counts only and contains no source; a planted fake credential in a
-    `context` value does not appear in any `ptc_debug` output.
+    `context` value does not appear in any `lisp_debug` output.
   - Aggregator mode: `upstream_calls` aggregation in `stats` matches the
     `upstream_calls` decorations on the underlying envelopes — `total`/`ok` plus
     the canonical `by_reason` buckets (`timeout`, `cap_exhausted`,
     `upstream_unavailable`, `response_too_large`, `upstream_error`) and `by_server`.
   - Agentic mode (`--agentic` + aggregator): `agentic` block in `stats`
-    (`tasks`, `planner_calls`, `planner_rejects`, `retries`); `ptc_debug` itself
+    (`tasks`, `planner_calls`, `planner_rejects`, `retries`); `lisp_debug` itself
     is not counted in `by_tool`.
   - `record/1` fault isolation: kill/overload `DebugBuffer`, confirm a
     concurrent `tools/call` still succeeds and returns a normal envelope.
@@ -545,7 +545,7 @@ baked into this spec:
 - Per-client / per-session partitioning of the ring.
 - Streaming or subscription (`notifications/...`) of debug events.
 - Exposing stderr operational logs (`§ 6.5`) through MCP — explicitly out;
-  `ptc_debug` only surfaces the server's own structured call records.
+  `lisp_debug` only surfaces the server's own structured call records.
 - A `--debug-payloads` knob separate from `--trace-payloads` (§ 12 Q1, resolved).
 - Trace-dir directory scanning in `stats`/`recent` (§ 12 Q3).
 - Time-series / rate-over-time output; v1 `stats` is a single window snapshot.
@@ -556,7 +556,7 @@ baked into this spec:
   knob. Revisit only if someone wants on-disk `full` traces alongside a stricter
   live debug surface.
 - **Q2 — resolved (v1).** Dedicated `PtcRunnerMcp.DebugTool` module (mirrors how
-  `ptc_task` lives in `PtcRunnerMcp.Agentic`), not an extension of
+  `lisp_task` lives in `PtcRunnerMcp.Agentic`), not an extension of
   `PtcRunnerMcp.Tools`.
 - **Q3 — open.** Should `stats` optionally (`include_trace_dir: true`, hard-capped
   file count) widen its window using on-disk trace files when `--trace-dir` is
@@ -578,7 +578,7 @@ baked into this spec:
   (wrapping validation, the concurrency gate, and execution — see § 5.1 / § 7).
   No tool surface yet; tested via direct `DebugBuffer.stats/recent/get` calls and
   by asserting validation-error / `busy` records land in the ring.
-- **Phase 1 — the tool.** `ptc_debug` `inputSchema`/`outputSchema`, dispatch +
+- **Phase 1 — the tool.** `lisp_debug` `inputSchema`/`outputSchema`, dispatch +
   gate in `JsonRpc`, `Tools.list/0` advertisement, size cap, redaction wiring;
   integration tests for all three ops + the disabled-server case.
 - **Phase 2 — enrichment + docs.** `get` trace-file lookup when `--trace-dir`

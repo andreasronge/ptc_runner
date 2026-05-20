@@ -129,7 +129,7 @@ aggregator inside that category:
 
 **A. Signature-validated returns.**
 
-`signature` is a first-class field on `ptc_lisp_execute`. The runtime
+`signature` is a first-class field on `lisp_eval`. The runtime
 validates the program's return value against the schema, coerces where
 unambiguous, and surfaces a structured `validation_error` on mismatch
 that the LLM can self-correct from. Cloudflare Code Mode, MCPProxy,
@@ -202,7 +202,7 @@ upgraded or revised.
 If a workflow genuinely needs the LLM to think between tool calls — "look
 at these search results, decide which one to dig into based on judgment"
 — it cannot be expressed in a single PTC-Lisp program. The LLM has to
-make multiple round-trips to `ptc_lisp_execute`. mcp-agent's multi-agent
+make multiple round-trips to `lisp_eval`. mcp-agent's multi-agent
 workflows handle this natively in one orchestration session.
 
 If your workflow is "tool, think, tool, think, tool," the aggregator
@@ -228,7 +228,7 @@ systems already handled.
 
 **4. Tool catalog token cost.**
 
-Embedding the upstream catalog inline in the `ptc_lisp_execute`
+Embedding the upstream catalog inline in the `lisp_eval`
 description costs tokens on every request. Anthropic's filesystem-of-
 tool-defs pattern (lazy, on-demand reads) and Cloudflare's typed-API
 generation handle this better at scale (200+ tools). The aggregator
@@ -313,7 +313,7 @@ Agents SDK. It composes with them at a different layer.
 Concrete patterns:
 
 - **Aggregator inside an agent framework.** A sub-agent in
-  mcp-agent or LangGraph could call the aggregator's `ptc_lisp_execute`
+  mcp-agent or LangGraph could call the aggregator's `lisp_eval`
   for deterministic compute over results, instead of trying to do joins
   or aggregates in LLM context. The framework provides multi-agent
   reasoning; the aggregator provides deterministic compute.
@@ -411,7 +411,7 @@ and prioritization. They are listed roughly in order of expected impact.
 **1. Typed catalog generation (Cloudflare-style).**
 
 Today the aggregator inlines a free-form catalog into the
-`ptc_lisp_execute` tool description. Cloudflare generates a typed TS
+`lisp_eval` tool description. Cloudflare generates a typed TS
 API from upstream MCP schemas and gives the LLM autocomplete-shaped
 guidance. PtcRunner equivalent: convert each upstream tool's JSON Schema
 into a PTC-Lisp signature spec inlined into the catalog, so the LLM
@@ -467,7 +467,7 @@ aggregator process serves multiple trust domains.
 
 **7. Streaming results back to the client.**
 
-`ptc_lisp_execute` is request/response. Long-running aggregator programs
+`lisp_eval` is request/response. Long-running aggregator programs
 (scraping, large fan-out) would benefit from streaming partial results
 or progress events. Cloudflare Workers' streaming response semantics
 are the obvious reference.
@@ -493,7 +493,7 @@ externally.
 **10. Multi-turn aggregator programs with model judgment.**
 
 The biggest "honest weakness" is workflows needing the model to think
-between calls. A future mode could let `ptc_lisp_execute` be invoked
+between calls. A future mode could let `lisp_eval` be invoked
 multi-turn within one session — preserving program state across calls,
 letting the model inject judgment between phases. Risks blurring the
 "deterministic primitive" identity; needs careful scoping.

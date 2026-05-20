@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add `ptc_transport: :tool_call` for `output: :ptc_lisp` agents. In this mode, the LLM no longer returns markdown-fenced Clojure. Instead, PtcRunner exposes one internal native tool, `ptc_lisp_execute`, whose `program` argument contains PTC-Lisp source. The LLM may call that tool zero or more times, then return a final answer directly. Final answers are validated against `signature:` as today.
+Add `ptc_transport: :tool_call` for `output: :ptc_lisp` agents. In this mode, the LLM no longer returns markdown-fenced Clojure. Instead, PtcRunner exposes one internal native tool, `lisp_eval`, whose `program` argument contains PTC-Lisp source. The LLM may call that tool zero or more times, then return a final answer directly. Final answers are validated against `signature:` as today.
 
 The current markdown-fence parser remains the default via `ptc_transport: :content`. **`:auto` is intentionally out of scope for v1** — capability detection in this codebase is not strong enough to make a fallback path predictable, and it adds the highest-complexity surface for the least proven value. Add later only if real usage demands it.
 
@@ -21,30 +21,30 @@ Stable IDs for traceability in PRs and reviews. Each requirement points to the s
 - **R1** — Add `ptc_transport: :content | :tool_call` to `SubAgent.new/1`, default `:content`. *(Public API)*
 - **R2** — Reject `ptc_transport` with `output: :text` (`ArgumentError` naming both keys). *(Public API)*
 - **R3** — Reject invalid `ptc_transport` values with `ArgumentError` listing accepted values. *(Public API)*
-- **R4** — Reserve the tool name `ptc_lisp_execute` globally; validator rejects any user app tool with that name regardless of mode. *(Public API, Implementation Plan → Definition + Validator)*
+- **R4** — Reserve the tool name `lisp_eval` globally; validator rejects any user app tool with that name regardless of mode. *(Public API, Implementation Plan → Definition + Validator)*
 
 **Two Tool Layers**
-- **R5** — In `:tool_call` mode, the LLM request `tools` field contains exactly one entry (`ptc_lisp_execute`); app tools are never exposed as provider-native tools. *(Two Tool Layers)*
+- **R5** — In `:tool_call` mode, the LLM request `tools` field contains exactly one entry (`lisp_eval`); app tools are never exposed as provider-native tools. *(Two Tool Layers)*
 - **R6** — System prompt continues to render the app-tool inventory in `:tool_call` mode. *(Two Tool Layers)*
-- **R7** — The `ptc_lisp_execute` tool description explicitly tells the model to call app tools as `(tool/name ...)` from inside the program, not as native calls. *(Two Tool Layers)*
+- **R7** — The `lisp_eval` tool description explicitly tells the model to call app tools as `(tool/name ...)` from inside the program, not as native calls. *(Two Tool Layers)*
 
 **Transport Behavior**
-- **R8** — One `ptc_lisp_execute` call per assistant turn → execute via `Lisp.run/2`, threading memory / journal / tool_cache / child_steps / turn_history identically to `:content` mode. *(Behavior #1)*
+- **R8** — One `lisp_eval` call per assistant turn → execute via `Lisp.run/2`, threading memory / journal / tool_cache / child_steps / turn_history identically to `:content` mode. *(Behavior #1)*
 - **R9** — Direct content with no tool calls → treat as final answer, validate against `signature:`. *(Behavior #2)*
 - **R10** — Direct-final-answer `Step` preserves PTC loop state (memory, journal, tool_cache, child_steps, summaries from the latest execution). Reuse `JsonHandler` parsing/coercion helpers but not its step-building path. *(Behavior #2)*
 - **R11** — `tool_calls` + content together → execute tool, preserve content in history, do not treat content as final. *(Behavior #3)*
-- **R12** — Multiple `ptc_lisp_execute` calls in one turn → execute none, append one error tool_result per `tool_call_id`, continue. *(Behavior #4)*
+- **R12** — Multiple `lisp_eval` calls in one turn → execute none, append one error tool_result per `tool_call_id`, continue. *(Behavior #4)*
 - **R13** — Unknown native tool (single call) → append paired error tool_result, continue. Any assistant turn with **more than one** native tool call — regardless of names, valid or unknown — is treated as multi-call rejection (R12); execute none, pair errors for every `tool_call_id`. The rule is "exactly one native tool call per turn," learned uniformly through feedback. *(Behavior #5)*
 - **R14** — Malformed args (missing / non-string / empty `program`, `args_error`) → paired error tool_result, continue. *(Edge Cases)*
 - **R15** — `(return v)` / `(fail v)` → append paired final tool_result, then terminate. *(Behavior #1)*
 - **R16** — Markdown-fenced clojure as content in `:tool_call` mode → targeted feedback, do not parse as PTC-Lisp, do not run signature validation first. *(Behavior #7)*
 - **R17** — Provider without native tool calling → surface `:llm_error` with provider reason; no fallback. *(Edge Cases, Adapter)*
-- **R17a** — Protocol-error recovery turns (multiple calls, unknown tool, malformed args, fenced-content feedback in `:tool_call` mode) consume a `max_turns` slot, exactly like parse/runtime retry feedback in `:content` mode. `ptc_lisp_execute`'s exemption from `max_tool_calls` (R19) does not extend to `max_turns`. *(Behavior #4, Behavior #5, Behavior #7, Edge Cases)*
+- **R17a** — Protocol-error recovery turns (multiple calls, unknown tool, malformed args, fenced-content feedback in `:tool_call` mode) consume a `max_turns` slot, exactly like parse/runtime retry feedback in `:content` mode. `lisp_eval`'s exemption from `max_tool_calls` (R19) does not extend to `max_turns`. *(Behavior #4, Behavior #5, Behavior #7, Edge Cases)*
 
 **Pairing, Budget, History**
 - **R18** — Universal pairing: every returned `tool_call_id` paired with a `role: :tool` message before continuing or terminating, including success, `(return)`, `(fail)`, and all protocol-error paths. *(Behavior — universal pairing rule)*
-- **R19** — `max_tool_calls` does **not** count `ptc_lisp_execute`; it continues to bound app tools called inside PTC-Lisp via `(tool/...)`. *(Behavior — `max_tool_calls` semantics)*
-- **R20** — `*1/*2/*3` reference previous successful `ptc_lisp_execute` executions, not direct-answer turns. "Successful" means an intermediate execution that returned a value normally; `(return)`, `(fail)`, parse / runtime / timeout / memory errors, validation failures, and protocol errors do not advance `turn_history`. *(Implementation Plan → `*1`/`*2`/`*3` history)*
+- **R19** — `max_tool_calls` does **not** count `lisp_eval`; it continues to bound app tools called inside PTC-Lisp via `(tool/...)`. *(Behavior — `max_tool_calls` semantics)*
+- **R20** — `*1/*2/*3` reference previous successful `lisp_eval` executions, not direct-answer turns. "Successful" means an intermediate execution that returned a value normally; `(return)`, `(fail)`, parse / runtime / timeout / memory errors, validation failures, and protocol errors do not advance `turn_history`. *(Implementation Plan → `*1`/`*2`/`*3` history)*
 
 **Tool-Result Shape**
 - **R21** — Refactor: extract `TurnFeedback.execution_feedback/3` from `format/3`; reimplement `format/3` on top of it without behavior change. *(Tool-result message shape)*
@@ -54,7 +54,7 @@ Stable IDs for traceability in PRs and reviews. Each requirement points to the s
 
 **System Prompt**
 - **R25** — Add `@output_format_tool_call` (and thinking variant); select in `resolve_static_sections/2` based on `agent.ptc_transport`. *(Implementation Plan → System prompt)*
-- **R26** — Tool-call output format instructs the model to call `ptc_lisp_execute` for computation/orchestration, return final answers directly in signature shape, and not return fenced code. *(Implementation Plan → System prompt)*
+- **R26** — Tool-call output format instructs the model to call `lisp_eval` for computation/orchestration, return final answers directly in signature shape, and not return fenced code. *(Implementation Plan → System prompt)*
 
 **Telemetry / Compaction / Adapter**
 - **R27** — Telemetry parity: execution turns record `program / raw_response / prints / tool_calls / memory / result preview`; direct-final turns record raw content with `program: nil`. *(Implementation Plan → Telemetry)*
@@ -81,7 +81,7 @@ Implement in order. Each phase is **reviewable independently on a feature branch
 Add the surface area without changing runtime behavior.
 
 - Add `:ptc_transport` to `SubAgent.Definition` with default `:content`.
-- Validator rejects invalid values, the `:text` combination, and any user tool named `ptc_lisp_execute`.
+- Validator rejects invalid values, the `:text` combination, and any user tool named `lisp_eval`.
 - Loop still routes everything through the existing `:content` path; `:tool_call` is constructible but executing such an agent raises `ArgumentError` with message `"ptc_transport: :tool_call not yet implemented"`. This guard is removed in Phase 4.
 
 **DoD:** agents can be built with `:tool_call`; executing one raises the not-yet-implemented error; all existing tests pass unchanged; new validator tests cover R1–R4 plus the runtime guard.
@@ -100,7 +100,7 @@ De-risks Phase 4 by isolating the shared rendering helper.
 The "two layers" become observable on the wire even before execution is wired.
 
 - Add `@output_format_tool_call` and the thinking variant; select in `resolve_static_sections/2`.
-- Build the `ptc_lisp_execute` OpenAI-format tool schema with the proactive "use `(tool/name ...)` inside the program" guidance.
+- Build the `lisp_eval` OpenAI-format tool schema with the proactive "use `(tool/name ...)` inside the program" guidance.
 - In `:tool_call` mode, the LLM request includes exactly one native tool entry; system prompt still renders the full app-tool inventory.
 
 **DoD:** request-building tests assert the request shape (one native tool, full inventory in prompt); schema description includes the guidance string. Loop still raises the Phase 1 not-yet-implemented error after the request is built.
@@ -130,15 +130,15 @@ The bulk of the work. Land as a single PR with two suggested *internal* commit b
 
 | Layer | What it is | Who sees it | How the LLM invokes it |
 |---|---|---|---|
-| **Provider-native layer** | Exactly one tool: `ptc_lisp_execute`. | The LLM provider (OpenAI / Anthropic / etc.) via the `tools` field on the request. | Native function-calling — returns a `tool_calls` block in the assistant message. |
+| **Provider-native layer** | Exactly one tool: `lisp_eval`. | The LLM provider (OpenAI / Anthropic / etc.) via the `tools` field on the request. | Native function-calling — returns a `tool_calls` block in the assistant message. |
 | **PTC-Lisp layer** | All app tools registered on the agent. | The LLM via the existing **system-prompt** Tool Inventory / namespace sections — exactly as in `:content` mode. | From inside a PTC-Lisp program: `(tool/name ...)`. Never as a native provider tool call. |
 
 Rules:
 
 - **App tools are never exposed as provider-native tools in `:tool_call` mode.** They stay inside the sandbox, callable only from PTC-Lisp source. This preserves PtcRunner's safety and determinism guarantees: every app-tool invocation is observable, cacheable, and bounded by `max_tool_calls`.
 - **System prompt continues to render the app-tool inventory** unchanged. The Tool Inventory / namespace sections are not removed in `:tool_call` mode — they document what's callable from inside `(tool/name ...)`.
-- **The `ptc_lisp_execute` description must explicitly tell the model** to call app tools as `(tool/name ...)` inside the program rather than as native function calls. The exact wording is the canonical description string defined in §Internal execution tool — do not paraphrase it in code; reference the canonical constant. This is the single most likely failure mode (model tries to call `search` natively); proactive instruction is cheaper than recovery feedback.
-- **Code-reading clarity**: in `Loop.PtcToolCall`, "tool call" without qualifier refers to a *native* tool call (the `ptc_lisp_execute` invocation). PTC-Lisp `(tool/...)` invocations continue to be called "app tool calls" and surface as `lisp_step.tool_calls`. Keep the naming separate in module docs and variable names.
+- **The `lisp_eval` description must explicitly tell the model** to call app tools as `(tool/name ...)` inside the program rather than as native function calls. The exact wording is the canonical description string defined in §Internal execution tool — do not paraphrase it in code; reference the canonical constant. This is the single most likely failure mode (model tries to call `search` natively); proactive instruction is cheaper than recovery feedback.
+- **Code-reading clarity**: in `Loop.PtcToolCall`, "tool call" without qualifier refers to a *native* tool call (the `lisp_eval` invocation). PTC-Lisp `(tool/...)` invocations continue to be called "app tool calls" and surface as `lisp_step.tool_calls`. Keep the naming separate in module docs and variable names.
 
 This design is the reason `:tool_call` transport is not "just use native tool calls for everything" — that path was rejected up front and stays rejected.
 
@@ -152,11 +152,11 @@ Add `ptc_transport: :content | :tool_call` to `PtcRunner.SubAgent.new/1`.
 
 ### Internal execution tool
 
-- Name: `ptc_lisp_execute` (reserved globally once `ptc_transport` exists — validator rejects user app tools with this name regardless of mode, to avoid mode-dependent surprises)
+- Name: `lisp_eval` (reserved globally once `ptc_transport` exists — validator rejects user app tools with this name regardless of mode, to avoid mode-dependent surprises)
 - Args: `%{"program" => string}` (non-empty)
 - **Canonical description string** (single source of truth — referenced by R7 and the Two Tool Layers section; tests assert stable substrings from this string):
 
-  > Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation and tool orchestration. Call app tools as `(tool/name ...)` from inside the program — do not attempt to call app tools as native function calls; only `ptc_lisp_execute` is available natively.
+  > Execute a PTC-Lisp program in PtcRunner's sandbox. Use this for deterministic computation and tool orchestration. Call app tools as `(tool/name ...)` from inside the program — do not attempt to call app tools as native function calls; only `lisp_eval` is available natively.
 
 ## Behavior
 
@@ -168,14 +168,14 @@ Current `ResponseHandler.parse/1` → `execute_code/4` path. No behavior change.
 
 Per assistant turn:
 
-1. **LLM returns one `ptc_lisp_execute` call.**
+1. **LLM returns one `lisp_eval` call.**
    Execute via existing `Lisp.run/2` path. Memory, journal, tool_cache, child_steps, turn_history continue to thread through loop state exactly as today.
    - On `(return v)` / `(fail v)`: emit a final tool-result message (see shape below), then terminate the loop.
    - On intermediate value: emit tool-result message, continue to next turn.
 2. **LLM returns content directly with no tool calls.**
    Treat as final answer. Validate / coerce against `signature:` per the rules below.
 
-   **Zero-execution case (direct answer on turn 1, no `ptc_lisp_execute` ever called):** the returned `Step` carries the *initial* loop state — `memory` is the agent's `initial_memory` (default `%{}`), and `journal / tool_cache / child_steps / summaries` are whatever the loop state holds at construction. No execution means no execution-derived state, but initial state is preserved. The "not empty maps" rule in R10 applies only to direct answers that follow at least one execution.
+   **Zero-execution case (direct answer on turn 1, no `lisp_eval` ever called):** the returned `Step` carries the *initial* loop state — `memory` is the agent's `initial_memory` (default `%{}`), and `journal / tool_cache / child_steps / summaries` are whatever the loop state holds at construction. No execution means no execution-derived state, but initial state is preserved. The "not empty maps" rule in R10 applies only to direct answers that follow at least one execution.
 
    **Signature handling for direct final content:**
    - **No signature, or `:string`, or `:any`** — return raw text (no JSON parse).
@@ -193,20 +193,20 @@ Per assistant turn:
 3. **LLM returns both `tool_calls` and content.**
    Execute the tool call. The assistant message keeps `content` alongside `tool_calls` in the transcript (standard message shape) — it is not re-surfaced to the model separately, just preserved on its own turn. Do not treat content as final while tool calls are present. The fenced-Clojure targeted feedback in Behavior #7 does **not** fire when tool calls are present — #7 applies only when content is the *only* thing returned. No double feedback. This turn consumes one `max_turns` slot like any execution turn.
 4. **LLM returns more than one native tool call in one assistant turn — regardless of names.**
-   Reject all of them. Execute none. The rule is "exactly one native tool call per assistant turn," and the model learns it uniformly through feedback rather than via per-name special cases. This covers two `ptc_lisp_execute` calls, `ptc_lisp_execute` + an unknown tool, two unknown tools, etc. **Append one `role: :tool` error message per `tool_call_id`**, each carrying the same protocol-error payload (`reason: "multiple_tool_calls"`, "exactly one `ptc_lisp_execute` call per assistant turn"). Then continue if turn budget allows. Pairing every returned `tool_call_id` with a `tool_result` is required for strict providers (Anthropic) — partial pairing produces invalid transcripts. Also configure provider requests to disable parallel tool calls where the adapter supports it (best-effort; do not rely on it).
+   Reject all of them. Execute none. The rule is "exactly one native tool call per assistant turn," and the model learns it uniformly through feedback rather than via per-name special cases. This covers two `lisp_eval` calls, `lisp_eval` + an unknown tool, two unknown tools, etc. **Append one `role: :tool` error message per `tool_call_id`**, each carrying the same protocol-error payload (`reason: "multiple_tool_calls"`, "exactly one `lisp_eval` call per assistant turn"). Then continue if turn budget allows. Pairing every returned `tool_call_id` with a `tool_result` is required for strict providers (Anthropic) — partial pairing produces invalid transcripts. Also configure provider requests to disable parallel tool calls where the adapter supports it (best-effort; do not rely on it).
 5. **LLM calls an unknown native tool (single call).**
-   Append a `role: :tool` error message paired to the unknown call's `tool_call_id` with protocol-error payload (`reason: "unknown_tool"`). Continue if turn budget allows. Only `ptc_lisp_execute` is valid in this transport. (If the unknown call is one of multiple native tool calls, route through Behavior #4 instead — the multi-call rule wins.)
+   Append a `role: :tool` error message paired to the unknown call's `tool_call_id` with protocol-error payload (`reason: "unknown_tool"`). Continue if turn budget allows. Only `lisp_eval` is valid in this transport. (If the unknown call is one of multiple native tool calls, route through Behavior #4 instead — the multi-call rule wins.)
 6. **Validation failure on direct final content.**
    Consume a retry turn and feed validation feedback as today.
 **Universal pairing rule for native tool-call protocol errors:** every `tool_call_id` returned by the LLM must be paired with a `role: :tool` message before the loop continues or terminates. This applies to malformed args, unknown tool names, multiple-call rejection, *and* the success path including `(return)` / `(fail)`. Never drop a `tool_call_id` silently.
 
-**`max_tool_calls` semantics:** `ptc_lisp_execute` does **not** count against `max_tool_calls`. That budget continues to limit *app tools* invoked from inside PTC-Lisp via `(tool/name ...)`, exactly as in `:content` mode. The execution tool itself is bounded by the "one call per assistant turn" rule and by `max_turns`.
+**`max_tool_calls` semantics:** `lisp_eval` does **not** count against `max_tool_calls`. That budget continues to limit *app tools* invoked from inside PTC-Lisp via `(tool/name ...)`, exactly as in `:content` mode. The execution tool itself is bounded by the "one call per assistant turn" rule and by `max_turns`.
 
 **`max_turns` semantics for protocol errors:** every assistant turn that produces a paired error tool-result (multiple-call rejection, unknown tool, malformed args) and every turn that produces fenced-content targeted feedback consumes a `max_turns` slot, identical to a parse/runtime retry turn in `:content` mode. The `max_tool_calls` exemption above is intentionally narrow — it does not extend to `max_turns`.
 
 7. **LLM returns markdown-fenced Clojure as content.**
    Targeted feedback (do not run generic signature validation first):
-   > In `ptc_transport: :tool_call`, call the `ptc_lisp_execute` tool with the program instead of returning fenced code.
+   > In `ptc_transport: :tool_call`, call the `lisp_eval` tool with the program instead of returning fenced code.
 
 ### Tool-result message shape (specified)
 
@@ -243,7 +243,7 @@ feedback =
 }
 ```
 
-This guarantees parity at the right layer: tool-call mode reuses the execution portion exactly, content mode keeps appending turn info and progress as today, and a user's `progress_fn` cannot accidentally leak into every `ptc_lisp_execute` tool result. The structured fields around `feedback` are machine-readable affordances, not a replacement for it.
+This guarantees parity at the right layer: tool-call mode reuses the execution portion exactly, content mode keeps appending turn info and progress as today, and a user's `progress_fn` cannot accidentally leak into every `lisp_eval` tool result. The structured fields around `feedback` are machine-readable affordances, not a replacement for it.
 
 **Success:**
 ```json
@@ -295,7 +295,7 @@ Rules:
 - `PtcRunner.SubAgent.Validator`:
   - Validate `:ptc_transport` is `:content` or `:tool_call`.
   - Raise `ArgumentError` if set with `output: :text`.
-  - Reject any user tool named `ptc_lisp_execute` (globally, regardless of transport).
+  - Reject any user tool named `lisp_eval` (globally, regardless of transport).
 
 ### Loop split
 
@@ -314,7 +314,7 @@ The new handler reuses:
 
 `PtcRunner.SubAgent.Loop.PtcToolCall` (small, focused):
 
-- Build OpenAI-format tool schema for `ptc_lisp_execute`.
+- Build OpenAI-format tool schema for `lisp_eval`.
 - Extract atom-keyed or string-keyed args; convert malformed args (`args_error`, missing `program`, non-string `program`, empty `program`) into protocol feedback rather than crashes.
 - Render success/error tool-result JSON using the shape above.
 - Append paired tool-result messages — including the final one before termination on `(return)` / `(fail)`.
@@ -326,7 +326,7 @@ In `PtcRunner.SubAgent.SystemPrompt`:
 - Add `@output_format_tool_call` (and a thinking variant) alongside the existing `@output_format` constants at `system_prompt.ex:58-83`.
 - Select in `resolve_static_sections/2` based on `agent.ptc_transport`.
 - Tool-call format instructs the model to:
-  - Call `ptc_lisp_execute` for deterministic computation and tool orchestration.
+  - Call `lisp_eval` for deterministic computation and tool orchestration.
   - Return the final answer directly in the requested signature shape when ready.
   - Not return fenced code blocks.
 - Keep existing PTC-Lisp language reference and tool namespace docs so generated programs can still call app tools via `(tool/name ...)`.
@@ -346,7 +346,7 @@ Tied to previous PTC-Lisp executions, **not** LLM turns. Only **intermediate exe
 
 ### Telemetry / tracing
 
-- Tool-call execution turns: record `program`, `raw_response`, `prints`, `tool_calls`, memory, result preview (same fields as today). **The `tool_calls` field on execution turns refers to *app tool calls* invoked from inside the PTC-Lisp program (`lisp_step.tool_calls`)**, not the native `ptc_lisp_execute` invocation. The native call is represented in message history and `raw_response`, not in this field. This preserves naming parity with `:content` mode.
+- Tool-call execution turns: record `program`, `raw_response`, `prints`, `tool_calls`, memory, result preview (same fields as today). **The `tool_calls` field on execution turns refers to *app tool calls* invoked from inside the PTC-Lisp program (`lisp_step.tool_calls`)**, not the native `lisp_eval` invocation. The native call is represented in message history and `raw_response`, not in this field. This preserves naming parity with `:content` mode.
 - Direct final-answer turns: record raw content with `program: nil`. Verify `Telemetry` and `StepAssembler` don't assume non-nil `program`.
 - LLM telemetry reports `"tool_calls"` when native tool calls are returned by the provider — that is a *separate* field from the per-turn `tool_calls` above.
 
@@ -360,7 +360,7 @@ Tied to previous PTC-Lisp executions, **not** LLM turns. Only **intermediate exe
 
 No new capability detection. Existing `req_llm_adapter.ex` already passes `tools` and surfaces `tool_calls`. If a provider raises `:tool_calling_not_supported` (Ollama / openai-compat), surface as `:llm_error` with provider reason — user picks a different model.
 
-**Parallel-tool-calls disable knob — future / best-effort only.** Today's `req_llm_adapter.ex` is not assumed to expose a "disable parallel tool calls" option, and Phase 4 must not block on finding one. If a future ReqLLM (or direct adapter) version exposes such an option, wire it through then. The source of truth for "exactly one `ptc_lisp_execute` per turn" is the multi-call rejection path (Behavior #4); the knob is a soft latency/cost optimization, not a correctness mechanism.
+**Parallel-tool-calls disable knob — future / best-effort only.** Today's `req_llm_adapter.ex` is not assumed to expose a "disable parallel tool calls" option, and Phase 4 must not block on finding one. If a future ReqLLM (or direct adapter) version exposes such an option, wire it through then. The source of truth for "exactly one `lisp_eval` per turn" is the multi-call rejection path (Behavior #4); the knob is a soft latency/cost optimization, not a correctness mechanism.
 
 ### Program size
 
@@ -381,7 +381,7 @@ No arbitrary library limit. Reject empty / missing `program` with a clear protoc
 | Direct final answer before any execution | Allowed. Signature-validated. |
 | Direct final answer after execution(s) | Allowed. Signature-validated. |
 | Complex signature on direct final content | Parse JSON, validate string-keyed map output. Failures consume retry turns. |
-| App tool named `ptc_lisp_execute` | Validator rejects at agent construction (globally). |
+| App tool named `lisp_eval` | Validator rejects at agent construction (globally). |
 
 ## Tests
 
@@ -389,7 +389,7 @@ No arbitrary library limit. Reject empty / missing `program` with a clear protoc
 
 - `ptc_transport` validation: accepts `:content`, `:tool_call`; rejects others; rejects with `output: :text`.
 - `:content` regression: existing fenced/raw parsing tests still pass unchanged.
-- `:tool_call`: executes `ptc_lisp_execute`, returns immediately on `(return ...)`, with paired final tool-result message present in history.
+- `:tool_call`: executes `lisp_eval`, returns immediately on `(return ...)`, with paired final tool-result message present in history.
 - `:tool_call`: intermediate execution followed by direct final JSON content.
 - `:tool_call`: direct final JSON validated against signature, covering each branch of the signature-handling rules:
   - no signature / `:string` / `:any` → raw text returned.
@@ -403,28 +403,28 @@ No arbitrary library limit. Reject empty / missing `program` with a clear protoc
 - `:tool_call`: markdown-fenced content produces targeted feedback, not signature-validation feedback.
 - `:tool_call`: malformed tool args → recoverable protocol feedback.
 - `:tool_call`: unknown native tool → recoverable protocol feedback.
-- `:tool_call`: multiple `ptc_lisp_execute` calls in one turn → all rejected, none executed, one paired protocol-error per `tool_call_id`.
-- `:tool_call`: mixed `ptc_lisp_execute` + unknown-tool calls in one turn → uniformly routed to multi-call rejection (`reason: "multiple_tool_calls"`), none executed, paired errors for every `tool_call_id`. Asserts the "exactly one native tool call per turn" rule wins over per-name handling.
+- `:tool_call`: multiple `lisp_eval` calls in one turn → all rejected, none executed, one paired protocol-error per `tool_call_id`.
+- `:tool_call`: mixed `lisp_eval` + unknown-tool calls in one turn → uniformly routed to multi-call rejection (`reason: "multiple_tool_calls"`), none executed, paired errors for every `tool_call_id`. Asserts the "exactly one native tool call per turn" rule wins over per-name handling.
 - `:tool_call`: error tool-result JSON for `(fail v)` includes `result` with the failed-value preview; error tool-result JSON for `parse_error` / `runtime_error` / `timeout` / `args_error` / `unknown_tool` / `multiple_tool_calls` does **not** include a `result` field.
-- `:tool_call`: `*1` / `*2` / `*3` reference previous successful `ptc_lisp_execute` results, not direct-answer turns.
-- Validator: rejects user tool named `ptc_lisp_execute`.
-- Two-layer separation: in `:tool_call` mode the LLM request's `tools` field contains exactly one entry (`ptc_lisp_execute`), regardless of how many app tools the agent declares. App tools must not appear in the native `tools` array.
+- `:tool_call`: `*1` / `*2` / `*3` reference previous successful `lisp_eval` results, not direct-answer turns.
+- Validator: rejects user tool named `lisp_eval`.
+- Two-layer separation: in `:tool_call` mode the LLM request's `tools` field contains exactly one entry (`lisp_eval`), regardless of how many app tools the agent declares. App tools must not appear in the native `tools` array.
 - App-tool inventory still rendered: in `:tool_call` mode the system prompt still contains the Tool Inventory / namespace sections describing app tools — verify by snapshot or substring assertion against the generated prompt.
-- `ptc_lisp_execute` tool description includes the "use `(tool/name ...)` inside the program, not native calls" guidance (substring assertion on the schema description).
+- `lisp_eval` tool description includes the "use `(tool/name ...)` inside the program, not native calls" guidance (substring assertion on the schema description).
 - Tool-result message shape: success and error JSON match spec, including `feedback`, `memory.changed`, `memory.stored_keys`, and both truncation flags.
 - Parity test: for an identical PTC-Lisp program and prior memory, the `feedback` field in `:tool_call` mode equals `TurnFeedback.execution_feedback/3`'s `feedback` value. Assert against `execution_feedback/3`, **not** `format/3` — the tool-result JSON must not contain `append_turn_info` / `append_progress` output.
 - Refactor regression test: `TurnFeedback.format/3` output is unchanged for content mode after the factor-out (golden assertion on existing test fixtures).
-- Negative test: a custom `progress_fn` set on the agent does **not** appear anywhere in the `ptc_lisp_execute` tool-result JSON, in either success or error shapes.
-- Direct-final-answer state preservation: after one or more `ptc_lisp_execute` calls followed by a direct content answer, the returned `Step` carries `memory`, `journal`, `tool_cache`, `child_steps`, and `summaries` from the latest execution — not empty maps.
+- Negative test: a custom `progress_fn` set on the agent does **not** appear anywhere in the `lisp_eval` tool-result JSON, in either success or error shapes.
+- Direct-final-answer state preservation: after one or more `lisp_eval` calls followed by a direct content answer, the returned `Step` carries `memory`, `journal`, `tool_cache`, `child_steps`, and `summaries` from the latest execution — not empty maps.
 - Universal pairing: with `collect_messages: true`, every returned `tool_call_id` from every assistant turn has a paired `role: :tool` message in the final transcript. Cover (a) success path, (b) `(return)`, (c) `(fail)`, (d) `unknown_tool`, (e) `multiple_tool_calls` (one paired error per id), (f) `args_error`.
-- `max_tool_calls` semantics: `ptc_lisp_execute` invocations do not consume the budget; app tools called from inside the program do. Mirror an existing `:content`-mode `max_tool_calls` test against `:tool_call` mode to confirm parity.
+- `max_tool_calls` semantics: `lisp_eval` invocations do not consume the budget; app tools called from inside the program do. Mirror an existing `:content`-mode `max_tool_calls` test against `:tool_call` mode to confirm parity.
 - Error feedback scope: error tool-result `feedback` field contains no turn info and no progress output, even when the agent is multi-turn with a custom `progress_fn`.
 - Memory previews: only new/changed vars appear in `memory.changed`; unchanged vars are not re-echoed turn after turn.
 - Compaction handles tool-call message history without dropping `tool_call_id` pairings.
 
 ### Integration (`@tag :integration`, gated on provider env vars)
 
-- **Scenario 1**: real tool-calling model calls `ptc_lisp_execute` once to filter/aggregate data, returns validated structured final answer.
+- **Scenario 1**: real tool-calling model calls `lisp_eval` once to filter/aggregate data, returns validated structured final answer.
 - **Scenario 2**: real model answers directly without calling the execution tool for a simple prompt.
 - **Scenario 3**: date/math workflow using tool-returned `DateTime` values through the execution-tool transport.
 - **Scenario 4**: parallel-tool-call rejection + recovery. The deterministic coverage is a **scripted/mock test** using a test-supplied `llm:` callback that returns two `tool_calls` in one assistant message, then a valid single call on the next turn. Asserts: none executed on the rejected turn, one paired `role: :tool` error message per `tool_call_id`, recovery on the following turn, both turns counted against `max_turns`. Real-provider coverage of "model spontaneously emits parallel tool calls" is **optional / manual** — relying on a specific live model to behave that way is flaky-by-design.
@@ -466,7 +466,7 @@ Each must explain:
 
 - Default remains `ptc_transport: :content`.
 - `:tool_call` is strict: never parses markdown fences as PTC-Lisp.
-- Internal native tool name is `ptc_lisp_execute`, reserved globally.
+- Internal native tool name is `lisp_eval`, reserved globally.
 - Direct final content is allowed before or after PTC execution.
 - Final direct content is validated against `signature:` when applicable.
 - Memory / journal / tool_cache / child_steps / turn_history threading is unchanged from current PTC-Lisp loop semantics.

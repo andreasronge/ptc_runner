@@ -1828,7 +1828,7 @@ work (live endpoint behavior is not parallelizable until known).
   (`@tag :real_remote_upstream`, gated on `MCP_REAL_REMOTE=1` +
   `GITHUB_PAT`). Depends on 4A.
 - **4C [S]** — End-to-end probe via `claude -p` against the live
-  aggregator with `--allowedTools mcp__ptc-runner__ptc_lisp_execute`
+  aggregator with `--allowedTools mcp__ptc-runner__lisp_eval`
   asking the LLM to call `get_me`. Per
   `memory/reference_aggregator_sandbox.md`, run from
   `~/ptc-mcp-sandbox/` with the upstreams config copy-pasted in.
@@ -1895,7 +1895,7 @@ review. `mix precommit` and human sign-off still apply.
   `read:project` only if the chosen probe needs them. Document in
   the test setup that the test is read-only by design.
 - **End-to-end probe.** A `claude -p` invocation against the live
-  aggregator with `--allowedTools mcp__ptc-runner__ptc_lisp_execute`,
+  aggregator with `--allowedTools mcp__ptc-runner__lisp_eval`,
   asking the LLM to call `get_me` (returns the authenticated user's
   profile — small, stable, read-only). Record output + the rendered
   catalog snippet in `Plans/aggregator-state-*.md` per the

@@ -13,14 +13,14 @@
 
 Add size-aware upstream catalog exposure to aggregator mode.
 
-For small upstream fleets with fully known catalogs, `ptc_lisp_execute`
+For small upstream fleets with fully known catalogs, `lisp_eval`
 keeps the current behavior: its MCP tool description includes a
 complete compact summary of the configured upstream MCP tools. This
 gives the calling LLM enough context to write a correct PTC-Lisp
 program in one shot.
 
 For larger fleets, or for fleets whose catalogs are not fully known at
-description-render time, `ptc_lisp_execute` switches to a compact
+description-render time, `lisp_eval` switches to a compact
 description that names configured upstream servers and teaches
 in-sandbox discovery builtins:
 
@@ -61,7 +61,7 @@ Default mode is `auto`.
 The aggregator currently collapses many upstream MCP tools into one MCP
 tool, which is already a large improvement over exposing every upstream
 operation as a native MCP tool. The remaining problem is the
-`ptc_lisp_execute` description: if every upstream tool description is
+`lisp_eval` description: if every upstream tool description is
 inlined, the description grows linearly with the upstream fleet.
 
 Inlining is still the best behavior for small fleets:
@@ -146,7 +146,7 @@ Configuration:
 | `catalog_mode` | `auto`, `inline`, `lazy` | `auto` | Catalog exposure strategy. |
 | `catalog_inline_max_chars` | positive integer | `12000` | Maximum rendered inline description size in `auto` mode. |
 | `catalog_inline_max_tools` | positive integer | `40` | Maximum total upstream tool count in `auto` mode. |
-| `max_catalog_ops_per_program` | positive integer | `25` | Maximum catalog builtin calls per `ptc_lisp_execute` invocation. |
+| `max_catalog_ops_per_program` | positive integer | `25` | Maximum catalog builtin calls per `lisp_eval` invocation. |
 | `max_catalog_result_bytes` | positive integer | `262144` | Maximum JSON-encoded result bytes from one catalog builtin. |
 
 CLI flags win over environment variables. Environment variables win over
@@ -157,7 +157,7 @@ Resolution:
 1. If no upstreams are configured, catalog mode is irrelevant and the
    normal non-aggregator description is used.
 2. If `catalog_mode=inline`, render the full compact upstream catalog in
-   the `ptc_lisp_execute` description.
+   the `lisp_eval` description.
 3. If `catalog_mode=lazy`, render the compact lazy description.
 4. If `catalog_mode=auto`:
    - build the inline candidate description;
@@ -179,7 +179,7 @@ not be treated as zero tools.
 
 ## 6. Dynamic Description Generation
 
-The `ptc_lisp_execute` MCP tool description is not a hardcoded static
+The `lisp_eval` MCP tool description is not a hardcoded static
 string. It is generated deterministically when `tools/list` is handled.
 
 The generated description has three parts:

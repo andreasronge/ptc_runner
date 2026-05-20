@@ -22,7 +22,7 @@ the family-by-family take.
 ## Why this matters
 
 The aggregator's current catalog model — inline every upstream tool's
-description into the `ptc_lisp_execute` tool description at boot,
+description into the `lisp_eval` tool description at boot,
 cached in `:persistent_term`, rebuilt only on PtcRunner restart — is
 flagged as a known weakness in
 [`Plans/positioning-mcp-aggregator.md`](positioning-mcp-aggregator.md)
@@ -35,7 +35,7 @@ The industry numbers below are real but they describe **clients
 exposing 200–400 tools as native MCP tools** (one tool per upstream
 operation). That is not PtcRunner aggregator's shape. The aggregator
 already collapses N upstreams into one advertised tool; the inline
-catalog inside `ptc_lisp_execute`'s description is itself a partial
+catalog inside `lisp_eval`'s description is itself a partial
 mitigation of the same problem. So the relevant question isn't "are
 the cited horror-story numbers scary" — it's "where does *PtcRunner's*
 curve put us today and how much headroom is there."
@@ -248,7 +248,7 @@ inside the sandbox as PTC-Lisp built-ins rather than new MCP tools.
 
 | Family | PTC-Lisp / MCP shape | Cost to ship | Identity impact |
 |---|---|---|---|
-| Lazy schema loading | `(catalog/list-servers)`, `(catalog/list-tools "github")`, `(catalog/describe-tool "github" "get_pr")` as PTC-Lisp built-ins. `ptc_lisp_execute` description shrinks to a one-line "use `(catalog/*)` to discover tools." | Low — pure catalog API design + interpreter built-ins. No new dependencies. | None — still one MCP tool, no new client-visible traffic. |
+| Lazy schema loading | `(catalog/list-servers)`, `(catalog/list-tools "github")`, `(catalog/describe-tool "github" "get_pr")` as PTC-Lisp built-ins. `lisp_eval` description shrinks to a one-line "use `(catalog/*)` to discover tools." | Low — pure catalog API design + interpreter built-ins. No new dependencies. | None — still one MCP tool, no new client-visible traffic. |
 | Typed bindings (Cloudflare-style) | Generate a PTC-Lisp signature spec per upstream tool from its JSON Schema; inline only signatures. Sandbox validates `tool/mcp-call` args against the signature pre-call. | Medium — JSON Schema → PTC-Lisp signature translation, coverage gaps for complex schemas. | None. Builds on Family 1's structured catalog. |
 | Semantic retrieval | n/a — out of scope. Embedding similarity is non-deterministic; conflicts with the aggregator's deterministic-composition identity. | n/a | Identity-incompatible. Operators who need this should use a Family 5 router upstream of the aggregator. |
 | Per-call filtering | `:tools` allowlist key in upstreams JSON; runtime check on `tool/mcp-call`. | Low — config plumbing. | None. |
@@ -436,7 +436,7 @@ They are not answered here.
 - **Becoming a gateway.** The aggregator advertises one tool. That
   identity is preserved across every option above.
 - **Surfacing discovery as MCP meta-tools.** Even if Family 1 ships,
-  it ships as PTC-Lisp built-ins inside `ptc_lisp_execute` — not as
+  it ships as PTC-Lisp built-ins inside `lisp_eval` — not as
   new MCP tools advertised on `tools/list`. The "exactly one tool
   advertised, exactly one approval prompt" property is non-
   negotiable.

@@ -6,7 +6,7 @@
 (`PtcRunner.PtcToolProtocol`, formerly Phase 0 of this plan) shipped on
 main and is the wire-format source of truth. This document specifies a
 new hex package `ptc_runner_mcp` that exposes one MCP tool —
-`ptc_lisp_execute` — over stdio JSON-RPC.
+`lisp_eval` — over stdio JSON-RPC.
 
 Sibling plans:
 
@@ -26,14 +26,14 @@ Sibling plans:
 | Server package | `ptc_runner_mcp` (depends on `ptc_runner`) |
 | Repository layout | Same git repo, two top-level Mix projects (§ 5.2) |
 | Server-package versioning | Independent semver, published to Hex separately |
-| Server tool count | 1 (`ptc_lisp_execute`) |
+| Server tool count | 1 (`lisp_eval`) |
 | Capability profile | `:mcp_no_tools` |
 | State across calls | None |
 
 ## 1. Summary
 
 `ptc_runner_mcp` is a long-running process speaking JSON-RPC over stdio.
-It advertises one tool, `ptc_lisp_execute`, accepting a PTC-Lisp program
+It advertises one tool, `lisp_eval`, accepting a PTC-Lisp program
 plus optional `context` and `signature`, and returns a structured
 result. Each invocation runs in a fresh sandbox (1s wall-clock execution timeout, 10MB
 memory cap, no I/O except `println`, no filesystem, no network). No
@@ -695,7 +695,7 @@ pagination — there is only one tool).
   "result": {
     "tools": [
       {
-        "name": "ptc_lisp_execute",
+        "name": "lisp_eval",
         "description": "<PtcToolProtocol.tool_description(:mcp_no_tools) + \"\\n\\n\" + authoring_card() per § 8.4>",
         "inputSchema": {
           "type": "object",
@@ -867,7 +867,7 @@ retains its existing substring assertions from `:ptc_runner` tests.
 ### 8.5 Debug tool (opt-in)
 
 When `--debug-tool` is set the server advertises a second (or third,
-alongside `ptc_task`) tool, `ptc_debug` — a read-only diagnostics
+alongside `lisp_task`) tool, `lisp_debug` — a read-only diagnostics
 surface over a bounded in-memory ring of recent `tools/call` records.
 Off by default, dispatched synchronously with no concurrency permit,
 never written to the ring. Full contract:
@@ -896,7 +896,7 @@ The MCP-defined wrapper is `params: { name, arguments }`; the
   "id": 7,
   "method": "tools/call",
   "params": {
-    "name": "ptc_lisp_execute",
+    "name": "lisp_eval",
     "arguments": {
       "program":  "<string, required, non-empty after trim, ≤ max_program_bytes>",
       "context":  { "<key>": "<JSON value>" },
@@ -906,7 +906,7 @@ The MCP-defined wrapper is `params: { name, arguments }`; the
 }
 ```
 
-`params.name` is the tool name (always `"ptc_lisp_execute"` in v1;
+`params.name` is the tool name (always `"lisp_eval"` in v1;
 any other value yields the `unknown_tool` tool result per § 10.5).
 `params.arguments` is the object whose keys are described below.
 
@@ -1064,7 +1064,7 @@ Reasons emitted by MCP v1:
 | `fail` | program called `(fail v)`; carries `result` |
 | `validation_error` | signature supplied; return value did not match |
 | `busy` | `max_concurrent_calls` exceeded; client should retry |
-| `unknown_tool` | `tools/call` for any name other than `ptc_lisp_execute` |
+| `unknown_tool` | `tools/call` for any name other than `lisp_eval` |
 
 `busy` and `unknown_tool` are **MCP-only reasons**. They are not in
 the shared `error_reason()` enum (which other surfaces also consume),
@@ -1177,9 +1177,9 @@ server adds across-request limits.
 | `program_timeout` | 1 s wall-clock (sandbox `receive…after`) | not configurable in v1 | tool result `timeout` |
 | `program_memory_limit` | 10 MB (sandbox) | not configurable in v1 | tool result `memory_limit` |
 | `debug_ring_size` (when `--debug-tool`) | 500 records | `--debug-ring-size`, `PTC_RUNNER_MCP_DEBUG_RING_SIZE` (clamped `[10, 5000]`) | FIFO eviction of oldest record |
-| `max_debug_response_bytes` (when `--debug-tool`) | 64 KiB | `--max-debug-response-bytes`, `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `ptc_debug` response truncated, `truncated: true` set |
+| `max_debug_response_bytes` (when `--debug-tool`) | 64 KiB | `--max-debug-response-bytes`, `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `lisp_debug` response truncated, `truncated: true` set |
 
-The `ptc_debug` tool itself (and its ring buffer) exist only when
+The `lisp_debug` tool itself (and its ring buffer) exist only when
 `--debug-tool` / `PTC_RUNNER_MCP_DEBUG_TOOL` is set — off by default;
 see § 8.5 and `Plans/ptc-runner-mcp-debug-tool.md`.
 
@@ -1379,7 +1379,7 @@ anchors already asserted by `:ptc_runner` tests.
   `-32602` and update § 7.4 + § 10.5 accordingly before Phase 2
   spawns.
 
-### Phase 2 — Wire `ptc_lisp_execute`, no `context`/`signature`
+### Phase 2 — Wire `lisp_eval`, no `context`/`signature`
 
 - `tools/call` accepts `program`, validates per § 9.2, runs via
   `PtcToolProtocol.lisp_run/2` with fresh opts: empty `memory`,
@@ -1390,7 +1390,7 @@ anchors already asserted by `:ptc_runner` tests.
   package never builds an `:execution` map directly.
 - Wraps the JSON in the MCP envelope per § 10.1.
 - Enforces `max_program_bytes` and `max_concurrent_calls`.
-- Implements `unknown_tool` for non-`ptc_lisp_execute` calls.
+- Implements `unknown_tool` for non-`lisp_eval` calls.
 
 **DoD:** `(+ 1 2)` returns `result: "user=> 3"` with `isError:
 false`. Parse errors return `parse_error` with `isError: true`.
@@ -1518,7 +1518,7 @@ the README.
 
 ### Tool advertisement
 
-- `tools/list` advertises exactly one tool, name `ptc_lisp_execute`.
+- `tools/list` advertises exactly one tool, name `lisp_eval`.
 - The advertised description has
   `PtcToolProtocol.tool_description(:mcp_no_tools)` as a
   byte-for-byte **prefix**, followed by exactly `"\n\n"`, followed by
@@ -1717,7 +1717,7 @@ Addendum 21 (Codex policy) verbatim where applicable.
 |---|---|---|---|---|
 | 0.5 — `:ptc_runner` instrumentation | Engineer | yes | — (must land first) | `:ptc_runner` only |
 | 1 — Project scaffold + JSON-RPC skeleton | Engineer | yes | — (gates infra) | `mcp_server/` (new), `.git/hooks/*` |
-| 2 — Wire `ptc_lisp_execute` (no context/signature) | Engineer | yes | — (depends on 1's envelope) | `mcp_server/` |
+| 2 — Wire `lisp_eval` (no context/signature) | Engineer | yes | — (depends on 1's envelope) | `mcp_server/` |
 | 3 — Context + signature | Engineer | yes | — (depends on 2) | `mcp_server/`, `:ptc_runner` (`to_json_value/1` lives in `PtcToolProtocol`) |
 | 3.5 — Per-call tracing | Engineer | yes | Phase 4 | `mcp_server/` only (consumes 0.5's surface) |
 | 4 — Cancellation + lifecycle | Engineer | yes | Phase 3.5 | `mcp_server/` |

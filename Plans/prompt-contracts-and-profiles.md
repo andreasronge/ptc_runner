@@ -5,7 +5,7 @@
 | Status | Draft |
 | Date | 2026-05-15 |
 | Target packages | `:ptc_runner`, `:ptc_runner_mcp` |
-| Related | `Plans/text-mode-ptc-compute-tool.md`, `Plans/ptc-lisp-tool-call-transport.md`, `Plans/ptc-runner-mcp-server.md`, `Plans/ptc-runner-mcp-aggregator.md`, `Plans/ptc-runner-mcp-catalog-exposure.md`, `Plans/ptc-runner-mcp-slim-responses.md`, `Plans/agentic-ptc-task-subagent-spec.md` |
+| Related | `Plans/text-mode-ptc-compute-tool.md`, `Plans/ptc-lisp-tool-call-transport.md`, `Plans/ptc-runner-mcp-server.md`, `Plans/ptc-runner-mcp-aggregator.md`, `Plans/ptc-runner-mcp-catalog-exposure.md`, `Plans/ptc-runner-mcp-slim-responses.md`, `Plans/agentic-lisp-task-subagent-spec.md` |
 
 ## 1. Summary
 
@@ -18,10 +18,10 @@ The repository currently has several prompt assembly paths:
   `PtcRunner.Lisp.LanguageSpec`.
 - Text-mode prompts for raw text, JSON output, and native tool use.
 - Combined text/PTC-Lisp mode, which appends a compact
-  `ptc_lisp_execute` reference card.
-- MCP `ptc_lisp_execute` descriptions and authoring cards under
+  `lisp_eval` reference card.
+- MCP `lisp_eval` descriptions and authoring cards under
   `mcp_server/priv/`.
-- MCP agentic `ptc_task` planner prompts assembled in
+- MCP agentic `lisp_task` planner prompts assembled in
   `PtcRunnerMcp.Agentic.Prompt`.
 
 These surfaces are allowed to live in different packages and file
@@ -37,9 +37,9 @@ importantly, sometimes different semantics.
 
 Examples:
 
-- Direct MCP aggregator `ptc_lisp_execute` uses `(tool/mcp-call ...)`
+- Direct MCP aggregator `lisp_eval` uses `(tool/mcp-call ...)`
   where world-fault failures return `nil`.
-- Agentic `ptc_task` uses an internal `tool/mcp-call` contract where
+- Agentic `lisp_task` uses an internal `tool/mcp-call` contract where
   results are tagged maps with `:ok`, `:value`, `:reason`, and
   `:message`.
 - Combined text mode has a compact PTC-Lisp reference card that
@@ -62,7 +62,7 @@ architecture should therefore avoid private-file coupling from
 3. Preserve existing public behavior while introducing internal prompt
    renderer/profile concepts.
 4. Shorten MCP advertised descriptions where needed, especially
-   `ptc_lisp_execute` in aggregator mode, without losing first-call
+   `lisp_eval` in aggregator mode, without losing first-call
    usability.
 5. Prevent semantic drift between similar-looking contracts, especially
    direct aggregator MCP calls vs agentic planner MCP calls.
@@ -93,7 +93,7 @@ architecture should therefore avoid private-file coupling from
 - Core PTC-Lisp dialect guidance.
 - SubAgent language behavior profiles such as single-shot and
   explicit-return multi-turn.
-- In-process `ptc_lisp_execute` transport guidance.
+- In-process `lisp_eval` transport guidance.
 - Combined text/PTC-Lisp mode reference guidance.
 - Local app-tool exposure and cache-bridge guidance.
 - Dynamic namespace, data, memory, tool inventory, and expected-output
@@ -103,13 +103,13 @@ architecture should therefore avoid private-file coupling from
 
 `ptc_runner_mcp` owns MCP-specific prompt and description surfaces:
 
-- MCP `ptc_lisp_execute` advertised descriptions.
+- MCP `lisp_eval` advertised descriptions.
 - Direct MCP no-tools authoring guidance.
 - Direct MCP aggregator `(tool/mcp-call ...)` guidance.
 - MCP response profile notes (`slim`, `structured`, `debug`).
 - MCP catalog inline/lazy discovery guidance.
 - MCP session authoring guidance.
-- Agentic `ptc_task` planner prompts and tool descriptions.
+- Agentic `lisp_task` planner prompts and tool descriptions.
 - MCP trust-boundary guidance for upstream catalogs, tool
   descriptions, and payloads.
 
@@ -157,16 +157,16 @@ may maintain their own compact/full wording.
 How the model is expected to access computation or tools:
 
 - `subagent_content`: model emits one fenced PTC-Lisp code block.
-- `subagent_ptc_tool_call`: model calls native `ptc_lisp_execute`.
+- `subagent_ptc_tool_call`: model calls native `lisp_eval`.
 - `text_native_tools`: model uses provider-native app tools and
   returns text/JSON.
 - `combined_text_ptc`: model can answer directly or call
-  `ptc_lisp_execute` as an escalation path.
+  `lisp_eval` as an escalation path.
 - `mcp_direct_no_tools`: external MCP client calls
-  `ptc_lisp_execute`, with no app/upstream tools inside the program.
+  `lisp_eval`, with no app/upstream tools inside the program.
 - `mcp_direct_aggregator`: external MCP client calls
-  `ptc_lisp_execute`, and programs may call upstream MCP tools.
-- `mcp_agentic_task`: external MCP client calls `ptc_task`; the server
+  `lisp_eval`, and programs may call upstream MCP tools.
+- `mcp_agentic_task`: external MCP client calls `lisp_task`; the server
   runs an internal planner that writes PTC-Lisp.
 - `mcp_session`: external MCP client evaluates PTC-Lisp in a stateful
   session.
@@ -178,7 +178,7 @@ How work terminates:
 - `implicit_final_expr`: final expression is the result.
 - `explicit_return_fail`: `(return value)` succeeds and `(fail reason)`
   fails.
-- `intermediate_ptc_tool_result`: `ptc_lisp_execute` is an
+- `intermediate_ptc_tool_result`: `lisp_eval` is an
   intermediate computation/tool-orchestration step; the assistant uses
   the tool result to decide whether to continue or to return final
   direct content in the requested output shape.
@@ -256,11 +256,11 @@ supersedes them.
 7. MCP direct aggregator successful top-level JSON `null` still returns
    the `:json-null` sentinel, not `nil`, so models can distinguish a
    successful JSON null payload from a world fault.
-8. Agentic `ptc_task` internal `tool/mcp-call` still returns tagged
+8. Agentic `lisp_task` internal `tool/mcp-call` still returns tagged
    data and must be inspected via `:ok` before `:value`.
 9. `PtcToolProtocol.tool_description/1` profile strings remain
    capability statements, not long prompt cards.
-10. `ptc_task` tool descriptions stay short and capability-summary
+10. `lisp_task` tool descriptions stay short and capability-summary
    based.
 
 ## 8. Proposed Internal Renderer Shape
@@ -305,11 +305,11 @@ implementations.
 MCP advertised tool descriptions are not normal documentation. They are
 tool-selection and first-call surfaces.
 
-For direct MCP `ptc_lisp_execute`, the first chunk of the description
+For direct MCP `lisp_eval`, the first chunk of the description
 must be self-contained enough for clients that truncate descriptions.
 For aggregator mode, the first 2 KB should include:
 
-- what `ptc_lisp_execute` does;
+- what `lisp_eval` does;
 - the `(tool/mcp-call ...)` shape;
 - the `nil` world-fault convention;
 - the `:json-null` sentinel for successful top-level JSON `null`;
@@ -335,7 +335,7 @@ Implementation status as of 2026-05-15:
   `ptc_runner` registry while preserving dynamic tool inventory
   rendering.
 - Phase 3 introduced `PtcRunnerMcp.PromptRegistry` and now routes
-  direct no-tools, direct aggregator, agentic `ptc_task`, and all
+  direct no-tools, direct aggregator, agentic `lisp_task`, and all
   session tool descriptions through MCP-owned contracts.
 
 ### Phase 0: Inventory and Invariants
@@ -372,12 +372,12 @@ Implementation status as of 2026-05-15:
   MCP-owned path.
 - Render direct no-tools, direct aggregator, session, and agentic
   surfaces from MCP-owned contracts.
-- Keep `ptc_task` prompt ordering constraints: MCP-owned contracts must
+- Keep `lisp_task` prompt ordering constraints: MCP-owned contracts must
   not be replaceable by operator prefix/suffix.
 
 ### Phase 4: Shorten MCP Advertised Descriptions
 
-- Replace long `ptc_lisp_execute` advertised descriptions with a
+- Replace long `lisp_eval` advertised descriptions with a
   compact quick contract plus optional catalog section.
 - Preserve enough anchors for existing clients and tests, but update
   byte-for-byte v1 fixture tests intentionally.
@@ -418,13 +418,13 @@ Add tests at the rendered-surface level:
 - Native tool text mode.
 - Combined text/PTC mode with no PTC-callable tools.
 - Combined text/PTC mode with `:both` and `:ptc_lisp` tool inventory.
-- MCP direct no-tools `ptc_lisp_execute`.
-- MCP direct aggregator `ptc_lisp_execute`, inline catalog.
-- MCP direct aggregator `ptc_lisp_execute`, lazy catalog.
+- MCP direct no-tools `lisp_eval`.
+- MCP direct aggregator `lisp_eval`, inline catalog.
+- MCP direct aggregator `lisp_eval`, lazy catalog.
 - MCP session tools.
-- MCP agentic `ptc_task` planner prompt, inline catalog.
-- MCP agentic `ptc_task` planner prompt, lazy catalog.
-- MCP `ptc_task` advertised tool description.
+- MCP agentic `lisp_task` planner prompt, inline catalog.
+- MCP agentic `lisp_task` planner prompt, lazy catalog.
+- MCP `lisp_task` advertised tool description.
 
 Tests must avoid making ordinary prose edits expensive. Prompt wording
 is expected to change as authoring quality improves, so tests should pin
@@ -475,7 +475,7 @@ Required MCP size/order assertions:
 
 1. Should `ptc_runner` expose a stable public API for compact dialect
    snippets before `mcp_server` is split out?
-2. Should MCP direct `ptc_lisp_execute` keep a full authoring card in
+2. Should MCP direct `lisp_eval` keep a full authoring card in
    `debug` response profile descriptions, or should debug only affect
    response shape?
 3. Should prompt budget/profile be package-wide configuration, per

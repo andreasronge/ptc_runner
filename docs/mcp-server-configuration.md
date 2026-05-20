@@ -1,6 +1,6 @@
 # MCP Server Configuration Reference
 
-Canonical reference for every flag, environment variable, response profile, catalog mode, tracing setting, and lifecycle command exposed by `ptc_runner_mcp`. For installation and client wiring see [`../mcp_server/README.md`](../mcp_server/README.md); for the conceptual overview (when to use the server, security model, architecture) see [`mcp-server.md`](mcp-server.md). Aggregator concepts live in [`aggregator-mode.md`](aggregator-mode.md), agentic mode in [`agentic-mode.md`](agentic-mode.md), and `ptc_debug` in [`mcp-debug.md`](mcp-debug.md).
+Canonical reference for every flag, environment variable, response profile, catalog mode, tracing setting, and lifecycle command exposed by `ptc_runner_mcp`. For installation and client wiring see [`../mcp_server/README.md`](../mcp_server/README.md); for the conceptual overview (when to use the server, security model, architecture) see [`mcp-server.md`](mcp-server.md). Aggregator concepts live in [`aggregator-mode.md`](aggregator-mode.md), agentic mode in [`agentic-mode.md`](agentic-mode.md), and `lisp_debug` in [`mcp-debug.md`](mcp-debug.md).
 
 ## Boot-time configuration model
 
@@ -23,20 +23,20 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
-| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `ptc_task` tool when aggregator mode is active. |
+| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
-| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `ptc_task` request. |
+| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `lisp_task` request. |
 | `--agentic-planner-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS` | `15000` | Per-planner-call timeout. |
 | `--agentic-max-output-tokens` | `PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS` | `1200` | Planner output token cap. |
-| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `ptc_task` response. |
-| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `ptc_task` responses. |
+| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `lisp_task` response. |
+| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `lisp_task` responses. |
 | `--agentic-trace-prompts` | `PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS` | `false` | Include agentic prompt snapshots in traces. Use only for local debugging. |
-| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `ptc_task`. |
+| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `lisp_task`. |
 | `--agentic-retry-turns` | `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS` | `0` | Additional retry turns after parser/runtime/validation feedback. |
-| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `ptc_task` in write-capable or unknown-effect aggregator configurations. |
+| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `lisp_task` in write-capable or unknown-effect aggregator configurations. |
 | `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
-| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
-| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
+| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `lisp_task` capability summary. |
+| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `lisp_task`. |
 | `--sessions` | `PTC_RUNNER_MCP_SESSIONS` | `false` | Expose opt-in stateful PTC-Lisp session tools. |
 | `--max-sessions` | `PTC_RUNNER_MCP_MAX_SESSIONS` | `64` | Maximum live sessions per MCP server process. |
 | `--max-sessions-per-owner` | `PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER` | `16` | Maximum live sessions per owner. |
@@ -137,11 +137,11 @@ The `--catalog-mode` flag (env: `PTC_RUNNER_MCP_CATALOG_MODE`) controls how upst
 
 | Mode | Description |
 |---|---|
-| `inline` | Full catalog inlined in `ptc_lisp_execute` description. Best for small fleets. |
+| `inline` | Full catalog inlined in `lisp_eval` description. Best for small fleets. |
 | `lazy` | Compact server listing; tools discovered at runtime via `catalog/*` builtins. Best for large fleets or cost-conscious setups. |
 | `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and ≤ `--catalog-inline-max-chars` (12000); lazy otherwise. |
 
-In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp builtins that run inside `ptc_lisp_execute` — no extra MCP tool calls:
+In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp builtins that run inside `lisp_eval` — no extra MCP tool calls:
 
 | Builtin | Purpose |
 |---|---|
@@ -198,7 +198,7 @@ Use `--trace-payloads full` only for local debugging or measurement; it records 
 
 ### Reading traces without writing code
 
-With `--trace-dir` set you do not need a bespoke trace reader: point a generic **filesystem MCP server** (e.g. `@modelcontextprotocol/server-filesystem`) at the trace directory and let the client read the raw per-call JSONL. The zero-code escape hatch — fine for ad-hoc digging, but `ptc_debug` (see [`mcp-debug.md`](mcp-debug.md)) is the purpose-built interface, and `ptc_viewer` (`mix ptc.viewer` in the repo) is the human-facing web UI for the same trace files.
+With `--trace-dir` set you do not need a bespoke trace reader: point a generic **filesystem MCP server** (e.g. `@modelcontextprotocol/server-filesystem`) at the trace directory and let the client read the raw per-call JSONL. The zero-code escape hatch — fine for ad-hoc digging, but `lisp_debug` (see [`mcp-debug.md`](mcp-debug.md)) is the purpose-built interface, and `ptc_viewer` (`mix ptc.viewer` in the repo) is the human-facing web UI for the same trace files.
 
 ## Lifecycle commands
 

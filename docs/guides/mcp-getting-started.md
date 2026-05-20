@@ -44,7 +44,7 @@ before any `tools/call`.
 cat <<'EOF' | _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"hello","version":"0.0.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ptc_lisp_execute","arguments":{"program":"(+ 1 2)"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lisp_eval","arguments":{"program":"(+ 1 2)"}}}
 EOF
 ```
 
@@ -97,7 +97,7 @@ binding — you reference values as `data/<key>`.
   "id": 3,
   "method": "tools/call",
   "params": {
-    "name": "ptc_lisp_execute",
+    "name": "lisp_eval",
     "arguments": {
       "program": "(reduce + (map #(get % \"value\") data/items))",
       "context": {
@@ -141,7 +141,7 @@ alongside the preview.
   "id": 4,
   "method": "tools/call",
   "params": {
-    "name": "ptc_lisp_execute",
+    "name": "lisp_eval",
     "arguments": {
       "program": "(let [vs (map #(get % \"value\") data/items)] {:total (reduce + vs) :count (count vs)})",
       "context": {

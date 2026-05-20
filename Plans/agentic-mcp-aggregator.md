@@ -9,13 +9,13 @@
 ## Summary
 
 Add an opt-in agentic mode to `ptc_runner_mcp` that exposes a second
-MCP tool, `ptc_task`, when aggregator mode is active. The tool accepts
+MCP tool, `lisp_task`, when aggregator mode is active. The tool accepts
 a plain-English task, uses one configured planner LLM call to generate
 PTC-Lisp, validates and executes that generated program through the
 existing aggregator sandbox, and returns deterministic results plus
 traceable metadata.
 
-The existing `ptc_lisp_execute` tool remains the default and remains
+The existing `lisp_eval` tool remains the default and remains
 no-LLM. No hidden planner/model call is added to existing tool calls.
 
 ## Motivation
@@ -66,13 +66,13 @@ variables; environment variables win over defaults.
 
 | Flag | Env var | Default | Meaning |
 |---|---|---|---|
-| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Enables the `ptc_task` tool when aggregator mode is active. |
+| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Enables the `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or full model id. The default alias resolves to OpenRouter Gemini 3.1 Flash Lite Preview. |
 | `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Overall wall-clock budget for planning, validation, execution, and rendering. |
 | `--agentic-planner-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS` | `15000` | Planner LLM call timeout inside the overall task budget. |
 | `--agentic-max-output-tokens` | `PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS` | `1200` | Max planner output tokens. |
 | `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Hard cap for serialized `answer` plus `structured_result` bytes after deterministic rendering/truncation. |
-| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include generated PTC-Lisp in `ptc_task` responses. |
+| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include generated PTC-Lisp in `lisp_task` responses. |
 | `--agentic-trace-prompts` | `PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS` | `false` | Include planner prompt/response previews in traces. |
 
 Planner provider selection is derived from the model registry. The
@@ -88,15 +88,15 @@ stub is not a user-facing provider option.
 
 `tools/list` advertises:
 
-- `ptc_lisp_execute` always.
-- `ptc_task` only when:
+- `lisp_eval` always.
+- `lisp_task` only when:
   - at least one upstream MCP server is configured, and
   - `--agentic` / `PTC_RUNNER_MCP_AGENTIC=true` is set.
 
 If agentic mode is enabled without aggregator mode, the server logs a
-warning and does not advertise `ptc_task`.
+warning and does not advertise `lisp_task`.
 
-`ptc_task` annotations follow aggregator annotations:
+`lisp_task` annotations follow aggregator annotations:
 
 - conservative default: `readOnlyHint=false`, `destructiveHint=true`,
   `openWorldHint=true`;
@@ -105,18 +105,18 @@ warning and does not advertise `ptc_task`.
 
 ## Client-Facing Capability Surface
 
-`ptc_task` must present the aggregator as a plain-English delegation
+`lisp_task` must present the aggregator as a plain-English delegation
 tool. The host MCP client should understand what broad outcomes are
 possible, but it should not receive the full upstream tool catalog,
 raw upstream input schemas, response unwrap rules, or detailed
-response-shape hints through the `ptc_task` description.
+response-shape hints through the `lisp_task` description.
 
 This avoids confusing the host client into trying to orchestrate
-upstream MCP calls itself. For `ptc_task`, the host client should
+upstream MCP calls itself. For `lisp_task`, the host client should
 describe the outcome it wants; the aggregator planner owns the
 low-level upstream call planning.
 
-V1 uses a compact deterministic capability summary in the `ptc_task`
+V1 uses a compact deterministic capability summary in the `lisp_task`
 tool description. The summary is derived from configured upstream
 server names, read-only/write posture, and coarse categories inferred
 from known server IDs and tool names. It should be boring rather than
@@ -151,12 +151,12 @@ Capability summary rules:
 - do not treat the summary as a source of truth for execution.
 
 The detailed upstream catalog remains internal to the planner and may
-be exposed only through `ptc_lisp_execute` authoring guidance or an
-explicit debug/developer resource. `ptc_lisp_execute` is the interface
-for clients that intentionally want to author PTC-Lisp; `ptc_task` is
+be exposed only through `lisp_eval` authoring guidance or an
+explicit debug/developer resource. `lisp_eval` is the interface
+for clients that intentionally want to author PTC-Lisp; `lisp_task` is
 the interface for clients that should stay at intent level.
 
-## `ptc_task` Interface
+## `lisp_task` Interface
 
 Input schema:
 
@@ -242,10 +242,10 @@ Error output shape:
 
 ## Execution Flow
 
-1. Validate `ptc_task` arguments:
+1. Validate `lisp_task` arguments:
    - `task` must be a non-empty string.
    - `context` must follow the same shape/byte validation as
-     `ptc_lisp_execute`.
+     `lisp_eval`.
    - `constraints`, when present, must be a JSON object under the
      context byte cap.
    - unsupported constraint keys are ignored and surfaced in
@@ -298,13 +298,13 @@ Error output shape:
 
 All phases share the overall `agentic_task_timeout_ms` budget. If the
 budget is exhausted before a phase completes, return `budget_exceeded`.
-If the MCP client cancels `ptc_task`, cancellation is best effort:
+If the MCP client cancels `lisp_task`, cancellation is best effort:
 cancel the planner request when possible, stop before starting any
 later phase, request cancellation of in-flight sandbox/upstream work
 where supported, and return/record `cancelled` in trace metadata.
 
 The planner catalog is the same boot snapshot used by
-`ptc_lisp_execute`. Refreshing the planner catalog from
+`lisp_eval`. Refreshing the planner catalog from
 `tools/listChanged` notifications is out of scope for v1.
 
 ## Planner Prompt Requirements
@@ -367,7 +367,7 @@ only when there is an implementation and compatibility test matrix.
 
 The likely shape is:
 
-1. During a `ptc_task` call, the server checks the client
+1. During a `lisp_task` call, the server checks the client
    `initialize.capabilities` for `sampling`.
 2. If a future sampling planner mode is enabled, the server sends a
    compact planner request with the task, catalog, constraints, and
@@ -407,7 +407,7 @@ recording raw sensitive content by default.
 
 Minimum spans/events:
 
-- `agentic_task` span for the full `ptc_task` request;
+- `agentic_task` span for the full `lisp_task` request;
 - `agentic_planner` span for the planner call;
 - `agentic_validation_reject` event for parse/static validation
   rejects;
@@ -448,8 +448,8 @@ Unit/config tests:
 
 Tool advertisement tests:
 
-- no upstreams: only `ptc_lisp_execute`;
-- upstreams with agentic disabled: only `ptc_lisp_execute`;
+- no upstreams: only `lisp_eval`;
+- upstreams with agentic disabled: only `lisp_eval`;
 - upstreams with agentic enabled: both tools;
 - read-only annotations follow `--aggregator-read-only`.
 
@@ -514,18 +514,18 @@ passing with OpenRouter Gemini 3.1 Flash Lite Preview.
 - self-repair loops that call the planner multiple times;
 - post-execution LLM summarization;
 - real GitHub/network dependency in the default test suite;
-- replacing or hiding `ptc_lisp_execute`;
+- replacing or hiding `lisp_eval`;
 - adding direct filesystem/network access outside the existing
   upstream MCP path.
 
 ## Near-Term Sequencing
 
-Before implementing `ptc_task`, land the deterministic aggregator
+Before implementing `lisp_task`, land the deterministic aggregator
 usability fixes that help both code mode and compiler-executor mode:
 
 1. Treat `signature: "any"` as omitted.
 2. Add response-shape hints to the catalog or authoring guidance.
 3. Improve compact deterministic result rendering.
 
-Before declaring v1 successful, benchmark minimal stateless `ptc_task`
+Before declaring v1 successful, benchmark minimal stateless `lisp_task`
 against improved code mode using the same tasks and telemetry.

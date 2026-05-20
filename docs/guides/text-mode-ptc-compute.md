@@ -1,7 +1,7 @@
 # Text Mode + PTC-Lisp Compute (Combined Mode)
 
 This guide covers **combined mode** — text agents that opt into the
-internal `ptc_lisp_execute` tool so the LLM can escalate to deterministic
+internal `lisp_eval` tool so the LLM can escalate to deterministic
 PTC-Lisp computation when a result is too large to feed into the chat
 context. It is the `output: :text, ptc_transport: :tool_call` shape.
 
@@ -12,10 +12,10 @@ orthogonal to both: text agents that want optional escalation paths.
 ## What is combined mode?
 
 Combined mode is a normal text agent with one extra provider-native tool
-exposed: `ptc_lisp_execute`. The LLM answers chat-shaped turns directly
+exposed: `lisp_eval`. The LLM answers chat-shaped turns directly
 when it can; when it needs deterministic compute, multi-tool
 orchestration, or filtering over a large result, it calls
-`ptc_lisp_execute` with a small PTC-Lisp program that runs in PtcRunner's
+`lisp_eval` with a small PTC-Lisp program that runs in PtcRunner's
 sandbox.
 
 ```elixir
@@ -38,7 +38,7 @@ agent =
 ```
 
 The provider sees `search_logs` (because `expose: :both`) **and**
-`ptc_lisp_execute`. PTC-Lisp programs see `search_logs` because the same
+`lisp_eval`. PTC-Lisp programs see `search_logs` because the same
 `:both` setting puts it on the program-callable side. Whichever layer
 calls the tool first seeds a shared cache; the other layer reuses the
 result.
@@ -63,7 +63,7 @@ Reach for combined mode when:
 It is **not** the right fit when:
 
 - The agent is pure chat with small tool results — overhead from the
-  compact reference card and `ptc_lisp_execute` schema isn't worth it.
+  compact reference card and `lisp_eval` schema isn't worth it.
 - You already need structured output from a single program — use
   `output: :ptc_lisp, ptc_transport: :tool_call` instead. That mode
   short-circuits on `(return v)` matching the signature; combined mode
@@ -73,7 +73,7 @@ It is **not** the right fit when:
 
 Each tool declares which layer can call it via the `expose:` option.
 
-| Value        | Provider-native? | Inside `ptc_lisp_execute` programs? |
+| Value        | Provider-native? | Inside `lisp_eval` programs? |
 |--------------|------------------|-------------------------------------|
 | `:native`    | yes              | no — `(tool/name ...)` rejected at parse time |
 | `:ptc_lisp`  | no               | yes — only as `(tool/name ...)` |
@@ -89,7 +89,7 @@ Per-mode defaults when `expose:` is omitted:
 
 **The intentional gotcha.** Combined mode defaults to `:native`. An
 agent that opts into combined mode but tags zero tools as `:both` or
-`:ptc_lisp` still gets a working `ptc_lisp_execute` — useful for pure
+`:ptc_lisp` still gets a working `lisp_eval` — useful for pure
 deterministic computation, math, or transforming data passed via
 `context`. But `(tool/foo ...)` calls inside programs will be rejected
 **at parse time** with a clear error. This is by design: combined mode
@@ -99,7 +99,7 @@ program-callable.
 
 The compact PTC-Lisp reference card is appended to the system prompt
 even when zero tools are exposed to programs (see "`ptc_reference:`
-option" below) — `ptc_lisp_execute` itself is still useful, and omitting
+option" below) — `lisp_eval` itself is still useful, and omitting
 the card produces agents that don't know how to use it.
 
 ## The cache bridge
@@ -130,13 +130,13 @@ TOOL (tool_call_id: "call_1"): {
                               "message": "string"}}},
   "sample_keys": ["id", "message", "timestamp"],
   "full_result_cached": true,
-  "cache_hint": "Call ptc_lisp_execute and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
+  "cache_hint": "Call lisp_eval and then call (tool/search_logs {:query \"error code 42\"}) to process the full cached result."
 }
 
-;; Turn 3 — LLM escalates to ptc_lisp_execute
+;; Turn 3 — LLM escalates to lisp_eval
 ASSISTANT (tool_calls): [
   {id: "call_2",
-   name: "ptc_lisp_execute",
+   name: "lisp_eval",
    args: {"program": "(def rows (tool/search_logs {:query \"error code 42\"}))\n(return {:total (count rows)})"}}
 ]
 
@@ -183,7 +183,7 @@ See the CHANGELOG for the migration note.
 
 ## Final-output semantics
 
-Inside combined-mode `ptc_lisp_execute`, the program's terminating
+Inside combined-mode `lisp_eval`, the program's terminating
 expression — whether `(return v)`, `(fail v)`, or a normal final
 expression — produces a **tool result**, not the run's final answer.
 The LLM gets one more turn to compose the final answer (which is then
@@ -213,12 +213,12 @@ purpose. Combined mode is deliberately the more permissive shape.
 
 ## Turn budget guidance
 
-`ptc_lisp_execute` consumes one `max_turns` slot like any other tool
+`lisp_eval` consumes one `max_turns` slot like any other tool
 call. The "LLM gets one more turn to respond" guarantee above is
 **conditional on turn budget remaining** — it is not a reserved slot.
 
 **Size `max_turns` with at least one slot of headroom** beyond your
-worst-case `ptc_lisp_execute` count. If `max_turns` is exhausted by the
+worst-case `lisp_eval` count. If `max_turns` is exhausted by the
 program call (so the paired `role: :tool` message is the last thing the
 loop emits), the run terminates via TextMode's existing
 `max_turns_exceeded` path. The `tool_call_id` is paired before
@@ -226,9 +226,9 @@ termination (universal pairing rule), but no follow-up text turn
 happens, and `step.return` carries whatever max-turns handling produces
 — not the program's `v`.
 
-**`ptc_lisp_execute` itself is exempt from `max_tool_calls`.** Only
+**`lisp_eval` itself is exempt from `max_tool_calls`.** Only
 native app-tool calls count against the tool-call budget. An agent with
-`max_tool_calls: 1` may still invoke `ptc_lisp_execute` repeatedly,
+`max_tool_calls: 1` may still invoke `lisp_eval` repeatedly,
 bounded only by `max_turns`.
 
 ## `native_result` options
@@ -273,7 +273,7 @@ to share.
 ## `ptc_reference:` option
 
 Combined-mode agents need at least a compact PTC-Lisp reference in the
-system prompt so the LLM knows how to use `ptc_lisp_execute`. The
+system prompt so the LLM knows how to use `lisp_eval`. The
 `ptc_reference:` option pins this:
 
 ```elixir
@@ -326,7 +326,7 @@ Every tool-call telemetry event in combined mode carries an
 - `exposure_layer: :native` — the call came in via the provider's
   native tool calling.
 - `exposure_layer: :ptc_lisp` — the call came from inside a
-  `ptc_lisp_execute` program (a `(tool/name ...)` invocation).
+  `lisp_eval` program (a `(tool/name ...)` invocation).
 
 Use `exposure_layer` to debug cache reuse and budget consumption — it
 is the field that tells "tool was called from chat" apart from "tool
@@ -351,7 +351,7 @@ Concrete v1 invariants for retained native results:
 Very large retained results consume runtime memory for the entire run.
 Mitigation:
 
-- Filter eagerly inside `ptc_lisp_execute` and return only the
+- Filter eagerly inside `lisp_eval` and return only the
   projection your program needs. The full result remains cached for
   later programs in the same run, but the program's own variables are
   scoped — keep them small.
@@ -369,7 +369,7 @@ deferred to follow-up work — see "Known limitations" below.
 The following behaviors are deferred from v1 and documented for honesty:
 
 - **No `*1`/`*2`/`*3` integration with native tool results.** Only
-  successful non-terminal `ptc_lisp_execute` programs advance
+  successful non-terminal `lisp_eval` programs advance
   `turn_history`. Native call results don't feed `*1` references.
 - **No richer `ChatState` API.** `tool_cache`, `journal`,
   `turn_history`, retained child-execution state do not thread across
@@ -424,10 +424,10 @@ and the CHANGELOG.
 - [Observability](subagent-observability.md) — telemetry surface
   including `exposure_layer`
 - [PTC-Lisp Specification](../ptc-lisp-specification.md) — language
-  reference for programs run inside `ptc_lisp_execute`
+  reference for programs run inside `lisp_eval`
 - `PtcRunner.SubAgent.new/1` — full agent options reference
 - `PtcRunner.SubAgent.run/2` — runtime options
-- `PtcRunner.PtcToolProtocol` — `ptc_lisp_execute` description and
+- `PtcRunner.PtcToolProtocol` — `lisp_eval` description and
   response renderers
 - `PtcRunner.SubAgent.Exposure` — exposure resolution and filtering
   helpers

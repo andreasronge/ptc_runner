@@ -64,7 +64,7 @@ only if most runs satisfy:
 
 ## Interpretation
 
-Positive signal means an opt-in `ptc_task` mode is worth a real design:
+Positive signal means an opt-in `lisp_task` mode is worth a real design:
 plain-English task in, internal model generates PTC-Lisp, server
 executes through the existing sandbox, and returns compact result plus
 trace/program metadata.

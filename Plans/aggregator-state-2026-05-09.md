@@ -57,7 +57,7 @@ Configured upstreams:
   in the sandbox dir. Keep around as a Phase C regression target.
 
 To re-test, open a fresh `claude` session and ask the LLM to use
-`ptc_lisp_execute` against the sandbox.
+`lisp_eval` against the sandbox.
 
 ### Sandbox fixtures
 
@@ -72,7 +72,7 @@ To re-test, open a fresh `claude` session and ask the LLM to use
 
 ```bash
 claude -p \
-  --allowedTools "mcp__ptc-runner__ptc_lisp_execute" \
+  --allowedTools "mcp__ptc-runner__lisp_eval" \
   --effort medium \
   "<task description>"
 ```

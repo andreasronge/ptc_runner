@@ -1,5 +1,10 @@
 # Repository Instructions
 
+This is a **0.x library** — expect breaking changes. Backward compatibility is not a priority. When refactoring:
+- Delete old code rather than deprecate
+- Simplify aggressively
+- Don't add compatibility shims
+
 ## Commit Messages
 
 Use a concise Conventional Commit subject, e.g.
@@ -10,8 +15,6 @@ it was verified.
 
 ## PTC-Lisp Changes
 
-When changing PTC-Lisp syntax, builtins, Java interop, or Clojure
-conformance behavior, read `docs/guidelines/ptc-lisp-design-guidelines.md` first.
 Clojure compatibility is the default, but sandbox safety and recoverable
 signal values take precedence for Clojure-named functions where Clojure
 would raise; Java-named dot methods keep Java semantics.

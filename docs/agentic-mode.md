@@ -1,12 +1,12 @@
 # Agentic Mode
 
-Reference for the experimental `ptc_task` MCP tool that lets clients
+Reference for the experimental `lisp_task` MCP tool that lets clients
 delegate a natural-language task to a server-side planner.
 
 ## Overview
 
 Agentic mode is an experimental layer on top of [aggregator
-mode](aggregator-mode.md). It adds a second MCP tool, `ptc_task`, for
+mode](aggregator-mode.md). It adds a second MCP tool, `lisp_task`, for
 clients that want to ask for a natural-language task instead of
 authoring PTC-Lisp directly. The server uses the configured planner
 model to run a SubAgent in explicit completion mode with one MCP-owned
@@ -15,7 +15,7 @@ call upstream MCP servers, inspect the tagged result, and must finish
 with `(return ...)` or `(fail ...)`. Successful answers are intended to
 be human-readable text.
 
-`ptc_task` does not replace `ptc_lisp_execute`. Both tools are
+`lisp_task` does not replace `lisp_eval`. Both tools are
 advertised when all of these are true:
 
 - at least one upstream MCP server is configured;
@@ -62,7 +62,7 @@ Once enabled, clients call:
 
 ```json
 {
-  "name": "ptc_task",
+  "name": "lisp_task",
   "arguments": {
     "task": "Read README.md and return the first 5 non-empty lines.",
     "constraints": {
@@ -83,12 +83,12 @@ The response includes:
 
 ## Turns and write safety
 
-By default `ptc_task` runs with `max_turns: 1` and `retry_turns: 0`.
+By default `lisp_task` runs with `max_turns: 1` and `retry_turns: 0`.
 That keeps the planner cheap and predictable, but a model may fail if
 it needs feedback to correct a generated program. Raise
 `--agentic-max-turns` for multi-turn planner repair. Read-only
 continuations may use parser/runtime/validation feedback. After any
-write-capable or unknown-effect upstream call, `ptc_task` blocks
+write-capable or unknown-effect upstream call, `lisp_task` blocks
 further continuation unless the planner returns or fails in the same
 turn; this avoids retrying after partial side effects.
 
@@ -121,7 +121,7 @@ those parts of the SubAgent contract.
 
 ## Capability summary
 
-`ptc_task` advertises a compact capability summary instead of the full
+`lisp_task` advertises a compact capability summary instead of the full
 aggregator authoring card. By default this is generated from the
 frozen upstream catalog at boot, capped by
 `--agentic-capability-summary-max-bytes`, and logged only as byte
@@ -136,28 +136,28 @@ full reference, including framing, tracing, and session limits.
 
 | Flag | Env var | Default | Meaning |
 |---|---|---|---|
-| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `ptc_task` tool when aggregator mode is active. |
+| `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
-| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `ptc_task` request. |
+| `--agentic-task-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_TASK_TIMEOUT_MS` | `45000` | Wall-clock cap for one `lisp_task` request. |
 | `--agentic-planner-timeout-ms` | `PTC_RUNNER_MCP_AGENTIC_PLANNER_TIMEOUT_MS` | `15000` | Per-planner-call timeout. |
 | `--agentic-max-output-tokens` | `PTC_RUNNER_MCP_AGENTIC_MAX_OUTPUT_TOKENS` | `1200` | Planner output token cap. |
-| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `ptc_task` response. |
-| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `ptc_task` responses. |
+| `--agentic-max-result-bytes` | `PTC_RUNNER_MCP_AGENTIC_MAX_RESULT_BYTES` | `4096` | Maximum rendered answer bytes in the `lisp_task` response. |
+| `--agentic-include-program` | `PTC_RUNNER_MCP_AGENTIC_INCLUDE_PROGRAM` | `true` | Include the generated PTC-Lisp program in `lisp_task` responses. |
 | `--agentic-trace-prompts` | `PTC_RUNNER_MCP_AGENTIC_TRACE_PROMPTS` | `false` | Include agentic prompt snapshots in traces. Use only for local debugging. |
-| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `ptc_task`. |
+| `--agentic-max-turns` | `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS` | `1` | Maximum SubAgent planner turns per `lisp_task`. |
 | `--agentic-retry-turns` | `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS` | `0` | Additional retry turns after parser/runtime/validation feedback. |
-| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `ptc_task` in write-capable or unknown-effect aggregator configurations. |
+| `--agentic-allow-writes` | `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES` | `false` | Permit `lisp_task` in write-capable or unknown-effect aggregator configurations. |
 | `--agentic-subagent-config` | `PTC_RUNNER_MCP_AGENTIC_SUBAGENT_CONFIG` | unset | JSON config file for `max_turns`, `retry_turns`, and prompt prefix/suffix. |
-| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `ptc_task` capability summary. |
-| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `ptc_task`. |
+| `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `lisp_task` capability summary. |
+| `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `lisp_task`. |
 
 ## Prompt-size benchmark
 
 Agentic mode has two separate prompt-cost surfaces:
 
-- `ptc_task`'s MCP tool entry is paid by the client at `tools/list`
+- `lisp_task`'s MCP tool entry is paid by the client at `tools/list`
   time, once per session.
-- The planner system prompt is paid server-side on every `ptc_task`
+- The planner system prompt is paid server-side on every `lisp_task`
   invocation.
 
 Run the deterministic tier-1 benchmark from `mcp_server/`:
@@ -174,7 +174,7 @@ With the default `--agentic-capability-summary-max-bytes=800` and
 default auto inline thresholds (`40` tools / `12000` chars), the
 current bench reports:
 
-| Fleet | `:auto` effective mode | Planner prompt `:auto` | Planner prompt `:inline` | Planner prompt `:lazy` | `ptc_task` tool entry `:auto` | `ptc_task` tool entry `:inline` | `ptc_task` tool entry `:lazy` |
+| Fleet | `:auto` effective mode | Planner prompt `:auto` | Planner prompt `:inline` | Planner prompt `:lazy` | `lisp_task` tool entry `:auto` | `lisp_task` tool entry `:inline` | `lisp_task` tool entry `:lazy` |
 |---|---|---:|---:|---:|---:|---:|---:|
 | small: 3 servers x 10 tools | inline | ~2.4 K tokens | ~2.4 K | ~0.7 K | ~0.7 K | ~1.1 K | ~0.6 K |
 | medium: 5 servers x 30 tools | lazy | ~0.7 K | ~9.7 K | ~0.7 K | ~0.7 K | ~3.2 K | ~0.6 K |
@@ -183,7 +183,7 @@ current bench reports:
 For the large synthetic fleet, forced `:inline` adds roughly 60 K
 estimated tokens to every planner invocation versus `:auto`/`:lazy`.
 For the small fleet, `:auto` intentionally stays inline, and forcing
-`:lazy` saves roughly 1.7 K estimated planner tokens per `ptc_task`
+`:lazy` saves roughly 1.7 K estimated planner tokens per `lisp_task`
 call at the cost of runtime catalog discovery.
 
 When an upstream tool advertises `outputSchema`, the generated catalog
@@ -214,7 +214,7 @@ mix run --no-start bench/agentic_real_provider_smoke.exs \
   --fail-on-skip
 ```
 
-The smoke starts a local filesystem upstream and exercises `ptc_task`
+The smoke starts a local filesystem upstream and exercises `lisp_task`
 through the real planner provider. It exits non-zero on failures and
 prints the generated program for failed cases.
 
@@ -241,7 +241,7 @@ upstream-call counts, and inferred catalog-operation mentions.
 ## See also
 
 - [aggregator-mode.md](aggregator-mode.md) - the underlying
-  programmatic aggregator that `ptc_task` builds on.
+  programmatic aggregator that `lisp_task` builds on.
 - [mcp-server.md](mcp-server.md) - conceptual overview of the MCP
   server.
 - [mcp-server-configuration.md](mcp-server-configuration.md) - full

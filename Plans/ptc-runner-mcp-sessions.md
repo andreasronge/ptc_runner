@@ -19,7 +19,7 @@ normative weight.
 ## 1. Motivation
 
 Current `ptc_runner_mcp` is intentionally stateless: each
-`ptc_lisp_execute` call receives a complete program, fresh memory, and
+`lisp_eval` call receives a complete program, fresh memory, and
 fresh tool cache, then returns a structured result. This is the right
 default for deterministic compute and one-shot aggregation.
 
@@ -55,7 +55,7 @@ history and execution traces.
 
 Goals:
 
-1. Keep `ptc_lisp_execute` stateless and unchanged.
+1. Keep `lisp_eval` stateless and unchanged.
 2. Add explicit opt-in stateful sessions.
 3. Reuse `PtcRunner.Lisp.run/2` with `memory:` and `turn_history:`.
 4. Reuse existing renderers where possible:
@@ -208,23 +208,23 @@ PTC_RUNNER_MCP_SESSIONS=true
 
 Recommended tool set:
 
-1. `ptc_session_start`
-2. `ptc_session_eval`
-3. `ptc_session_inspect`
-4. `ptc_session_forget`
-5. `ptc_session_close`
+1. `lisp_session_start`
+2. `lisp_session_eval`
+3. `lisp_session_inspect`
+4. `lisp_session_forget`
+5. `lisp_session_close`
 
 Phase 1.5 adds:
 
-6. `ptc_session_list`
+6. `lisp_session_list`
 
-`ptc_lisp_execute` remains the stateless baseline.
+`lisp_eval` remains the stateless baseline.
 
 If sessions are disabled, session tools SHOULD NOT be advertised. If
 an implementation reserves the names anyway, calls MUST return
 `sessions_disabled`; this behavior must be consistent within a build.
 
-### 8.1 `ptc_session_start`
+### 8.1 `lisp_session_start`
 
 Creates a new empty PTC-Lisp REPL session.
 
@@ -258,7 +258,7 @@ Output:
 }
 ```
 
-### 8.2 `ptc_session_eval`
+### 8.2 `lisp_session_eval`
 
 Evaluates a PTC-Lisp program against persistent session memory.
 
@@ -318,9 +318,9 @@ response-profile work may choose slim/structured/debug variants, but
 the session state update semantics are independent of the response
 shape.
 
-`ptc_session_eval` MAY accept a typed return contract via either
+`lisp_session_eval` MAY accept a typed return contract via either
 `signature` or `output_schema`, matching the stateless
-`ptc_lisp_execute` validation surface. The two inputs are mutually
+`lisp_eval` validation surface. The two inputs are mutually
 exclusive. Validation happens after PTC-Lisp execution produces a
 candidate return value and before committing session state. If contract
 validation fails, the eval response is an error and memory, result
@@ -334,7 +334,7 @@ This does **not** refer to MCP tool `outputSchema`. Session tools may
 still advertise MCP `outputSchema` for their own response envelopes
 when the active response profile allows it.
 
-### 8.3 `ptc_session_inspect`
+### 8.3 `lisp_session_inspect`
 
 Returns a compact orientation view of the session.
 
@@ -364,7 +364,7 @@ Views:
 - `ExecutionHistory.render_output(session.prints, limit, has_println?)`
 - `ExecutionHistory.render_tool_calls(session.tool_calls, limit)`
 
-### 8.4 `ptc_session_forget`
+### 8.4 `lisp_session_forget`
 
 Removes bindings or clears bounded histories.
 
@@ -392,7 +392,7 @@ add `"tool_cache"` as a clear target with explicit cache limits.
 
 This is the explicit cleanup mechanism for stale or large values.
 
-### 8.5 `ptc_session_close`
+### 8.5 `lisp_session_close`
 
 Closes a session and deletes its state.
 
@@ -409,7 +409,7 @@ After close, session tools MUST return `session_not_found` or
 `session_closed` for that id. A short tombstone MAY be retained so
 clients can distinguish closed from unknown sessions.
 
-### 8.6 `ptc_session_list`
+### 8.6 `lisp_session_list`
 
 Lists active sessions for the current owner.
 
@@ -468,7 +468,7 @@ Each session summary MUST include:
 
 This is intentionally metadata-only. Clients that need rendered memory,
 print history, tool-call history, or limit details should call
-`ptc_session_inspect` for a specific `session_id`.
+`lisp_session_inspect` for a specific `session_id`.
 
 ### 8.7 Session Authoring Card
 
@@ -485,10 +485,10 @@ mcp_server/priv/mcp_session_authoring_card.md
 This card MUST only be included in:
 
 - session tool descriptions; and/or
-- `ptc_session_inspect view: "overview"` orientation output when
+- `lisp_session_inspect view: "overview"` orientation output when
   useful.
 
-It MUST NOT be appended to the stateless `ptc_lisp_execute`
+It MUST NOT be appended to the stateless `lisp_eval`
 description, because that tool remains independent per invocation and
 its existing "No state across calls" rule remains true.
 
@@ -500,7 +500,7 @@ without crowding the catalog. Recommended text:
 
 This tool evaluates PTC-Lisp inside a stateful session. Values defined
 with `(def name value)` and functions defined with `(defn name [args]
-body)` are available in later `ptc_session_eval` calls for the same
+body)` are available in later `lisp_session_eval` calls for the same
 session.
 
 Use `println` to inspect values between calls. Printed lines are
@@ -508,7 +508,7 @@ captured and returned; they are not stdout.
 
 `*1`, `*2`, and `*3` reference the last three successful eval results.
 
-Use `let` for temporary values. Use `ptc_session_forget` to remove
+Use `let` for temporary values. Use `lisp_session_forget` to remove
 stale or large bindings.
 
 Keep programs short and store only values you need again.
@@ -668,7 +668,7 @@ history truncation surprises, and assuming sessions are durable.
   descriptions should encourage intentional refresh patterns, e.g.
   storing `(defn fetch-issues [] ...)` separately from `(def issues
   (fetch-issues))` so the model can refresh explicitly.
-- Memory bloat: `ptc_session_forget` must be easy for the LLM to
+- Memory bloat: `lisp_session_forget` must be easy for the LLM to
   discover. Inspect `view: "limits"` SHOULD show top bindings by
   approximate byte size when cheap to compute, plus print/tool-call
   history counts.
@@ -712,11 +712,11 @@ Each PTC session process owns its memory and histories, but it MUST
 NOT execute PTC-Lisp inside the GenServer callback. Eval runs in a
 cancellable worker process owned by the stdio request path.
 
-`ptc_session_eval` lifecycle:
+`lisp_session_eval` lifecycle:
 
 1. `JsonRpc` validates the tool name and basic argument shape.
-2. `Stdio` treats `ptc_session_eval` as an async gated tool, same
-   class as `ptc_lisp_execute`: it acquires a `max_concurrent_calls`
+2. `Stdio` treats `lisp_session_eval` as an async gated tool, same
+   class as `lisp_eval`: it acquires a `max_concurrent_calls`
    permit, spawns a per-request worker, monitors it, and records it in
    the in-flight table.
 3. The worker asks `Sessions.Session` to begin eval. The session
@@ -724,7 +724,7 @@ cancellable worker process owned by the stdio request path.
    running, snapshots memory/history, records the worker pid/request
    id in `state.eval`, and returns the snapshot.
 4. The worker runs `Lisp.run/2` with the snapshot, linked/cancellable
-   sandbox behavior matching `ptc_lisp_execute`.
+   sandbox behavior matching `lisp_eval`.
 5. The worker sends the eval result back to the session GenServer for
    commit. The session validates all limits against the candidate new
    state, then either commits or rejects with `session_limit_exceeded`.
@@ -732,11 +732,11 @@ cancellable worker process owned by the stdio request path.
    releases the concurrency permit on worker `:DOWN`.
 
 Per-session concurrency rule for Phase 1: at most one eval may run per
-session. A second `ptc_session_eval` for a session with `state.eval !=
-nil` MUST return `session_busy`; it MUST NOT queue. `ptc_session_inspect`
+session. A second `lisp_session_eval` for a session with `state.eval !=
+nil` MUST return `session_busy`; it MUST NOT queue. `lisp_session_inspect`
 MAY run during an eval and returns the last committed state plus
-`eval_status: "running"`. `ptc_session_forget` MUST return
-`session_busy` while an eval is running. `ptc_session_close` MUST cancel
+`eval_status: "running"`. `lisp_session_forget` MUST return
+`session_busy` while an eval is running. `lisp_session_close` MUST cancel
 the running worker, clear the session state, and close/tombstone the
 session.
 
@@ -804,25 +804,25 @@ telemetry metadata.
 
 ## 15. Interaction With Existing Features
 
-### 15.1 `ptc_lisp_execute`
+### 15.1 `lisp_eval`
 
 No behavior change. It remains stateless.
 
 ### 15.2 Aggregator Mode
 
-`ptc_session_eval` MAY use aggregator mode. Upstream-call entries
+`lisp_session_eval` MAY use aggregator mode. Upstream-call entries
 produced inside a session eval SHOULD be appended to the session's
 bounded upstream-call history.
 
-### 15.3 Agentic `ptc_task`
+### 15.3 Agentic `lisp_task`
 
-Agentic `ptc_task` may later use sessions as its working environment,
+Agentic `lisp_task` may later use sessions as its working environment,
 but Phase 1 should not require agentic mode. Sessions should be useful
 for client-authored PTC-Lisp first.
 
 ### 15.4 Debug Tool
 
-`ptc_debug` SHOULD include session events when enabled, capped by the
+`lisp_debug` SHOULD include session events when enabled, capped by the
 existing debug response limits.
 
 ### 15.5 JSON-RPC and Tool Integration
@@ -830,13 +830,13 @@ existing debug response limits.
 Session tools extend the existing `tools/list` and `tools/call`
 handling:
 
-- `ptc_session_start`, `ptc_session_inspect`, `ptc_session_forget`,
-  and `ptc_session_close` are synchronous tool calls. They do not
+- `lisp_session_start`, `lisp_session_inspect`, `lisp_session_forget`,
+  and `lisp_session_close` are synchronous tool calls. They do not
   acquire the global `max_concurrent_calls` execution permit because
   they do not run the sandbox, but they must still validate frame and
   argument sizes.
-- `ptc_session_eval` is an async gated tool, like
-  `ptc_lisp_execute`. It acquires the global execution permit, runs in
+- `lisp_session_eval` is an async gated tool, like
+  `lisp_eval`. It acquires the global execution permit, runs in
   a per-request worker, supports `notifications/cancelled`, records
   debug outcomes, and releases the permit on worker `:DOWN`.
 - `tools/list` advertises session tools only when sessions are enabled.
@@ -850,7 +850,7 @@ handling:
   `slim|structured|debug` response profile where practical, but their
   core `status`, `reason`, `message`, and `session_id` fields must
   remain stable.
-- `ptc_debug` recording must include session tool calls when enabled,
+- `lisp_debug` recording must include session tool calls when enabled,
   but must not record raw binding values, raw prints, or large tool
   results beyond existing debug limits.
 
@@ -885,20 +885,20 @@ compatible with the session architecture:
 
 | Tool | Purpose |
 |---|---|
-| `ptc_session_details` | Return metadata, limits, usage, last activity, and status for one session. |
-| `ptc_session_interrupt` | Cancel an in-flight session eval, mirroring `notifications/cancelled` behavior. |
-| `ptc_session_reset` | Clear memory, history, prints, tool calls, and tool cache in one operation. May be sugar over `ptc_session_forget`. |
-| `ptc_session_export` | Return a redacted, bounded snapshot for debugging or transfer. Disabled by default. |
+| `lisp_session_details` | Return metadata, limits, usage, last activity, and status for one session. |
+| `lisp_session_interrupt` | Cancel an in-flight session eval, mirroring `notifications/cancelled` behavior. |
+| `lisp_session_reset` | Clear memory, history, prints, tool calls, and tool cache in one operation. May be sugar over `lisp_session_forget`. |
+| `lisp_session_export` | Return a redacted, bounded snapshot for debugging or transfer. Disabled by default. |
 
-`ptc_session_list` is specified in §8.6 as the Phase 1.5 usability
+`lisp_session_list` is specified in §8.6 as the Phase 1.5 usability
 addition. It is no longer treated as a speculative future tool.
 
-`ptc_session_details` can initially be covered by
-`ptc_session_inspect view: "limits"`, but a separate tool may become
+`lisp_session_details` can initially be covered by
+`lisp_session_inspect view: "limits"`, but a separate tool may become
 useful if clients want metadata without rendered memory previews.
 
-`ptc_session_reset` is ergonomic sugar over
-`ptc_session_forget clear: ["memory", "history", "prints",
+`lisp_session_reset` is ergonomic sugar over
+`lisp_session_forget clear: ["memory", "history", "prints",
 "tool_calls"]`. It should remain optional until real usage shows the
 extra tool is worth the surface area.
 
@@ -906,9 +906,9 @@ extra tool is worth the surface area.
 
 - Browser/session trace viewer similar in spirit to `repl-mcp`, but
   backed by PTC trace data rather than a raw terminal.
-- Session timeline in `ptc_debug`: evals, changed bindings, prints,
+- Session timeline in `lisp_debug`: evals, changed bindings, prints,
   tool calls, errors, limit events.
-- Optional initial prelude on `ptc_session_start`, useful for loading
+- Optional initial prelude on `lisp_session_start`, useful for loading
   helper functions.
 - Optional persistence backend for explicit operator-managed session
   continuity across server restarts.
@@ -935,22 +935,22 @@ REPL MCP server with appropriate OS/container isolation.
 
 - Add session config, registry, supervisor, owner derivation, and
   session GenServer.
-- Implement `ptc_session_start`, `ptc_session_eval`,
-  `ptc_session_inspect`, `ptc_session_forget`, and
-  `ptc_session_close`.
+- Implement `lisp_session_start`, `lisp_session_eval`,
+  `lisp_session_inspect`, `lisp_session_forget`, and
+  `lisp_session_close`.
 - Feature flag off by default.
 - Support no-upstream PTC-Lisp first.
 
 ### Phase 1.5 — Session Discovery
 
-- Implement `ptc_session_list` for owner-scoped live-session discovery.
+- Implement `lisp_session_list` for owner-scoped live-session discovery.
 - Advertise the tool only when sessions are enabled.
-- Keep the response metadata-only; callers use `ptc_session_inspect`
+- Keep the response metadata-only; callers use `lisp_session_inspect`
   for rendered memory, histories, and limit details.
 
 ### Phase 2 — Aggregator Integration
 
-- Add `(tool/mcp-call ...)` support inside `ptc_session_eval`.
+- Add `(tool/mcp-call ...)` support inside `lisp_session_eval`.
 - Persist bounded tool/upstream call histories.
 - Apply read-only policy where metadata/allowlists exist.
 
@@ -988,7 +988,7 @@ scope, for example:
 
 ```text
 Review the current diff against Plans/ptc-runner-mcp-sessions.md.
-Scope: Phase 1b, ptc_session_eval worker/cancellation/busy/rollback.
+Scope: Phase 1b, lisp_session_eval worker/cancellation/busy/rollback.
 Focus on behavioral bugs, missing tests, and scope creep into Phase 2.
 ```
 
@@ -997,12 +997,12 @@ Suggested review checkpoints:
 1. Phase 0: shared renderer extraction and rollback/limit tests.
 2. Phase 1a: session config, owner, registry, supervisor, and session
    lifecycle.
-3. Phase 1b: `ptc_session_eval` worker, cancellation, `session_busy`,
+3. Phase 1b: `lisp_session_eval` worker, cancellation, `session_busy`,
    rollback, and persisted-state limits.
 4. Phase 1c: MCP tool surface, `tools/list`, JSON-RPC routing,
    schemas, response profiles, and debug recording.
-5. Phase 1d: `ptc_session_inspect`, `ptc_session_forget`,
-   `ptc_session_close`, disabled-by-default behavior, and full Phase 1
+5. Phase 1d: `lisp_session_inspect`, `lisp_session_forget`,
+   `lisp_session_close`, disabled-by-default behavior, and full Phase 1
    integration.
 
 Recommended fresh-session handoff:
@@ -1026,17 +1026,17 @@ owner per sub-phase.
    users when upstream data changes. Phase 1 answer: no persistent
    tool cache.
 2. Should additional typed return contract aliases be accepted on
-   `ptc_session_eval`? Current answer: only `signature` and
+   `lisp_session_eval`? Current answer: only `signature` and
    `output_schema` are accepted, they are mutually exclusive, and
    validation failure rolls back the eval.
 3. How much of `TurnFeedback` should move to a shared non-SubAgent
    module?
-4. Should `ptc_session_inspect view: "memory"` return only rendered
+4. Should `lisp_session_inspect view: "memory"` return only rendered
    text, structured entries, or both?
 5. Should closed sessions keep tombstones briefly?
-6. Should `ptc_session_forget` support wildcard/prefix deletion?
+6. Should `lisp_session_forget` support wildcard/prefix deletion?
 7. Should session start support loading an initial prelude program?
-8. Should `ptc_session_interrupt` be implemented as a separate tool,
+8. Should `lisp_session_interrupt` be implemented as a separate tool,
    or should MCP `notifications/cancelled` be the only cancellation
    path for Phase 1?
 
@@ -1049,24 +1049,24 @@ The first shippable version is acceptable when:
 3. Multiple sessions can exist concurrently in one stdio server
    process.
 4. Session state is isolated by owner.
-5. `def` and `defn` persist across `ptc_session_eval` calls.
+5. `def` and `defn` persist across `lisp_session_eval` calls.
 6. `let` bindings and ordinary intermediate values do not persist.
 7. `*1`, `*2`, `*3` work across eval calls.
 8. `println` output is returned and available via inspect.
 9. Memory limit violations roll back the eval.
-10. `ptc_session_forget` removes selected bindings and histories.
+10. `lisp_session_forget` removes selected bindings and histories.
 11. Cancelled evals do not commit memory/history.
 12. A concurrent eval on the same session returns `session_busy`.
 13. Persisted `turn_history`, prints, tool-call history, and
     upstream-call history are all bounded by count and bytes.
-14. `ptc_session_eval` accepts `signature` and `output_schema` as
+14. `lisp_session_eval` accepts `signature` and `output_schema` as
     mutually exclusive return contracts. Validation failures roll back
     memory, history, prints, and tool-call state for that eval.
-15. `ptc_session_list` returns owner-scoped live-session metadata and
+15. `lisp_session_list` returns owner-scoped live-session metadata and
     omits rendered binding values.
 16. `tool_cache` does not persist across session evals in Phase 1.
 17. Oversized `*1` / `*2` / `*3` entries become explicit preview
     markers and eval feedback reports that truncation.
-18. `ptc_session_start` does not advertise advisory/non-enforced
+18. `lisp_session_start` does not advertise advisory/non-enforced
     access-mode fields.
-19. `ptc_lisp_execute` remains stateless and all existing tests pass.
+19. `lisp_eval` remains stateless and all existing tests pass.

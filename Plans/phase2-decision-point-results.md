@@ -38,7 +38,7 @@ Two scenarios:
   upstream tool were natively exposed). Token cost is bytes-of-JSON
   / 4 across all request and response envelopes plus a small
   client-side synthesis output.
-* **B — aggregator**: one `ptc_lisp_execute` request whose program
+* **B — aggregator**: one `lisp_eval` request whose program
   orchestrates the same upstream calls and returns only the
   transformed value. Token cost is the bytes/4 of the single
   request (program text included) plus the single response

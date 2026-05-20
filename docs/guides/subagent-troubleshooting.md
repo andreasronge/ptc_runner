@@ -407,14 +407,14 @@ real capability mismatch.
 ### Agent returns fenced Clojure as content in `:tool_call` mode
 
 **Symptom:** In `ptc_transport: :tool_call` you see assistant turns whose
-content is a markdown ` ```clojure ` block instead of a `ptc_lisp_execute`
+content is a markdown ` ```clojure ` block instead of a `lisp_eval`
 tool call. Traces show retry feedback rather than program execution.
 
 **Cause:** The model is trying to use the `:content` transport (fenced code)
 even though the agent is configured for `:tool_call`. **This is expected
 behavior** — PtcRunner deliberately does *not* parse fenced code in
 `:tool_call` mode. Instead, it sends targeted feedback telling the model to
-call the `ptc_lisp_execute` tool with the program.
+call the `lisp_eval` tool with the program.
 
 **Solutions:**
 
@@ -430,7 +430,7 @@ call the `ptc_lisp_execute` tool with the program.
    instructions reliably.
 
 3. **Verify the system prompt is being sent.** If the model never sees the
-   "use the `ptc_lisp_execute` tool" guidance, it will default to whatever
+   "use the `lisp_eval` tool" guidance, it will default to whatever
    output style it knows. Check
    [LLM Returns Prose Instead of Code](#llm-returns-prose-instead-of-code)
    above for diagnosis steps — they apply equally here.
@@ -441,7 +441,7 @@ call the `ptc_lisp_execute` tool with the program.
 saw the same latency, or worse, more LLM turns and higher cost.
 
 **Cause:** This is by design. `:tool_call` is **not** a latency or cost
-optimization. It trades extra LLM turns (call `ptc_lisp_execute`, get tool
+optimization. It trades extra LLM turns (call `lisp_eval`, get tool
 result, return final answer) for native-tool-calling reliability on
 providers/models where that is materially better than fenced-code parsing. A
 workload that finishes in one `:content` turn typically takes two or three in

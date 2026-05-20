@@ -9,20 +9,20 @@
 ## Summary
 
 Add an opt-in MCP sampling planner backend for `ptc_runner_mcp`
-agentic mode. When enabled, `ptc_task` uses the MCP client's language
+agentic mode. When enabled, `lisp_task` uses the MCP client's language
 model through `sampling/createMessage` to generate the same PTC-Lisp
 program that the current server-side planner generates today. The
 generated program is still validated, executed, traced, and rendered
 through the existing PTC-Lisp sandbox and aggregator path.
 
-This does not replace `ptc_lisp_execute`, does not expose upstream MCP
+This does not replace `lisp_eval`, does not expose upstream MCP
 tools directly through sampling, and does not make ordinary
-`ptc_lisp_execute` calls agentic. It is a planner-provider option for
-the existing `ptc_task` tool.
+`lisp_eval` calls agentic. It is a planner-provider option for
+the existing `lisp_task` tool.
 
 ## Motivation
 
-The current `ptc_task` implementation depends on a server-side LLM
+The current `lisp_task` implementation depends on a server-side LLM
 adapter and provider credentials. That is useful for reproducible
 operator-controlled deployments, but it is awkward for editor MCP
 clients that already have a user-approved model, subscription, and
@@ -39,7 +39,7 @@ VS Code/Copilot users, this means:
 - the server can keep all deterministic execution, tracing, and
   upstream-call governance exactly where it already lives.
 
-This is especially attractive for `ptc_task`, whose planner output is
+This is especially attractive for `lisp_task`, whose planner output is
 small PTC-Lisp source. The expensive/large-data work remains in the
 sandboxed program and upstream aggregator calls rather than in hidden
 client context.
@@ -79,17 +79,17 @@ Current repo constraints:
 
 ## Goals
 
-- Add client-LLM planning for `ptc_task` without requiring server-side
+- Add client-LLM planning for `lisp_task` without requiring server-side
   provider credentials.
-- Preserve the existing `ptc_task` input/output contract as much as
+- Preserve the existing `lisp_task` input/output contract as much as
   possible.
 - Keep sampling isolated behind a planner backend and a transport
   request service.
 - Detect and fail cleanly when the MCP client does not advertise
   sampling support.
-- Keep `ptc_lisp_execute` no-LLM and deterministic.
+- Keep `lisp_eval` no-LLM and deterministic.
 - Preserve cancellation, shutdown, concurrency limits, telemetry, and
-  `ptc_debug` behavior.
+  `lisp_debug` behavior.
 - Keep v1 sampling text-only and tool-free. Upstream MCP tool
   orchestration remains inside generated PTC-Lisp through
   `(tool/mcp-call ...)`.
@@ -99,7 +99,7 @@ Current repo constraints:
 - No tool-enabled sampling in v1.
 - No `includeContext: "thisServer"` or `"allServers"` in v1.
 - No server-initiated sampling outside a `tools/call`.
-- No sampling for raw `ptc_lisp_execute`.
+- No sampling for raw `lisp_eval`.
 - No automatic fallback from sampling planner to server-side planner
   unless explicitly configured later.
 - No adoption of modern stateless MCP lifecycle in this change. The
@@ -182,7 +182,7 @@ Tool-enabled sampling is recognized as:
 ```
 
 V1 requires only basic `sampling`. If `--agentic-planner=sampling` and
-the current client does not advertise sampling support, `ptc_task`
+the current client does not advertise sampling support, `lisp_task`
 returns a tool error:
 
 ```json
@@ -251,7 +251,7 @@ current `Stdio.State` says the client did not advertise basic
 sampling, the registration call returns `{:error,
 :sampling_unavailable}` immediately, without writing an outbound
 frame or creating a pending entry. `Agentic.call_planner/4` maps this
-to the public `sampling_unavailable` `ptc_task` reason. No separate
+to the public `sampling_unavailable` `lisp_task` reason. No separate
 "read capabilities first" path is required in the sampling planner.
 
 For v1, only `method == "sampling/createMessage"` is needed. Keep the
@@ -359,7 +359,7 @@ Never treat such a frame as success.
 ### Cancellation and shutdown
 
 If the original client sends `notifications/cancelled` for an
-in-flight `ptc_task`, current behavior kills the worker. Pending
+in-flight `lisp_task`, current behavior kills the worker. Pending
 sampling requests owned by that worker must be removed and the waiting
 process must receive `{:error, :cancelled}` or simply die with the
 worker. No response is emitted for the original cancelled `tools/call`,
@@ -493,7 +493,7 @@ Success metadata:
 
 Errors map to existing agentic reasons where possible:
 
-| Sampling failure | Planner return | Final `ptc_task` reason |
+| Sampling failure | Planner return | Final `lisp_task` reason |
 |---|---|---|
 | client lacks sampling capability | `{:error, :sampling_unavailable, ...}` | `sampling_unavailable` |
 | request timeout | `{:error, :planner, ...}` | `planner_timeout` |
@@ -508,7 +508,7 @@ returning it as `:config`. `Agentic.call_planner/4` must map
 `map_step_reason/3` must preserve that reason as
 `sampling_unavailable` rather than collapsing it into
 `agentic_config_error`, `planner_error`, or `ptc_llm_error`. This is a
-public `ptc_task` error reason because the operator may have
+public `lisp_task` error reason because the operator may have
 configured sampling correctly while the current client simply does
 not support it.
 
@@ -575,7 +575,7 @@ Stop metadata:
 
 No raw prompt or raw completion text in telemetry metadata.
 
-`ptc_debug` should continue recording only the outer `tools/call`
+`lisp_debug` should continue recording only the outer `tools/call`
 outcome. Do not add sampling prompt/response bodies to debug records.
 It is acceptable to include counts and backend metadata inside the
 existing planner block.
@@ -589,7 +589,7 @@ no raw prompt or completion text.
 
 ## Output Schema Changes
 
-Extend `ptc_task` error reasons with:
+Extend `lisp_task` error reasons with:
 
 - `sampling_unavailable`
 
@@ -684,7 +684,7 @@ DoD:
 
 DoD:
 
-- `ptc_task` can use a fake sampling response to generate and execute
+- `lisp_task` can use a fake sampling response to generate and execute
   a PTC-Lisp program.
 - Planner metadata includes backend/model/bytes/duration.
 - No raw prompt/completion appears in telemetry metadata.
@@ -722,7 +722,7 @@ Only consider after text-only sampling ships.
 
 Questions:
 
-- Can tool-enabled sampling simplify `ptc_task`, or does it duplicate
+- Can tool-enabled sampling simplify `lisp_task`, or does it duplicate
   the PTC-Lisp aggregator?
 - Can client support be detected reliably across VS Code, Copilot
   variants, and other MCP clients?
