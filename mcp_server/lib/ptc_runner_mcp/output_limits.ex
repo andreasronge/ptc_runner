@@ -170,24 +170,37 @@ defmodule PtcRunnerMcp.OutputLimits do
     end
   end
 
+  # Keep a prefix of `items` (≤ `max_entries`) whose JSON-array encoding stays
+  # within `max_bytes`. Each item is encoded once and the running array size is
+  # tracked incrementally — `byte_size(Jason.encode(kept))` equals the seed of 2
+  # (`[` + `]`) plus each item's bytes plus one comma per item after the first.
+  # This is exact, not an estimate, and runs in O(n) instead of the previous
+  # O(n²) (which rebuilt the list with `++` and re-encoded it every iteration).
   defp cap_list_by_encoded_bytes(items, max_entries, max_bytes) do
-    limited = Enum.take(items, max_entries)
+    total = length(items)
 
-    {kept, _size} =
-      Enum.reduce_while(limited, {[], 2}, fn item, {acc, _size} ->
-        candidate = acc ++ [item]
+    kept =
+      items
+      |> Enum.take(max_entries)
+      |> Enum.reduce_while({[], 2}, fn item, {acc, bytes} ->
+        case Jason.encode(item) do
+          {:ok, json} ->
+            new_bytes = bytes + byte_size(json) + if(acc == [], do: 0, else: 1)
 
-        case Jason.encode(candidate) do
-          {:ok, json} when byte_size(json) <= max_bytes ->
-            {:cont, {candidate, byte_size(json)}}
+            if new_bytes <= max_bytes do
+              {:cont, {[item | acc], new_bytes}}
+            else
+              {:halt, {acc, bytes}}
+            end
 
-          _ ->
-            {:halt, {acc, encoded_size(acc)}}
+          {:error, _} ->
+            {:halt, {acc, bytes}}
         end
       end)
+      |> elem(0)
+      |> Enum.reverse()
 
-    truncated? = length(kept) < length(items)
-    {kept, truncated?}
+    {kept, length(kept) < total}
   end
 
   defp shrink_envelope(%{"structuredContent" => sc} = envelope) when is_map(sc) do
