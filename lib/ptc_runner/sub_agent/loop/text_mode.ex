@@ -41,7 +41,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.Tool
 
-  @ptc_lisp_execute_name "ptc_lisp_execute"
+  @lisp_eval_name "lisp_eval"
 
   # ============================================================
   # Preview Prompt
@@ -118,7 +118,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     result =
       cond do
         # Tier 3a: combined mode always goes through the tool variant
-        # because `ptc_lisp_execute` is always present in the request
+        # because `lisp_eval` is always present in the request
         # `tools` field, even when zero app tools are configured.
         combined_mode?(agent) ->
           run_tool_variant(agent, llm, state)
@@ -361,7 +361,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     # Tier 3a: in combined mode, the LLM-visible request `tools` field
     # is filtered to `:native | :both`-exposed app tools, then appended
-    # with `ptc_lisp_execute`. Pure text mode keeps the legacy behavior
+    # with `lisp_eval`. Pure text mode keeps the legacy behavior
     # (every effective tool surfaces natively).
     tool_schemas =
       if combined? do
@@ -414,7 +414,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   # Tier 3a: combined-mode tool schemas. Filter app tools by exposure
-  # (`:native` or `:both`) and append the `ptc_lisp_execute` entry whose
+  # (`:native` or `:both`) and append the `lisp_eval` entry whose
   # description comes from the `:in_process_text_mode` capability
   # profile. ToolSchema.to_tool_definitions/1 expects the original
   # `effective_tools` map shape; we filter the *map* by expose-eligible
@@ -452,7 +452,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   @doc false
-  # Tier 3a: TextMode-local variant of the `ptc_lisp_execute` schema.
+  # Tier 3a: TextMode-local variant of the `lisp_eval` schema.
   # Same wire shape as `Loop.PtcToolCall.tool_schema/0` but the
   # `description` is sourced from the `:in_process_text_mode`
   # capability profile (Addendum #11 — one canonical string per
@@ -464,7 +464,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     %{
       "type" => "function",
       "function" => %{
-        "name" => @ptc_lisp_execute_name,
+        "name" => @lisp_eval_name,
         "description" => PtcToolProtocol.tool_description(:in_process_text_mode),
         "parameters" => %{
           "type" => "object",
@@ -644,7 +644,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     # reject the entire turn with one paired protocol-error per
     # `tool_call_id`; Rows 3-6 fall through to the existing dispatch
     # path. Pure text mode is not subject to Rows 1-2 (no
-    # `ptc_lisp_execute` exposed) and keeps its legacy unknown-tool
+    # `lisp_eval` exposed) and keeps its legacy unknown-tool
     # behavior; combined mode also handles Rows 5-6 unknown-tool
     # protocol errors below in the per-call dispatch branch.
     case classify_turn(tool_calls_with_ids, state) do
@@ -663,14 +663,14 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   defp proceed_with_tool_calls(tool_calls_with_ids, assistant_content, agent, state) do
-    # Tier 3a (Addendum / Tier 3a description): `ptc_lisp_execute`
+    # Tier 3a (Addendum / Tier 3a description): `lisp_eval`
     # invocations are exempt from `agent.max_tool_calls` and MUST NOT
     # increment `state.total_tool_calls`. We tag each call with a
     # boolean flag, then apply the budget check only to the non-exempt
     # subset. Exempt calls always execute regardless of the budget.
     tagged_calls =
       Enum.map(tool_calls_with_ids, fn tc ->
-        {tc, ptc_lisp_execute_call?(tc, state)}
+        {tc, lisp_eval_call?(tc, state)}
       end)
 
     non_exempt_count = Enum.count(tagged_calls, fn {_, exempt?} -> not exempt? end)
@@ -793,7 +793,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     cond do
       exempt? ->
-        case dispatch_ptc_lisp_execute(tc, agent, st) do
+        case dispatch_lisp_eval(tc, agent, st) do
           {:ok, result_str, step_entry, st_next} ->
             tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
             {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
@@ -845,7 +845,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   # Split tagged calls so non-exempt calls stay within `remaining`
-  # budget; exempt (`ptc_lisp_execute`) calls are always kept. Order
+  # budget; exempt (`lisp_eval`) calls are always kept. Order
   # within `tagged_calls` is preserved.
   defp partition_with_budget(tagged_calls, remaining) do
     {kept, skipped, _left} =
@@ -866,12 +866,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     {Enum.reverse(kept), Enum.reverse(skipped)}
   end
 
-  # Tier 3a: classify a tool call. The `ptc_lisp_execute` exemption
+  # Tier 3a: classify a tool call. The `lisp_eval` exemption
   # only applies in combined mode; in pure text mode the name is
   # never registered, so an LLM that returns it falls through to the
   # generic `tool not found` path.
-  defp ptc_lisp_execute_call?(%{name: @ptc_lisp_execute_name}, %{combined_mode: true}), do: true
-  defp ptc_lisp_execute_call?(_, _), do: false
+  defp lisp_eval_call?(%{name: @lisp_eval_name}, %{combined_mode: true}), do: true
+  defp lisp_eval_call?(_, _), do: false
 
   # ============================================================
   # Tier 3c — Multi-Call Rule classification
@@ -880,12 +880,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # Six-row precedence table from "Multi-Call Rule" in
   # `Plans/text-mode-ptc-compute-tool.md`. First match wins.
   #
-  #   Row 1: ≥ 2 `ptc_lisp_execute` calls (any other calls present
+  #   Row 1: ≥ 2 `lisp_eval` calls (any other calls present
   #          or not) → reject all (`multiple_tool_calls`).
-  #   Row 2: exactly one `ptc_lisp_execute` + any other native call
+  #   Row 2: exactly one `lisp_eval` + any other native call
   #          (valid or unknown) → reject all
-  #          (`mixed_with_ptc_lisp_execute`).
-  #   Row 3: exactly one `ptc_lisp_execute` alone → execute the
+  #          (`mixed_with_lisp_eval`).
+  #   Row 3: exactly one `lisp_eval` alone → execute the
   #          program (existing Tier 3a path).
   #   Row 4: native app-tool calls only — all valid → execute all.
   #   Row 5: native app-tool calls only — mix of valid and unknown
@@ -897,12 +897,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # and "proceed" (Rows 3-6). The per-call branch in
   # `proceed_with_tool_calls/4` handles Rows 5/6 unknown-tool pairing
   # (combined mode only). Pure text mode never reaches Row 1/2 because
-  # `ptc_lisp_execute` is not registered — the call short-circuits to
+  # `lisp_eval` is not registered — the call short-circuits to
   # `:proceed` and the legacy "Tool not found" envelope is preserved
   # by `dispatch_bare/4`.
   @spec classify_turn([map()], map()) :: :proceed | {:reject, atom(), String.t()}
   defp classify_turn(calls, state) do
-    ptc_count = Enum.count(calls, fn tc -> ptc_lisp_execute_call?(tc, state) end)
+    ptc_count = Enum.count(calls, fn tc -> lisp_eval_call?(tc, state) end)
     total = length(calls)
 
     cond do
@@ -910,7 +910,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         {:reject, :multiple_tool_calls, multiple_tool_calls_message()}
 
       ptc_count == 1 and total > 1 ->
-        {:reject, :mixed_with_ptc_lisp_execute, mixed_with_ptc_lisp_execute_message()}
+        {:reject, :mixed_with_lisp_eval, mixed_with_lisp_eval_message()}
 
       true ->
         :proceed
@@ -919,7 +919,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   # Tier 3c — protocol-error JSON shape. Lives in `Loop.TextMode` per
   # the spec ("Protocol-error rendering for `multiple_tool_calls`,
-  # `mixed_with_ptc_lisp_execute`, `unknown_tool` MUST live in
+  # `mixed_with_lisp_eval`, `unknown_tool` MUST live in
   # `Loop.TextMode`, not in `PtcToolProtocol`."). NO `feedback` field
   # — protocol errors are transport-level, not execution-level. This
   # diverges intentionally from v1 PTC `:tool_call`'s
@@ -934,16 +934,16 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   defp multiple_tool_calls_message,
-    do: "exactly one ptc_lisp_execute call per assistant turn"
+    do: "exactly one lisp_eval call per assistant turn"
 
-  defp mixed_with_ptc_lisp_execute_message,
+  defp mixed_with_lisp_eval_message,
     do:
-      "ptc_lisp_execute is exclusive in its assistant turn; no other native tool calls may accompany it"
+      "lisp_eval is exclusive in its assistant turn; no other native tool calls may accompany it"
 
   defp unknown_tool_message(name),
     do: "Unknown native tool `#{name}`."
 
-  # Tier 3c — classify a non-`ptc_lisp_execute` native call as unknown
+  # Tier 3c — classify a non-`lisp_eval` native call as unknown
   # for combined-mode Row 5/6 handling. A call is unknown when:
   #   1. The tool is not registered (no entry in
   #      `state.normalized_tools_map` after API-name resolution), OR
@@ -1030,7 +1030,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   # ============================================================
-  # Tier 3a — ptc_lisp_execute dispatch (combined mode only)
+  # Tier 3a — lisp_eval dispatch (combined mode only)
   # ============================================================
   #
   # Mirrors `Loop.PtcToolCall.execute_program/5` for the in-process
@@ -1051,7 +1051,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # Returns one of:
   #   {:ok, result_json, step_entry, new_state}   — continue
   #   {:fatal, error_step}                          — terminate run with error
-  defp dispatch_ptc_lisp_execute(call, agent, state) do
+  defp dispatch_lisp_eval(call, agent, state) do
     start = System.monotonic_time(:millisecond)
 
     case extract_program(call) do
@@ -1064,7 +1064,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         emit_ptc_lisp_telemetry(state, duration_ms, true)
 
         step_entry = %{
-          name: @ptc_lisp_execute_name,
+          name: @lisp_eval_name,
           args: call.args || %{},
           result: nil,
           error: message,
@@ -1258,7 +1258,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       end
 
     # Tier 3b: advance `turn_history` only when the caller explicitly
-    # asks. Successful intermediate `ptc_lisp_execute` results pass
+    # asks. Successful intermediate `lisp_eval` results pass
     # `true`; `(return v)`, `(fail v)`, runtime errors, memory rollback,
     # native tool calls, and direct text turns all leave it unchanged.
     case Keyword.get(opts, :advance_turn_history, false) do
@@ -1280,7 +1280,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp ptc_lisp_step_entry(call, lisp_step, duration_ms, error) do
     %{
-      name: @ptc_lisp_execute_name,
+      name: @lisp_eval_name,
       args: call.args || %{},
       result: Map.get(lisp_step, :return),
       error: error,
@@ -1293,7 +1293,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     Telemetry.emit([:tool, :call], %{duration_ms: duration_ms}, %{
       agent_name: state.agent_name,
       agent_id: state.agent_id,
-      tool_name: @ptc_lisp_execute_name,
+      tool_name: @lisp_eval_name,
       exposure_layer: :native,
       cached: false,
       error: error?
@@ -1849,7 +1849,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
     final_messages = state.messages ++ [%{role: :assistant, content: text_content}]
 
-    # Tier 3a: propagate combined-mode `ptc_lisp_execute` state on the
+    # Tier 3a: propagate combined-mode `lisp_eval` state on the
     # final step so callers can introspect memory/journal/tool_cache/
     # child_steps after the run terminates. Pure text mode never
     # accumulates these (tool_cache stays nil; memory stays nil), so

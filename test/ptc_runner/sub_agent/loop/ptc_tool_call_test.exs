@@ -13,10 +13,10 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
   # canonical text is the single source of truth (R7).
   @canonical_substring "Call app tools as `(tool/name ...)` from inside the program"
 
-  describe "tool_schema/0 — native tool schema for ptc_lisp_execute (R7)" do
-    test "schema name is ptc_lisp_execute" do
+  describe "tool_schema/0 — native tool schema for lisp_eval (R7)" do
+    test "schema name is lisp_eval" do
       schema = PtcToolCall.tool_schema()
-      assert schema["function"]["name"] == "ptc_lisp_execute"
+      assert schema["function"]["name"] == "lisp_eval"
     end
 
     test "schema requires a non-empty `program` string argument" do
@@ -43,12 +43,12 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
     end
 
     test "tool_name/0 returns the reserved name" do
-      assert PtcToolCall.tool_name() == "ptc_lisp_execute"
+      assert PtcToolCall.tool_name() == "lisp_eval"
     end
   end
 
   describe "request_tools/1 — provider-native tools list (R5)" do
-    test ":tool_call mode returns exactly one entry — ptc_lisp_execute" do
+    test ":tool_call mode returns exactly one entry — lisp_eval" do
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -64,12 +64,12 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
 
       assert is_list(tools)
       assert length(tools) == 1
-      assert hd(tools)["function"]["name"] == "ptc_lisp_execute"
+      assert hd(tools)["function"]["name"] == "lisp_eval"
     end
 
     test ":tool_call mode never exposes app tools as provider-native tools" do
       # R5: regardless of how many app tools the agent declares, the
-      # native `tools` array contains only `ptc_lisp_execute`. App-tool
+      # native `tools` array contains only `lisp_eval`. App-tool
       # names must not appear anywhere in the structure.
       agent =
         SubAgent.new(
@@ -96,7 +96,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
           tools: %{}
         )
 
-      assert [%{"function" => %{"name" => "ptc_lisp_execute"}}] =
+      assert [%{"function" => %{"name" => "lisp_eval"}}] =
                PtcToolCall.request_tools(agent)
     end
 
@@ -123,7 +123,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
   end
 
   describe "Loop.build_llm_input/5 — request shape (R5, R6)" do
-    test ":tool_call request has tools=[ptc_lisp_execute] and one entry only" do
+    test ":tool_call request has tools=[lisp_eval] and one entry only" do
       agent =
         SubAgent.new(
           prompt: "Test",
@@ -140,7 +140,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
 
       assert is_list(input.tools)
       assert length(input.tools) == 1
-      assert hd(input.tools)["function"]["name"] == "ptc_lisp_execute"
+      assert hd(input.tools)["function"]["name"] == "lisp_eval"
     end
 
     test ":tool_call request never carries app-tool names in the tools field" do
@@ -225,13 +225,13 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
       refute output_format_block =~ "Respond with EXACTLY ONE ```clojure code block"
     end
 
-    test ":tool_call prompt instructs the model to call ptc_lisp_execute" do
-      # R26: instruct the model to call `ptc_lisp_execute` for
+    test ":tool_call prompt instructs the model to call lisp_eval" do
+      # R26: instruct the model to call `lisp_eval` for
       # computation/orchestration.
       agent = SubAgent.new(prompt: "Test", ptc_transport: :tool_call, max_turns: 3)
       system = SystemPrompt.generate_system(agent)
 
-      assert system =~ "ptc_lisp_execute"
+      assert system =~ "lisp_eval"
     end
 
     test ":tool_call prompt instructs the model to return the final answer directly" do
@@ -255,11 +255,11 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallTest do
 
     test ":tool_call prompt forbids native app-tool calls" do
       # Reinforces R7 inside the prompt itself, not just on the tool
-      # description: only `ptc_lisp_execute` is available natively.
+      # description: only `lisp_eval` is available natively.
       agent = SubAgent.new(prompt: "Test", ptc_transport: :tool_call, max_turns: 3)
       system = SystemPrompt.generate_system(agent)
 
-      assert system =~ "only `ptc_lisp_execute`"
+      assert system =~ "only `lisp_eval`"
     end
 
     test ":tool_call thinking variant differs from non-thinking variant" do

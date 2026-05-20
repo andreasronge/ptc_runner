@@ -9,7 +9,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
     * `Plans/text-mode-ptc-compute-tool.md` § "Final-Output Semantics"
       (matrix + `(return v)` non-short-circuit rationale).
     * `Plans/text-mode-ptc-compute-tool.md` § "Turn Budget Interaction"
-      (`ptc_lisp_execute` on the final available turn must terminate
+      (`lisp_eval` on the final available turn must terminate
       via `max_turns_exceeded` with the `tool_call_id` paired).
     * `Plans/text-mode-ptc-compute-tool.md` § "Implementation
       Contract → Final-Output Semantics" (normative MUSTs).
@@ -236,7 +236,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
     # Tier 3.5 Fix 5: combined-mode JSON-shaped finals must propagate
     # combined state (memory, journal, tool_cache, child_steps) — pre-fix,
     # `JsonHandler.build_success_step/5` hard-coded `memory: %{}` and
-    # ignored the other fields, dropping everything `ptc_lisp_execute`
+    # ignored the other fields, dropping everything `lisp_eval`
     # had built up.
     test "{:map, ...} final preserves memory/journal/tool_cache/child_steps from program execution" do
       llm =
@@ -246,7 +246,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{
                   "program" => ~s|(do (def n 7) (println "ran") (return {:answer n}))|
                 }
@@ -307,7 +307,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
   # ---------------------------------------------------------------------------
 
   describe "(return v) does not short-circuit the run" do
-    # Spec: "(return v) inside ptc_lisp_execute produces a success
+    # Spec: "(return v) inside lisp_eval produces a success
     # tool-result; the LLM gets one more turn to respond when budget
     # remains. The agent's final answer is the LLM's final text, not v."
     test "final answer is the LLM's final text, not the program's return value" do
@@ -317,7 +317,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(return {:answer 42})"}
               }
             ],
@@ -343,7 +343,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
   end
 
   describe "(fail v) does not abort the run if budget remains" do
-    # Spec: "(fail v) inside ptc_lisp_execute produces an error
+    # Spec: "(fail v) inside lisp_eval produces an error
     # tool-result (reason: \"fail\"); the LLM gets one more turn to
     # respond when budget remains."
     test "step status is {:ok, _} after the LLM recovers in a final text turn" do
@@ -353,7 +353,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => ~S|(fail :nope)|}
               }
             ],
@@ -382,15 +382,15 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
   # Turn Budget Interaction (spec § "Turn Budget Interaction").
   # ---------------------------------------------------------------------------
 
-  describe "turn budget exhausted on ptc_lisp_execute" do
-    # Spec: "ptc_lisp_execute invoked on the final available turn:
+  describe "turn budget exhausted on lisp_eval" do
+    # Spec: "lisp_eval invoked on the final available turn:
     # tool-result JSON is emitted and paired with the tool_call_id,
     # then the loop terminates via TextMode's existing
     # max_turns_exceeded path. No follow-up text turn happens."
     #
     # `state.turn` starts at 1 and `check_termination/2` triggers
     # `:max_turns_exceeded` when `state.turn > agent.max_turns`. With
-    # `max_turns: 1`, turn 1 dispatches `ptc_lisp_execute`, the loop
+    # `max_turns: 1`, turn 1 dispatches `lisp_eval`, the loop
     # increments `state.turn` to 2, and the next iteration aborts
     # before any further LLM turn — so the assistant turn-1 tool call
     # is the final available one.
@@ -408,7 +408,7 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
              tool_calls: [
                %{
                  id: "c1",
-                 name: "ptc_lisp_execute",
+                 name: "lisp_eval",
                  args: %{"program" => "(+ 1 2)"}
                }
              ],
@@ -445,14 +445,14 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
     # Spec: "Users who need program execution followed by a text wrap-up
     # MUST configure `max_turns` with at least one slot of headroom
     # beyond their worst-case program-call count."
-    test "max_turns: 3, turn 1 ptc_lisp_execute + turn 2 final text → step.return is final text" do
+    test "max_turns: 3, turn 1 lisp_eval + turn 2 final text → step.return is final text" do
       llm =
         tool_calling_llm([
           %{
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{"program" => "(+ 1 2)"}
               }
             ],

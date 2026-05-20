@@ -289,7 +289,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     all_tool_calls = Keyword.get(opts, :all_tool_calls, [])
 
     # Tier 3.5 Fix 5: combined-mode JSON-shaped finals must propagate
-    # state accumulated by `ptc_lisp_execute` runs (memory, journal,
+    # state accumulated by `lisp_eval` runs (memory, journal,
     # tool_cache, child_steps, summaries). Pure JSON mode passes
     # `preserve_state: false` (default) and gets the legacy zeroed
     # fields. Combined mode passes `preserve_state: true` from

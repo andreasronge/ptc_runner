@@ -64,42 +64,42 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
     end
   end
 
-  describe "reserved tool name `ptc_lisp_execute` (Phase 1, R4)" do
-    test "rejects atom-keyed user tool named :ptc_lisp_execute with default transport" do
-      assert_raise ArgumentError, ~r/"ptc_lisp_execute" is reserved/, fn ->
+  describe "reserved tool name `lisp_eval` (Phase 1, R4)" do
+    test "rejects atom-keyed user tool named :lisp_eval with default transport" do
+      assert_raise ArgumentError, ~r/"lisp_eval" is reserved/, fn ->
         SubAgent.new(
           prompt: "Test",
-          tools: %{ptc_lisp_execute: fn _ -> :ok end}
+          tools: %{lisp_eval: fn _ -> :ok end}
         )
       end
     end
 
-    test "rejects string-keyed user tool named \"ptc_lisp_execute\" with default transport" do
-      assert_raise ArgumentError, ~r/"ptc_lisp_execute" is reserved/, fn ->
+    test "rejects string-keyed user tool named \"lisp_eval\" with default transport" do
+      assert_raise ArgumentError, ~r/"lisp_eval" is reserved/, fn ->
         SubAgent.new(
           prompt: "Test",
-          tools: %{"ptc_lisp_execute" => fn _ -> :ok end}
+          tools: %{"lisp_eval" => fn _ -> :ok end}
         )
       end
     end
 
-    test "rejects user tool named ptc_lisp_execute with ptc_transport: :tool_call" do
-      assert_raise ArgumentError, ~r/"ptc_lisp_execute" is reserved/, fn ->
+    test "rejects user tool named lisp_eval with ptc_transport: :tool_call" do
+      assert_raise ArgumentError, ~r/"lisp_eval" is reserved/, fn ->
         SubAgent.new(
           prompt: "Test",
           ptc_transport: :tool_call,
-          tools: %{ptc_lisp_execute: fn _ -> :ok end}
+          tools: %{lisp_eval: fn _ -> :ok end}
         )
       end
     end
 
-    test "rejects user tool named ptc_lisp_execute alongside other valid tools" do
-      assert_raise ArgumentError, ~r/"ptc_lisp_execute" is reserved/, fn ->
+    test "rejects user tool named lisp_eval alongside other valid tools" do
+      assert_raise ArgumentError, ~r/"lisp_eval" is reserved/, fn ->
         SubAgent.new(
           prompt: "Test",
           tools: %{
             other_tool: fn _ -> :ok end,
-            ptc_lisp_execute: fn _ -> :ok end
+            lisp_eval: fn _ -> :ok end
           }
         )
       end
@@ -134,7 +134,7 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
          %{
            content: nil,
            tool_calls: [
-             %{id: "call_1", name: "ptc_lisp_execute", args: %{"program" => "(return 42)"}}
+             %{id: "call_1", name: "lisp_eval", args: %{"program" => "(return 42)"}}
            ],
            tokens: %{input: 0, output: 0}
          }}
@@ -157,7 +157,7 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
          %{
            content: nil,
            tool_calls: [
-             %{id: "call_1", name: "ptc_lisp_execute", args: %{"program" => ~s|(return "hi")|}}
+             %{id: "call_1", name: "lisp_eval", args: %{"program" => ~s|(return "hi")|}}
            ],
            tokens: %{input: 0, output: 0}
          }}
@@ -184,7 +184,7 @@ defmodule PtcRunner.SubAgent.PtcTransportTest do
          %{
            content: nil,
            tool_calls: [
-             %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}}
+             %{id: "c1", name: "lisp_eval", args: %{"program" => "(return 1)"}}
            ],
            tokens: %{input: 0, output: 0}
          }}

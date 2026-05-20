@@ -23,7 +23,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
   # ============================================================
 
   describe "success path (R8, R15)" do
-    test "single ptc_lisp_execute call with (return v) terminates immediately" do
+    test "single lisp_eval call with (return v) terminates immediately" do
       llm = scripted_llm([tool_call_response("(return 42)")])
 
       agent =
@@ -396,7 +396,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         scripted_llm([
           %{
             content: nil,
-            tool_calls: [%{id: "c1", name: "ptc_lisp_execute", args: %{}}],
+            tool_calls: [%{id: "c1", name: "lisp_eval", args: %{}}],
             tokens: %{input: 0, output: 0}
           },
           tool_call_response("(return :ok)", id: "c2")
@@ -424,7 +424,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
           %{
             content: nil,
             tool_calls: [
-              %{id: "c1", name: "ptc_lisp_execute", args: %{"program" => 123}}
+              %{id: "c1", name: "lisp_eval", args: %{"program" => 123}}
             ],
             tokens: %{input: 0, output: 0}
           },
@@ -449,7 +449,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
             tool_calls: [
               %{
                 id: "c1",
-                name: "ptc_lisp_execute",
+                name: "lisp_eval",
                 args: %{},
                 args_error: "Invalid JSON arguments: garbage"
               }
@@ -503,14 +503,14 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
   end
 
   describe "multiple native tool calls (R12)" do
-    test "two ptc_lisp_execute calls in one turn → both rejected, paired errors per id" do
+    test "two lisp_eval calls in one turn → both rejected, paired errors per id" do
       llm =
         scripted_llm([
           %{
             content: nil,
             tool_calls: [
-              %{id: "a", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}},
-              %{id: "b", name: "ptc_lisp_execute", args: %{"program" => "(return 2)"}}
+              %{id: "a", name: "lisp_eval", args: %{"program" => "(return 1)"}},
+              %{id: "b", name: "lisp_eval", args: %{"program" => "(return 2)"}}
             ],
             tokens: %{input: 0, output: 0}
           },
@@ -533,7 +533,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
       assert json_field(msg_b, "reason") == "multiple_tool_calls"
     end
 
-    test "mixed ptc_lisp_execute + unknown tool → uniformly multi-call rejected" do
+    test "mixed lisp_eval + unknown tool → uniformly multi-call rejected" do
       # The "exactly one native tool call per turn" rule wins over
       # per-name handling (R13 + R12).
       llm =
@@ -541,7 +541,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
           %{
             content: nil,
             tool_calls: [
-              %{id: "x", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}},
+              %{id: "x", name: "lisp_eval", args: %{"program" => "(return 1)"}},
               %{id: "y", name: "search", args: %{}}
             ],
             tokens: %{input: 0, output: 0}
@@ -599,7 +599,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         scripted_llm([
           %{
             content: nil,
-            tool_calls: [%{id: "a1", name: "ptc_lisp_execute", args: %{}}],
+            tool_calls: [%{id: "a1", name: "lisp_eval", args: %{}}],
             tokens: %{input: 0, output: 0}
           },
           tool_call_response("(return 1)")
@@ -638,8 +638,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
           %{
             content: nil,
             tool_calls: [
-              %{id: "m1", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}},
-              %{id: "m2", name: "ptc_lisp_execute", args: %{"program" => "(return 2)"}}
+              %{id: "m1", name: "lisp_eval", args: %{"program" => "(return 1)"}},
+              %{id: "m2", name: "lisp_eval", args: %{"program" => "(return 2)"}}
             ],
             tokens: %{input: 0, output: 0}
           },
@@ -815,8 +815,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
   # ============================================================
 
   describe "max_tool_calls semantics (R19)" do
-    test "ptc_lisp_execute does not consume max_tool_calls budget" do
-      # Even with max_tool_calls: 1, two ptc_lisp_execute calls should
+    test "lisp_eval does not consume max_tool_calls budget" do
+      # Even with max_tool_calls: 1, two lisp_eval calls should
       # both succeed (the budget only limits app tools called from
       # within PTC-Lisp).
       llm =
@@ -909,8 +909,8 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
           %{
             content: nil,
             tool_calls: [
-              %{id: "m1", name: "ptc_lisp_execute", args: %{"program" => "(return 1)"}},
-              %{id: "m2", name: "ptc_lisp_execute", args: %{"program" => "(return 2)"}}
+              %{id: "m1", name: "lisp_eval", args: %{"program" => "(return 1)"}},
+              %{id: "m2", name: "lisp_eval", args: %{"program" => "(return 2)"}}
             ],
             tokens: %{input: 0, output: 0}
           },
@@ -930,7 +930,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
         scripted_llm([
           %{
             content: nil,
-            tool_calls: [%{id: "ae", name: "ptc_lisp_execute", args: %{}}],
+            tool_calls: [%{id: "ae", name: "lisp_eval", args: %{}}],
             tokens: %{input: 0, output: 0}
           },
           tool_call_response("(return 1)")
@@ -949,7 +949,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
   # ============================================================
 
   describe "pmap telemetry parity (R27)" do
-    test "(pmap ...) inside ptc_lisp_execute emits :pmap start/stop events" do
+    test "(pmap ...) inside lisp_eval emits :pmap start/stop events" do
       events_table =
         :ets.new(:tool_call_pmap_events, [:bag, :public, write_concurrency: true])
 

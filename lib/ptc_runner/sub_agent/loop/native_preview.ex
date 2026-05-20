@@ -97,7 +97,7 @@ defmodule PtcRunner.SubAgent.Loop.NativePreview do
 
   Format:
 
-      Call ptc_lisp_execute and then call (tool/<name> <ARGS>) to
+      Call lisp_eval and then call (tool/<name> <ARGS>) to
       process the full cached result.
 
   `<ARGS>` is produced by `PtcRunner.Lisp.Formatter.format/1` after
@@ -111,7 +111,7 @@ defmodule PtcRunner.SubAgent.Loop.NativePreview do
     {_name, canonical_args} = KeyNormalizer.canonical_cache_key(tool_name, args)
     args_fragment = Formatter.format(to_ast(canonical_args))
 
-    "Call ptc_lisp_execute and then call " <>
+    "Call lisp_eval and then call " <>
       "(tool/#{tool_name} #{args_fragment}) " <>
       "to process the full cached result."
   end

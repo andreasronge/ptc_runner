@@ -3,7 +3,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   Native tool-call transport handler for `ptc_transport: :tool_call` agents.
 
   Owns the loop branch that consumes assistant turns shaped as native
-  `tool_calls` (the `ptc_lisp_execute` invocation) plus the direct
+  `tool_calls` (the `lisp_eval` invocation) plus the direct
   final-answer path. App tools are never exposed as provider-native
   tools — they remain callable only from inside a PTC-Lisp program via
   `(tool/name ...)`. The system prompt continues to render the full
@@ -14,7 +14,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   ## Naming
 
   In this module, "tool call" without qualifier refers to a *native*
-  tool call (the `ptc_lisp_execute` invocation on the provider wire).
+  tool call (the `lisp_eval` invocation on the provider wire).
   PTC-Lisp `(tool/...)` invocations continue to be called "app tool
   calls" and surface as `lisp_step.tool_calls`.
 
@@ -23,7 +23,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   - `tool_name/0`, `tool_description/0`, `tool_schema/0`, `request_tools/1`
     — Phase 3 schema/request shape (unchanged).
   - `handle_response/3` — Phase 4 entry point. Branches on the assistant
-    response to either execute a single `ptc_lisp_execute` call, treat
+    response to either execute a single `lisp_eval` call, treat
     direct content as a final answer, or surface a paired protocol error.
   """
 
@@ -45,7 +45,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     TurnFeedback
   }
 
-  @ptc_lisp_execute_name "ptc_lisp_execute"
+  @lisp_eval_name "lisp_eval"
 
   # Canonical description string — single source of truth lives in
   # `PtcRunner.PtcToolProtocol`, parameterized by capability profile.
@@ -55,13 +55,13 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   # assert stable substrings against the same source of truth.
 
   @doc """
-  The reserved native tool name (`"ptc_lisp_execute"`).
+  The reserved native tool name (`"lisp_eval"`).
   """
   @spec tool_name() :: String.t()
-  def tool_name, do: @ptc_lisp_execute_name
+  def tool_name, do: @lisp_eval_name
 
   @doc """
-  The canonical description string for the `ptc_lisp_execute` tool in
+  The canonical description string for the `lisp_eval` tool in
   v1 PTC `:tool_call` mode.
 
   Delegates to `PtcRunner.PtcToolProtocol.tool_description/1` with the
@@ -72,7 +72,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   def tool_description, do: PtcToolProtocol.tool_description(:in_process_with_app_tools)
 
   @doc """
-  Build the OpenAI-format tool schema for `ptc_lisp_execute`.
+  Build the OpenAI-format tool schema for `lisp_eval`.
 
   Returns a single map. The intended use in `:tool_call` mode is to put
   exactly this one entry in the LLM request's `tools` field — app tools
@@ -84,7 +84,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       iex> schema["type"]
       "function"
       iex> schema["function"]["name"]
-      "ptc_lisp_execute"
+      "lisp_eval"
       iex> schema["function"]["parameters"]["required"]
       ["program"]
 
@@ -94,7 +94,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     %{
       "type" => "function",
       "function" => %{
-        "name" => @ptc_lisp_execute_name,
+        "name" => @lisp_eval_name,
         "description" => PtcToolProtocol.tool_description(:in_process_with_app_tools),
         "parameters" => %{
           "type" => "object",
@@ -116,7 +116,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   Build the request `tools` list for an agent.
 
   In `:tool_call` mode, returns exactly one entry — the
-  `ptc_lisp_execute` schema — regardless of how many app tools the agent
+  `lisp_eval` schema — regardless of how many app tools the agent
   declares. App tools stay in the system prompt's Tool Inventory and are
   callable only from inside the sandboxed program.
 
@@ -145,7 +145,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   - **No native tool calls**: treat direct content as the final answer
     (signature handling matrix). Markdown-fenced clojure as content
     triggers targeted feedback (R16).
-  - **Exactly one `ptc_lisp_execute` call**: execute, append paired
+  - **Exactly one `lisp_eval` call**: execute, append paired
     `role: :tool` message, continue or terminate on `(return)`/`(fail)`.
   - **One unknown tool call**: paired `unknown_tool` error, continue.
   - **More than one native tool call**: paired `multiple_tool_calls`
@@ -178,7 +178,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     name = Map.get(call, :name) || Map.get(call, "name")
     id = Map.get(call, :id) || Map.get(call, "id")
 
-    if name != @ptc_lisp_execute_name do
+    if name != @lisp_eval_name do
       recover_protocol_error(
         [%{id: id, name: name}],
         assistant_content,
@@ -686,7 +686,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   defp handle_direct_final(nil, agent, state) do
     # No tool calls and no content — treat as malformed assistant turn.
     error_message =
-      "Assistant turn returned no content and no tool calls. Either call ptc_lisp_execute or return the final answer directly."
+      "Assistant turn returned no content and no tool calls. Either call lisp_eval or return the final answer directly."
 
     direct_final_feedback_continuation(error_message, agent, state, "")
   end
@@ -695,7 +695,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     if fenced_clojure_content?(content) do
       # R16 — targeted feedback, no signature validation
       msg =
-        "In ptc_transport: :tool_call, call the ptc_lisp_execute tool with the program instead of returning fenced code."
+        "In ptc_transport: :tool_call, call the lisp_eval tool with the program instead of returning fenced code."
 
       direct_final_feedback_continuation(msg, agent, state, content)
     else
@@ -776,7 +776,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   # Does NOT reuse JsonHandler's step-building path (per the plan); builds a
   # PTC-aware Step inline so memory / journal / tool_cache / child_steps /
   # summaries from the latest accumulated loop state flow through to the
-  # caller, even when zero `ptc_lisp_execute` calls happened.
+  # caller, even when zero `lisp_eval` calls happened.
   defp complete_direct_final(value, raw_content, agent, state) do
     normalized_return = KeyNormalizer.normalize_keys(value)
 
@@ -1089,7 +1089,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   # `PtcToolProtocol.render_error/3`.
   #
   # Protocol-error rendering stays local: protocol errors
-  # (`multiple_tool_calls`, `mixed_with_ptc_lisp_execute`,
+  # (`multiple_tool_calls`, `mixed_with_lisp_eval`,
   # `unknown_tool`) are reasons specific to the v1 PTC `:tool_call`
   # transport. They are *not* members of the shared
   # `PtcToolProtocol.error_reason()` union — that union is reserved for
@@ -1136,11 +1136,11 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   # ----------------------------------------------------------------
 
   defp unknown_tool_message(name) do
-    "Unknown native tool `#{inspect(name)}`. Only `ptc_lisp_execute` is available natively in this transport."
+    "Unknown native tool `#{inspect(name)}`. Only `lisp_eval` is available natively in this transport."
   end
 
   defp multiple_tool_calls_message do
-    "exactly one ptc_lisp_execute call per assistant turn"
+    "exactly one lisp_eval call per assistant turn"
   end
 
   # ----------------------------------------------------------------

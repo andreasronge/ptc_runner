@@ -423,7 +423,7 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  # Reserve `ptc_lisp_execute` as a tool name globally — see Phase 1 of
+  # Reserve `lisp_eval` as a tool name globally — see Phase 1 of
   # docs/plans/ptc-lisp-tool-call-transport.md (R4). The reservation applies
   # regardless of `ptc_transport` value or `output` mode so that adding the
   # transport in a later phase cannot collide with a user-defined tool.
@@ -432,7 +432,7 @@ defmodule PtcRunner.SubAgent.Validator do
       {:ok, tools} when is_map(tools) ->
         if Enum.any?(tools, fn {name, _value} -> reserved_tool_name?(name) end) do
           raise ArgumentError,
-                "tool name \"ptc_lisp_execute\" is reserved by PtcRunner — choose a different name"
+                "tool name \"lisp_eval\" is reserved by PtcRunner — choose a different name"
         end
 
         :ok
@@ -442,8 +442,8 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  defp reserved_tool_name?(:ptc_lisp_execute), do: true
-  defp reserved_tool_name?("ptc_lisp_execute"), do: true
+  defp reserved_tool_name?(:lisp_eval), do: true
+  defp reserved_tool_name?("lisp_eval"), do: true
   defp reserved_tool_name?(_), do: false
 
   defp validate_text_mode_constraints!(opts) do

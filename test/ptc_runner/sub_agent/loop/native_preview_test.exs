@@ -351,7 +351,7 @@ defmodule PtcRunner.SubAgent.Loop.NativePreviewTest do
       hint = NativePreview.cache_hint("search_logs", %{"query" => "error code 42"})
 
       assert hint ==
-               ~s|Call ptc_lisp_execute and then call (tool/search_logs {:query "error code 42"}) to process the full cached result.|
+               ~s|Call lisp_eval and then call (tool/search_logs {:query "error code 42"}) to process the full cached result.|
     end
 
     test "nested maps render with proper nesting" do

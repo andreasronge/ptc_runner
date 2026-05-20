@@ -1,4 +1,4 @@
-# Benchmark: native-only vs combined-mode (text + ptc_lisp_execute) on a
+# Benchmark: native-only vs combined-mode (text + lisp_eval) on a
 # large-result workload.
 #
 # Demonstrates the value-prop of combined mode: when a tool returns more
@@ -10,7 +10,7 @@
 #   %{id, timestamp, message}. The LLM is asked an aggregate question
 # ("How many entries mention 'error'?"). The native-only path has to
 # slurp every row into the model context. The combined-mode path sees a
-# metadata preview and escalates to ptc_lisp_execute, which counts the
+# metadata preview and escalates to lisp_eval, which counts the
 # rows from the cached full result without round-tripping them through
 # the LLM.
 #
@@ -119,7 +119,7 @@ run_once = fn label, agent ->
     # Each :tool message in `input.messages` is a tool result the LLM has
     # been shown by the runtime. Sum their byte sizes — for native-only
     # this is the full JSON-encoded result; for combined-mode this is
-    # the metadata preview (or the ptc_lisp_execute response, which is
+    # the metadata preview (or the lisp_eval response, which is
     # also small). Send it back to the parent process for aggregation.
     tool_bytes =
       input.messages
@@ -370,7 +370,7 @@ if native && combined do
       wall_delta > 0 ->
         "Wall time was #{wall_delta}ms slower for combined mode " <>
           "(#{native.wall_ms}ms -> #{combined.wall_ms}ms). The extra LLM turn " <>
-          "(preview -> ptc_lisp_execute -> text) costs round-trips that only pay " <>
+          "(preview -> lisp_eval -> text) costs round-trips that only pay " <>
           "off once N is large enough that the native context cost dominates."
 
       true ->
@@ -379,7 +379,7 @@ if native && combined do
 
   turn_summary =
     "Turns: native-only=#{native.turns} vs combined=#{combined.turns}. Combined " <>
-      "mode pays one extra turn (preview seen, then ptc_lisp_execute) in exchange " <>
+      "mode pays one extra turn (preview seen, then lisp_eval) in exchange " <>
       "for the model never having to read raw rows."
 
   IO.puts("  - " <> bytes_summary)

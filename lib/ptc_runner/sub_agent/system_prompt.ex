@@ -87,20 +87,20 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
   # Tool-call transport output format (ptc_transport: :tool_call).
   #
-  # The model invokes the native `ptc_lisp_execute` tool for any
+  # The model invokes the native `lisp_eval` tool for any
   # deterministic computation or app-tool orchestration; app tools must
   # be called as `(tool/name ...)` from inside the program, not as
   # native provider tool calls. When the answer is ready, the model
   # returns it directly in the requested signature shape — no fenced
-  # code block, no `ptc_lisp_execute` call.
+  # code block, no `lisp_eval` call.
   @output_format_tool_call """
   <output_format>
   Two ways to respond, depending on what you need to do:
 
-  1. **Run a program.** Call the native `ptc_lisp_execute` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls. The runtime returns the program's result so you can decide what to do next.
+  1. **Run a program.** Call the native `lisp_eval` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls. The runtime returns the program's result so you can decide what to do next.
   2. **Return the final answer.** When you are ready to answer the mission, return it directly in the requested signature shape as the assistant message content. No tool call. No ```clojure fences. Just the answer.
 
-  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `ptc_lisp_execute` is available natively.
+  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `lisp_eval` is available natively.
   </output_format>
   """
 
@@ -111,10 +111,10 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   thinking:
   [your reasoning here]
 
-  1. **Run a program.** Call the native `ptc_lisp_execute` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls.
+  1. **Run a program.** Call the native `lisp_eval` tool with a `program` argument containing PTC-Lisp source. Use this for any deterministic computation, data transformation, or app-tool orchestration. Call app tools as `(tool/name ...)` from inside the program — never as native function calls.
   2. **Return the final answer.** When you are ready, return the answer directly in the requested signature shape as the assistant message content. No tool call. No ```clojure fences.
 
-  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `ptc_lisp_execute` is available natively.
+  Do NOT return ```clojure (or any other) fenced code blocks. Do NOT attempt to call app tools as native function calls — only `lisp_eval` is available natively.
   </output_format>
   """
 
@@ -556,7 +556,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   # `:content` (default) keeps the existing markdown-fenced contract so
   # all current behavior is unchanged. `:tool_call` selects the
   # tool-call variant which instructs the model to call
-  # `ptc_lisp_execute` for computation and return final answers
+  # `lisp_eval` for computation and return final answers
   # directly in signature shape (no fenced code blocks).
   defp default_output_format(%{ptc_transport: :tool_call, thinking: true}),
     do: @output_format_tool_call_thinking
@@ -617,7 +617,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   `:ptc_lisp` or `:both`.
 
   Per Addendum #19: included even when zero PTC-callable tools exist —
-  the static portion documents `ptc_lisp_execute` itself, which is
+  the static portion documents `lisp_eval` itself, which is
   always callable.
 
   Returns `nil` for non-combined-mode agents (used by callers to filter
@@ -677,7 +677,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         entries = Enum.map_join(ts, "\n", &render_tool_entry/1)
 
         "<ptc_tools>\n" <>
-          "Tools callable from inside `ptc_lisp_execute` as `(tool/name {...})`:\n" <>
+          "Tools callable from inside `lisp_eval` as `(tool/name {...})`:\n" <>
           entries <> "\n</ptc_tools>"
     end
   end
