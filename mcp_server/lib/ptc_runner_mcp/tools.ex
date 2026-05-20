@@ -34,6 +34,7 @@ defmodule PtcRunnerMcp.Tools do
     DebugConfig,
     Envelope,
     Limits,
+    OutputLimits,
     PayloadMetrics,
     PromptRegistry,
     ResponseProfile,
@@ -68,7 +69,13 @@ defmodule PtcRunnerMcp.Tools do
           "prints" => %{"type" => "array", "items" => %{"type" => "string"}},
           "feedback" => %{"type" => "string"},
           "truncated" => %{"type" => "boolean"},
-          "validated" => %{}
+          "output_truncated" => %{"type" => "boolean"},
+          "prints_truncated" => %{"type" => "boolean"},
+          "feedback_truncated" => %{"type" => "boolean"},
+          "validated" => %{},
+          "validated_preview" => %{"type" => "string"},
+          "validated_preview_truncated" => %{"type" => "boolean"},
+          "validated_bytes" => %{"type" => "integer", "minimum" => 0}
         }
       },
       %{
@@ -98,7 +105,10 @@ defmodule PtcRunnerMcp.Tools do
           },
           "message" => %{"type" => "string"},
           "feedback" => %{"type" => "string"},
-          "result" => %{"type" => "string"}
+          "result" => %{"type" => "string"},
+          "truncated" => %{"type" => "boolean"},
+          "output_truncated" => %{"type" => "boolean"},
+          "feedback_truncated" => %{"type" => "boolean"}
         }
       }
     ]
@@ -173,6 +183,7 @@ defmodule PtcRunnerMcp.Tools do
         Map.update!(branch, "properties", fn props ->
           props
           |> Map.put("upstream_calls", @upstream_calls_schema)
+          |> Map.put("upstream_results", %{"type" => "array", "items" => %{"type" => "object"}})
           |> Map.put("ptc_metrics", @ptc_metrics_schema)
         end)
       end)
@@ -188,7 +199,12 @@ defmodule PtcRunnerMcp.Tools do
           "status" => %{"const" => "ok"},
           "result" => %{"type" => "string"},
           "validated" => %{},
-          "truncated" => %{"type" => "boolean"}
+          "validated_preview" => %{"type" => "string"},
+          "validated_preview_truncated" => %{"type" => "boolean"},
+          "validated_bytes" => %{"type" => "integer", "minimum" => 0},
+          "upstream_results" => %{"type" => "array", "items" => %{"type" => "object"}},
+          "truncated" => %{"type" => "boolean"},
+          "output_truncated" => %{"type" => "boolean"}
         }
       },
       %{
@@ -200,6 +216,9 @@ defmodule PtcRunnerMcp.Tools do
           "message" => %{"type" => "string"},
           "feedback" => %{"type" => "string"},
           "result" => %{"type" => "string"},
+          "truncated" => %{"type" => "boolean"},
+          "output_truncated" => %{"type" => "boolean"},
+          "feedback_truncated" => %{"type" => "boolean"},
           "upstream_calls" => %{
             "type" => "array",
             "items" => %{
@@ -715,12 +734,16 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   defp decorate_and_wrap({:ok, payload}, entries) when is_map(payload) do
-    case ResponseProfile.current() do
+    profile = ResponseProfile.current()
+
+    case profile do
       :debug ->
         payload
         |> UpstreamCalls.decorate(entries)
         |> decorate_ptc_metrics(:ok, entries)
+        |> OutputLimits.shape_lisp_payload(:ok, profile)
         |> Envelope.ptc_lisp_success()
+        |> OutputLimits.limit_envelope(profile)
 
       _ ->
         debug_payload =
@@ -729,25 +752,32 @@ defmodule PtcRunnerMcp.Tools do
           |> decorate_ptc_metrics(:ok, entries)
 
         payload
+        |> OutputLimits.shape_lisp_payload(:ok, profile)
         |> Envelope.ptc_lisp_success()
+        |> OutputLimits.limit_envelope(profile)
         |> maybe_attach_debug_structured(debug_payload)
     end
   end
 
   defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
     decorated = UpstreamCalls.decorate(payload, entries)
+    profile = ResponseProfile.current()
 
-    case ResponseProfile.current() do
+    case profile do
       :debug ->
         decorated
         |> decorate_ptc_metrics(:error, entries)
+        |> OutputLimits.shape_lisp_payload(:error, profile)
         |> Envelope.ptc_lisp_error()
+        |> OutputLimits.limit_envelope(profile)
 
       _ ->
         debug_payload = decorate_ptc_metrics(decorated, :error, entries)
 
         decorated
+        |> OutputLimits.shape_lisp_payload(:error, profile)
         |> Envelope.ptc_lisp_error()
+        |> OutputLimits.limit_envelope(profile)
         |> maybe_attach_debug_structured(debug_payload)
     end
   end
@@ -807,29 +837,43 @@ defmodule PtcRunnerMcp.Tools do
   # scattering decoration through Sandbox renderers.
   # Mirrors the slim-profile attach in `decorate_and_wrap/2`: in a
   # non-debug profile this path still hands the pre-slim payload to the
-  # debug recorder (via `__ptc_debug_structured`) when `--debug-tool`
+  # debug recorder (via `__lisp_debug_structured`) when `--debug-tool`
   # is on, so a `--debug-tool --response-profile slim` server keeps
   # full diagnostics even for no-upstream executions.
   defp wrap_sandbox_result({:ok, payload}) when is_map(payload) do
-    case ResponseProfile.current() do
+    profile = ResponseProfile.current()
+
+    case profile do
       :debug ->
-        Envelope.ptc_lisp_success(payload)
+        payload
+        |> OutputLimits.shape_lisp_payload(:ok, profile)
+        |> Envelope.ptc_lisp_success()
+        |> OutputLimits.limit_envelope(profile)
 
       _ ->
         payload
+        |> OutputLimits.shape_lisp_payload(:ok, profile)
         |> Envelope.ptc_lisp_success()
+        |> OutputLimits.limit_envelope(profile)
         |> maybe_attach_debug_structured(payload)
     end
   end
 
   defp wrap_sandbox_result({:error, payload}) when is_map(payload) do
-    case ResponseProfile.current() do
+    profile = ResponseProfile.current()
+
+    case profile do
       :debug ->
-        Envelope.ptc_lisp_error(payload)
+        payload
+        |> OutputLimits.shape_lisp_payload(:error, profile)
+        |> Envelope.ptc_lisp_error()
+        |> OutputLimits.limit_envelope(profile)
 
       _ ->
         payload
+        |> OutputLimits.shape_lisp_payload(:error, profile)
         |> Envelope.ptc_lisp_error()
+        |> OutputLimits.limit_envelope(profile)
         |> maybe_attach_debug_structured(payload)
     end
   end
@@ -930,7 +974,7 @@ defmodule PtcRunnerMcp.Tools do
 
   Returns `{:ok, parsed_signature}` (or `{:ok, nil}` when neither was
   supplied) or `{:error, message}`. Public so `PtcRunnerMcp.Sessions`
-  can reuse the same gate from `ptc_session_eval` validation.
+  can reuse the same gate from `lisp_session_eval` validation.
   """
   @spec validate_output_contract(map()) ::
           {:ok, Sandbox.parsed_signature() | nil} | {:error, String.t()}
