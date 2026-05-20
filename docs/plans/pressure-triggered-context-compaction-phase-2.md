@@ -1,8 +1,8 @@
 # Pressure-triggered Context Compaction — Phase 2 (deferred)
 
-This is a design stub for items deferred from
-[Phase 1](pressure-triggered-context-compaction.md). Phase 1 ships
-`compaction: true | [strategy: :trim, ...]` and that's it. Anything more
+This is a design stub for items deferred from Phase 1, which is now shipped
+(see the [Context Compaction guide](../guides/subagent-compaction.md)). Phase 1
+delivers `compaction: true | [strategy: :trim, ...]` and that's it. Anything more
 ambitious lives here.
 
 ## Why a Phase 2 at all

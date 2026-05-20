@@ -1215,9 +1215,8 @@ defmodule PtcRunner.SubAgent.Loop do
   # Build messages for LLM input.
   #
   # When compaction is enabled and `agent.max_turns > 1`, dispatches to
-  # `Compaction.maybe_compact/3`. Single-shot and single-shot+retry skip
-  # compaction (locked-in decision §4 of
-  # `docs/plans/pressure-triggered-context-compaction.md`).
+  # `Compaction.maybe_compact/3`. Single-shot and single-shot+retry
+  # (`max_turns <= 1`) deliberately skip compaction.
   #
   # Returns `{messages, compaction_stats | nil}`.
   defp build_llm_messages(agent, state) do
