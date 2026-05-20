@@ -246,6 +246,10 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate split(s, separator), to: RuntimeString
   defdelegate split_lines(s), to: RuntimeString
   defdelegate trim(s), to: RuntimeString
+  defdelegate blank?(s), to: RuntimeString
+  defdelegate trim_newline(s), to: RuntimeString
+  defdelegate triml(s), to: RuntimeString
+  defdelegate trimr(s), to: RuntimeString
   defdelegate replace(s, pattern, replacement), to: RuntimeString
   defdelegate upcase(s), to: RuntimeString
   defdelegate downcase(s), to: RuntimeString

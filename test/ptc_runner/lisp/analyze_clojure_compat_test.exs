@@ -25,6 +25,11 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       assert {:ok, {:var, :includes?}} = Analyze.analyze(raw)
     end
 
+    test "clojure.string/blank? normalizes to blank?" do
+      raw = {:ns_symbol, :"clojure.string", :blank?}
+      assert {:ok, {:var, :blank?}} = Analyze.analyze(raw)
+    end
+
     test "clojure.string/trim normalizes to trim" do
       raw = {:ns_symbol, :"clojure.string", :trim}
       assert {:ok, {:var, :trim}} = Analyze.analyze(raw)
@@ -182,13 +187,6 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
       assert msg =~ "join"
       assert msg =~ "split"
       assert msg =~ "trim"
-    end
-
-    test "str/blank? gives helpful error" do
-      raw = {:ns_symbol, :str, :blank?}
-      assert {:error, {:invalid_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "blank? is not available"
-      assert msg =~ "String functions:"
     end
 
     test "clojure.core/nonexistent gives helpful error with core functions" do
