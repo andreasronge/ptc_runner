@@ -297,7 +297,6 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
            ) do
         {:ok, resp} -> {:ok, resp}
         {:error, exception, _acc} -> {:error, exception}
-        {:error, exception} -> {:error, exception}
       end
     rescue
       e -> {:error, e}
@@ -547,8 +546,6 @@ defmodule PtcRunnerMcp.Upstream.Http.Transport do
       snippet -> "http #{status}: #{snippet}"
     end
   end
-
-  defp http_detail(status, _body), do: "http #{status}"
 
   defp body_snippet(body) do
     body

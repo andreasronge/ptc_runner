@@ -135,28 +135,22 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
                ]}} = Analyze.analyze(raw)
     end
 
-    test "chained comparison (3 args) fails" do
+    test "chained comparison operators are accepted" do
       raw = {:list, [{:symbol, :<}, 1, 2, 3]}
-      assert {:error, {:invalid_arity, :<, msg}} = Analyze.analyze(raw)
-      assert msg =~ "exactly 2 arguments"
-      assert msg =~ "got 3"
+      assert {:ok, {:call, {:var, :<}, [1, 2, 3]}} = Analyze.analyze(raw)
     end
 
-    test "single arg comparison fails" do
+    test "single arg comparison operators are accepted" do
       raw = {:list, [{:symbol, :>}, 1]}
-      assert {:error, {:invalid_arity, :>, msg}} = Analyze.analyze(raw)
-      assert msg =~ "exactly 2 arguments"
-      assert msg =~ "got 1"
+      assert {:ok, {:call, {:var, :>}, [1]}} = Analyze.analyze(raw)
     end
 
-    test "ordered zero arg comparison fails" do
+    test "zero arg comparison operators are accepted by analyzer" do
       raw = {:list, [{:symbol, :<}]}
-      assert {:error, {:invalid_arity, :<, msg}} = Analyze.analyze(raw)
-      assert msg =~ "exactly 2 arguments"
-      assert msg =~ "got 0"
+      assert {:ok, {:call, {:var, :<}, []}} = Analyze.analyze(raw)
     end
 
-    test "equality operators are variadic" do
+    test "equality operators are accepted by analyzer" do
       raw = {:list, [{:symbol, :=}]}
       assert {:ok, {:call, {:var, :=}, []}} = Analyze.analyze(raw)
 

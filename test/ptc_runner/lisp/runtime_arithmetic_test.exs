@@ -227,6 +227,49 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "ordered comparisons" do
+    test "ordered comparisons are variadic with one or more arguments" do
+      assert_lisp("(< 1)", true)
+      assert_lisp("(< 1 2 3)", true)
+      assert_lisp("(< 1 3 2)", false)
+      assert_lisp("(<= 1 1 2)", true)
+      assert_lisp("(<= 1 2 1)", false)
+      assert_lisp("(> 3 2 1)", true)
+      assert_lisp("(> 3 1 2)", false)
+      assert_lisp("(>= 3 3 2)", true)
+      assert_lisp("(>= 3 2 3)", false)
+    end
+
+    test "apply with ordered comparisons" do
+      assert_lisp("(apply <= [1 5 10])", true)
+      assert_lisp("(apply > [3 2 1])", true)
+      assert_lisp("(apply < [1 3 2])", false)
+    end
+
+    test "ordered comparisons are recoverable for nil and mixed scalar values" do
+      assert_lisp("(< 1 nil)", true)
+      assert_lisp("(> 1 nil)", false)
+      assert_lisp(~S[(< 1 "2")], true)
+      assert_lisp(~S[(> "b" "a")], true)
+      assert_lisp("(<= nil nil)", true)
+      assert_lisp("(< :a :b)", true)
+    end
+
+    test "NaN ordered comparisons return false" do
+      assert_lisp("(< Double/NaN 0)", false)
+      assert_lisp("(> 0 Double/NaN)", false)
+      assert_lisp("(< 0 Double/NaN 1)", false)
+    end
+
+    test "zero-arity ordered comparison forms are arity errors" do
+      assert_lisp_error("(<)", :arity_error, "< requires at least 1 argument")
+      assert_lisp_error("(>)", :arity_error, "> requires at least 1 argument")
+      assert_lisp_error("(<=)", :arity_error, "<= requires at least 1 argument")
+      assert_lisp_error("(>=)", :arity_error, ">= requires at least 1 argument")
+      assert_lisp_error("(apply < [])", :arity_error, "< requires at least 1 argument")
+    end
+  end
+
   defp assert_lisp(source, expected) do
     {:ok, %{return: result}} = PtcRunner.Lisp.run(source)
     assert result == expected

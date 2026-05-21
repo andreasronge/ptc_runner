@@ -140,14 +140,11 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert message =~ "expected (if cond then else?)"
     end
 
-    test "3-arity comparison (range syntax)" do
-      # Clojure allows (<= 1 x 10) but PTC-Lisp only supports 2-arity
-      # Use (and (>= x 1) (<= x 10)) instead
-      source = "(<= 1 5 10)"
+    test "zero-arity ordered comparison returns arity error" do
+      source = "(<)"
 
-      assert {:error, %Step{fail: %{reason: :invalid_arity, message: message}}} = Lisp.run(source)
-      assert message =~ "comparison operators require exactly 2 arguments"
-      assert message =~ "got 3"
+      assert {:error, %Step{fail: %{reason: :arity_error, message: message}}} = Lisp.run(source)
+      assert message =~ "< requires at least 1 argument"
     end
 
     test "range with 0 arguments returns arity error" do
