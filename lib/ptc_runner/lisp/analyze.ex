@@ -482,9 +482,9 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  # Comparison operators (strict 2-arity per spec section 8.4)
+  # Ordered comparison operators (strict 2-arity per spec section 8.5)
   defp dispatch_list_form({:symbol, op}, rest, _list, tail?)
-       when op in [:=, :"not=", :>, :<, :>=, :<=],
+       when op in [:>, :<, :>=, :<=],
        do: analyze_comparison(op, rest, tail?)
 
   # Generic function call
@@ -1112,7 +1112,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_value(ast), do: do_analyze(ast, false)
 
   # ============================================================
-  # Comparison operators (strict 2-arity)
+  # Ordered comparison operators (strict 2-arity)
   # ============================================================
 
   defp analyze_comparison(op, [left_ast, right_ast], _tail?) do

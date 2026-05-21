@@ -105,8 +105,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 | `/` | `(/ x y)` | Division (always returns float) |
 | `<` | `(< x y)` | Less than |
 | `<=` | `(<= x y)` | Less or equal |
-| `=` | `(= x y)` | Equality |
-| `==` | `(== x y)` | Type-independent numeric equality |
+| `=` | `(= x), (= x y & more)` | Equality |
+| `==` | `(== x), (== x y & more)` | Type-independent numeric equality |
 | `>` | `(> x y)` | Greater than |
 | `>=` | `(>= x y)` | Greater or equal |
 | `NaN?` | `(NaN? ...)` |  |
@@ -209,7 +209,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 | `not-any?` | `(not-any? :key coll)` | True if none have truthy `:key` |
 | `not-empty` | `(not-empty coll)` | `coll` if not empty, else `nil` |
 | `not-every?` | `(not-every? :key coll)` | True if not all have truthy `:key` |
-| `not=` | `(not= x y)` | Inequality |
+| `not=` | `(not= x), (not= x y & more)` | Inequality |
 | `nth` | `(nth coll idx)` | Item at index or nil |
 | `nthnext` | `(nthnext coll n)` | Drop n items and return seq or nil |
 | `nthrest` | `(nthrest coll n)` | Drop n items |

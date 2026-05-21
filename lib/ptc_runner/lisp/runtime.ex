@@ -215,6 +215,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate gt(x, y), to: Math
   defdelegate lte(x, y), to: Math
   defdelegate gte(x, y), to: Math
+  defdelegate eq_variadic(args), to: Math
+  defdelegate numeric_eq_variadic(args), to: Math
+  defdelegate not_eq_variadic(args), to: Math
   defdelegate not_eq(x, y), to: Math
   defdelegate compare(x, y), to: Math
 

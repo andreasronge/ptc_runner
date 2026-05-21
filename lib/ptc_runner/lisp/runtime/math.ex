@@ -395,6 +395,19 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   # Comparison (for direct use, not inside where)
   def not_eq(x, y), do: not eq(x, y)
 
+  def numeric_eq_variadic(args), do: eq_variadic_named("==", args)
+  def eq_variadic(args), do: eq_variadic_named("=", args)
+
+  def not_eq_variadic([]), do: arity_error("not=")
+  def not_eq_variadic(args), do: not eq_variadic(args)
+
+  defp eq_variadic_named(name, []), do: arity_error(name)
+  defp eq_variadic_named(_name, [_]), do: true
+
+  defp eq_variadic_named(_name, [first | rest]) do
+    Enum.all?(rest, &eq(first, &1))
+  end
+
   def eq(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) ->

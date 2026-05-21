@@ -202,10 +202,9 @@ defmodule PtcRunner.Lisp.RegistryTest do
     # keeps the structured metadata in sync with the prose doc — without
     # this test, divergences silently bit-rot to nil.
     @divergent_functions %{
-      # DIV-03: comparison operators are strictly 2-arity
+      # DIV-03: ordered comparison operators are strictly 2-arity
       "<" => "DIV-03",
       "<=" => "DIV-03",
-      "=" => "DIV-03",
       ">" => "DIV-03",
       ">=" => "DIV-03",
       # DIV-14: if-let / when-let only support single symbol bindings
