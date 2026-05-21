@@ -202,12 +202,20 @@ With `--trace-dir` set you do not need a bespoke trace reader: point a generic *
 
 ## Lifecycle commands
 
-The release binary forces `RELEASE_DISTRIBUTION=none` so MCP clients can
-run multiple stdio subprocesses concurrently without Erlang node-name
-collisions:
+The release binary defaults `RELEASE_DISTRIBUTION=none` so MCP clients
+can run multiple stdio subprocesses concurrently without Erlang
+node-name collisions:
 
 ```bash
 ptc_runner_mcp start      # foreground, stdio attached (what MCP clients use)
 ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
 ptc_runner_mcp eval "..."  # run an expression in a one-shot VM
+```
+
+For remote IEx debugging, start the process with distribution enabled
+and a unique node name, then attach with the same settings:
+
+```bash
+RELEASE_DISTRIBUTION=sname RELEASE_NODE=ptc_runner_mcp_debug_1 ptc_runner_mcp start
+RELEASE_DISTRIBUTION=sname RELEASE_NODE=ptc_runner_mcp_debug_1 ptc_runner_mcp remote
 ```
