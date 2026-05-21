@@ -1,17 +1,25 @@
 defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
   @moduledoc """
-  Regression coverage for GitHub issue #944 finding #2: `lisp_session_eval`
-  responses must carry a `ptc_metrics` block when the eval made upstream
-  calls, mirroring the stateless `lisp_eval` path.
-
-  Combines the aggregator-mode setup from `AggregatorPhase1aTest` with
-  the session enablement from `SessionsTest`.
+  Regression coverage for session eval response bloat: normal responses must
+  not inline verbose upstream accounting, while `lisp_debug` still retains the
+  diagnostic payload for explicit retrieval.
   """
   use ExUnit.Case, async: false
 
   import PtcRunnerMcp.McpTestHelpers, only: [stop_existing_registry: 1]
 
-  alias PtcRunnerMcp.{AggregatorConfig, ConcurrencyGate, Limits, Sessions, Tools}
+  alias PtcRunnerMcp.{
+    AggregatorConfig,
+    ConcurrencyGate,
+    DebugBuffer,
+    DebugConfig,
+    JsonRpc,
+    Limits,
+    ResponseProfile,
+    Sessions,
+    Tools
+  }
+
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
@@ -19,12 +27,17 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
   @registry_name PtcRunnerMcp.Upstream.Registry
 
   setup do
+    old_debug = DebugConfig.get()
+    old_profile = ResponseProfile.current()
     stop_existing_registry(@registry_name)
     stop_sessions_processes()
+    stop_buffer()
 
     {:ok, _pid} = UpstreamRegistry.start_link(name: @registry_name)
     Limits.set(Limits.defaults())
     AggregatorConfig.set(AggregatorConfig.defaults())
+    DebugConfig.set(%{enabled: false, ring_size: 500, max_response_bytes: 65_536})
+    ResponseProfile.set(:slim)
     SessionsConfig.set(%{enabled: true})
     ConcurrencyGate.reset()
     assert :ok = Sessions.ensure_started()
@@ -32,8 +45,11 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
     on_exit(fn ->
       stop_existing_registry(@registry_name)
       stop_sessions_processes()
+      stop_buffer()
       Limits.set(Limits.defaults())
       AggregatorConfig.set(AggregatorConfig.defaults())
+      DebugConfig.set(old_debug)
+      ResponseProfile.set(old_profile)
       SessionsConfig.reset()
       ConcurrencyGate.reset()
     end)
@@ -41,68 +57,104 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
     :ok
   end
 
-  describe "ptc_metrics on session eval responses" do
-    test "successful eval with upstream call attaches ptc_metrics block" do
+  describe "session eval upstream diagnostics" do
+    test "structured session eval omits inline ptc_metrics and full upstream_calls" do
+      ResponseProfile.set(:structured)
       put_fake("alpha", %{"echo" => fn args, _ -> {:ok, %{"echo" => args["msg"]}} end})
-
       session_id = start_session()
 
-      response =
-        eval(session_id, ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})|)
+      envelope =
+        eval_envelope(
+          session_id,
+          ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
+        )
 
+      response = envelope["structuredContent"]
       assert response["status"] == "ok"
-
-      metrics = response["ptc_metrics"]
-
-      assert is_map(metrics),
-             "expected ptc_metrics on session eval response, got: #{inspect(response)}"
-
-      assert metrics["schema_version"] == 1
-      assert metrics["upstream_call_count"] == 1
-      assert metrics["upstream_ok_count"] == 1
-      assert metrics["upstream_error_count"] == 0
-      assert is_integer(metrics["upstream_result_bytes"]) and metrics["upstream_result_bytes"] > 0
-      assert is_integer(metrics["final_result_bytes"]) and metrics["final_result_bytes"] > 0
-    end
-
-    test "eval that makes no upstream calls omits ptc_metrics" do
-      put_fake("alpha", %{"echo" => fn _, _ -> {:ok, "ok"} end})
-
-      session_id = start_session()
-      response = eval(session_id, "(+ 1 2)")
-
-      assert response["status"] == "ok"
+      assert response["session"]["session_id"] == session_id
+      assert response["result"] =~ "user=>"
       refute Map.has_key?(response, "ptc_metrics")
+      refute Map.has_key?(response, "upstream_calls")
+      refute inspect(envelope) =~ "ptc_metrics"
+      refute inspect(envelope) =~ "upstream_calls"
     end
 
-    test "failed eval still surfaces ptc_metrics for calls made before failure" do
+    test "slim session eval omits structured diagnostics from the public envelope" do
       put_fake("alpha", %{"echo" => fn _, _ -> {:ok, "value"} end})
-
       session_id = start_session()
 
-      # `(/ 1 0)` survives analyze but raises at runtime, so the upstream
-      # call runs and is drained before the crash.
-      response =
-        eval(
+      envelope =
+        eval_envelope(session_id, ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|)
+
+      assert envelope["isError"] == false
+      refute Map.has_key?(envelope, "structuredContent")
+      assert get_in(envelope, ["content", Access.at(0), "text"]) =~ "user=>"
+      refute inspect(envelope) =~ "ptc_metrics"
+      refute inspect(envelope) =~ "upstream_calls"
+    end
+
+    test "debug recording keeps ptc_metrics and redacted upstream_calls for slim session eval" do
+      enable_debug()
+      put_fake("alpha", %{"echo" => fn args, _ -> {:ok, %{"echo" => args["msg"]}} end})
+      session_id = start_session()
+
+      env =
+        json_rpc_eval(
+          "session-metrics-1",
+          session_id,
+          ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
+        )
+
+      refute Map.has_key?(env, "structuredContent")
+      refute Map.has_key?(env, "__lisp_debug_structured")
+
+      {:ok, record} = DebugBuffer.get("session-metrics-1")
+      assert record.tool == "lisp_session_eval"
+      assert is_map(record.ptc_metrics)
+      assert record.ptc_metrics["schema_version"] == 1
+      assert record.ptc_metrics["upstream_call_count"] == 1
+      assert record.ptc_metrics["upstream_ok_count"] == 1
+      assert is_integer(record.ptc_metrics["upstream_result_bytes"])
+      assert is_integer(record.ptc_metrics["final_result_bytes"])
+
+      [entry] = record.upstream_calls
+      assert entry["server"] == "alpha"
+      assert entry["tool"] == "echo"
+      assert entry["status"] == "ok"
+      assert is_integer(entry["result_bytes"])
+
+      debug_get = call_debug("debug-get-1", %{"op" => "get", "request_id" => "session-metrics-1"})
+      assert debug_get["record"]["ptc_metrics"]["upstream_call_count"] == 1
+      [debug_entry] = debug_get["record"]["upstream_calls"]
+      assert debug_entry["server"] == "alpha"
+      assert debug_entry["tool"] == "echo"
+    end
+
+    test "debug recording keeps metrics for failed session eval after upstream call" do
+      enable_debug()
+      put_fake("alpha", %{"echo" => fn _, _ -> {:ok, "value"} end})
+      session_id = start_session()
+
+      env =
+        json_rpc_eval(
+          "session-metrics-2",
           session_id,
           ~S|(do (tool/mcp-call {:server "alpha" :tool "echo" :args {}}) (/ 1 0))|
         )
 
-      assert response["status"] == "error"
+      assert env["isError"] == true
+      refute inspect(env) =~ "ptc_metrics"
 
-      metrics = response["ptc_metrics"]
-      assert is_map(metrics), "expected ptc_metrics on failed eval, got: #{inspect(response)}"
-      assert metrics["upstream_call_count"] == 1
-      # On error final_result_bytes degrades: the projection has no "result"
-      # field, so byte size is 0 and the ratio is null (PayloadMetrics §7 #2).
-      assert metrics["final_result_bytes"] == 0
-      assert metrics["payload_reduction_ratio"] == nil
+      {:ok, record} = DebugBuffer.get("session-metrics-2")
+      assert record.ptc_metrics["upstream_call_count"] == 1
+      assert record.ptc_metrics["final_result_bytes"] == 0
+      assert record.ptc_metrics["payload_reduction_ratio"] == nil
+      [entry] = record.upstream_calls
+      assert entry["status"] == "ok"
     end
 
-    test "limit-exceeded eval still surfaces ptc_metrics for the calls it made" do
-      # Lower max_session_memory_bytes so storing the upstream result
-      # via (def ...) makes the candidate state fail validate_candidate
-      # AFTER the upstream call already ran and drained.
+    test "limit-exceeded public response omits metrics while debug record keeps them" do
+      enable_debug()
       SessionsConfig.set(%{enabled: true, max_session_memory_bytes: 64})
 
       put_fake("alpha", %{
@@ -111,42 +163,28 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
 
       session_id = start_session()
 
-      response =
-        eval(
+      env =
+        json_rpc_eval(
+          "session-metrics-3",
           session_id,
           ~S|(def big (tool/mcp-call {:server "alpha" :tool "echo" :args {}}))|
         )
 
-      assert response["status"] == "error"
-      assert response["reason"] == "session_limit_exceeded"
+      assert env["isError"] == true
+      assert get_in(env, ["content", Access.at(0), "text"]) =~ "session_limit_exceeded"
+      refute inspect(env) =~ "ptc_metrics"
 
-      metrics = response["ptc_metrics"]
-
-      assert is_map(metrics),
-             "expected ptc_metrics on limit-exceeded eval, got: #{inspect(response)}"
-
-      assert metrics["upstream_call_count"] == 1
-      assert metrics["upstream_ok_count"] == 1
-    end
-
-    test "metrics count each per-eval batch separately, not cumulative session calls" do
-      put_fake("alpha", %{"echo" => fn _, _ -> {:ok, "v"} end})
-
-      session_id = start_session()
-
-      first = eval(session_id, ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|)
-      second = eval(session_id, ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|)
-
-      assert first["ptc_metrics"]["upstream_call_count"] == 1
-      assert second["ptc_metrics"]["upstream_call_count"] == 1
+      {:ok, record} = DebugBuffer.get("session-metrics-3")
+      assert record.ptc_metrics["upstream_call_count"] == 1
+      assert record.ptc_metrics["upstream_ok_count"] == 1
     end
   end
 
   defp tools_config(tools) do
     %{
       tools:
-        Map.new(tools, fn {n, fun} ->
-          {n, {%{name: n, input_schema: %{}}, fun}}
+        Map.new(tools, fn {name, fun} ->
+          {name, {%{name: name, input_schema: %{}}, fun}}
         end)
     }
   end
@@ -155,12 +193,48 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
     :ok = UpstreamRegistry.put_fake(name, tools_config(tools), @registry_name)
   end
 
+  defp enable_debug do
+    DebugConfig.set(%{enabled: true, ring_size: 500, max_response_bytes: 65_536})
+    {:ok, _pid} = DebugBuffer.start_link(ring_size: 500, name: DebugBuffer)
+    :ok
+  end
+
   defp start_session do
     call!("lisp_session_start", %{})["session_id"]
   end
 
-  defp eval(session_id, program) do
-    call!("lisp_session_eval", %{"session_id" => session_id, "program" => program})
+  defp eval_envelope(session_id, program) do
+    Tools.call(%{
+      "name" => "lisp_session_eval",
+      "arguments" => %{"session_id" => session_id, "program" => program}
+    })
+  end
+
+  defp json_rpc_eval(id, session_id, program) do
+    frame = %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "lisp_session_eval",
+        "arguments" => %{"session_id" => session_id, "program" => program}
+      }
+    }
+
+    {:async_call, ^id, work_fn, _on_busy, _on_discard, _} = JsonRpc.dispatch({:ok, frame})
+    work_fn.()
+  end
+
+  defp call_debug(id, args) do
+    frame = %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "method" => "tools/call",
+      "params" => %{"name" => "lisp_debug", "arguments" => args}
+    }
+
+    {:reply, %{"result" => envelope}, _} = JsonRpc.dispatch({:ok, frame})
+    envelope["structuredContent"]
   end
 
   defp call!(name, args) do
@@ -187,5 +261,12 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
     end
   catch
     :exit, _ -> :ok
+  end
+
+  defp stop_buffer do
+    case Process.whereis(DebugBuffer) do
+      nil -> :ok
+      pid -> if Process.alive?(pid), do: GenServer.stop(pid)
+    end
   end
 end

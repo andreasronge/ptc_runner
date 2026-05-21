@@ -30,7 +30,7 @@ Several capabilities are opt-in and add their own top-level tools:
 - [`lisp_debug`](mcp-debug.md) exposes in-process telemetry rollups
   for diagnostics.
 
-`lisp_eval` itself is rendered through one of three
+`lisp_eval` and `lisp_session_eval` are rendered through one of three
 [response profiles](mcp-server-configuration.md#response-profiles)
 (`slim` / `structured` / `debug`), defaulting to `slim`.
 Those profiles also control client-facing output limits for prints,
@@ -220,6 +220,16 @@ bounded, and allow at most one eval in a given session at a time.
 `lisp_session_eval` uses the same global concurrency gate as
 `lisp_eval`; a second eval on the same session returns
 `session_busy` rather than queueing.
+
+`lisp_session_eval` follows the same response-profile model as
+`lisp_eval`. In the default `slim` profile it returns text only and
+does not advertise `outputSchema`. In `structured`, it returns compact
+`structuredContent` with the result, session summary, and
+`memory.changed_keys` / `stored_keys`; it does not echo stored binding
+values. Full binding previews, upstream-call ledgers, and
+`ptc_metrics` are diagnostics and are available through `lisp_debug`
+or session inspection paths rather than normal slim/structured eval
+responses.
 
 ## Security model
 

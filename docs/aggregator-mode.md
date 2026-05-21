@@ -536,13 +536,14 @@ detail string).
 The whole point of programmatic tool calling is that the program
 fetches from upstream MCP tools and **collapses** the results down to
 a small answer before handing it back. Aggregator-mode responses
-(`lisp_eval` with at least one upstream call, every
-`lisp_task`, and every `lisp_session_eval` whose turn made at least one
-upstream call) carry a deterministic accounting of that, in a
-`ptc_metrics` block on the `structuredContent` envelope plus
-`result_bytes` / `oversize` on each `upstream_calls[]` entry. For
-sessions the block is **per-eval** — it accounts for the calls drained
-this turn, not the session's cumulative `upstream_calls` history:
+can carry deterministic accounting for that work: a `ptc_metrics`
+block plus `result_bytes` / `oversize` on each `upstream_calls[]`
+entry. Where those fields appear depends on the response profile:
+`debug` exposes them inline, while slim/structured model-facing
+responses omit them and keep the details for `lisp_debug recent` /
+`get` / `stats`. For sessions, metrics are **per eval** — they account
+for the calls drained in that turn, not the session's cumulative
+`upstream_calls` history:
 
 ```jsonc
 // structuredContent (abridged) — lisp_eval, aggregator mode
@@ -575,12 +576,14 @@ tool-result payload the program collapsed into its answer" — a real
 number the server can measure. It is **not** "tokens saved by PTC"
 (that needs the no-PTC counterfactual and the server-side LLM usage,
 neither of which the server can know), and it is **not** the literal
-reduction in the MCP response the client receives — the envelope
-mirrors the full structured payload (`ptc_metrics`, `upstream_calls`,
-`prints`, `feedback`) into `content[0].text`, so the actual response
-is larger than `final_result_bytes`. Bytes are primary and exact;
-token figures are explicitly estimates (`utf8_bytes_div_4`) — clients
-that care tokenize themselves. Only `status: "ok"`, non-`oversize`
+reduction in the MCP response the client receives. In `debug`, the
+envelope mirrors the full structured payload (`ptc_metrics`,
+`upstream_calls`, `prints`, `feedback`) into `content[0].text`, so the
+actual response is larger than `final_result_bytes`; in slim/structured
+profiles, those observability fields are omitted from normal eval
+responses. Bytes are primary and exact; token figures are explicitly
+estimates (`utf8_bytes_div_4`) — clients that care tokenize
+themselves. Only `status: "ok"`, non-`oversize`
 upstream calls count toward `upstream_result_bytes`; failed-call and
 oversize bytes are reported separately and never inflate the ratio.
 On an error envelope, `final_result_bytes` is `0` and the ratio is

@@ -19,6 +19,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
     old_profile = ResponseProfile.current()
     stop_sessions_processes()
     SessionsConfig.set(%{enabled: true})
+    ResponseProfile.set(:structured)
     ConcurrencyGate.reset()
     assert :ok = Sessions.ensure_started()
 

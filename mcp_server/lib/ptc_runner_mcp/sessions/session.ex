@@ -209,10 +209,16 @@ defmodule PtcRunnerMcp.Sessions.Session do
         {:error, step} ->
           upstream_calls = Map.get(opts, :upstream_calls, [])
 
-          response =
+          public =
+            Projection.eval_lisp_error(state, step)
+            |> maybe_put_upstream_calls(upstream_calls)
+
+          diagnostic =
             Projection.eval_lisp_error(state, step)
             |> maybe_put_upstream_calls(upstream_calls)
             |> decorate_ptc_metrics(upstream_calls)
+
+          response = attach_diagnostic(public, diagnostic)
 
           :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
             session_id: state.id,
@@ -463,10 +469,16 @@ defmodule PtcRunnerMcp.Sessions.Session do
               |> Map.put(:updated_at, DateTime.utc_now())
               |> reset_idle_timer()
 
-            response =
+            public =
               Projection.eval_success(previous, committed, step, history_notices)
               |> maybe_put_upstream_calls(upstream_calls)
+
+            diagnostic =
+              Projection.eval_success_diagnostic(previous, committed, step, history_notices)
+              |> maybe_put_upstream_calls(upstream_calls)
               |> decorate_ptc_metrics(upstream_calls)
+
+            response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
               [:ptc_runner_mcp, :session, :eval, :stop],
@@ -491,11 +503,18 @@ defmodule PtcRunnerMcp.Sessions.Session do
             # Always emit `validated` when a contract was supplied — even
             # when the value is `nil`. Mirrors the stateless renderer,
             # which surfaces "validated": null distinct from "no contract".
-            response =
+            public =
               Projection.eval_success(previous, committed, step, history_notices)
               |> Map.put("validated", validated)
               |> maybe_put_upstream_calls(upstream_calls)
+
+            diagnostic =
+              Projection.eval_success_diagnostic(previous, committed, step, history_notices)
+              |> Map.put("validated", validated)
+              |> maybe_put_upstream_calls(upstream_calls)
               |> decorate_ptc_metrics(upstream_calls)
+
+            response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
               [:ptc_runner_mcp, :session, :eval, :stop],
@@ -515,7 +534,15 @@ defmodule PtcRunnerMcp.Sessions.Session do
             # like `session_limit_exceeded` — reject the eval, do NOT
             # commit the candidate state. Side effects (upstream calls)
             # already happened and are surfaced as usual.
-            response =
+            public =
+              Projection.error(
+                :validation_error,
+                message,
+                %{session: Projection.inspect_view(state, "limits")["session"]}
+              )
+              |> maybe_put_upstream_calls(upstream_calls)
+
+            diagnostic =
               Projection.error(
                 :validation_error,
                 message,
@@ -523,6 +550,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
               )
               |> maybe_put_upstream_calls(upstream_calls)
               |> decorate_ptc_metrics(upstream_calls)
+
+            response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
               [:ptc_runner_mcp, :session, :eval, :stop],
@@ -539,7 +568,15 @@ defmodule PtcRunnerMcp.Sessions.Session do
         end
 
       {:error, detail} ->
-        response =
+        public =
+          Projection.error(
+            :session_limit_exceeded,
+            "session persisted-state limit exceeded; eval was not committed",
+            %{detail: detail, session: Projection.inspect_view(state, "limits")["session"]}
+          )
+          |> maybe_put_upstream_calls(upstream_calls)
+
+        diagnostic =
           Projection.error(
             :session_limit_exceeded,
             "session persisted-state limit exceeded; eval was not committed",
@@ -547,6 +584,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
           )
           |> maybe_put_upstream_calls(upstream_calls)
           |> decorate_ptc_metrics(upstream_calls)
+
+        response = attach_diagnostic(public, diagnostic)
 
         :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
           session_id: state.id,
@@ -566,6 +605,10 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   defp maybe_put_upstream_calls(payload, []), do: payload
   defp maybe_put_upstream_calls(payload, calls), do: Map.put(payload, "upstream_calls", calls)
+
+  defp attach_diagnostic(public, diagnostic) when is_map(public) and is_map(diagnostic) do
+    Map.put(public, "__lisp_debug_structured", diagnostic)
+  end
 
   # `(return v)` is unwrapped at the top of commit_success so step.return
   # is already the raw value here — no extra unwrapping needed.

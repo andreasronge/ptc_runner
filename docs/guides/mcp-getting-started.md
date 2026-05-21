@@ -1,7 +1,7 @@
 # MCP Getting Started
 
 This guide walks from installing `ptc_runner_mcp` to making your first
-signature-validated call. We use raw JSON-RPC frames so you can see
+schema-validated call. We use raw JSON-RPC frames so you can see
 exactly what the server consumes and emits; in practice your MCP
 client (Claude Desktop, Cursor, Cline, …) hides this layer.
 
@@ -41,16 +41,22 @@ include `initialize` and the `notifications/initialized` notification
 before any `tools/call`.
 
 ```bash
-cat <<'EOF' | _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start
+cat <<'EOF' | _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start --response-profile structured
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"hello","version":"0.0.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lisp_eval","arguments":{"program":"(+ 1 2)"}}}
 EOF
 ```
 
-The third frame is the call. The server's response (one NDJSON line on
-stdout, formatted here for readability) wraps the R22 success payload
-in the standard MCP `tools/call` envelope:
+The third frame is the call. This guide starts the server with
+`--response-profile structured` so the examples can show typed
+`structuredContent`. In the production default `slim` profile,
+successful eval tools return concise text only and do not advertise
+`outputSchema`.
+
+The server's response (one NDJSON line on stdout, formatted here for
+readability) wraps the success payload in the standard MCP
+`tools/call` envelope:
 
 ```json
 {
@@ -60,13 +66,10 @@ in the standard MCP `tools/call` envelope:
     "isError": false,
     "structuredContent": {
       "status": "ok",
-      "result": "user=> 3",
-      "prints": [],
-      "feedback": "...",
-      "truncated": false
+      "result": "user=> 3"
     },
     "content": [
-      { "type": "text", "text": "{\"status\":\"ok\",\"result\":\"user=> 3\",...}" }
+      { "type": "text", "text": "user=> 3" }
     ]
   }
 }
@@ -82,8 +85,10 @@ persist into the next call. The response intentionally omits any
 `memory` field so callers don't infer state from a single program's
 local definitions (issue #879).
 
-The `content[0].text` block carries the same JSON as a string, for
-clients that read content blocks instead of `structuredContent`.
+In the `structured` profile, the `content[0].text` block carries
+concise human-readable text while `structuredContent` carries the
+machine-readable payload. Use `--response-profile debug` only when you
+need the old verbose mirrored payload for troubleshooting.
 
 ## 3. Add `context`: bind values under `data/`
 
@@ -172,10 +177,7 @@ Successful response:
   "structuredContent": {
     "status": "ok",
     "result": "user=> {:total 42, :count 3}",
-    "validated": { "total": 42, "count": 3 },
-    "prints": [],
-    "feedback": "...",
-    "truncated": false
+    "validated": { "total": 42, "count": 3 }
   }
 }
 ```
@@ -200,6 +202,7 @@ Tracing is opt-in and off by default. To turn it on, pass
 ```bash
 mkdir -p /tmp/ptc-traces
 _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start \
+  --response-profile structured \
   --trace-dir /tmp/ptc-traces
 ```
 
