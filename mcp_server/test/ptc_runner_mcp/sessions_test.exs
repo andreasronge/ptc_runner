@@ -11,6 +11,7 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.JsonRpc
   alias PtcRunnerMcp.Limits
   alias PtcRunnerMcp.PromptRegistry
+  alias PtcRunnerMcp.ResponseProfile
   alias PtcRunnerMcp.Sessions
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Limits, as: SessionLimits
@@ -24,14 +25,17 @@ defmodule PtcRunnerMcp.SessionsTest do
   alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   setup do
+    old_profile = ResponseProfile.current()
     stop_sessions_processes()
     SessionsConfig.set(%{enabled: true})
+    ResponseProfile.set(:structured)
     ConcurrencyGate.reset()
     assert :ok = Sessions.ensure_started()
 
     on_exit(fn ->
       stop_sessions_processes()
       SessionsConfig.reset()
+      ResponseProfile.set(old_profile)
       Limits.set(Limits.defaults())
       ConcurrencyGate.reset()
     end)
@@ -82,6 +86,16 @@ defmodule PtcRunnerMcp.SessionsTest do
       assert error["properties"]["status"] == %{"const" => "error"}
       assert error["properties"]["reason"] == %{"type" => "string"}
     end)
+  end
+
+  test "session eval omits outputSchema in slim profile" do
+    ResponseProfile.set(:slim)
+
+    eval =
+      Tools.list()["tools"]
+      |> Enum.find(&(&1["name"] == "lisp_session_eval"))
+
+    refute Map.has_key?(eval, "outputSchema")
   end
 
   test "session start and eval descriptions are rendered from prompt registry" do

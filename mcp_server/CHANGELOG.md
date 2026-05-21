@@ -140,12 +140,13 @@ revisions.
   `decoded_bytes: 0` and `text_bytes` (size of the rejected text
   for cap correlation). No event fires when no text-content item is
   present or when the mimeType doesn't match.
-- Response profiles for `lisp_eval`
+- Response profiles for `lisp_eval` and `lisp_session_eval`
   (`Plans/ptc-runner-mcp-slim-responses.md`). New `--response-profile`
   / `PTC_RUNNER_MCP_RESPONSE_PROFILE` flag selects `slim` (the new
-  default — concise text in `content[0].text`, no `structuredContent`,
-  no advertised `outputSchema`, with `ptc_metrics` / `upstream_calls` /
-  empty `prints`/`feedback` / default `truncated` omitted),
+  default for eval tools — concise text in `content[0].text`, no
+  `structuredContent`, no advertised `outputSchema`, with
+  `ptc_metrics` / `upstream_calls` / empty `prints`/`feedback` /
+  default `truncated` omitted),
   `structured` (compact `structuredContent` + concise text,
   observability fields still omitted; compact `outputSchema`
   advertised), or `debug` (the pre-existing verbose shape: mirrored
@@ -154,8 +155,12 @@ revisions.
   `--debug-tool --response-profile slim` keeps the client response
   slim while still feeding the full pre-slim payload to the `lisp_debug`
   recorder internally (the private `__lisp_debug_structured` carrier is
-  stripped before the JSON-RPC frame is written). The tool description
-  advertises the active profile. See README "Response profiles" and
+  stripped before the JSON-RPC frame is written). For session evals,
+  normal slim/structured responses expose changed binding names rather
+  than stored binding values; full memory previews and per-eval
+  `ptc_metrics` / `upstream_calls` remain available through
+  `lisp_debug`. The tool description advertises the active profile.
+  See README "Response profiles" and
   `bench/local_payload_bench.py` for the wire-cost comparison
   (`slim` is roughly 13-28x smaller per call than `debug`).
 - Catalog discovery from inside PTC-Lisp, aggregator mode
@@ -185,32 +190,36 @@ revisions.
 
 ### Breaking changes
 
-- The default `lisp_eval` response shape is now `slim`
+- The default `lisp_eval` and `lisp_session_eval` response shape is now `slim`
   (`Plans/ptc-runner-mcp-slim-responses.md`): `content[0].text` carries
   concise human-readable text (the value, or `<prints>…</prints>` +
   `<result>…` when the program printed), there is no
-  `structuredContent`, and no `outputSchema` is advertised even when a
-  `signature` argument is present. `ptc_metrics`, `upstream_calls`,
+  `structuredContent`, and no `outputSchema` is advertised even when
+  `output_schema` is present. `ptc_metrics`, `upstream_calls`,
   empty `prints`/`feedback`, and a default `truncated: false` are
-  omitted. Clients that parsed `structuredContent` from
-  `lisp_eval` (or relied on the advertised `outputSchema`) must
+  omitted. Clients that parsed `structuredContent` from eval tools
+  (or relied on the advertised `outputSchema`) must
   start the server with `--response-profile structured` (compact
   machine-readable shape) or `--debug-tool` / `--response-profile
   debug` (the pre-existing verbose shape). The MCP v1 response contract
   in `Plans/ptc-runner-mcp-server.md` §10 is now the `debug` profile.
 
-- `outputSchema` no longer includes the `memory` field on success
-  responses, and `tools/call` responses no longer surface
-  `memory.{changed, stored_keys, truncated}`. Each MCP call is
-  one-shot — `defn`'d names never persist across calls — so the
-  field misled callers into expecting state. Clients that read
-  `structuredContent["memory"]` should remove that path. Issue #879.
+- `outputSchema` for stateless `lisp_eval` no longer includes the
+  `memory` field on success responses, and stateless `tools/call`
+  responses no longer surface `memory.{changed, stored_keys,
+  truncated}`. Each stateless MCP call is one-shot — `defn`'d names
+  never persist across calls — so the field misled callers into
+  expecting state. Stateful `lisp_session_eval` structured responses
+  do expose compact memory metadata (`changed_keys`, `stored_keys`) but
+  do not echo stored binding values. Clients that read stateless
+  `lisp_eval` `structuredContent["memory"]` should remove that path.
+  Issue #879.
 
 ### Documentation
 
-- `tools/list` describes the optional `signature` argument as
-  accepting both `() -> {...}` and the bare-type shorthand `{...}`.
-  Issue #882.
+- `tools/list` and the public docs now point clients at
+  `output_schema` for return validation instead of the removed
+  MCP-facing `signature` argument.
 
 ## 0.1.0 — 2026-05-07
 

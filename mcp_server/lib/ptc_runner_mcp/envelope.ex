@@ -278,6 +278,48 @@ defmodule PtcRunnerMcp.Envelope do
     end
   end
 
+  @doc "Wrap a `lisp_session_eval` success according to the response profile."
+  @spec ptc_lisp_session_success(map(), keyword()) :: t()
+  def ptc_lisp_session_success(structured, opts \\ []) when is_map(structured) do
+    case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do
+      :slim ->
+        text_envelope(false, render_session_success_text(structured))
+
+      :structured ->
+        compact = compact_session_success(structured)
+
+        %{
+          "isError" => false,
+          "structuredContent" => compact,
+          "content" => [%{"type" => "text", "text" => render_session_success_text(compact)}]
+        }
+
+      :debug ->
+        success(structured)
+    end
+  end
+
+  @doc "Wrap a `lisp_session_eval` error according to the response profile."
+  @spec ptc_lisp_session_error(map(), keyword()) :: t()
+  def ptc_lisp_session_error(structured, opts \\ []) when is_map(structured) do
+    case Keyword.get(opts, :response_profile, PtcRunnerMcp.ResponseProfile.current()) do
+      :slim ->
+        text_envelope(true, render_session_error_text(structured))
+
+      :structured ->
+        compact = compact_session_error(structured)
+
+        %{
+          "isError" => true,
+          "structuredContent" => compact,
+          "content" => [%{"type" => "text", "text" => render_session_error_text(compact)}]
+        }
+
+      :debug ->
+        error_envelope(structured)
+    end
+  end
+
   @doc false
   @spec compact_structured_success(map()) :: map()
   def compact_structured_success(structured) do
@@ -309,6 +351,50 @@ defmodule PtcRunnerMcp.Envelope do
     |> maybe_put("upstream_calls", compact_upstream_errors(Map.get(structured, "upstream_calls")),
       keep_nil?: false
     )
+  end
+
+  @doc false
+  @spec compact_session_success(map()) :: map()
+  def compact_session_success(structured) do
+    %{"status" => Map.get(structured, "status", "ok")}
+    |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("validated", Map.get(structured, "validated"), keep_nil?: false)
+    |> maybe_put("validated_preview", Map.get(structured, "validated_preview"), keep_nil?: false)
+    |> maybe_put_true(
+      "validated_preview_truncated",
+      Map.get(structured, "validated_preview_truncated")
+    )
+    |> maybe_put("validated_bytes", Map.get(structured, "validated_bytes"), keep_nil?: false)
+    |> maybe_put("session", Map.get(structured, "session"), keep_nil?: false)
+    |> maybe_put("memory", compact_session_memory(Map.get(structured, "memory")),
+      keep_nil?: false
+    )
+    |> maybe_put("history_notices", Map.get(structured, "history_notices"), keep_nil?: false)
+    |> maybe_put_true("truncated", Map.get(structured, "truncated"))
+    |> maybe_put_true("output_truncated", Map.get(structured, "output_truncated"))
+  end
+
+  @doc false
+  @spec compact_session_error(map()) :: map()
+  def compact_session_error(structured) do
+    %{"status" => Map.get(structured, "status", "error")}
+    |> maybe_put("reason", Map.get(structured, "reason"))
+    |> maybe_put("message", Map.get(structured, "message"))
+    |> maybe_put("feedback", Map.get(structured, "feedback"))
+    |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("session", Map.get(structured, "session"), keep_nil?: false)
+    |> maybe_put("memory", compact_session_memory(Map.get(structured, "memory")),
+      keep_nil?: false
+    )
+    |> maybe_put("history_notices", Map.get(structured, "history_notices"), keep_nil?: false)
+    |> maybe_put(
+      "upstream_errors",
+      compact_upstream_errors(Map.get(structured, "upstream_calls")),
+      keep_nil?: false
+    )
+    |> maybe_put_true("truncated", Map.get(structured, "truncated"))
+    |> maybe_put_true("output_truncated", Map.get(structured, "output_truncated"))
+    |> maybe_put_true("feedback_truncated", Map.get(structured, "feedback_truncated"))
   end
 
   @doc false
@@ -350,6 +436,14 @@ defmodule PtcRunnerMcp.Envelope do
   end
 
   @doc false
+  @spec render_session_success_text(map()) :: String.t()
+  def render_session_success_text(structured) do
+    structured
+    |> render_success_text()
+    |> append_session_suffix(structured)
+  end
+
+  @doc false
   @spec render_error_text(map()) :: String.t()
   def render_error_text(structured) do
     reason = Map.get(structured, "reason")
@@ -367,6 +461,14 @@ defmodule PtcRunnerMcp.Envelope do
     base
     |> append_feedback(feedback)
     |> append_upstream_error(Map.get(structured, "upstream_calls"))
+  end
+
+  @doc false
+  @spec render_session_error_text(map()) :: String.t()
+  def render_session_error_text(structured) do
+    structured
+    |> render_error_text()
+    |> append_session_suffix(structured)
   end
 
   defp text_envelope(is_error, text) do
@@ -388,6 +490,15 @@ defmodule PtcRunnerMcp.Envelope do
 
   defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
   defp maybe_put_true(map, _key, _), do: map
+
+  defp compact_session_memory(memory) when is_map(memory) do
+    %{}
+    |> maybe_put("changed_keys", Map.get(memory, "changed_keys"), keep_nil?: false)
+    |> maybe_put("stored_keys", Map.get(memory, "stored_keys"), keep_nil?: false)
+    |> maybe_put_true("truncated", Map.get(memory, "truncated"))
+  end
+
+  defp compact_session_memory(_), do: nil
 
   defp compact_upstream_errors(entries) when is_list(entries) do
     compacted =
@@ -427,6 +538,35 @@ defmodule PtcRunnerMcp.Envelope do
   end
 
   defp append_upstream_error(text, _), do: text
+
+  defp append_session_suffix(text, structured) do
+    suffix =
+      [
+        stored_suffix(Map.get(structured, "memory")),
+        upstream_suffix(Map.get(structured, "upstream_calls"))
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(" ")
+
+    if suffix == "", do: text, else: join_text(text, "[" <> suffix <> "]")
+  end
+
+  defp stored_suffix(%{"changed_keys" => keys}) when is_list(keys) and keys != [] do
+    "stored: " <> Enum.map_join(keys, " ", &to_string/1)
+  end
+
+  defp stored_suffix(_), do: nil
+
+  defp upstream_suffix(entries) when is_list(entries) and entries != [] do
+    count = length(entries)
+    noun = if count == 1, do: "upstream call", else: "upstream calls"
+    "#{count} #{noun}, see lisp_debug for metrics"
+  end
+
+  defp upstream_suffix(_), do: nil
+
+  defp join_text("", suffix), do: suffix
+  defp join_text(text, suffix), do: text <> "\n" <> suffix
 
   defp preview(value) do
     case Jason.encode(value) do

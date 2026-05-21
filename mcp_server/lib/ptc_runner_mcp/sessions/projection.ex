@@ -27,13 +27,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   @doc "Render a successful eval response."
   @spec eval_success(map(), map(), map(), [map()]) :: map()
   def eval_success(previous, committed, step, history_notices) do
-    execution =
-      TurnFeedback.execution_feedback(
-        @session_agent,
-        %{memory: previous.memory || %{}},
-        step
-      )
-
+    execution = eval_execution(previous, step)
     usage = session_usage(committed)
 
     %{
@@ -42,7 +36,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "prints" => execution.prints,
       "feedback" => append_history_notices(execution.feedback, history_notices),
       "memory" => %{
-        "changed" => execution.memory.changed,
+        "changed_keys" => changed_keys(execution.memory.changed),
         "stored_keys" => execution.memory.stored_keys,
         "truncated" => execution.memory.truncated
       },
@@ -55,6 +49,45 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "history_notices" => history_notices,
       "truncated" => execution.truncated or history_notices != []
     }
+  end
+
+  @doc "Render the verbose successful eval payload retained for diagnostics."
+  @spec eval_success_diagnostic(map(), map(), map(), [map()]) :: map()
+  def eval_success_diagnostic(previous, committed, step, history_notices) do
+    execution = eval_execution(previous, step)
+    usage = session_usage(committed)
+
+    %{
+      "status" => "ok",
+      "result" => execution.result,
+      "prints" => execution.prints,
+      "feedback" => append_history_notices(execution.feedback, history_notices),
+      "memory" => %{
+        "changed" => execution.memory.changed,
+        "changed_keys" => changed_keys(execution.memory.changed),
+        "stored_keys" => execution.memory.stored_keys,
+        "truncated" => execution.memory.truncated
+      },
+      "session" => %{
+        "session_id" => committed.id,
+        "turn" => committed.turn,
+        "memory_bytes" => usage.memory_bytes,
+        "binding_count" => usage.binding_count
+      },
+      "history_notices" => history_notices,
+      "truncated" => execution.truncated or history_notices != []
+    }
+  end
+
+  defp eval_execution(previous, step) do
+    execution =
+      TurnFeedback.execution_feedback(
+        @session_agent,
+        %{memory: previous.memory || %{}},
+        step
+      )
+
+    execution
   end
 
   @doc "Render a Lisp execution failure. Session state was not committed."
@@ -225,6 +258,13 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       state.tool_calls,
       state.upstream_calls
     )
+  end
+
+  defp changed_keys(changed) when is_map(changed) do
+    changed
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+    |> Enum.sort()
   end
 
   defp history_text([]), do: ";; History:\n;   *1 nil\n;   *2 nil\n;   *3 nil"

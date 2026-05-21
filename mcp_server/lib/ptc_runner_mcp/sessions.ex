@@ -13,6 +13,7 @@ defmodule PtcRunnerMcp.Sessions do
     AggregatorTools,
     CatalogBuiltins,
     CatalogConfig,
+    DebugConfig,
     Envelope,
     Limits,
     OutputLimits,
@@ -534,21 +535,66 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp envelope({:ok, response}) do
     profile = ResponseProfile.current()
+    {public, diagnostic} = pop_debug_structured(response)
+    session_eval? = session_eval_payload?(public) or is_map(diagnostic)
 
-    response
+    payload = if profile == :debug and is_map(diagnostic), do: diagnostic, else: public
+
+    payload
     |> OutputLimits.shape_session_payload(:ok, profile)
-    |> Envelope.success()
+    |> wrap_session_success(session_eval?)
     |> OutputLimits.limit_envelope(profile)
+    |> maybe_attach_debug_structured(diagnostic)
   end
 
   defp envelope({:error, response}) when is_map(response) do
     profile = ResponseProfile.current()
+    {public, diagnostic} = pop_debug_structured(response)
+    session_eval? = session_eval_payload?(public) or is_map(diagnostic)
 
-    response
+    payload = if profile == :debug and is_map(diagnostic), do: diagnostic, else: public
+
+    payload
     |> OutputLimits.shape_session_payload(:error, profile)
-    |> Envelope.error_envelope()
+    |> wrap_session_error(session_eval?)
     |> OutputLimits.limit_envelope(profile)
+    |> maybe_attach_debug_structured(diagnostic)
   end
+
+  defp wrap_session_success(payload, session_eval?) do
+    if session_eval? do
+      Envelope.ptc_lisp_session_success(payload)
+    else
+      Envelope.success(payload)
+    end
+  end
+
+  defp wrap_session_error(payload, session_eval?) do
+    if session_eval? do
+      Envelope.ptc_lisp_session_error(payload)
+    else
+      Envelope.error_envelope(payload)
+    end
+  end
+
+  defp session_eval_payload?(payload) when is_map(payload) do
+    Map.has_key?(payload, "result") and is_map(Map.get(payload, "session"))
+  end
+
+  defp pop_debug_structured(response) when is_map(response) do
+    {Map.delete(response, "__lisp_debug_structured"),
+     Map.get(response, "__lisp_debug_structured")}
+  end
+
+  defp maybe_attach_debug_structured(envelope, diagnostic) when is_map(diagnostic) do
+    if DebugConfig.enabled?() do
+      Map.put(envelope, "__lisp_debug_structured", diagnostic)
+    else
+      envelope
+    end
+  end
+
+  defp maybe_attach_debug_structured(envelope, _diagnostic), do: envelope
 
   defp start_session_args(args) do
     case validate_start_args(args) do
@@ -748,9 +794,9 @@ defmodule PtcRunnerMcp.Sessions do
           }
         },
         "additionalProperties" => false
-      },
-      "outputSchema" => session_output_schema(["status", "session"])
+      }
     }
+    |> maybe_put("outputSchema", session_eval_output_schema(ResponseProfile.current()))
   end
 
   defp session_eval_description_key do
@@ -760,6 +806,9 @@ defmodule PtcRunnerMcp.Sessions do
       :mcp_session_eval_description
     end
   end
+
+  defp session_eval_output_schema(:slim), do: nil
+  defp session_eval_output_schema(_profile), do: session_output_schema(["status", "session"])
 
   defp session_inspect_tool do
     %{

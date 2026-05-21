@@ -52,7 +52,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--max-session-tool-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES` | `131072` (128 KiB) | Persisted tool-call history byte cap. |
 | `--max-session-upstream-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES` | `50` | Maximum persisted upstream-call history entries. |
 | `--max-session-upstream-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES` | `131072` (128 KiB) | Persisted upstream-call history byte cap. |
-| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `lisp_eval` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
+| `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `lisp_eval` / `lisp_session_eval` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
 | `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `lisp_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `lisp_debug` (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `lisp_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
@@ -99,15 +99,17 @@ public attacker-controlled host. POST requests with a present
 
 ## Response profiles
 
-`lisp_eval` renders its result according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace.
+`lisp_eval` and `lisp_session_eval` render their eval results according to a boot-time **response profile** (`--response-profile`). The default is **`slim`**: optimized for the model consuming the tool result, not for an operator reading a trace. Session utility tools such as `lisp_session_start`, `lisp_session_inspect`, and `lisp_session_forget` keep structured responses in all profiles.
 
 | Profile | `content[0].text` | `structuredContent` | `outputSchema` advertised | Observability fields |
 |---|---|---|---|---|
-| **`slim`** *(default)* | concise human-readable text / the value | — | no | omitted everywhere — no `ptc_metrics`, no `upstream_calls`, no empty `prints`/`feedback`, no default `truncated` |
-| **`structured`** | concise text | compact `{status, result, …}` (errors add `reason`/`message`/`feedback` and a trimmed error-only `upstream_calls`) | yes (compact) | `ptc_metrics` omitted; `upstream_calls` carried *only* on errors and trimmed to the failed entries (no `duration_ms` / `result_bytes` / per-entry observability), so the model still has enough to repair the program |
+| **`slim`** *(default)* | concise human-readable text / the value | — | no for eval tools | omitted everywhere — no `ptc_metrics`, no `upstream_calls`, no empty `prints`/`feedback`, no default `truncated` |
+| **`structured`** | concise text | compact `{status, result, …}` (session eval also keeps `session` and `memory.changed_keys`; errors add `reason`/`message`/`feedback` and compact upstream failure summaries when useful) | yes (compact) | `ptc_metrics` omitted; full `upstream_calls` omitted, so diagnostics stay out of the model-facing path |
 | **`debug`** | the result, mirrored | full payload (also mirrored as text) | yes (full) | full `ptc_metrics`, full `upstream_calls` (all entries with timings/byte counts), and the rest of the verbose payload |
 
-`--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. If you combine `--debug-tool --response-profile slim`, the client-facing response stays slim while the `lisp_debug` recorder still gets the full pre-slim payload internally.
+For `lisp_session_eval`, normal slim/structured responses expose only the next-step contract: result text, compact session metadata, and changed binding names. Binding values, full upstream-call ledgers, and `ptc_metrics` are retained for explicit diagnostics instead of being echoed in every eval response.
+
+`--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. If you combine `--debug-tool --response-profile slim`, the client-facing response stays slim while the `lisp_debug` recorder still gets the full pre-slim payload internally for both stateless and session evals.
 
 ### Client-facing output limits
 
@@ -189,7 +191,7 @@ For local evaluation of aggregator benefits, run with:
 --trace-dir /tmp/ptc-traces --trace-payloads full
 ```
 
-Then inspect the JSONL trace file to see the generated PTC-Lisp program, `program_bytes`, total call duration, and result size. The MCP response's `upstream_calls` array records each upstream call's server, tool, status, reason on failure, and duration. To estimate token savings, compare:
+Then inspect the JSONL trace file to see the generated PTC-Lisp program, `program_bytes`, total call duration, and result size. In `debug` responses, or through `lisp_debug` records when enabled, `upstream_calls` records each upstream call's server, tool, status, reason on failure, and duration. To estimate token savings, compare:
 
 - aggregator `tools/list` bytes vs the sum of native upstream `tools/list` bytes;
 - aggregator final result bytes vs the sum of native upstream raw result bytes.
