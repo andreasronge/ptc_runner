@@ -309,10 +309,10 @@
     %{
       name: "<",
       description: "Less than",
-      binding: :normal,
+      binding: :collect,
       category: :core,
       dispatch: :env,
-      signatures: ["(< x y)"],
+      signatures: ["(< x)", "(< x y & more)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,
@@ -320,16 +320,15 @@
       notes: nil,
       see_also: [],
       clojure_var: "<",
-      divergences:
-        "DIV-03: strictly 2-arity; chained comparisons like (< 1 2 3) are rejected. See docs/clojure-conformance-gaps.md."
+      divergences: nil
     },
     %{
       name: "<=",
       description: "Less or equal",
-      binding: :normal,
+      binding: :collect,
       category: :core,
       dispatch: :env,
-      signatures: ["(<= x y)"],
+      signatures: ["(<= x)", "(<= x y & more)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,
@@ -337,8 +336,7 @@
       notes: nil,
       see_also: [],
       clojure_var: "<=",
-      divergences:
-        "DIV-03: strictly 2-arity; chained comparisons like (<= 1 2 3) are rejected. See docs/clojure-conformance-gaps.md."
+      divergences: nil
     },
     %{
       name: "=",
@@ -376,10 +374,10 @@
     %{
       name: ">",
       description: "Greater than",
-      binding: :normal,
+      binding: :collect,
       category: :core,
       dispatch: :env,
-      signatures: ["(> x y)"],
+      signatures: ["(> x)", "(> x y & more)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,
@@ -387,16 +385,15 @@
       notes: nil,
       see_also: [],
       clojure_var: ">",
-      divergences:
-        "DIV-03: strictly 2-arity; chained comparisons like (> 3 2 1) are rejected. See docs/clojure-conformance-gaps.md."
+      divergences: nil
     },
     %{
       name: ">=",
       description: "Greater or equal",
-      binding: :normal,
+      binding: :collect,
       category: :core,
       dispatch: :env,
-      signatures: ["(>= x y)"],
+      signatures: ["(>= x)", "(>= x y & more)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,
@@ -404,8 +401,7 @@
       notes: nil,
       see_also: [],
       clojure_var: ">=",
-      divergences:
-        "DIV-03: strictly 2-arity; chained comparisons like (>= 3 2 1) are rejected. See docs/clojure-conformance-gaps.md."
+      divergences: nil
     },
     %{
       name: "NEGATIVE_INFINITY",

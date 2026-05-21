@@ -482,11 +482,6 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  # Ordered comparison operators (strict 2-arity per spec section 8.5)
-  defp dispatch_list_form({:symbol, op}, rest, _list, tail?)
-       when op in [:>, :<, :>=, :<=],
-       do: analyze_comparison(op, rest, tail?)
-
   # Generic function call
   defp dispatch_list_form(_head, _rest, list, tail?), do: analyze_call(list, tail?)
 
@@ -1110,28 +1105,6 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_value(ast), do: do_analyze(ast, false)
-
-  # ============================================================
-  # Ordered comparison operators (strict 2-arity)
-  # ============================================================
-
-  defp analyze_comparison(op, [left_ast, right_ast], _tail?) do
-    with {:ok, left} <- do_analyze(left_ast, false),
-         {:ok, right} <- do_analyze(right_ast, false) do
-      {:ok, {:call, {:var, op}, [left, right]}}
-    end
-  end
-
-  defp analyze_comparison(op, args, _tail?) do
-    {:error,
-     {:invalid_arity, op,
-      "comparison operators require exactly 2 arguments, got #{length(args)}. " <>
-        "Use (and (#{op} a b) (#{op} b c)) for chained comparisons."}}
-  end
-
-  # ============================================================
-  # Generic function call
-  # ============================================================
 
   defp analyze_call({:list, [f_ast | arg_asts]}, _tail?) do
     with {:ok, f} <- do_analyze(f_ast, false),

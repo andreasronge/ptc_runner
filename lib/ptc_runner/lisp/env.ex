@@ -343,10 +343,10 @@ defmodule PtcRunner.Lisp.Env do
       {:=, {:collect, &Runtime.eq_variadic/1}},
       {:==, {:collect, &Runtime.numeric_eq_variadic/1}},
       {:"not=", {:collect, &Runtime.not_eq_variadic/1}},
-      {:>, {:normal, &Runtime.gt/2}},
-      {:<, {:normal, &Runtime.lt/2}},
-      {:>=, {:normal, &Runtime.gte/2}},
-      {:<=, {:normal, &Runtime.lte/2}},
+      {:>, {:collect, &Runtime.gt_variadic/1}},
+      {:<, {:collect, &Runtime.lt_variadic/1}},
+      {:>=, {:collect, &Runtime.gte_variadic/1}},
+      {:<=, {:collect, &Runtime.lte_variadic/1}},
       {:compare, {:normal, &Runtime.compare/2}},
 
       # ============================================================

@@ -408,6 +408,20 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     Enum.all?(rest, &eq(first, &1))
   end
 
+  def lt_variadic(args), do: ordered_variadic("<", args, &lt/2)
+  def gt_variadic(args), do: ordered_variadic(">", args, &gt/2)
+  def lte_variadic(args), do: ordered_variadic("<=", args, &lte/2)
+  def gte_variadic(args), do: ordered_variadic(">=", args, &gte/2)
+
+  defp ordered_variadic(name, [], _pred), do: arity_error(name)
+  defp ordered_variadic(_name, [_], _pred), do: true
+
+  defp ordered_variadic(_name, args, pred) do
+    args
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.all?(fn [x, y] -> pred.(x, y) end)
+  end
+
   def eq(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) ->

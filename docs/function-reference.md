@@ -103,12 +103,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 | `-` | `(- x y ...)` | Subtraction |
 | `-'` | `(-' x y ...)` | Arbitrary precision subtraction alias |
 | `/` | `(/ x y)` | Division (always returns float) |
-| `<` | `(< x y)` | Less than |
-| `<=` | `(<= x y)` | Less or equal |
+| `<` | `(< x), (< x y & more)` | Less than |
+| `<=` | `(<= x), (<= x y & more)` | Less or equal |
 | `=` | `(= x), (= x y & more)` | Equality |
 | `==` | `(== x), (== x y & more)` | Type-independent numeric equality |
-| `>` | `(> x y)` | Greater than |
-| `>=` | `(>= x y)` | Greater or equal |
+| `>` | `(> x), (> x y & more)` | Greater than |
+| `>=` | `(>= x), (>= x y & more)` | Greater or equal |
 | `NaN?` | `(NaN? ...)` |  |
 | `apply` | `(apply f coll)` | Applies function `f` to the argument sequence `coll` |
 | `array-map` | `(array-map & kvs)` | Create map from alternating key-value pairs |
@@ -445,5 +445,4 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 |----------|-----------|-------------|
 | `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
-
 

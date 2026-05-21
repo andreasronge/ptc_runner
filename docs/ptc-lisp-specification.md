@@ -1540,7 +1540,7 @@ Use `get-in` (or sequential `(:b (:a item))`) for nested fields:
 
 ### 7.4 Nil Handling in Predicates
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) with `nil` are **type errors**. Guard explicitly when a field may be missing or `nil`:
+Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable predicates: they return booleans for `nil` and mixed scalar values instead of raising. PTC-Lisp uses the runtime's total term ordering for non-NaN values, which can be surprising for missing fields. Guard explicitly when missing values should be excluded:
 
 ```clojure
 ;; Safe: filter out users without :age first
@@ -1764,7 +1764,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 (reverse [1 2 3])             ; => [3 2 1]
 ```
 
-**Note:** While `sort` and `sort-by` support string comparison internally, the explicit comparison operators (`>`, `<`, `>=`, `<=`) only work on numbers. This prevents ambiguous comparisons in user code while allowing natural sorting.
+**Note:** `sort`, `sort-by`, and the explicit comparison operators (`>`, `<`, `>=`, `<=`) support strings and mixed scalar values using recoverable runtime term ordering. Prefer numeric-only data when numeric ordering is required.
 
 **Map support:** `sort-by` accepts maps, treating each entry as a `[key value]` pair. Returns a **list** of `[key value]` pairs (not a map) to preserve sort order:
 
@@ -2437,12 +2437,12 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 |----------|-----------|-------------|
 | `=` | `(= x)`, `(= x y & more)` | Equality |
 | `not=` | `(not= x)`, `(not= x y & more)` | Inequality |
-| `<` | `(< x y)` | Less than |
-| `>` | `(> x y)` | Greater than |
-| `<=` | `(<= x y)` | Less or equal |
-| `>=` | `(>= x y)` | Greater or equal |
+| `<` | `(< x)`, `(< x y & more)` | Less than |
+| `>` | `(> x)`, `(> x y & more)` | Greater than |
+| `<=` | `(<= x)`, `(<= x y & more)` | Less or equal |
+| `>=` | `(>= x)`, `(>= x y & more)` | Greater or equal |
 
-**Note:** Ordered comparison operators in PTC-Lisp are strictly 2-arity. Chained comparisons like `(< 1 2 3)` are **not supported**. Use `and` to combine comparisons: `(and (< 1 2) (< 2 3))`. Equality operators (`=`, `==`, `not=`) are variadic but require at least one argument.
+**Note:** Comparison and equality operators are variadic but require at least one argument. Ordered comparisons compare adjacent pairs, so `(< 1 2 3)` is equivalent to `(and (< 1 2) (< 2 3))`.
 
 ```clojure
 (= 1 1)         ; => true
@@ -2450,6 +2450,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 (= 1 2)         ; => false
 (not= 1 2)      ; => true
 (< 1 2)         ; => true
+(< 1 2 3)       ; => true
 (> 3 2)         ; => true
 (<= 1 1)        ; => true
 (>= 3 2)        ; => true
@@ -3488,38 +3489,35 @@ Filter by nested field:
 (= 5 nil)                    ; => false
 (nil? nil)                   ; => true
 
-;; Ordering comparisons with nil are type errors
-(> 5 nil)                    ; => TYPE ERROR
-(< nil 10)                   ; => TYPE ERROR
+;; Ordering comparisons with nil are recoverable term-order predicates
+(> 5 nil)                    ; => false
+(< nil 10)                   ; => false
 
 ;; filter/map handle nil gracefully
 (filter (fn [m] (= (:x m) nil)) [{:x nil} {:x 1}])  ; => [{:x nil}]
 ```
 
-### 11.3 Type Errors in Comparisons
+### 11.3 Recoverable Ordered Comparisons
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) are only defined for numbers:
+Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable in PTC-Lisp. They return booleans rather than raising for `nil`, strings, keywords, maps, and mixed scalar values. For non-NaN values they use the runtime's total term ordering; `NaN` comparisons return false.
 
 ```clojure
-;; Valid
+;; Numeric comparisons
 (> 5 3)                      ; => true
 (< 1.5 2.0)                  ; => true
 
-;; Type errors
-(> "a" "b")                  ; => TYPE ERROR (strings not orderable via >)
-(< {:a 1} {:b 2})            ; => TYPE ERROR (maps not orderable)
-(>= 5 nil)                   ; => TYPE ERROR (nil not orderable)
+;; Recoverable term-order comparisons
+(> "b" "a")                  ; => true
+(< 1 nil)                    ; => true
+(<= nil nil)                 ; => true
+(< Double/NaN 0.0)           ; => false
 ```
 
-**Note on sorting:** While explicit comparison operators reject strings, the `sort` and `sort-by` functions use internal comparison that supports both numbers and strings. This design prevents ambiguous user-written comparisons while enabling natural sorting:
+**Note on sorting:** The `sort` and `sort-by` functions use related internal comparison behavior that supports both numbers and strings:
 
 ```clojure
-;; These work (internal comparison)
 (sort ["b" "a" "c"])         ; => ["a" "b" "c"]
 (sort-by :name users)        ; sorts alphabetically
-
-;; This fails (explicit comparison)
-(> "bob" "alice")            ; => TYPE ERROR
 ```
 
 ### 11.4 Aggregation with Missing/Nil Fields
