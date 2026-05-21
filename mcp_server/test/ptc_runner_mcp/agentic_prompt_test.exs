@@ -165,13 +165,22 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
       prompt = Prompt.system_prompt(catalog_mode: :lazy)
 
+      assert prompt =~ "Configured upstream MCP servers: alpha"
       assert prompt =~ "Upstream catalog: not inlined (catalog mode: lazy)."
-      assert prompt =~ "(catalog/list-servers)"
       assert prompt =~ "(catalog/search-tools"
       assert prompt =~ "(catalog/list-tools"
       assert prompt =~ "(catalog/describe-tool"
       # The detailed frozen catalog body must not leak through.
       refute prompt =~ "alpha:\n  ping()"
+    end
+
+    test ":lazy fallback strips transport metadata from frozen catalog server names" do
+      Catalog.freeze("alpha [transport: stdio]:\n  ping()")
+
+      prompt = Prompt.system_prompt(catalog_mode: :lazy)
+
+      assert prompt =~ "Configured upstream MCP servers: alpha"
+      refute prompt =~ "Configured upstream MCP servers: alpha [transport"
     end
 
     test ":auto preserves the existing inlined catalog body" do

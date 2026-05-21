@@ -652,6 +652,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
 
       assert is_binary(result)
       assert result =~ "github.search(query: string)"
+      assert result =~ "Required args: :query"
       assert result =~ "Use:"
       assert result =~ ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
       assert result =~ "Returns: tagged data"
@@ -682,7 +683,40 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:describe_tool, ["util", "ping"])
 
       assert result =~ "util.ping()"
+      assert result =~ "Required args: none"
       assert result =~ ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
+    end
+
+    test "required args line prevents inferring trace_id from result payloads" do
+      schema = %{
+        name: "get_trace",
+        description: "Get a single trace whose returned payload includes trace_id.",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"id" => %{"type" => "string"}},
+          "required" => ["id"]
+        },
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "trace_id" => %{"type" => "string"},
+            "duration_ms" => %{"type" => "integer"}
+          },
+          "required" => ["trace_id"]
+        }
+      }
+
+      config = %{tools: %{"get_trace" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("observatory", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("observatory", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:describe_tool, ["observatory", "get_trace"])
+
+      assert result =~ "observatory.get_trace(id: string)"
+      assert result =~ "Required args: :id"
+      assert result =~ ~s|:args {:id ...}|
+      refute result =~ ":trace_id ..."
     end
 
     test "describe_tool surfaces input_schema fields for upstream-normalized tools" do

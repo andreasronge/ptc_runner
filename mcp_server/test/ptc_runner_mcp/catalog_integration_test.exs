@@ -56,19 +56,14 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
+      assert String.starts_with?(description, "Tools below. For details:")
       assert description =~ "Configured upstream MCP servers:"
       assert description =~ "alpha:"
       assert description =~ "beta:"
       assert description =~ "3 tools."
       assert description =~ "2 tools."
       assert description =~ "Tools:"
-      assert description =~ "tool_1:"
-      # The lazy-mode discovery block (from CatalogDescription) must
-      # not appear when the inline catalog is present. The authoring
-      # card still documents `catalog/*` as a reference; the refute
-      # here is scoped to the discovery block's unique sentence so a
-      # general authoring-card mention doesn't trip it.
-      refute description =~ "If search reports an unloaded server-level match"
+      assert description =~ "alpha.tool_1(key: string?)"
     end
   end
 
@@ -86,6 +81,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
+      assert String.starts_with?(description, "Tools below. For details:")
       assert description =~ "Configured upstream MCP servers:"
       assert description =~ "srv_a"
       assert description =~ "srv_b"
@@ -110,6 +106,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
+      assert String.starts_with?(description, "Tools below. For details:")
       assert description =~ "Configured upstream MCP servers:"
       assert description =~ "gamma"
       assert description =~ "delta"

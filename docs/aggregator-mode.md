@@ -272,18 +272,23 @@ retry on the next turn.
 
 ## Catalog
 
-In aggregator mode the `lisp_eval` tool description ends
-with an inline catalog block — one entry per configured
-upstream's tools, in the shape:
+In aggregator mode, upstream-capable `lisp_eval` and
+`lisp_session_eval` descriptions start with a short discovery hint:
+use `catalog/search-tools`, `catalog/describe-tool`,
+`catalog/list-tools`, then call the selected upstream with
+`tool/mcp-call`. In inline catalog mode the dynamic tail also includes
+one compact signature per configured upstream tool, in the shape:
 
 ```
-fs:
-  read_text_file(path: string) - Read the contents of a UTF-8 text file
-  list_directory(path: string) - List the entries in a directory
-
-github:
-  search_repos(query: string, limit: integer?) - Search repositories
-  get_pr(owner: string, repo: string, number: integer) - Get a pull request
+Configured upstream MCP servers:
+- fs: Filesystem MCP server. 2 tools. files.
+  Tools:
+  - fs.read_text_file(path: string) Read the contents of a UTF-8 text file
+  - fs.list_directory(path: string) List the entries in a directory
+- github: GitHub MCP server. 2 tools. issues, pull requests.
+  Tools:
+  - github.search_repos(query: string, limit: integer?) Search repositories
+  - github.get_pr(owner: string, repo: string, number: integer) Get a pull request
 ```
 
 ### Reading the catalog
@@ -318,9 +323,9 @@ github:
     `{"type": "string", "enum": ["open","closed"]}` renders as
     `enum<string>`, NOT `string`. Constrained args are exactly
     where the LLM most needs the constraint hint.
-- **Description**: hard-truncated at 80 characters with an
-  ellipsis suffix. Multi-line upstream descriptions collapse to
-  a single line.
+- **Description**: optional prose is normalized to one line and capped.
+  Auto mode budgets required-arg signatures first; descriptions are
+  dropped before the renderer falls back to lazy mode.
 
 ### When the catalog is populated
 
@@ -357,21 +362,22 @@ upstream state.
 
 ### Catalog discovery from PTC-Lisp — `catalog/` builtins
 
-The inline catalog above is a static, truncated snapshot baked
-into the tool description. For programs that need to *inspect*
-the configured upstreams at runtime — enumerate servers, page
-through a server's tools, search across catalogs, or read a tool's
-full input schema — aggregator mode also exposes a `catalog/`
-namespace with five builtins. (Outside aggregator mode these forms
-do not exist.)
+The inline catalog above is a static snapshot baked into the tool
+description. Lazy mode shows configured server names plus discovery
+guidance instead of individual tools. For programs that need to
+*inspect* the configured upstreams at runtime — enumerate servers,
+page through a server's tools, search across catalogs, or read a
+tool's full input schema — aggregator mode exposes a `catalog/`
+namespace with five builtins. (Outside aggregator mode these forms do
+not exist.)
 
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `catalog/summary` | `(catalog/summary)` | A map `{"mode" <catalog-mode-string> "servers" [...] "catalogs_loaded" <bool>}`. Each server entry has `"name"`, `"description"`, `"tool_count"` (`nil` if its `tools/list` isn't cached yet) and, when present, `"capabilities"`. `"catalogs_loaded"` is `true` only when every configured upstream's tool list is cached. |
 | `catalog/list-servers` | `(catalog/list-servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `catalog/list-tools` | `(catalog/list-tools server)`<br>`(catalog/list-tools server opts)` | A list of compact tool maps — `{"server" "tool" "summary" "arg_keys" "read_only"}` — for `server`, sorted by tool name. `opts` is a map: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | A detailed map for one tool: `"server"`, `"tool"`, `"summary"`, `"description"` (untruncated), `"input_schema"` (the upstream's JSON Schema), `"arg_keys"`, `"required"` (the names of required args), `"annotations"`, `"call_example"` (a ready-to-edit `(tool/mcp-call …)` snippet whose `:args` placeholder lists the required keys) and `"response_notes"`. |
-| `catalog/search-tools` | `(catalog/search-tools query)`<br>`(catalog/search-tools query opts)` | A list of compact tool maps — `{"server" "tool" "summary" "arg_keys" "read_only" "catalog_loaded"}` — ranked by lexical relevance to `query` (scoring described below). `opts` is a map: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` a server whose catalog isn't cached contributes a single server-level placeholder — `{"server" <name> "tool" nil "summary" "<desc>. Catalog not loaded." "catalog_loaded" false "next" "(catalog/list-tools \"<name>\" {:limit 20})"}` — instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `catalog/list-tools` | `(catalog/list-tools server)`<br>`(catalog/list-tools server opts)` | A list of compact signature strings such as `github.search(query: string) - Search repositories`, sorted by tool name. `opts` is a map: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | One detailed tool description string. It starts with the compact signature, includes `Required args: ...`, then a ready-to-edit `(tool/mcp-call …)` call example whose `:args` placeholder lists the required keys, and ends with response notes. |
+| `catalog/search-tools` | `(catalog/search-tools query)`<br>`(catalog/search-tools query opts)` | A list of compact signature strings ranked by lexical relevance to `query` (scoring described below). `opts` is a map: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` a server whose catalog isn't cached contributes a single server-level placeholder string with a `catalog/list-tools` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
 
 `catalog/search-tools` ranks each candidate with a deterministic
 lexical score: `query` tokens are matched against the tokenized
