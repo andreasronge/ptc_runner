@@ -636,9 +636,12 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp detailed_tool_text(entry) when is_map(entry) do
     line = catalog_line(entry)
     call_example = Map.fetch!(entry, "call_example")
+    required = Map.get(entry, "required", [])
 
     [
       line,
+      "",
+      "Required args: #{required_args_text(required)}",
       "",
       "Use:",
       call_example,
@@ -646,6 +649,12 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "Returns: tagged data; use `(:value r)` for the unwrapped upstream payload."
     ]
     |> Enum.join("\n")
+  end
+
+  defp required_args_text([]), do: "none"
+
+  defp required_args_text(required) when is_list(required) do
+    Enum.map_join(required, ", ", &":#{&1}")
   end
 
   defp build_call_example(server, name, arg_keys, required) do

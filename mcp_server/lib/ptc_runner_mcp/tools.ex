@@ -1060,7 +1060,16 @@ defmodule PtcRunnerMcp.Tools do
           ""
       end
 
-    profile_note <> aggregator_note <> "\n\n" <> description
+    case capability_profile do
+      :mcp_aggregator -> description <> "\n\n" <> profile_note <> aggregator_note
+      _ -> profile_note <> "\n\n" <> description
+    end
+  end
+
+  defp prepend_response_profile_note(description, :mcp_aggregator, :structured) do
+    description <>
+      "\n\nResponse profile: structured. Calls return compact structuredContent with concise " <>
+      "human-readable text; debug-only observability fields are omitted."
   end
 
   defp prepend_response_profile_note(description, _capability_profile, :structured) do

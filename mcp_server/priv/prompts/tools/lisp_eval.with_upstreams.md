@@ -10,6 +10,12 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
+Tools below. For details:
+- `(catalog/describe-tool "server" "tool")`
+- `(catalog/search-tools "query" {:limit 8})`
+- `(catalog/list-tools "server" {:limit 20})`
+Call: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
+
 One stateless PTC-Lisp program
 Final value = result
 No persistence across calls
@@ -22,12 +28,6 @@ Check `:ok`; `:value` is unwrapped domain data, not MCP envelope. `:raw` optiona
 Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
 
 Unknown result shape:
-- Inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
-- Check `:ok` before using `:value`.
-Example:
-`(let [r (tool/mcp-call {:server s :tool t :args a})]
-   (if (:ok r)
-      (let [v (:value r)]
-      (if (string? v) v (json/generate-string v)))
-      (fail (:message r))))`
+- Check `:ok`; inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
+- Use `(fail (:message r))` for unhandled upstream faults.
 <!-- PTC_PROMPT_END -->

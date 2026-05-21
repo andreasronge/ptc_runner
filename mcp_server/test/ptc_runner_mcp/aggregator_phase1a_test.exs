@@ -337,6 +337,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["message"] =~ "no tool 'unknown' in upstream 'alpha'"
       assert structured(env)["message"] =~ "Known tools include: known"
       assert structured(env)["message"] =~ ~s|(catalog/list-tools "alpha" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "alpha" "tool")|
     end
 
     test "unknown tool suggests a close cached match and describe-tool" do
@@ -419,6 +420,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       assert structured(env)["message"] =~ "Known tools include: search"
       assert structured(env)["message"] =~ ~s|(catalog/list-tools "fake-x" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "fake-x" "tool")|
 
       # The Fake's `call/4` MUST NOT be invoked: programmer-fault
       # surfaces BEFORE the upstream call, so the test-only counter

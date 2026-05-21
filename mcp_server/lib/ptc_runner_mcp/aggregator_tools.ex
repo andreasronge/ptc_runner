@@ -617,7 +617,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
 
   defp tool_discovery_hint(server) do
     "\nHint: use (catalog/list-tools \"#{server}\" {:limit 20}) or " <>
-      "(catalog/search-tools \"query\" {:limit 8})."
+      "(catalog/search-tools \"query\" {:limit 8}); then use " <>
+      "(catalog/describe-tool \"#{server}\" \"tool\") for required args and a call example."
   end
 
   defp describe_tool_hint(registry, server, tool) do
@@ -628,7 +629,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
       end
 
     summary <>
-      "\nHint: use (catalog/describe-tool \"#{server}\" \"#{tool}\") for input_schema, call_example, and response notes."
+      "\nHint: use (catalog/describe-tool \"#{server}\" \"#{tool}\") for required args and a call example."
   end
 
   defp known_tools_hint(server, attempted_tool, tools) do

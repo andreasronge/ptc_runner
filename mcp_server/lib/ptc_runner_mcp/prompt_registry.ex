@@ -381,8 +381,13 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_unknown_content_guidance(_), do: ""
 
-  defp agentic_upstream_catalog(_catalog, :lazy) do
-    CatalogPrompt.agentic_discovery_block()
+  defp agentic_upstream_catalog(catalog, :lazy) do
+    [
+      lazy_catalog_server_names(catalog),
+      CatalogPrompt.agentic_discovery_block()
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n\n")
   end
 
   defp agentic_upstream_catalog(catalog, :auto) do
@@ -397,6 +402,42 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_upstream_catalog("", _mode), do: "Upstream catalog:\n(no upstream catalog frozen)"
   defp agentic_upstream_catalog(catalog, _mode), do: "Upstream catalog:\n#{catalog}"
+
+  defp lazy_catalog_server_names(catalog) do
+    snapshot = Catalog.frozen_snapshot()
+    config = %{CatalogConfig.get() | catalog_mode: :lazy}
+
+    case CatalogDescription.render_for_entries(snapshot, config) do
+      nil -> server_names_from_catalog_text(catalog)
+      server_names -> server_names
+    end
+  end
+
+  defp server_names_from_catalog_text(catalog) when is_binary(catalog) do
+    names =
+      catalog
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^(\S.*):\s*$/, line) do
+          [_, header] -> [strip_catalog_header_metadata(header)]
+          _ -> []
+        end
+      end)
+      |> Enum.reject(&(&1 == ""))
+
+    case names do
+      [] -> nil
+      _ -> "Configured upstream MCP servers: " <> Enum.join(names, ", ")
+    end
+  end
+
+  defp server_names_from_catalog_text(_catalog), do: nil
+
+  defp strip_catalog_header_metadata(header) do
+    header
+    |> String.replace(~r/\s+\[[^\]]+\]\s*$/, "")
+    |> String.trim()
+  end
 
   defp agentic_final_recap do
     """

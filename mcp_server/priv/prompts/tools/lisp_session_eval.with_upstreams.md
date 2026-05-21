@@ -10,11 +10,16 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
+Tools below. For details:
+- `(catalog/describe-tool "server" "tool")`
+- `(catalog/search-tools "query" {:limit 8})`
+- `(catalog/list-tools "server" {:limit 20})`
+Call: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
+
 Evaluates PTC-Lisp against committed session memory
-- Requires `session_id` and `program`
 - `def`/`defn` persist for later evals in the same session
 - Use `let` for temporary values
-- Optional `output_schema` validates the program result; on mismatch, session state is not committed.
+- `output_schema` validates result; mismatch rejects the commit.
 
 Upstreams:
 `(tool/mcp-call {:server s :tool t :args {...}})`
@@ -24,12 +29,6 @@ Check `:ok`; `:value` is unwrapped domain data.
 Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
 
 Unknown result shape:
-- Inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
-- Check `:ok` before using `:value`.
-Example:
-`(let [r (tool/mcp-call {:server s :tool t :args a})]
-   (if (:ok r)
-      (let [v (:value r)]
-      (if (string? v) v (json/generate-string v)))
-      (fail (:message r))))`
+- Check `:ok`; inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
+- Use `(fail (:message r))` for unhandled upstream faults.
 <!-- PTC_PROMPT_END -->
