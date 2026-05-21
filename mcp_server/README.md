@@ -1,101 +1,106 @@
 # ptc_runner_mcp
 
-An [MCP](https://modelcontextprotocol.io/) server that exposes
-[PtcRunner](../README.md)'s PTC-Lisp sandbox to any
-MCP client (Claude Desktop, Cursor, Cline, Claude Code, …) over stdio
-JSON-RPC, with an opt-in Streamable HTTP mode for private-network
-deployments. The default tool, `lisp_eval`, accepts a PTC-Lisp
-program plus optional `context` and `output_schema`, runs it in an isolated BEAM process (1 s wall-clock,
-10 MB memory; 10 s / 100 MB in [aggregator mode](../docs/aggregator-mode.md)),
-and returns a structured result. No filesystem, no network, no
-arbitrary process exec — only PTC-Lisp built-ins and `println`.
+`ptc_runner_mcp` is a standalone MCP server for coding agents and other
+MCP clients. It gives the client a safe **code mode** backed by
+PTC-Lisp, plus optional modes for aggregating upstream MCP tools,
+stateful Lisp sessions, diagnostics, and private-network HTTP
+deployment.
 
-The server has no LLM. The MCP client's LLM does the reasoning;
-PtcRunner is invoked only when deterministic computation is useful.
+The server does not contain an LLM. Your MCP client or agent does the
+reasoning; `ptc_runner_mcp` runs bounded, deterministic work when the
+model needs help with counting, filtering, reshaping JSON, validating
+schemas, or composing MCP tool results.
 
-For the conceptual overview (when to use it, comparison with Python /
-JS execution servers, security model, architecture), see
+For the deeper rationale, architecture, and security model, see
 [`docs/mcp-server.md`](../docs/mcp-server.md).
 
-## Install
+## Why Use It
 
-Requires Elixir 1.15+ / Erlang OTP 26+ (see `mcp_server/mix.exs`).
+PTC-Lisp is intentionally smaller than Python or JavaScript execution
+servers:
 
-The intended distribution channel is a standalone `ptc_runner_mcp`
-binary from GitHub Releases. Until those artifacts are published, build
-the local Mix release from source.
+- no filesystem, network, or process execution from the program;
+- per-call resource limits and bounded concurrency;
+- structured errors that an LLM can repair from;
+- optional JSON Schema validation for machine-readable results;
+- no cross-call state unless explicit session tools are enabled;
+- upstream MCP access only through configured, mediated calls in
+  aggregator mode.
 
-### Planned GitHub releases
+The practical advantage is that the sandbox is part of the language
+surface, not something you have to recreate with containers around a
+general-purpose interpreter.
 
-Release artifacts should be archives containing the Mix release output
-for one OS/architecture pair. The first supported target should be
-Apple Silicon macOS, with Intel macOS, Linux, and Windows added as CI
-coverage and packaging are proven.
+Each program runs in its own lightweight BEAM process. If a program is
+slow, too large, or crashes, the server can kill just that worker and
+keep serving other requests. This gives PtcRunner process-level
+isolation without the startup cost of a container or Python sandbox per
+call, and lets the server handle concurrent calls while keeping MCP and
+upstream connections warm.
 
-Expected channels:
+## Core Ideas
 
-- Snapshot builds from the latest `main`, published as prerelease
-  artifacts for testing current work.
-- Versioned releases from tags, published as stable GitHub Releases.
-- `SHA256SUMS` for every archive, generated in CI after packaging and
-  verified by install scripts before extraction.
+**Code mode.** The default tool, `lisp_eval`, accepts a PTC-Lisp
+program plus optional JSON `context` and `output_schema`. The program
+runs in an isolated BEAM process and returns a compact MCP tool result.
+Use it for deterministic computation that LLMs often do unreliably:
+counts, sums, filters, schema-shaped extraction, and data reshaping.
 
-### Source build (Mix release)
+**MCP aggregation.** With an upstream config file, PTC-Lisp programs
+can call other MCP servers through `(tool/mcp-call ...)`. One
+sandboxed program can search, filter, join, and reduce upstream tool
+results before the final answer reaches the LLM. This reduces
+round-trips and context size without exposing arbitrary I/O to the
+program.
+
+**Server deployment.** The same executable can run as a local stdio MCP
+server for desktop/coding agents, or as a Streamable HTTP MCP endpoint
+for private-network deployments.
+
+## Modes
+
+| Mode | Enable with | What it adds |
+|---|---|---|
+| Stdio | default `start` | Local MCP subprocess for Claude Desktop, Cursor, Cline, Claude Code, and similar clients. |
+| HTTP | `--http` | Streamable HTTP endpoint with bearer auth, health/readiness endpoints, and session ids. |
+| Aggregator | `--upstreams-config <path>` | Lets `lisp_eval` programs call configured upstream MCP servers. |
+| Sessions | `--sessions` | Adds `lisp_session_*` tools with explicit persisted Lisp bindings and bounded history. |
+| Agentic | `--agentic` | Adds experimental `lisp_task`, a natural-language task tool backed by a planner LLM. Requires aggregator mode. |
+| Diagnostics | `--debug-tool`, `--trace-dir` | Adds `lisp_debug` and/or per-call JSONL traces for troubleshooting. |
+
+Full flag reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md).
+
+## Install on macOS
+
+Current packaged support is macOS. Download the `ptc_runner_mcp`
+archive for your Mac from the project release artifacts, unpack it,
+and use the executable inside the release directory.
+
+Smoke test:
 
 ```bash
-git clone https://github.com/andreasronge/ptc_runner
-cd ptc_runner/mcp_server
-mix deps.get
-MIX_ENV=prod mix release
+/absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp version
 ```
 
-The release binary lands at
-`_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp`. Smoke-test it:
+If macOS blocks an unsigned local binary, right-click it once and
+choose Open, or remove the quarantine attribute:
 
 ```bash
-_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp version
-# → ptc_runner_mcp 0.1.0
+xattr -d com.apple.quarantine /absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp
 ```
 
-The MCP `initialize` response advertises the package version plus build
-metadata. When built from a git checkout, `serverInfo.version` uses SemVer
-build metadata such as `0.1.0+abc123def456`, and `serverInfo.build` includes
-the compile-time `git_commit` and `git_dirty` fields. CI or packaging scripts
-can override these with `PTC_RUNNER_MCP_GIT_COMMIT` and
-`PTC_RUNNER_MCP_GIT_DIRTY`.
+Building from source, release internals, and remote IEx debugging are
+covered in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-### In-tree development
+## Use From A Coding Agent
 
-From `mcp_server/`:
-
-```bash
-mix deps.get
-mix mcp.run        # foreground, stdio attached
-```
-
-Equivalent to `mix run --no-halt` — convenient for local iteration
-before cutting a release.
-
-> macOS note: unsigned binaries built locally trigger Gatekeeper on
-> first launch. Right-click → Open, or
-> `xattr -d com.apple.quarantine <path>`.
-
-## Wire it into an MCP client
-
-The server speaks NDJSON-framed JSON-RPC 2.0 on stdio. Point any MCP
-client at the release binary (or a wrapper that runs `mix mcp.run`
-from the source tree).
-
-### Claude Desktop — `claude_desktop_config.json`
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
-on macOS (Windows / Linux equivalents apply) and add:
+Most local MCP clients should run the server in stdio mode:
 
 ```json
 {
   "mcpServers": {
     "ptc-runner": {
-      "command": "/absolute/path/to/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp",
+      "command": "/absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp",
       "args": ["start"],
       "env": {}
     }
@@ -103,128 +108,88 @@ on macOS (Windows / Linux equivalents apply) and add:
 }
 ```
 
-Restart Claude Desktop. The `lisp_eval` tool appears in the
-tool palette.
-
-### Cline (VS Code) — `cline_mcp_settings.json`
-
-Open the Cline settings file (Command Palette → "Cline: Open MCP
-Settings") and add:
-
-```json
-{
-  "mcpServers": {
-    "ptc-runner": {
-      "command": "/absolute/path/to/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp",
-      "args": ["start"],
-      "env": {},
-      "disabled": false,
-      "autoApprove": []
-    }
-  }
-}
-```
-
-### Cursor — `mcp.json`
-
-Place at `~/.cursor/mcp.json` (or `<project>/.cursor/mcp.json` for a
-project-scoped server):
-
-```json
-{
-  "mcpServers": {
-    "ptc-runner": {
-      "command": "/absolute/path/to/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp",
-      "args": ["start"],
-      "env": {}
-    }
-  }
-}
-```
-
-### Claude Code — `claude mcp add`
+Use the same shape for Claude Desktop, Cursor, Cline, and other clients
+that accept MCP JSON config. For Claude Code:
 
 ```bash
 claude mcp add ptc-runner \
-  /absolute/path/to/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp \
+  /absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp \
   start
 ```
 
-To pass configuration flags through any of these clients, append them
-to the `args` array (e.g., `"args": ["start", "--max-frame-bytes", "8388608"]`).
+To pass options, append them after `start`:
 
-## Streamable HTTP mode
+```json
+"args": ["start", "--sessions", "--trace-dir", "/tmp/ptc-traces"]
+```
 
-HTTP mode is opt-in and intended for service deployments, not local
-desktop MCP client configs:
+The release defaults `RELEASE_DISTRIBUTION=none`, so multiple clients
+or health probes can launch independent stdio subprocesses without
+colliding on an Erlang node name.
+
+## Aggregator Example
+
+Create an upstream config:
+
+```json
+{
+  "upstreams": {
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/sandbox"]
+    }
+  }
+}
+```
+
+Start the MCP server with:
+
+```json
+"args": ["start", "--upstreams-config", "/absolute/path/to/upstreams.json"]
+```
+
+`lisp_eval` can now use `(tool/mcp-call ...)` to call the configured
+`fs` server from inside one bounded PTC-Lisp program. See
+[`docs/aggregator-mode.md`](../docs/aggregator-mode.md) for the
+authoring model, catalog discovery, error semantics, credentials, and
+HTTP upstreams.
+
+## Deploy As A Server
+
+HTTP mode is opt-in and intended for private-network deployments behind
+a trusted TLS edge or load balancer:
 
 ```bash
 export PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)"
-_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp start \
+
+/absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp start \
   --http \
   --http-auth-token "$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN"
 ```
 
-The default endpoint is `POST /mcp` on `127.0.0.1:7332`. The first
-client request initializes an HTTP protocol session and receives an
-`MCP-Session-Id`; later POST/DELETE requests send that id. `GET /health`
-is liveness and `GET /ready` is load-balancer readiness.
+Defaults:
 
-See [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
-for the private-network deployment runbook and
-[`docs/mcp-server-configuration.md#streamable-http-flags`](../docs/mcp-server-configuration.md#streamable-http-flags)
-for all HTTP flags.
+- MCP endpoint: `POST /mcp`
+- bind: `127.0.0.1:7332`
+- liveness: `GET /health`
+- readiness: `GET /ready`
 
-## Features
+For non-loopback binds, auth is required unless you explicitly opt into
+unsafe networking. Use
+[`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
+as the deployment runbook.
 
-The server is one binary with several opt-in capabilities. Each links
-to its own doc.
+## More Docs
 
-| Feature | Default | Doc |
-|---|---|---|
-| `lisp_eval` (sealed sandbox) | on | [`docs/mcp-server.md`](../docs/mcp-server.md) |
-| **Aggregator mode** — call configured upstream MCP servers from inside the sandbox via `(tool/mcp-call ...)` | off; enabled by `--upstreams-config` | [`docs/aggregator-mode.md`](../docs/aggregator-mode.md) |
-| **Agentic mode** — `lisp_task`, a natural-language task tool backed by a planner LLM (requires aggregator mode) | off; `--agentic` | [`docs/agentic-mode.md`](../docs/agentic-mode.md) |
-| **Stateful sessions** — `lisp_session_*` tools that persist `(def ...)` bindings, `*1`/`*2`/`*3`, and history | off; `--sessions` | [`docs/mcp-server.md`](../docs/mcp-server.md#stateful-sessions) |
-| **Diagnostics** — `lisp_debug` for in-process telemetry rollups | off; `--debug-tool` | [`docs/mcp-debug.md`](../docs/mcp-debug.md) |
-| **Response profiles** — `slim` / `structured` / `debug` | `slim` | [`docs/mcp-server-configuration.md#response-profiles`](../docs/mcp-server-configuration.md#response-profiles) |
-| **Tracing** — per-call JSONL traces, viewable via `mix ptc.viewer` | off; `--trace-dir` | [`docs/mcp-server-configuration.md#tracing`](../docs/mcp-server-configuration.md#tracing) |
-| **Streamable HTTP** — private-network MCP endpoint with session ids, bearer auth, health/readiness, and HTTP telemetry | off; `--http` | [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md) |
-
-For every flag and environment variable, see
-[`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md).
-
-## Lifecycle commands
-
-The release binary defaults `RELEASE_DISTRIBUTION=none` so MCP clients
-can run multiple stdio subprocesses concurrently without Erlang
-node-name collisions:
-
-```bash
-ptc_runner_mcp start      # foreground, stdio attached (what MCP clients use)
-ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
-```
-
-For remote IEx debugging, start the process with distribution enabled
-and a unique node name, then attach with the same settings:
-
-```bash
-RELEASE_DISTRIBUTION=sname RELEASE_NODE=ptc_runner_mcp_debug_1 ptc_runner_mcp start
-RELEASE_DISTRIBUTION=sname RELEASE_NODE=ptc_runner_mcp_debug_1 ptc_runner_mcp remote
-```
-
-## Links
-
-- Conceptual overview: [`docs/mcp-server.md`](../docs/mcp-server.md)
-- Configuration reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md)
-- HTTP deployment: [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
+- Conceptual overview and security model: [`docs/mcp-server.md`](../docs/mcp-server.md)
+- Full configuration reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md)
 - Aggregator mode: [`docs/aggregator-mode.md`](../docs/aggregator-mode.md)
-- Agentic mode (`lisp_task`): [`docs/agentic-mode.md`](../docs/agentic-mode.md)
-- Diagnostics (`lisp_debug`): [`docs/mcp-debug.md`](../docs/mcp-debug.md)
-- Getting-started walkthrough: [`docs/guides/mcp-getting-started.md`](../docs/guides/mcp-getting-started.md)
+- Agentic mode: [`docs/agentic-mode.md`](../docs/agentic-mode.md)
+- HTTP deployment: [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
+- Diagnostics: [`docs/mcp-debug.md`](../docs/mcp-debug.md)
+- First raw JSON-RPC call: [`docs/guides/mcp-getting-started.md`](../docs/guides/mcp-getting-started.md)
 - PTC-Lisp language reference: [`docs/ptc-lisp-specification.md`](../docs/ptc-lisp-specification.md)
-- PtcRunner repo: <https://github.com/andreasronge/ptc_runner>
-- Model Context Protocol: <https://modelcontextprotocol.io/>
+- Developer/build/debug notes: [DEVELOPMENT.md](DEVELOPMENT.md)
 
 ## License
 
