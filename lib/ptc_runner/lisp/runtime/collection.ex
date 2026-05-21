@@ -19,6 +19,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
 
+  defguardp is_sort_key(key)
+            when is_atom(key) or is_binary(key) or is_list(key) or is_struct(key, LispKeyword)
+
   # ============================================================
   # Selection operations (delegated to Collection.Select)
   # ============================================================
@@ -77,6 +80,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: invalid comparator: #{inspect(other)}. Expected :asc, :desc, or a function of 2 arguments."
   end
 
+  defp sort_keyfn(key) when is_sort_key(key), do: &FlexAccess.flex_get(&1, key)
+  defp sort_keyfn(keyfn), do: &Callable.call(keyfn, [&1])
+
   defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
 
   defp validate_n(n, name),
@@ -105,13 +111,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def sort_by(_keyfn, nil), do: []
 
   # sort_by with 2 args: (keyfn/key, coll)
-  def sort_by(key, coll)
-      when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
-    Enum.sort_by(coll, &FlexAccess.flex_get(&1, key))
-  end
+  def sort_by(key, coll) when is_list(coll) and is_sort_key(key),
+    do: Enum.sort_by(coll, sort_keyfn(key))
 
   def sort_by(keyfn, coll) when is_list(coll) do
-    Enum.sort_by(coll, &Callable.call(keyfn, [&1]))
+    Enum.sort_by(coll, sort_keyfn(keyfn))
   end
 
   def sort_by(keyfn, coll) when is_binary(coll) do
@@ -126,14 +130,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
-  # sort_by with 3 args: (keyfn/key, comparator, coll)
-  def sort_by(key, comp, coll)
-      when is_list(coll) and (is_atom(key) or is_binary(key) or is_list(key)) do
-    Enum.sort_by(coll, &FlexAccess.flex_get(&1, key), wrap_comparator(comp))
+  def sort_by(keyfn, coll) do
+    Enum.sort_by(Normalize.to_seq(coll), sort_keyfn(keyfn))
   end
 
+  # sort_by with 3 args: (keyfn/key, comparator, coll)
+  def sort_by(key, comp, coll) when is_list(coll) and is_sort_key(key),
+    do: Enum.sort_by(coll, sort_keyfn(key), wrap_comparator(comp))
+
   def sort_by(keyfn, comp, coll) when is_list(coll) do
-    Enum.sort_by(coll, &Callable.call(keyfn, [&1]), wrap_comparator(comp))
+    Enum.sort_by(coll, sort_keyfn(keyfn), wrap_comparator(comp))
+  end
+
+  def sort_by(keyfn, comp, coll) when is_binary(coll) do
+    Enum.sort_by(Normalize.graphemes(coll), &Callable.call(keyfn, [&1]), wrap_comparator(comp))
   end
 
   def sort_by(keyfn, comp, %MapSet{} = set), do: sort_by(keyfn, comp, MapSet.to_list(set))
@@ -142,6 +152,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll
     |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end, wrap_comparator(comp))
     |> Enum.map(fn {k, v} -> [k, v] end)
+  end
+
+  def sort_by(keyfn, comp, coll) do
+    Enum.sort_by(Normalize.to_seq(coll), sort_keyfn(keyfn), wrap_comparator(comp))
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)

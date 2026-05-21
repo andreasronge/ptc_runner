@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Runtime.Collection
   alias PtcRunner.Step
 
   describe "group-by with destructuring" do
@@ -1962,6 +1963,37 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   # ============================================================
 
   describe "sort-by on maps" do
+    test "sort-by accepts mapped list results" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(sort-by :day (map (fn [x] x) [{:day 2} {:day 1}]))|)
+
+      assert result == [%{"day" => 1}, %{"day" => 2}]
+    end
+
+    test "sort-by accepts lazy seqable collections" do
+      coll = Stream.map([%{day: 2}, %{day: 1}], & &1)
+
+      assert Collection.sort_by(:day, coll) == [%{day: 1}, %{day: 2}]
+    end
+
+    test "sort-by with comparator accepts lazy seqable collections" do
+      coll = Stream.map([%{day: 2}, %{day: 1}], & &1)
+
+      assert Collection.sort_by(:day, :desc, coll) == [%{day: 2}, %{day: 1}]
+    end
+
+    test "sort-by with keyword on string keeps grapheme order" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by :foo "ba")|)
+
+      assert result == ["b", "a"]
+    end
+
+    test "sort-by with novel keyword on string keeps grapheme order" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by :novel-runtime-keyword "ba")|)
+
+      assert result == ["b", "a"]
+    end
+
     test "sort-by on map returns sorted list of pairs" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(sort-by second {:a 3 :b 1 :c 2})|)
       assert result == [["b", 1], ["c", 2], ["a", 3]]
