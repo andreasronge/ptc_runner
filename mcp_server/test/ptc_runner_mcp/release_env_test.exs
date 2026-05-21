@@ -3,6 +3,23 @@ defmodule PtcRunnerMcp.ReleaseEnvTest do
 
   @env_sh Path.expand("../../rel/env.sh.eex", __DIR__)
 
+  test "release env shim forces Erlang distribution off" do
+    assert {distribution, 0} =
+             System.cmd(
+               "/bin/sh",
+               [
+                 "-c",
+                 """
+                 . "#{@env_sh}"
+                 printf '%s' "$RELEASE_DISTRIBUTION"
+                 """
+               ],
+               env: [{"RELEASE_DISTRIBUTION", "sname"}]
+             )
+
+    assert distribution == "none"
+  end
+
   test "release env shim preserves repeated --http-allowed-origin flags" do
     assert {origins, 0} =
              System.cmd("/bin/sh", [
