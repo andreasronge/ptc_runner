@@ -100,13 +100,15 @@ Before code mode, you designed MCP tools for the questions you thought people wo
 
 Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory, REPL-like way: run something, look at the shape, run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions. ptc_runner leans into it directly with a session mode, where definitions persist across calls so the model can build up state the way you would in a real REPL.
 
+The performance story follows from that programming model. A ptc_runner session is a bounded REPL, not a disposable job sandbox. The model can define helpers once, keep intermediate findings in the runtime, and continue the investigation on the next turn. The point is not only that each eval is cheap. It is that the model gets a small workspace outside the context window, so it does not have to rebuild the same world every time it asks the next question.[^perf]
+
 So you do not have to front-load all the cleverness into your tools anymore. You can ship simple, boring servers that expose primitives, and let the code-mode client compose the logic per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that is a real simplification: stop pre-optimizing tools for imagined workloads, ship the primitive, and let the questions find their own programs.
 
-## One thing it is not
+## Tool lists are context too
 
-I should be clear about a line I am deliberately holding. The piece of ptc_runner that lets a program call several upstream MCP servers and combine their results is one deterministic step. It is not an MCP gateway, and it is not a management product, and I do not want it to grow into one. It should stay a small, predictable execution layer.
+The same idea applies before the first tool call. MCP tool lists can get large fast. Every server brings names, descriptions, schemas, examples, and response shapes, and most of that is irrelevant to the task in front of you. If all of it is pushed into the prompt up front, tool discovery becomes another version of the context-window problem.
 
-When you have a mature workflow that runs the same way every time, write it as ordinary application code. When you need the model to exercise judgment between steps, that is a different kind of tool. The value of the execution layer comes from staying narrow. The moment it tries to be a platform, it stops being the thing that is easy to reason about, and reasoning about it easily was the entire point.
+ptc_runner can make the tool catalog part of the runtime instead. A program can ask which upstream servers exist with `(catalog/list-servers)`, search for a relevant capability with `(catalog/search-tools "calendar")`, list one server's tools with `(catalog/list-tools "calendar")`, and pull the details for a single tool with `(catalog/describe-tool "calendar" "search_events")`. In a session, that means the model can explore the available tools the same way it explores the data: ask for the next small piece of structure, bind what it learned, and continue. The model does not need to carry every possible tool in its head just in case one of them matters.
 
 ## Simplify until it disappears
 
@@ -119,3 +121,5 @@ Code mode is the right idea. The win does not come from handing the model the bi
 ---
 
 *[ptc_runner on GitHub](https://github.com/andreasronge/ptc_runner) · [Hex package](https://hex.pm/packages/ptc_runner) · [Documentation](https://hexdocs.pm/ptc_runner)*
+
+[^perf]: Local development numbers, not a portable benchmark: loopback HTTP MCP, no upstream calls, warning logs, Python `urllib` client. With reused sessions, 1024 requests per point, `(+ 1 2)` measured about 1.5 ms p50 at concurrency 1 and about 3,500 requests/sec at concurrency 16; `(reduce + 0 (range 10000))` measured about 2.8 ms p50 at concurrency 1 and about 3,200 requests/sec at concurrency 16. Without session reuse, each request pays the full MCP lifecycle (`initialize -> initialized notification -> lisp_eval -> DELETE`); in 512 full request cycles, tiny eval throughput dropped to about 1,000 requests/sec at concurrency 16, with p50 full-cycle latency around 15 ms.
