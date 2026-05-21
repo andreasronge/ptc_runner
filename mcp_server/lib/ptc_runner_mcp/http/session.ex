@@ -91,7 +91,7 @@ defmodule PtcRunnerMcp.Http.Session do
   end
 
   @impl GenServer
-  def handle_call({:request, frame, waiter, context}, _from, state) do
+  def handle_call({:request, frame, waiter, context}, from, state) do
     state = touch(state)
 
     case dispatch(frame, state, context) do
@@ -104,8 +104,8 @@ defmodule PtcRunnerMcp.Http.Session do
       {:async_call, request_id, work_fn, on_busy, on_discard, lifecycle} ->
         state = apply_lifecycle(state, lifecycle)
 
-        case start_async(state, request_id, work_fn, on_busy, on_discard, waiter) do
-          {:ok, state} -> {:reply, :accepted, state}
+        case start_async(state, request_id, work_fn, on_busy, on_discard, waiter, from) do
+          {:ok, state} -> {:noreply, state}
           {:reply, reply, state} -> {:reply, {:reply, reply}, state}
         end
 
@@ -166,7 +166,7 @@ defmodule PtcRunnerMcp.Http.Session do
   @impl GenServer
   def handle_info({:async_reply, request_id, envelope}, state) do
     case Map.fetch(state.in_flight, request_id) do
-      {:ok, %{ref: ref, waiter: waiter, waiter_ref: waiter_ref}} ->
+      {:ok, %{ref: ref, waiter_ref: waiter_ref, from: from}} ->
         Log.log(:info, "tools_call_stop", %{
           request_id: request_id,
           is_error: Map.get(envelope, "isError")
@@ -174,7 +174,7 @@ defmodule PtcRunnerMcp.Http.Session do
 
         Process.demonitor(ref, [:flush])
         Process.demonitor(waiter_ref, [:flush])
-        send(waiter, {:ptc_http_reply, request_id, success_reply(request_id, envelope)})
+        GenServer.reply(from, {:reply, success_reply(request_id, envelope)})
         {:noreply, state |> remove_in_flight(request_id) |> touch()}
 
       :error ->
@@ -192,8 +192,8 @@ defmodule PtcRunnerMcp.Http.Session do
             _ -> error_reply(request_id, -32_603, "Internal error")
           end
 
-        waiter = get_in(state.in_flight, [request_id, :waiter])
-        if waiter, do: send(waiter, {:ptc_http_reply, request_id, reply})
+        from = get_in(state.in_flight, [request_id, :from])
+        if from, do: GenServer.reply(from, {:reply, reply})
         {:noreply, state |> remove_in_flight(request_id) |> touch()}
 
       :error ->
@@ -229,7 +229,7 @@ defmodule PtcRunnerMcp.Http.Session do
     )
   end
 
-  defp start_async(state, request_id, work_fn, on_busy, on_discard, waiter) do
+  defp start_async(state, request_id, work_fn, on_busy, on_discard, waiter, from) do
     cond do
       Map.has_key?(state.in_flight, request_id) ->
         safe_invoke(on_discard)
@@ -244,7 +244,7 @@ defmodule PtcRunnerMcp.Http.Session do
       true ->
         case ConcurrencyGate.try_acquire_tracked(Limits.max_concurrent_calls()) do
           {:ok, permit} ->
-            {:ok, spawn_worker(state, request_id, work_fn, on_discard, waiter, permit)}
+            {:ok, spawn_worker(state, request_id, work_fn, on_discard, waiter, from, permit)}
 
           :full ->
             Telemetry.emit(
@@ -260,7 +260,7 @@ defmodule PtcRunnerMcp.Http.Session do
     end
   end
 
-  defp spawn_worker(state, request_id, work_fn, on_discard, waiter, permit) do
+  defp spawn_worker(state, request_id, work_fn, on_discard, waiter, from, permit) do
     parent = self()
     waiter_ref = Process.monitor(waiter)
 
@@ -278,8 +278,8 @@ defmodule PtcRunnerMcp.Http.Session do
           Map.put(state.in_flight, request_id, %{
             pid: pid,
             ref: ref,
-            waiter: waiter,
             waiter_ref: waiter_ref,
+            from: from,
             permit: permit,
             on_discard: on_discard
           }),
@@ -289,12 +289,12 @@ defmodule PtcRunnerMcp.Http.Session do
 
   defp cancel_request(state, request_id, reason, opts \\ []) do
     case Map.fetch(state.in_flight, request_id) do
-      {:ok, %{pid: pid, ref: ref, waiter: waiter}} ->
+      {:ok, %{pid: pid, ref: ref, from: from}} ->
         Process.demonitor(ref, [:flush])
         Process.exit(pid, :kill)
 
         if Keyword.get(opts, :reply?, true) do
-          send(waiter, {:ptc_http_reply, request_id, cancelled_reply(request_id)})
+          GenServer.reply(from, {:reply, cancelled_reply(request_id)})
         end
 
         Telemetry.emit([:cancelled], %{count: 1}, telemetry_meta(state, reason))
