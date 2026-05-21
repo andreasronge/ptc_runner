@@ -158,12 +158,14 @@ defmodule PtcRunnerMcp.Http.Router do
       conn = put_session_private(conn, owner, meta)
 
       if Map.has_key?(frame, "id") do
-        case Session.request(meta.pid, frame, request_context(conn, owner, meta)) do
+        timeout_ms = worker_await_timeout_ms(frame)
+
+        case request_session(meta.pid, frame, request_context(conn, owner, meta), timeout_ms) do
           {:reply, reply} ->
             json(conn, 200, reply)
 
           :accepted ->
-            await_reply(conn, meta.pid, Map.get(frame, "id"), worker_await_timeout_ms(frame))
+            await_reply(conn, meta.pid, Map.get(frame, "id"), timeout_ms)
         end
       else
         _ = Session.notify_or_response(meta.pid, frame)
@@ -218,6 +220,24 @@ defmodule PtcRunnerMcp.Http.Router do
         _ = Session.cancel(session_pid, id, :await_timeout)
         json(conn, 200, server_error(id, "request timed out"))
     end
+  end
+
+  defp request_session(session_pid, frame, context, timeout_ms) do
+    Session.request(session_pid, frame, context, timeout_ms)
+  catch
+    :exit, {:timeout, _} ->
+      safe_cancel_session(session_pid, frame_id(frame), :await_timeout)
+      {:reply, server_error(frame_id(frame), "request timed out")}
+
+    :exit, _reason ->
+      {:reply, server_error(frame_id(frame), "session unavailable")}
+  end
+
+  defp safe_cancel_session(session_pid, request_id, reason) do
+    _ = Session.cancel(session_pid, request_id, reason)
+    :ok
+  catch
+    :exit, _reason -> :ok
   end
 
   defp authenticate(conn, cfg) do
