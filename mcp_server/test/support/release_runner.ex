@@ -69,8 +69,9 @@ defmodule PtcRunnerMcp.Test.ReleaseRunner do
     * `:timeout_ms` — kill the subprocess if it does not exit within
       this many milliseconds. Default `15_000`.
     * `:env` — extra environment variables (list of `{name, value}`).
-      `RELEASE_DISTRIBUTION=none` is always added so concurrent test
-      runs do not collide on the default `sname`.
+      The release itself forces `RELEASE_DISTRIBUTION=none`; this
+      helper also passes it explicitly so older local release artifacts
+      keep the same no-collision behavior.
     * `:args` — release-binary args (default `["start"]`).
     * `:bin` — override the release binary path (mostly for tests of
       this helper itself).

@@ -196,14 +196,12 @@ For every flag and environment variable, see
 
 ## Lifecycle commands
 
-The release binary supports the standard Mix release lifecycle:
+The release binary forces `RELEASE_DISTRIBUTION=none` so MCP clients can
+run multiple stdio subprocesses concurrently without Erlang node-name
+collisions:
 
 ```bash
 ptc_runner_mcp start      # foreground, stdio attached (what MCP clients use)
-ptc_runner_mcp daemon     # background
-ptc_runner_mcp stop
-ptc_runner_mcp restart
-ptc_runner_mcp remote     # IEx attached to a running node
 ptc_runner_mcp version    # print "ptc_runner_mcp <version>"
 ```
 
