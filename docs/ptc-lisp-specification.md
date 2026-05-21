@@ -2435,17 +2435,18 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `=` | `(= x y)` | Equality |
-| `not=` | `(not= x y)` | Inequality |
+| `=` | `(= x)`, `(= x y & more)` | Equality |
+| `not=` | `(not= x)`, `(not= x y & more)` | Inequality |
 | `<` | `(< x y)` | Less than |
 | `>` | `(> x y)` | Greater than |
 | `<=` | `(<= x y)` | Less or equal |
 | `>=` | `(>= x y)` | Greater or equal |
 
-**Note:** Comparison operators in PTC-Lisp are strictly 2-arity. Chained comparisons like `(< 1 2 3)` are **not supported**. Use `and` to combine comparisons: `(and (< 1 2) (< 2 3))`.
+**Note:** Ordered comparison operators in PTC-Lisp are strictly 2-arity. Chained comparisons like `(< 1 2 3)` are **not supported**. Use `and` to combine comparisons: `(and (< 1 2) (< 2 3))`. Equality operators (`=`, `==`, `not=`) are variadic but require at least one argument.
 
 ```clojure
 (= 1 1)         ; => true
+(= 1 1 1)       ; => true
 (= 1 2)         ; => false
 (not= 1 2)      ; => true
 (< 1 2)         ; => true

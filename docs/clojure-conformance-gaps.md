@@ -213,7 +213,7 @@ All collection operations are eager. `(range)` without arguments is not supporte
 
 **Rationale:** Sandbox safety and simplicity. All operations must complete within timeout.
 
-### DIV-03: Comparison operators are strictly 2-arity
+### DIV-03: Ordered comparison operators are strictly 2-arity
 
 | Field | Value |
 |-------|-------|
@@ -227,6 +227,8 @@ All collection operations are eager. `(range)` without arguments is not supporte
 ;; PTC-Lisp
 (< 1 2 3)   ;=> error (only 2 args allowed)
 ```
+
+Equality operators (`=`, `==`, `not=`) are variadic with one or more arguments.
 
 ### DIV-04: No macros, eval, or metaprogramming
 

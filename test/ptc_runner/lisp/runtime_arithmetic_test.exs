@@ -199,8 +199,41 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "equality" do
+    test "= is variadic with one or more arguments" do
+      assert_lisp("(= 1)", true)
+      assert_lisp("(= 1 1 1)", true)
+      assert_lisp("(= 1 2 1)", false)
+      assert_lisp("(apply = [1 1 1])", true)
+    end
+
+    test "== is variadic with one or more arguments" do
+      assert_lisp("(== 1)", true)
+      assert_lisp("(== 1 1 1)", true)
+      assert_lisp("(== 1 2 1)", false)
+    end
+
+    test "not= is variadic complement of = with one or more arguments" do
+      assert_lisp("(not= 1)", false)
+      assert_lisp("(not= 1 2 1)", true)
+      assert_lisp("(not= 1 1 1)", false)
+    end
+
+    test "zero-arity equality forms are arity errors" do
+      assert_lisp_error("(=)", :arity_error, "= requires at least 1 argument")
+      assert_lisp_error("(==)", :arity_error, "== requires at least 1 argument")
+      assert_lisp_error("(not=)", :arity_error, "not= requires at least 1 argument")
+      assert_lisp_error("(apply = [])", :arity_error, "= requires at least 1 argument")
+    end
+  end
+
   defp assert_lisp(source, expected) do
     {:ok, %{return: result}} = PtcRunner.Lisp.run(source)
     assert result == expected
+  end
+
+  defp assert_lisp_error(source, reason, message) do
+    assert {:error, %{fail: %{reason: ^reason, message: actual}}} = PtcRunner.Lisp.run(source)
+    assert actual =~ message
   end
 end

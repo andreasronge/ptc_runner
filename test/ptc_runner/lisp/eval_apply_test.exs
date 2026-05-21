@@ -5,6 +5,22 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
   alias PtcRunner.Lisp.{Env, Eval}
 
   describe "apply basic usage" do
+    test "apply with variadic equality" do
+      env = Env.initial()
+      ast = {:call, {:var, :apply}, [{:var, :=}, {:vector, [1, 1, 1]}]}
+      assert {:ok, true, _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      ast = {:call, {:var, :apply}, [{:var, :=}, {:vector, [1, 2, 1]}]}
+      assert {:ok, false, _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "apply with empty equality args raises arity error" do
+      env = Env.initial()
+      ast = {:call, {:var, :apply}, [{:var, :=}, {:vector, []}]}
+      assert {:error, {:arity_error, msg}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+      assert msg =~ "= requires at least 1 argument"
+    end
+
     test "apply with builtin + and vector" do
       env = Env.initial()
       # (apply + [1 2 3])

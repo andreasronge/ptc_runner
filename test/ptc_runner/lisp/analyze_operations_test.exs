@@ -111,14 +111,14 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
     end
   end
 
-  describe "comparison operators (strict 2-arity)" do
+  describe "comparison operators" do
     test "less than" do
       raw = {:list, [{:symbol, :<}, 1, 2]}
       assert {:ok, {:call, {:var, :<}, [1, 2]}} = Analyze.analyze(raw)
     end
 
     test "all comparison operators with 2 args" do
-      for op <- [:=, :"not=", :>, :<, :>=, :<=] do
+      for op <- [:=, :==, :"not=", :>, :<, :>=, :<=] do
         raw = {:list, [{:symbol, op}, {:symbol, :a}, {:symbol, :b}]}
         assert {:ok, {:call, {:var, ^op}, [{:var, :a}, {:var, :b}]}} = Analyze.analyze(raw)
       end
@@ -149,11 +149,19 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
       assert msg =~ "got 1"
     end
 
-    test "zero arg comparison fails" do
-      raw = {:list, [{:symbol, :=}]}
-      assert {:error, {:invalid_arity, :=, msg}} = Analyze.analyze(raw)
+    test "ordered zero arg comparison fails" do
+      raw = {:list, [{:symbol, :<}]}
+      assert {:error, {:invalid_arity, :<, msg}} = Analyze.analyze(raw)
       assert msg =~ "exactly 2 arguments"
       assert msg =~ "got 0"
+    end
+
+    test "equality operators are variadic" do
+      raw = {:list, [{:symbol, :=}]}
+      assert {:ok, {:call, {:var, :=}, []}} = Analyze.analyze(raw)
+
+      raw = {:list, [{:symbol, :"not="}, 1, 2, 3]}
+      assert {:ok, {:call, {:var, :"not="}, [1, 2, 3]}} = Analyze.analyze(raw)
     end
   end
 

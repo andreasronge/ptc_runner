@@ -338,11 +338,11 @@ defmodule PtcRunner.Lisp.Env do
       {:"bit-test", {:normal, &Runtime.bit_test/2}},
 
       # ============================================================
-      # Comparison — normal (binary)
+      # Comparison
       # ============================================================
-      {:=, {:normal, &Runtime.Math.eq/2}},
-      {:==, {:normal, &Runtime.Math.eq/2}},
-      {:"not=", {:normal, &Runtime.Math.not_eq/2}},
+      {:=, {:collect, &Runtime.eq_variadic/1}},
+      {:==, {:collect, &Runtime.numeric_eq_variadic/1}},
+      {:"not=", {:collect, &Runtime.not_eq_variadic/1}},
       {:>, {:normal, &Runtime.gt/2}},
       {:<, {:normal, &Runtime.lt/2}},
       {:>=, {:normal, &Runtime.gte/2}},
