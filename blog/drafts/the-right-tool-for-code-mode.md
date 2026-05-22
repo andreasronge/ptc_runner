@@ -9,15 +9,15 @@ title: "The Right Tool for Code Mode"
 
 ---
 
-A while back I wired up a small personal assistant to my email, calendar, and phone over MCP. Nothing clever. I just wanted to ask normal questions about my own data. One of the first things I tried was something I genuinely wanted: "go through my mail, suggest a few categories, and give me some statistics."
+A while back I built my own personal assistant and wired it to my email, calendar, and phone over MCP. One of the first things I asked was simple: "show me the last 10 emails."
 
-It came apart almost immediately.
+That was already enough to feel the problem. Email bodies are long, quoted threads are longer, and every message the tool returned was now sitting in the model's context. The model had not done any real work yet. It had just fetched data, and the context window was already being spent.
 
-Categorizing mail is ordinary data work. You look at patterns in subjects and senders, maybe run a regex or two, group things, count them. But the model was trying to do all of that by reading messages one at a time, in its head, and to get there it pulled every message into its context. The window filled up. The answers got vague. And on anything that came down to counting or arithmetic, it was confidently wrong.
+Then I asked for something more useful: "go through my mail, suggest a few categories, and give me some statistics." Categorizing mail is ordinary data work. You look at subjects and senders, group by pattern, count things. But the model tried to do it by reading messages one at a time in its head. The context filled up, the answers got vague, and the counts were wrong.
 
-I had not optimized my Gmail MCP at all, so some of that was on me. But the failure pointed at something deeper than a badly tuned tool. The model was being asked to *be the computer*, and it is not good at that. It is good at deciding *what* to compute. Those are different jobs, and I had handed it the wrong one.
+Some of that was on my Gmail MCP. But the failure pointed at something deeper: the model was being asked to *be the computer*, and it is not good at that. It is good at deciding *what* to compute. Those are different jobs, and I had handed it the wrong one.
 
-That gap is the reason I built [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think the popular answer to that gap reaches for the wrong tool, and what a better one looks like. It also changed how I design tools in the first place, which turned out to be the lesson I keep coming back to.
+That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think the popular answer to that gap reaches for the wrong tool, and what a better one looks like. It also changed how I design tools in the first place, which turned out to be the lesson I keep coming back to.
 
 ## Code mode is having a moment
 
@@ -49,11 +49,11 @@ ptc_runner runs a small Clojure-like language called PTC-Lisp. There is no files
 
 Every program runs in its own lightweight BEAM process (the runtime behind Erlang and Elixir) with a wall-clock limit and a memory limit. If a program loops or balloons, that one process is killed and the model is told why, in terms it can act on. Errors are written to be recovered from, not to look like a stack trace. The model reads the feedback, adjusts, and tries again, the way you would at a REPL.
 
-This does not seem to require a frontier model. In the current [PTC-Lisp generation benchmark](https://github.com/andreasronge/ptc_runner/blob/main/docs/benchmark-eval.md), Gemini Flash Lite and Claude Haiku each passed 149 of 150 executions across five runs of a 30-test suite. That is a small eval, not a model leaderboard, but it is enough to make the practical point: the language is small enough, and the feedback loop clear enough, that cheaper models can use it reliably.
+This does not seem to require a frontier model. In the current [PTC-Lisp generation benchmark](https://github.com/andreasronge/ptc_runner/blob/main/docs/benchmark-eval.md), Gemini 3.1 Flash Lite and Claude Haiku 4.5 each passed 149 of 150 executions across five runs of a 30-test suite. That is a small eval, not a model leaderboard, but it is enough to make the practical point: the language is small enough, and the feedback loop clear enough, that cheaper models can use it reliably.
 
 The core path through the MCP server is a single tool, `lisp_eval`, that takes a PTC-Lisp program and optional input (sessions and diagnostics add a few more when you want them). Any MCP client can point at it: Claude Desktop, Cursor, Cline, Claude Code. You do not write Elixir, and you do not host a Python runtime. You run a binary and add it to your client config. The fact that there is a 30-year-old battle-tested VM doing the isolation underneath is an implementation detail you never have to touch.
 
-## A small, honest example
+## A small example
 
 Let me show the failure that made this concrete, and then the fix.
 
@@ -92,18 +92,6 @@ The other thing worth reporting is how little data crossed back into the context
 
 The efficiency is the easy thing to notice. It is not the most interesting thing in that example.
 
-## The part that changed how I build these systems
-
-Go back to that server for a second. The `observatory` server is dumb. It exposes `list_traces`, `get_trace`, and `get_trace_steps`, and that is all. It knows nothing about spend spikes. The spike detection did not live in a tool. It lived in code the model wrote on the spot, for that one question.
-
-That is the shift I did not expect, and it is the part I would most want a fellow builder to take away.
-
-Before code mode, you designed MCP tools for the questions you thought people would ask. It works a bit like RAG. With RAG you have to anticipate the questions up front to tune your chunking and your embeddings, and when the questions change, your retrieval is suddenly wrong. MCP tool design can fall into a similar trap. You decide each tool's granularity, you shape its responses, you paginate it just so, and then you sit and watch the responses come back and tweak the design. You are optimizing in advance for usage you are only guessing at.
-
-Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory way: run something, look at the shape, run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions.
-
-So you do not have to front-load all the cleverness into your tools anymore. You can ship simple, boring servers that expose primitives, and let the code-mode client compose the logic per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that is a real simplification: stop pre-optimizing tools for imagined workloads, ship the primitive, and let the questions find their own programs.
-
 ## Code mode should feel like a REPL
 
 The REPL part matters more than I expected. Investigations are naturally stateful. You define `cost`, bind `traces`, compute `by-day`, inspect the spike, and then ask the next question using the same small workspace. If every code-mode call is a fresh sandbox, the model has to recreate that workspace over and over, or push more of it back into the context window.
@@ -117,6 +105,18 @@ ptc_runner sessions are deliberately smaller. Definitions persist across calls, 
 The same idea applies before the first tool call. MCP tool lists can get large fast. Every server brings names, descriptions, schemas, examples, and response shapes, and most of that is irrelevant to the task in front of you. If all of it is pushed into the prompt up front, tool discovery becomes another version of the context-window problem.
 
 ptc_runner can make the tool catalog part of the runtime instead. A program can ask which upstream servers exist with `(catalog/list-servers)`, search for a relevant capability with `(catalog/search-tools "calendar")`, list one server's tools with `(catalog/list-tools "calendar")`, and pull the details for a single tool with `(catalog/describe-tool "calendar" "search_events")`. In a session, that means the model can explore the available tools the same way it explores the data: ask for the next small piece of structure, bind what it learned, and continue. The model does not need to carry every possible tool in its head just in case one of them matters.
+
+## The part that changed how I build these systems
+
+Go back to that server for a second. The `observatory` server is dumb. It exposes `list_traces`, `get_trace`, and `get_trace_steps`, and that is all. It knows nothing about spend spikes. The spike detection did not live in a tool. It lived in code the model wrote on the spot, for that one question.
+
+That is the shift I did not expect, and it is the part I would most want a fellow builder to take away.
+
+Before code mode, you designed MCP tools for the questions you thought people would ask. It works a bit like RAG. With RAG you have to anticipate the questions up front to tune your chunking and your embeddings, and when the questions change, your retrieval is suddenly wrong. MCP tool design can fall into a similar trap. You decide each tool's granularity, you shape its responses, you paginate it just so, and then you sit and watch the responses come back and tweak the design. You are optimizing in advance for usage you are only guessing at.
+
+Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory way: run something, look at the shape, run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions.
+
+So you do not have to front-load all the cleverness into your tools anymore. You can ship simple, boring servers that expose primitives, and let the code-mode client compose the logic per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that is a real simplification: stop pre-optimizing tools for imagined workloads, ship the primitive, and let the questions find their own programs.
 
 ## Simplify until it disappears
 
