@@ -3294,7 +3294,7 @@ built-ins or reserved runtime operations at analysis time.
 | PTC runtime/helper | `catalog` | Upstream MCP catalog discovery |
 | PTC runtime/helper | `budget` | Remaining-budget introspection |
 | PTC runtime/helper | `json` | JSON parse/generate helpers |
-| PTC runtime/helper | `mcp` | MCP result unwrap helpers |
+| MCP server extension | `mcp` | Profile-gated helper namespace used by the MCP server; unavailable in base `Lisp.run/2` unless that profile enables it |
 
 **Examples of normalization:**
 

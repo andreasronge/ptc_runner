@@ -2771,6 +2771,8 @@
       signatures: [
         "(parse iso-string)",
         "(LocalDate/parse date-str)",
+        "(java.time.LocalDate/parse date-str)",
+        "(java.time.Instant/parse iso-string)",
         "(Instant/parse iso-string)"
       ],
       since: nil,
@@ -4987,7 +4989,11 @@
       class: "java.time.LocalDate",
       kind: :static,
       description: "Parse an ISO-8601 date string (YYYY-MM-DD) to a Date",
-      signatures: ["(LocalDate/parse date-string)", "(parse date-string)"],
+      signatures: [
+        "(LocalDate/parse date-string)",
+        "(java.time.LocalDate/parse date-string)",
+        "(parse date-string)"
+      ],
       notes:
         "Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin."
     },
@@ -4996,7 +5002,11 @@
       class: "java.time.Instant",
       kind: :static,
       description: "Parse an ISO-8601 instant/date-time string to a DateTime",
-      signatures: ["(Instant/parse iso-string)", "(parse iso-string)"],
+      signatures: [
+        "(Instant/parse iso-string)",
+        "(java.time.Instant/parse iso-string)",
+        "(parse iso-string)"
+      ],
       notes:
         "Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin."
     },
@@ -5115,6 +5125,22 @@
       kind: :method,
       description: "Convert string to upper case",
       signatures: ["(.toUpperCase s)"],
+      notes: ""
+    },
+    %{
+      name: ".startsWith",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Returns true if string starts with prefix",
+      signatures: ["(.startsWith s prefix)"],
+      notes: ""
+    },
+    %{
+      name: ".endsWith",
+      class: "java.lang.String",
+      kind: :method,
+      description: "Returns true if string ends with suffix",
+      signatures: ["(.endsWith s suffix)"],
       notes: ""
     },
     %{
