@@ -3,6 +3,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
 
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Registry
 
   describe "sync validation" do
@@ -254,6 +255,10 @@ defmodule PtcRunner.Lisp.RegistryTest do
                "#{name} divergences should link to docs/clojure-conformance-gaps.md, got: #{inspect(entry[:divergences])}"
       end
     end
+  end
+
+  defp binding_type(%Builtin{} = builtin) do
+    builtin |> Builtin.unwrap() |> binding_type()
   end
 
   defp binding_type({:normal, _}), do: :normal

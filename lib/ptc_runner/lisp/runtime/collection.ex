@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   are implemented in `Collection.Transform`.
   """
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
@@ -68,6 +69,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   defp wrap_comparator(comp) when is_tuple(comp) do
+    fn a, b ->
+      case Callable.call(comp, [a, b]) do
+        n when is_integer(n) -> n <= 0
+        bool -> bool
+      end
+    end
+  end
+
+  defp wrap_comparator(%Builtin{} = comp) do
     fn a, b ->
       case Callable.call(comp, [a, b]) do
         n when is_integer(n) -> n <= 0

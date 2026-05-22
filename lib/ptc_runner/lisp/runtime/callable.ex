@@ -16,7 +16,9 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
       (map range [1 2 3])              ;; multi_arity - now works
   """
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
 
@@ -24,6 +26,23 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   defguardp is_keyword(k) when is_atom(k) and k != nil and k != true and k != false
 
   @spec call(term(), [term()]) :: term()
+  def call(%Builtin{binding: {:multi_arity, _name, funs}} = builtin, args) do
+    arity = length(args)
+    min_arity = :erlang.fun_info(elem(funs, 0), :arity) |> elem(1)
+    idx = arity - min_arity
+
+    if idx >= 0 and idx < tuple_size(funs) do
+      Args.validate!(builtin, args)
+    end
+
+    call(Builtin.unwrap(builtin), args)
+  end
+
+  def call(%Builtin{} = builtin, args) do
+    Args.validate!(builtin, args)
+    call(Builtin.unwrap(builtin), args)
+  end
+
   def call(f, args) when is_function(f), do: apply(f, args)
 
   def call(%LispKeyword{} = k, [m]) when is_map(m), do: FlexAccess.flex_get(m, k)
