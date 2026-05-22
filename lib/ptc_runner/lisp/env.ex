@@ -187,7 +187,7 @@ defmodule PtcRunner.Lisp.Env do
   defp args_spec(:sort), do: {:arity, %{1 => [:seqable], 2 => [:callable, :seqable]}}
 
   defp args_spec(:"sort-by"),
-    do: {:arity, %{2 => [:keyfn, :seqable], 3 => [:keyfn, :callable, :seqable]}}
+    do: {:arity, %{2 => [:sort_keyfn, :seqable], 3 => [:sort_keyfn, :callable, :seqable]}}
 
   defp args_spec(:take), do: [:integer, :seqable]
   defp args_spec(:drop), do: [:integer, :seqable]
