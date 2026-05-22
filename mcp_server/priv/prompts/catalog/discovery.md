@@ -11,5 +11,7 @@ Discover tools:
 - `(catalog/search-tools "query" {:limit 8})`
 - `(catalog/describe-tool "server" "tool")`
 - `(catalog/list-tools "server" {:limit 20})`
+Use `catalog/describe-tool` before calling; it shows `Result<T>`.
 Call: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
+catalog list/search returns strings like `srv.tool_name(arg: type) -> Result<T>`; use exact tool names.
 <!-- PTC_PROMPT_END -->

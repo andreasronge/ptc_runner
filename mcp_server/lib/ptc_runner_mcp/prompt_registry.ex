@@ -311,7 +311,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     [
       @agentic_role,
       "Write PTC-Lisp only. Use explicit terminal forms: `(return value)` for success or `(fail reason)` for failure.",
-      "Treat `tool/mcp-call` results as tagged data and inspect `:ok` before using `:value`.",
+      "`tool/mcp-call` returns `Result<T>`; inspect `:ok` before using `:value`.",
       "Check the value before returning it as a human-readable text answer.",
       agentic_multi_turn_guidance(max_turns),
       agentic_write_mode_guidance(allow_writes)
@@ -362,7 +362,9 @@ defmodule PtcRunnerMcp.PromptRegistry do
     lisp_task MCP-call contract:
     Call upstream tools with `(tool/mcp-call {:server "<configured-name>" :tool "<upstream-tool>" :args {}})`.
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
-    In `lisp_task`, `tool/mcp-call` returns a tagged map. On success, `(:value r)` is already the unwrapped upstream payload; read it directly.
+    In `lisp_task`, `tool/mcp-call` returns `Result<T>`: success `{:ok true :value T}`, failure `{:ok false :reason k :message s}`.
+    T object keys are strings, not keywords.
+    If T is `{content :string}`, read text with `(get (:value r) "content")`.
     #{agentic_unknown_content_guidance(catalog)}
     If `(:value r)` has an unexpected shape, handle or fail with a clear message.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.
@@ -372,8 +374,8 @@ defmodule PtcRunnerMcp.PromptRegistry do
   end
 
   defp agentic_unknown_content_guidance(catalog) when is_binary(catalog) do
-    if String.contains?(catalog, "-> :unknown_content") do
-      "For `-> :unknown_content` tools, inspect `:value` before assuming a shape."
+    if String.contains?(catalog, ":unknown_content") do
+      "For `Result<:unknown_content>` tools, inspect `:value` before assuming a shape."
     else
       ""
     end

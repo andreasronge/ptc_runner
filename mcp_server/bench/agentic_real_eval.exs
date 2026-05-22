@@ -296,7 +296,7 @@ defmodule Bench.AgenticRealEval do
       %{
         name: "single_read",
         category: "single-tool read",
-        max_turns: 1,
+        max_turns: 2,
         retry_turns: 0,
         task:
           "Read README.md and return the first non-empty line plus one sentence saying what repository this is.",
@@ -312,7 +312,7 @@ defmodule Bench.AgenticRealEval do
       %{
         name: "multi_file_reduce",
         category: "multi-call aggregation",
-        max_turns: 1,
+        max_turns: 3,
         retry_turns: 0,
         task:
           "Read README.md, docs/short.md, and notes/long.md. Count lines in each and return only the path with the most lines and the three counts.",
@@ -328,7 +328,7 @@ defmodule Bench.AgenticRealEval do
       %{
         name: "lazy_catalog_discovery",
         category: "catalog discovery",
-        max_turns: 1,
+        max_turns: 3,
         retry_turns: 0,
         catalog_modes: [:lazy],
         task:

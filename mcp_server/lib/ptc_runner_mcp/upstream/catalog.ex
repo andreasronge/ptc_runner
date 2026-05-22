@@ -312,12 +312,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
 
   defp render_output(schema) when is_map(schema) do
     case render_signature_type(schema) do
-      "" -> ""
-      type -> " -> #{type}"
+      "" -> " -> Result<:unknown_content>"
+      type -> " -> Result<#{type}>"
     end
   end
 
-  defp render_output(_), do: " -> :unknown_content"
+  defp render_output(_), do: " -> Result<:unknown_content>"
 
   # Argument ordering rule: required args first in the order they
   # appear in the schema's `required` array, then optional args

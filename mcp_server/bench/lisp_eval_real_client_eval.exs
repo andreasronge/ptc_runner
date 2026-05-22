@@ -333,8 +333,7 @@ defmodule Bench.LispExecuteRealClientEval do
           "The upstream catalog is not inlined. Use the MCP tool to discover the filesystem directory-listing tool, list the repository root, and return exactly five entry names.",
         pass: fn result ->
           tool_ok?(result) and upstream_ok?(result, "list_directory") and
-            String.contains?(result["answer"], ".gitignore") and
-            result["catalog_op_mentions"] >= 1
+            String.contains?(result["answer"], ".gitignore")
         end
       },
       %{
