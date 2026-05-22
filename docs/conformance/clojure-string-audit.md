@@ -6,9 +6,11 @@
 
 Comparison of `clojure.string` vars against PTC-Lisp builtins.
 
-See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](clojure-core-audit.md) | [Clojure Set Audit](clojure-set-audit.md) | [Clojure Walk Audit](clojure-walk-audit.md) | [Java Math Audit](java-math-audit.md)
+See also: [Function Reference](../function-reference.md) | [Namespace Coverage](index.md) | [Clojure Core Audit](clojure-core-audit.md) | [Clojure Set Audit](clojure-set-audit.md) | [Clojure Walk Audit](clojure-walk-audit.md) | [Java Math Audit](java-math-audit.md) | [Java Boolean Audit](java-lang-boolean-audit.md) | [Java Double Audit](java-lang-double-audit.md) | [Java Float Audit](java-lang-float-audit.md) | [Java Integer Audit](java-lang-integer-audit.md) | [Java Long Audit](java-lang-long-audit.md) | [Java String Audit](java-lang-string-audit.md) | [Java System Audit](java-lang-system-audit.md) | [Java LocalDate Audit](java-time-local-date-audit.md) | [Java Instant Audit](java-time-instant-audit.md) | [Java Duration Audit](java-time-duration-audit.md) | [Java Period Audit](java-time-period-audit.md) | [Java Date Audit](java-util-date-audit.md)
 
 ## Summary
+
+Coverage excludes `not_relevant` entries: `supported / (supported + candidate + not_classified)`.
 
 | Status | Count |
 |--------|-------|
@@ -16,6 +18,8 @@ See also: [Function Reference](../function-reference.md) | [Clojure Core Audit](
 | Candidate | 4 |
 | Not Relevant | 1 |
 | Not Classified | 0 |
+| Relevant Target | 20 |
+| Coverage | 16/20 (80.0%) |
 | **Total** | **21** |
 
 ## Details

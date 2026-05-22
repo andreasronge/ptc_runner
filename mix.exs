@@ -276,6 +276,24 @@ defmodule PtcRunner.MixProject do
         # Generated Reference (mix ptc.gen_docs)
         "docs/function-reference.md",
         "docs/java-interop.md",
+        "docs/conformance/index.md",
+        "docs/conformance/clojure-core-audit.md",
+        "docs/conformance/clojure-string-audit.md",
+        "docs/conformance/clojure-set-audit.md",
+        "docs/conformance/clojure-walk-audit.md",
+        "docs/conformance/java-math-audit.md",
+        "docs/conformance/java-lang-boolean-audit.md",
+        "docs/conformance/java-lang-double-audit.md",
+        "docs/conformance/java-lang-float-audit.md",
+        "docs/conformance/java-lang-integer-audit.md",
+        "docs/conformance/java-lang-long-audit.md",
+        "docs/conformance/java-lang-string-audit.md",
+        "docs/conformance/java-lang-system-audit.md",
+        "docs/conformance/java-time-local-date-audit.md",
+        "docs/conformance/java-time-instant-audit.md",
+        "docs/conformance/java-time-duration-audit.md",
+        "docs/conformance/java-time-period-audit.md",
+        "docs/conformance/java-util-date-audit.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
         "livebooks/ptc_runner_llm_agent.livemd",
@@ -290,7 +308,7 @@ defmodule PtcRunner.MixProject do
         "MCP Server":
           ~r/mcp_server\/(README|DEVELOPMENT)\.md|docs\/(mcp-server|mcp-server-cli|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
         Reference:
-          ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md/,
+          ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md|docs\/conformance\/.+\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
       ],
       assets: %{"images" => "images"},

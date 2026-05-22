@@ -6,9 +6,9 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-22 interop entries across 11 classes.
+24 interop entries across 11 classes.
 
-See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
+See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
 ### java.lang.Boolean
 
@@ -53,9 +53,11 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
 | `.contains` | Method | `(.contains s substr)` | Returns true if string contains substring |  |
+| `.endsWith` | Method | `(.endsWith s suffix)` | Returns true if string ends with suffix |  |
 | `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
 | `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
 | `.length` | Method | `(.length s)` | Return the grapheme count of a string | Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics. |
+| `.startsWith` | Method | `(.startsWith s prefix)` | Returns true if string starts with prefix |  |
 | `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf. |
 | `.toLowerCase` | Method | `(.toLowerCase s)` | Convert string to lower case |  |
 | `.toUpperCase` | Method | `(.toUpperCase s)` | Convert string to upper case |  |
@@ -72,14 +74,14 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Instant/parse` | Static | `(Instant/parse iso-string), (parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime | Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin. |
+| `Instant/parse` | Static | `(Instant/parse iso-string), (java.time.Instant/parse iso-string), (parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime | Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin. |
 
 
 ### java.time.LocalDate
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
+| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
 
 
 ### java.time.LocalDate / java.util.Date

@@ -171,6 +171,83 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert counts[:candidate] > 0, "No candidate entries in audit"
       assert counts[:not_relevant] > 0, "No not_relevant entries in audit"
     end
+
+    test "curated Java compatibility audits cover all documented interop entries" do
+      supported_java_targets =
+        Registry.java_compat_audit_keys()
+        |> Enum.flat_map(&Registry.java_compat_audit/1)
+        |> Enum.filter(&(&1.status == :supported))
+        |> MapSet.new(& &1.name)
+
+      interop_names = Registry.java_interop() |> MapSet.new(& &1.name)
+
+      missing_from_audit = MapSet.difference(interop_names, supported_java_targets)
+      missing_from_interop = MapSet.difference(supported_java_targets, interop_names)
+
+      assert MapSet.to_list(missing_from_audit) == [],
+             "Java interop entries missing from curated audit: #{inspect(MapSet.to_list(missing_from_audit))}"
+
+      assert MapSet.to_list(missing_from_interop) == [],
+             "Curated Java audit entries marked :supported but missing from java_interop: #{inspect(MapSet.to_list(missing_from_interop))}"
+    end
+
+    test "namespace coverage index includes base and profile-gated namespaces" do
+      index = File.read!("docs/conformance/index.md")
+
+      for namespace <- [
+            "`clojure.core/`, `core/`",
+            "`clojure.string/`, `str/`, `string/`",
+            "`Math/`, `java.lang.Math`",
+            "`Boolean/`, `java.lang.Boolean`",
+            "`Double/`, `java.lang.Double`",
+            "`Float/`, `java.lang.Float`",
+            "`Integer/`, `java.lang.Integer`",
+            "`Long/`, `java.lang.Long`",
+            "`System/`, `java.lang.System`",
+            "`LocalDate/`, `java.time.LocalDate/`",
+            "`Instant/`, `java.time.Instant/`",
+            "`Duration/`, `java.time.Duration`",
+            "`Period/`, `java.time.Period`",
+            "`java.util.Date.`",
+            "`regex/`",
+            "`data/`",
+            "`tool/`",
+            "`catalog/`",
+            "`budget/`",
+            "`json/`",
+            "`mcp/`"
+          ] do
+        assert index =~ namespace, "docs/conformance/index.md missing #{namespace}"
+      end
+
+      assert index =~ "PTC extension / MCP server profile"
+      assert index =~ "profile-gated helper namespace"
+    end
+
+    test "issue 1019 date/time helpers are represented as candidates" do
+      candidates =
+        [
+          :java_time_local_date_audit,
+          :java_time_duration_audit,
+          :java_time_period_audit
+        ]
+        |> Enum.flat_map(&Registry.java_compat_audit/1)
+        |> Enum.filter(&(&1.status == :candidate))
+        |> MapSet.new(& &1.name)
+
+      for name <- [
+            ".toEpochDay",
+            ".plusDays",
+            ".minusDays",
+            "Duration/between",
+            ".toMillis",
+            ".toDays",
+            "Period/between",
+            ".getDays"
+          ] do
+        assert MapSet.member?(candidates, name), "#{name} should be tracked as a candidate"
+      end
+    end
   end
 
   describe "constants" do

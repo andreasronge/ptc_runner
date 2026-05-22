@@ -2,10 +2,11 @@ defmodule PtcRunner.Lisp.Registry do
   @moduledoc """
   Single source of truth for PTC-Lisp function metadata.
 
-  Loads `priv/functions.exs` (implemented + Java interop entries) and
-  `priv/function_audit.exs` (Clojure/Java parity triage notes) at
+  Loads `priv/functions.exs` (implemented + Java interop entries),
+  `priv/function_audit.exs` (Clojure/Java Math parity triage notes), and
+  `priv/java_compat_audit.exs` (curated Java compatibility targets) at
   compile time via `@external_resource`. No runtime file I/O —
-  recompiles automatically when either file changes.
+  recompiles automatically when any source file changes.
 
   The two files are split (#896) because their change cadence differs:
   `functions.exs` is touched when the language definition evolves, while
@@ -31,12 +32,15 @@ defmodule PtcRunner.Lisp.Registry do
 
   @registry_path "priv/functions.exs"
   @audit_path "priv/function_audit.exs"
+  @java_compat_audit_path "priv/java_compat_audit.exs"
 
   # Compile-time loading (no runtime file I/O)
   @external_resource @registry_path
   @external_resource @audit_path
+  @external_resource @java_compat_audit_path
   @registry Code.eval_file(@registry_path) |> elem(0)
   @audit Code.eval_file(@audit_path) |> elem(0)
+  @java_compat_audit Code.eval_file(@java_compat_audit_path) |> elem(0)
 
   @doc """
   Returns all implemented function entries.
@@ -109,6 +113,18 @@ defmodule PtcRunner.Lisp.Registry do
   """
   @spec java_math_audit() :: [map()]
   def java_math_audit, do: @audit.java_math_audit
+
+  @doc """
+  Returns the available curated Java compatibility audit keys.
+  """
+  @spec java_compat_audit_keys() :: [atom()]
+  def java_compat_audit_keys, do: @java_compat_audit |> Map.keys() |> Enum.sort()
+
+  @doc """
+  Returns a curated Java compatibility audit by key.
+  """
+  @spec java_compat_audit(atom()) :: [map()]
+  def java_compat_audit(key), do: Map.fetch!(@java_compat_audit, key)
 
   @doc """
   Returns all Java interop entries.
