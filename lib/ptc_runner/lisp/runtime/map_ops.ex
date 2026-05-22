@@ -260,6 +260,11 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   # Keep the 2-arg version for direct calls
   def dissoc(m, k), do: Map.delete(m, k)
+  def merge_variadic(args), do: Enum.reduce(args, %{}, &merge(&2, &1))
+
+  def merge(nil, nil), do: Map.merge(%{}, %{})
+  def merge(nil, m), do: Map.merge(%{}, m)
+  def merge(m, nil), do: Map.merge(m, %{})
   def merge(m1, m2), do: Map.merge(m1, m2)
 
   def select_keys(m, ks) do

@@ -2175,6 +2175,32 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ==========================================================================
+  # merge - Merge maps
+  # ==========================================================================
+
+  describe "merge" do
+    test "treats nil maps as empty" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge nil {:a 1} nil {:b 2})|)
+      assert result == %{"a" => 1, "b" => 2}
+    end
+
+    test "two nil maps return empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge nil nil)|)
+      assert result == %{}
+    end
+
+    test "single nil map returns empty map" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(merge nil)|)
+      assert result == %{}
+    end
+
+    test "nil does not allow non-map arguments" do
+      assert {:error, _} = Lisp.run(~S|(merge nil [1 2])|)
+      assert {:error, _} = Lisp.run(~S|(merge [1 2] nil)|)
+    end
+  end
+
+  # ==========================================================================
   # merge-with - Merge maps with combining function
   # ==========================================================================
 
