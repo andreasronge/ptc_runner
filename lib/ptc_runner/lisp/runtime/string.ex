@@ -616,7 +616,9 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   defp parse_specifier(rest, args) do
-    # Parse optional precision like ".2" before the specifier char
+    # Accept common width/alignment hints from printf-style formats, but keep
+    # PTC-Lisp formatting semantics intentionally small.
+    rest = drop_ignored_width_hint(rest)
     {precision, rest} = parse_precision(rest)
 
     case rest do
@@ -629,6 +631,19 @@ defmodule PtcRunner.Lisp.Runtime.String do
       _ -> raise ArgumentError, "unsupported format specifier in: %#{rest}"
     end
   end
+
+  defp drop_ignored_width_hint(rest) do
+    rest
+    |> drop_ignored_width_flags()
+    |> drop_digits()
+  end
+
+  defp drop_ignored_width_flags("-" <> rest), do: drop_ignored_width_flags(rest)
+  defp drop_ignored_width_flags("0" <> rest), do: drop_ignored_width_flags(rest)
+  defp drop_ignored_width_flags(rest), do: rest
+
+  defp drop_digits(<<c, rest::binary>>) when c in ?0..?9, do: drop_digits(rest)
+  defp drop_digits(rest), do: rest
 
   defp parse_precision("." <> rest) do
     {digits, rest2} = take_digits(rest, [])
