@@ -150,12 +150,6 @@ defmodule PtcRunner.Lisp.Runtime.Args do
     "get-in expects the collection first, e.g. (get-in map key) — got (#{actual(key)}, map), arguments appear to be swapped"
   end
 
-  defp custom_error("sort-by", 3, :seqable, comp, [key, coll, comp])
-       when (is_atom(key) or is_binary(key) or is_function(key, 1)) and is_list(coll) and
-              (is_function(comp) or comp in [:asc, :desc, :>, :<]) do
-    "sort-by expects (key, comparator, collection) but got (key, collection, comparator). Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)"
-  end
-
   defp custom_error("update-vals", 1, _spec, f, [f, m]) when is_map(m) and is_function(f) do
     "update-vals expects (map, function) but got (function, map). Use -> (thread-first) instead of ->> (thread-last) with update-vals"
   end
