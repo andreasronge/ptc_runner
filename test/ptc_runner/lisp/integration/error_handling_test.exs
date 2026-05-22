@@ -66,7 +66,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "(filter :x 42)"
 
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
-      assert message =~ "expected a collection, got number 42"
+      assert message =~ "filter: arg 2 expected seqable, got number"
     end
 
     test "filter with arguments swapped returns a clean error, not a raw protocol error" do
@@ -86,7 +86,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "(count 42)"
 
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} = Lisp.run(source)
-      assert message =~ "invalid argument types"
+      assert message =~ "count: arg 1 expected seqable, got number"
     end
 
     test "take on set returns type error" do
@@ -119,6 +119,45 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert {:error, %Step{fail: %{message: message}}} = Lisp.run("((first filter) 1 2)")
       assert message =~ "function"
       refute message =~ "unknown"
+    end
+
+    test "map builtin type errors include function name and argument position" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(merge nil [1 2])")
+
+      assert message =~ "merge: arg 2 expected map, got list"
+
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(merge [1 2] nil)")
+
+      assert message =~ "merge: arg 1 expected map, got list"
+    end
+
+    test "keyword arguments are reported as keyword in canonical type errors" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(merge :x {})")
+
+      assert message =~ "merge: arg 1 expected map, got keyword"
+
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(take :n [1 2])")
+
+      assert message =~ "take: arg 1 expected integer, got keyword"
+    end
+
+    test "sort-by swapped collection and comparator keeps custom hint" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(sort-by :k [1 2] >)")
+
+      assert message =~ "sort-by expects (key, comparator, collection)"
+      assert message =~ "got (key, collection, comparator)"
+    end
+
+    test "merge-with without function is an arity error" do
+      assert {:error, %Step{fail: %{reason: :arity_error, message: message}}} =
+               Lisp.run("(merge-with)")
+
+      assert message =~ "merge-with requires at least 1 argument"
     end
   end
 

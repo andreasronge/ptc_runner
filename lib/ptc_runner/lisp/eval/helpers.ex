@@ -6,6 +6,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   """
 
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
   Generates a type error tuple for FunctionClauseError in builtins.
@@ -32,8 +34,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   # first/last/nth on maps - maps are unordered
-  defp specific_type_error(name, [%{} = _map] = args)
-       when name in [:first, :last, :reverse, :sort] do
+  defp specific_type_error(name, [%{} = map] = args)
+       when name in [:first, :last, :reverse, :sort] and not is_struct(map) do
     {:ok,
      {:type_error,
       "#{name} does not support maps (maps are unordered). " <>
@@ -48,6 +50,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   defp specific_type_error(:update_vals, [f, m] = args) when is_function(f) and is_map(m) do
+    {:ok,
+     {:type_error,
+      "update-vals expects (map, function) but got (function, map). " <>
+        "Use -> (thread-first) instead of ->> (thread-last) with update-vals", args}}
+  end
+
+  defp specific_type_error(:update_vals, [%Builtin{} = _f, m] = args) when is_map(m) do
     {:ok,
      {:type_error,
       "update-vals expects (map, function) but got (function, map). " <>
@@ -109,7 +118,9 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   """
   @spec describe_type(term()) :: String.t()
   def describe_type(nil), do: "nil"
+  def describe_type(%Builtin{}), do: "function"
   def describe_type(%MapSet{}), do: "set"
+  def describe_type(%LispKeyword{}), do: "keyword"
   def describe_type(x) when is_list(x), do: "list"
   def describe_type(x) when is_map(x), do: "map"
   def describe_type(x) when is_binary(x), do: "string"
@@ -121,6 +132,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   # error formatting when a builtin is used as a value, e.g. `(first filter)`.
   # Surface them as "function" rather than the leaky "unknown".
   def describe_type({tag, _}) when tag in [:normal, :collect], do: "function"
+  def describe_type({:special, :println}), do: "function"
 
   def describe_type({tag, _, _}) when tag in [:variadic, :variadic_nonempty, :multi_arity],
     do: "function"

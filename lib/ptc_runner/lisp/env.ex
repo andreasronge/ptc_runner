@@ -12,10 +12,12 @@ defmodule PtcRunner.Lisp.Env do
   - `{:collect, fun}` - Collects all args into a list and passes to unary function
   """
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Runtime
 
   @type binding ::
-          {:normal, function()}
+          Builtin.t()
+          | {:normal, function()}
           | {:variadic, function(), term()}
           | {:variadic_nonempty, atom(), function()}
           | {:multi_arity, atom(), tuple()}
@@ -27,7 +29,7 @@ defmodule PtcRunner.Lisp.Env do
   def initial do
     case :persistent_term.get({__MODULE__, :initial}, :unset) do
       :unset ->
-        env = builtin_bindings() |> Map.new()
+        env = builtin_bindings() |> Enum.map(&wrap_builtin_binding/1) |> Map.new()
         :persistent_term.put({__MODULE__, :initial}, env)
         env
 
@@ -130,6 +132,73 @@ defmodule PtcRunner.Lisp.Env do
     clojure_namespace?(ns) and Map.has_key?(initial(), name) and
       match?({:constant, _}, Map.get(initial(), name))
   end
+
+  defp wrap_builtin_binding({name, {tag, _} = binding})
+       when tag in [:normal, :collect] do
+    {name, Builtin.wrap(name, binding, args_spec(name))}
+  end
+
+  defp wrap_builtin_binding({name, {tag, _, _} = binding})
+       when tag in [:variadic, :variadic_nonempty, :multi_arity] do
+    {name, Builtin.wrap(name, binding, args_spec(name))}
+  end
+
+  defp wrap_builtin_binding(other), do: other
+
+  defp args_spec(:merge), do: {:rest, :map_or_nil}
+  defp args_spec(:"merge-with"), do: {:min, 1, [:callable], {:rest, :map_or_nil}}
+
+  defp args_spec(:get),
+    do: {:arity, %{2 => [:associative_or_nil, :any], 3 => [:associative_or_nil, :any, :any]}}
+
+  defp args_spec(:"get-in"),
+    do:
+      {:arity,
+       %{2 => [:associative_or_nil, :seqable], 3 => [:associative_or_nil, :seqable, :any]}}
+
+  defp args_spec(:assoc), do: {:min, 1, [:map_or_list_or_nil], {:rest, :any}}
+  defp args_spec(:"assoc-in"), do: [:any, :seqable, :any]
+  defp args_spec(:update), do: {:min, 3, [:map_or_list, :any, :callable], {:rest, :any}}
+  defp args_spec(:"update-in"), do: {:min, 3, [:any, :seqable, :callable], {:rest, :any}}
+  defp args_spec(:dissoc), do: {:min, 1, [:map_or_nil], {:rest, :any}}
+  defp args_spec(:"select-keys"), do: [:map_or_nil, :seqable]
+  defp args_spec(:keys), do: [:map_or_nil]
+  defp args_spec(:vals), do: [:map_or_nil]
+  defp args_spec(:"update-vals"), do: [:map_or_nil, :callable]
+  defp args_spec(:"update-keys"), do: [:map_or_nil, :callable]
+  defp args_spec(:"reduce-kv"), do: [:callable, :any, :map_or_nil]
+  defp args_spec(:zipmap), do: [:seqable, :seqable]
+
+  defp args_spec(:filter), do: [:predicate, :seqable]
+  defp args_spec(:remove), do: [:predicate, :seqable]
+
+  defp args_spec(:map),
+    do:
+      {:arity,
+       %{
+         2 => [:keyfn, :seqable],
+         3 => [:callable, :seqable, :seqable],
+         4 => [:callable, :seqable, :seqable, :seqable]
+       }}
+
+  defp args_spec(:mapv), do: args_spec(:map)
+  defp args_spec(:mapcat), do: [:callable, :seqable]
+  defp args_spec(:keep), do: [:keyfn, :seqable]
+  defp args_spec(:sort), do: {:arity, %{1 => [:seqable], 2 => [:callable, :seqable]}}
+
+  defp args_spec(:"sort-by"),
+    do: {:arity, %{2 => [:keyfn, :seqable], 3 => [:keyfn, :callable, :seqable]}}
+
+  defp args_spec(:take), do: [:integer, :seqable]
+  defp args_spec(:drop), do: [:integer, :seqable]
+  defp args_spec(:count), do: [:seqable]
+  defp args_spec(:concat), do: {:rest, :seqable}
+  defp args_spec(:into), do: [:any, :seqable]
+
+  defp args_spec(:reduce),
+    do: {:arity, %{2 => [:callable, :seqable], 3 => [:callable, :any, :seqable]}}
+
+  defp args_spec(_name), do: :unchecked
 
   @doc """
   Get the list of builtin functions for a category.

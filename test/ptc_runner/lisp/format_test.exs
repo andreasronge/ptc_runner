@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.FormatTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Format
 
   doctest PtcRunner.Lisp.Format
@@ -48,6 +49,14 @@ defmodule PtcRunner.Lisp.FormatTest do
     test "formats :multi_arity builtin" do
       assert Format.to_string({:multi_arity, :subs, {&String.slice/2, &String.slice/3}}) ==
                "#<builtin>"
+    end
+
+    test "formats wrapped Env builtins" do
+      normal = Builtin.wrap(:count, {:normal, &Enum.count/1})
+      collect = Builtin.wrap(:merge, {:collect, fn args -> args end})
+
+      assert Format.to_string(normal) == "#<builtin>"
+      assert Format.to_string(collect) == "#fn[...]"
     end
   end
 
