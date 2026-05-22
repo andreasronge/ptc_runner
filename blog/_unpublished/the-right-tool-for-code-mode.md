@@ -49,6 +49,8 @@ ptc_runner runs a small Clojure-like language called PTC-Lisp. There is no files
 
 Every program runs in its own lightweight BEAM process (the runtime behind Erlang and Elixir) with a wall-clock limit and a memory limit. If a program loops or balloons, that one process is killed and the model is told why, in terms it can act on. Errors are written to be recovered from, not to look like a stack trace. The model reads the feedback, adjusts, and tries again, the way you would at a REPL.
 
+For readers wondering how much "Clojure-like" means in practice, the generated [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md) tracks supported Clojure namespaces, curated Java compatibility targets, and PTC-specific extensions.
+
 This does not seem to require a frontier model. In a small [PTC-Lisp generation benchmark](https://github.com/andreasronge/ptc_runner/blob/main/docs/benchmark-eval.md), Gemini 3.1 Flash Lite and Claude Haiku 4.5 each passed 149 of 150 executions, which is enough for the practical point here: cheaper models can use the language reliably.
 
 The core path through the MCP server is a single tool, `lisp_eval`, that takes a PTC-Lisp program and optional input (sessions and diagnostics add a few more when you want them). Any MCP client can point at it: Claude Desktop, Cursor, Cline, Claude Code. You do not write Elixir, and you do not host a Python runtime. You run a binary and add it to your client config. The fact that there is a 30-year-old battle-tested VM doing the isolation underneath is an implementation detail you never have to touch.
