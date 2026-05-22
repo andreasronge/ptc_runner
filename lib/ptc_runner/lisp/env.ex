@@ -266,7 +266,7 @@ defmodule PtcRunner.Lisp.Env do
       {:update, {:collect, &Runtime.update_variadic/1}},
       {:"update-in", {:collect, &Runtime.update_in_variadic/1}},
       {:dissoc, {:collect, &Runtime.dissoc_variadic/1}},
-      {:merge, {:variadic, &Runtime.merge/2, %{}}},
+      {:merge, {:collect, &Runtime.merge_variadic/1}},
       {:"select-keys", {:normal, &Runtime.select_keys/2}},
       {:keys, {:normal, &Runtime.keys/1}},
       {:vals, {:normal, &Runtime.vals/1}},
