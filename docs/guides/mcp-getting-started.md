@@ -7,7 +7,7 @@ client (Claude Desktop, Cursor, Cline, …) hides this layer.
 
 For the conceptual overview, see
 [`docs/mcp-server.md`](../mcp-server.md). For full client wiring,
-see [`mcp_server/README.md`](../../mcp_server/README.md).
+see [`docs/mcp-server-cli.md`](../mcp-server-cli.md).
 
 ## 1. Install
 
@@ -30,7 +30,7 @@ _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp version
 
 For Claude Desktop / Cursor / Cline / Claude Code wiring, use the
 ready-to-paste snippets in
-[`mcp_server/README.md`](../../mcp_server/README.md). The rest of this
+[`docs/mcp-server-cli.md`](../mcp-server-cli.md). The rest of this
 guide drives the server with raw JSON-RPC frames piped into the
 release; that lets us inspect every byte.
 

@@ -236,7 +236,6 @@ defmodule PtcRunner.MixProject do
       extras: [
         "README.md",
         "LICENSE",
-        "CHANGELOG.md",
         # SubAgent Guides (learning path)
         "docs/guides/subagent-getting-started.md",
         "docs/guides/subagent-llm-setup.md",
@@ -257,6 +256,10 @@ defmodule PtcRunner.MixProject do
         "docs/guides/phoenix-streaming.md",
         "docs/guides/structured-output-callbacks.md",
         # MCP Server
+        {"mcp_server/README.md", [filename: "mcp-server-readme", title: "MCP Server README"]},
+        {"mcp_server/DEVELOPMENT.md",
+         [filename: "mcp-server-development", title: "MCP Server Development"]},
+        "docs/mcp-server-cli.md",
         "docs/mcp-server.md",
         "docs/guides/mcp-getting-started.md",
         "docs/aggregator-mode.md",
@@ -272,11 +275,6 @@ defmodule PtcRunner.MixProject do
         "docs/clojure-conformance-gaps.md",
         # Generated Reference (mix ptc.gen_docs)
         "docs/function-reference.md",
-        "docs/conformance/clojure-core-audit.md",
-        "docs/conformance/clojure-string-audit.md",
-        "docs/conformance/clojure-set-audit.md",
-        "docs/conformance/clojure-walk-audit.md",
-        "docs/conformance/java-math-audit.md",
         "docs/java-interop.md",
         # Livebooks
         "livebooks/ptc_runner_playground.livemd",
@@ -290,7 +288,7 @@ defmodule PtcRunner.MixProject do
         "SubAgent Guides": ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute)\.md/,
         "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
         "MCP Server":
-          ~r/docs\/(mcp-server|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
+          ~r/mcp_server\/(README|DEVELOPMENT)\.md|docs\/(mcp-server|mcp-server-cli|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|aggregator-mode|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
         Reference:
           ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/

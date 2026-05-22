@@ -9,27 +9,48 @@
 [![Run in Livebook](https://img.shields.io/badge/Run_in-Livebook-purple)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreasronge%2Fptc_runner%2Fmain%2Flivebooks%2Fptc_runner_playground.livemd)
 [![Blog](https://img.shields.io/badge/Blog-posts-green)](https://andreasronge.github.io/ptc_runner/)
 
-Build LLM agents with a secure code mode. SubAgents let models write small programs that execute in a fast BEAM-native sandbox, combining LLM reasoning with deterministic computation.
+PtcRunner gives LLM agents a fast, secure, stateful code mode.
 
-> **Using an MCP client (Claude Desktop, Cursor, Cline, Claude Code)?**
-> `ptc_runner_mcp` gives the client a secure code mode backed by PTC-Lisp:
-> the model writes small programs, PtcRunner runs them in a fast BEAM sandbox,
-> and the client receives compact computed results.
-> You do not need an Elixir application to use it; `ptc_runner_mcp` runs as a
-> standalone MCP server for any MCP-compatible client.
->
-> Compared with process-per-call Python or JavaScript code execution,
-> PtcRunner avoids per-call runtime startup, package installation from generated
-> code, and direct filesystem/network access unless you explicitly provide tools
-> or upstream MCP servers. Programs run with BEAM process isolation, timeouts,
-> and heap limits; optional stateful sessions keep definitions and intermediate
-> results across calls.
->
-> Start with [`mcp_server/README.md`](mcp_server/README.md) for client config
-> snippets. See [`docs/mcp-server.md`](docs/mcp-server.md) for security,
-> sessions, and the Python/JS comparison.
+Models write small [PTC-Lisp](docs/ptc-lisp-specification.md) programs.
+PtcRunner runs them in a BEAM-native sandbox with process isolation, timeouts,
+heap limits, and controlled tool access. Sessions can keep definitions and
+intermediate results across calls, so an agent can work in a REPL-like loop
+without repeatedly reloading context or restarting a runtime.
 
-## Quick Start
+Use it over MCP from any language or client, or embed it directly in Elixir.
+
+## Start Here
+
+### Use code mode over MCP
+
+`ptc_runner_mcp` is a standalone MCP server for sandboxed code execution. It
+gives MCP-compatible clients and server-side agent runtimes a fast REPL-like
+code mode backed by PTC-Lisp. Agents can evaluate programs, keep session state,
+call approved tools, aggregate large results, and return compact computed
+answers.
+
+Use this when you want code execution for an agent, but do not want generated
+code to have direct filesystem, network, package-install, or OS process access.
+The server is useful both for local AI clients such as Claude Desktop, Cursor,
+Cline, and Claude Code, and for non-Elixir agent applications that want a stable
+protocol boundary around the sandbox.
+
+Compared with process-per-call Python or JavaScript execution, PtcRunner keeps
+the runtime warm, evaluates small programs inside lightweight BEAM processes,
+and can preserve session state across calls.
+
+Start with the [`mcp_server` README](mcp_server/README.md)
+for install, setup, client config, and server deployment. See
+[`docs/mcp-server.md`](docs/mcp-server.md) for the security model, sessions, and
+architecture.
+
+### Build agents in Elixir
+
+Use the `ptc_runner` library when you want SubAgents, signatures, tools, memory,
+text mode, PTC-Lisp mode, tracing, composition, and compiled workflows directly
+inside an Elixir application.
+
+## Elixir Quick Start
 
 ```elixir
 # Runnable doctest — uses a mock LLM so it works without API access.
@@ -83,7 +104,7 @@ This is [Programmatic Tool Calling](https://www.anthropic.com/engineering/advanc
 - **Observable**: [Telemetry spans](docs/guides/subagent-observability.md) for every turn, LLM call, and tool call with parent-child correlation. JSONL trace logs with Chrome DevTools flame chart export for debugging multi-agent flows ([interactive Livebook](livebooks/observability_and_tracing.livemd))
 - **[Context compaction](docs/guides/subagent-compaction.md)**: Pressure-triggered trimming for long-running multi-turn agents — opt in with `compaction: true` to drop older turns once a turn or token threshold is hit
 - **BEAM-native**: Parallel tool calling (`pmap`/`pcalls`), process isolation with timeout and heap limits, fault tolerance
-- **MCP server**: Expose the sandbox as client-side code mode, with optional stateful sessions and [aggregator mode](docs/aggregator-mode.md) for upstream MCP tools
+- **MCP server**: Expose the sandbox as code mode over MCP for clients and server-side agents, with optional stateful sessions and [aggregator mode](docs/aggregator-mode.md) for upstream MCP tools
 
 ### Examples
 
@@ -251,14 +272,14 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
-- **[MCP Getting Started](docs/guides/mcp-getting-started.md)** - Using `ptc_runner_mcp` from any MCP client (overview: [`docs/mcp-server.md`](docs/mcp-server.md))
+- **[MCP Getting Started](docs/guides/mcp-getting-started.md)** - Using `ptc_runner_mcp` from MCP clients or server-side agent runtimes (overview: [`docs/mcp-server.md`](docs/mcp-server.md))
 
 ### Reference
 
 - **[Signature Syntax](docs/signature-syntax.md)** - Input/output type contracts
 - **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write (a Clojure subset: 211 of 534 `clojure.core` vars, plus `clojure.string`, `clojure.set`, `clojure.walk`, and `java.lang.Math`)
 - **[Function Reference](docs/function-reference.md)** - All built-in functions with signatures
-- **Clojure Conformance** - [Core](docs/conformance/clojure-core-audit.md) | [String](docs/conformance/clojure-string-audit.md) | [Set](docs/conformance/clojure-set-audit.md) | [Walk](docs/conformance/clojure-walk-audit.md) | [Math](docs/conformance/java-math-audit.md) | [Java Interop](docs/java-interop.md)
+- **Clojure Conformance** - [Gaps](docs/clojure-conformance-gaps.md) | [Java Interop](docs/java-interop.md)
 - **[Benchmark Evaluation](docs/benchmark-eval.md)** - LLM accuracy by model
 
 PTC-Lisp follows Clojure where that is safe and bounded. Intentional divergences favor sandbox safety and recoverable signal values for Clojure-named helpers; Java-named dot methods keep Java semantics.

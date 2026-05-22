@@ -73,13 +73,6 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       |> Enum.group_by(& &1.section)
       |> Enum.sort_by(fn {section, _} -> section_order(section) end)
 
-    audit_links =
-      @audits
-      |> Enum.map_join(" | ", fn %{path: path, title: title} ->
-        name = title |> String.replace(" for PTC-Lisp", "") |> String.replace(" Audit", "")
-        "[#{name}](conformance/#{Path.basename(path)})"
-      end)
-
     content = """
     <!-- Auto-generated — do not edit by hand -->
     # PTC-Lisp Function Reference
@@ -89,7 +82,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     #{length(entries)} functions and special forms.
 
-    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | #{audit_links}
+    See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md)
 
     ## Table of Contents
 

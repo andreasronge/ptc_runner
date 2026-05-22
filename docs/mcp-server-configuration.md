@@ -1,6 +1,6 @@
 # MCP Server Configuration Reference
 
-Canonical reference for every flag, environment variable, response profile, catalog mode, tracing setting, and lifecycle command exposed by `ptc_runner_mcp`. For installation and client wiring see [`../mcp_server/README.md`](../mcp_server/README.md); for the conceptual overview (when to use the server, security model, architecture) see [`mcp-server.md`](mcp-server.md). Aggregator concepts live in [`aggregator-mode.md`](aggregator-mode.md), agentic mode in [`agentic-mode.md`](agentic-mode.md), and `lisp_debug` in [`mcp-debug.md`](mcp-debug.md).
+Canonical reference for every flag, environment variable, response profile, catalog mode, tracing setting, and lifecycle command exposed by `ptc_runner_mcp`. For installation and client wiring see [`mcp-server-cli.md`](mcp-server-cli.md); for the conceptual overview (when to use the server, security model, architecture) see [`mcp-server.md`](mcp-server.md). Aggregator concepts live in [`aggregator-mode.md`](aggregator-mode.md), agentic mode in [`agentic-mode.md`](agentic-mode.md), and `lisp_debug` in [`mcp-debug.md`](mcp-debug.md).
 
 ## Boot-time configuration model
 

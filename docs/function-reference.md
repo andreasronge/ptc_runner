@@ -6,7 +6,7 @@
 
 305 functions and special forms.
 
-See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](conformance/clojure-core-audit.md) | [Clojure String](conformance/clojure-string-audit.md) | [Clojure Set](conformance/clojure-set-audit.md) | [Clojure Walk](conformance/clojure-walk-audit.md) | [Java Math](conformance/java-math-audit.md)
+See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conformance Gaps](clojure-conformance-gaps.md)
 
 ## Table of Contents
 
@@ -445,4 +445,5 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Core](c
 |----------|-----------|-------------|
 | `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
+
 
