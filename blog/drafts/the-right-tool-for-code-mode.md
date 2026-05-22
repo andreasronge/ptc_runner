@@ -49,6 +49,8 @@ ptc_runner runs a small Clojure-like language called PTC-Lisp. There is no files
 
 Every program runs in its own lightweight BEAM process (the runtime behind Erlang and Elixir) with a wall-clock limit and a memory limit. If a program loops or balloons, that one process is killed and the model is told why, in terms it can act on. Errors are written to be recovered from, not to look like a stack trace. The model reads the feedback, adjusts, and tries again, the way you would at a REPL.
 
+This does not seem to require a frontier model. In the current [PTC-Lisp generation benchmark](https://github.com/andreasronge/ptc_runner/blob/main/docs/benchmark-eval.md), Gemini Flash Lite and Claude Haiku each passed 149 of 150 executions across five runs of a 30-test suite. That is a small eval, not a model leaderboard, but it is enough to make the practical point: the language is small enough, and the feedback loop clear enough, that cheaper models can use it reliably.
+
 The core path through the MCP server is a single tool, `lisp_eval`, that takes a PTC-Lisp program and optional input (sessions and diagnostics add a few more when you want them). Any MCP client can point at it: Claude Desktop, Cursor, Cline, Claude Code. You do not write Elixir, and you do not host a Python runtime. You run a binary and add it to your client config. The fact that there is a 30-year-old battle-tested VM doing the isolation underneath is an implementation detail you never have to touch.
 
 ## A small, honest example
@@ -98,11 +100,17 @@ That is the shift I did not expect, and it is the part I would most want a fello
 
 Before code mode, you designed MCP tools for the questions you thought people would ask. It works a bit like RAG. With RAG you have to anticipate the questions up front to tune your chunking and your embeddings, and when the questions change, your retrieval is suddenly wrong. MCP tool design can fall into a similar trap. You decide each tool's granularity, you shape its responses, you paginate it just so, and then you sit and watch the responses come back and tweak the design. You are optimizing in advance for usage you are only guessing at.
 
-Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory, REPL-like way: run something, look at the shape, run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions. ptc_runner leans into it directly with a session mode, where definitions persist across calls so the model can build up state the way you would in a real REPL.
-
-The performance story follows from that programming model. A ptc_runner session is a bounded REPL, not a disposable job sandbox. The model can define helpers once, keep intermediate findings in the runtime, and continue the investigation on the next turn. The point is not only that each eval is cheap. It is that the model gets a small workspace outside the context window, so it does not have to rebuild the same world every time it asks the next question.[^perf]
+Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory way: run something, look at the shape, run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions.
 
 So you do not have to front-load all the cleverness into your tools anymore. You can ship simple, boring servers that expose primitives, and let the code-mode client compose the logic per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that is a real simplification: stop pre-optimizing tools for imagined workloads, ship the primitive, and let the questions find their own programs.
+
+## Code mode should feel like a REPL
+
+The REPL part matters more than I expected. Investigations are naturally stateful. You define `cost`, bind `traces`, compute `by-day`, inspect the spike, and then ask the next question using the same small workspace. If every code-mode call is a fresh sandbox, the model has to recreate that workspace over and over, or push more of it back into the context window.
+
+That is awkward with a general-purpose runtime. Keeping a pool of stateful Python or JavaScript sandboxes around means keeping imports, heaps, event loops, and capabilities alive too. Cold-starting them is simpler, but then you lose the REPL shape.
+
+ptc_runner sessions are deliberately smaller. Definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived Python or JavaScript process. That is the performance story as much as the ergonomics story: the model gets a small workspace outside the context window, so it does not have to rebuild the same world every time it asks the next question.[^perf]
 
 ## Tool lists are context too
 
@@ -114,7 +122,9 @@ ptc_runner can make the tool catalog part of the runtime instead. A program can 
 
 If there is a bias running underneath all of this, it is that I like removing things.
 
-The language is small on purpose. The servers can be dumb on purpose. Recently a customer asked me to design an MCP server around one of their tools, and I caught myself asking whether they needed MCP at all: the tool was already an HTTP API, and if it described itself well enough, a model that can write code might not need a protocol layer in the middle. That is a thought for another day, but it points the same way as everything else here: a smaller language, simpler servers, fewer layers between the model and the data.
+The language is small on purpose. The servers can be dumb on purpose. Recently a customer asked me to design an MCP server around one of their tools, and I caught myself asking whether they needed MCP at all. The tool was already an HTTP API. If its responses carried the next available actions as links or forms, the old REST/HATEOAS idea, then a model that can write code might not need a separate protocol layer describing every action up front. It could start from one URL, inspect the representation, and follow the affordances that matter for the task.
+
+That is a thought for another day, but it points the same way as everything else here: a smaller language, simpler servers, fewer layers between the model and the data.
 
 Code mode is the right idea. The win does not come from handing the model the biggest, most familiar language and then spending months caging it. It comes from picking a tool actually shaped for the job, and from being willing to leave things out. I like making things that are no longer needed go away.
 
