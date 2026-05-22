@@ -27,12 +27,15 @@ fields you can rely on:
 
 - `step.return` — value returned by `(return ...)` or the last expression in
   single-shot mode.
-- `step.fail` — `%{reason: atom, message: binary, ...}` on failure, otherwise `nil`.
+- `step.fail` — `%{reason: atom | binary, message: binary, details: map}` on failure, otherwise `nil`.
 - `step.usage` — duration, token, and memory metrics.
 - `step.turns` — list of per-turn structs (LLM output, generated program, eval result).
 - `step.tool_calls`, `step.pmap_calls` — tool invocation records.
 - `step.memory` — final memory map (PTC-Lisp `def`s).
+- `step.prints` — list of `println` outputs (always present, defaults to `[]`).
+- `step.summaries` — map of `step-done` summaries (always present, defaults to `%{}`).
 - `step.messages` — full LLM conversation if `collect_messages: true`.
+- `step.journal` — present when the agent has `journaling: true`, otherwise `nil`.
 - `step.child_traces`, `step.child_steps` — for nested SubAgentTool calls.
 
 There is no top-level `:trace` field — use `:turns` for execution history,
@@ -42,9 +45,9 @@ There is no top-level `:trace` field — use `:turns` for execution history,
 
 | Mode | When | Behavior |
 |------|------|----------|
-| Single-shot | `max_turns: 1`, no tools, `retry_turns: 0` | One LLM call, expression result is the answer; `(return ...)` not needed. |
+| Single-shot | `output: :ptc_lisp` (default), `max_turns: 1`, no tools, `retry_turns: 0` | One LLM call, expression result is the answer; `(return ...)` not needed. |
 | Loop | tools present, `max_turns > 1`, or `retry_turns > 0` | Multi-turn until `(return v)` or `(fail r)`; otherwise stops at `max_turns`. |
-| Text | `output: :text` | LLM returns text/JSON directly, no PTC-Lisp. Provider's native tool calling is used if `tools:` is set. |
+| Text | `output: :text` | LLM returns text/JSON directly. Provider's native tool calling is used if `tools:` is set. Add `ptc_transport: :tool_call` for the combined text + PTC-Lisp compute mode. |
 
 If your agent loops to `max_turns_exceeded` despite producing the right value,
 it is almost always missing `(return ...)`. Either drop to `max_turns: 1` or
@@ -71,6 +74,10 @@ history = [%{role: :user, content: "Summarize ticket 123"}]
 
 history = history ++ [%{role: :assistant, content: step.return}]
 ```
+
+`step.return` is a plain string here because this call has no `signature:`. With
+a `signature:`, `step.return` is a **map** keyed by strings — render it before
+putting it into `content:`.
 
 For the next message, decide again: `output: :text` for prose, `output: :text`
 plus `signature:` for structured extraction, or default `:ptc_lisp` when the
@@ -132,6 +139,10 @@ Tool functions return any Elixir term. Don't raise — return `{:error, reason}`
 
 `cache: true` is safe only for pure, idempotent tools. Don't use it on tools
 that read mutable state another tool might change.
+
+`max_tool_calls:` (a `new/1` / `run/2` option) bounds how many app-tool
+invocations the program may make across the whole run — a backstop against
+runaway loops. Calls to the internal `lisp_eval` tool don't count against it.
 
 ## Signatures
 
@@ -223,7 +234,7 @@ across turns. The right choice depends on **(model × workload)**, not model
 alone — see the [transport guide][transport-guide-empirical] for a small
 benchmark.
 
-[transport-guide-empirical]: ../docs/guides/subagent-ptc-transport.md#empirical-note-one-small-benchmark
+[transport-guide-empirical]: https://hexdocs.pm/ptc_runner/subagent-ptc-transport.html#empirical-note-one-small-benchmark
 
 ### Behavior in `:tool_call` mode
 
@@ -245,8 +256,9 @@ benchmark.
 
 `:tool_call` requires a provider/model with native tool calling. Models without
 it surface as `:llm_error` with the provider reason; there is no fallback to
-`:content`. See [`usage-rules/llm-setup.md`](llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling)
-for which built-in providers qualify.
+`:content`. See the LLM setup usage rules (`usage-rules/llm_setup.md`,
+"`ptc_transport: :tool_call` and provider tool calling") for which built-in
+providers qualify.
 
 ### Examples
 
@@ -273,13 +285,15 @@ agent = PtcRunner.SubAgent.new(
 
 ### Don't
 
-- Don't pass `ptc_transport` together with `output: :text` — raises
-  `ArgumentError`. The transport only applies to PTC-Lisp programs.
+- Don't pass `ptc_transport: :content` together with `output: :text` — raises
+  `ArgumentError`. (`ptc_transport: :tool_call` *with* `output: :text` is valid:
+  it's the combined "text + PTC-Lisp compute" mode — see
+  [Text Mode + PTC-Lisp Compute](https://hexdocs.pm/ptc_runner/text-mode-ptc-compute.html).)
 - Don't define an app tool named `lisp_eval`. The name is reserved
   globally; the validator rejects it regardless of `ptc_transport`.
 
 For the full decision guide ("when to switch, when to stay") and a runnable
-walkthrough, see [PTC-Lisp transport](../docs/guides/subagent-ptc-transport.md).
+walkthrough, see [PTC-Lisp transport](https://hexdocs.pm/ptc_runner/subagent-ptc-transport.html).
 
 ## Composition
 

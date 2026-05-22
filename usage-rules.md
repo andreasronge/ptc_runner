@@ -7,8 +7,8 @@ in a sandboxed BEAM process. The LLM is the programmer, not the runtime.
 This file covers the consumer-facing API. Sub-rules cover specific topics:
 
 - [`usage-rules/subagent.md`](usage-rules/subagent.md) — the agentic loop API (most common entry point)
-- [`usage-rules/ptc-lisp.md`](usage-rules/ptc-lisp.md) — running PTC-Lisp directly without an LLM
-- [`usage-rules/llm-setup.md`](usage-rules/llm-setup.md) — providers, callbacks, model aliases
+- [`usage-rules/ptc_lisp.md`](usage-rules/ptc_lisp.md) — running PTC-Lisp directly without an LLM
+- [`usage-rules/llm_setup.md`](usage-rules/llm_setup.md) — providers, callbacks, model aliases
 - [`usage-rules/testing.md`](usage-rules/testing.md) — mocking the LLM in ExUnit
 
 ## Mental model
@@ -95,8 +95,9 @@ each user message as a fresh mission:
    needs prior conversation state.
 
 Use `PtcRunner.SubAgent.chat/3` only when you specifically want its wrapper
-contract: it returns `{result, updated_messages, memory}` and threads those
-values into the next call. It is still not a long-lived agent process.
+contract: it returns `{:ok, result, updated_messages, memory}` (or
+`{:error, reason}`) and threads those values into the next call. It is still
+not a long-lived agent process.
 
 See `livebooks/output_modes_in_app_loops.livemd` for the canonical pattern:
 plain text turn, structured text turn, then a PTC-Lisp turn over the same
@@ -153,46 +154,14 @@ a "filter these tickets by age and priority" request should usually be
 ## PTC-Lisp transport (`ptc_transport`)
 
 For `output: :ptc_lisp` agents, `ptc_transport` controls how the LLM ships its
-program to PtcRunner. There are two values:
-
-| Transport | Default? | How the LLM delivers programs |
-|-----------|----------|-------------------------------|
-| `:content` | yes | Markdown-fenced PTC-Lisp in the assistant message body. Parsed by PtcRunner. |
-| `:tool_call` | opt-in | A native tool call to a single internal `lisp_eval` tool whose `program` argument is the PTC-Lisp source. |
-
-The two transports are functionally equivalent in what programs can express —
-same sandbox, same `(tool/...)` namespace for app tools, same memory / journal /
-signature semantics. They differ only in *how* the program crosses the wire.
-
-**When `:content` is preferred (and why it stays the default):**
-*one program, one deterministic orchestration.* The LLM produces a single
-PTC-Lisp program that fans out to tools, filters, aggregates, and returns —
-typically in **one** LLM turn. Lower latency, lower cost, simplest transcript.
-
-**When `:tool_call` is preferred:**
-- providers / models where native tool calling is materially more reliable than
-  the model adhering to "emit a single fenced clojure block";
-- workloads that genuinely need iterative refinement across multiple program
-  executions (the model inspects an intermediate result before writing the next
-  program).
-
-`:tool_call` turns one PTC-Lisp program into a ReAct-style loop: the model can
-call `lisp_eval` zero or more times, then return a final answer
-directly. That extra round-tripping is a **tradeoff, not an upgrade** — pay for
-it deliberately.
-
-**Provider compatibility.** `:tool_call` requires a provider/model with native
-tool calling. Models without it surface as `:llm_error` from the adapter
-(usually with the provider's own reason string); there is no automatic fallback
-to `:content`.
-
-**App tools stay inside PTC-Lisp.** Even in `:tool_call` mode, your app tools
-are *not* exposed as native provider tools. Only `lisp_eval` is. The LLM
-calls your tools the same way as in `:content` mode — as `(tool/name ...)`
-forms inside the PTC-Lisp program. This preserves the sandbox, the
-`max_tool_calls` budget, the tool cache, and parallel execution
-(`pmap` / `pcalls`). The two transports are about *delivering the program*, not
-about how tools are called.
+program to PtcRunner. `:content` (default) sends a markdown-fenced PTC-Lisp
+program in the assistant message; `:tool_call` (opt-in) sends it as a native
+tool call to a single internal `lisp_eval` tool. Both run in the same sandbox
+with identical tool, memory, and signature semantics — and in **both**, your
+app tools stay inside PTC-Lisp as `(tool/...)` forms (never exposed as native
+provider tools). `:tool_call` turns one program into a ReAct-style loop and is
+a **tradeoff, not an upgrade** — pay for it deliberately, and only with a
+provider/model that has native tool calling.
 
 ```elixir
 # Default — :content. Nothing to opt into.
@@ -202,11 +171,11 @@ agent = SubAgent.new(prompt: "...", tools: tools)
 agent = SubAgent.new(prompt: "...", tools: tools, ptc_transport: :tool_call)
 ```
 
-`ptc_transport` is rejected with `output: :text` (raises `ArgumentError`).
-For the full SubAgent-level rules and examples, see
-[`usage-rules/subagent.md`](usage-rules/subagent.md#ptc-lisp-transport-ptc_transport).
-For provider compatibility specifics, see
-[`usage-rules/llm-setup.md`](usage-rules/llm-setup.md#ptc_transport-tool_call-and-provider-tool-calling).
+`ptc_transport: :content` is rejected with `output: :text` (raises
+`ArgumentError`); `ptc_transport: :tool_call` *with* `output: :text` is the
+supported combined "text + PTC-Lisp compute" mode. For the full SubAgent-level
+rules and examples see [`usage-rules/subagent.md`](usage-rules/subagent.md), and
+for provider compatibility see [`usage-rules/llm_setup.md`](usage-rules/llm_setup.md).
 
 ## Required vs optional `run/2` options
 

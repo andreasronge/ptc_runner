@@ -127,10 +127,10 @@ defmodule PtcRunner.Lisp do
 
   ## Memory Contract
 
-  The memory contract is applied only at the top level (via `apply_memory_contract/3`):
-  - If result is not a map: `step.return` = value, no memory update
-  - If result is a map without `:return`: merges map into memory, returns map as `step.return`
-  - If result is a map with `:return`: merges remaining keys into memory, returns `:return` value as `step.return`
+  The top-level program value passes through to `step.return` **unchanged** —
+  there is no implicit map merge and no special `:return` key handling. Storage
+  is **explicit**: `(def x v)` persists `v` in memory (`step.memory["x"]`), and
+  that memory survives across turns within a single `SubAgent` run.
 
   **Related modules:**
   - `PtcRunner.SubAgent.Loop` - Uses this contract to persist memory across turns

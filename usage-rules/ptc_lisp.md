@@ -23,7 +23,7 @@ For everything else, use `PtcRunner.SubAgent.run/2` instead.
   context: %{items: items}
 )
 
-step.return  #=> 3
+step.return  #=> count of active items
 ```
 
 With tools (note kebab-case in the Lisp call, string key in the map, arity-1 fn):
@@ -75,21 +75,22 @@ time. Wrap zero-arity / multi-arity functions: `fn _args -> Mod.fun() end` /
 
 ## What's available in the language
 
-PTC-Lisp covers ~40% of `clojure.core` (211 of 534 vars), plus selected
+PTC-Lisp covers ~44% of `clojure.core` (234 of 534 vars), plus selected
 functions from `clojure.string`, `clojure.set`, `clojure.walk`, and
 `java.lang.Math`. Highlights:
 
 - Threading: `->`, `->>`
 - Sequence: `map`, `filter`, `reduce`, `take`, `drop`, `partition`, `group-by`
-- Collection aggregators (PTC extensions): `sum`, `avg`, `sum-by`, `avg-by`, `min-by`, `max-by`, `pluck`
-- Predicates: `where`, `all-of`, `any-of`, `none-of`
+- Collection aggregators (PTC extensions): `sum`, `avg`, `sum-by`, `avg-by`, `min-by`, `max-by`
+- Filtering by field: a keyword is a function, so `(filter :active items)` keeps
+  truthy `:active`; use `(filter (fn [x] (> (:price x) 100)) items)` for predicates.
 - Parallel: `pmap`, `pcalls` (BEAM-native, runs concurrently)
 - Control flow: `if`, `cond`, `when`, `let`, `loop`/`recur`
 - Multi-turn loop control: `(return v)`, `(fail reason)`
 - Definitions: `def` (variable, persists in memory), `defn` (function)
 
 The full list lives in `docs/function-reference.md`. Use `mix
-usage_rules.search_docs <name> -p ptc_runner` to look one up.
+usage_rules.docs PtcRunner.Lisp` to print the built-in reference.
 
 **Not available** (deliberate omissions): I/O, file system, HTTP, atoms (Clojure
 atoms), refs, agents, lazy seqs (everything is eager), macros, and general
@@ -107,7 +108,8 @@ Clojure namespace declarations/imports (`ns`, `require`, `refer`, `import`).
 | `regex/name` | Calls an allowlisted regex helper; regex vars are audited as `clojure.core`. |
 | `Math/name`, `System/name`, `Double/name` | Java-shaped compatibility helpers/constants. |
 | `LocalDate/name`, `Instant/name` | Java time parsing compatibility helpers. |
-| `json/name` / `mcp/name` | Calls JSON and MCP result helpers. |
+| `json/name` | Calls JSON helpers (`json/parse-string`, `json/generate-string`). |
+| `budget/remaining` | Remaining tool-call budget (only when a `:budget` is set). |
 | `*1`, `*2`, `*3` | Last 1/2/3 turn results (multi-turn agents only). |
 
 PTC-Lisp does **not** evaluate namespace forms. Do not write `(require
@@ -180,9 +182,15 @@ shape first.
 
 The top-level program's value passes through to `step.return` **unchanged** —
 no implicit map merge, no `:return` key handling. Persistence is **explicit**:
-use `(def x v)` to store a value (it becomes `memory[:x]` and survives across
-turns within one `SubAgent.run/2`). `(defn name [...] ...)` does the same for
-functions.
+use `(def x v)` to store a value (it becomes `memory["x"]` — user-defined names
+are string keys — and survives across turns within one `SubAgent.run/2`).
+`(defn name [...] ...)` does the same for functions.
+
+When you call `Lisp.run/2` directly (not via `SubAgent`), `(return v)` and
+`(fail r)` leave raw sentinels on `step.return` (`{:__ptc_return__, v}` /
+`{:__ptc_fail__, r}`); `SubAgent` unwraps them for you. For single-shot
+`Lisp.run/2` programs — the common case — skip `(return ...)` and let the last
+expression be the result.
 
 ## Common pitfalls
 
