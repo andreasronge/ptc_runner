@@ -1959,10 +1959,20 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   end
 
   # ============================================================
-  # sort-by on maps
+  # sort and sort-by on maps
   # ============================================================
 
-  describe "sort-by on maps" do
+  describe "sort and sort-by on maps" do
+    test "sort on map returns sorted list of pairs" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort {:b 2 :a 1})|)
+      assert result == [["a", 1], ["b", 2]]
+    end
+
+    test "sort on empty map returns empty list" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(sort {})|)
+      assert result == []
+    end
+
     test "sort-by accepts mapped list results" do
       {:ok, %Step{return: result}} =
         Lisp.run(~S|(sort-by :day (map (fn [x] x) [{:day 2} {:day 1}]))|)

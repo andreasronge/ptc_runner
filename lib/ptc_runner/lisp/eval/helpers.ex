@@ -35,7 +35,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   # first/last/nth on maps - maps are unordered
   defp specific_type_error(name, [%{} = map] = args)
-       when name in [:first, :last, :reverse, :sort] and not is_struct(map) do
+       when name in [:first, :last, :reverse] and not is_struct(map) do
     {:ok,
      {:type_error,
       "#{name} does not support maps (maps are unordered). " <>

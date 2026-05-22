@@ -1747,7 +1747,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `sort-by` | `(sort-by keyfn comp coll)` | Sort with comparator |
 | `reverse` | `(reverse coll)` | Reverse order |
 
-**Sortable types:** Numbers and strings can be sorted. Numbers use numeric order; strings use lexicographic (alphabetical) order. Sorting mixed types or unsortable types (maps, nil) raises a type error.
+**Sortable types:** Numbers, strings, and map entries can be sorted. Numbers use numeric order; strings use lexicographic (alphabetical) order. Sorting mixed types or unsortable types (such as nil) raises a type error.
 
 ```clojure
 (sort [3 1 2])                ; => [1 2 3]
@@ -1766,9 +1766,13 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 
 **Note:** `sort`, `sort-by`, and the explicit comparison operators (`>`, `<`, `>=`, `<=`) support strings and mixed scalar values using recoverable runtime term ordering. Prefer numeric-only data when numeric ordering is required.
 
-**Map support:** `sort-by` accepts maps, treating each entry as a `[key value]` pair. Returns a **list** of `[key value]` pairs (not a map) to preserve sort order:
+**Map support:** `sort` and `sort-by` accept maps, treating each entry as a `[key value]` pair. They return a **list** of `[key value]` pairs (not a map) to preserve sort order:
 
 ```clojure
+;; Sort map entries by key/value pair order
+(sort {:b 2 :a 1})
+;; => [[:a 1] [:b 2]]
+
 ;; Sort map by values (descending)
 (sort-by second > {:food 100 :travel 500 :office 200})
 ;; => [[:travel 500] [:office 200] [:food 100]]
