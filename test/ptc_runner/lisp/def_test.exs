@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.DefTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Analyze
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval
   alias PtcRunner.Lisp.Format.Var
 
@@ -178,8 +179,8 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, value, _} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
 
       # count should be a builtin
-      assert is_tuple(value)
-      assert elem(value, 0) == :normal
+      assert Builtin.builtin?(value)
+      assert Builtin.unwrap(value) |> elem(0) == :normal
     end
 
     test "resolution order: locals > user_ns > builtins" do

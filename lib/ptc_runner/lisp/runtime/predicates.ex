@@ -46,6 +46,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
       iex> f.(5)
       6
   """
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.SourceAtoms
@@ -94,6 +95,29 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   def fnil({:collect, _fun} = callable, default) do
+    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+  end
+
+  def fnil(%Builtin{binding: {:normal, fun}} = callable, default) when is_function(fun) do
+    case :erlang.fun_info(fun, :arity) do
+      {:arity, 1} ->
+        fn
+          nil -> Callable.call(callable, [default])
+          arg -> Callable.call(callable, [arg])
+        end
+
+      {:arity, 2} ->
+        fn
+          nil, arg2 -> Callable.call(callable, [default, arg2])
+          arg1, arg2 -> Callable.call(callable, [arg1, arg2])
+        end
+
+      {:arity, _n} ->
+        {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+    end
+  end
+
+  def fnil(%Builtin{} = callable, default) do
     {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
   end
 
@@ -328,6 +352,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def type_of(x) when is_list(x), do: :vector
   def type_of(%MapSet{}), do: :set
   def type_of(%LispKeyword{}), do: :keyword
+  def type_of(%Builtin{}), do: :function
 
   def type_of(x) when is_atom(x) do
     if SpecialValues.special?(x), do: :number, else: :keyword

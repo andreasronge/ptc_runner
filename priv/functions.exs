@@ -2411,7 +2411,7 @@
     %{
       name: "merge",
       description: "Merge maps (later wins)",
-      binding: :variadic,
+      binding: :collect,
       category: :core,
       dispatch: :env,
       signatures: ["(merge m1 m2 ...)"],

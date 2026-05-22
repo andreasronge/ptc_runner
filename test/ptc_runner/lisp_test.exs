@@ -255,17 +255,16 @@ defmodule PtcRunner.LispTest do
       assert msg =~ "Tool 'kaboom' failed: \"boom\""
     end
 
-    test "unexpected runtime exception reports as runtime_error not tool_error" do
-      # Simulate a built-in function that raises unexpectedly.
-      # We use a tool that returns a non-map value, then call (keys result)
-      # which will raise ArgumentError from Map.keys/1.
-      # This should be classified as :runtime_error, not :tool_error with name "unknown".
+    test "builtin type error after tool result reports as type_error not tool_error" do
+      # A tool can return a value with the wrong shape for a downstream builtin.
+      # This should be classified as a Lisp type error, not a tool_error with
+      # name "unknown".
       tools = %{"get-data" => fn _args -> "not-a-map" end}
 
-      assert {:error, %{fail: %{reason: :runtime_error, message: msg}}} =
+      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
                Lisp.run(~S|(keys (tool/get-data {}))|, tools: tools)
 
-      assert msg =~ "Runtime error:"
+      assert msg =~ "keys: arg 1 expected map, got string"
       refute msg =~ "unknown"
     end
 

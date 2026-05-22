@@ -14,6 +14,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   - Plain Erlang functions
   """
 
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
@@ -21,6 +22,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
@@ -35,6 +37,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           {:ok, term(), EvalContext.t()} | {:error, term()}
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
+  end
+
+  defp do_apply_fun(%Builtin{} = builtin, args, %EvalContext{} = eval_ctx, do_eval_fn) do
+    with :ok <- maybe_validate_builtin_args(builtin, args) do
+      do_apply_fun(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn)
+    end
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
@@ -131,6 +139,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
       e in RuntimeError ->
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
+        {:error, {:type_error, Exception.message(e), converted_args}}
+
+      e in PtcRunner.Lisp.TypeError ->
         {:error, {:type_error, Exception.message(e), converted_args}}
 
       e in ExecutionError ->
@@ -241,6 +252,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
+
+    e in PtcRunner.Lisp.TypeError ->
+      {:error, {:type_error, Exception.message(e), args}}
   end
 
   # Collect builtins: pass all args as a list to unary function
@@ -253,6 +267,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   rescue
     e in ExecutionError ->
       {:error, execution_error_tuple(e)}
+
+    e in PtcRunner.Lisp.TypeError ->
+      {:error, {:type_error, Exception.message(e), args}}
   end
 
   # Multi-arity builtins: select function based on argument count
@@ -285,6 +302,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           # See the `{:normal, fun}` clause: surface nested parallel
           # `:memory_exceeded` / `:timeout` rather than crash the sandbox.
           reraise_unless_parallel(e, __STACKTRACE__)
+
+        e in PtcRunner.Lisp.TypeError ->
+          {:error, {:type_error, Exception.message(e), converted_args}}
       end
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
@@ -350,6 +370,38 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         {:error, {:invalid_keyword_call, k, args}}
     end
   end
+
+  defp maybe_validate_builtin_args(%Builtin{binding: {:normal, fun}} = builtin, args) do
+    if function_arity(fun) == length(args), do: validate_builtin_args(builtin, args), else: :ok
+  end
+
+  defp maybe_validate_builtin_args(%Builtin{binding: {:multi_arity, _name, funs}} = builtin, args) do
+    arity = length(args)
+    min_arity = function_arity(elem(funs, 0))
+    idx = arity - min_arity
+
+    if idx >= 0 and idx < tuple_size(funs), do: validate_builtin_args(builtin, args), else: :ok
+  end
+
+  defp maybe_validate_builtin_args(%Builtin{binding: {:variadic_nonempty, _name, _fun}}, []) do
+    :ok
+  end
+
+  defp maybe_validate_builtin_args(%Builtin{name: :"merge-with"}, []) do
+    {:error, {:arity_error, "merge-with requires at least 1 argument, got 0"}}
+  end
+
+  defp maybe_validate_builtin_args(%Builtin{} = builtin, args),
+    do: validate_builtin_args(builtin, args)
+
+  defp validate_builtin_args(builtin, args) do
+    Args.validate!(builtin, args)
+    :ok
+  rescue
+    e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
+  end
+
+  defp function_arity(fun), do: :erlang.fun_info(fun, :arity) |> elem(1)
 
   defp check_arity({:variadic, leading, _rest}, args) do
     if length(args) >= length(leading) do
@@ -526,6 +578,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   def closure_to_fun({:multi_arity, _, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
   def closure_to_fun({:collect, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
+  def closure_to_fun(%Builtin{} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
   # Special forms like println - convert to a function
   def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do

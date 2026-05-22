@@ -50,6 +50,7 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -349,6 +350,11 @@ defmodule PtcRunner.Lisp.Format do
     names = Enum.map_join(params, " ", &extract_param_name/1)
     %Fn{params: names}
   end
+
+  defp sanitize(%EnvBuiltin{binding: {:collect, fun}}) when is_function(fun),
+    do: %Fn{params: "..."}
+
+  defp sanitize(%EnvBuiltin{}), do: %Builtin{}
 
   defp sanitize({:normal, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
