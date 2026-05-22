@@ -27,6 +27,17 @@ defmodule PtcRunner.Lisp.Runtime.StringFormatTest do
       assert run!(~s|(format "%s has %d items" "Alice" 5)|) == "Alice has 5 items"
     end
 
+    test "ignores width and alignment hints" do
+      assert run!(~S[(format "in %6s | out %-8s | id %08d" "12" "34" 255)]) ==
+               "in 12 | out 34 | id 255"
+    end
+
+    test "ignores width in multi-specifier trace templates" do
+      assert run!(
+               ~S[(format "iter %s | in %6s | out %s | $%s | %s | finish=%s" "3" "100" "45" "0.0012" "gpt" "stop")]
+             ) == "iter 3 | in 100 | out 45 | $0.0012 | gpt | finish=stop"
+    end
+
     test "%% literal percent" do
       assert run!(~s|(format "100%%")|) == "100%"
     end
