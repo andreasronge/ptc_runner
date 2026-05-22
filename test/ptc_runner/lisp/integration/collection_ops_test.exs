@@ -305,6 +305,26 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert Enum.map(result, & &1.score) == [1, 2, 3]
     end
 
+    test "sort-by accepts vector paths" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(sort-by [:a :b] [{:a {:b 2}} {:a {:b 1}}])|)
+
+      assert result == [
+               %{"a" => %{"b" => 1}},
+               %{"a" => %{"b" => 2}}
+             ]
+    end
+
+    test "sort-by with comparator accepts vector paths" do
+      {:ok, %Step{return: result}} =
+        Lisp.run(~S|(sort-by [:a :b] > [{:a {:b 1}} {:a {:b 2}}])|)
+
+      assert result == [
+               %{"a" => %{"b" => 2}},
+               %{"a" => %{"b" => 1}}
+             ]
+    end
+
     test "some with keyword finds first truthy" do
       items = [%{active: false}, %{active: true}]
 

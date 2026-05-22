@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.TypeError
 
@@ -50,6 +51,10 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   def valid_keyfn?(%LispKeyword{}), do: true
   def valid_keyfn?(x), do: valid_callable?(x)
 
+  @spec valid_sort_keyfn?(term()) :: boolean()
+  def valid_sort_keyfn?(x) when is_list(x), do: true
+  def valid_sort_keyfn?(x), do: valid_keyfn?(x)
+
   defp validate_shape!(name, specs, args) when is_list(specs) do
     validate_list!(name, specs, args)
   end
@@ -90,13 +95,26 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   defp custom_call_error("sort-by", [key, coll, comp])
        when (is_atom(key) or is_binary(key) or is_function(key, 1) or
-               is_struct(key, LispKeyword)) and is_list(coll) do
+               is_list(key) or is_struct(key, LispKeyword)) and is_list(coll) do
     if valid_callable?(comp) or comp in [:asc, :desc, :>, :<] do
-      "sort-by expects (key, comparator, collection) but got (key, collection, comparator). Try: (sort-by #{inspect(key)} #{inspect(comp)} collection)"
+      "sort-by expects (key, comparator, collection) but got (key, collection, comparator). Try: (sort-by #{format_hint_value(key)} #{format_hint_value(comp)} collection)"
     end
   end
 
   defp custom_call_error(_name, _args), do: nil
+
+  defp format_hint_value(%Builtin{name: name}), do: display_atom(name)
+  defp format_hint_value(:>), do: ">"
+  defp format_hint_value(:<), do: "<"
+  defp format_hint_value(:asc), do: ":asc"
+  defp format_hint_value(:desc), do: ":desc"
+
+  defp format_hint_value(value) do
+    {formatted, _truncated?} = Format.to_clojure(value)
+    formatted
+  end
+
+  defp display_atom(name), do: name |> Atom.to_string() |> String.replace("_", "-")
 
   defp validate_arg!(name, index, spec, arg, args) do
     case custom_error(name, index, spec, arg, args) do
@@ -173,6 +191,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   defp valid?(:callable, x), do: valid_callable?(x)
   defp valid?(:predicate, x), do: valid_predicate?(x)
   defp valid?(:keyfn, x), do: valid_keyfn?(x)
+  defp valid?(:sort_keyfn, x), do: valid_sort_keyfn?(x)
   defp valid?(:number, x), do: is_number(x)
   defp valid?(:integer, x), do: is_integer(x)
   defp valid?(:non_neg_integer, x), do: is_integer(x) and x >= 0

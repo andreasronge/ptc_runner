@@ -153,6 +153,15 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert message =~ "got (key, collection, comparator)"
     end
 
+    test "sort-by swapped vector path hint uses source-like values" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run(~S|(sort-by [:a :b] [{:a {:b 1}} {:a {:b 2}}] >)|)
+
+      assert message =~ "Try: (sort-by [:a :b] > collection)"
+      refute message =~ "%PtcRunner.Lisp.Keyword"
+      refute message =~ "%PtcRunner.Lisp.Env.Builtin"
+    end
+
     test "merge-with without function is an arity error" do
       assert {:error, %Step{fail: %{reason: :arity_error, message: message}}} =
                Lisp.run("(merge-with)")
