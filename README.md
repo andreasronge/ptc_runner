@@ -11,6 +11,9 @@
 
 PtcRunner gives LLM agents a fast, secure, stateful code mode.
 
+> PtcRunner is a 0.x library under active development. Expect bugs, API changes,
+> and breaking behavior as the project evolves.
+
 Models write small [PTC-Lisp](docs/ptc-lisp-specification.md) programs.
 PtcRunner runs them in a BEAM-native sandbox with process isolation, timeouts,
 heap limits, and controlled tool access. Sessions can keep definitions and
