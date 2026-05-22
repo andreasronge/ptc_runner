@@ -227,7 +227,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, [tool]} = exec.(:list_tools, ["github"])
 
       assert tool ==
-               "github.search(query: string) -> {items [:any], next :string?} - Search things"
+               "github.search(query: string) -> Result<{items [:any], next :string?}> - Search things"
     end
 
     test "unknown server is programmer fault" do
@@ -655,7 +655,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result =~ "Required args: :query"
       assert result =~ "Use:"
       assert result =~ ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
-      assert result =~ "Returns: tagged data"
+      assert result =~ "Returns: `Result<T>`"
+      assert result =~ "use `(:value r)` as T"
     end
 
     test "call_example surfaces required args with :args clause" do

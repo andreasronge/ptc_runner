@@ -23,9 +23,8 @@ Evaluates PTC-Lisp against committed session memory
 
 Upstreams:
 `(tool/mcp-call {:server s :tool t :args {...}})`
-=> `{:ok true :value payload :value_kind :json|:text|:none}` or
-   `{:ok false :reason kw :message text}`.
-Check `:ok`; `:value` is unwrapped domain data.
+=> `Result<T>`: success `{:ok true :value T}`; failure `{:ok false :reason kw :message text}`.
+Catalog `-> Result<T>` shows T. Check `:ok`.
 Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
 
 Unknown result shape:

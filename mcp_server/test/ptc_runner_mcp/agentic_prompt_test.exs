@@ -103,8 +103,8 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     prompt = Prompt.system_prompt(catalog: "docs:\n  search()")
 
     assert count(prompt, "lisp_task MCP-call contract:") == 1
-    assert count(prompt, "In `lisp_task`, `tool/mcp-call` returns a tagged map") == 1
-    assert prompt =~ "`(:value r)` is already the unwrapped upstream payload"
+    assert count(prompt, "In `lisp_task`, `tool/mcp-call` returns `Result<T>`") == 1
+    assert prompt =~ "success `{:ok true :value T}`"
     assert prompt =~ "unexpected shape, handle or fail"
     assert prompt =~ "inspect `:ok`"
     refute prompt =~ ":tag"
@@ -120,7 +120,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert direct =~ "Check `:ok`"
     refute direct =~ ":json-null"
 
-    assert agentic =~ "returns a tagged map"
+    assert agentic =~ "returns `Result<T>`"
     assert agentic =~ "inspect `:ok`"
     refute agentic =~ "return `nil`"
     refute agentic =~ ":json-null"
@@ -130,15 +130,16 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     prompt =
       Prompt.system_prompt(
         catalog:
-          "fs:\n  list_directory(path: string) -> :unknown_content - Results use [FILE] prefixes"
+          "fs:\n  list_directory(path: string) -> Result<:unknown_content> - Results use [FILE] prefixes"
       )
 
-    assert prompt =~ "For `-> :unknown_content` tools, inspect `:value` before assuming a shape."
+    assert prompt =~
+             "For `Result<:unknown_content>` tools, inspect `:value` before assuming a shape."
 
     typed_prompt =
-      Prompt.system_prompt(catalog: "docs:\n  search(q: string) -> {items [:string]}")
+      Prompt.system_prompt(catalog: "docs:\n  search(q: string) -> Result<{items [:string]}>")
 
-    refute typed_prompt =~ "For `-> :unknown_content` tools"
+    refute typed_prompt =~ "For `Result<:unknown_content>` tools"
   end
 
   test "assemble returns user message and generic tool-rendering suppression data" do
@@ -166,7 +167,9 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
       prompt = Prompt.system_prompt(catalog_mode: :lazy)
 
       assert prompt =~ "Configured upstream MCP servers: alpha"
-      assert prompt =~ "Upstream catalog: not inlined (catalog mode: lazy)."
+      refute prompt =~ "Upstream catalog: not inlined"
+      assert prompt =~ "catalog list/search returns strings like"
+      assert prompt =~ "use exact tool names"
       assert prompt =~ "(catalog/search-tools"
       assert prompt =~ "(catalog/list-tools"
       assert prompt =~ "(catalog/describe-tool"

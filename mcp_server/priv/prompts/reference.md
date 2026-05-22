@@ -21,14 +21,14 @@ Syntax:
 Data:
 - literals: `nil`, bools, numbers, strings, keywords, vectors/maps/sets.
 - JSON maps use string keys.
-- Context keys are symbols: `{"records":[...]}` -> `data/records`; `{"orders":[...]}` -> `data/orders`.
-- Use `data/records`, not `(data/records)`. No bare `data` object.
+- Context example: `{"orders":[...]}` -> `(count (filter #(= "paid" (get % "status")) data/orders))`.
+- Use `data/orders`, not `(data/orders)`, `orders`, or bare `data`.
 
 Helpers:
 - Namespaces are fixed; no `require`/`import`.
 - `json/parse-string`, `json/generate-string`; `str/join`, `set/union`.
-- Java-shaped: `Double/parseDouble`, `LocalDate/parse`, `Instant/parse`.
+- Java-shaped: `Double/parseDouble`, `LocalDate/parse`.
 - Prefer core fns; use `pmap`/`pcalls` when useful.
 
-No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network; general Java interop.
+No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network; broad Java interop.
 <!-- PTC_PROMPT_END -->

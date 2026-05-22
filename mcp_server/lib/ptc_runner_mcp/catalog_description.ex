@@ -315,7 +315,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   defp render_output(schema) when is_map(schema) do
     case render_output_type(schema) do
       "" -> ""
-      type -> " -> #{type}"
+      type -> " -> Result<#{type}>"
     end
   end
 

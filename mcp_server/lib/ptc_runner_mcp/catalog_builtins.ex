@@ -612,7 +612,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "annotations" => annotations,
       "call_example" => build_call_example(server, name, arg_keys, required),
       "response_notes" =>
-        "Returns tagged data whose :value is already the unwrapped upstream payload."
+        "`tool/mcp-call` returns `Result<T>`; success has `:value T`, failure has `:reason`/`:message`."
     }
     |> detailed_tool_text()
   end
@@ -646,7 +646,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "Use:",
       call_example,
       "",
-      "Returns: tagged data; use `(:value r)` for the unwrapped upstream payload."
+      "Returns: `Result<T>`; if `(:ok r)`, use `(:value r)` as T."
     ]
     |> Enum.join("\n")
   end
@@ -771,7 +771,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp render_output(schema) when is_map(schema) do
     case render_output_type(schema) do
       "" -> ""
-      type -> " -> #{type}"
+      type -> " -> Result<#{type}>"
     end
   end
 

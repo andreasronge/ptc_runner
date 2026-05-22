@@ -331,8 +331,9 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
   defp assert_quick_contract_in_first_chunk(text) do
     for marker <- [
           "(tool/mcp-call",
+          "Result<T>",
           "Check `:ok`",
-          ":value payload",
+          ":value T",
           ":reason kw",
           ":raw",
           "Unknown result shape"
