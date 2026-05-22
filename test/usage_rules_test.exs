@@ -32,8 +32,8 @@ defmodule UsageRulesTest do
   @rules_files [
     "usage-rules.md",
     "usage-rules/subagent.md",
-    "usage-rules/ptc-lisp.md",
-    "usage-rules/llm-setup.md",
+    "usage-rules/ptc_lisp.md",
+    "usage-rules/llm_setup.md",
     "usage-rules/testing.md"
   ]
 
@@ -123,7 +123,7 @@ defmodule UsageRulesTest do
     end
 
     test "Lisp.run/2 executes without an LLM" do
-      # Mirrors usage-rules/ptc-lisp.md "Basic shape".
+      # Mirrors usage-rules/ptc_lisp.md "Basic shape".
       {:ok, step} =
         PtcRunner.Lisp.run(
           ~S|(->> data/items (filter :active) (count))|,
@@ -134,7 +134,7 @@ defmodule UsageRulesTest do
     end
 
     test "Lisp.run/2 memory contract: top-level map passes through unchanged" do
-      # Mirrors usage-rules/ptc-lisp.md "Memory contract".
+      # Mirrors usage-rules/ptc_lisp.md "Memory contract".
       # No implicit merge of returned maps into memory; persistence is via def.
       {:ok, step} =
         PtcRunner.Lisp.run(
@@ -160,7 +160,7 @@ defmodule UsageRulesTest do
     end
 
     test "LLM callback may return a raw string OR a normalized map" do
-      # Mirrors usage-rules/llm-setup.md "Custom callback" output shapes.
+      # Mirrors usage-rules/llm_setup.md "Custom callback" output shapes.
       raw = fn _ -> {:ok, "(+ 1 2)"} end
       normalized = fn _ -> {:ok, %{content: "(+ 1 2)", tokens: %{input: 1, output: 1}}} end
 
@@ -171,7 +171,7 @@ defmodule UsageRulesTest do
     end
 
     test "LLM callback tokens reach step.usage" do
-      # Mirrors usage-rules/llm-setup.md token shape — the canonical map form
+      # Mirrors usage-rules/llm_setup.md token shape — the canonical map form
       # carries token accounting through the loop into the final Step.
       llm = fn _ ->
         {:ok, %{content: "(+ 1 2)", tokens: %{input: 7, output: 13}}}

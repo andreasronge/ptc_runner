@@ -76,7 +76,7 @@ tests that exercise the loop with a scripted LLM and real tools.
 ## Inspecting failures
 
 ```elixir
-{result, step} = PtcRunner.SubAgent.run(agent, llm: llm)
+{_ok_or_error, step} = PtcRunner.SubAgent.run(agent, llm: llm)
 
 # See every turn — generated program, tool calls, return value
 PtcRunner.SubAgent.Debug.print_trace(step)

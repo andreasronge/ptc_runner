@@ -136,19 +136,23 @@ return value fails the signature.
 
 `SubAgent.new(ptc_transport: :tool_call, ...)` requires a provider/model with
 **native tool calling** — PtcRunner ships the LLM a single internal tool
-(`lisp_eval`) and expects native `tool_calls` back. See
-[`usage-rules/subagent.md`](subagent.md#ptc-lisp-transport-ptc_transport)
-for the full transport semantics; this section covers only provider
-compatibility.
+(`lisp_eval`) and expects native `tool_calls` back. See the SubAgent usage
+rules (`usage-rules/subagent.md`, "PTC-Lisp transport") for the full transport
+semantics; this section covers only provider compatibility.
 
 | Provider prefix (in `PtcRunner.LLM.callback/2`) | `ptc_transport: :tool_call` |
 |--------------------------------------------------|------------------------------|
 | `anthropic:` (most Claude models)                | supported                   |
 | `openai:` (most GPT-4 / GPT-4.1 / o-series)      | supported                   |
+| `google:` (Gemini tool-calling models)           | supported                   |
+| `groq:` (tool-calling models, e.g. `gpt-oss-120b`) | supported                 |
 | `bedrock:` (Anthropic + supported OpenAI variants on Bedrock) | supported     |
 | `openrouter:<provider>/<model>`                  | supported when the upstream model is itself a tool-calling model — passes through whatever the upstream offers |
 | `ollama:` (most local models)                    | not supported               |
 | `openai-compat:` against endpoints without tool-calling | not supported        |
+
+The list above is not exhaustive — see `PtcRunner.LLM.DefaultRegistry` for the
+full set of supported provider prefixes.
 
 Caveats apply at the *model* level, not the provider level: a
 tool-calling-capable provider can still host non-tool-calling models. If you
@@ -170,7 +174,7 @@ calling.
 > **Compatibility ≠ recommendation.** A model supporting `:tool_call` does not
 > mean `:tool_call` is the right default for your workload. On some capable
 > models it actively reduces pass rate and increases token cost. See the
-> [transport guide](../docs/guides/subagent-ptc-transport.md#choosing-a-transport)
+> [transport guide](https://hexdocs.pm/ptc_runner/subagent-ptc-transport.html#choosing-a-transport)
 > for tradeoffs and a small benchmark.
 
 ## Don't
