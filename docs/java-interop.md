@@ -6,9 +6,16 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-17 interop entries across 7 classes.
+22 interop entries across 11 classes.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md)
+
+### java.lang.Boolean
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Boolean/parseBoolean` | Static | `(Boolean/parseBoolean s)` | Parse "true"/"false" to boolean | Compatibility alias for `(parse-boolean s)`. Invalid or non-string input returns nil instead of Java's false/throwing behavior. |
+
 
 ### java.lang.Double
 
@@ -17,6 +24,28 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `Double/NEGATIVE_INFINITY` | Constant | `Double/NEGATIVE_INFINITY, NEGATIVE_INFINITY` | Negative infinity constant (##-Inf) |  |
 | `Double/NaN` | Constant | `Double/NaN, NaN` | Not-a-Number constant (##NaN) |  |
 | `Double/POSITIVE_INFINITY` | Constant | `Double/POSITIVE_INFINITY, POSITIVE_INFINITY` | Positive infinity constant (##Inf) |  |
+| `Double/parseDouble` | Static | `(Double/parseDouble s)` | Parse string to double | Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing. |
+
+
+### java.lang.Float
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Float/parseFloat` | Static | `(Float/parseFloat s)` | Parse string to float | Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing. |
+
+
+### java.lang.Integer
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Integer/parseInt` | Static | `(Integer/parseInt s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
+
+
+### java.lang.Long
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
 
 
 ### java.lang.String

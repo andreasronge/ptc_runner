@@ -106,7 +106,7 @@ Clojure namespace declarations/imports (`ns`, `require`, `refer`, `import`).
 | `clojure.set/name` | Calls an allowlisted `clojure.set` function. |
 | `clojure.walk/name` | Calls an allowlisted `clojure.walk` function. |
 | `regex/name` | Calls an allowlisted regex helper; regex vars are audited as `clojure.core`. |
-| `Math/name`, `System/name`, `Double/name` | Java-shaped compatibility helpers/constants. |
+| `Math/name`, `System/name`, `Boolean/name`, `Double/name`, `Float/name`, `Integer/name`, `Long/name` | Java-shaped compatibility helpers/constants. |
 | `LocalDate/name`, `Instant/name` | Java time parsing compatibility helpers. |
 | `json/name` | Calls JSON helpers (`json/parse-string`, `json/generate-string`). |
 | `budget/remaining` | Remaining tool-call budget (only when a `:budget` is set). |

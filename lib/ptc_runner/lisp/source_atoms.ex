@@ -118,7 +118,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     data tool catalog budget json mcp
     str string set regex
     walk
-    Math Interop System Double
+    Math Interop System Boolean Double Float Integer Long
     LocalDate Instant
     java.time.LocalDate java.time.Instant java.util.Date.
     clojure.core clojure.string clojure.set clojure.walk

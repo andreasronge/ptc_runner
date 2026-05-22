@@ -82,6 +82,10 @@ defmodule PtcRunner.Lisp.Env do
     :Math => :math,
     :Interop => :interop,
     :System => :interop,
+    :Boolean => :interop,
+    :Float => :interop,
+    :Integer => :interop,
+    :Long => :interop,
     :"java.time.LocalDate" => :interop,
     :LocalDate => :interop,
     # `Instant/parse` and `LocalDate/parse` both resolve to the `parse`

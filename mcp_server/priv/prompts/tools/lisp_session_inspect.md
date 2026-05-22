@@ -8,5 +8,5 @@
 <!-- mcp-tools: lisp_session_inspect -->
 
 <!-- PTC_PROMPT_START -->
-Returns a compact orientation view of a PTC-Lisp session.
+Returns a compact view of a PTC-Lisp session - available bindings, prints, history, tool calls, or limits.
 <!-- PTC_PROMPT_END -->
