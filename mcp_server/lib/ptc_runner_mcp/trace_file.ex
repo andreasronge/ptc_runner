@@ -14,8 +14,6 @@ defmodule PtcRunnerMcp.TraceFile do
       stderr and continues serving without tracing for that call.
   """
 
-  require Logger
-
   alias PtcRunnerMcp.Credentials.Redactor
   alias PtcRunnerMcp.{Log, TraceConfig}
 

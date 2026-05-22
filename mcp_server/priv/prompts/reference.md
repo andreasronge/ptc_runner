@@ -10,16 +10,18 @@
 <!-- PTC_PROMPT_START -->
 PTC-Lisp reference
 
+Clojure-core subset: assume common pure core fns exist unless listed under No.
+Core includes `loop`/`recur`, `parse-double`/`parse-long`.
+
 Syntax:
-- Clojure forms. `(let [x v ...] body)`, `(fn [x] body)`, `(defn f [x] body)`, `#(...)`.
-- One or more top-level forms.
-- No `lambda`, `let*`, `ns`, `require`, `refer`, `import`, macros.
+- Forms: `(let [x v ...] body)`, `(fn [x] body)`, `(defn f [x] body)`, `#(...)`.
+- One or more top-level forms. Final value = result.
+- No `lambda`, `let*`, `ns`, `require`, `import`, macros.
 
 Data:
-- literals: `nil`, booleans, numbers, strings, keywords, vectors, maps, sets.
-- JSON parse maps use string keys.
-- Tool `context` keys get `data/` prefix: `{"records":[...]}` -> variable `data/records` only.
-- Debug shapes with `println` / `pr-str`.
+- literals: `nil`, bools, numbers, strings, keywords, vectors, maps, sets.
+- JSON maps use string keys. `context`: `{"records":[...]}` -> `data/records`.
+- Inspect shapes with `println`, `pr-str`, `keys`.
 
 Helpers:
 - collections, strings, sets, walk, regex, math.
@@ -28,12 +30,11 @@ Helpers:
 - Fail: `(fail v)`.
 
 Java:
-- `(java.util.Date.)`, `(java.util.Date. millis-or-iso)`, `(.getTime date)`.
-- `(java.time.LocalDate/parse "2026-01-15")`.
-- `(System/currentTimeMillis)`.
-- String methods: `.contains`, `.indexOf`, `.toLowerCase`, `.startsWith`, etc.
+- Limited: dates/time, `System/currentTimeMillis`, common String methods.
+- Prefer core fns over Java interop.
 
 No:
-- lazy seqs, atoms/refs, futures/promises, try/catch/throw, dotimes, iterate/repeat/cycle.
+- lazy/infinite seq producers: use eager fns or `loop`/`recur`.
+- atoms/refs, futures/promises, try/catch/throw.
 - transients, metadata, filesystem/network I/O, general Java interop.
 <!-- PTC_PROMPT_END -->

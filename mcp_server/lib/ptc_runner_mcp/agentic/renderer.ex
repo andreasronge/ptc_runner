@@ -164,11 +164,9 @@ defmodule PtcRunnerMcp.Agentic.Renderer do
 
   defp warning(code, detail), do: %{"code" => code, "detail" => detail}
 
-  defp type_label(v) when is_map(v), do: "object"
+  defp type_label(v) when is_boolean(v), do: "boolean"
   defp type_label(v) when is_list(v), do: "array"
   defp type_label(v) when is_integer(v), do: "integer"
   defp type_label(v) when is_float(v), do: "number"
-  defp type_label(v) when is_boolean(v), do: "boolean"
-  defp type_label(nil), do: "null"
   defp type_label(_), do: "unknown"
 end

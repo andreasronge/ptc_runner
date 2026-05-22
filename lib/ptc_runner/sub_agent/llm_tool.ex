@@ -182,9 +182,9 @@ defmodule PtcRunner.SubAgent.LLMTool do
   defp validate_llm!(opts) do
     case Keyword.fetch(opts, :llm) do
       {:ok, :caller} -> :ok
+      {:ok, nil} -> :ok
       {:ok, llm} when is_atom(llm) -> :ok
       {:ok, llm} when is_function(llm) -> :ok
-      {:ok, nil} -> :ok
       {:ok, _} -> raise ArgumentError, "llm must be :caller, an atom, a function, or nil"
       :error -> :ok
     end

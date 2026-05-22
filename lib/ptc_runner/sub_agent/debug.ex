@@ -307,7 +307,7 @@ defmodule PtcRunner.SubAgent.Debug do
   # Private Helpers - Chain
   # ============================================================
 
-  defp print_chain_step(step, index, total) do
+  defp print_chain_step(step, index, total) when is_integer(index) and is_integer(total) do
     status =
       case step.fail do
         nil -> ansi(:green) <> "ok" <> ansi(:reset)
@@ -339,7 +339,6 @@ defmodule PtcRunner.SubAgent.Debug do
       "#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}Turns:#{ansi(:reset)} #{turns} | #{ansi(:dim)}Duration:#{ansi(:reset)} #{duration_ms}ms"
     )
 
-    # Add arrow between steps (except for last step)
     if index < total do
       IO.puts("#{ansi(:cyan)}|#{ansi(:reset)}   #{ansi(:dim)}v#{ansi(:reset)}")
     end

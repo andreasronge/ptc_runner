@@ -105,10 +105,6 @@ defmodule PtcRunner.SubAgent.Chaining do
   # CompiledAgent validation
   defp validate_chain_keys!(%Step{}, %CompiledAgent{signature: nil}), do: :ok
 
-  defp validate_chain_keys!(%Step{fail: fail}, %CompiledAgent{})
-       when fail != nil,
-       do: :ok
-
   defp validate_chain_keys!(%Step{return: return}, %CompiledAgent{signature: sig}) do
     do_validate_chain_keys!(return, sig)
   end

@@ -297,9 +297,6 @@ defmodule PtcRunnerMcp.Sandbox do
 
   # Atomize the program's raw return value to the type-shape implied by
   # the signature so signature validation sees the right keys/types.
-  # Falls back to identity when no signature was supplied.
-  defp atomize(value, nil), do: value
-
   defp atomize(value, {:signature, _params, return_type}) do
     PtcToolProtocol.atomize_value(value, return_type)
   end

@@ -197,9 +197,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   defp view_payload(state, "prints") do
     %{
       "prints" => state.prints,
-      "text" =>
-        ExecutionHistory.render_output(state.prints, state.limits.max_print_entries, true) ||
-          ";; Output:"
+      "text" => ExecutionHistory.render_output(state.prints, state.limits.max_print_entries, true)
     }
   end
 

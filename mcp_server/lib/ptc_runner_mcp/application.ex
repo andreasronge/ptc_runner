@@ -2046,7 +2046,6 @@ defmodule PtcRunnerMcp.Application do
 
   defp scheme_compatible_with_hint?("bearer", :bearer), do: true
   defp scheme_compatible_with_hint?("basic", :basic), do: true
-  defp scheme_compatible_with_hint?("custom_header", :raw), do: true
   defp scheme_compatible_with_hint?(_scheme, _hint), do: false
 
   # §5.2 / §5.5 #6: the legacy `${VAR}` placeholder resolver applies

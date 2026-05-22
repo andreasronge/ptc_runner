@@ -185,10 +185,10 @@ defmodule PtcRunnerMcp.TraceHandler do
   # ----------------------------------------------------------------
 
   defp sanitize_scalar(value) when is_binary(value), do: value
-  defp sanitize_scalar(value) when is_atom(value), do: value
-  defp sanitize_scalar(value) when is_number(value), do: value
   defp sanitize_scalar(value) when is_boolean(value), do: value
   defp sanitize_scalar(nil), do: nil
+  defp sanitize_scalar(value) when is_atom(value), do: value
+  defp sanitize_scalar(value) when is_number(value), do: value
 
   defp sanitize_scalar(value) when is_list(value) do
     Enum.map(value, &sanitize_scalar/1)

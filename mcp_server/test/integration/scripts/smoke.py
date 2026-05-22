@@ -75,6 +75,9 @@ def run_session(release_bin, frames, timeout_s=15):
 
     env = os.environ.copy()
     env["RELEASE_DISTRIBUTION"] = "none"
+    # Pin the default `:slim` response profile so the asserted envelope
+    # shapes are deterministic regardless of the caller's shell env.
+    env["PTC_RUNNER_MCP_RESPONSE_PROFILE"] = "slim"
 
     try:
         with open(stdin_path, "rb") as stdin_fh:
@@ -170,7 +173,16 @@ def case_unknown_tool_d1(release_bin):
 
 
 def case_args_error(release_bin):
-    """tools/call with no `program` argument: reason=args_error envelope."""
+    """tools/call with no `program` argument: slim args_error envelope.
+
+    Under the default `:slim` response profile (the shape real clients
+    receive), `lisp_eval` errors render as text only — `isError: true`
+    plus a `content[0].text` that begins with `args_error:`, and *no*
+    `structuredContent`. (`unknown_tool` is the exception: it always
+    carries `structuredContent` regardless of profile — see
+    `case_unknown_tool_d1`.) `run_session` pins the slim profile so this
+    holds regardless of the caller's shell env.
+    """
     replies, code, _stderr = run_session(
         release_bin,
         [
@@ -187,11 +199,16 @@ def case_args_error(release_bin):
     if not reply:
         return False, "no reply for id 8"
 
-    sc = reply.get("result", {}).get("structuredContent", {})
-    if reply.get("result", {}).get("isError") is not True:
+    result = reply.get("result", {})
+    if result.get("isError") is not True:
         return False, "isError must be true"
-    if sc.get("reason") != "args_error":
-        return False, f"reason must be args_error, got {sc.get('reason')}"
+    if "structuredContent" in result:
+        return False, "slim profile must omit structuredContent for args_error"
+
+    content = result.get("content") or []
+    text = content[0].get("text", "") if content else ""
+    if not text.startswith("args_error:"):
+        return False, f"content text must start with 'args_error:', got {text!r}"
 
     return True, "ok"
 

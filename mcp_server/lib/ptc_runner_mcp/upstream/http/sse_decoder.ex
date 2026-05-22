@@ -174,7 +174,7 @@ defmodule PtcRunnerMcp.Upstream.Http.SseDecoder do
         :no_event
 
       {pos, len} ->
-        <<raw_event::binary-size(pos), _boundary::binary-size(len), rest::binary>> = buffer
+        <<raw_event::binary-size(^pos), _boundary::binary-size(^len), rest::binary>> = buffer
         {:event, raw_event, rest}
     end
   end
@@ -226,8 +226,10 @@ defmodule PtcRunnerMcp.Upstream.Http.SseDecoder do
   # Strip a single trailing `\r` (covers `\r\n` line endings inside
   # a `\n\n`-separated event).
   defp strip_cr(line) do
+    size = byte_size(line) - 1
+
     case line do
-      <<rest::binary-size(byte_size(line) - 1), "\r">> -> rest
+      <<rest::binary-size(^size), "\r">> -> rest
       _ -> line
     end
   end

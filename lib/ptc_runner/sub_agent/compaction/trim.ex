@@ -256,8 +256,6 @@ defmodule PtcRunner.SubAgent.Compaction.Trim do
     Enum.map(calls, fn c -> Map.get(c, :id) || Map.get(c, "id") end)
   end
 
-  defp assistant_call_ids(_), do: []
-
   defp estimate_tokens(messages, token_counter) do
     Enum.reduce(messages, 0, fn msg, acc ->
       acc + token_counter.(message_text_for_estimate(msg))
