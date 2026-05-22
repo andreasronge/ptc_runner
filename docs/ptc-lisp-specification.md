@@ -2,7 +2,7 @@
 
 **Related docs:**
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
-- [Clojure Core Audit](conformance/clojure-core-audit.md) — function-level coverage of Clojure core
+- [Function Reference](function-reference.md) — supported PTC-Lisp functions and special forms
 
 ---
 
@@ -762,7 +762,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 **Semantics:**
 - `if-let` evaluates `condition-expr`, binds result to `name`, then evaluates `then-expr` if truthy, otherwise `else-expr`
 - `when-let` is like `if-let` but returns `nil` instead of an else branch
-- Both only support single symbol bindings, no destructuring (see [DIV-14](clojure-conformance-gaps.md#div-14-if-letwhen-let-only-support-single-symbol-bindings))
+- Both only support single symbol bindings, no destructuring (see [DIV-14](clojure-conformance-gaps.md#div-14-if-let-when-let-only-support-single-symbol-bindings))
 - Desugars at analysis time: `(if-let [x expr] then else)` → `(let [x expr] (if x then else))`
 
 **Examples:**
@@ -1029,7 +1029,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 
-**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-defn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-prepost-conditions-in-defn)).
+**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-defn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-pre-post-conditions-in-defn)).
 
 ---
 
@@ -2623,7 +2623,7 @@ To iterate over just keys or values, extract them first:
 - All predicates (including `zero?`) return `false` for `Double/NaN`.
 - `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
-**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-handle-floats-gracefully)).
+**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-even-odd-handle-floats-gracefully)).
 
 ```clojure
 (even? 4)     ; => true
@@ -2722,7 +2722,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 ```
 
 **Type checking:**
-Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-longparse-double-return-nil-for-non-string-input)).
+Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-long-parse-double-parse-boolean-return-nil-for-non-string-input)).
 
 ```clojure
 (parse-long 42)            ; => ...
@@ -3228,7 +3228,7 @@ Invoke registered tools using the `tool/` namespace:
 
 ### 9.7 Catalog Discovery — `catalog/` (MCP aggregator mode)
 
-When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through the `catalog/` namespace. Outside aggregator mode these forms are unavailable. See [docs/aggregator-mode.md](aggregator-mode.md#catalog-discovery-from-ptc-lisp--catalog-builtins) for the full reference.
+When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through the `catalog/` namespace. Outside aggregator mode these forms are unavailable. See [docs/aggregator-mode.md](aggregator-mode.md#catalog-discovery-from-ptc-lisp-catalog-builtins) for the full reference.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
@@ -3666,7 +3666,7 @@ type-error at line 5:
 
 ## 13. What Is NOT Supported
 
-PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences--by-design-not-bugs).
+PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences-by-design-not-bugs).
 
 Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.13).
 
@@ -3718,7 +3718,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 **Restrictions:**
 - `#()` accepts a single expression as the body
 - `%`, `%1`, `%2`, etc. are parameter placeholders; `%&` captures rest args (not regular symbols within `#()`)
-- Nested `#()` is not allowed ([DIV-17](clojure-conformance-gaps.md#div-17-nested--not-allowed))
+- Nested `#()` is not allowed ([DIV-17](clojure-conformance-gaps.md#div-17-nested-not-allowed))
 - Recursion is supported via `recur` (no self-reference by name, see §5.16)
 - Closures over local `let` bindings are allowed
 - No closures over mutable host state (there is none)
@@ -3749,7 +3749,7 @@ The `#()` syntax desugars to the equivalent `fn`:
 
 ### 13.2 Functions Excluded from Core
 
-For a complete function-level coverage report, see [Clojure Core Audit](conformance/clojure-core-audit.md).
+For supported functions and special forms, see the [Function Reference](function-reference.md).
 
 Key exclusions: `iterate`, `repeat`, `cycle` (infinite sequences), infinite `(range)` (finite `range` is supported: see §8.1), and transducers.
 

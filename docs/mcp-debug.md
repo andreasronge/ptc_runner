@@ -4,7 +4,7 @@ Opt-in, read-only MCP tool for inspecting recent `tools/call` activity.
 
 `lisp_debug` lets the client LLM ask "how is this server doing?" without filesystem access and without grepping JSONL traces. It is off by default; enable it with `--debug-tool` (or `PTC_RUNNER_MCP_DEBUG_TOOL=true`). When disabled there is no extra process, no ring buffer, and the tool does not appear in `tools/list`.
 
-For the broader MCP server overview see [mcp-server.md](mcp-server.md). For the full configuration flag reference see [mcp-server-configuration.md](mcp-server-configuration.md). For the `ptc_runner_mcp` release itself see [`mcp_server/README.md`](../mcp_server/README.md).
+For the broader MCP server overview see [mcp-server.md](mcp-server.md). For the full configuration flag reference see [mcp-server-configuration.md](mcp-server-configuration.md). For the `ptc_runner_mcp` release itself see [mcp-server-cli.md](mcp-server-cli.md).
 
 ## What gets recorded
 
