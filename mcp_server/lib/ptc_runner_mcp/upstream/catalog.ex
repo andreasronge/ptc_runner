@@ -528,16 +528,12 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   # constraint." Heterogeneous enums (e.g. `["a", 1, true]`) cannot
   # be summarized in one label without lying about the shape, so we
   # render the bare keyword.
-  defp render_enum([]), do: "enum"
-
   defp render_enum(values) when is_list(values) do
     case enum_primitive(values) do
       nil -> "enum"
       primitive -> "enum<#{primitive}>"
     end
   end
-
-  defp render_enum(_), do: "enum"
 
   defp enum_primitive(values) do
     types = values |> Enum.map(&value_primitive/1) |> Enum.uniq()

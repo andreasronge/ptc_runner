@@ -543,7 +543,7 @@ defmodule PtcRunnerMcp.Upstream.Stdio do
         state
 
       {pos, 1} ->
-        <<_discarded::binary-size(pos), _newline::binary-size(1), rest::binary>> = chunk
+        <<_discarded::binary-size(^pos), _newline::binary-size(1), rest::binary>> = chunk
         # Found the terminating newline of the oversized line.
         # Resume normal accumulation with whatever followed it.
         state = %{state | discarding_until_newline?: false, buffer: ""}
@@ -679,7 +679,7 @@ defmodule PtcRunnerMcp.Upstream.Stdio do
         %{state | buffer: "", discarding_until_newline?: true}
 
       {pos, 1} ->
-        <<_::binary-size(pos), _newline::binary-size(1), rest::binary>> = state.buffer
+        <<_::binary-size(^pos), _newline::binary-size(1), rest::binary>> = state.buffer
         %{state | buffer: rest, discarding_until_newline?: false}
     end
   end
@@ -789,7 +789,7 @@ defmodule PtcRunnerMcp.Upstream.Stdio do
         :more
 
       {pos, 1} ->
-        <<line::binary-size(pos), _newline::binary-size(1), rest::binary>> = buffer
+        <<line::binary-size(^pos), _newline::binary-size(1), rest::binary>> = buffer
         {:line, line, rest}
     end
   end

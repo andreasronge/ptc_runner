@@ -144,6 +144,15 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "to_clojure/2 with regex values" do
+    test "formats compiled regexes by source pattern" do
+      regex = PtcRunner.Lisp.Runtime.Regex.re_pattern("\\d+")
+
+      assert Format.to_clojure(regex) == {~S(#"\d+"), false}
+      assert Format.to_string(regex) == ~S(#"\d+")
+    end
+  end
+
   describe "to_string/2 with structs" do
     test "handles MapSet without crashing" do
       # Regression test: MapSet passes is_map/1 but enumerates as elements, not tuples

@@ -26,8 +26,8 @@ defmodule PtcRunnerMcp.Http.Telemetry do
   end
 
   defp sanitize_value(value) when is_binary(value), do: value
+  defp sanitize_value(value) when is_boolean(value), do: value
   defp sanitize_value(value) when is_atom(value), do: value
   defp sanitize_value(value) when is_integer(value), do: value
-  defp sanitize_value(value) when is_boolean(value), do: value
   defp sanitize_value(value), do: inspect(value, limit: 20, printable_limit: 100)
 end

@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.DebugBuffer do
   Stored call record (atom-keyed; already redacted per
   `--trace-payloads`). See `Plans/ptc-runner-mcp-debug-tool.md` § 5.1.
   """
-  @type record :: %{
+  @type call_record :: %{
           required(:request_id) => String.t(),
           required(:ts) => DateTime.t(),
           required(:tool) => String.t(),
@@ -72,7 +72,7 @@ defmodule PtcRunnerMcp.DebugBuffer do
   fails the caller, a silent no-op when the buffer is not running, and
   load-sheds (drops the record) when the buffer's mailbox is backed up.
   """
-  @spec record(record()) :: :ok
+  @spec record(call_record()) :: :ok
   def record(rec) when is_map(rec) do
     case Process.whereis(__MODULE__) do
       nil ->
@@ -116,7 +116,7 @@ defmodule PtcRunnerMcp.DebugBuffer do
   Options: `:limit` (default 20, capped at 200), `:since_seconds`,
   `:errors_only`.
   """
-  @spec recent(keyword()) :: [record()]
+  @spec recent(keyword()) :: [call_record()]
   def recent(opts \\ []) do
     case safe_call({:recent, opts}) do
       {:ok, result} -> result
@@ -125,7 +125,7 @@ defmodule PtcRunnerMcp.DebugBuffer do
   end
 
   @doc "Fetch the full record for `request_id`, or `:not_found`."
-  @spec get(String.t()) :: {:ok, record()} | :not_found
+  @spec get(String.t()) :: {:ok, call_record()} | :not_found
   def get(request_id) when is_binary(request_id) do
     case safe_call({:get, request_id}) do
       {:ok, result} -> result

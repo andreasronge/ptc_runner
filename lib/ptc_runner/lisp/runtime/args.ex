@@ -50,8 +50,6 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   def valid_keyfn?(%LispKeyword{}), do: true
   def valid_keyfn?(x), do: valid_callable?(x)
 
-  defp validate_shape!(_name, :unchecked, _args), do: :ok
-
   defp validate_shape!(name, specs, args) when is_list(specs) do
     validate_list!(name, specs, args)
   end
