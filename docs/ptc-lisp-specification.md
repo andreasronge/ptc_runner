@@ -2642,8 +2642,10 @@ To iterate over just keys or values, extract them first:
 | `parse-long` | Parse string to integer, returns nil on failure |
 | `parse-int` | Alias for `parse-long` |
 | `parse-double` | Parse string to double, returns nil on failure |
+| `parse-boolean` | Parse `"true"`/`"false"`, returns nil on failure |
 
 String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
+Java-shaped aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, `Double/parseDouble` and `Float/parseFloat` map to `parse-double`, and `Boolean/parseBoolean` maps to `parse-boolean`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics.
 
 **Parsing behavior:**
 - Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
@@ -2657,6 +2659,9 @@ String parsing functions provide safe conversion from strings to numbers, compat
 (parse-double "3.14")      ; => 3.14
 (parse-double "-0.5")      ; => -0.5
 (parse-double "1.23e-4")   ; => 1.23e-4
+(Double/parseDouble "3.14") ; => 3.14
+(Integer/parseInt "42")    ; => 42
+(Boolean/parseBoolean "true") ; => true
 ```
 
 ### 8.10 Regex Functions
@@ -3276,7 +3281,10 @@ built-ins or reserved runtime operations at analysis time.
 | Clojure compatibility | `regex` | Regex helpers (`re-find`, `re-pattern`, etc.; underlying vars are audited as `clojure.core`) |
 | Java compatibility | `Math` | Math functions |
 | Java compatibility | `System` | Java System properties/time |
-| Java compatibility | `Double` | Double constants |
+| Java compatibility | `Boolean` | Boolean parse alias |
+| Java compatibility | `Double` | Double constants and parse alias |
+| Java compatibility | `Float` | Float parse alias (returns PTC-Lisp double/float) |
+| Java compatibility | `Integer`, `Long` | Integer parse aliases |
 | Java compatibility | `Interop` | General interop helpers |
 | Java compatibility | `LocalDate`, `java.time.LocalDate` | Java Date parsing (ISO-8601) |
 | Java compatibility | `Instant`, `java.time.Instant` | Java Instant parsing (ISO-8601) |

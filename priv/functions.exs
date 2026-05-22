@@ -2798,7 +2798,8 @@
         {~S|(parse-boolean "true")|, "true"},
         {~S|(parse-boolean "false")|, "false"}
       ],
-      notes: ~S|Returns nil for values other than "true" or "false".|,
+      notes:
+        ~S|Returns nil for values other than "true" or "false". Also available as `Boolean/parseBoolean`.|,
       see_also: ["parse-long", "parse-double"],
       clojure_var: "parse-boolean",
       divergences:
@@ -2815,7 +2816,7 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes: "Also available as `Double/parseDouble` and `Float/parseFloat`.",
       see_also: [],
       clojure_var: "parse-double",
       divergences:
@@ -2832,7 +2833,8 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Alias for `parse-long`; Java-shaped aliases are `Integer/parseInt` and `Long/parseLong`.",
       see_also: [],
       clojure_var: "parse-int",
       divergences: nil
@@ -2848,7 +2850,7 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes: "Also available as `Integer/parseInt` and `Long/parseLong`.",
       see_also: [],
       clojure_var: "parse-long",
       divergences:
@@ -5007,12 +5009,30 @@
       notes: ""
     },
     %{
+      name: "Boolean/parseBoolean",
+      class: "java.lang.Boolean",
+      kind: :static,
+      description: "Parse \"true\"/\"false\" to boolean",
+      signatures: ["(Boolean/parseBoolean s)"],
+      notes:
+        "Compatibility alias for `(parse-boolean s)`. Invalid or non-string input returns nil instead of Java's false/throwing behavior."
+    },
+    %{
       name: "Double/POSITIVE_INFINITY",
       class: "java.lang.Double",
       kind: :constant,
       description: "Positive infinity constant (##Inf)",
       signatures: ["Double/POSITIVE_INFINITY", "POSITIVE_INFINITY"],
       notes: ""
+    },
+    %{
+      name: "Double/parseDouble",
+      class: "java.lang.Double",
+      kind: :static,
+      description: "Parse string to double",
+      signatures: ["(Double/parseDouble s)"],
+      notes:
+        "Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing."
     },
     %{
       name: "Double/NEGATIVE_INFINITY",
@@ -5029,6 +5049,33 @@
       description: "Not-a-Number constant (##NaN)",
       signatures: ["Double/NaN", "NaN"],
       notes: ""
+    },
+    %{
+      name: "Float/parseFloat",
+      class: "java.lang.Float",
+      kind: :static,
+      description: "Parse string to float",
+      signatures: ["(Float/parseFloat s)"],
+      notes:
+        "Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing."
+    },
+    %{
+      name: "Integer/parseInt",
+      class: "java.lang.Integer",
+      kind: :static,
+      description: "Parse string to integer",
+      signatures: ["(Integer/parseInt s)"],
+      notes:
+        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing."
+    },
+    %{
+      name: "Long/parseLong",
+      class: "java.lang.Long",
+      kind: :static,
+      description: "Parse string to integer",
+      signatures: ["(Long/parseLong s)"],
+      notes:
+        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing."
     },
     %{
       name: ".contains",

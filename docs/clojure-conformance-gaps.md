@@ -401,6 +401,12 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 (parse-boolean 42)   ;=> nil
 ```
 
+Java-shaped parse aliases (`Integer/parseInt`, `Long/parseLong`,
+`Double/parseDouble`, `Float/parseFloat`, `Boolean/parseBoolean`) intentionally
+share the same safe PTC-Lisp semantics: invalid or non-string input returns
+`nil` instead of raising. They are compatibility spellings for LLM-generated
+code, not full Java throwing semantics.
+
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
 
 ### DIV-19: `symbol?` always returns false

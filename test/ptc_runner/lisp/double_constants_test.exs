@@ -43,6 +43,35 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:ok, %{return: :infinity}} = Lisp.run("(parse-double \"+Infinity\")")
     end
 
+    test "Double/parseDouble aliases parse-double" do
+      assert {:ok, %{return: 11.76}} = Lisp.run(~S|(Double/parseDouble "11.760000")|)
+      assert {:ok, %{return: nil}} = Lisp.run(~S|(Double/parseDouble "not-a-number")|)
+    end
+
+    test "Java parse aliases use safe parse builtins" do
+      assert {:ok, %{return: true}} = Lisp.run(~S|(Boolean/parseBoolean "true")|)
+      assert {:ok, %{return: false}} = Lisp.run(~S|(Boolean/parseBoolean "false")|)
+      assert {:ok, %{return: nil}} = Lisp.run(~S|(Boolean/parseBoolean "yes")|)
+
+      assert {:ok, %{return: 11.76}} = Lisp.run(~S|(Float/parseFloat "11.760000")|)
+      assert {:ok, %{return: nil}} = Lisp.run(~S|(Float/parseFloat "not-a-number")|)
+
+      assert {:ok, %{return: 42}} = Lisp.run(~S|(Integer/parseInt "42")|)
+      assert {:ok, %{return: nil}} = Lisp.run(~S|(Integer/parseInt "42.5")|)
+
+      assert {:ok, %{return: 42}} = Lisp.run(~S|(Long/parseLong "42")|)
+      assert {:ok, %{return: nil}} = Lisp.run(~S|(Long/parseLong "bad")|)
+    end
+
+    test "Java parse alias namespaces are known for diagnostics" do
+      for ns <- ~w(Boolean Float Integer Long) do
+        assert {:error, %{fail: %{message: msg}}} = Lisp.run("(#{ns}/missing \"42\")")
+        assert msg =~ "missing is not available"
+        assert msg =~ "Interop functions:"
+        refute msg =~ "unknown namespace"
+      end
+    end
+
     test "formatting" do
       assert {:ok, %{return: result}} = Lisp.run("Double/POSITIVE_INFINITY")
       assert Format.to_clojure(result) == {"##Inf", false}
