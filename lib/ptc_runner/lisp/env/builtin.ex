@@ -29,10 +29,6 @@ defmodule PtcRunner.Lisp.Env.Builtin do
   def unwrap(%__MODULE__{binding: binding}), do: binding
   def unwrap(other), do: other
 
-  @spec binding(t() | term()) :: term()
-  def binding(%__MODULE__{binding: binding}), do: binding
-  def binding(other), do: other
-
   @spec name(t() | term()) :: atom() | nil
   def name(%__MODULE__{name: name}), do: name
   def name({:variadic_nonempty, name, _}) when is_atom(name), do: name
