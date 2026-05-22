@@ -109,6 +109,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
   def sort(coll) when is_binary(coll), do: Enum.sort(Normalize.graphemes(coll))
+  def sort(coll) when is_map(coll) and not is_struct(coll), do: Enum.sort(Normalize.to_seq(coll))
 
   def sort(comp, coll) when is_list(coll) do
     Enum.sort(coll, wrap_comparator(comp))
