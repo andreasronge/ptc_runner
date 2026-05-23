@@ -274,28 +274,30 @@ retry on the next turn.
 
 In aggregator mode, upstream-capable `lisp_eval` and
 `lisp_session_eval` descriptions start with a short discovery hint:
-use `(apropos ...)`, `(dir ...)`, `(doc ...)`, and `(meta ...)`, then
-call the selected upstream with `tool/mcp-call`. In inline catalog mode
-the dynamic tail also includes
-one compact signature per configured upstream tool, in the shape:
+use `(apropos ...)`, `(dir ...)`, and `(doc ...)`, then call the
+selected upstream with `tool/mcp-call`. In inline catalog mode the
+dynamic tail also includes a synthetic discovery snapshot:
 
 ```
 Configured upstream MCP servers:
 - fs: Filesystem MCP server. 2 tools. files.
   Tools:
-  - fs.read_text_file(path: string) Read the contents of a UTF-8 text file
-  - fs.list_directory(path: string) List the entries in a directory
+  - read_text_file - Read the contents of a UTF-8 text file
+  - list_directory - List the entries in a directory
 - github: GitHub MCP server. 2 tools. issues, pull requests.
   Tools:
-  - github.search_repos(query: string, limit: integer?) Search repositories
-  - github.get_pr(owner: string, repo: string, number: integer) Get a pull request
+  - search_repos - Search repositories
+  - get_pr - Get a pull request
 ```
 
 ### Reading the catalog
 
-- **Args**: `name: type` for required, `name: type?` for
-  optional. The optional `?` mirrors Python type-hint
-  conventions and is the LLM's signal to omit the arg or pass
+- **`dir` / `apropos`**: list tool names and short descriptions only.
+  Use them to choose a tool, not to infer schemas.
+- **`doc`**: shows args, required args, the call form, and the
+  Clojure-ish `Result<...>` payload shape.
+- **Args in `doc`**: `:name type` for required, `:name type?` for
+  optional. The optional `?` is the LLM's signal to omit the arg or pass
   `nil`.
 - **Argument order**: required args first in the JSON Schema's
   `required`-array order; optional args alphabetical. This is a
@@ -324,8 +326,8 @@ Configured upstream MCP servers:
     `enum<string>`, NOT `string`. Constrained args are exactly
     where the LLM most needs the constraint hint.
 - **Description**: optional prose is normalized to one line and capped.
-  Auto mode budgets required-arg signatures first; descriptions are
-  dropped before the renderer falls back to lazy mode.
+  Auto mode drops descriptions before the renderer falls back to lazy
+  mode.
 
 ### When the catalog is populated
 
@@ -374,9 +376,9 @@ discovery backend.)
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `mcp/servers` | `(mcp/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact signature strings ranked by lexical relevance to `query`. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
-| `dir` | `(dir server)`<br>`(dir server opts)` | A list of compact signature strings such as `github.search(query: string) - Search repositories`, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `doc` | `(doc tool-ref)` | One detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. The description includes the compact signature, required args, a ready-to-edit `(tool/mcp-call …)` example, and response notes. |
+| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of `server.tool - description` strings ranked by lexical relevance to `query`. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `dir` | `(dir server)`<br>`(dir server opts)` | A list of `tool - description` strings for one server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `doc` | `(doc tool-ref)` | One detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. The description includes args, required args, a ready-to-edit `(tool/mcp-call …)` example, and the `Result<...>` payload shape. |
 | `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas, annotations, and a call example. |
 
 `apropos` ranks each candidate with a deterministic

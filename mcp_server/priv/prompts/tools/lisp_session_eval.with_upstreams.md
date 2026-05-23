@@ -10,14 +10,14 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
-Synthetic discovery snapshot below. Live: `(mcp/servers)`, `(apropos "query" {:limit 8})`, `(dir "server" {:limit 20})`, `(doc "server/tool")`, `(meta "server/tool")`.
-Discovery inspects schemas only. Execute: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})` -> `Result<T>`: `{:ok true :value T}` or `{:ok false :reason kw :message text}`. Check `:ok`; `:raw` optional.
+Synthetic discovery snapshot below. Live: `(mcp/servers)`, `(apropos "query" {:limit 8})`, `(dir "server" {:limit 20})`, `(doc "server/tool")`.
+Discovery inspects schemas only; `dir` lists names/descriptions, `doc` shows args/result. Execute: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})` -> `Result<T>`: `{:ok true :value T}` or `{:ok false :reason kw :message text}`. Check `:ok`; `:raw` optional.
 
 Evaluates PTC-Lisp against committed session memory
 - `def`/`defn` persist for later evals in the same session
 - Use `let` for temporary values
 - `output_schema` validates result; mismatch rejects the commit.
 
-`doc` shows args/result. Use `(map tool/mcp-call calls)` for batches.
+Use `(map tool/mcp-call calls)` for batches. Raw schema/debug: `(meta "server/tool")`.
 Unknown result shape: inspect `(keys (:value r))` or `(pr-str (:value r))`; use `(fail (:message r))` for unhandled faults.
 <!-- PTC_PROMPT_END -->

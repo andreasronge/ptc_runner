@@ -312,7 +312,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["message"] =~ "(apropos \"query\" {:limit 8})"
     end
 
-    test "missing :tool hints catalog discovery for that upstream" do
+    test "missing :tool hints REPL discovery for that upstream" do
       put_fake("alpha", %{"known" => fn _, _ -> {:ok, "ok"} end})
 
       env = call(~S|(tool/mcp-call {:server "alpha" :args {}})|)

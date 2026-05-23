@@ -144,15 +144,14 @@ defmodule PtcRunnerMcp.CatalogDescription do
 
   defp render_inline_server(_entry, _description_mode), do: []
 
-  defp render_inline_tool(server, tool, description_mode) do
+  defp render_inline_tool(_server, tool, description_mode) do
     name = tool_field(tool, :name, "unknown")
-    input_schema = tool_schema(tool, :input_schema)
-    output_schema = tool_schema(tool, :output_schema)
     description = tool_field(tool, :description, "")
-    args = render_args(input_schema)
-    output = render_output(output_schema)
-    desc_part = render_inline_description(description, description_mode)
-    "#{server}.#{name}(#{args})#{output}#{desc_part}"
+
+    case render_inline_description(description, description_mode) do
+      "" -> name
+      desc_part -> "#{name} - #{String.trim(desc_part)}"
+    end
   end
 
   defp description_mode(entries, config) do
@@ -276,22 +275,35 @@ defmodule PtcRunnerMcp.CatalogDescription do
     required = tool_required_keys(tool)
 
     [
-      "#{server}.#{name}(#{render_args(input_schema)})#{render_output(output_schema)}#{render_inline_description(tool_field(tool, :description, ""), description_mode)}",
+      "#{server}/#{name}",
+      maybe_description_line(tool_field(tool, :description, ""), description_mode),
       "",
+      "Args: #{render_schema_arg_map(input_schema)}",
       "Required args: #{required_args_text(required)}",
       "",
-      "Use:",
+      "Call:",
       build_call_example(server, name, tool_arg_keys(tool), required),
       "",
-      "Returns: `Result<T>`; if `(:ok r)`, use `(:value r)` as T."
+      "Returns: Result<#{render_schema_type(output_schema)}>",
+      "Use `(:value r)` after checking `(:ok r)`."
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
+  end
+
+  defp maybe_description_line(_description, :signature_only), do: nil
+
+  defp maybe_description_line(description, :with_descriptions) do
+    case description |> compact_description() |> truncate(@inline_description_max_chars) do
+      "" -> nil
+      desc -> "Description: #{desc}"
+    end
   end
 
   defp required_args_text([]), do: "none"
 
   defp required_args_text(required) when is_list(required) do
-    Enum.map_join(required, ", ", &":#{&1}")
+    Enum.map_join(required, ", ", &keyword_name/1)
   end
 
   defp build_call_example(server, name, arg_keys, required) do
@@ -308,7 +320,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
           " :args {}"
 
         keys ->
-          inner = Enum.map_join(keys, " ", fn key -> ":#{key} ..." end)
+          inner = Enum.map_join(keys, " ", fn key -> "#{keyword_name(key)} ..." end)
           " :args {#{inner}}"
       end
 
@@ -427,113 +439,147 @@ defmodule PtcRunnerMcp.CatalogDescription do
   defp schema_keys(:input_schema), do: {"input_schema", :inputSchema, "inputSchema"}
   defp schema_keys(:output_schema), do: {"output_schema", :outputSchema, "outputSchema"}
 
-  defp render_args(schema) when is_map(schema) do
+  defp render_schema_arg_map(schema) when is_map(schema) do
     properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
-    required = Map.get(schema, "required", Map.get(schema, :required, []))
+    ordered_names = ordered_property_names(schema, properties)
 
     properties_by_string =
       Map.new(properties, fn {key, value} -> {to_string(key), value} end)
 
-    required_names =
-      required
-      |> Enum.map(&to_string/1)
+    case ordered_names do
+      [] ->
+        "{}"
 
-    required_set = MapSet.new(required_names)
+      names ->
+        fields =
+          Enum.map_join(names, " ", fn name ->
+            value = Map.get(properties_by_string, name, %{})
+            "#{keyword_name(name)} #{render_schema_type(value)}#{optional_suffix(schema, name)}"
+          end)
 
-    optional_names =
-      properties_by_string
-      |> Map.keys()
-      |> Enum.reject(&MapSet.member?(required_set, &1))
-      |> Enum.sort()
-
-    (required_names ++ optional_names)
-    |> Enum.map_join(", ", fn name ->
-      optional = if MapSet.member?(required_set, name), do: "", else: "?"
-      "#{name}: #{render_arg_type(Map.get(properties_by_string, name, %{}))}#{optional}"
-    end)
-  end
-
-  defp render_args(_), do: ""
-
-  defp render_output(schema) when is_map(schema) do
-    case render_output_type(schema) do
-      "" -> ""
-      type -> " -> Result<#{type}>"
+        "{#{fields}}"
     end
   end
 
-  defp render_output(_), do: ""
+  defp render_schema_arg_map(_), do: "{}"
 
-  defp render_arg_type(schema) when is_map(schema) do
+  defp render_schema_type(nil), do: "any"
+
+  defp render_schema_type(schema) when is_map(schema) do
     cond do
       Map.has_key?(schema, "const") or Map.has_key?(schema, :const) ->
-        "const"
+        inspect(Map.get(schema, "const", Map.get(schema, :const)))
 
       is_list(Map.get(schema, "enum", Map.get(schema, :enum))) ->
-        "enum"
+        render_enum_type(Map.get(schema, "enum", Map.get(schema, :enum)))
 
       true ->
-        case Map.get(schema, "type", Map.get(schema, :type)) do
-          "string" -> "string"
-          "integer" -> "integer"
-          "number" -> "number"
-          "boolean" -> "boolean"
-          "object" -> "object"
-          "array" -> "array"
-          list when is_list(list) -> Enum.map_join(list, "|", &to_string/1)
-          nil -> infer_arg_type(schema)
-          other -> to_string(other)
-        end
+        render_schema_type_by_type(Map.get(schema, "type", Map.get(schema, :type)), schema)
     end
   end
 
-  defp render_arg_type(_), do: "any"
+  defp render_schema_type(_), do: "any"
 
-  defp infer_arg_type(schema) do
+  defp render_schema_type_by_type(type, schema) when is_list(type) do
+    type
+    |> Enum.reject(&(&1 in ["null", :null]))
+    |> case do
+      [] -> "nil"
+      [one] -> render_schema_type_by_type(one, schema)
+      many -> Enum.map_join(many, "|", &render_schema_type_by_type(&1, schema))
+    end
+  end
+
+  defp render_schema_type_by_type("string", _schema), do: "string"
+  defp render_schema_type_by_type("integer", _schema), do: "int"
+  defp render_schema_type_by_type("number", _schema), do: "float"
+  defp render_schema_type_by_type("boolean", _schema), do: "bool"
+
+  defp render_schema_type_by_type("array", schema) do
+    items = Map.get(schema, "items", Map.get(schema, :items))
+    "[#{render_schema_type(items)}]"
+  end
+
+  defp render_schema_type_by_type("object", schema), do: render_object_type(schema)
+  defp render_schema_type_by_type(nil, schema), do: infer_schema_type(schema)
+  defp render_schema_type_by_type(other, _schema), do: to_string(other)
+
+  defp render_enum_type([]), do: "enum"
+
+  defp render_enum_type(values) do
+    Enum.map_join(values, "|", &render_literal_type/1)
+  end
+
+  defp render_literal_type(value) when is_binary(value), do: lisp_string(value)
+  defp render_literal_type(value), do: inspect(value)
+
+  defp infer_schema_type(schema) do
     cond do
-      Map.has_key?(schema, "properties") or Map.has_key?(schema, :properties) -> "object"
-      Map.has_key?(schema, "items") or Map.has_key?(schema, :items) -> "array"
-      true -> "any"
+      Map.has_key?(schema, "properties") or Map.has_key?(schema, :properties) ->
+        render_object_type(schema)
+
+      Map.has_key?(schema, "items") or Map.has_key?(schema, :items) ->
+        render_schema_type_by_type("array", schema)
+
+      true ->
+        "any"
     end
   end
 
-  defp render_output_type(schema) when is_map(schema) do
-    case Map.get(schema, "type", Map.get(schema, :type)) do
-      "string" -> ":string"
-      "integer" -> ":int"
-      "number" -> ":float"
-      "boolean" -> ":bool"
-      "array" -> "[:any]"
-      "object" -> render_output_object(schema)
-      _ -> ""
-    end
-  end
-
-  defp render_output_type(_), do: ""
-
-  defp render_output_object(schema) do
+  defp render_object_type(schema) do
     properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
 
     if is_map(properties) and map_size(properties) > 0 do
-      required =
-        case Map.get(schema, "required", Map.get(schema, :required, [])) do
-          list when is_list(list) -> Enum.map(list, &to_string/1)
-          _ -> []
-        end
+      properties_by_string =
+        Map.new(properties, fn {key, value} -> {to_string(key), value} end)
 
       fields =
-        properties
-        |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
-        |> Enum.take(5)
-        |> Enum.map_join(", ", fn {key, value} ->
-          key = to_string(key)
-          optional = if key in required, do: "", else: "?"
-          "#{key} #{render_output_type(value)}#{optional}"
+        schema
+        |> ordered_property_names(properties)
+        |> Enum.map_join(" ", fn name ->
+          value = Map.fetch!(properties_by_string, name)
+          "#{keyword_name(name)} #{render_schema_type(value)}#{optional_suffix(schema, name)}"
         end)
 
       "{#{fields}}"
     else
-      ":map"
+      "map"
     end
+  end
+
+  defp ordered_property_names(schema, properties) when is_map(properties) do
+    properties_by_string = Map.new(properties, fn {key, value} -> {to_string(key), value} end)
+
+    required_names =
+      schema
+      |> required_key_names()
+      |> Enum.filter(&Map.has_key?(properties_by_string, &1))
+
+    optional_names =
+      properties_by_string
+      |> Map.keys()
+      |> Enum.reject(&(&1 in required_names))
+      |> Enum.sort()
+
+    required_names ++ optional_names
+  end
+
+  defp ordered_property_names(_schema, _properties), do: []
+
+  defp optional_suffix(schema, name) do
+    if name in required_key_names(schema), do: "", else: "?"
+  end
+
+  defp required_key_names(schema) when is_map(schema) do
+    case Map.get(schema, "required", Map.get(schema, :required, [])) do
+      list when is_list(list) -> Enum.map(list, &to_string/1)
+      _ -> []
+    end
+  end
+
+  defp required_key_names(_), do: []
+
+  defp keyword_name(key) do
+    ":" <> (key |> to_string() |> String.replace("_", "-"))
   end
 end

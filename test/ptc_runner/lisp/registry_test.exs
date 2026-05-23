@@ -226,7 +226,6 @@ defmodule PtcRunner.Lisp.RegistryTest do
             "`regex/`",
             "`data/`",
             "`tool/`",
-            "`catalog/`",
             "`budget/`",
             "`json/`",
             "`mcp/`"
@@ -236,6 +235,10 @@ defmodule PtcRunner.Lisp.RegistryTest do
 
       assert index =~ "PTC extension / MCP server profile"
       assert index =~ "profile-gated helper namespace"
+      assert index =~ "## REPL Environment Support"
+      assert index =~ "`(mcp/servers)`"
+      assert index =~ "`(apropos query)`"
+      refute index =~ "`catalog/`"
     end
 
     test "issue 1019 selected date/time helpers are supported and Period remains deferred" do

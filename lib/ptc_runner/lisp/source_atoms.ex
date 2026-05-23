@@ -24,12 +24,12 @@ defmodule PtcRunner.Lisp.SourceAtoms do
        aspirational Clojure entries.
     3. Bounded keyword modifiers used by `for`/`doseq`/destructuring —
        `:else`, `:keys`, `:as`, `:or`, etc.
-    4. Bounded namespaces — `data`, `tool`, `catalog`, `budget`,
+    4. Bounded namespaces — `data`, `tool`, `budget`,
        `json`, `mcp`, plus Clojure aliases (`clojure.string`),
        and fully-qualified Java namespaces from `Env.clojure_namespaces`
        (`java.time.LocalDate`, etc.).
-    5. Qualified analyzer keys — `search-tools`, `describe-tool`,
-       etc. matched as atom literals in `dispatch_list_form` clauses.
+    5. Qualified analyzer keys such as `servers` and JSON member
+       names matched as atom literals in `dispatch_list_form` clauses.
     6. Short-fn param atoms `:p1`..`:p20` synthesized by the
        short-fn analyzer.
 
@@ -116,7 +116,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # `parse_namespaced_symbol` doesn't split them — `java.time.LocalDate`
   # is one atom, not `java.time` + `LocalDate`.
   @bounded_namespaces ~w(
-    data tool catalog budget json mcp
+    data tool budget json mcp
     str string set regex
     walk
     Math System Boolean Double Float Integer Long
@@ -127,10 +127,10 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   )a
 
   # Qualified analyzer keys — atom literals after `ns/` in dispatch
-  # clauses (e.g. `(catalog/list-tools)`, `(catalog/search-tools)`).
+  # clauses (e.g. `(mcp/servers)` and other REPL discovery forms).
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
-    summary remaining list-servers list-tools describe-tool search-tools servers
+    summary remaining servers
     parse-string generate-string between text json
     re-pattern
   )a

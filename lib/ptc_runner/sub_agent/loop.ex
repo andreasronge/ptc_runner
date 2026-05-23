@@ -155,8 +155,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
     # Optional REPL discovery executor closure (aggregator-mode discovery forms).
     # Caller-owned, not inherited by child SubAgents.
-    catalog_exec = Keyword.get(opts, :catalog_exec)
-    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec)
 
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
@@ -205,7 +204,6 @@ defmodule PtcRunner.SubAgent.Loop do
           journal: journal,
           tool_cache: tool_cache,
           discovery_exec: discovery_exec,
-          catalog_exec: catalog_exec,
           on_chunk: on_chunk,
           initial_messages: initial_messages,
           initial_memory: initial_memory
@@ -305,7 +303,6 @@ defmodule PtcRunner.SubAgent.Loop do
       journal: run_opts.journal,
       tool_cache: run_opts.tool_cache,
       discovery_exec: run_opts.discovery_exec,
-      catalog_exec: run_opts.catalog_exec,
       agent_name: agent.name,
       agent_id: run_opts.agent_id,
       on_chunk: run_opts.on_chunk,

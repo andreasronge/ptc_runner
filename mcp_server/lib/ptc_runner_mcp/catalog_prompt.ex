@@ -6,8 +6,8 @@ defmodule PtcRunnerMcp.CatalogPrompt do
   @prompt_dir Path.expand(Path.join([__DIR__, "..", "..", "priv", "prompts"]))
 
   @builtin_prompt_specs %{
-    discovery: "catalog/discovery.md",
-    agentic_discovery: "catalog/agentic_discovery.md"
+    discovery: "discovery/discovery.md",
+    agentic_discovery: "discovery/agentic_discovery.md"
   }
 
   for {_key, relative_path} <- @builtin_prompt_specs do

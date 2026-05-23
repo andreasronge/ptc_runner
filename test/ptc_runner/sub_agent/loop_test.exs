@@ -637,8 +637,8 @@ defmodule PtcRunner.SubAgent.LoopTest do
     end
   end
 
-  describe "run/2 with :catalog_exec" do
-    test "threads catalog_exec into Lisp.run so (catalog/...) is callable from the program" do
+  describe "run/2 with :discovery_exec" do
+    test "threads discovery_exec into Lisp.run so REPL discovery is callable from the program" do
       agent =
         SubAgent.new(
           prompt: "list the upstream servers",
@@ -648,19 +648,19 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(return (catalog/summary))
+(return (mcp/servers))
 ```|}
       end
 
-      catalog_exec = fn
-        :summary, [] ->
-          {:ok, %{"mode" => "test-from-catalog-exec", "servers" => []}}
+      discovery_exec = fn
+        :servers, [] ->
+          {:ok, [%{"name" => "github", "catalog_loaded" => true}]}
       end
 
       {:ok, step} =
-        Loop.run(agent, llm: llm, context: %{}, catalog_exec: catalog_exec)
+        Loop.run(agent, llm: llm, context: %{}, discovery_exec: discovery_exec)
 
-      assert step.return == %{"mode" => "test-from-catalog-exec", "servers" => []}
+      assert step.return == [%{"name" => "github", "catalog_loaded" => true}]
       assert step.fail == nil
     end
   end

@@ -708,8 +708,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         max_heap: eval_context.max_heap,
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
-        discovery_exec: eval_context.discovery_exec,
-        catalog_exec: eval_context.catalog_exec
+        discovery_exec: eval_context.discovery_exec
       )
 
     eval_ctx = %{
@@ -942,7 +941,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             summaries: caller_ctx.summaries,
             journal: caller_ctx.journal,
             discovery_exec: caller_ctx.discovery_exec,
-            catalog_exec: caller_ctx.catalog_exec,
             catalog_ops: caller_ctx.catalog_ops
         }
 

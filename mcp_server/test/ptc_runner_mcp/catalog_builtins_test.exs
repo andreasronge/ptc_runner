@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   @moduledoc """
-  Tests for `PtcRunnerMcp.CatalogBuiltins` — the catalog executor
-  closure builder for `catalog/` PTC-Lisp builtins.
+  Tests for `PtcRunnerMcp.CatalogBuiltins` — the discovery executor
+  closure builder for PTC-Lisp REPL discovery forms.
 
   Each test starts its own isolated `Upstream.Registry` so tests run
   in parallel without colliding on the global registry name.
@@ -82,58 +82,23 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
 
   defp tool_names_from_lines(lines) do
     Enum.map(lines, fn line ->
-      [_, name] = Regex.run(~r/^[^.]+\.([^(]+)\(/, line)
+      [_, name] = Regex.run(~r/^(?:[^.]+\.|)([^\s(-]+)/, line)
       name
     end)
   end
 
   # ============================================================
-  # catalog/summary
+  # mcp/servers
   # ============================================================
 
-  describe "summary" do
-    test "returns mode, servers, and catalogs_loaded" do
-      put_fake("github", [{"search", fn _ -> "ok" end}],
-        metadata: %{description: "GitHub MCP", capabilities: ["issues", "prs"]}
-      )
-
-      {exec, _ctx} = build_exec()
-      assert {:ok, result} = exec.(:summary, [])
-
-      assert result["mode"] == "auto"
-      assert is_list(result["servers"])
-
-      server = hd(result["servers"])
-      assert server["name"] == "github"
-      assert server["description"] == "GitHub MCP"
-      assert server["tool_count"] == 1
-      assert server["capabilities"] == ["issues", "prs"]
-      assert result["catalogs_loaded"] == true
-    end
-
-    test "catalogs_loaded is false when an upstream is not started" do
-      # Register upstream without ensure_started so cached_tools stays nil
-      config = tools_config(%{"tool_a" => fn _ -> "ok" end})
-      :ok = Registry.put_fake("alpha", config, @registry_name)
-
-      {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:summary, [])
-      assert result["catalogs_loaded"] == false
-    end
-  end
-
-  # ============================================================
-  # catalog/list-servers
-  # ============================================================
-
-  describe "list_servers" do
+  describe "servers" do
     test "returns server summaries" do
       put_fake("github", [{"search", fn _ -> "ok" end}], metadata: %{description: "GitHub"})
 
       put_fake("linear", [{"create_issue", fn _ -> "ok" end}], metadata: %{description: "Linear"})
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:list_servers, [])
+      {:ok, result} = exec.(:servers, [])
 
       assert is_list(result)
       assert length(result) == 2
@@ -150,10 +115,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   end
 
   # ============================================================
-  # catalog/list-tools
+  # dir
   # ============================================================
 
-  describe "list_tools" do
+  describe "dir" do
     test "returns sorted tool summaries for a server" do
       put_fake("github", [
         {"search_issues", fn _ -> "ok" end},
@@ -161,7 +126,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       ])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:list_tools, ["github"])
+      {:ok, result} = exec.(:dir, ["github"])
 
       assert is_list(result)
       assert length(result) == 2
@@ -174,10 +139,9 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, [tool]} = exec.(:list_tools, ["github"])
+      {:ok, [tool]} = exec.(:dir, ["github"])
 
-      assert tool =~ "github.search("
-      assert tool =~ "query: string"
+      assert tool =~ "search"
       assert tool =~ " - Tool search"
     end
 
@@ -197,13 +161,13 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("github", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, [tool]} = exec.(:list_tools, ["github"])
+      {:ok, [tool]} = exec.(:dir, ["github"])
 
-      assert tool == "github.search(query: string) - Search things"
+      assert tool == "search - Search things"
       refute tool =~ " -> "
     end
 
-    test "renders return type when upstream provides output_schema" do
+    test "dir omits return type even when upstream provides output_schema" do
       schema = %{
         name: "search",
         description: "Search things",
@@ -224,15 +188,14 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("github", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, [tool]} = exec.(:list_tools, ["github"])
+      {:ok, [tool]} = exec.(:dir, ["github"])
 
-      assert tool ==
-               "github.search(query: string) -> Result<{items [:any], next :string?}> - Search things"
+      assert tool == "search - Search things"
     end
 
     test "unknown server is programmer fault" do
       {exec, _ctx} = build_exec()
-      assert {:programmer_fault, msg} = exec.(:list_tools, ["nonexistent"])
+      assert {:programmer_fault, msg} = exec.(:dir, ["nonexistent"])
       assert msg =~ "no upstream 'nonexistent' configured"
     end
 
@@ -241,7 +204,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("big", tools)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:list_tools, ["big", %{limit: 3}])
+      {:ok, result} = exec.(:dir, ["big", %{limit: 3}])
       assert length(result) == 3
     end
 
@@ -255,8 +218,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("srv", tools)
 
       {exec, _ctx} = build_exec()
-      {:ok, all} = exec.(:list_tools, ["srv"])
-      {:ok, offset} = exec.(:list_tools, ["srv", %{offset: 2}])
+      {:ok, all} = exec.(:dir, ["srv"])
+      {:ok, offset} = exec.(:dir, ["srv", %{offset: 2}])
 
       assert length(offset) == 3
       assert tool_names_from_lines(offset) == tool_names_from_lines(Enum.drop(all, 2))
@@ -266,34 +229,34 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, msg} = exec.(:list_tools, ["srv", %{limit: 999}])
+      assert {:programmer_fault, msg} = exec.(:dir, ["srv", %{limit: 999}])
       assert msg =~ "limit"
 
-      assert {:programmer_fault, _} = exec.(:list_tools, ["srv", %{limit: -1}])
-      assert {:programmer_fault, _} = exec.(:list_tools, ["srv", %{limit: "five"}])
+      assert {:programmer_fault, _} = exec.(:dir, ["srv", %{limit: -1}])
+      assert {:programmer_fault, _} = exec.(:dir, ["srv", %{limit: "five"}])
     end
 
     test "invalid offset is programmer fault" do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, msg} = exec.(:list_tools, ["srv", %{offset: -1}])
+      assert {:programmer_fault, msg} = exec.(:dir, ["srv", %{offset: -1}])
       assert msg =~ "offset"
     end
 
     test "0-tool server returns empty list" do
       put_fake("empty", [])
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:list_tools, ["empty"])
+      {:ok, result} = exec.(:dir, ["empty"])
       assert result == []
     end
   end
 
   # ============================================================
-  # catalog/search-tools
+  # apropos
   # ============================================================
 
-  describe "search_tools" do
+  describe "apropos" do
     test "returns tool-level matches for loaded servers" do
       put_fake("github", [
         {"search_issues", fn _ -> "ok" end},
@@ -302,7 +265,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       ])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search"])
+      {:ok, result} = exec.(:apropos, ["search"])
 
       assert is_list(result)
       assert length(result) >= 2
@@ -324,8 +287,8 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
 
       {exec, _ctx} = build_exec()
 
-      {:ok, result1} = exec.(:search_tools, ["find"])
-      {:ok, result2} = exec.(:search_tools, ["find"])
+      {:ok, result1} = exec.(:apropos, ["find"])
+      {:ok, result2} = exec.(:apropos, ["find"])
 
       assert result1 == result2
     end
@@ -337,10 +300,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       ])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search"])
+      {:ok, result} = exec.(:apropos, ["search"])
 
       assert [first | _] = result
-      assert first =~ "srv.search("
+      assert first =~ "srv.search"
     end
 
     test "tool name matches rank higher than description-only matches" do
@@ -354,17 +317,17 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       )
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["users"])
+      {:ok, result} = exec.(:apropos, ["users"])
 
       assert [first | _] = result
-      assert first =~ "srv.list_users("
+      assert first =~ "srv.list_users"
     end
 
     test "empty query is programmer fault" do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, msg} = exec.(:search_tools, [""])
+      assert {:programmer_fault, msg} = exec.(:apropos, [""])
       assert msg =~ "non-empty string"
     end
 
@@ -372,7 +335,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, msg} = exec.(:search_tools, ["   "])
+      assert {:programmer_fault, msg} = exec.(:apropos, ["   "])
       assert msg =~ "non-empty string"
     end
 
@@ -380,16 +343,16 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: 100}])
-      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: 0}])
-      assert {:programmer_fault, _} = exec.(:search_tools, ["q", %{limit: "five"}])
+      assert {:programmer_fault, _} = exec.(:apropos, ["q", %{limit: 100}])
+      assert {:programmer_fault, _} = exec.(:apropos, ["q", %{limit: 0}])
+      assert {:programmer_fault, _} = exec.(:apropos, ["q", %{limit: "five"}])
     end
 
     test "invalid load option is programmer fault" do
       put_fake("srv", [{"t", fn _ -> "ok" end}])
       {exec, _ctx} = build_exec()
 
-      assert {:programmer_fault, msg} = exec.(:search_tools, ["q", %{load: "yes"}])
+      assert {:programmer_fault, msg} = exec.(:apropos, ["q", %{load: "yes"}])
       assert msg =~ ":load must be a boolean"
     end
 
@@ -398,7 +361,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("big", tools)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["tool", %{limit: 3}])
+      {:ok, result} = exec.(:apropos, ["tool", %{limit: 3}])
       assert length(result) <= 3
     end
 
@@ -406,7 +369,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("srv", [{"alpha", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["zzzznonexistent"])
+      {:ok, result} = exec.(:apropos, ["zzzznonexistent"])
       assert result == []
     end
 
@@ -423,7 +386,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       # Don't ensure_started — stays unloaded
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["github"])
+      {:ok, result} = exec.(:apropos, ["github"])
 
       assert [_ | _] = result
       server_match = Enum.find(result, &String.starts_with?(&1, "github:"))
@@ -443,7 +406,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
         )
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["special"])
+      {:ok, result} = exec.(:apropos, ["special"])
 
       assert [server_match] = Enum.filter(result, &String.starts_with?(&1, "my server/one:"))
       assert server_match =~ ~s|Use (dir "my server/one" {:limit 20}).|
@@ -462,10 +425,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       # Don't ensure_started — stays unloaded until :load true
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search", %{load: true}])
+      {:ok, result} = exec.(:apropos, ["search", %{load: true}])
 
       assert [_ | _] = result
-      tool_match = Enum.find(result, &String.starts_with?(&1, "github.search_issues("))
+      tool_match = Enum.find(result, &String.starts_with?(&1, "github.search_issues"))
       assert tool_match != nil
     end
 
@@ -474,33 +437,34 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("linear", [{"search_tickets", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search"])
+      {:ok, result} = exec.(:apropos, ["search"])
 
-      assert Enum.any?(result, &String.starts_with?(&1, "github.search_issues("))
-      assert Enum.any?(result, &String.starts_with?(&1, "linear.search_tickets("))
+      assert Enum.any?(result, &String.starts_with?(&1, "github.search_issues"))
+      assert Enum.any?(result, &String.starts_with?(&1, "linear.search_tickets"))
     end
 
     test "result includes server and tool name in the display string" do
       put_fake("srv", [{"tool_a", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["tool"])
+      {:ok, result} = exec.(:apropos, ["tool"])
 
       assert [first | _] = result
-      assert first =~ "srv.tool_a("
+      assert first =~ "srv.tool_a"
     end
 
     test "result-size truncation via max_catalog_result_bytes" do
       tools = Enum.map(1..20, fn i -> {"search_tool_#{i}", fn _ -> "ok" end} end)
       put_fake("big", tools)
 
-      CatalogConfig.set(%{max_catalog_result_bytes: 500})
+      CatalogConfig.set(%{max_catalog_result_bytes: 120})
       {exec, _ctx} = build_exec()
-      result = exec.(:search_tools, ["search"])
+      result = exec.(:apropos, ["search"])
 
       case result do
         {:ok, items} ->
           assert length(items) < 20
+          assert List.last(items) =~ "shown"
 
         {:world_fault, :catalog_result_too_large} ->
           :ok
@@ -554,7 +518,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("fs", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search", %{limit: 5}])
+      {:ok, result} = exec.(:apropos, ["search", %{limit: 5}])
 
       names = tool_names_from_lines(result)
 
@@ -605,7 +569,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("fs", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["search", %{limit: 5}])
+      {:ok, result} = exec.(:apropos, ["search", %{limit: 5}])
 
       # No tool matches "search" specifically, and the server NAME doesn't
       # match either — so no results should be returned. The description
@@ -635,7 +599,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("warehouse", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["warehouse", %{limit: 5}])
+      {:ok, result} = exec.(:apropos, ["warehouse", %{limit: 5}])
 
       names = tool_names_from_lines(result)
       assert "tool_a" in names
@@ -649,38 +613,39 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       ])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:search_tools, ["issue"])
+      {:ok, result} = exec.(:apropos, ["issue"])
 
       assert [first | _] = result
-      assert first =~ "srv.getIssueComments("
+      assert first =~ "srv.getIssueComments"
     end
   end
 
   # ============================================================
-  # catalog/describe-tool
+  # doc
   # ============================================================
 
-  describe "describe_tool" do
+  describe "doc" do
     test "returns detailed tool entry" do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, ["github", "search"])
+      {:ok, result} = exec.(:doc, ["github/search"])
 
       assert is_binary(result)
-      assert result =~ "github.search(query: string)"
+      assert result =~ "github/search"
+      assert result =~ "Args: {:query string}"
       assert result =~ "Required args: :query"
-      assert result =~ "Use:"
+      assert result =~ "Call:"
       assert result =~ ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
-      assert result =~ "Returns: `Result<T>`"
-      assert result =~ "use `(:value r)` as T"
+      assert result =~ "Returns: Result<any>"
+      assert result =~ "Use `(:value r)` after checking `(:ok r)`."
     end
 
     test "call_example surfaces required args with :args clause" do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, ["github", "search"])
+      {:ok, result} = exec.(:doc, ["github/search"])
 
       assert result =~
                ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
@@ -698,9 +663,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("util", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, ["util", "ping"])
+      {:ok, result} = exec.(:doc, ["util/ping"])
 
-      assert result =~ "util.ping()"
+      assert result =~ "util/ping"
+      assert result =~ "Args: {}"
       assert result =~ "Required args: none"
       assert result =~ ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
     end
@@ -717,10 +683,28 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started(~s|srv"quoted|, @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, [~s|srv"quoted|, ~s|say"hi|])
+      {:ok, result} = exec.(:doc, [~s|srv"quoted/say"hi|])
 
       assert result =~
                ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+    end
+
+    test "tool refs can address configured upstream names containing slash" do
+      schema = %{
+        name: "search",
+        description: "slash server tool",
+        input_schema: %{"type" => "object", "properties" => %{}}
+      }
+
+      config = %{tools: %{"search" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("my server/one", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("my server/one", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      assert {:ok, result} = exec.(:doc, ["my server/one/search"])
+
+      assert result =~ "my server/one/search"
+      assert result =~ ~s|:server "my server/one"|
     end
 
     test "required args line prevents inferring trace_id from result payloads" do
@@ -747,15 +731,17 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("observatory", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, ["observatory", "get_trace"])
+      {:ok, result} = exec.(:doc, ["observatory/get_trace"])
 
-      assert result =~ "observatory.get_trace(id: string)"
+      assert result =~ "observatory/get_trace"
+      assert result =~ "Args: {:id string}"
       assert result =~ "Required args: :id"
       assert result =~ ~s|:args {:id ...}|
+      assert result =~ "Returns: Result<{:trace-id string :duration-ms int?}>"
       refute result =~ ":trace_id ..."
     end
 
-    test "describe_tool surfaces input_schema fields for upstream-normalized tools" do
+    test "doc surfaces input_schema fields for upstream-normalized tools" do
       schema = %{
         name: "read_text_file",
         description: "read a file",
@@ -775,9 +761,10 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("fs", @registry_name)
 
       {exec, _ctx} = build_exec()
-      {:ok, result} = exec.(:describe_tool, ["fs", "read_text_file"])
+      {:ok, result} = exec.(:doc, ["fs/read_text_file"])
 
-      assert result =~ "fs.read_text_file(path: string, head: integer?, tail: integer?)"
+      assert result =~ "fs/read_text_file"
+      assert result =~ "Args: {:path string :head int? :tail int?}"
       assert result =~ ":args {:path ...}"
     end
 
@@ -785,24 +772,24 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      assert {:programmer_fault, msg} = exec.(:describe_tool, ["github", "nonexistent"])
+      assert {:programmer_fault, msg} = exec.(:doc, ["github/nonexistent"])
       assert msg =~ "no tool 'nonexistent'"
     end
 
     test "unknown server is programmer fault" do
       {exec, _ctx} = build_exec()
-      assert {:programmer_fault, msg} = exec.(:describe_tool, ["nonexistent", "tool"])
+      assert {:programmer_fault, msg} = exec.(:doc, ["nonexistent/tool"])
       assert msg =~ "no upstream 'nonexistent' configured"
     end
 
-    test "non-string server is programmer fault" do
+    test "non-string reference is programmer fault" do
       {exec, _ctx} = build_exec()
-      assert {:programmer_fault, msg} = exec.(:describe_tool, [123, "tool"])
-      assert msg =~ "non-empty string"
+      assert {:programmer_fault, msg} = exec.(:doc, [123])
+      assert msg =~ "quoted symbol or string tool reference"
     end
   end
 
-  describe "tool_meta" do
+  describe "meta" do
     test "returns structured MCP tool metadata" do
       schema = %{
         name: "search",
@@ -821,7 +808,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started("github", @registry_name)
 
       {exec, _ctx} = build_exec()
-      assert {:ok, result} = exec.(:tool_meta, ["github", "search"])
+      assert {:ok, result} = exec.(:meta, ["github/search"])
 
       assert result.kind == "mcp-tool"
       assert result.server == "github"
@@ -847,17 +834,35 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, _} = Registry.ensure_started(~s|srv"quoted|, @registry_name)
 
       {exec, _ctx} = build_exec()
-      assert {:ok, result} = exec.(:tool_meta, [~s|srv"quoted|, ~s|say"hi|])
+      assert {:ok, result} = exec.(:meta, [~s|srv"quoted/say"hi|])
 
       assert result.call ==
                ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+    end
+
+    test "tool refs with slash-containing upstream names work for meta" do
+      schema = %{
+        name: "search",
+        description: "slash server tool",
+        input_schema: %{"type" => "object", "properties" => %{}}
+      }
+
+      config = %{tools: %{"search" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("my server/one", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("my server/one", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      assert {:ok, result} = exec.(:meta, ["my server/one/search"])
+
+      assert result.server == "my server/one"
+      assert result.tool == "search"
     end
 
     test "unknown tool is programmer fault" do
       put_fake("github", [{"search", fn _ -> "ok" end}])
 
       {exec, _ctx} = build_exec()
-      assert {:programmer_fault, msg} = exec.(:tool_meta, ["github", "missing"])
+      assert {:programmer_fault, msg} = exec.(:meta, ["github/missing"])
       assert msg =~ "no tool 'missing'"
     end
   end
@@ -872,7 +877,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert {:ok, [_]} = exec.(:apropos, ["search"])
       assert {:ok, [_]} = exec.(:dir, ["github"])
       assert {:ok, doc} = exec.(:doc, [{:symbol_ref, "github/search"}])
-      assert doc =~ "github.search"
+      assert doc =~ "github/search"
       assert {:ok, meta} = exec.(:meta, ["github/search"])
       assert meta.kind == "mcp-tool"
     end
@@ -908,9 +913,9 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
 
       {exec, _ctx} = build_exec(max_catalog_ops: 2)
 
-      assert {:ok, _} = exec.(:summary, [])
-      assert {:ok, _} = exec.(:list_servers, [])
-      assert {:world_fault, :catalog_cap_exhausted} = exec.(:summary, [])
+      assert {:ok, _} = exec.(:servers, [])
+      assert {:ok, _} = exec.(:servers, [])
+      assert {:world_fault, :catalog_cap_exhausted} = exec.(:servers, [])
     end
 
     test "catalog budget is separate from upstream call budget" do
@@ -935,9 +940,9 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       # Exhaust upstream call budget
       :atomics.add(call_context.call_counter, 1, 1)
 
-      # Catalog ops should still work
-      assert {:ok, _} = exec.(:summary, [])
-      assert {:ok, _} = exec.(:list_servers, [])
+      # Discovery ops should still work
+      assert {:ok, _} = exec.(:servers, [])
+      assert {:ok, _} = exec.(:servers, [])
     end
   end
 
@@ -970,7 +975,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
         )
 
       # cached_tools is nil → ensure path → checks failure cache → world_fault
-      assert {:world_fault, :upstream_unavailable} = exec.(:list_tools, ["srv"])
+      assert {:world_fault, :upstream_unavailable} = exec.(:dir, ["srv"])
     end
   end
 
@@ -979,23 +984,23 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   # ============================================================
 
   describe "result size cap" do
-    test "oversized describe-tool result returns world fault" do
+    test "oversized doc result returns world fault" do
       put_fake("big", [{"huge_tool", fn _ -> "ok" end}])
 
       CatalogConfig.set(%{max_catalog_result_bytes: 10})
       {exec, _ctx} = build_exec()
 
       assert {:world_fault, :catalog_result_too_large} =
-               exec.(:describe_tool, ["big", "huge_tool"])
+               exec.(:doc, ["big/huge_tool"])
     end
 
-    test "list-tools truncates to fit" do
+    test "dir truncates to fit" do
       tools = Enum.map(1..20, fn i -> {"tool_#{i}", fn _ -> "ok" end} end)
       put_fake("big", tools)
 
-      CatalogConfig.set(%{max_catalog_result_bytes: 500})
+      CatalogConfig.set(%{max_catalog_result_bytes: 80})
       {exec, _ctx} = build_exec()
-      result = exec.(:list_tools, ["big"])
+      result = exec.(:dir, ["big"])
 
       case result do
         {:ok, items} ->

@@ -187,7 +187,8 @@
       section: "Interop",
       ptc_extension?: false,
       examples: [],
-      notes: "Works on Duration values returned by `Duration/between`; partial days truncate toward zero.",
+      notes:
+        "Works on Duration values returned by `Duration/between`; partial days truncate toward zero.",
       see_also: ["Duration/between", ".toMillis"],
       clojure_var: ".toDays",
       divergences: nil
@@ -4457,7 +4458,7 @@
       section: "Discovery",
       ptc_extension?: true,
       examples: [],
-      notes: "MCP-backed in aggregator mode; equivalent to catalog/search-tools in this phase.",
+      notes: "MCP-backed in aggregator mode; searches loaded discovery backends.",
       see_also: ["dir", "doc", "meta", "mcp/servers"],
       clojure_var: "apropos",
       divergences: nil
@@ -4866,6 +4867,23 @@
         "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
       see_also: ["doc", "dir", "apropos"],
       clojure_var: "meta",
+      divergences: nil
+    },
+    %{
+      name: "mcp/servers",
+      description: "List configured upstream MCP servers",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(mcp/servers)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "MCP-backed in aggregator mode; returns server names, descriptions, tool counts, and load status.",
+      see_also: ["apropos", "dir", "doc", "meta"],
+      clojure_var: nil,
       divergences: nil
     },
     %{

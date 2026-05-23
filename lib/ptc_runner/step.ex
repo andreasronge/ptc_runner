@@ -303,13 +303,13 @@ defmodule PtcRunner.Step do
   @typedoc """
   PTC-Lisp discovery invocation record (aggregator mode).
 
-  Captured for legacy `catalog/*` calls and generic REPL discovery
-  forms such as `mcp/servers`, `apropos`, `dir`, `doc`, and `meta`
-  dispatched through the configured discovery executor.
+  Captured for REPL discovery forms such as `mcp/servers`, `apropos`,
+  `dir`, `doc`, and `meta` dispatched through the configured discovery
+  executor.
 
   Fields:
   - `operation`: The discovery operation (`:servers`, `:apropos`,
-    `:dir`, `:doc`, `:meta`, or a legacy `catalog/*` operation)
+    `:dir`, `:doc`, or `:meta`)
   - `args`: Normalized argument map (shape depends on operation)
   - `outcome`: `:ok` on success, `:nil_world_fault` when a world fault
     was swallowed to `nil`, `:error` on programmer faults that raised

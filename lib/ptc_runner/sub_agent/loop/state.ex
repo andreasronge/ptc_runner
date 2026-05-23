@@ -103,8 +103,6 @@ defmodule PtcRunner.SubAgent.Loop.State do
     # Caller-owned; this loop neither constructs it nor inherits it
     # across child SubAgents.
     discovery_exec: nil,
-    # Backward-compatible catalog/* executor option.
-    catalog_exec: nil,
 
     # Pluggable progress renderer state (opaque, owned by progress_fn)
     progress_state: nil,
@@ -197,9 +195,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           journal: map() | nil,
           summaries: map(),
           tool_cache: map() | nil,
-          # Optional discovery/catalog executor closures
+          # Optional discovery executor closure
           discovery_exec: (atom(), list() -> term()) | nil,
-          catalog_exec: (atom(), list() -> term()) | nil,
           # Pluggable progress renderer state
           progress_state: term(),
           # Child steps

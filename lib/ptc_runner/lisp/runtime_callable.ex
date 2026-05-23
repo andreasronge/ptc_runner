@@ -2,11 +2,10 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   @moduledoc """
   Runtime callable for effectful qualified Lisp symbols.
 
-  Values such as `tool/search` and `catalog/search-tools` are not plain
-  functions: they need an evaluator context to enforce limits, record traces,
-  and call the configured runtime executor. The persisted value only carries
-  the qualified name. A short-lived bound form is created at application time
-  for higher-order runtime calls.
+  Values such as `tool/search` are not plain functions: they need an evaluator
+  context to enforce limits, record traces, and call the configured runtime
+  executor. The persisted value only carries the qualified name. A short-lived
+  bound form is created at application time for higher-order runtime calls.
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -15,7 +14,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
 
   defstruct [:namespace, :name, :eval_ctx, :do_eval]
 
-  @type namespace :: :tool | :catalog
+  @type namespace :: :tool
   @type t :: %__MODULE__{
           namespace: namespace(),
           name: atom(),
@@ -24,14 +23,6 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
             (term(), EvalContext.t() -> {:ok, term(), EvalContext.t()} | {:error, term()})
             | nil
         }
-
-  @catalog_tags %{
-    "summary" => {:catalog_summary, 0},
-    "list-servers" => {:catalog_list_servers, 0},
-    "list-tools" => {:catalog_list_tools, [1, 2]},
-    "describe-tool" => {:catalog_describe_tool, 2},
-    "search-tools" => {:catalog_search_tools, [1, 2]}
-  }
 
   @spec new(namespace(), atom()) :: t()
   def new(namespace, name) do
@@ -115,49 +106,11 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
     {:ok, {:tool_call, name, literal_args(args)}}
   end
 
-  defp core_call(%__MODULE__{namespace: :catalog, name: name}, args) do
-    key = Atom.to_string(name)
-
-    case Map.fetch(@catalog_tags, key) do
-      {:ok, {tag, 0}} ->
-        if args == [] do
-          {:ok, {tag}}
-        else
-          {:error, {:invalid_arity, :"catalog/#{name}", "(catalog/#{name}) takes no arguments"}}
-        end
-
-      {:ok, {tag, arities}} when is_list(arities) ->
-        if length(args) in arities do
-          {:ok, {tag, literal_args(args)}}
-        else
-          {:error,
-           {:invalid_arity, :"catalog/#{name}",
-            "catalog/#{name} expects #{format_arities(arities)} argument(s), got #{length(args)}"}}
-        end
-
-      {:ok, {tag, arity}} ->
-        if length(args) == arity do
-          {:ok, {tag, literal_args(args)}}
-        else
-          {:error,
-           {:invalid_arity, :"catalog/#{name}",
-            "catalog/#{name} expects #{arity} argument(s), got #{length(args)}"}}
-        end
-
-      :error ->
-        {:error, {:invalid_form, "Unknown runtime callable: catalog/#{name}"}}
-    end
-  end
-
   defp core_call(%__MODULE__{} = callable, _args) do
     {:error, {:invalid_form, "Unknown runtime callable: #{label(callable)}"}}
   end
 
   defp literal_args(args), do: Enum.map(args, &{:literal, &1})
-
-  defp format_arities([one]), do: to_string(one)
-  defp format_arities([one, two]), do: "#{one} or #{two}"
-  defp format_arities(arities), do: Enum.map_join(arities, ", ", &to_string/1)
 
   defp raise_error({reason, message, data}) when is_atom(reason) and is_binary(message) do
     raise ExecutionError, reason: reason, message: message, data: data
