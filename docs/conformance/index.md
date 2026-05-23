@@ -44,7 +44,28 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | `regex/` | Clojure standard | audited through `clojure.core` regex vars | N/A | N/A | N/A | N/A | [audit](clojure-core-audit.md) |
 | `data/` | PTC extension | context access | N/A | N/A | N/A | N/A | N/A |
 | `tool/` | PTC extension / capability | registered tool calls | N/A | N/A | N/A | N/A | N/A |
-| `catalog/` | PTC extension / MCP aggregator profile | upstream catalog discovery | N/A | N/A | N/A | N/A | N/A |
 | `budget/` | PTC extension / SubAgent budget profile | budget introspection | N/A | N/A | N/A | N/A | N/A |
 | `json/` | PTC extension | PTC JSON helpers | N/A | N/A | N/A | N/A | N/A |
 | `mcp/` | PTC extension / MCP server profile | profile-gated helper namespace; unavailable in base `Lisp.run/2` | N/A | N/A | N/A | N/A | N/A |
+
+## REPL Environment Support
+
+| Command | Status | Scope | Notes |
+|---------|--------|-------|-------|
+| `(mcp/servers)` | supported | MCP aggregator | List configured upstream servers, tool counts, and catalog load status |
+| `(apropos query)` | supported | REPL discovery | Search available discovery backends without loading unloaded upstreams by default |
+| `(dir ref)` | supported | REPL discovery | List members for a reference; MCP backend lists tools for a server |
+| `(doc ref)` | supported | REPL discovery | Return human-readable docs for one referenced tool |
+| `(meta ref)` | supported | REPL discovery | Return structured metadata for one referenced tool |
+| `(quote symbol)`, `'symbol` | partial | Core syntax | Symbol references only; quoted collections and syntax quote are not supported |
+
+
+## REPL Candidates
+
+| Candidate | Why |
+|-----------|-----|
+| Builtin var discovery | Let `apropos`, `doc`, and `meta` inspect PTC-Lisp builtins outside MCP |
+| User var discovery | Let sessions inspect `def`/`defn` bindings and captured docstrings |
+| Namespace-style listing | Let `dir` work beyond MCP servers |
+| Examples/source snippets | Expose examples only where they improve model repair |
+

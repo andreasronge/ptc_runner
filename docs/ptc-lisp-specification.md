@@ -3087,7 +3087,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
-| `catalog/` | Catalog discovery | (MCP aggregator mode) inspect configured upstream servers and their tools |
+| `mcp/` plus `apropos`/`dir`/`doc`/`meta` | REPL discovery | (MCP aggregator mode) inspect configured upstream servers and their tools |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3261,33 +3261,33 @@ Invoke registered tools using the `tool/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
-### 9.7 Catalog Discovery — `catalog/` (MCP aggregator mode)
+### 9.7 REPL Discovery (MCP aggregator mode)
 
-When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through the `catalog/` namespace. Outside aggregator mode these forms are unavailable. See [docs/aggregator-mode.md](aggregator-mode.md#catalog-discovery-from-ptc-lisp-catalog-builtins) for the full reference.
+When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through REPL-style discovery forms. Outside aggregator mode these forms require a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the full reference.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
-| `catalog/summary` | `(catalog/summary)` | Map `{"mode" "servers" [...] "catalogs_loaded" bool}` — one compact entry per server (`name`, `description`, `tool_count`, optional `capabilities`). |
-| `catalog/list-servers` | `(catalog/list-servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
-| `catalog/list-tools` | `(catalog/list-tools server)` / `(catalog/list-tools server opts)` | List of compact signature strings (`server.tool(args) -> output? - summary`), sorted by tool name. `opts` is a map with `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0) for pagination. |
-| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | Detailed tool description string. It includes the compact signature, `Required args: ...`, a call example, and response notes. The call example always includes an `:args { … }` clause and uses the required keys (or the first available arg key) as placeholders. |
-| `catalog/search-tools` | `(catalog/search-tools query)` / `(catalog/search-tools query opts)` | Deterministic lexical search across upstream tool catalogs: a list of compact signature strings ranked by relevance, with `{server, tool}` tie-breaking. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false — when false, an unloaded server contributes a server-level placeholder string with a `catalog/list-tools` next hint instead of triggering `ensure_started`). |
+| `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
+| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search across upstream tool catalogs. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
+| `dir` | `(dir server)` / `(dir server opts)` | List of compact signature strings (`server.tool(args) -> output? - summary`), sorted by tool name. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
+| `doc` | `(doc tool-ref)` | Detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. |
+| `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas and a call example. |
 
 **Error model** (same split as `tool/mcp-call`):
-- *World faults* — an upstream that can't be started, an oversized catalog result, or an exhausted per-program catalog op budget — make the form return `nil`. The program continues.
+- *World faults* — an upstream that can't be started, an oversized discovery result, or an exhausted per-program discovery budget — make the form return `nil`. The program continues.
 - *Programmer faults* — an unknown server name, an unknown tool name, or a bad argument (e.g. `:limit` out of range) — raise an execution error that terminates the program.
 
 ```clojure
 ;; Discover which upstreams are available, then describe a tool on one of them
-(let [servers (catalog/list-servers)]
+(let [servers (mcp/servers)]
   (when (some (fn [s] (= (:name s) "github")) servers)
-    (catalog/describe-tool "github" "search_repos")))
+    (doc 'github/search_repos)))
 
 ;; Find tools related to "read" across every configured upstream
-(map :tool (catalog/search-tools "read"))
+(apropos "read")
 ```
 
-The `catalog/` op budget is separate from the `tool/mcp-call` budget; catalog discovery never consumes upstream-call quota.
+The discovery op budget is separate from the `tool/mcp-call` budget; discovery never consumes upstream-call quota.
 
 ### 9.8 Namespace Compatibility
 
@@ -3317,7 +3317,6 @@ built-ins or reserved runtime operations at analysis time.
 | Java compatibility | `java.util.Date.` | Java Date constructors |
 | PTC runtime/helper | `data` | Context access |
 | PTC runtime/helper | `tool` | Registered tool invocation |
-| PTC runtime/helper | `catalog` | Upstream MCP catalog discovery |
 | PTC runtime/helper | `budget` | Remaining-budget introspection |
 | PTC runtime/helper | `json` | JSON parse/generate helpers |
 | MCP server extension | `mcp` | Profile-gated helper namespace used by the MCP server; unavailable in base `Lisp.run/2` unless that profile enables it |
@@ -4210,7 +4209,7 @@ When the interpreter encounters a symbol, it resolves in this order:
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
-| `catalog/summary`, `catalog/list-servers`, `catalog/list-tools`, `catalog/describe-tool`, `catalog/search-tools` | Upstream catalog discovery (MCP aggregator mode) |
+| `mcp/servers`, `apropos`, `dir`, `doc`, `meta` | REPL discovery (MCP aggregator mode) |
 | `foo` | Local binding or built-in |
 
 ### Example

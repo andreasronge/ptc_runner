@@ -109,7 +109,7 @@ Start the MCP server with:
 `lisp_eval` can now use `(tool/mcp-call ...)` to call the configured
 `fs` server from inside one bounded PTC-Lisp program. See
 [Aggregator Mode](aggregator-mode.md) for the authoring model,
-catalog discovery, error semantics, credentials, and HTTP upstreams.
+REPL discovery, error semantics, credentials, and HTTP upstreams.
 
 ## HTTP Mode
 

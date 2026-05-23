@@ -274,9 +274,9 @@ retry on the next turn.
 
 In aggregator mode, upstream-capable `lisp_eval` and
 `lisp_session_eval` descriptions start with a short discovery hint:
-use `catalog/search-tools`, `catalog/describe-tool`,
-`catalog/list-tools`, then call the selected upstream with
-`tool/mcp-call`. In inline catalog mode the dynamic tail also includes
+use `(apropos ...)`, `(dir ...)`, `(doc ...)`, and `(meta ...)`, then
+call the selected upstream with `tool/mcp-call`. In inline catalog mode
+the dynamic tail also includes
 one compact signature per configured upstream tool, in the shape:
 
 ```
@@ -360,26 +360,26 @@ The Connection is still re-attempted on the first
 backoff) — only the catalog text is frozen, not the runtime
 upstream state.
 
-### Catalog discovery from PTC-Lisp — `catalog/` builtins
+### REPL discovery from PTC-Lisp
 
 The inline catalog above is a static snapshot baked into the tool
 description. Lazy mode shows configured server names plus discovery
 guidance instead of individual tools. For programs that need to
 *inspect* the configured upstreams at runtime — enumerate servers,
 page through a server's tools, search across catalogs, or read a
-tool's full input schema — aggregator mode exposes a `catalog/`
-namespace with five builtins. (Outside aggregator mode these forms do
-not exist.)
+tool's full input schema — aggregator mode exposes REPL-style discovery
+forms. (Outside aggregator mode these forms require a configured
+discovery backend.)
 
 | Form | Signature | Returns |
 |------|-----------|---------|
-| `catalog/summary` | `(catalog/summary)` | A map `{"mode" <catalog-mode-string> "servers" [...] "catalogs_loaded" <bool>}`. Each server entry has `"name"`, `"description"`, `"tool_count"` (`nil` if its `tools/list` isn't cached yet) and, when present, `"capabilities"`. `"catalogs_loaded"` is `true` only when every configured upstream's tool list is cached. |
-| `catalog/list-servers` | `(catalog/list-servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `catalog/list-tools` | `(catalog/list-tools server)`<br>`(catalog/list-tools server opts)` | A list of compact signature strings such as `github.search(query: string) - Search repositories`, sorted by tool name. `opts` is a map: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `catalog/describe-tool` | `(catalog/describe-tool server tool)` | One detailed tool description string. It starts with the compact signature, includes `Required args: ...`, then a ready-to-edit `(tool/mcp-call …)` call example whose `:args` placeholder lists the required keys, and ends with response notes. |
-| `catalog/search-tools` | `(catalog/search-tools query)`<br>`(catalog/search-tools query opts)` | A list of compact signature strings ranked by lexical relevance to `query` (scoring described below). `opts` is a map: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` a server whose catalog isn't cached contributes a single server-level placeholder string with a `catalog/list-tools` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `mcp/servers` | `(mcp/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
+| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact signature strings ranked by lexical relevance to `query`. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `dir` | `(dir server)`<br>`(dir server opts)` | A list of compact signature strings such as `github.search(query: string) - Search repositories`, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `doc` | `(doc tool-ref)` | One detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. The description includes the compact signature, required args, a ready-to-edit `(tool/mcp-call …)` example, and response notes. |
+| `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas, annotations, and a call example. |
 
-`catalog/search-tools` ranks each candidate with a deterministic
+`apropos` ranks each candidate with a deterministic
 lexical score: `query` tokens are matched against the tokenized
 server/tool names (boosted) and the tokenized
 descriptions/arg-keys/annotations (unboosted), scoring `10` for an
@@ -389,45 +389,40 @@ camelCase, snake_case, and kebab-case. Only positive-scoring
 entries are returned; ties break on `{server, tool}` so ordering
 is stable across runs.
 
-`catalog/list-tools` and `catalog/describe-tool` (and
-`catalog/search-tools` when called with `:load true`) trigger a
-lazy `ensure_started/1` for the target upstream if its tools
-aren't cached yet — using the same per-program failure cache and
-ensure locks as `(tool/mcp-call ...)`, so concurrent `pmap`
-children cooperate instead of stampeding. Result lists are
-size-capped at `--max-catalog-result-bytes` (default 256 KiB) of
-JSON: an over-cap `list-tools` / `search-tools` list is truncated
-entry-by-entry, an over-cap `describe-tool` result becomes a world
-fault.
+`dir`, `doc`, and `meta` (and `apropos` when called with `:load true`)
+trigger a lazy `ensure_started/1` for the target upstream if its tools
+aren't cached yet — using the same per-program failure cache and ensure
+locks as `(tool/mcp-call ...)`, so concurrent `pmap` children cooperate
+instead of stampeding. Result lists are size-capped at
+`--max-catalog-result-bytes` (default 256 KiB) of JSON: an over-cap
+`dir` / `apropos` list is truncated entry-by-entry, an over-cap `doc`
+or `meta` result becomes a world fault.
 
 **Error model** — identical split to `(tool/mcp-call ...)`:
 
 - **World fault → `nil`**: upstream can't be started, the result
-  is too large to cap, or the per-program catalog op budget is
+  is too large to cap, or the per-program discovery op budget is
   exhausted. The program keeps running.
 - **Programmer fault → program raises**: `server` not configured,
   `tool` not found on that server, or a bad argument (e.g.
   `:limit` out of range, `:load` not a boolean, an empty `query`,
   `server`/`tool` not a non-empty string).
 
-The catalog op budget is a **separate** atomics counter from the
+The discovery op budget is a **separate** atomics counter from the
 `(tool/mcp-call ...)` budget — discovery calls never eat into a
 program's upstream-call quota.
 
 ```clojure
-;; List the read-only tools the "github" upstream exposes
-(->> (catalog/list-tools "github" {:limit 100})
-     (filter :read_only)
-     (map :tool))
+;; List the tools the "github" upstream exposes
+(dir 'github {:limit 100})
 
 ;; Only describe a tool if its server is actually configured
-(when (some (fn [s] (= (:name s) "fs")) (catalog/list-servers))
-  (catalog/describe-tool "fs" "read_text_file"))
+(when (some (fn [s] (= (:name s) "fs")) (mcp/servers))
+  (doc 'fs/read_text_file))
 
 ;; Search every configured upstream for "read"-related tools,
 ;; loading any cold catalogs so only tool-level matches come back
-(map (juxt :server :tool)
-     (catalog/search-tools "read" {:limit 20 :load true}))
+(apropos "read" {:limit 20 :load true})
 ```
 
 ## Three example programs

@@ -184,7 +184,7 @@ For the large synthetic fleet, forced `:inline` adds roughly 60 K
 estimated tokens to every planner invocation versus `:auto`/`:lazy`.
 For the small fleet, `:auto` intentionally stays inline, and forcing
 `:lazy` saves roughly 1.7 K estimated planner tokens per `lisp_task`
-call at the cost of runtime catalog discovery.
+call at the cost of runtime REPL discovery.
 
 When an upstream tool advertises `outputSchema`, the generated catalog
 turns the supported JSON Schema subset into compact PTC-style output
