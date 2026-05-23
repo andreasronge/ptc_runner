@@ -275,6 +275,22 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert "search_repos" in tool_names
     end
 
+    test "structured apropos exposes ranked matches for unified discovery" do
+      put_fake("github", [
+        {"search_issues", fn _ -> "ok" end},
+        {"get_issue", fn _ -> "ok" end}
+      ])
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:apropos_matches, ["search"])
+
+      assert [%{source_kind: "mcp", source_rank: 0, score: score, server: "github"} | _] =
+               result
+
+      assert score > 0
+      assert Enum.all?(result, &is_binary(&1.line))
+    end
+
     test "deterministic ordering: same query always produces same order" do
       put_fake("alpha", [
         {"find_items", fn _ -> "ok" end},
@@ -469,6 +485,18 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
         {:world_fault, :catalog_result_too_large} ->
           :ok
       end
+    end
+
+    test "rendered apropos is capped after compact line rendering" do
+      put_fake("github", [{"search", fn _ -> "ok" end}])
+
+      CatalogConfig.set(%{max_catalog_result_bytes: 80})
+      {exec, _ctx} = build_exec()
+
+      assert {:ok, ["github.search" <> _]} = exec.(:apropos, ["search", %{limit: 1}])
+
+      assert {:ok, ["... 0/1 shown"]} =
+               exec.(:apropos_matches, ["search", %{limit: 1}])
     end
 
     # Regression for issue #944 finding #4: a query that matches the server

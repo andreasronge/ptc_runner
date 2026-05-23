@@ -28,6 +28,7 @@ Helpers:
 - Namespaces are fixed; no `require`/`import`.
 - `json/parse-string`, `json/generate-string`; `str/join`, `set/union`.
 - Java-shaped: `Double/parseDouble`, `LocalDate/parse`.
+- Discover: `apropos`, `dir`, `doc`, `meta`; `ns-publics` is local only.
 - Prefer core fns; use `pmap`/`pcalls` when useful.
 
 No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network

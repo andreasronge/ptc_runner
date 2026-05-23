@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   alias PtcRunner.Lisp.ClosureCapture
   alias PtcRunner.Lisp.CoreAST
+  alias PtcRunner.Lisp.Discovery
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval.{Apply, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -1497,27 +1498,167 @@ defmodule PtcRunner.Lisp.Eval do
   # REPL discovery dispatch
   # ============================================================
 
-  defp invoke_discovery(%EvalContext{discovery_exec: nil}, _operation, _args) do
+  defp invoke_discovery(%EvalContext{} = eval_ctx, operation, args) do
+    args = normalize_catalog_args(operation, args)
+
+    case operation do
+      :servers -> invoke_mcp_only_discovery(eval_ctx, operation, args)
+      :apropos -> invoke_apropos_discovery(eval_ctx, args)
+      :dir -> invoke_ref_discovery(eval_ctx, operation, args, &Discovery.dir/2)
+      :doc -> invoke_ref_discovery(eval_ctx, operation, args, &local_doc/2)
+      :meta -> invoke_ref_discovery(eval_ctx, operation, args, &local_meta/2)
+      :ns_publics -> invoke_local_only_discovery(eval_ctx, operation, args, &local_ns_publics/2)
+      _ -> invoke_mcp_only_discovery(eval_ctx, operation, args)
+    end
+  end
+
+  defp invoke_mcp_only_discovery(%EvalContext{discovery_exec: nil}, _operation, _args) do
     raise ExecutionError,
       reason: :runtime_error,
       message: "REPL discovery forms are only available when a discovery backend is configured"
   end
 
-  defp invoke_discovery(%EvalContext{discovery_exec: discovery_exec} = eval_ctx, operation, args) do
+  defp invoke_mcp_only_discovery(
+         %EvalContext{discovery_exec: discovery_exec} = eval_ctx,
+         operation,
+         args
+       ) do
     invoke_discovery_exec(eval_ctx, discovery_exec, operation, args)
   end
 
+  defp invoke_apropos_discovery(%EvalContext{} = eval_ctx, [query | rest]) do
+    opts = List.first(rest, %{})
+
+    with :ok <- validate_apropos_query(query),
+         {:ok, opts} <- Discovery.parse_apropos_opts(opts) do
+      local_matches = Discovery.apropos_matches(query, opts)
+
+      case eval_ctx.discovery_exec do
+        nil ->
+          render_unified_apropos(eval_ctx, local_matches, opts)
+
+        discovery_exec ->
+          invoke_mcp_apropos_discovery(eval_ctx, discovery_exec, query, opts, local_matches)
+      end
+    else
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_apropos_discovery(_eval_ctx, args) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "apropos requires query and optional opts, got #{inspect(args)}"
+  end
+
+  defp invoke_mcp_apropos_discovery(eval_ctx, discovery_exec, query, opts, local_matches) do
+    result =
+      invoke_discovery_exec(eval_ctx, discovery_exec, :apropos_matches, [query, opts], :apropos)
+
+    handle_mcp_apropos_matches(result, discovery_exec, query, opts, local_matches)
+  end
+
+  defp handle_mcp_apropos_matches(
+         {:ok, mcp_matches, eval_ctx},
+         _exec,
+         _query,
+         opts,
+         local_matches
+       )
+       when is_list(mcp_matches) do
+    render_unified_apropos(eval_ctx, normalize_mcp_matches(mcp_matches), opts, local_matches)
+  end
+
+  defp handle_mcp_apropos_matches({:ok, nil, eval_ctx}, _exec, _query, opts, local_matches) do
+    render_unified_apropos(eval_ctx, local_matches, opts)
+  end
+
+  defp handle_mcp_apropos_matches(
+         {:fallback, eval_ctx},
+         discovery_exec,
+         query,
+         opts,
+         local_matches
+       ) do
+    eval_ctx
+    |> invoke_discovery_exec(discovery_exec, :apropos, [query, opts])
+    |> handle_legacy_mcp_apropos(opts, local_matches)
+  end
+
+  defp handle_legacy_mcp_apropos({:ok, mcp_lines, eval_ctx}, opts, local_matches)
+       when is_list(mcp_lines) do
+    render_unified_apropos(eval_ctx, fallback_mcp_line_matches(mcp_lines), opts, local_matches)
+  end
+
+  defp handle_legacy_mcp_apropos({:ok, nil, eval_ctx}, opts, local_matches) do
+    render_unified_apropos(eval_ctx, local_matches, opts)
+  end
+
+  defp validate_apropos_query(query) do
+    if is_binary(query) and String.trim(query) != "" do
+      :ok
+    else
+      {:programmer_fault, "apropos requires query (non-empty string), got #{inspect(query)}"}
+    end
+  end
+
+  defp invoke_ref_discovery(%EvalContext{} = eval_ctx, operation, [ref | rest] = args, local_fun) do
+    opts = List.first(rest, %{})
+
+    case local_fun.(ref, opts) do
+      {:ok, result} ->
+        {:ok, result, eval_ctx}
+
+      :unknown ->
+        invoke_mcp_only_discovery(eval_ctx, operation, args)
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_ref_discovery(_eval_ctx, operation, args, _local_fun) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "#{operation} requires a ref, got #{inspect(args)}"
+  end
+
+  defp invoke_local_only_discovery(%EvalContext{} = eval_ctx, operation, [ref], local_fun) do
+    case local_fun.(ref, %{}) do
+      {:ok, result} ->
+        {:ok, result, eval_ctx}
+
+      :unknown ->
+        raise ExecutionError,
+          reason: :runtime_error,
+          message: "no local discovery ref #{inspect(ref)} for #{operation}"
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
   defp invoke_discovery_exec(%EvalContext{} = eval_ctx, discovery_exec, operation, args) do
+    invoke_discovery_exec(eval_ctx, discovery_exec, operation, args, operation)
+  end
+
+  defp invoke_discovery_exec(
+         %EvalContext{} = eval_ctx,
+         discovery_exec,
+         operation,
+         args,
+         record_op
+       ) do
     start_time = System.monotonic_time(:millisecond)
-    args = normalize_catalog_args(operation, args)
 
     case discovery_exec.(operation, args) do
       {:ok, result} ->
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
         op_record = %{
-          operation: operation,
-          args: catalog_op_args(operation, args),
+          operation: record_op,
+          args: catalog_op_args(record_op, args),
           outcome: :ok,
           reason: nil,
           duration_ms: duration_ms
@@ -1529,8 +1670,8 @@ defmodule PtcRunner.Lisp.Eval do
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
         op_record = %{
-          operation: operation,
-          args: catalog_op_args(operation, args),
+          operation: record_op,
+          args: catalog_op_args(record_op, args),
           outcome: :nil_world_fault,
           reason: reason,
           duration_ms: duration_ms
@@ -1539,15 +1680,60 @@ defmodule PtcRunner.Lisp.Eval do
         {:ok, nil, EvalContext.append_catalog_op(eval_ctx, op_record)}
 
       {:programmer_fault, message} ->
-        raise ExecutionError, reason: :runtime_error, message: message
+        if operation == :apropos_matches do
+          {:fallback, eval_ctx}
+        else
+          raise ExecutionError, reason: :runtime_error, message: message
+        end
     end
   end
+
+  defp render_unified_apropos(eval_ctx, matches, opts, extra_matches \\ []) do
+    limit = Map.get(opts, :limit, 8)
+
+    lines =
+      (matches ++ extra_matches)
+      |> Discovery.sort_matches()
+      |> Enum.take(limit)
+      |> Discovery.render_matches()
+
+    {:ok, lines, eval_ctx}
+  end
+
+  defp normalize_mcp_matches(matches) do
+    Enum.map(matches, fn
+      %{} = match ->
+        %{
+          source_rank: Map.get(match, :source_rank, Map.get(match, "source_rank", 0)),
+          score: Map.get(match, :score, Map.get(match, "score", 0)),
+          source_kind: Map.get(match, :source_kind, Map.get(match, "source_kind", "mcp")),
+          server: Map.get(match, :server, Map.get(match, "server", "")),
+          name: Map.get(match, :name, Map.get(match, "name", Map.get(match, "tool", ""))),
+          ref: Map.get(match, :ref, Map.get(match, "ref", "")),
+          line: Map.get(match, :line, Map.get(match, "line", ""))
+        }
+
+      line when is_binary(line) ->
+        fallback_mcp_line_match(line)
+    end)
+  end
+
+  defp fallback_mcp_line_matches(lines), do: Enum.map(lines, &fallback_mcp_line_match/1)
+
+  defp fallback_mcp_line_match(line) do
+    %{source_rank: 0, score: 0, source_kind: "mcp", server: "", name: line, ref: line, line: line}
+  end
+
+  defp local_doc(ref, _opts), do: Discovery.doc(ref)
+  defp local_meta(ref, _opts), do: Discovery.meta(ref)
+  defp local_ns_publics(ref, _opts), do: Discovery.ns_publics(ref)
 
   defp catalog_op_args(:servers, []), do: %{}
   defp catalog_op_args(:dir, [server]), do: %{server: server}
   defp catalog_op_args(:dir, [server, opts]), do: %{server: server, opts: opts}
   defp catalog_op_args(:doc, [ref]), do: %{ref: ref}
   defp catalog_op_args(:meta, [ref]), do: %{ref: ref}
+  defp catalog_op_args(:ns_publics, [ref]), do: %{ref: ref}
   defp catalog_op_args(:apropos, [query]), do: %{query: query}
   defp catalog_op_args(:apropos, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(_, args), do: %{args: args}
@@ -1563,6 +1749,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp server_ref_name(name), do: name
 
   defp normalize_catalog_value(%LispKeyword{name: name}), do: safe_keyword_name(name)
+  defp normalize_catalog_value({:symbol_ref, name}) when is_binary(name), do: name
 
   defp normalize_catalog_value(map) when is_map(map) and not is_struct(map) do
     Map.new(map, fn {key, value} ->

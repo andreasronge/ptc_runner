@@ -218,26 +218,36 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     %{
       command: "`(apropos query)`",
       status: "supported",
-      scope: "REPL discovery",
-      notes: "Search available discovery backends without loading unloaded upstreams by default"
+      scope: "local + MCP discovery",
+      notes:
+        "Search executable local PTC/Clojure/curated Java capabilities and, in aggregator mode, configured MCP tools. MCP matches rank before local matches."
     },
     %{
       command: "`(dir ref)`",
       status: "supported",
-      scope: "REPL discovery",
-      notes: "List members for a reference; MCP backend lists tools for a server"
+      scope: "local + MCP discovery",
+      notes: "List members for a local namespace/curated Java class, or tools for an MCP server."
     },
     %{
       command: "`(doc ref)`",
       status: "supported",
-      scope: "REPL discovery",
-      notes: "Return human-readable docs for one referenced tool"
+      scope: "local + MCP discovery",
+      notes:
+        "Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs."
     },
     %{
       command: "`(meta ref)`",
       status: "supported",
-      scope: "REPL discovery",
-      notes: "Return structured metadata for one referenced tool"
+      scope: "local + MCP discovery",
+      notes:
+        "Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs."
+    },
+    %{
+      command: "`(ns-publics ns)`",
+      status: "supported",
+      scope: "local discovery",
+      notes:
+        "Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported."
     },
     %{
       command: "`(quote symbol)`, `'symbol`",
@@ -248,10 +258,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   ]
 
   @repl_candidates [
-    {"Builtin var discovery",
-     "Let `apropos`, `doc`, and `meta` inspect PTC-Lisp builtins outside MCP"},
     {"User var discovery", "Let sessions inspect `def`/`defn` bindings and captured docstrings"},
-    {"Namespace-style listing", "Let `dir` work beyond MCP servers"},
     {"Examples/source snippets", "Expose examples only where they improve model repair"}
   ]
 

@@ -128,6 +128,7 @@ defmodule PtcRunner.Lisp.Analyze do
       :dir,
       :doc,
       :meta,
+      :"ns-publics",
       :"mcp/servers"
     ]
   end
@@ -434,6 +435,18 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :meta}, args, _list, _tail?) do
     {:error,
      {:invalid_arity, :meta, "(meta tool-ref) requires exactly 1 argument, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:symbol, :"ns-publics"}, [ns_ast], _list, _tail?) do
+    with {:ok, ns_ref} <- do_analyze(ns_ast, false) do
+      {:ok, {:repl_discovery, :ns_publics, [ns_ref]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :"ns-publics"}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :"ns-publics",
+      "(ns-publics namespace) requires exactly 1 argument, got #{length(args)}"}}
   end
 
   # Tool invocation via tool/ namespace: (tool/name args...)
