@@ -13,7 +13,8 @@ defmodule PtcRunnerMcp.Agentic do
     Limits,
     PayloadMetrics,
     PromptRegistry,
-    UpstreamCalls
+    UpstreamCalls,
+    UpstreamResultFeedback
   }
 
   alias PtcRunnerMcp.Agentic.{
@@ -76,7 +77,7 @@ defmodule PtcRunnerMcp.Agentic do
          {:ok, planner_log} <- Agent.start_link(fn -> [] end),
          assembled <- assemble_prompt(validated, cfg),
          agent <- build_subagent(assembled, ledger, turn_tracker, cfg),
-         llm <- planner_llm(cfg, deadline, request_id, planner_log, turn_tracker),
+         llm <- planner_llm(cfg, deadline, request_id, planner_log, turn_tracker, ledger),
          result <- run_subagent(agent, llm, validated, request_id, ledger),
          :ok <- require_budget(deadline) do
       project_subagent_result(result, ledger, planner_log, validated, cfg)
@@ -113,10 +114,10 @@ defmodule PtcRunnerMcp.Agentic do
     )
   end
 
-  defp planner_llm(cfg, deadline, request_id, planner_log, turn_tracker) do
+  defp planner_llm(cfg, deadline, request_id, planner_log, turn_tracker, ledger) do
     fn input ->
       update_turn_tracker(turn_tracker, Map.get(input, :turn))
-      prompt = render_subagent_input(input)
+      prompt = render_subagent_input(input, ledger)
 
       case call_planner(cfg, prompt, deadline, request_id) do
         {:ok, raw, meta} ->
@@ -136,7 +137,7 @@ defmodule PtcRunnerMcp.Agentic do
 
   defp update_turn_tracker(_turn_tracker, _turn), do: :ok
 
-  defp render_subagent_input(input) do
+  defp render_subagent_input(input, ledger) do
     messages =
       input
       |> Map.get(:messages, [])
@@ -144,10 +145,29 @@ defmodule PtcRunnerMcp.Agentic do
         "#{Map.get(message, :role)}:\n#{Map.get(message, :content)}"
       end)
 
-    [Map.get(input, :system), messages]
+    [Map.get(input, :system), messages, retry_upstream_feedback(input, ledger)]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
   end
+
+  defp retry_upstream_feedback(input, ledger) do
+    if retry_feedback_turn?(Map.get(input, :messages, [])) do
+      ledger
+      |> Ledger.entries()
+      |> UpstreamResultFeedback.render()
+    end
+  end
+
+  defp retry_feedback_turn?(messages) when is_list(messages) do
+    case List.last(messages) do
+      %{role: :user, content: "Error:" <> _} -> true
+      %{role: "user", content: "Error:" <> _} -> true
+      %{"role" => "user", "content" => "Error:" <> _} -> true
+      _ -> false
+    end
+  end
+
+  defp retry_feedback_turn?(_messages), do: false
 
   defp run_subagent(agent, llm, validated, request_id, ledger) do
     SubAgent.run(agent,
@@ -534,11 +554,13 @@ defmodule PtcRunnerMcp.Agentic do
       "status" => "error",
       "reason" => to_string(reason),
       "message" => message,
+      "feedback" => message,
       "warnings" => [],
       "planner" => Map.get(partial, "planner", %{}),
       "execution" => Map.get(partial, "execution", %{}),
       "upstream_calls" => Map.get(partial, "upstream_calls", [])
     }
+    |> UpstreamResultFeedback.append_to_feedback(Map.get(partial, "upstream_results", []))
     |> maybe_put_upstream_results(Map.get(partial, "upstream_results", []))
     |> maybe_put_program(Map.get(partial, "program"), cfg)
     |> maybe_put_trace_id(Map.get(partial, "trace_id"))

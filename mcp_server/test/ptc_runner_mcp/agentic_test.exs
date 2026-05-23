@@ -82,6 +82,13 @@ defmodule PtcRunnerMcp.AgenticTest do
     end
   end
 
+  defmodule CapturingSequencePlanner do
+    def call(model, prompt, opts) do
+      send(Application.fetch_env!(:ptc_runner_mcp, :agentic_test_pid), {:planner_prompt, prompt})
+      SequencePlanner.call(model, prompt, opts)
+    end
+  end
+
   defmodule CapturingAdapter do
     def call(model, req) do
       send(Application.fetch_env!(:ptc_runner_mcp, :agentic_test_pid), {:llm_call, model, req})
@@ -334,6 +341,8 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert env["isError"] == true
       sc = env["structuredContent"]
       assert sc["reason"] == "agent_failed"
+      assert sc["feedback"] =~ sc["message"]
+      assert sc["feedback"] =~ "alpha.ok ok"
       assert sc["planner"]["model"] == "stub:model"
 
       assert [
@@ -421,6 +430,46 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert sc["execution"]["turn_count"] == 2
       assert sc["structured_result"] == 11
       assert sc["upstream_calls"] == []
+    end
+
+    test "retry prompt includes upstream result summary from failed prior turn" do
+      :ok = AggregatorConfig.set(%{read_only: true})
+      :ok = AgenticConfig.set(%{enabled: true, model: "stub:model", max_turns: 2})
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_pid, self())
+
+      :ok =
+        put_fake("alpha", %{
+          "get" => fn _, _ ->
+            {:ok, %{"structuredContent" => %{"content" => "[FILE] README.md\n[DIR] docs"}}}
+          end
+        })
+
+      {:ok, sequence} =
+        Agent.start_link(fn ->
+          [
+            ~S|(do (tool/mcp-call {:server "alpha" :tool "get" :args {}}) (+ 1 "x"))|,
+            ~S|(return 11)|
+          ]
+        end)
+
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
+      Elixir.Application.put_env(:ptc_runner_mcp, :agentic_planner, CapturingSequencePlanner)
+
+      env =
+        Tools.call(%{
+          "name" => "lisp_task",
+          "arguments" => %{"task" => "recover from runtime error after upstream"}
+        })
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["structured_result"] == 11
+      assert_receive {:planner_prompt, first_prompt}
+      refute first_prompt =~ "Tool results before error"
+      assert_receive {:planner_prompt, retry_prompt}
+      assert retry_prompt =~ "source=\"upstream-tool-results\""
+      assert retry_prompt =~ "Tool results before error"
+      assert retry_prompt =~ "alpha.get ok"
+      assert retry_prompt =~ "map keys=[\"content\"]"
     end
 
     test "write-effect non-terminal turn is blocked before continuation" do

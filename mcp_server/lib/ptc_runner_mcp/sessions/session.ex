@@ -15,6 +15,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sandbox
   alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
+  alias PtcRunnerMcp.UpstreamResultFeedback
 
   @bytes_per_word :erlang.system_info(:wordsize)
   @min_max_heap_words 233
@@ -211,10 +212,12 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
           public =
             Projection.eval_lisp_error(state, step)
+            |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
             |> maybe_put_upstream_calls(upstream_calls)
 
           diagnostic =
             Projection.eval_lisp_error(state, step)
+            |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
             |> maybe_put_upstream_calls(upstream_calls)
             |> decorate_ptc_metrics(upstream_calls)
 
@@ -540,6 +543,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
                 message,
                 %{session: Projection.inspect_view(state, "limits")["session"]}
               )
+              |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
               |> maybe_put_upstream_calls(upstream_calls)
 
             diagnostic =
@@ -548,6 +552,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
                 message,
                 %{session: Projection.inspect_view(state, "limits")["session"]}
               )
+              |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
               |> maybe_put_upstream_calls(upstream_calls)
               |> decorate_ptc_metrics(upstream_calls)
 
@@ -574,6 +579,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             "session persisted-state limit exceeded; eval was not committed",
             %{detail: detail, session: Projection.inspect_view(state, "limits")["session"]}
           )
+          |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
           |> maybe_put_upstream_calls(upstream_calls)
 
         diagnostic =
@@ -582,6 +588,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             "session persisted-state limit exceeded; eval was not committed",
             %{detail: detail, session: Projection.inspect_view(state, "limits")["session"]}
           )
+          |> UpstreamResultFeedback.append_to_feedback(upstream_calls)
           |> maybe_put_upstream_calls(upstream_calls)
           |> decorate_ptc_metrics(upstream_calls)
 
