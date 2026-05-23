@@ -80,7 +80,6 @@ defmodule PtcRunner.Lisp.Env do
     :walk => :walk,
     :regex => :regex,
     :Math => :math,
-    :Interop => :interop,
     :System => :interop,
     :Boolean => :interop,
     :Float => :interop,
@@ -92,6 +91,8 @@ defmodule PtcRunner.Lisp.Env do
     # builtin, which auto-dispatches on the string shape (Date vs DateTime).
     :"java.time.Instant" => :interop,
     :Instant => :interop,
+    :"java.time.Duration" => :interop,
+    :Duration => :interop,
     :Double => :interop,
     :json => :json
   }
@@ -559,6 +560,12 @@ defmodule PtcRunner.Lisp.Env do
       {:"java.util.Date.",
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},
+      {:".toEpochDay", {:normal, &Runtime.dot_to_epoch_day/1}},
+      {:".plusDays", {:normal, &Runtime.dot_plus_days/2}},
+      {:".minusDays", {:normal, &Runtime.dot_minus_days/2}},
+      {:"Duration/between", {:normal, &Runtime.duration_between/2}},
+      {:".toMillis", {:normal, &Runtime.dot_to_millis/1}},
+      {:".toDays", {:normal, &Runtime.dot_to_days/1}},
       {:".contains", {:normal, &Runtime.dot_contains/2}},
       {:".indexOf",
        {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},

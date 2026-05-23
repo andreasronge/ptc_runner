@@ -110,6 +110,20 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert entry.dispatch == :env
     end
 
+    test "doc/1 resolves fully-qualified Java aliases to canonical entries" do
+      assert Registry.doc("Duration/between").name == "Duration/between"
+      assert Registry.doc("java.time.Duration/between").name == "Duration/between"
+      assert Registry.doc("Double/parseDouble").name == "parse-double"
+      assert Registry.doc("Integer/parseInt").name == "parse-long"
+    end
+
+    test "doc/1 rejects unsupported namespaced Java members" do
+      assert Registry.doc("LocalDate/currentTimeMillis") == nil
+      assert Registry.doc("Duration/parse") == nil
+      assert Registry.doc("java.time.Duration/parse") == nil
+      assert Registry.doc("System/parse") == nil
+    end
+
     test "doc/1 returns nil for unknown function" do
       assert Registry.doc("nonexistent") == nil
     end
@@ -224,15 +238,14 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert index =~ "profile-gated helper namespace"
     end
 
-    test "issue 1019 date/time helpers are represented as candidates" do
-      candidates =
+    test "issue 1019 selected date/time helpers are supported and Period remains deferred" do
+      supported =
         [
           :java_time_local_date_audit,
-          :java_time_duration_audit,
-          :java_time_period_audit
+          :java_time_duration_audit
         ]
         |> Enum.flat_map(&Registry.java_compat_audit/1)
-        |> Enum.filter(&(&1.status == :candidate))
+        |> Enum.filter(&(&1.status == :supported))
         |> MapSet.new(& &1.name)
 
       for name <- [
@@ -241,11 +254,22 @@ defmodule PtcRunner.Lisp.RegistryTest do
             ".minusDays",
             "Duration/between",
             ".toMillis",
-            ".toDays",
+            ".toDays"
+          ] do
+        assert MapSet.member?(supported, name), "#{name} should be tracked as supported"
+      end
+
+      candidates =
+        :java_time_period_audit
+        |> Registry.java_compat_audit()
+        |> Enum.filter(&(&1.status == :candidate))
+        |> MapSet.new(& &1.name)
+
+      for name <- [
             "Period/between",
             ".getDays"
           ] do
-        assert MapSet.member?(candidates, name), "#{name} should be tracked as a candidate"
+        assert MapSet.member?(candidates, name), "#{name} should remain a deferred candidate"
       end
     end
   end

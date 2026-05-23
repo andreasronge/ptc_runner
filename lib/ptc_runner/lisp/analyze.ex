@@ -1180,7 +1180,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # interned before any user input reaches the analyzer (avoids the
   # `String.to_existing_atom/1` race where the analyzer module loads before
   # Env's `builtin_bindings/0` runs).
-  @qualified_namespaces [:json]
+  @qualified_namespaces [:json, :Duration]
 
   @qualified_namespace_tables (for ns <- @qualified_namespaces, into: %{} do
                                  prefix = Atom.to_string(ns) <> "/"
@@ -1220,6 +1220,10 @@ defmodule PtcRunner.Lisp.Analyze do
   defp qualified_namespace_lookup(:Float, "parseFloat"), do: {:ok, :"parse-double"}
   defp qualified_namespace_lookup(:Integer, "parseInt"), do: {:ok, :"parse-long"}
   defp qualified_namespace_lookup(:Long, "parseLong"), do: {:ok, :"parse-long"}
+  defp qualified_namespace_lookup(:"java.time.Duration", :between), do: {:ok, :"Duration/between"}
+
+  defp qualified_namespace_lookup(:"java.time.Duration", "between"),
+    do: {:ok, :"Duration/between"}
 
   defp qualified_namespace_lookup(ns, func) do
     case Map.get(@qualified_namespace_tables, ns) do
@@ -1296,12 +1300,13 @@ defmodule PtcRunner.Lisp.Analyze do
       "Double/",
       "Float/",
       "Integer/",
-      "Interop/",
       "Long/",
       "LocalDate/",
       "Instant/",
+      "Duration/",
       "java.time.LocalDate/",
       "java.time.Instant/",
+      "java.time.Duration/",
       "java.util.Date."
     ]
     |> Enum.join(", ")

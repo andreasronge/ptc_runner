@@ -13,12 +13,12 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Metric | Count |
 |--------|-------|
-| Supported | 291 |
-| Candidate | 87 |
+| Supported | 297 |
+| Candidate | 81 |
 | Not Relevant | 325 |
 | Not Classified | 0 |
 | Relevant Target | 378 |
-| Coverage | 291/378 (77.0%) |
+| Coverage | 297/378 (78.6%) |
 
 ## Namespace Index
 
@@ -36,9 +36,9 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | `Long/`, `java.lang.Long` | Java standard | curated Java standard methods/constants (5) | 1 | 2 | 2 | 1/3 (33.3%) | [audit](java-lang-long-audit.md) |
 | `java.lang.String` dot methods | Java standard | curated Java standard methods (15) | 9 | 4 | 2 | 9/13 (69.2%) | [audit](java-lang-string-audit.md) |
 | `System/`, `java.lang.System` | Java standard | curated Java standard methods (5) | 1 | 1 | 3 | 1/2 (50.0%) | [audit](java-lang-system-audit.md) |
-| `LocalDate/`, `java.time.LocalDate/` | Java standard | curated Java standard methods (9) | 3 | 6 | 0 | 3/9 (33.3%) | [audit](java-time-local-date-audit.md) |
+| `LocalDate/`, `java.time.LocalDate/` | Java standard | curated Java standard methods (9) | 6 | 3 | 0 | 6/9 (66.7%) | [audit](java-time-local-date-audit.md) |
 | `Instant/`, `java.time.Instant/` | Java standard | curated Java standard methods (6) | 4 | 2 | 0 | 4/6 (66.7%) | [audit](java-time-instant-audit.md) |
-| `Duration/`, `java.time.Duration` | Java standard candidate | curated Java standard methods (5) | 0 | 5 | 0 | 0/5 (0.0%) | [audit](java-time-duration-audit.md) |
+| `Duration/`, `java.time.Duration` | Java standard candidate | curated Java standard methods (5) | 3 | 2 | 0 | 3/5 (60.0%) | [audit](java-time-duration-audit.md) |
 | `Period/`, `java.time.Period` | Java standard candidate | curated Java standard methods (4) | 0 | 4 | 0 | 0/4 (0.0%) | [audit](java-time-period-audit.md) |
 | `java.util.Date.` | Java standard | curated Java standard methods/constructors (5) | 2 | 2 | 1 | 2/4 (50.0%) | [audit](java-util-date-audit.md) |
 | `regex/` | Clojure standard | audited through `clojure.core` regex vars | N/A | N/A | N/A | N/A | [audit](clojure-core-audit.md) |

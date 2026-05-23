@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Interop.Duration
 
   @doc """
   Convert zero or more values to string and concatenate.
@@ -53,6 +54,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   def to_str(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
   def to_str(%Date{} = d), do: Date.to_iso8601(d)
   def to_str(%Time{} = t), do: Time.to_iso8601(t)
+  def to_str(%Duration{milliseconds: milliseconds}), do: "#duration[#{milliseconds}ms]"
 
   def to_str(x) when is_map(x) or is_list(x) do
     Format.to_clojure(x) |> elem(0)

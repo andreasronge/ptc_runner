@@ -2939,7 +2939,7 @@ Programs that call `println` will have their output available in the `prints` li
 
 ### 8.14 Date and Time (Minimal Java Interop)
 
-PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating the behavior of `java.util.Date`, `java.time.LocalDate`, `java.time.Instant`, and `java.lang.System`.
+PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating bounded behavior from `java.util.Date`, `java.time.LocalDate`, `java.time.Instant`, `java.time.Duration`, and `java.lang.System`.
 
 | Symbol | Signature | Description |
 |--------|-----------|-------------|
@@ -2949,6 +2949,12 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 | `Instant/parse` | `(Instant/parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime (offsetless `...T...` strings treated as UTC; bare `YYYY-MM-DD` returns a Date instead); also available as `(parse iso-string)` |
 | `parse` | `(parse iso-string)` | Alias for `Instant/parse` / `LocalDate/parse` auto-dispatch — same as `(Instant/parse ...)` |
 | `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only** — works on results from `Instant/parse` and `LocalDate/parse` when input had a time component; does NOT work on Date objects) |
+| `.toEpochDay` | `(.toEpochDay local-date)` | Return a LocalDate's epoch-day integer (`1970-01-01` is `0`) |
+| `.plusDays` | `(.plusDays local-date n)` | Add integer days to a LocalDate |
+| `.minusDays` | `(.minusDays local-date n)` | Subtract integer days from a LocalDate |
+| `Duration/between` | `(Duration/between start end)` | Return a Duration between two DateTime instants; also available as `(java.time.Duration/between start end)` |
+| `.toMillis` | `(.toMillis duration)` | Return a Duration length in milliseconds |
+| `.toDays` | `(.toDays duration)` | Return a Duration length in whole days, truncating partial days toward zero |
 | `.isBefore` | `(.isBefore a b)` | Returns true if `a` comes strictly before `b` (same-type only) |
 | `.isAfter` | `(.isAfter a b)` | Returns true if `a` comes strictly after `b` (same-type only) |
 | `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
@@ -2983,14 +2989,34 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
   - A bare `YYYY-MM-DD` string (no time component) returns a **Date** instead (same as `LocalDate/parse`).
 - **Methods**: `.isBefore`, `.isAfter`, and `.getTime` all work on the returned DateTime.
 
+#### LocalDate Methods
+
+- **`.toEpochDay`**: Takes a **Date** object and returns the number of days since `1970-01-01`.
+- **`.plusDays` / `.minusDays`**: Take a **Date** object and an integer day count, returning a shifted **Date**.
+- These methods do not work on DateTime values. Use `Duration/between` for instant differences.
+
+#### `Duration/between`
+
+- **Shorthand**: `(Duration/between start end)` and `(java.time.Duration/between start end)` are both supported.
+- **Behavior**: Takes two **DateTime** values and returns an opaque **Duration** object representing `end - start`.
+- **Methods**:
+  - `(.toMillis duration)` returns the signed millisecond difference.
+  - `(.toDays duration)` returns signed whole days; partial days truncate toward zero, including negative partial days.
+- **Display**: When displayed or returned to an LLM, a Duration is formatted as `#duration[<milliseconds>ms]`.
+- **No bare alias**: `(between start end)` is not supported.
+- **LocalDate differences**: Use `(.toEpochDay date)` and subtraction for total day differences between LocalDate values.
+
 #### Methods and Utilities
 
 - **`.getTime`**: Takes a **DateTime** object and returns its value as Unix milliseconds (integer). Works on results from `java.util.Date.`, `Instant/parse`, and `LocalDate/parse` when the input contained a time component. **Does NOT work on Date objects** (bare `YYYY-MM-DD` results).
+- **`.toEpochDay`**: Takes a **Date** object and returns its epoch-day integer. This is the preferred way to compute total LocalDate day differences: `(- (.toEpochDay b) (.toEpochDay a))`.
+- **`.toMillis` / `.toDays`**: Take a **Duration** object returned by `Duration/between`.
 - **`System/currentTimeMillis`**: Returns the current system time in milliseconds.
 
 #### Errors and Type Safety
 - Passing `nil` to `java.util.Date.`, `LocalDate/parse`, or `.getTime` raises an error.
 - Invalid strings or types raise descriptive errors.
+- Java-shaped namespace membership is bounded. For example, `Duration/between` is supported but bare `(between ...)` and unrelated members such as `LocalDate/currentTimeMillis` are not.
 - **Unsupported Methods**: Calling unregistered dot-methods (e.g., `(.toString date)`) provides a hint listing supported interop functions.
 
 #### Comparison
@@ -3280,14 +3306,14 @@ built-ins or reserved runtime operations at analysis time.
 | Clojure compatibility | `clojure.walk`, `walk` | Tree traversal functions |
 | Clojure compatibility | `regex` | Regex helpers (`re-find`, `re-pattern`, etc.; underlying vars are audited as `clojure.core`) |
 | Java compatibility | `Math` | Math functions |
-| Java compatibility | `System` | Java System properties/time |
+| Java compatibility | `System` | Java System time helper |
 | Java compatibility | `Boolean` | Boolean parse alias |
 | Java compatibility | `Double` | Double constants and parse alias |
 | Java compatibility | `Float` | Float parse alias (returns PTC-Lisp double/float) |
 | Java compatibility | `Integer`, `Long` | Integer parse aliases |
-| Java compatibility | `Interop` | General interop helpers |
 | Java compatibility | `LocalDate`, `java.time.LocalDate` | Java Date parsing (ISO-8601) |
 | Java compatibility | `Instant`, `java.time.Instant` | Java Instant parsing (ISO-8601) |
+| Java compatibility | `Duration`, `java.time.Duration` | Java Duration between helper |
 | Java compatibility | `java.util.Date.` | Java Date constructors |
 | PTC runtime/helper | `data` | Context access |
 | PTC runtime/helper | `tool` | Registered tool invocation |

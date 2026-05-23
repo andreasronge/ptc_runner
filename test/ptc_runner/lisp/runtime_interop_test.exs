@@ -169,6 +169,40 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert {:error, step} = Lisp.run("(LocalDate/parse nil)")
       assert step.fail.message =~ "parse: cannot parse nil"
     end
+
+    test ".toEpochDay returns Java-compatible epoch day" do
+      assert {:ok, %{return: 0}} = Lisp.run(~s|(.toEpochDay (LocalDate/parse "1970-01-01"))|)
+      assert {:ok, %{return: 1}} = Lisp.run(~s|(.toEpochDay (LocalDate/parse "1970-01-02"))|)
+      assert {:ok, %{return: -1}} = Lisp.run(~s|(.toEpochDay (LocalDate/parse "1969-12-31"))|)
+    end
+
+    test "day differences can be computed from epoch days" do
+      source = ~s|
+        (- (.toEpochDay (LocalDate/parse "2026-05-29"))
+           (.toEpochDay (LocalDate/parse "2026-05-22")))
+      |
+
+      assert {:ok, %{return: 7}} = Lisp.run(source)
+    end
+
+    test ".plusDays and .minusDays return shifted LocalDate values" do
+      assert {:ok, %{return: ~D[2026-05-29]}} =
+               Lisp.run(~s|(.plusDays (LocalDate/parse "2026-05-22") 7)|)
+
+      assert {:ok, %{return: ~D[2026-05-15]}} =
+               Lisp.run(~s|(.minusDays (LocalDate/parse "2026-05-22") 7)|)
+    end
+
+    test "LocalDate arithmetic rejects wrong receiver and day argument types" do
+      assert {:error, step} = Lisp.run(~s|(.toEpochDay (Instant/parse "2026-05-22T00:00:00Z"))|)
+      assert step.fail.message =~ ".toEpochDay: expected LocalDate, got DateTime"
+
+      assert {:error, step} = Lisp.run(~s|(.plusDays (LocalDate/parse "2026-05-22") "7")|)
+      assert step.fail.message =~ ".plusDays: expected integer days, got string"
+
+      assert {:error, step} = Lisp.run(~s|(.minusDays "2026-05-22" 7)|)
+      assert step.fail.message =~ ".minusDays: expected LocalDate, got string"
+    end
   end
 
   describe "ISO-8601 instant parsing (#885)" do
@@ -214,6 +248,88 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
     test "invalid instant string raises a clean error" do
       assert {:error, step} = Lisp.run(~s|(parse "2026-13-99T00:00:00Z")|)
       assert step.fail.message =~ "parse: invalid ISO-8601 date/time"
+    end
+  end
+
+  describe "java.time.Duration interop" do
+    test "Duration/between returns a duration usable with .toMillis" do
+      source = ~s|
+        (.toMillis
+          (Duration/between
+            (Instant/parse "2026-05-01T00:00:00Z")
+            (Instant/parse "2026-05-22T00:00:00Z")))
+      |
+
+      assert {:ok, %{return: 1_814_400_000}} = Lisp.run(source)
+    end
+
+    test "java.time.Duration/between also works" do
+      source = ~s|
+        (.toMillis
+          (java.time.Duration/between
+            (Instant/parse "2026-05-22T00:00:00Z")
+            (Instant/parse "2026-05-22T00:00:01Z")))
+      |
+
+      assert {:ok, %{return: 1000}} = Lisp.run(source)
+    end
+
+    test ".toDays returns whole days and truncates partial days toward zero" do
+      assert {:ok, %{return: 2}} =
+               Lisp.run(
+                 ~s|(.toDays (Duration/between (Instant/parse "2026-05-01T00:00:00Z") (Instant/parse "2026-05-03T12:00:00Z")))|
+               )
+
+      assert {:ok, %{return: 0}} =
+               Lisp.run(
+                 ~s|(.toDays (Duration/between (Instant/parse "2026-05-03T00:00:00Z") (Instant/parse "2026-05-02T12:00:00Z")))|
+               )
+
+      assert {:ok, %{return: -2}} =
+               Lisp.run(
+                 ~s|(.toDays (Duration/between (Instant/parse "2026-05-04T12:00:00Z") (Instant/parse "2026-05-02T00:00:00Z")))|
+               )
+    end
+
+    test "negative durations preserve sign in milliseconds" do
+      source = ~s|
+        (.toMillis
+          (Duration/between
+            (Instant/parse "2026-05-22T00:00:01Z")
+            (Instant/parse "2026-05-22T00:00:00Z")))
+      |
+
+      assert {:ok, %{return: -1000}} = Lisp.run(source)
+    end
+
+    test "direct Duration display is readable and not an Elixir struct" do
+      {:ok, step} =
+        Lisp.run(
+          ~s|(Duration/between (Instant/parse "2026-05-22T00:00:00Z") (Instant/parse "2026-05-22T00:00:01Z"))|
+        )
+
+      assert Format.to_clojure(step.return) == {"#duration[1000ms]", false}
+
+      assert {:ok, %{return: "#duration[1000ms]"}} =
+               Lisp.run(
+                 ~s|(str (Duration/between (Instant/parse "2026-05-22T00:00:00Z") (Instant/parse "2026-05-22T00:00:01Z")))|
+               )
+    end
+
+    test "Duration/between rejects LocalDate values and .toMillis/.toDays reject non-durations" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~s|(Duration/between (LocalDate/parse "2026-05-01") (LocalDate/parse "2026-05-02"))|
+               )
+
+      assert step.fail.message =~
+               "Duration/between: expected DateTime start argument, got LocalDate"
+
+      assert {:error, step} = Lisp.run(~s|(.toMillis (Instant/parse "2026-05-22T00:00:00Z"))|)
+      assert step.fail.message =~ ".toMillis: expected Duration, got DateTime"
+
+      assert {:error, step} = Lisp.run(~s|(.toDays nil)|)
+      assert step.fail.message =~ ".toDays: expected Duration, got nil"
     end
   end
 

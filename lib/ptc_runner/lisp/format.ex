@@ -61,6 +61,7 @@ defmodule PtcRunner.Lisp.Format do
 
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Interop.Duration
 
   @doc """
   Format a Lisp value as a string for display.
@@ -226,6 +227,10 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(%Time{} = t, _opts) do
     {"\"#{Time.to_iso8601(t)}\"", false}
+  end
+
+  defp format_clojure(%Duration{milliseconds: milliseconds}, _opts) do
+    {"#duration[#{milliseconds}ms]", false}
   end
 
   defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}

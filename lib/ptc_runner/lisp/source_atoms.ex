@@ -118,9 +118,9 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     data tool catalog budget json mcp
     str string set regex
     walk
-    Math Interop System Boolean Double Float Integer Long
-    LocalDate Instant
-    java.time.LocalDate java.time.Instant java.util.Date.
+    Math System Boolean Double Float Integer Long
+    LocalDate Instant Duration
+    java.time.LocalDate java.time.Instant java.time.Duration java.util.Date.
     clojure.core clojure.string clojure.set clojure.walk
     core
   )a
@@ -130,7 +130,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
     summary remaining list-servers list-tools describe-tool search-tools
-    parse-string generate-string text json
+    parse-string generate-string between text json
     re-pattern
   )a
 

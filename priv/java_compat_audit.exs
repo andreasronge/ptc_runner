@@ -295,19 +295,19 @@
     },
     %{
       name: ".toEpochDay",
-      status: :candidate,
+      status: :supported,
       description: "Return LocalDate epoch-day integer",
       notes: "Requested in issue #1019 for day differences and date sorting."
     },
     %{
       name: ".plusDays",
-      status: :candidate,
+      status: :supported,
       description: "Add days to a LocalDate",
       notes: "Requested in issue #1019 for date arithmetic."
     },
     %{
       name: ".minusDays",
-      status: :candidate,
+      status: :supported,
       description: "Subtract days from a LocalDate",
       notes: "Requested in issue #1019 for date arithmetic."
     }
@@ -353,19 +353,19 @@
   java_time_duration_audit: [
     %{
       name: "Duration/between",
-      status: :candidate,
+      status: :supported,
       description: "Duration between two instants",
       notes: "Requested in issue #1019 for millisecond/day differences."
     },
     %{
       name: ".toMillis",
-      status: :candidate,
+      status: :supported,
       description: "Return duration length in milliseconds",
       notes: "Requested in issue #1019 for instant differences."
     },
     %{
       name: ".toDays",
-      status: :candidate,
+      status: :supported,
       description: "Return duration length in whole days",
       notes: "Requested in issue #1019 for bucket/day calculations."
     },
@@ -387,13 +387,15 @@
       name: "Period/between",
       status: :candidate,
       description: "Period between two dates",
-      notes: "Requested in issue #1019 for LocalDate differences."
+      notes:
+        "Deferred for issue #1019; `Period.getDays` is a component value, not total days. Use `.toEpochDay` subtraction for LocalDate day differences."
     },
     %{
       name: ".getDays",
       status: :candidate,
       description: "Return day component of a Period",
-      notes: "Requested in issue #1019 for bounded Java-shaped Period support."
+      notes:
+        "Deferred for issue #1019 because this is the day component, not total days; easy to misuse for analytics."
     },
     %{
       name: "Period/ofDays",

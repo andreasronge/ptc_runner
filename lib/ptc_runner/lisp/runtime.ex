@@ -370,6 +370,12 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate java_util_date(), to: Interop
   defdelegate java_util_date(ms), to: Interop
   defdelegate dot_get_time(dt), to: Interop
+  defdelegate dot_to_epoch_day(date), to: Interop
+  defdelegate dot_plus_days(date, days), to: Interop
+  defdelegate dot_minus_days(date, days), to: Interop
+  defdelegate duration_between(start_dt, end_dt), to: Interop
+  defdelegate dot_to_millis(duration), to: Interop
+  defdelegate dot_to_days(duration), to: Interop
   defdelegate current_time_millis, to: Interop
   defdelegate parse_temporal(s), to: Interop
   defdelegate dot_contains(s, substring), to: Interop

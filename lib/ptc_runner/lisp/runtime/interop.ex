@@ -3,6 +3,14 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   Simulated Java interop for PTC-Lisp.
   """
 
+  defmodule Duration do
+    @moduledoc false
+    defstruct [:milliseconds]
+  end
+
+  @millis_per_day 86_400_000
+  @epoch_date ~D[1970-01-01]
+
   @doc """
   Constructs a java.util.Date.
   If no args, returns now.
@@ -141,6 +149,56 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   def dot_get_time(other) do
     raise ".getTime: expected DateTime, got #{inspect(other)}"
+  end
+
+  def dot_to_epoch_day(%Date{} = date), do: Date.diff(date, @epoch_date)
+
+  def dot_to_epoch_day(other) do
+    raise ".toEpochDay: expected LocalDate, got #{type_name(other)}"
+  end
+
+  def dot_plus_days(%Date{} = date, days) when is_integer(days), do: Date.add(date, days)
+
+  def dot_plus_days(%Date{}, days) do
+    raise ".plusDays: expected integer days, got #{type_name(days)}"
+  end
+
+  def dot_plus_days(other, _days) do
+    raise ".plusDays: expected LocalDate, got #{type_name(other)}"
+  end
+
+  def dot_minus_days(%Date{} = date, days) when is_integer(days), do: Date.add(date, -days)
+
+  def dot_minus_days(%Date{}, days) do
+    raise ".minusDays: expected integer days, got #{type_name(days)}"
+  end
+
+  def dot_minus_days(other, _days) do
+    raise ".minusDays: expected LocalDate, got #{type_name(other)}"
+  end
+
+  def duration_between(%DateTime{} = start_dt, %DateTime{} = end_dt) do
+    %Duration{milliseconds: DateTime.diff(end_dt, start_dt, :millisecond)}
+  end
+
+  def duration_between(%DateTime{}, end_dt) do
+    raise "Duration/between: expected DateTime end argument, got #{type_name(end_dt)}"
+  end
+
+  def duration_between(start_dt, _end_dt) do
+    raise "Duration/between: expected DateTime start argument, got #{type_name(start_dt)}"
+  end
+
+  def dot_to_millis(%Duration{milliseconds: milliseconds}), do: milliseconds
+
+  def dot_to_millis(other) do
+    raise ".toMillis: expected Duration, got #{type_name(other)}"
+  end
+
+  def dot_to_days(%Duration{milliseconds: milliseconds}), do: div(milliseconds, @millis_per_day)
+
+  def dot_to_days(other) do
+    raise ".toDays: expected Duration, got #{type_name(other)}"
   end
 
   @doc """
@@ -445,6 +503,7 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   defp type_name(nil), do: "nil"
   defp type_name(x) when is_list(x), do: "list"
+  defp type_name(%Duration{}), do: "Duration"
   defp type_name(%Date{}), do: "LocalDate"
   defp type_name(%DateTime{}), do: "DateTime"
   defp type_name(x) when is_map(x), do: "map"
