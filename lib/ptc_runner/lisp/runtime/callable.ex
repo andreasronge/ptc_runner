@@ -21,6 +21,7 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.Lisp.RuntimeCallable
 
   # Guard: true keywords (atoms that aren't nil, true, or false)
   defguardp is_keyword(k) when is_atom(k) and k != nil and k != true and k != false
@@ -42,6 +43,8 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
     Args.validate!(builtin, args)
     call(Builtin.unwrap(builtin), args)
   end
+
+  def call(%RuntimeCallable{} = callable, args), do: RuntimeCallable.call(callable, args)
 
   def call(f, args) when is_function(f), do: apply(f, args)
 

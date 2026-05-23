@@ -66,6 +66,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
   # Variables and data access
   def format({:var, name}), do: to_string(name)
   def format({:data, key}), do: "data/#{key}"
+  def format({:runtime_callable, namespace, name}), do: "#{namespace}/#{name}"
 
   # Collections
   def format({:vector, elems}) do

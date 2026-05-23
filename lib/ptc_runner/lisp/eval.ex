@@ -27,6 +27,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.TraceContext
@@ -221,6 +222,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:data, key}, %EvalContext{ctx: ctx} = eval_ctx) do
     {:ok, flex_get(ctx, key), eval_ctx}
+  end
+
+  defp do_eval({:runtime_callable, namespace, name}, %EvalContext{} = eval_ctx) do
+    {:ok, RuntimeCallable.new(namespace, name), eval_ctx}
   end
 
   # Define binding in user namespace: (def name value opts)
@@ -476,7 +481,11 @@ defmodule PtcRunner.Lisp.Eval do
         worker_fun = fn elem ->
           try do
             TraceContext.take_child_result()
-            value = Callable.call(callable_fn, [elem])
+
+            value =
+              RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
+                Callable.call(callable_fn, [elem])
+              end)
 
             case TraceContext.take_child_result() do
               {trace_id, child_step} -> {:ok, {:ok, value, trace_id, child_step}}

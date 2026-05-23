@@ -219,6 +219,12 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp do_analyze({:ns_symbol, :data, key}, _tail?), do: {:ok, {:data, key}}
 
+  # Runtime tool callable in value position: `tool/search`.
+  # Call position remains the existing direct `{:tool_call, ...}` path.
+  defp do_analyze({:ns_symbol, :tool, name}, _tail?) do
+    {:ok, {:runtime_callable, :tool, name}}
+  end
+
   # Budget introspection: (budget/remaining) returns budget info map
   defp do_analyze({:ns_symbol, :budget, :remaining}, _tail?), do: {:ok, {:budget_remaining}}
 
@@ -228,10 +234,11 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
   end
 
-  # Catalog builtins in symbol position (e.g., passing catalog/summary as a value)
+  # Runtime catalog callable in value position, e.g. `(map catalog/search-tools queries)`.
+  # Call position remains the existing arity-checked catalog builtin lowering.
   defp do_analyze({:ns_symbol, :catalog, name}, _tail?)
        when name in [:summary, :"list-servers", :"list-tools", :"describe-tool", :"search-tools"] do
-    {:ok, {catalog_core_ast_tag(name)}}
+    {:ok, {:runtime_callable, :catalog, name}}
   end
 
   defp do_analyze({:ns_symbol, :catalog, other}, _tail?) do
@@ -1311,13 +1318,6 @@ defmodule PtcRunner.Lisp.Analyze do
     ]
     |> Enum.join(", ")
   end
-
-  # Maps catalog builtin names to their CoreAST tag atoms.
-  defp catalog_core_ast_tag(:summary), do: :catalog_summary
-  defp catalog_core_ast_tag(:"list-servers"), do: :catalog_list_servers
-  defp catalog_core_ast_tag(:"list-tools"), do: :catalog_list_tools
-  defp catalog_core_ast_tag(:"describe-tool"), do: :catalog_describe_tool
-  defp catalog_core_ast_tag(:"search-tools"), do: :catalog_search_tools
 
   # ============================================================
   # Placeholder detection
