@@ -96,6 +96,14 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
+  defp dispatch(:apropos_matches, [query | rest], call_context, registry, catalog_config) do
+    with {:ok, opts} <- parse_apropos_opts(rest),
+         :ok <- validate_query_string(query),
+         :ok <- validate_apropos_opts(opts) do
+      do_apropos_matches(query, opts, call_context, registry, catalog_config)
+    end
+  end
+
   defp dispatch(operation, _args, _call_context, _registry, _catalog_config) do
     {:programmer_fault, "unknown discovery operation: #{operation}"}
   end
@@ -167,6 +175,19 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # ----------------------------------------------------------------
 
   defp do_apropos(query, opts, call_context, registry, catalog_config) do
+    query
+    |> build_apropos_matches(opts, call_context, registry)
+    |> Enum.map(&Map.fetch!(&1, :line))
+    |> maybe_cap_list_result(catalog_config.max_catalog_result_bytes)
+  end
+
+  defp do_apropos_matches(query, opts, call_context, registry, catalog_config) do
+    query
+    |> build_apropos_matches(opts, call_context, registry)
+    |> maybe_cap_list_result(catalog_config.max_catalog_result_bytes)
+  end
+
+  defp build_apropos_matches(query, opts, call_context, registry) do
     limit = Map.get(opts, :limit, 8)
     load? = Map.get(opts, :load, false)
     query_tokens = tokenize(query)
@@ -207,15 +228,12 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
         {[], server_level}
       end
 
-    all_results =
-      (loaded_results ++ extra_loaded_results ++ unloaded_results)
-      |> Enum.sort_by(fn {score, entry} ->
-        {-score, entry["server"] || "", entry["tool"] || ""}
-      end)
-      |> Enum.take(limit)
-      |> Enum.map(fn {_score, entry} -> apropos_line(entry) end)
-
-    maybe_cap_list_result(all_results, catalog_config.max_catalog_result_bytes)
+    loaded_results
+    |> Kernel.++(extra_loaded_results)
+    |> Kernel.++(unloaded_results)
+    |> Enum.map(fn {score, entry} -> structured_apropos_match(score, entry) end)
+    |> sort_matches()
+    |> Enum.take(limit)
   end
 
   defp score_tools(server_info, tools, query_tokens) do
@@ -296,37 +314,6 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     {total, entry}
   end
 
-  defp score_tokens(query_tokens, target_tokens, name_boost) do
-    Enum.reduce(query_tokens, 0, fn qt, acc ->
-      best =
-        Enum.reduce(target_tokens, 0, fn tt, best ->
-          cond do
-            qt == tt -> max(best, 10 + name_boost)
-            String.starts_with?(tt, qt) -> max(best, 5 + name_boost)
-            String.contains?(tt, qt) -> max(best, 2 + name_boost)
-            true -> best
-          end
-        end)
-
-      acc + best
-    end)
-  end
-
-  defp tokenize(text) when is_binary(text) do
-    text
-    |> split_camel_case()
-    |> String.replace(~r/[_\-\s]+/, " ")
-    |> String.downcase()
-    |> String.split()
-    |> Enum.reject(&(&1 == ""))
-  end
-
-  defp tokenize(_), do: []
-
-  defp split_camel_case(text) do
-    Regex.replace(~r/([a-z])([A-Z])/, text, "\\1 \\2")
-  end
-
   defp tokenize_capabilities(caps) when is_list(caps) do
     Enum.flat_map(caps, &tokenize(to_string(&1)))
   end
@@ -338,6 +325,48 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     |> Enum.flat_map(fn {k, v} ->
       tokenize(to_string(k)) ++ tokenize(to_string(v))
     end)
+  end
+
+  defp sort_matches(matches) do
+    Enum.sort_by(matches, fn match ->
+      {
+        Map.get(match, :source_rank, 0),
+        -Map.get(match, :score, 0),
+        Map.get(match, :server, ""),
+        Map.get(match, :name, Map.get(match, :ref, ""))
+      }
+    end)
+  end
+
+  defp score_tokens(query_tokens, target_tokens, name_boost) do
+    Enum.reduce(query_tokens, 0, fn query_token, acc ->
+      best =
+        Enum.reduce(target_tokens, 0, fn target_token, best ->
+          cond do
+            query_token == target_token -> max(best, 10 + name_boost)
+            String.starts_with?(target_token, query_token) -> max(best, 5 + name_boost)
+            String.contains?(target_token, query_token) -> max(best, 2 + name_boost)
+            true -> best
+          end
+        end)
+
+      acc + best
+    end)
+  end
+
+  defp tokenize(text) when is_binary(text) do
+    text
+    |> split_camel_case()
+    |> String.replace(~r/[_\-\s\.\/\(\),:]+/, " ")
+    |> String.downcase()
+    |> String.split()
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp tokenize(_), do: []
+
+  defp split_camel_case(text) do
+    Regex.replace(~r/([a-z])([A-Z])/, text, "\\1 \\2")
   end
 
   # ----------------------------------------------------------------
@@ -707,6 +736,35 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     }
   end
 
+  defp structured_apropos_match(score, %{"tool" => nil} = entry) do
+    %{
+      source_kind: "mcp",
+      source_rank: 1,
+      score: score,
+      server: Map.fetch!(entry, "server"),
+      name: Map.fetch!(entry, "server"),
+      ref: Map.fetch!(entry, "server"),
+      catalog_loaded: false,
+      line: apropos_line(entry)
+    }
+  end
+
+  defp structured_apropos_match(score, entry) do
+    server = Map.fetch!(entry, "server")
+    tool = Map.fetch!(entry, "tool")
+
+    %{
+      source_kind: "mcp",
+      source_rank: 0,
+      score: score,
+      server: server,
+      name: tool,
+      ref: "#{server}/#{tool}",
+      catalog_loaded: true,
+      line: apropos_line(entry)
+    }
+  end
+
   defp apropos_line(%{"tool" => nil} = entry) do
     summary = compact_text(Map.get(entry, "summary") || "")
     next = Map.get(entry, "next")
@@ -992,8 +1050,6 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       _ -> []
     end
   end
-
-  defp required_key_names(_), do: []
 
   defp keyword_name(key) do
     ":" <> (key |> to_string() |> String.replace("_", "-"))

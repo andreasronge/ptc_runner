@@ -53,10 +53,11 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | Command | Status | Scope | Notes |
 |---------|--------|-------|-------|
 | `(mcp/servers)` | supported | MCP aggregator | List configured upstream servers, tool counts, and catalog load status |
-| `(apropos query)` | supported | REPL discovery | Search available discovery backends without loading unloaded upstreams by default |
-| `(dir ref)` | supported | REPL discovery | List members for a reference; MCP backend lists tools for a server |
-| `(doc ref)` | supported | REPL discovery | Return human-readable docs for one referenced tool |
-| `(meta ref)` | supported | REPL discovery | Return structured metadata for one referenced tool |
+| `(apropos query)` | supported | local + MCP discovery | Search executable local PTC/Clojure/curated Java capabilities and, in aggregator mode, configured MCP tools. MCP matches rank before local matches. |
+| `(dir ref)` | supported | local + MCP discovery | List members for a local namespace/curated Java class, or tools for an MCP server. |
+| `(doc ref)` | supported | local + MCP discovery | Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs. |
+| `(meta ref)` | supported | local + MCP discovery | Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs. |
+| `(ns-publics ns)` | supported | local discovery | Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported. |
 | `(quote symbol)`, `'symbol` | partial | Core syntax | Symbol references only; quoted collections and syntax quote are not supported |
 
 
@@ -64,8 +65,6 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Candidate | Why |
 |-----------|-----|
-| Builtin var discovery | Let `apropos`, `doc`, and `meta` inspect PTC-Lisp builtins outside MCP |
 | User var discovery | Let sessions inspect `def`/`defn` bindings and captured docstrings |
-| Namespace-style listing | Let `dir` work beyond MCP servers |
 | Examples/source snippets | Expose examples only where they improve model repair |
 

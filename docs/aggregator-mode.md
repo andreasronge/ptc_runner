@@ -366,20 +366,20 @@ upstream state.
 
 The inline catalog above is a static snapshot baked into the tool
 description. Lazy mode shows configured server names plus discovery
-guidance instead of individual tools. For programs that need to
-*inspect* the configured upstreams at runtime — enumerate servers,
-page through a server's tools, search across catalogs, or read a
-tool's full input schema — aggregator mode exposes REPL-style discovery
-forms. (Outside aggregator mode these forms require a configured
-discovery backend.)
+guidance instead of individual tools. PTC-Lisp also has local discovery
+for executable PTC/Clojure builtins and curated Java interop. Aggregator
+mode extends the same REPL-style forms so programs can inspect configured
+upstreams at runtime — enumerate servers, page through a server's tools,
+search across catalogs, or read a tool's full input schema.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `mcp/servers` | `(mcp/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of `server.tool - description` strings ranked by lexical relevance to `query`. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
-| `dir` | `(dir server)`<br>`(dir server opts)` | A list of `tool - description` strings for one server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `doc` | `(doc tool-ref)` | One detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. The description includes args, required args, a ready-to-edit `(tool/mcp-call …)` example, and the `Result<...>` payload shape. |
-| `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas, annotations, and a call example. |
+| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Loaded MCP tool matches rank before unloaded MCP server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `dir` | `(dir ref)`<br>`(dir ref opts)` | For known local namespaces/classes, lists executable local members. Otherwise, lists `tool - description` strings for one MCP server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `doc` | `(doc ref)` | One detailed local or MCP description string. Known local refs win; unknown refs fall through to MCP tool refs shaped as `server/tool`. MCP docs include args, required args, a ready-to-edit `(tool/mcp-call …)` example, and the `Result<...>` payload shape. |
+| `meta` | `(meta ref)` | Structured local or MCP metadata. Known local refs win; unknown refs fall through to MCP tool refs. |
+| `ns-publics` | `(ns-publics ns)` | Local-only map of public names to compact metadata for PTC/Clojure namespaces. Java classes and MCP servers are not supported. |
 
 `apropos` ranks each candidate with a deterministic
 lexical score: `query` tokens are matched against the tokenized

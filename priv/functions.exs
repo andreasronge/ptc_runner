@@ -4887,6 +4887,22 @@
       divergences: nil
     },
     %{
+      name: "ns-publics",
+      description: "Return public vars for a local PTC/Clojure namespace",
+      binding: nil,
+      category: :core,
+      dispatch: :analyze,
+      signatures: ["(ns-publics namespace)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Local namespace discovery only; Java classes and MCP servers are not supported.",
+      see_also: ["dir", "doc", "meta", "apropos"],
+      clojure_var: "ns-publics",
+      divergences: nil
+    },
+    %{
       name: "or",
       description: "Logical OR (short-circuits)",
       binding: nil,

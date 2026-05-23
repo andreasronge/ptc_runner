@@ -59,10 +59,102 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert {:ok, step} =
                Lisp.run(~s|(apropos "github" {:limit 5})|, discovery_exec: discovery_exec())
 
-      assert ["github.search(query) - Search repositories"] = step.return
+      assert hd(step.return) == "github.search(query) - Search repositories"
 
       assert [%{operation: :apropos, args: %{query: "github", opts: %{limit: 5}}}] =
                step.catalog_ops
+    end
+
+    test "local discovery works without discovery_exec" do
+      assert {:ok, apropos_step} = Lisp.run(~s|(apropos "replace")|)
+      assert Enum.any?(apropos_step.return, &String.contains?(&1, "replace"))
+
+      assert {:ok, string_dir} = Lisp.run("(dir 'clojure.string)")
+      assert Enum.any?(string_dir.return, &String.starts_with?(&1, "replace"))
+
+      assert {:ok, date_dir} = Lisp.run("(dir 'java.time.LocalDate)")
+      assert ".toEpochDay" in Enum.map(date_dir.return, &(&1 |> String.split(" - ") |> hd()))
+      assert ".plusDays" in Enum.map(date_dir.return, &(&1 |> String.split(" - ") |> hd()))
+      refute ".unsupported" in date_dir.return
+
+      assert {:ok, math_dir} = Lisp.run("(dir 'Math)")
+      assert Enum.any?(math_dir.return, &String.starts_with?(&1, "abs"))
+
+      assert {:ok, fq_math_dir} = Lisp.run("(dir 'java.lang.Math)")
+      assert Enum.any?(fq_math_dir.return, &String.starts_with?(&1, "abs"))
+
+      assert {:ok, doc_step} = Lisp.run("(doc 'LocalDate/parse)")
+      assert doc_step.return =~ "LocalDate/parse"
+
+      assert {:ok, meta_step} = Lisp.run("(meta 'java.time.Duration/between)")
+      assert meta_step.return.kind in ["java-interop", "ptc-builtin"]
+
+      assert {:ok, publics_step} = Lisp.run("(ns-publics 'clojure.string)")
+      assert is_map(publics_step.return)
+      assert Map.has_key?(publics_step.return, "replace")
+    end
+
+    test "local discovery does not expose non-executable fully-qualified java.lang refs" do
+      assert {:error, step} = Lisp.run("(doc 'java.lang.Integer/parseInt)")
+      assert step.fail.message =~ "REPL discovery forms are only available"
+
+      assert {:ok, short_doc} = Lisp.run("(doc 'Integer/parseInt)")
+      assert short_doc.return =~ "Integer/parseInt"
+
+      assert {:ok, apropos_step} = Lisp.run(~s|(apropos "parseInt")|)
+      refute Enum.any?(apropos_step.return, &String.contains?(&1, "java.lang.Integer/parseInt"))
+      assert Enum.any?(apropos_step.return, &String.contains?(&1, "Integer/parseInt"))
+    end
+
+    test "local apropos is lexical and does not treat query as regex" do
+      assert {:ok, step} = Lisp.run(~s|(apropos "[invalid")|)
+      assert step.return == []
+    end
+
+    test "unified apropos ranks MCP before local matches" do
+      exec = fn
+        :apropos_matches, ["replace", %{limit: 5}] ->
+          {:ok,
+           [
+             %{
+               source_kind: "mcp",
+               source_rank: 0,
+               score: 1,
+               server: "search",
+               name: "replace",
+               ref: "search/replace",
+               line: "search.replace - MCP replacement tool"
+             }
+           ]}
+
+        operation, args ->
+          discovery_result(operation, args)
+      end
+
+      assert {:ok, step} = Lisp.run(~s|(apropos "replace" {:limit 5})|, discovery_exec: exec)
+
+      assert ["search.replace - MCP replacement tool" | rest] = step.return
+      assert Enum.any?(rest, &String.starts_with?(&1, "local:"))
+    end
+
+    test "known local refs shadow MCP refs and unknown refs fall through" do
+      exec = fn
+        :doc, ["LocalDate/unknown"] -> {:ok, "mcp LocalDate/unknown"}
+        :doc, ["LocalDate/parse"] -> {:ok, "mcp LocalDate/parse"}
+        operation, args -> discovery_result(operation, args)
+      end
+
+      assert {:ok, local_step} = Lisp.run("(doc 'LocalDate/parse)", discovery_exec: exec)
+      assert local_step.return =~ "LocalDate/parse"
+      refute local_step.return =~ "mcp LocalDate/parse"
+
+      assert {:ok, mcp_step} = Lisp.run("(doc 'LocalDate/unknown)", discovery_exec: exec)
+      assert mcp_step.return == "mcp LocalDate/unknown"
+    end
+
+    test "mcp servers still requires discovery_exec" do
+      assert {:error, step} = Lisp.run("(mcp/servers)")
+      assert step.fail.message =~ "REPL discovery forms are only available"
     end
 
     test "dir accepts quoted symbols and strings" do

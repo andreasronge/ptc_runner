@@ -157,7 +157,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     default_eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
 
     refute default_eval["description"] =~ "tool/mcp-call"
-    refute default_eval["description"] =~ "apropos"
+    refute default_eval["description"] =~ "mcp/servers"
 
     {:ok, _pid} = UpstreamRegistry.start_link(name: UpstreamRegistry)
     :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, UpstreamRegistry)

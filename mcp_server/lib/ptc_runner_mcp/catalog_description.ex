@@ -577,8 +577,6 @@ defmodule PtcRunnerMcp.CatalogDescription do
     end
   end
 
-  defp required_key_names(_), do: []
-
   defp keyword_name(key) do
     ":" <> (key |> to_string() |> String.replace("_", "-"))
   end

@@ -3261,19 +3261,22 @@ Invoke registered tools using the `tool/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
-### 9.7 REPL Discovery (MCP aggregator mode)
+### 9.7 REPL Discovery
 
-When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), programs can inspect the configured upstream servers and their tools through REPL-style discovery forms. Outside aggregator mode these forms require a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the full reference.
+Programs can inspect executable PTC-Lisp capabilities through REPL-style discovery forms. Plain `Lisp.run/2` exposes local PTC/Clojure builtins and curated Java interop. When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), the same forms also inspect configured upstream MCP tools. `mcp/servers` remains MCP-only and requires a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the aggregator details.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
-| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning `server.tool - description` strings. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
-| `dir` | `(dir server)` / `(dir server opts)` | List of `tool - description` strings for one server, sorted by tool name. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
-| `doc` | `(doc tool-ref)` | Detailed args/result description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. |
-| `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas and a call example. |
+| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and MCP tools. MCP loaded tools rank before MCP unloaded-server hints, which rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
+| `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one MCP server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
+| `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
+| `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
+| `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for local PTC/Clojure namespaces only. Java classes and MCP servers are not supported. |
 
-**Error model** (same split as `tool/mcp-call`):
+Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compatibility aliases, discovery returns executable refs such as `Integer/parseInt`, `System/currentTimeMillis`, `Math/abs`, and `java.time.LocalDate/parse`; it does not advertise unsupported fully-qualified `java.lang.*` call forms.
+
+**MCP error model** (same split as `tool/mcp-call`):
 - *World faults* — an upstream that can't be started, an oversized discovery result, or an exhausted per-program discovery budget — make the form return `nil`. The program continues.
 - *Programmer faults* — an unknown server name, an unknown tool name, or a bad argument (e.g. `:limit` out of range) — raise an execution error that terminates the program.
 
