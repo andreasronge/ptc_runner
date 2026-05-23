@@ -103,40 +103,6 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, budget || %{}, eval_ctx}
   end
 
-  # ============================================================
-  # Catalog builtins: catalog/summary, catalog/list-servers,
-  #   catalog/list-tools, catalog/describe-tool, catalog/search-tools
-  # ============================================================
-
-  defp do_eval({:catalog_summary}, %EvalContext{} = eval_ctx) do
-    invoke_catalog(eval_ctx, :summary, [])
-  end
-
-  defp do_eval({:catalog_list_servers}, %EvalContext{} = eval_ctx) do
-    invoke_catalog(eval_ctx, :list_servers, [])
-  end
-
-  defp do_eval({:catalog_list_tools, arg_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(arg_asts, eval_ctx) do
-      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :list_tools, args)
-      {:error, _} = err -> err
-    end
-  end
-
-  defp do_eval({:catalog_describe_tool, arg_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(arg_asts, eval_ctx) do
-      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :describe_tool, args)
-      {:error, _} = err -> err
-    end
-  end
-
-  defp do_eval({:catalog_search_tools, arg_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(arg_asts, eval_ctx) do
-      {:ok, args, eval_ctx2} -> invoke_catalog(eval_ctx2, :search_tools, args)
-      {:error, _} = err -> err
-    end
-  end
-
   defp do_eval({:repl_discovery, operation, arg_asts}, %EvalContext{} = eval_ctx) do
     case eval_all(arg_asts, eval_ctx) do
       {:ok, args, eval_ctx2} ->
@@ -1429,8 +1395,7 @@ defmodule PtcRunner.Lisp.Eval do
           worker_max_heap: eval_ctx.worker_max_heap,
           parallel_budget: eval_ctx.parallel_budget,
           pmap_deadline: eval_ctx.pmap_deadline,
-          discovery_exec: eval_ctx.discovery_exec,
-          catalog_exec: eval_ctx.catalog_exec
+          discovery_exec: eval_ctx.discovery_exec
       }
 
       case do_eval(body, ctx) do
@@ -1529,22 +1494,8 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # ============================================================
-  # Catalog builtin dispatch
+  # REPL discovery dispatch
   # ============================================================
-
-  defp invoke_catalog(%EvalContext{catalog_exec: nil, discovery_exec: nil}, _operation, _args) do
-    raise ExecutionError,
-      reason: :runtime_error,
-      message: "catalog/ builtins are only available in aggregator mode with configured upstreams"
-  end
-
-  defp invoke_catalog(
-         %EvalContext{catalog_exec: catalog_exec, discovery_exec: discovery_exec} = eval_ctx,
-         operation,
-         args
-       ) do
-    invoke_discovery_exec(eval_ctx, catalog_exec || discovery_exec, operation, args)
-  end
 
   defp invoke_discovery(%EvalContext{discovery_exec: nil}, _operation, _args) do
     raise ExecutionError,
@@ -1592,12 +1543,6 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  defp catalog_op_args(:summary, []), do: %{}
-  defp catalog_op_args(:list_servers, []), do: %{}
-  defp catalog_op_args(:list_tools, [server]), do: %{server: server}
-  defp catalog_op_args(:list_tools, [server, opts]), do: %{server: server, opts: opts}
-  defp catalog_op_args(:describe_tool, [server, tool]), do: %{server: server, tool: tool}
-  defp catalog_op_args(:tool_meta, [server, tool]), do: %{server: server, tool: tool}
   defp catalog_op_args(:servers, []), do: %{}
   defp catalog_op_args(:dir, [server]), do: %{server: server}
   defp catalog_op_args(:dir, [server, opts]), do: %{server: server, opts: opts}
@@ -1605,15 +1550,9 @@ defmodule PtcRunner.Lisp.Eval do
   defp catalog_op_args(:meta, [ref]), do: %{ref: ref}
   defp catalog_op_args(:apropos, [query]), do: %{query: query}
   defp catalog_op_args(:apropos, [query, opts]), do: %{query: query, opts: opts}
-  defp catalog_op_args(:search_tools, [query]), do: %{query: query}
-  defp catalog_op_args(:search_tools, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(_, args), do: %{args: args}
 
-  defp normalize_catalog_args(:list_tools, [server]), do: [server_ref_name(server)]
   defp normalize_catalog_args(:dir, [server]), do: [server_ref_name(server)]
-
-  defp normalize_catalog_args(:list_tools, [server, opts]),
-    do: [server_ref_name(server), normalize_catalog_value(opts)]
 
   defp normalize_catalog_args(:dir, [server, opts]),
     do: [server_ref_name(server), normalize_catalog_value(opts)]

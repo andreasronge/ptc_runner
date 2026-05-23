@@ -139,18 +139,18 @@ The `--catalog-mode` flag (env: `PTC_RUNNER_MCP_CATALOG_MODE`) controls how upst
 
 | Mode | Description |
 |---|---|
-| `inline` | Compact `server.tool(required: type, optional: type?)` signatures inlined in `lisp_eval` / `lisp_session_eval` descriptions. Best for small fleets. |
+| `inline` | A synthetic discovery snapshot inlined in `lisp_eval` / `lisp_session_eval` descriptions: server summaries, compact `dir` name/description lists, and one `doc` example. Best for small fleets. |
 | `lazy` | Configured server names plus front-loaded discovery guidance; tools discovered at runtime via REPL discovery forms. Best for large fleets or cost-conscious setups. |
-| `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and the required-arg signature catalog fits within `--catalog-inline-max-chars` (12000); lazy otherwise. Optional prose is capped/dropped before required arg signatures are dropped. |
+| `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and the synthetic discovery snapshot fits within `--catalog-inline-max-chars` (12000); lazy otherwise. Optional prose is capped/dropped before switching to lazy mode. |
 
 In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp REPL discovery forms that run inside `lisp_eval` — no extra MCP tool calls:
 
 | Form | Purpose |
 |---|---|
 | `(mcp/servers)` | All servers with tool counts and load status |
-| `(apropos "query" {:limit 8})` | Cross-server lexical search returning compact signature strings |
-| `(dir "server" {:limit 50})` | Compact tool signature strings for one server |
-| `(doc "server/tool")` | Detailed signature string with required args and call example |
+| `(apropos "query" {:limit 8})` | Cross-server lexical search returning `server.tool - description` strings |
+| `(dir "server" {:limit 50})` | Tool names and descriptions for one server |
+| `(doc "server/tool")` | Detailed args/result description with required args and call example |
 | `(meta "server/tool")` | Structured tool metadata and schemas |
 
 Discovery forms have a separate budget from upstream calls: `--max-catalog-ops-per-program` (default 25) and `--max-catalog-result-bytes` (default 256 KiB).
@@ -158,7 +158,7 @@ Discovery forms have a separate budget from upstream calls: `--max-catalog-ops-p
 | Flag | Env var | Default | Meaning |
 |---|---|---|---|
 | `--catalog-mode` | `PTC_RUNNER_MCP_CATALOG_MODE` | `auto` | `auto` \| `inline` \| `lazy` |
-| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `12000` | Auto→lazy threshold for the rendered required-arg signature catalog |
+| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `12000` | Auto→lazy threshold for the rendered synthetic discovery snapshot |
 | `--catalog-inline-max-tools` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS` | `40` | Auto→lazy threshold (tool count) |
 | `--max-catalog-ops-per-program` | `PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM` | `25` | Discovery call budget per program |
 | `--max-catalog-result-bytes` | `PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES` | `262144` (256 KiB) | Per-discovery-result cap |

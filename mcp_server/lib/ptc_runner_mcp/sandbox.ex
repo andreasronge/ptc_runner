@@ -154,8 +154,7 @@ defmodule PtcRunnerMcp.Sandbox do
     #     `:mcp_no_tools`; Phase 1a flips it to `:mcp_aggregator` from
     #     an aggregator-mode handler.
     tools = Keyword.get(opts, :tools, [])
-    catalog_exec = Keyword.get(opts, :catalog_exec)
-    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec)
 
     # Phase 1a (`Plans/ptc-runner-mcp-aggregator.md` §10 / §11.5): the
     # aggregator request handler passes `profile: :mcp_aggregator` so

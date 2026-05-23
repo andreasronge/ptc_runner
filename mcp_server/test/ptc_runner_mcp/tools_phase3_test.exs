@@ -169,7 +169,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       assert is_binary(description)
       assert description =~ "Synthetic discovery snapshot for configured upstreams:"
       assert description =~ ~s|"name" "alpha"|
-      assert description =~ "alpha.ping(msg: string) Ping the upstream"
+      assert description =~ "ping - Ping the upstream"
+      assert description =~ "Args: {:msg string}"
     end
 
     test "aggregator-mode tool_entry uses the aggregator outputSchema/annotations" do

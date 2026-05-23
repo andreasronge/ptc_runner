@@ -23,8 +23,8 @@ Prompts are operational cards, not conformance docs.
 - Runtime prompt content must be self-contained. Do not put authoring links,
   repo-doc references, or "see docs" instructions inside extracted prompt
   content.
-- Mention contextual namespaces only in surfaces where they are usable: `tool/`,
-  `data/`, `catalog/`, and `budget/`.
+- Mention contextual namespaces and forms only in surfaces where they are usable:
+  `tool/`, `data/`, `mcp/`, `budget/`, and REPL discovery forms.
 - Keep MCP helper examples out of non-MCP prompt surfaces.
 - Do not claim general Java interop. List only the supported compatibility
   shape.
@@ -88,10 +88,10 @@ constraint. Keep the first 800 to 1000 bytes useful on their own.
 
 MCP-specific tool-description text lives under `mcp_server/priv/prompts/` and
 is composed by `PtcRunnerMcp.PromptRegistry`. Each advertised MCP tool has a
-file-backed prompt under `mcp_server/priv/prompts/tools/`. PTC-Lisp catalog
-builtin guidance has one file per builtin under `mcp_server/priv/prompts/catalog/`
-and is rendered into upstream-enabled MCP descriptions or agentic planner
-prompts when catalog discovery is available. Core `PtcRunner.PtcToolProtocol`
+file-backed prompt under `mcp_server/priv/prompts/tools/`. PTC-Lisp REPL
+discovery guidance lives under `mcp_server/priv/prompts/discovery/` and is
+rendered into upstream-enabled MCP descriptions or agentic planner prompts when
+upstream discovery is available. Core `PtcRunner.PtcToolProtocol`
 may keep legacy or in-process tool descriptions, but MCP `tools/list`
 descriptions should not depend on core prompt strings.
 
@@ -99,8 +99,8 @@ descriptions should not depend on core prompt strings.
 
 Files use kebab-case for root PTC-Lisp prompt cards. MCP prompt files use the
 runtime names they describe: MCP tool prompt filenames match tool names under
-`mcp_server/priv/prompts/tools/`, and catalog builtin prompt filenames match the
-catalog operation names under `mcp_server/priv/prompts/catalog/`.
+`mcp_server/priv/prompts/tools/`, and discovery prompt filenames match the
+discovery cards under `mcp_server/priv/prompts/discovery/`.
 
 | Prefix | Category | Used By |
 |--------|----------|---------|
@@ -111,7 +111,7 @@ catalog operation names under `mcp_server/priv/prompts/catalog/`.
 | `turn-feedback-` | Retry/final-turn feedback | `PtcRunner.SubAgent.Loop.TurnFeedback` |
 | `ptc_text_mode_` | Combined text + PTC-Lisp compact reference | `PtcRunner.SubAgent.SystemPrompt` |
 | `mcp_server/priv/prompts/tools/` | MCP `tools/list` tool descriptions | `PtcRunnerMcp.PromptRegistry` |
-| `mcp_server/priv/prompts/catalog/` | PTC-Lisp catalog builtin guidance for MCP upstream discovery | `PtcRunnerMcp.CatalogPrompt` |
+| `mcp_server/priv/prompts/discovery/` | PTC-Lisp REPL discovery guidance for MCP upstream discovery | `PtcRunnerMcp.CatalogPrompt` |
 | none | Shared PTC-Lisp reference | `PtcRunner.Lisp.LanguageSpec` |
 
 ## Prompt Usage Matrix
@@ -140,7 +140,7 @@ prompt wording, composition, or budgets.
 | `mcp_server/priv/prompts/tools/lisp_session_*.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Sessions` | `:mcp_session` | Per-session-tool description | upstream guidance only in `lisp_session_eval.with_upstreams.md` | blank line | MCP `tools/list` description |
 | `mcp_server/priv/prompts/tools/lisp_task.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.Agentic` | `:mcp_agentic_task` | Agentic task tool description | optional capability summary appended in code | blank line | MCP `tools/list` description |
 | `mcp_server/priv/prompts/tools/lisp_debug.md` | `PtcRunnerMcp.PromptRegistry.render/2` | `PtcRunnerMcp.DebugTool` | `:mcp_debug` | Debug tool description | none | blank line | MCP `tools/list` description |
-| `mcp_server/priv/prompts/catalog/*.md` | `PtcRunnerMcp.CatalogPrompt` | `PtcRunnerMcp.CatalogDescription`, `PtcRunnerMcp.PromptRegistry` | upstream-enabled MCP descriptions and agentic lazy catalog prompt | One prompt per `catalog/*` PTC-Lisp builtin | configured server/tool catalog data elsewhere | newline | MCP description or agentic prompt |
+| `mcp_server/priv/prompts/discovery/*.md` | `PtcRunnerMcp.CatalogPrompt` | `PtcRunnerMcp.CatalogDescription`, `PtcRunnerMcp.PromptRegistry` | upstream-enabled MCP descriptions and agentic lazy discovery prompt | REPL discovery guidance cards | configured server/tool catalog data elsewhere | newline | MCP description or agentic prompt |
 | agentic planner cards | in-code functions in `PtcRunnerMcp.PromptRegistry` | agentic planner | `:mcp_agentic_task` | Profile-specific planner prompt cards | optional operator text or catalog | blank line | agentic system prompt |
 | optional dynamic upstream catalog text | runtime catalog renderers | `PtcRunnerMcp.PromptRegistry` | aggregator and agentic MCP profiles | After authoritative cards | upstream server/tool inventory | blank line | MCP description or agentic prompt |
 
@@ -163,12 +163,12 @@ without freezing ordinary prose.
 1. Create the prompt file with metadata and prompt markers in the right prompt
    tree: root `priv/prompts/` for core PTC-Lisp prompts,
    `mcp_server/priv/prompts/tools/` for advertised MCP tools, or
-   `mcp_server/priv/prompts/catalog/` for catalog builtins.
+   `mcp_server/priv/prompts/discovery/` for REPL discovery guidance.
 2. For root PTC-Lisp prompts, add the file path, `@external_resource`, loaded
    content, and public function to `PtcRunner.Prompts`.
 3. For MCP tool prompts, add the file to `PtcRunnerMcp.PromptRegistry` prompt
    specs and profile/card metadata.
-4. For catalog builtin prompts, add the file to `PtcRunnerMcp.CatalogPrompt`.
+4. For discovery prompt cards, add the file to `PtcRunnerMcp.CatalogPrompt`.
 5. Add or update prompt registry metadata when the prompt is a card/profile
    member.
 6. Update this README's tables and usage matrix.

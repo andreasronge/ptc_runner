@@ -1,8 +1,8 @@
 defmodule PtcRunnerMcp.CatalogBuiltins do
   @moduledoc """
-  Builds the catalog executor closure for PTC-Lisp `catalog/` builtins.
+  Builds the discovery executor closure for PTC-Lisp REPL discovery forms.
 
-  The catalog executor follows the same closure-capture pattern as
+  The discovery executor follows the same closure-capture pattern as
   `AggregatorTools.build/1`: it captures the per-program `call_context`
   (with `catalog_op_counter`, shared `failure_cache` and `ensure_locks`)
   and the registry GenServer name, so `pmap` children see the same
@@ -26,7 +26,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   @type result :: {:ok, term()} | {:world_fault, atom()} | {:programmer_fault, String.t()}
 
   @doc """
-  Builds a catalog executor closure for the given call context.
+  Builds a discovery executor closure for the given call context.
 
   The closure accepts `(operation, args)` and returns a result tuple.
   """
@@ -50,22 +50,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # Dispatch
   # ----------------------------------------------------------------
 
-  defp dispatch(:summary, [], _call_context, registry, catalog_config) do
-    all_info = all_server_info(registry)
-
-    result = %{
-      "mode" => Atom.to_string(catalog_config.catalog_mode),
-      "servers" =>
-        Enum.map(all_info, fn info ->
-          server_summary_map(info)
-        end),
-      "catalogs_loaded" => Enum.all?(all_info, & &1.catalog_loaded)
-    }
-
-    {:ok, result}
-  end
-
-  defp dispatch(:list_servers, [], _call_context, registry, _catalog_config) do
+  defp dispatch(:servers, [], _call_context, registry, _catalog_config) do
     all_info = all_server_info(registry)
 
     result =
@@ -81,71 +66,45 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     {:ok, result}
   end
 
-  defp dispatch(:servers, [], call_context, registry, catalog_config) do
-    dispatch(:list_servers, [], call_context, registry, catalog_config)
-  end
-
-  defp dispatch(:list_tools, [server | rest], call_context, registry, catalog_config) do
-    with {:ok, opts} <- parse_list_tools_opts(rest),
-         :ok <- validate_list_tools_opts(opts),
-         :ok <- check_configured(registry, server, "catalog/list-tools") do
-      do_list_tools(server, opts, call_context, registry, catalog_config)
-    end
-  end
-
   defp dispatch(:dir, [server | rest], call_context, registry, catalog_config) do
-    dispatch(:list_tools, [server | rest], call_context, registry, catalog_config)
-  end
-
-  defp dispatch(:describe_tool, [server, tool], call_context, registry, catalog_config) do
-    with :ok <- validate_string_arg(server, "catalog/describe-tool", "server"),
-         :ok <- validate_string_arg(tool, "catalog/describe-tool", "tool"),
-         :ok <- check_configured(registry, server, "catalog/describe-tool") do
-      do_describe_tool(server, tool, call_context, registry, catalog_config)
+    with {:ok, opts} <- parse_dir_opts(rest),
+         :ok <- validate_dir_opts(opts),
+         :ok <- check_configured(registry, server, "dir") do
+      do_dir(server, opts, call_context, registry, catalog_config)
     end
   end
 
   defp dispatch(:doc, [ref], call_context, registry, catalog_config) do
-    with {:ok, server, tool} <- parse_tool_ref(ref, "doc") do
-      dispatch(:describe_tool, [server, tool], call_context, registry, catalog_config)
+    with {:ok, server, tool} <- parse_tool_ref(ref, "doc", registry),
+         :ok <- check_configured(registry, server, "doc") do
+      do_doc(server, tool, call_context, registry, catalog_config)
     end
   end
 
-  defp dispatch(:tool_meta, [server, tool], call_context, registry, catalog_config) do
-    with :ok <- validate_string_arg(server, "meta", "server"),
-         :ok <- validate_string_arg(tool, "meta", "tool"),
+  defp dispatch(:meta, [ref], call_context, registry, catalog_config) do
+    with {:ok, server, tool} <- parse_tool_ref(ref, "meta", registry),
          :ok <- check_configured(registry, server, "meta") do
       do_tool_meta(server, tool, call_context, registry, catalog_config)
     end
   end
 
-  defp dispatch(:meta, [ref], call_context, registry, catalog_config) do
-    with {:ok, server, tool} <- parse_tool_ref(ref, "meta") do
-      dispatch(:tool_meta, [server, tool], call_context, registry, catalog_config)
-    end
-  end
-
-  defp dispatch(:search_tools, [query | rest], call_context, registry, catalog_config) do
-    with {:ok, opts} <- parse_search_tools_opts(rest),
-         :ok <- validate_query_string(query),
-         :ok <- validate_search_tools_opts(opts) do
-      do_search_tools(query, opts, call_context, registry, catalog_config)
-    end
-  end
-
   defp dispatch(:apropos, [query | rest], call_context, registry, catalog_config) do
-    dispatch(:search_tools, [query | rest], call_context, registry, catalog_config)
+    with {:ok, opts} <- parse_apropos_opts(rest),
+         :ok <- validate_query_string(query),
+         :ok <- validate_apropos_opts(opts) do
+      do_apropos(query, opts, call_context, registry, catalog_config)
+    end
   end
 
   defp dispatch(operation, _args, _call_context, _registry, _catalog_config) do
-    {:programmer_fault, "unknown catalog operation: #{operation}"}
+    {:programmer_fault, "unknown discovery operation: #{operation}"}
   end
 
   # ----------------------------------------------------------------
-  # list-tools implementation
+  # dir implementation
   # ----------------------------------------------------------------
 
-  defp do_list_tools(server, opts, call_context, registry, catalog_config) do
+  defp do_dir(server, opts, call_context, registry, catalog_config) do
     case get_tools_for_server(server, call_context, registry) do
       {:ok, tools} ->
         limit = Map.get(opts, :limit, 50)
@@ -156,7 +115,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           |> Enum.sort_by(&tool_name_of/1)
           |> Enum.drop(offset)
           |> Enum.take(limit)
-          |> Enum.map(fn tool -> compact_tool_entry(server, tool) |> catalog_line() end)
+          |> Enum.map(fn tool -> compact_tool_entry(server, tool) |> dir_line() end)
 
         maybe_cap_list_result(sorted, catalog_config.max_catalog_result_bytes)
 
@@ -166,10 +125,10 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   end
 
   # ----------------------------------------------------------------
-  # describe-tool implementation
+  # doc implementation
   # ----------------------------------------------------------------
 
-  defp do_describe_tool(server, tool_name, call_context, registry, catalog_config) do
+  defp do_doc(server, tool_name, call_context, registry, catalog_config) do
     case get_tools_for_server(server, call_context, registry) do
       {:ok, tools} ->
         case Enum.find(tools, fn t -> tool_name_of(t) == tool_name end) do
@@ -204,10 +163,10 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   end
 
   # ----------------------------------------------------------------
-  # search-tools implementation
+  # apropos implementation
   # ----------------------------------------------------------------
 
-  defp do_search_tools(query, opts, call_context, registry, catalog_config) do
+  defp do_apropos(query, opts, call_context, registry, catalog_config) do
     limit = Map.get(opts, :limit, 8)
     load? = Map.get(opts, :load, false)
     query_tokens = tokenize(query)
@@ -254,7 +213,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
         {-score, entry["server"] || "", entry["tool"] || ""}
       end)
       |> Enum.take(limit)
-      |> Enum.map(fn {_score, entry} -> catalog_line(entry) end)
+      |> Enum.map(fn {_score, entry} -> apropos_line(entry) end)
 
     maybe_cap_list_result(all_results, catalog_config.max_catalog_result_bytes)
   end
@@ -446,31 +405,29 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # Option parsing and validation
   # ----------------------------------------------------------------
 
-  defp parse_list_tools_opts(rest), do: parse_catalog_opts(rest)
+  defp parse_dir_opts(rest), do: parse_discovery_opts(rest)
 
-  defp validate_list_tools_opts(opts) do
+  defp validate_dir_opts(opts) do
     limit = Map.get(opts, :limit, 50)
     offset = Map.get(opts, :offset, 0)
 
     cond do
       not is_integer(limit) or limit < 1 or limit > 200 ->
-        {:programmer_fault,
-         "catalog/list-tools :limit must be an integer 1..200, got #{inspect(limit)}"}
+        {:programmer_fault, "dir :limit must be an integer 1..200, got #{inspect(limit)}"}
 
       not is_integer(offset) or offset < 0 ->
-        {:programmer_fault,
-         "catalog/list-tools :offset must be a non-negative integer, got #{inspect(offset)}"}
+        {:programmer_fault, "dir :offset must be a non-negative integer, got #{inspect(offset)}"}
 
       true ->
         :ok
     end
   end
 
-  defp parse_search_tools_opts(rest), do: parse_catalog_opts(rest)
+  defp parse_apropos_opts(rest), do: parse_discovery_opts(rest)
 
-  defp parse_catalog_opts([]), do: {:ok, %{}}
+  defp parse_discovery_opts([]), do: {:ok, %{}}
 
-  defp parse_catalog_opts([opts]) when is_map(opts) do
+  defp parse_discovery_opts([opts]) when is_map(opts) do
     opts =
       Map.new(opts, fn
         {k, v} when is_atom(k) -> {k, v}
@@ -482,18 +439,49 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     {:ok, opts}
   end
 
-  defp parse_catalog_opts([opts]),
-    do: {:programmer_fault, "catalog options must be a map, got #{inspect(opts)}"}
+  defp parse_discovery_opts([opts]),
+    do: {:programmer_fault, "discovery options must be a map, got #{inspect(opts)}"}
 
-  defp parse_catalog_opts(rest),
+  defp parse_discovery_opts(rest),
     do:
       {:programmer_fault,
-       "catalog forms accept at most one options map, got #{length(rest)} option arguments"}
+       "discovery forms accept at most one options map, got #{length(rest)} option arguments"}
 
-  defp parse_tool_ref({:symbol_ref, name}, form) when is_binary(name),
-    do: parse_tool_ref(name, form)
+  defp parse_tool_ref({:symbol_ref, name}, form, registry) when is_binary(name),
+    do: parse_tool_ref(name, form, registry)
 
-  defp parse_tool_ref(name, form) when is_binary(name) do
+  defp parse_tool_ref(name, form, registry) when is_binary(name) do
+    configured_servers =
+      registry
+      |> configured_server_names()
+      |> Enum.sort_by(&byte_size/1, :desc)
+
+    case Enum.find_value(configured_servers, &split_ref_with_server(name, &1)) do
+      {server, tool} ->
+        {:ok, server, tool}
+
+      nil ->
+        fallback_parse_tool_ref(name, form)
+    end
+  end
+
+  defp parse_tool_ref(other, form, _registry) do
+    {:programmer_fault,
+     "#{form} requires a quoted symbol or string tool reference, got #{inspect(other)}"}
+  end
+
+  defp split_ref_with_server(ref, server) when is_binary(ref) and is_binary(server) do
+    prefix = server <> "/"
+
+    if String.starts_with?(ref, prefix) do
+      tool = String.replace_prefix(ref, prefix, "")
+      if tool == "", do: nil, else: {server, tool}
+    end
+  end
+
+  defp split_ref_with_server(_ref, _server), do: nil
+
+  defp fallback_parse_tool_ref(name, form) do
     case String.split(name, "/", parts: 2) do
       [server, tool] when server != "" and tool != "" ->
         {:ok, server, tool}
@@ -504,22 +492,16 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
-  defp parse_tool_ref(other, form) do
-    {:programmer_fault,
-     "#{form} requires a quoted symbol or string tool reference, got #{inspect(other)}"}
-  end
-
-  defp validate_search_tools_opts(opts) do
+  defp validate_apropos_opts(opts) do
     limit = Map.get(opts, :limit, 8)
     load = Map.get(opts, :load, false)
 
     cond do
       not is_integer(limit) or limit < 1 or limit > 50 ->
-        {:programmer_fault,
-         "catalog/search-tools :limit must be an integer 1..50, got #{inspect(limit)}"}
+        {:programmer_fault, "apropos :limit must be an integer 1..50, got #{inspect(limit)}"}
 
       not is_boolean(load) ->
-        {:programmer_fault, "catalog/search-tools :load must be a boolean, got #{inspect(load)}"}
+        {:programmer_fault, "apropos :load must be a boolean, got #{inspect(load)}"}
 
       true ->
         :ok
@@ -530,8 +512,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     if is_binary(value) and String.trim(value) != "" do
       :ok
     else
-      {:programmer_fault,
-       "catalog/search-tools requires query (non-empty string), got #{inspect(value)}"}
+      {:programmer_fault, "apropos requires query (non-empty string), got #{inspect(value)}"}
     end
   end
 
@@ -578,10 +559,18 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   end
 
   defp truncate_list_to_fit(items, max_bytes) do
-    do_truncate(items, [], 0, max_bytes)
+    {kept, omitted} = do_truncate(items, [], 0, max_bytes)
+    kept = Enum.reverse(kept)
+
+    if omitted > 0 do
+      marker = "... #{length(kept)}/#{length(items)} shown"
+      maybe_append_truncation_marker(kept, marker, max_bytes)
+    else
+      kept
+    end
   end
 
-  defp do_truncate([], acc, _size, _max), do: Enum.reverse(acc)
+  defp do_truncate([], acc, _size, _max), do: {acc, 0}
 
   defp do_truncate([item | rest], acc, current_size, max_bytes) do
     case Jason.encode(item) do
@@ -592,11 +581,23 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
         if new_size + 2 <= max_bytes do
           do_truncate(rest, [item | acc], new_size, max_bytes)
         else
-          Enum.reverse(acc)
+          {acc, length(rest) + 1}
         end
 
       {:error, _} ->
-        Enum.reverse(acc)
+        {acc, length(rest) + 1}
+    end
+  end
+
+  defp maybe_append_truncation_marker(items, marker, max_bytes) do
+    candidate = items ++ [marker]
+
+    case Jason.encode(candidate) do
+      {:ok, json} when byte_size(json) <= max_bytes ->
+        candidate
+
+      _ ->
+        items
     end
   end
 
@@ -614,13 +615,15 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   # Server info helpers
   # ----------------------------------------------------------------
 
+  defp configured_server_names(registry) do
+    registry
+    |> all_routings()
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+  end
+
   defp all_server_info(registry) do
-    routings =
-      try do
-        GenServer.call(registry, :all_routings)
-      catch
-        :exit, _ -> %{}
-      end
+    routings = all_routings(registry)
 
     routings
     |> Enum.map(fn {name, routing} ->
@@ -638,17 +641,10 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     |> Enum.sort_by(& &1.name)
   end
 
-  defp server_summary_map(info) do
-    base = %{
-      "name" => info.name,
-      "description" => info.description,
-      "tool_count" => info.tool_count
-    }
-
-    case info.capabilities do
-      caps when is_list(caps) and caps != [] -> Map.put(base, "capabilities", caps)
-      _ -> base
-    end
+  defp all_routings(registry) do
+    GenServer.call(registry, :all_routings)
+  catch
+    :exit, _ -> %{}
   end
 
   # ----------------------------------------------------------------
@@ -711,44 +707,63 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     }
   end
 
-  defp catalog_line(%{"tool" => nil} = entry) do
+  defp apropos_line(%{"tool" => nil} = entry) do
     summary = compact_text(Map.get(entry, "summary") || "")
     next = Map.get(entry, "next")
     "#{entry["server"]}: #{summary} Use #{next}."
   end
 
-  defp catalog_line(entry) when is_map(entry) do
+  defp apropos_line(entry) when is_map(entry) do
     server = Map.fetch!(entry, "server")
     tool = Map.fetch!(entry, "tool")
-    args = render_args(Map.get(entry, "input_schema", %{}))
-    output = render_output(Map.get(entry, "output_schema"))
     summary = compact_text(Map.get(entry, "summary") || "")
     description = if summary == "", do: "", else: " - #{summary}"
-    "#{server}.#{tool}(#{args})#{output}#{description}"
+    "#{server}.#{tool}#{description}"
+  end
+
+  defp dir_line(entry) when is_map(entry) do
+    tool = Map.fetch!(entry, "tool")
+    summary = compact_text(Map.get(entry, "summary") || "")
+
+    case truncate_text(summary, 120) do
+      "" -> tool
+      description -> "#{tool} - #{description}"
+    end
   end
 
   defp detailed_tool_text(entry) when is_map(entry) do
-    line = catalog_line(entry)
+    server = Map.fetch!(entry, "server")
+    tool = Map.fetch!(entry, "tool")
+    input_schema = Map.get(entry, "input_schema", %{})
+    output_schema = Map.get(entry, "output_schema")
     call_example = Map.fetch!(entry, "call_example")
     required = Map.get(entry, "required", [])
+    summary = compact_text(Map.get(entry, "description") || Map.get(entry, "summary") || "")
 
     [
-      line,
+      "#{server}/#{tool}",
+      maybe_description_line(summary),
       "",
+      "Args: #{render_schema_arg_map(input_schema)}",
       "Required args: #{required_args_text(required)}",
       "",
-      "Use:",
+      "Call:",
       call_example,
       "",
-      "Returns: `Result<T>`; if `(:ok r)`, use `(:value r)` as T."
+      "Returns: Result<#{render_schema_type(output_schema)}>",
+      "Use `(:value r)` after checking `(:ok r)`."
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
+
+  defp maybe_description_line(""), do: nil
+  defp maybe_description_line(description), do: "Description: #{truncate_text(description, 240)}"
 
   defp required_args_text([]), do: "none"
 
   defp required_args_text(required) when is_list(required) do
-    Enum.map_join(required, ", ", &":#{&1}")
+    Enum.map_join(required, ", ", &keyword_name/1)
   end
 
   defp build_call_example(server, name, arg_keys, required) do
@@ -765,7 +780,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           " :args {}"
 
         keys ->
-          inner = Enum.map_join(keys, " ", fn k -> ":#{k} ..." end)
+          inner = Enum.map_join(keys, " ", fn k -> "#{keyword_name(k)} ..." end)
           " :args {#{inner}}"
       end
 
@@ -840,115 +855,148 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
-  defp render_args(schema) when is_map(schema) do
+  defp render_schema_arg_map(schema) when is_map(schema) do
     properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
-    required = Map.get(schema, "required", Map.get(schema, :required, []))
+    ordered_names = ordered_property_names(schema, properties)
 
     properties_by_string =
       Map.new(properties, fn {key, value} -> {to_string(key), value} end)
 
-    required_names =
-      required
-      |> Enum.map(&to_string/1)
-      |> Enum.filter(&Map.has_key?(properties_by_string, &1))
+    case ordered_names do
+      [] ->
+        "{}"
 
-    required_set = MapSet.new(required_names)
+      names ->
+        fields =
+          Enum.map_join(names, " ", fn name ->
+            value = Map.get(properties_by_string, name, %{})
+            "#{keyword_name(name)} #{render_schema_type(value)}#{optional_suffix(schema, name)}"
+          end)
 
-    optional_names =
-      properties_by_string
-      |> Map.keys()
-      |> Enum.reject(&MapSet.member?(required_set, &1))
-      |> Enum.sort()
-
-    (required_names ++ optional_names)
-    |> Enum.map_join(", ", fn name ->
-      optional = if MapSet.member?(required_set, name), do: "", else: "?"
-      "#{name}: #{render_arg_type(Map.fetch!(properties_by_string, name))}#{optional}"
-    end)
-  end
-
-  defp render_args(_), do: ""
-
-  defp render_output(schema) when is_map(schema) do
-    case render_output_type(schema) do
-      "" -> ""
-      type -> " -> Result<#{type}>"
+        "{#{fields}}"
     end
   end
 
-  defp render_output(_), do: ""
+  defp render_schema_arg_map(_), do: "{}"
 
-  defp render_arg_type(schema) when is_map(schema) do
+  defp render_schema_type(nil), do: "any"
+
+  defp render_schema_type(schema) when is_map(schema) do
     cond do
       Map.has_key?(schema, "const") or Map.has_key?(schema, :const) ->
-        "const"
+        inspect(Map.get(schema, "const", Map.get(schema, :const)))
 
       is_list(Map.get(schema, "enum", Map.get(schema, :enum))) ->
-        "enum"
+        render_enum_type(Map.get(schema, "enum", Map.get(schema, :enum)))
 
       true ->
-        case Map.get(schema, "type", Map.get(schema, :type)) do
-          "string" -> "string"
-          "integer" -> "integer"
-          "number" -> "number"
-          "boolean" -> "boolean"
-          "object" -> "object"
-          "array" -> "array"
-          list when is_list(list) -> Enum.map_join(list, "|", &to_string/1)
-          nil -> infer_arg_type(schema)
-          other -> to_string(other)
-        end
+        render_schema_type_by_type(Map.get(schema, "type", Map.get(schema, :type)), schema)
     end
   end
 
-  defp render_arg_type(_), do: "any"
+  defp render_schema_type(_), do: "any"
 
-  defp infer_arg_type(schema) do
+  defp render_schema_type_by_type(type, schema) when is_list(type) do
+    type
+    |> Enum.reject(&(&1 in ["null", :null]))
+    |> case do
+      [] -> "nil"
+      [one] -> render_schema_type_by_type(one, schema)
+      many -> Enum.map_join(many, "|", &render_schema_type_by_type(&1, schema))
+    end
+  end
+
+  defp render_schema_type_by_type("string", _schema), do: "string"
+  defp render_schema_type_by_type("integer", _schema), do: "int"
+  defp render_schema_type_by_type("number", _schema), do: "float"
+  defp render_schema_type_by_type("boolean", _schema), do: "bool"
+
+  defp render_schema_type_by_type("array", schema) do
+    items = Map.get(schema, "items", Map.get(schema, :items))
+    "[#{render_schema_type(items)}]"
+  end
+
+  defp render_schema_type_by_type("object", schema), do: render_object_type(schema)
+  defp render_schema_type_by_type(nil, schema), do: infer_schema_type(schema)
+  defp render_schema_type_by_type(other, _schema), do: to_string(other)
+
+  defp render_enum_type([]), do: "enum"
+
+  defp render_enum_type(values) do
+    Enum.map_join(values, "|", &render_literal_type/1)
+  end
+
+  defp render_literal_type(value) when is_binary(value), do: lisp_string(value)
+  defp render_literal_type(value), do: inspect(value)
+
+  defp infer_schema_type(schema) do
     cond do
-      Map.has_key?(schema, "properties") or Map.has_key?(schema, :properties) -> "object"
-      Map.has_key?(schema, "items") or Map.has_key?(schema, :items) -> "array"
-      true -> "any"
+      Map.has_key?(schema, "properties") or Map.has_key?(schema, :properties) ->
+        render_object_type(schema)
+
+      Map.has_key?(schema, "items") or Map.has_key?(schema, :items) ->
+        render_schema_type_by_type("array", schema)
+
+      true ->
+        "any"
     end
   end
 
-  defp render_output_type(schema) when is_map(schema) do
-    case Map.get(schema, "type", Map.get(schema, :type)) do
-      "string" -> ":string"
-      "integer" -> ":int"
-      "number" -> ":float"
-      "boolean" -> ":bool"
-      "array" -> "[:any]"
-      "object" -> render_output_object(schema)
-      _ -> ""
-    end
-  end
-
-  defp render_output_type(_), do: ""
-
-  defp render_output_object(schema) do
+  defp render_object_type(schema) do
     properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
 
     if is_map(properties) and map_size(properties) > 0 do
-      required =
-        case Map.get(schema, "required", Map.get(schema, :required, [])) do
-          list when is_list(list) -> Enum.map(list, &to_string/1)
-          _ -> []
-        end
+      properties_by_string =
+        Map.new(properties, fn {key, value} -> {to_string(key), value} end)
 
       fields =
-        properties
-        |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
-        |> Enum.take(5)
-        |> Enum.map_join(", ", fn {key, value} ->
-          key = to_string(key)
-          optional = if key in required, do: "", else: "?"
-          "#{key} #{render_output_type(value)}#{optional}"
+        schema
+        |> ordered_property_names(properties)
+        |> Enum.map_join(" ", fn name ->
+          value = Map.fetch!(properties_by_string, name)
+          "#{keyword_name(name)} #{render_schema_type(value)}#{optional_suffix(schema, name)}"
         end)
 
       "{#{fields}}"
     else
-      ":map"
+      "map"
     end
+  end
+
+  defp ordered_property_names(schema, properties) when is_map(properties) do
+    properties_by_string = Map.new(properties, fn {key, value} -> {to_string(key), value} end)
+
+    required_names =
+      schema
+      |> required_key_names()
+      |> Enum.filter(&Map.has_key?(properties_by_string, &1))
+
+    optional_names =
+      properties_by_string
+      |> Map.keys()
+      |> Enum.reject(&(&1 in required_names))
+      |> Enum.sort()
+
+    required_names ++ optional_names
+  end
+
+  defp ordered_property_names(_schema, _properties), do: []
+
+  defp optional_suffix(schema, name) do
+    if name in required_key_names(schema), do: "", else: "?"
+  end
+
+  defp required_key_names(schema) when is_map(schema) do
+    case Map.get(schema, "required", Map.get(schema, :required, [])) do
+      list when is_list(list) -> Enum.map(list, &to_string/1)
+      _ -> []
+    end
+  end
+
+  defp required_key_names(_), do: []
+
+  defp keyword_name(key) do
+    ":" <> (key |> to_string() |> String.replace("_", "-"))
   end
 
   defp compact_text(text) when is_binary(text) do
@@ -956,6 +1004,15 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
   end
+
+  defp truncate_text(text, max) when is_binary(text) and byte_size(text) > max do
+    text
+    |> String.slice(0, max - 3)
+    |> String.trim()
+    |> Kernel.<>("...")
+  end
+
+  defp truncate_text(text, _max), do: text
 
   defp safe_to_atom(str) when is_binary(str) do
     String.to_existing_atom(str)

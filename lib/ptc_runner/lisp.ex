@@ -295,8 +295,7 @@ defmodule PtcRunner.Lisp do
     tool_cache = Keyword.get(opts, :tool_cache, %{})
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
     strict_data = Keyword.get(opts, :strict_data, false)
-    catalog_exec = Keyword.get(opts, :catalog_exec)
-    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec)
     link_sandbox = Keyword.get(opts, :link, false)
 
     # Preflight: reject oversized source before any parsing
@@ -334,7 +333,6 @@ defmodule PtcRunner.Lisp do
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
         discovery_exec: discovery_exec,
-        catalog_exec: catalog_exec,
         link: link_sandbox
       })
     end
@@ -573,8 +571,7 @@ defmodule PtcRunner.Lisp do
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       strict_data: strict_data,
-      discovery_exec: discovery_exec,
-      catalog_exec: catalog_exec
+      discovery_exec: discovery_exec
     } = opts
 
     filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
@@ -597,8 +594,7 @@ defmodule PtcRunner.Lisp do
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
-        discovery_exec: discovery_exec,
-        catalog_exec: catalog_exec
+        discovery_exec: discovery_exec
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 

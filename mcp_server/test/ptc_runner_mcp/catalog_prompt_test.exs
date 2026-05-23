@@ -11,7 +11,7 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
     "Plans/"
   ]
 
-  test "every catalog builtin prompt file is extracted before rendering" do
+  test "every discovery prompt file is extracted before rendering" do
     for key <- [:discovery, :agentic_discovery] do
       text = CatalogPrompt.builtin_text(key)
 
@@ -25,8 +25,8 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
     end
   end
 
-  test "every catalog builtin has a prompt file" do
-    prompt_dir = Path.expand("../../priv/prompts/catalog", __DIR__)
+  test "every discovery prompt has a prompt file" do
+    prompt_dir = Path.expand("../../priv/prompts/discovery", __DIR__)
 
     for file <- ["discovery.md", "agentic_discovery.md"] do
       path = Path.join(prompt_dir, file)
@@ -35,7 +35,7 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
     end
   end
 
-  test "discovery block is built from catalog builtin prompts" do
+  test "discovery block is built from discovery prompts" do
     block = CatalogPrompt.discovery_block()
 
     assert block =~ ~s|`(mcp/servers)`|

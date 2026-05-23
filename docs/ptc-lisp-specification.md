@@ -3268,9 +3268,9 @@ When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstr
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
-| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search across upstream tool catalogs. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
-| `dir` | `(dir server)` / `(dir server opts)` | List of compact signature strings (`server.tool(args) -> output? - summary`), sorted by tool name. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
-| `doc` | `(doc tool-ref)` | Detailed tool description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. |
+| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning `server.tool - description` strings. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
+| `dir` | `(dir server)` / `(dir server opts)` | List of `tool - description` strings for one server, sorted by tool name. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
+| `doc` | `(doc tool-ref)` | Detailed args/result description string. `tool-ref` is a quoted symbol or string shaped as `server/tool`. |
 | `meta` | `(meta tool-ref)` | Structured MCP tool metadata, including input/output schemas and a call example. |
 
 **Error model** (same split as `tool/mcp-call`):

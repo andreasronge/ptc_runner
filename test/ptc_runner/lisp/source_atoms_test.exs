@@ -53,7 +53,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
     test "covers bounded namespaces (including fully-qualified Java)" do
       assert SourceAtoms.intern("data") == :data
       assert SourceAtoms.intern("tool") == :tool
-      assert SourceAtoms.intern("catalog") == :catalog
+      assert SourceAtoms.intern("mcp") == :mcp
       assert SourceAtoms.intern("java.time.LocalDate") == :"java.time.LocalDate"
       assert SourceAtoms.intern("LocalDate") == :LocalDate
       assert SourceAtoms.intern("java.time.Duration") == :"java.time.Duration"
@@ -62,9 +62,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
     end
 
     test "covers qualified analyzer keys" do
-      assert SourceAtoms.intern("search-tools") == :"search-tools"
-      assert SourceAtoms.intern("describe-tool") == :"describe-tool"
-      assert SourceAtoms.intern("list-tools") == :"list-tools"
+      assert SourceAtoms.intern("servers") == :servers
       assert SourceAtoms.intern("between") == :between
     end
 
@@ -145,7 +143,6 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       # bounded namespaces
       :data,
       :tool,
-      :catalog,
       :budget,
       :json,
       :mcp,
@@ -166,10 +163,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       # qualified analyzer keys
       :summary,
       :remaining,
-      :"list-servers",
-      :"list-tools",
-      :"describe-tool",
-      :"search-tools",
+      :servers,
       :"parse-string",
       :"generate-string",
       :between,

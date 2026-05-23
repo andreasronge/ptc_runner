@@ -122,7 +122,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       assert result =~ "(mcp/servers)"
       assert result =~ ~s|(dir "filesystem" {:limit 20})|
       assert result =~ ~s|(dir "github" {:limit 20})|
-      assert result =~ "filesystem.tool_1(arg: string)"
+      assert result =~ "tool_1 - Description for tool 1."
+      assert result =~ "Args: {:arg string}"
       assert result =~ ~s|(doc "filesystem/tool_1")|
       refute result =~ "catalog/search-tools"
     end
@@ -175,7 +176,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(large_fleet(), config)
 
       assert result =~ ~s|(dir "github" {:limit 20})|
-      assert result =~ "github.tool_1(arg: string)"
+      assert result =~ "tool_1"
+      assert result =~ ~s|(doc "github/tool_1")|
       refute result =~ "catalog/search-tools"
     end
 
@@ -194,7 +196,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), config)
 
       assert result =~ ~s|(dir "github" {:limit 20})|
-      assert result =~ "github.tool_1(arg: string)"
+      assert result =~ "tool_1"
+      assert result =~ ~s|(doc "github/tool_1")|
       assert result =~ ~s(Warning: catalog for "linear" not loaded yet.)
       assert result =~ ~s|"catalog_loaded" false|
       refute result =~ "catalog/search-tools"
@@ -245,7 +248,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       assert {:inline, []} = CatalogDescription.resolve_mode(entries, config)
       result = CatalogDescription.render_for_entries(entries, config)
-      assert result =~ "observatory.get_trace(id: string)"
+      assert result =~ "observatory/get_trace"
+      assert result =~ "Args: {:id string}"
       refute result =~ "Very long prose"
     end
 
@@ -314,10 +318,11 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       result = CatalogDescription.render_for_entries(entries, default_config())
 
-      assert result =~ "srv.do_thing(required: string, optional: integer?) Does something useful."
+      assert result =~ "do_thing - Does something useful."
+      assert result =~ "Args: {:required string :optional int?}"
 
-      assert result =~ "srv.no_desc()"
-      refute result =~ "srv.no_desc() "
+      assert result =~ ~s|"no_desc"|
+      refute result =~ "no_desc -"
     end
 
     test "required schema keys render even when properties omit them" do
@@ -335,7 +340,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       ]
 
       result = CatalogDescription.render_for_entries(entries, default_config())
-      assert result =~ "observatory.get_trace(id: any)"
+      assert result =~ "observatory/get_trace"
+      assert result =~ "Required args: :id"
     end
 
     test "known empty tools renders 0 tools" do

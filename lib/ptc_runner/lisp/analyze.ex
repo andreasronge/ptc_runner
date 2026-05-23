@@ -127,7 +127,8 @@ defmodule PtcRunner.Lisp.Analyze do
       :apropos,
       :dir,
       :doc,
-      :meta
+      :meta,
+      :"mcp/servers"
     ]
   end
 
@@ -245,20 +246,6 @@ defmodule PtcRunner.Lisp.Analyze do
   defp do_analyze({:ns_symbol, :budget, other}, _tail?) do
     {:error,
      {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
-  end
-
-  # Runtime catalog callable in value position, e.g. `(map catalog/search-tools queries)`.
-  # Call position remains the existing arity-checked catalog builtin lowering.
-  defp do_analyze({:ns_symbol, :catalog, name}, _tail?)
-       when name in [:summary, :"list-servers", :"list-tools", :"describe-tool", :"search-tools"] do
-    {:ok, {:runtime_callable, :catalog, name}}
-  end
-
-  defp do_analyze({:ns_symbol, :catalog, other}, _tail?) do
-    {:error,
-     {:invalid_form,
-      "Unknown catalog function: catalog/#{other}. Available: " <>
-        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool, catalog/search-tools"}}
   end
 
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
@@ -474,94 +461,6 @@ defmodule PtcRunner.Lisp.Analyze do
     do:
       {:error,
        {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
-
-  # Catalog builtins via catalog/ namespace
-  defp dispatch_list_form({:ns_symbol, :catalog, :summary}, [], _list, _tail?),
-    do: {:ok, {:catalog_summary}}
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :summary}, _args, _list, _tail?),
-    do: {:error, {:invalid_arity, :"catalog/summary", "(catalog/summary) takes no arguments"}}
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"list-servers"}, [], _list, _tail?),
-    do: {:ok, {:catalog_list_servers}}
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"list-servers"}, _args, _list, _tail?),
-    do:
-      {:error,
-       {:invalid_arity, :"catalog/list-servers", "(catalog/list-servers) takes no arguments"}}
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"list-tools"}, [server_ast], _list, _tail?) do
-    with {:ok, server} <- do_analyze(server_ast, false) do
-      {:ok, {:catalog_list_tools, [server]}}
-    end
-  end
-
-  defp dispatch_list_form(
-         {:ns_symbol, :catalog, :"list-tools"},
-         [server_ast, opts_ast],
-         _list,
-         _tail?
-       ) do
-    with {:ok, server} <- do_analyze(server_ast, false),
-         {:ok, opts} <- do_analyze(opts_ast, false) do
-      {:ok, {:catalog_list_tools, [server, opts]}}
-    end
-  end
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"list-tools"}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :"catalog/list-tools",
-      "(catalog/list-tools server) or (catalog/list-tools server opts) — got #{length(args)} args"}}
-  end
-
-  defp dispatch_list_form(
-         {:ns_symbol, :catalog, :"describe-tool"},
-         [server_ast, tool_ast],
-         _list,
-         _tail?
-       ) do
-    with {:ok, server} <- do_analyze(server_ast, false),
-         {:ok, tool} <- do_analyze(tool_ast, false) do
-      {:ok, {:catalog_describe_tool, [server, tool]}}
-    end
-  end
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"describe-tool"}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :"catalog/describe-tool",
-      "(catalog/describe-tool server tool) requires exactly 2 arguments, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"search-tools"}, [query_ast], _list, _tail?) do
-    with {:ok, query} <- do_analyze(query_ast, false) do
-      {:ok, {:catalog_search_tools, [query]}}
-    end
-  end
-
-  defp dispatch_list_form(
-         {:ns_symbol, :catalog, :"search-tools"},
-         [query_ast, opts_ast],
-         _list,
-         _tail?
-       ) do
-    with {:ok, query} <- do_analyze(query_ast, false),
-         {:ok, opts} <- do_analyze(opts_ast, false) do
-      {:ok, {:catalog_search_tools, [query, opts]}}
-    end
-  end
-
-  defp dispatch_list_form({:ns_symbol, :catalog, :"search-tools"}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :"catalog/search-tools",
-      "(catalog/search-tools query) or (catalog/search-tools query opts) — got #{length(args)} args"}}
-  end
-
-  defp dispatch_list_form({:ns_symbol, :catalog, other}, _rest, _list, _tail?) do
-    {:error,
-     {:invalid_form,
-      "Unknown catalog function: catalog/#{other}. Available: " <>
-        "catalog/summary, catalog/list-servers, catalog/list-tools, catalog/describe-tool, catalog/search-tools"}}
-  end
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
@@ -1386,7 +1285,6 @@ defmodule PtcRunner.Lisp.Analyze do
     [
       "data/",
       "tool/",
-      "catalog/",
       "mcp/",
       "budget/",
       "json/",

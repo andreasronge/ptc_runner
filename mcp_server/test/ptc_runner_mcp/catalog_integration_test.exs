@@ -67,7 +67,8 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       assert description =~ ~s|"tool_count" 3|
       assert description =~ ~s|"tool_count" 2|
       assert description =~ ~s|(dir "alpha" {:limit 20})|
-      assert description =~ "alpha.tool_1(key: string?)"
+      assert description =~ "tool_1 - Description for tool_1."
+      assert description =~ "Args: {:key string?}"
     end
   end
 
@@ -148,7 +149,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
         (let [results (apropos "warehouse" {:limit 5})
               first_line (first results)
               server (first (clojure.string/split first_line #"\."))
-              first_tool (first (clojure.string/split (second (clojure.string/split first_line #"\.")) #"\("))
+              first_tool (first (clojure.string/split (second (clojure.string/split first_line #"\.")) #" "))
               detail (doc (str server "/" first_tool))]
           (tool/mcp-call {:server server
                           :tool first_tool
@@ -188,7 +189,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
         (let [search (apropos "analytics" {:limit 5})
               server (first (clojure.string/split (first search) #":"))
               tools (dir server {:limit 10})
-              first_tool (first (clojure.string/split (second (clojure.string/split (first tools) #"\.")) #"\("))
+              first_tool (first (clojure.string/split (first tools) #" "))
               detail (doc (str server "/" first_tool))]
           (tool/mcp-call {:server server
                           :tool first_tool
@@ -210,7 +211,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   # ============================================================
 
   describe "direct call in inline mode" do
-    test "mcp-call works without catalog builtins in inline mode" do
+    test "mcp-call works without discovery forms in inline mode" do
       put_fake_with_tools("storage", 2, "Storage backend", ["blobs"])
 
       freeze_snapshot()

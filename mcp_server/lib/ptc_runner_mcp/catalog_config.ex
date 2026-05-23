@@ -11,10 +11,10 @@ defmodule PtcRunnerMcp.CatalogConfig do
       size in `auto` mode.
     * `:catalog_inline_max_tools` — maximum total upstream tool count
       in `auto` mode.
-    * `:max_catalog_ops_per_program` — maximum catalog builtin calls
+    * `:max_catalog_ops_per_program` — maximum REPL discovery calls
       per `lisp_eval` invocation.
     * `:max_catalog_result_bytes` — maximum JSON-encoded result bytes
-      from one catalog builtin.
+      from one discovery result.
 
   Stored in `:persistent_term` for O(1) lock-free reads on every
   `tools/list` request.

@@ -363,8 +363,8 @@ defmodule PtcRunnerMcp.PromptRegistry do
     Call upstream tools with `(tool/mcp-call {:server "<configured-name>" :tool "<upstream-tool>" :args {}})`.
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
     In `lisp_task`, `tool/mcp-call` returns `Result<T>`: success `{:ok true :value T}`, failure `{:ok false :reason k :message s}`.
-    T object keys are strings, not keywords.
-    If T is `{content :string}`, read text with `(get (:value r) "content")`.
+    Use the field names shown by `doc`; keyword lookup works on upstream result maps.
+    If T is `{:content string}`, read text with `(:content (:value r))`.
     #{agentic_unknown_content_guidance(catalog)}
     If `(:value r)` has an unexpected shape, handle or fail with a clear message.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.

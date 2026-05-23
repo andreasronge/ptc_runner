@@ -108,12 +108,11 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
                Analyze.analyze(raw)
     end
 
-    test "catalog namespace symbols in value position lower to runtime callables" do
+    test "catalog namespace symbols are no longer runtime callables" do
       raw = {:list, [{:symbol, :map}, {:ns_symbol, :catalog, :"search-tools"}, {:symbol, :qs}]}
 
-      assert {:ok,
-              {:call, {:var, :map}, [{:runtime_callable, :catalog, :"search-tools"}, {:var, :qs}]}} =
-               Analyze.analyze(raw)
+      assert {:error, {:invalid_form, message}} = Analyze.analyze(raw)
+      assert message =~ "unknown namespace catalog/"
     end
   end
 
@@ -343,20 +342,6 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
       assert {:ok, step} = Lisp.run(source, tools: tools)
       assert_no_persisted_runtime_context!(step.memory)
       assert :erlang.external_size(step.memory) < 50_000
-    end
-  end
-
-  describe "catalog runtime callables" do
-    test "map can invoke catalog/search-tools" do
-      catalog_exec = fn
-        :search_tools, [query] -> {:ok, [%{query: query}]}
-      end
-
-      source = ~S|(map catalog/search-tools ["calendar" "gmail"])|
-
-      assert {:ok, step} = Lisp.run(source, catalog_exec: catalog_exec)
-      assert step.return == [[%{query: "calendar"}], [%{query: "gmail"}]]
-      assert Enum.map(step.catalog_ops, & &1.operation) == [:search_tools, :search_tools]
     end
   end
 end
