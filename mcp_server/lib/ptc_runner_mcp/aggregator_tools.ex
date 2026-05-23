@@ -136,6 +136,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
         )
 
       true ->
+        check_call_args_shape(registry, server, tool, call_args)
         {server, tool, call_args}
     end
   end
@@ -205,6 +206,59 @@ defmodule PtcRunnerMcp.AggregatorTools do
           "tool '#{server}.#{tool}' rejected args: not JSON-encodable (#{inspect_short(reason)})" <>
             describe_tool_hint(registry, server, tool)
         )
+    end
+  end
+
+  defp check_call_args_shape(registry, server, tool, call_args) do
+    case find_cached_tool(registry, server, tool) do
+      nil ->
+        :ok
+
+      cached_tool ->
+        cached_tool
+        |> tool_input_schema()
+        |> reject_missing_required_with_unexpected_keys!(server, tool, call_args, registry)
+    end
+  end
+
+  defp reject_missing_required_with_unexpected_keys!(schema, server, tool, call_args, registry)
+       when is_map(schema) do
+    properties = schema_properties(schema)
+    required = schema_required(schema)
+
+    if map_size(properties) > 0 and required != [] do
+      supplied = call_args |> Map.keys() |> Enum.map(&to_string/1)
+      missing = Enum.reject(required, &(&1 in supplied))
+      unexpected = Enum.reject(supplied, &Map.has_key?(properties, &1))
+
+      if missing != [] and unexpected != [] do
+        raise_programmer_fault(
+          "tool '#{server}.#{tool}' rejected args: received unexpected " <>
+            pluralize("key", unexpected) <>
+            " #{format_arg_names(unexpected)}; expected #{format_arg_names(Map.keys(properties))}. " <>
+            "Missing required #{pluralize("arg", missing)} #{format_arg_names(missing)}." <>
+            describe_tool_hint(registry, server, tool)
+        )
+      end
+    end
+
+    :ok
+  end
+
+  defp schema_properties(schema) do
+    case Map.get(schema, "properties") || Map.get(schema, :properties) do
+      properties when is_map(properties) ->
+        Map.new(properties, fn {key, value} -> {to_string(key), value} end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp schema_required(schema) do
+    case Map.get(schema, "required") || Map.get(schema, :required) do
+      required when is_list(required) -> Enum.map(required, &to_string/1)
+      _ -> []
     end
   end
 
@@ -703,6 +757,26 @@ defmodule PtcRunnerMcp.AggregatorTools do
     if score >= 0.82, do: candidate
   end
 
+  defp pluralize(word, [_one]), do: word
+  defp pluralize(word, _many), do: word <> "s"
+
+  defp format_arg_names(names) do
+    names
+    |> Enum.sort()
+    |> Enum.map_join(", ", &format_arg_name/1)
+  end
+
+  defp format_arg_name(name) do
+    name = to_string(name)
+    lisp_name = String.replace(name, "_", "-")
+
+    if lisp_name == name do
+      ":" <> name
+    else
+      ":#{lisp_name} (encoded as :#{name})"
+    end
+  end
+
   # Phase 4 hardening: classify a successful upstream payload. A
   # map whose `"isError"` key is `true` is a tool-level failure
   # (§16 entry 2 / amended §7.1) and surfaces as a world-fault.
@@ -863,6 +937,11 @@ defmodule PtcRunnerMcp.AggregatorTools do
   defp tool_name_of(%{name: n}) when is_binary(n), do: n
   defp tool_name_of(%{"name" => n}) when is_binary(n), do: n
   defp tool_name_of(_), do: nil
+
+  defp tool_input_schema(%{input_schema: schema}) when is_map(schema), do: schema
+  defp tool_input_schema(%{"input_schema" => schema}) when is_map(schema), do: schema
+  defp tool_input_schema(%{"inputSchema" => schema}) when is_map(schema), do: schema
+  defp tool_input_schema(_), do: %{}
 
   defp tool_description_of(%{description: d}) when is_binary(d), do: d
   defp tool_description_of(%{"description" => d}) when is_binary(d), do: d

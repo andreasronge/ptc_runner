@@ -517,6 +517,54 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     end
   end
 
+  describe "schema-aware arg diagnostics" do
+    test "missing required arg with an unexpected key names both the sent and expected keys" do
+      called = :counters.new(1, [])
+
+      :ok =
+        Registry.put_fake(
+          "observatory",
+          %{
+            tools: %{
+              "get_trace" =>
+                {%{
+                   name: "get_trace",
+                   input_schema: %{
+                     "type" => "object",
+                     "properties" => %{"id" => %{"type" => "string"}},
+                     "required" => ["id"]
+                   },
+                   description: "Get a trace"
+                 },
+                 fn args, _opts ->
+                   :counters.add(called, 1, 1)
+                   {:ok, %{"structuredContent" => %{"id" => args["id"]}}}
+                 end}
+            }
+          },
+          @registry_name
+        )
+
+      warm =
+        call(~S|(tool/mcp-call {:server "observatory" :tool "get_trace" :args {:id "uuid-1"}})|)
+
+      assert warm["isError"] == false
+
+      env =
+        call(
+          ~S|(tool/mcp-call {:server "observatory" :tool "get_trace" :args {:trace-id "uuid-1"}})|
+        )
+
+      assert env["isError"] == true
+      assert structured(env)["reason"] == "runtime_error"
+      assert structured(env)["message"] =~ "unexpected key :trace-id"
+      assert structured(env)["message"] =~ "expected :id"
+      assert structured(env)["message"] =~ "Missing required arg :id"
+      assert structured(env)["message"] =~ ~s|(doc "observatory/get_trace")|
+      assert :counters.get(called, 1) == 1
+    end
+  end
+
   describe "tagged unwrapped result" do
     test "successful upstream returning JSON null → tagged JSON nil" do
       put_fake("alpha", %{"null" => fn _, _ -> {:ok, nil} end})
