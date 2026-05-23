@@ -35,19 +35,24 @@ defmodule PtcRunnerMcp.Version do
                  rescue
                    _ -> "unknown"
                  end)
-  @git_dirty System.get_env(@git_dirty_env) ||
-               (try do
+  @git_dirty_env_value System.get_env(@git_dirty_env)
+  @git_dirty (if is_binary(@git_dirty_env_value) do
+                @git_dirty_env_value == "true"
+              else
+                try do
                   case System.cmd("git", ["status", "--porcelain"],
                          cd: @repo_root,
                          stderr_to_stdout: true
                        ) do
-                    {"", 0} -> "false"
-                    {_, 0} -> "true"
-                    _ -> "false"
+                    {"", 0} -> false
+                    {_, 0} -> true
+                    _ -> false
                   end
                 rescue
-                  _ -> "false"
-                end)
+                  _ -> false
+                end
+              end)
+  @git_dirty_suffix if(@git_dirty, do: ".dirty", else: "")
 
   @doc "Server's primary (latest) supported protocol version."
   @spec primary() :: String.t()
@@ -118,7 +123,7 @@ defmodule PtcRunnerMcp.Version do
 
   @doc "True when the source checkout had uncommitted changes at compile time."
   @spec git_dirty?() :: boolean()
-  def git_dirty?, do: @git_dirty == "true"
+  def git_dirty?, do: @git_dirty
 
   @doc "Structured build metadata for diagnostics and MCP initialize responses."
   @spec build_info() :: map()
@@ -131,6 +136,6 @@ defmodule PtcRunnerMcp.Version do
   end
 
   defp dirty_suffix do
-    if git_dirty?(), do: ".dirty", else: ""
+    @git_dirty_suffix
   end
 end
