@@ -59,6 +59,33 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     assert Envelope.render_success_text(shaped) == ~s(["alpha" "beta"])
   end
 
+  test "session success text renders a brief stored/upstream suffix" do
+    text =
+      Envelope.render_session_success_text(%{
+        "status" => "ok",
+        "result" => "42",
+        "memory" => %{"changed_keys" => ["all", "by-day"]},
+        "upstream_calls" => [%{"server" => "fs"}, %{"server" => "fs"}]
+      })
+
+    assert text == "42\n[stored: all, by-day; turn upstream calls: 2]"
+    refute text =~ "lisp_debug"
+  end
+
+  test "session error text marks rollback and turn-local upstream calls" do
+    text =
+      Envelope.render_session_error_text(%{
+        "status" => "error",
+        "reason" => "runtime_error",
+        "message" => "boom",
+        "feedback" => "boom",
+        "upstream_calls" => [%{"server" => "fs"}]
+      })
+
+    assert text == "runtime_error: boom\nboom\n[rolled back; turn upstream calls: 1]"
+    refute text =~ "lisp_debug"
+  end
+
   test "prints are capped by encoded byte budget and the kept prefix stays within budget" do
     # 10 prints of ~2 KB each (~20 KB total) — under slim's 20-entry cap, so the
     # 8 KB byte budget is what fires.
