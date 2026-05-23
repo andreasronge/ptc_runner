@@ -13,12 +13,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.Collection.Select
   alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
+  alias PtcRunner.Lisp.TypeError
 
   defguardp is_sort_key(key)
             when is_atom(key) or is_binary(key) or is_list(key) or is_struct(key, LispKeyword)
@@ -92,6 +94,67 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   defp sort_keyfn(key) when is_sort_key(key), do: &FlexAccess.flex_get(&1, key)
   defp sort_keyfn(keyfn), do: &Callable.call(keyfn, [&1])
+  defp safe_sort_keyfn(key) when is_sort_key(key), do: sort_keyfn(key)
+
+  defp safe_sort_keyfn(keyfn) do
+    safe_callable_sort_keyfn(keyfn)
+  end
+
+  defp safe_callable_sort_keyfn(keyfn) do
+    key_fun = &Callable.call(keyfn, [&1])
+
+    fn item ->
+      try do
+        key_fun.(item)
+      rescue
+        e in FunctionClauseError ->
+          reraise TypeError, [message: sort_key_error_message(keyfn, item, e)], __STACKTRACE__
+
+        e in TypeError ->
+          reraise TypeError,
+                  [message: sort_key_error_message(item, Exception.message(e))],
+                  __STACKTRACE__
+
+        e in RuntimeError ->
+          reraise TypeError,
+                  [message: sort_key_error_message(item, Exception.message(e))],
+                  __STACKTRACE__
+      end
+    end
+  end
+
+  defp sort_key_error_message(%Builtin{} = builtin, item, %FunctionClauseError{}) do
+    builtin
+    |> Builtin.unwrap()
+    |> sort_key_error_message(item, %FunctionClauseError{})
+  end
+
+  defp sort_key_error_message({:normal, fun}, item, %FunctionClauseError{}) do
+    {_type, message, _args} = Helpers.type_error_for_args(fun, [item])
+    sort_key_error_message(item, message)
+  end
+
+  defp sort_key_error_message(fun, item, %FunctionClauseError{}) when is_function(fun) do
+    {_type, message, _args} = Helpers.type_error_for_args(fun, [item])
+    sort_key_error_message(item, message)
+  end
+
+  defp sort_key_error_message(_keyfn, item, %FunctionClauseError{}) do
+    sort_key_error_message(item, "key function does not accept this value")
+  end
+
+  defp sort_key_error_message(item, message) do
+    "sort-by key function failed for item #{format_sort_item(item)}: " <>
+      strip_type_prefix(message)
+  end
+
+  defp strip_type_prefix("type_error: " <> rest), do: rest
+  defp strip_type_prefix(message), do: message
+
+  defp format_sort_item(item) do
+    {formatted, _truncated?} = Format.to_clojure(item, limit: 80)
+    formatted
+  end
 
   defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
 
@@ -126,23 +189,23 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     do: Enum.sort_by(coll, sort_keyfn(key))
 
   def sort_by(keyfn, coll) when is_list(coll) do
-    Enum.sort_by(coll, sort_keyfn(keyfn))
+    Enum.sort_by(coll, safe_sort_keyfn(keyfn))
   end
 
   def sort_by(keyfn, coll) when is_binary(coll) do
-    Enum.sort_by(Normalize.graphemes(coll), &Callable.call(keyfn, [&1]))
+    Enum.sort_by(Normalize.graphemes(coll), safe_callable_sort_keyfn(keyfn))
   end
 
   def sort_by(keyfn, %MapSet{} = set), do: sort_by(keyfn, MapSet.to_list(set))
 
   def sort_by(keyfn, coll) when is_map(coll) and not is_struct(coll) do
     coll
-    |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end)
+    |> Enum.sort_by(fn {k, v} -> safe_sort_keyfn(keyfn).([k, v]) end)
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   def sort_by(keyfn, coll) do
-    Enum.sort_by(Normalize.to_seq(coll), sort_keyfn(keyfn))
+    Enum.sort_by(Normalize.to_seq(coll), safe_sort_keyfn(keyfn))
   end
 
   # sort_by with 3 args: (keyfn/key, comparator, coll)
@@ -150,23 +213,27 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     do: Enum.sort_by(coll, sort_keyfn(key), wrap_comparator(comp))
 
   def sort_by(keyfn, comp, coll) when is_list(coll) do
-    Enum.sort_by(coll, sort_keyfn(keyfn), wrap_comparator(comp))
+    Enum.sort_by(coll, safe_sort_keyfn(keyfn), wrap_comparator(comp))
   end
 
   def sort_by(keyfn, comp, coll) when is_binary(coll) do
-    Enum.sort_by(Normalize.graphemes(coll), &Callable.call(keyfn, [&1]), wrap_comparator(comp))
+    Enum.sort_by(
+      Normalize.graphemes(coll),
+      safe_callable_sort_keyfn(keyfn),
+      wrap_comparator(comp)
+    )
   end
 
   def sort_by(keyfn, comp, %MapSet{} = set), do: sort_by(keyfn, comp, MapSet.to_list(set))
 
   def sort_by(keyfn, comp, coll) when is_map(coll) and not is_struct(coll) do
     coll
-    |> Enum.sort_by(fn {k, v} -> Callable.call(keyfn, [[k, v]]) end, wrap_comparator(comp))
+    |> Enum.sort_by(fn {k, v} -> safe_sort_keyfn(keyfn).([k, v]) end, wrap_comparator(comp))
     |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
   def sort_by(keyfn, comp, coll) do
-    Enum.sort_by(Normalize.to_seq(coll), sort_keyfn(keyfn), wrap_comparator(comp))
+    Enum.sort_by(Normalize.to_seq(coll), safe_sort_keyfn(keyfn), wrap_comparator(comp))
   end
 
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)

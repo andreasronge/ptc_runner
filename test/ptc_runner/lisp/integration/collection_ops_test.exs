@@ -2000,6 +2000,17 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [%{"day" => 1}, %{"day" => 2}]
     end
 
+    test "sort-by reports key function failures on mapped map rows" do
+      {:error, %Step{fail: fail}} =
+        Lisp.run(~S|(sort-by first (map (fn [x] {:day x}) ["b" "a"]))|)
+
+      assert fail.reason == :type_error
+      assert fail.message =~ "sort-by key function failed for item"
+      assert fail.message =~ ~S|{:day "b"}|
+      assert fail.message =~ "first does not support maps"
+      refute fail.message =~ "sort_by: invalid argument types: function, list"
+    end
+
     test "sort-by accepts lazy seqable collections" do
       coll = Stream.map([%{day: 2}, %{day: 1}], & &1)
 

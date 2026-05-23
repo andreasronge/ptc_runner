@@ -447,7 +447,7 @@ defmodule PtcRunnerMcp.Envelope do
   @spec render_error_text(map()) :: String.t()
   def render_error_text(structured) do
     reason = Map.get(structured, "reason")
-    message = Map.get(structured, "message")
+    message = normalize_error_message(reason, Map.get(structured, "message"))
     feedback = Map.get(structured, "feedback")
 
     base =
@@ -462,6 +462,18 @@ defmodule PtcRunnerMcp.Envelope do
     |> append_feedback(feedback)
     |> append_upstream_error(Map.get(structured, "upstream_calls"))
   end
+
+  defp normalize_error_message(reason, message) when is_binary(reason) and is_binary(message) do
+    prefix = reason <> ": "
+
+    if String.starts_with?(message, prefix) do
+      String.replace_prefix(message, prefix, "")
+    else
+      message
+    end
+  end
+
+  defp normalize_error_message(_reason, message), do: message
 
   @doc false
   @spec render_session_error_text(map()) :: String.t()
@@ -519,7 +531,11 @@ defmodule PtcRunnerMcp.Envelope do
   defp compact_upstream_errors(_), do: nil
 
   defp append_feedback(text, feedback) when is_binary(feedback) and feedback != "" do
-    text <> "\n" <> feedback
+    if feedback == text or String.ends_with?(text, ": " <> feedback) do
+      text
+    else
+      text <> "\n" <> feedback
+    end
   end
 
   defp append_feedback(text, _), do: text
