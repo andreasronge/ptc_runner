@@ -10,8 +10,7 @@
 <!-- PTC_PROMPT_START -->
 PTC-Lisp reference
 
-Clojure-shaped eager sandbox. Assume common pure core fns exist unless listed under No.
-Core includes `let`, `fn`, `defn`, `#(...)`, `loop`/`recur`, collections/strings/sets/regex/math, `parse-*`.
+Core includes `let`, `fn`, `defn`, `#(...)`, `loop`/`recur`, collections/strings/sets/regex/math, `parse-*`, destructing.
 
 Syntax:
 - One or more top-level forms. Final value = result.
@@ -31,5 +30,5 @@ Helpers:
 - Java-shaped: `Double/parseDouble`, `LocalDate/parse`.
 - Prefer core fns; use `pmap`/`pcalls` when useful.
 
-No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network; broad Java interop.
+No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network
 <!-- PTC_PROMPT_END -->

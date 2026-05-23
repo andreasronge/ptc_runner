@@ -3,7 +3,8 @@
 `ptc_runner_mcp` is a long-running process that speaks
 [Model Context Protocol](https://modelcontextprotocol.io/) over stdio
 JSON-RPC by default, with an opt-in Streamable HTTP listener for
-private-network deployments. It exposes `lisp_eval` to MCP
+private-network deployments. It advertises the MCP server name
+`ptc_lisp` and exposes `lisp_eval` to MCP
 clients (Claude Desktop, Cursor, Cline, Claude Code, MCP Inspector,
 agentic applications, …). The tool
 accepts a PTC-Lisp program plus optional `context` and `output_schema`,

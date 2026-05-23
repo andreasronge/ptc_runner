@@ -232,7 +232,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       |> put_in([Access.key!(:monitors), ref], meta.id)
       |> add_owner_index(meta.owner_hash, meta.id)
 
-    :telemetry.execute([:ptc_runner_mcp, :session, :start], %{count: 1}, %{
+    :telemetry.execute([:ptc_lisp, :session, :start], %{count: 1}, %{
       session_id: meta.id,
       owner_hash: meta.owner_hash,
       mode: meta.mode

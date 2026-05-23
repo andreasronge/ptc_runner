@@ -150,7 +150,7 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
 
     test "scrubs binary leaves inside nested maps" do
       event = %{
-        "event" => "ptc_runner_mcp.call.stop",
+        "event" => "ptc_lisp.call.stop",
         "metadata" => %{
           "tool_name" => "lisp_eval",
           "reason" => "boom: deep-secret-aaaaaaaaaaa happened"
@@ -160,7 +160,7 @@ defmodule PtcRunnerMcp.Credentials.RedactorTest do
 
       out = Redactor.scrub_deep(event)
 
-      assert out["event"] == "ptc_runner_mcp.call.stop"
+      assert out["event"] == "ptc_lisp.call.stop"
       assert out["metadata"]["tool_name"] == "lisp_eval"
       refute String.contains?(out["metadata"]["reason"], "deep-secret-aaaaaaaaaaa")
       assert String.contains?(out["metadata"]["reason"], "[REDACTED]")

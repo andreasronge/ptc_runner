@@ -87,7 +87,7 @@ the deployment runbook.
 | `--http-metrics-path` | `PTC_RUNNER_MCP_HTTP_METRICS_PATH` | `/metrics` | Reserved metrics path; must not collide with HTTP control paths. |
 | `--http-instance-label` | `PTC_RUNNER_MCP_HTTP_INSTANCE_LABEL` | hostname | Stable instance label stamped into HTTP logs, telemetry, and trace metadata. |
 
-HTTP emits sanitized telemetry under `[:ptc_runner_mcp, :http, ...]`
+HTTP emits sanitized telemetry under `[:ptc_lisp, :http, ...]`
 and logs request stop lines to stderr. Raw bearer tokens and raw
 `MCP-Session-Id` values are not logged.
 

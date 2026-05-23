@@ -129,7 +129,7 @@ defmodule PtcRunnerMcp.TraceFile do
     case config.trace_dir do
       nil ->
         # Tracing disabled: invoke the function directly. The MCP
-        # `[:ptc_runner_mcp, :call, *]` telemetry events still fire
+        # `[:ptc_lisp, :call, *]` telemetry events still fire
         # — they're useful for any subscriber.
         fun.()
 
@@ -173,7 +173,7 @@ defmodule PtcRunnerMcp.TraceFile do
           |> Keyword.merge(
             path: pending_path,
             trace_kind: "mcp_call",
-            producer: "ptc_runner_mcp",
+            producer: "ptc_lisp",
             trace_label: to_string(request_id || ""),
             model: nil,
             query: scrub_value(query)

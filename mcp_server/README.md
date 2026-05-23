@@ -1,15 +1,16 @@
 # ptc_runner_mcp
 
-`ptc_runner_mcp` is a standalone MCP server for coding agents and other
-MCP clients. It gives the client a safe **code mode** backed by
-PTC-Lisp, plus optional modes for aggregating upstream MCP tools,
-stateful Lisp sessions, diagnostics, and private-network HTTP
+`ptc_runner_mcp` is a standalone MCP server release for coding agents
+and other MCP clients. In the MCP `initialize` handshake it advertises
+the server name `ptc_lisp`. It gives the client a safe **code mode**
+backed by PTC-Lisp, plus optional modes for aggregating upstream MCP
+tools, stateful Lisp sessions, diagnostics, and private-network HTTP
 deployment.
 
 The server does not contain an LLM. Your MCP client or agent does the
-reasoning; `ptc_runner_mcp` runs bounded, deterministic work when the
-model needs help with counting, filtering, reshaping JSON, validating
-schemas, or composing MCP tool results.
+reasoning; the `ptc_lisp` MCP server runs bounded, deterministic work
+when the model needs help with counting, filtering, reshaping JSON,
+validating schemas, or composing MCP tool results.
 
 For the deeper rationale, architecture, and security model, see
 [`docs/mcp-server.md`](../docs/mcp-server.md).

@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.TelemetryPhase1aTest do
   @moduledoc """
-  Phase 1a tests for the `[:ptc_runner_mcp, :upstream, :call, :*]`
+  Phase 1a tests for the `[:ptc_lisp, :upstream, :call, :*]`
   telemetry event family per `Plans/ptc-runner-mcp-aggregator.md` §10.
 
   Asserts:
@@ -34,9 +34,9 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
       :telemetry.attach_many(
         handler_id,
         [
-          [:ptc_runner_mcp, :upstream, :call, :start],
-          [:ptc_runner_mcp, :upstream, :call, :stop],
-          [:ptc_runner_mcp, :upstream, :call, :exception]
+          [:ptc_lisp, :upstream, :call, :start],
+          [:ptc_lisp, :upstream, :call, :stop],
+          [:ptc_lisp, :upstream, :call, :exception]
         ],
         fn event, measurements, metadata, _ ->
           send(parent, {:telemetry, event, measurements, metadata})
@@ -61,7 +61,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
     Registry.put_fake(name, config, @registry_name)
   end
 
-  describe "[:ptc_runner_mcp, :upstream, :call, :*]" do
+  describe "[:ptc_lisp, :upstream, :call, :*]" do
     test ":start + :stop emit on a successful call" do
       :ok = put_fake("alpha", %{"echo" => fn args, _ -> {:ok, args} end})
 
@@ -70,10 +70,9 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :start], _, start_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], stop_meas,
-                      stop_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], stop_meas, stop_meta}
 
       assert start_meta.caller == :mcp
       assert start_meta.profile == :mcp_aggregator
@@ -95,7 +94,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, meta}
       assert meta.status == :error
       assert meta.reason == :upstream_error
     end
@@ -114,7 +113,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, stop_meta}
 
       assert is_integer(stop_meta.ensure_duration_ms) and stop_meta.ensure_duration_ms >= 0
       assert is_integer(stop_meta.call_duration_ms) and stop_meta.call_duration_ms >= 0
@@ -128,7 +127,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, meta}
       assert meta.status == :error
       assert is_integer(meta.ensure_duration_ms) and meta.ensure_duration_ms >= 0
       assert is_integer(meta.call_duration_ms) and meta.call_duration_ms >= 0
@@ -146,8 +145,8 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
             ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:secret_in "hidden"}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :start], _, start_meta}
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, stop_meta}
 
       # No raw `args` / `result` keys in metadata: §10 default-off.
       refute Map.has_key?(start_meta, :args)
@@ -186,9 +185,9 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           request_id: request_id
         )
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :start], _, start_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, stop_meta}
 
       # Pre-fix: both metas had `request_id: nil`. Post-fix: the
       # request id flows from JsonRpc → Tools → AggregatorTools
@@ -209,7 +208,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
           "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|
         })
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :call, :start], _, start_meta}
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
       assert start_meta.request_id == nil
     end
   end

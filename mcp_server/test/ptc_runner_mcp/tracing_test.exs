@@ -103,7 +103,7 @@ defmodule PtcRunnerMcp.TracingTest do
 
       # And our handler is not registered.
       handler_ids =
-        :telemetry.list_handlers([:ptc_runner_mcp, :call, :start])
+        :telemetry.list_handlers([:ptc_lisp, :call, :start])
         |> Enum.map(& &1.id)
 
       refute TraceHandler.handler_id() in handler_ids
@@ -150,7 +150,7 @@ defmodule PtcRunnerMcp.TracingTest do
 
         assert header["event"] == "trace.start"
         assert header["trace_kind"] == "mcp_call"
-        assert header["producer"] == "ptc_runner_mcp"
+        assert header["producer"] == "ptc_lisp"
         assert header["trace_label"] == "req-pinned"
         # `model` is part of the trace header schema but is `nil` for
         # MCP traces; collector elides nil header keys, so either the
@@ -171,17 +171,17 @@ defmodule PtcRunnerMcp.TracingTest do
         assert hd(names) == "trace.start"
         assert List.last(names) == "trace.stop"
 
-        assert "ptc_runner_mcp.call.start" in names
-        assert "ptc_runner_mcp.call.stop" in names
+        assert "ptc_lisp.call.start" in names
+        assert "ptc_lisp.call.stop" in names
         assert "ptc_runner.lisp.execute.start" in names
         assert "ptc_runner.lisp.execute.stop" in names
 
         # Order: MCP call.start before Lisp execute.start; both before
         # their respective stop events.
         idx = fn name -> Enum.find_index(names, &(&1 == name)) end
-        assert idx.("ptc_runner_mcp.call.start") < idx.("ptc_runner.lisp.execute.start")
+        assert idx.("ptc_lisp.call.start") < idx.("ptc_runner.lisp.execute.start")
         assert idx.("ptc_runner.lisp.execute.start") < idx.("ptc_runner.lisp.execute.stop")
-        assert idx.("ptc_runner.lisp.execute.stop") < idx.("ptc_runner_mcp.call.stop")
+        assert idx.("ptc_runner.lisp.execute.stop") < idx.("ptc_lisp.call.stop")
       end)
     end
 
@@ -191,7 +191,7 @@ defmodule PtcRunnerMcp.TracingTest do
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        mcp_stop = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.stop"))
+        mcp_stop = Enum.find(events, &(&1["event"] == "ptc_lisp.call.stop"))
         lisp_stop = Enum.find(events, &(&1["event"] == "ptc_runner.lisp.execute.stop"))
 
         assert is_integer(mcp_stop["duration_ms"])
@@ -289,7 +289,7 @@ defmodule PtcRunnerMcp.TracingTest do
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
+        start = Enum.find(events, &(&1["event"] == "ptc_lisp.call.start"))
         meta = start["metadata"]
 
         refute Map.has_key?(meta, "program")
@@ -307,7 +307,7 @@ defmodule PtcRunnerMcp.TracingTest do
         [file] = wait_for_files(dir, 1)
         events = read_jsonl(Path.join(dir, file))
 
-        stop = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.stop"))
+        stop = Enum.find(events, &(&1["event"] == "ptc_lisp.call.stop"))
         meta = stop["metadata"]
 
         refute Map.has_key?(meta, "validated")

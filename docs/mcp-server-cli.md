@@ -1,9 +1,10 @@
 # MCP Server CLI
 
 `ptc_runner_mcp` is the standalone MCP server release for coding
-agents and other MCP clients. It exposes PTC-Lisp as a bounded code
-mode, plus optional aggregator, session, diagnostic, agentic, and HTTP
-deployment modes.
+agents and other MCP clients. The release binary remains
+`ptc_runner_mcp`; the MCP `initialize` server name is `ptc_lisp`. It
+exposes PTC-Lisp as a bounded code mode, plus optional aggregator,
+session, diagnostic, agentic, and HTTP deployment modes.
 
 For the architecture and security model, start with
 [MCP Server](mcp-server.md). For every flag and environment variable,

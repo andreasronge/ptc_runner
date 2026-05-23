@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.Http.Telemetry do
   @spec emit(atom() | [atom()], map(), map()) :: :ok
   def emit(event, measurements, metadata) do
     :telemetry.execute(
-      [:ptc_runner_mcp, :http | List.wrap(event)],
+      [:ptc_lisp, :http | List.wrap(event)],
       measurements,
       sanitize_metadata(metadata)
     )

@@ -131,7 +131,7 @@ defmodule PtcRunnerMcp.Credentials do
     start_mono = System.monotonic_time()
 
     :telemetry.execute(
-      [:ptc_runner_mcp, :credentials, :resolve, :start],
+      [:ptc_lisp, :credentials, :resolve, :start],
       %{system_time: System.system_time()},
       %{binding: name}
     )
@@ -169,7 +169,7 @@ defmodule PtcRunnerMcp.Credentials do
   # the duration (or short atom reason on error).
   defp emit_resolve_outcome(name, {:ok, _m}, source, duration_ms) do
     :telemetry.execute(
-      [:ptc_runner_mcp, :credentials, :resolve, :stop],
+      [:ptc_lisp, :credentials, :resolve, :stop],
       %{duration_ms: duration_ms},
       %{binding: name, source: source}
     )
@@ -180,7 +180,7 @@ defmodule PtcRunnerMcp.Credentials do
     # Use `:unknown` as the source atom; the reason atom carries the
     # diagnosis. No detail string is included (no path leak risk).
     :telemetry.execute(
-      [:ptc_runner_mcp, :credentials, :resolve, :error],
+      [:ptc_lisp, :credentials, :resolve, :error],
       %{duration_ms: duration_ms},
       %{binding: name, source: :unknown, reason: :unknown_binding}
     )
@@ -190,7 +190,7 @@ defmodule PtcRunnerMcp.Credentials do
     {source, reason} = classify_resolution_failure(detail)
 
     :telemetry.execute(
-      [:ptc_runner_mcp, :credentials, :resolve, :error],
+      [:ptc_lisp, :credentials, :resolve, :error],
       %{duration_ms: duration_ms},
       %{binding: name, source: source, reason: reason}
     )

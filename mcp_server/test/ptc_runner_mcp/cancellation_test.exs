@@ -18,7 +18,7 @@ defmodule PtcRunnerMcp.CancellationTest do
       `ConcurrencyGate.in_flight/0` at 0.
     * Sandbox isolation: two sequential tools/call requests cannot
       see each other's `(memory/put ...)` state.
-    * Telemetry `[:ptc_runner_mcp, :call, :*]` events still fire from
+    * Telemetry `[:ptc_lisp, :call, :*]` events still fire from
       worker processes with correct metadata.
   """
   use ExUnit.Case, async: false
@@ -450,14 +450,14 @@ defmodule PtcRunnerMcp.CancellationTest do
   end
 
   describe "telemetry from worker processes (§ 6.7)" do
-    test "[:ptc_runner_mcp, :call, :stop] fires with correct metadata from worker", %{harness: h} do
+    test "[:ptc_lisp, :call, :stop] fires with correct metadata from worker", %{harness: h} do
       _ = JsonRpcHarness.drain_replied_messages()
       handler_id = "phase4_telemetry_#{System.unique_integer([:positive])}"
       test_pid = self()
 
       :telemetry.attach(
         handler_id,
-        [:ptc_runner_mcp, :call, :stop],
+        [:ptc_lisp, :call, :stop],
         fn _name, measurements, metadata, _config ->
           send(test_pid, {:span_stop, measurements, metadata})
         end,

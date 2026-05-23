@@ -248,7 +248,7 @@ defmodule PtcRunnerMcp.JsonRpc do
 
       not known_tool_name?(Map.get(params, "name")) ->
         # Unknown tool: handled synchronously (no Lisp execution, no
-        # gate). We still trace + emit `[:ptc_runner_mcp, :call, :*]`
+        # gate). We still trace + emit `[:ptc_lisp, :call, :*]`
         # so subscribers see the call regardless of outcome.
         envelope =
           traced_tools_call(id, params, fn -> Tools.call(params) end,
@@ -346,7 +346,7 @@ defmodule PtcRunnerMcp.JsonRpc do
               fn ->
                 # Phase 1a §10: thread the JSON-RPC request id into
                 # `Tools.call_validated/4` so the
-                # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry
+                # `[:ptc_lisp, :upstream, :call, :*]` telemetry
                 # metadata can correlate upstream calls back to the
                 # parent `tools/call` request.
                 Tools.call_validated(program, context, parsed_signature, request_id: id)
@@ -510,7 +510,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   #
   #   1. `PtcRunnerMcp.TraceFile.with_traced_call/4` — opens a JSONL
   #      trace file under `--trace-dir` (no-op when tracing is off).
-  #   2. `:telemetry.span([:ptc_runner_mcp, :call], ...)` — emits the
+  #   2. `:telemetry.span([:ptc_lisp, :call], ...)` — emits the
   #      MCP-level start/stop/exception events from § 6.7. These events
   #      fire whether or not tracing is enabled (they're useful for any
   #      subscriber).
@@ -522,7 +522,7 @@ defmodule PtcRunnerMcp.JsonRpc do
   Wrap the actual tools-call execution (`run_fn`) in tracing and
   telemetry. Public for `Stdio` workers; called inside the worker
   process so the per-process trace collector and the
-  `[:ptc_runner_mcp, :call, :*]` span both land on the right pid.
+  `[:ptc_lisp, :call, :*]` span both land on the right pid.
 
   `run_fn` is a 0-arity function that returns the MCP envelope. In
   Phase 4 it's `fn -> Tools.call_validated(program, ctx, sig) end`;
@@ -556,7 +556,7 @@ defmodule PtcRunnerMcp.JsonRpc do
           opts
         )
 
-      :telemetry.span([:ptc_runner_mcp, :call], span_meta, fn ->
+      :telemetry.span([:ptc_lisp, :call], span_meta, fn ->
         envelope = run_fn.()
         stop_meta = call_stop_meta(span_meta, envelope)
         {envelope, stop_meta}

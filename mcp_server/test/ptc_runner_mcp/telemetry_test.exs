@@ -135,8 +135,8 @@ defmodule PtcRunnerMcp.TelemetryTest do
     test "fires around every POST with name + jsonrpc_method + http_status + duration_ms" do
       attach(
         [
-          [:ptc_runner_mcp, :upstream, :http, :request, :start],
-          [:ptc_runner_mcp, :upstream, :http, :request, :stop]
+          [:ptc_lisp, :upstream, :http, :request, :start],
+          [:ptc_lisp, :upstream, :http, :request, :stop]
         ],
         :req_success
       )
@@ -191,8 +191,8 @@ defmodule PtcRunnerMcp.TelemetryTest do
     test "wrong-port → :stop fires with http_status: nil and duration_ms" do
       attach(
         [
-          [:ptc_runner_mcp, :upstream, :http, :request, :start],
-          [:ptc_runner_mcp, :upstream, :http, :request, :stop]
+          [:ptc_lisp, :upstream, :http, :request, :start],
+          [:ptc_lisp, :upstream, :http, :request, :stop]
         ],
         :req_transport_err
       )
@@ -237,7 +237,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
   describe "upstream.http.session_lost" do
     test "fires with prior_session_id_hash (hashed, NOT raw)" do
       attach(
-        [[:ptc_runner_mcp, :upstream, :http, :session_lost]],
+        [[:ptc_lisp, :upstream, :http, :session_lost]],
         :session_lost
       )
 
@@ -257,7 +257,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert_receive {:DOWN, ^ref, :process, ^pid, :session_lost}, 2_000
 
       # Exactly one session_lost event for this caller.
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :http, :session_lost], %{count: 1},
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :http, :session_lost], %{count: 1},
                       metadata},
                      1_000
 
@@ -282,9 +282,9 @@ defmodule PtcRunnerMcp.TelemetryTest do
     test "fires per materialize/2 call with binding + source + duration_ms" do
       attach(
         [
-          [:ptc_runner_mcp, :credentials, :resolve, :start],
-          [:ptc_runner_mcp, :credentials, :resolve, :stop],
-          [:ptc_runner_mcp, :credentials, :resolve, :error]
+          [:ptc_lisp, :credentials, :resolve, :start],
+          [:ptc_lisp, :credentials, :resolve, :stop],
+          [:ptc_lisp, :credentials, :resolve, :error]
         ],
         :creds_resolve_ok
       )
@@ -297,14 +297,12 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert {:ok, %{raw: "secret-bearer-12345", scheme_hint: :bearer}} =
                Credentials.materialize(creds, "tok")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :start], _meas,
-                      start_md},
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :start], _meas, start_md},
                      500
 
       assert start_md == %{binding: "tok"}
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :stop], stop_meas,
-                      stop_md},
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :stop], stop_meas, stop_md},
                      500
 
       assert stop_md.binding == "tok"
@@ -313,7 +311,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert stop_meas.duration_ms >= 0
 
       # No :error event must fire on success.
-      refute_received {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :error], _, _}
+      refute_received {:telemetry, [:ptc_lisp, :credentials, :resolve, :error], _, _}
 
       # Audit: the resolved value must NEVER appear in any telemetry
       # metadata. (Defense-in-depth — the implementation wires it on
@@ -324,7 +322,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
     test "stop metadata source matches the binding source for :env and :file" do
       attach(
         [
-          [:ptc_runner_mcp, :credentials, :resolve, :stop]
+          [:ptc_lisp, :credentials, :resolve, :stop]
         ],
         :creds_source
       )
@@ -345,13 +343,13 @@ defmodule PtcRunnerMcp.TelemetryTest do
 
       assert {:ok, _} = Credentials.materialize(creds, "evar")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :stop], _,
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :stop], _,
                       %{binding: "evar", source: :env}},
                      500
 
       assert {:ok, _} = Credentials.materialize(creds, "fvar")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :stop], _,
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :stop], _,
                       %{binding: "fvar", source: :file}},
                      500
     end
@@ -362,7 +360,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
   describe "credentials.resolve — error" do
     test "unset env var → :env_missing (short atom, NOT a path / detail string)" do
       attach(
-        [[:ptc_runner_mcp, :credentials, :resolve, :error]],
+        [[:ptc_lisp, :credentials, :resolve, :error]],
         :creds_err_env
       )
 
@@ -374,7 +372,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert {:error, :resolution_failed, _detail} =
                Credentials.materialize(creds, "missing")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :error], _, metadata},
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :error], _, metadata},
                      500
 
       assert metadata.binding == "missing"
@@ -393,7 +391,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
 
     test "missing file → :file_not_found (NOT the path)" do
       attach(
-        [[:ptc_runner_mcp, :credentials, :resolve, :error]],
+        [[:ptc_lisp, :credentials, :resolve, :error]],
         :creds_err_file
       )
 
@@ -410,7 +408,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert {:error, :resolution_failed, _detail} =
                Credentials.materialize(creds, "f")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :error], _, metadata},
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :error], _, metadata},
                      500
 
       assert metadata.binding == "f"
@@ -424,7 +422,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
 
     test "unknown binding → :unknown_binding" do
       attach(
-        [[:ptc_runner_mcp, :credentials, :resolve, :error]],
+        [[:ptc_lisp, :credentials, :resolve, :error]],
         :creds_err_unknown
       )
 
@@ -433,7 +431,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert {:error, :unknown_binding, _detail} =
                Credentials.materialize(creds, "nonexistent")
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :credentials, :resolve, :error], _,
+      assert_receive {:telemetry, [:ptc_lisp, :credentials, :resolve, :error], _,
                       %{binding: "nonexistent", source: :unknown, reason: :unknown_binding}},
                      500
     end
@@ -444,7 +442,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
   describe "upstream.http.sse_array_compat (Phase 2C — still firing)" do
     test ":sse_response_array_form path emits the event" do
       attach(
-        [[:ptc_runner_mcp, :upstream, :http, :sse_array_compat]],
+        [[:ptc_lisp, :upstream, :http, :sse_array_compat]],
         :sse_array
       )
 
@@ -457,8 +455,8 @@ defmodule PtcRunnerMcp.TelemetryTest do
       assert {:ok, %{"content" => [%{"type" => "text", "text" => "ok"}]}} =
                Http.call(name, "echo", %{}, [])
 
-      assert_receive {:telemetry, [:ptc_runner_mcp, :upstream, :http, :sse_array_compat],
-                      %{count: 1}, _metadata},
+      assert_receive {:telemetry, [:ptc_lisp, :upstream, :http, :sse_array_compat], %{count: 1},
+                      _metadata},
                      1_000
     end
   end
@@ -470,7 +468,7 @@ defmodule PtcRunnerMcp.TelemetryTest do
   # Drains until the mailbox quiesces for ~50ms.
   defp drain_request_events(acc \\ []) do
     receive do
-      {:telemetry, [:ptc_runner_mcp, :upstream, :http, :request, phase], meas, md} ->
+      {:telemetry, [:ptc_lisp, :upstream, :http, :request, phase], meas, md} ->
         ev = %{
           phase: phase,
           method: md.jsonrpc_method,

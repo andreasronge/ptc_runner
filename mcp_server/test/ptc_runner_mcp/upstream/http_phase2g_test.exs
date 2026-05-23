@@ -94,7 +94,7 @@ defmodule PtcRunnerMcp.Upstream.HttpPhase2gTest do
       :ok =
         :telemetry.attach(
           handler_id,
-          [:ptc_runner_mcp, :upstream, :http, :sse_array_compat],
+          [:ptc_lisp, :upstream, :http, :sse_array_compat],
           &__MODULE__.forward_telemetry/4,
           %{test_pid: test_pid}
         )
@@ -114,12 +114,11 @@ defmodule PtcRunnerMcp.Upstream.HttpPhase2gTest do
                Http.call(name, "echo", %{}, [])
 
       # Exactly one telemetry event for the array-compat path.
-      assert_receive {:telemetry_event, [:ptc_runner_mcp, :upstream, :http, :sse_array_compat],
+      assert_receive {:telemetry_event, [:ptc_lisp, :upstream, :http, :sse_array_compat],
                       %{count: 1}, _metadata},
                      1_000
 
-      refute_received {:telemetry_event, [:ptc_runner_mcp, :upstream, :http, :sse_array_compat],
-                       _, _}
+      refute_received {:telemetry_event, [:ptc_lisp, :upstream, :http, :sse_array_compat], _, _}
     end
   end
 

@@ -5,6 +5,9 @@ schema-validated call. We use raw JSON-RPC frames so you can see
 exactly what the server consumes and emits; in practice your MCP
 client (Claude Desktop, Cursor, Cline, …) hides this layer.
 
+The installable release and binary are still named `ptc_runner_mcp`;
+the MCP `initialize` response advertises the server name `ptc_lisp`.
+
 For the conceptual overview, see
 [`docs/mcp-server.md`](../mcp-server.md). For full client wiring,
 see [`docs/mcp-server-cli.md`](../mcp-server-cli.md).
@@ -225,10 +228,10 @@ head -1 /tmp/ptc-traces/*.jsonl
 A typical trace contains, in chronological order:
 
 - `trace.start` — header with the trace UUID.
-- `[:ptc_runner_mcp, :call, :start]` — the MCP call began.
+- `[:ptc_lisp, :call, :start]` — the MCP call began.
 - `[:ptc_runner, :lisp, :execute, :start]` — the sandbox started.
 - `[:ptc_runner, :lisp, :execute, :stop]` — the sandbox finished.
-- `[:ptc_runner_mcp, :call, :stop]` — the MCP call returned.
+- `[:ptc_lisp, :call, :stop]` — the MCP call returned.
 - `trace.stop` — footer.
 
 Two flags shape what gets written:

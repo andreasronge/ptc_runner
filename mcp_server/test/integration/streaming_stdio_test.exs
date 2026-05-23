@@ -88,7 +88,7 @@ defmodule PtcRunnerMcp.Integration.StreamingStdioTest do
 
     assert reply["id"] == 1, "expected reply for id 1, got #{inspect(reply)}"
     assert reply["result"]["protocolVersion"] in ["2025-11-25", "2025-06-18"]
-    assert reply["result"]["serverInfo"]["name"] == "ptc_runner_mcp"
+    assert reply["result"]["serverInfo"]["name"] == "ptc_lisp"
 
     # Now drive a `tools/call` over the same still-open stdin to make
     # sure the streaming path goes all the way through the async worker
