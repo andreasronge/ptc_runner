@@ -542,25 +542,27 @@ defmodule PtcRunnerMcp.Envelope do
   defp append_session_suffix(text, structured) do
     suffix =
       [
+        rollback_suffix(structured),
         stored_suffix(Map.get(structured, "memory")),
         upstream_suffix(Map.get(structured, "upstream_calls"))
       ]
       |> Enum.reject(&is_nil/1)
-      |> Enum.join(" ")
+      |> Enum.join("; ")
 
     if suffix == "", do: text, else: join_text(text, "[" <> suffix <> "]")
   end
 
+  defp rollback_suffix(%{"status" => "error"}), do: "rolled back"
+  defp rollback_suffix(_), do: nil
+
   defp stored_suffix(%{"changed_keys" => keys}) when is_list(keys) and keys != [] do
-    "stored: " <> Enum.map_join(keys, " ", &to_string/1)
+    "stored: " <> Enum.map_join(keys, ", ", &to_string/1)
   end
 
   defp stored_suffix(_), do: nil
 
   defp upstream_suffix(entries) when is_list(entries) and entries != [] do
-    count = length(entries)
-    noun = if count == 1, do: "upstream call", else: "upstream calls"
-    "#{count} #{noun}, see lisp_debug for metrics"
+    "turn upstream calls: #{length(entries)}"
   end
 
   defp upstream_suffix(_), do: nil

@@ -48,8 +48,36 @@ defmodule PtcRunnerMcp.SessionsTest do
 
     names = Tools.list()["tools"] |> Enum.map(& &1["name"])
 
+    assert "lisp_eval" in names
     refute "lisp_session_start" in names
     refute "lisp_session_eval" in names
+  end
+
+  test "session mode hides and rejects stateless lisp_eval" do
+    names = Tools.list()["tools"] |> Enum.map(& &1["name"])
+
+    refute "lisp_eval" in names
+    assert "lisp_session_eval" in names
+
+    direct =
+      Tools.call(%{
+        "name" => "lisp_eval",
+        "arguments" => %{"program" => "(+ 1 2)"}
+      })
+
+    assert direct["isError"] == true
+    assert direct["structuredContent"]["reason"] == "unknown_tool"
+
+    frame = %{
+      "jsonrpc" => "2.0",
+      "id" => "no-stateless",
+      "method" => "tools/call",
+      "params" => %{"name" => "lisp_eval", "arguments" => %{"program" => "(+ 1 2)"}}
+    }
+
+    assert {:reply, reply, :continue} = JsonRpc.dispatch({:ok, frame})
+    assert reply["result"]["isError"] == true
+    assert reply["result"]["structuredContent"]["reason"] == "unknown_tool"
   end
 
   test "session Lisp opts preserve the aggregate parallel memory budget" do

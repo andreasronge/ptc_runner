@@ -427,10 +427,17 @@ defmodule PtcRunnerMcp.Tools do
   @spec list() :: map()
   def list do
     base =
-      if agentic_advertised?() do
-        [tool_entry(), Agentic.tool_entry()]
+      if Sessions.enabled?() do
+        []
       else
         [tool_entry()]
+      end
+
+    base =
+      if agentic_advertised?() do
+        base ++ [Agentic.tool_entry()]
+      else
+        base
       end
 
     tools =
@@ -476,10 +483,20 @@ defmodule PtcRunnerMcp.Tools do
   """
   @spec call(map()) :: map()
   def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
-    handle_execute_with_gate(args)
+    if Sessions.enabled?() do
+      Envelope.unknown_tool(@tool_name)
+    else
+      handle_execute_with_gate(args)
+    end
   end
 
-  def call(%{"name" => @tool_name}), do: handle_execute_with_gate(%{})
+  def call(%{"name" => @tool_name}) do
+    if Sessions.enabled?() do
+      Envelope.unknown_tool(@tool_name)
+    else
+      handle_execute_with_gate(%{})
+    end
+  end
 
   def call(%{"name" => "lisp_task", "arguments" => args}) when is_map(args),
     do: handle_agentic_call(args)

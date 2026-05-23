@@ -464,12 +464,16 @@ defmodule PtcRunnerMcp.JsonRpc do
   end
 
   defp validate_tool_args(%{"name" => "lisp_eval"}, args) do
-    case Tools.validate(args) do
-      {:ok, program, context, parsed_signature} ->
-        {:ok, :lisp_eval, {program, context, parsed_signature}}
+    if Sessions.enabled?() do
+      {:error, Envelope.unknown_tool("lisp_eval")}
+    else
+      case Tools.validate(args) do
+        {:ok, program, context, parsed_signature} ->
+          {:ok, :lisp_eval, {program, context, parsed_signature}}
 
-      {:error, envelope} ->
-        {:error, envelope}
+        {:error, envelope} ->
+          {:error, envelope}
+      end
     end
   end
 
@@ -497,7 +501,8 @@ defmodule PtcRunnerMcp.JsonRpc do
     end
   end
 
-  defp known_tool_name?(name) when name in ["lisp_eval", "lisp_task"], do: true
+  defp known_tool_name?("lisp_eval"), do: not Sessions.enabled?()
+  defp known_tool_name?("lisp_task"), do: true
   defp known_tool_name?(name) when is_binary(name), do: Sessions.tool_name?(name)
   defp known_tool_name?(_), do: false
 
