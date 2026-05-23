@@ -82,8 +82,20 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
         "upstream_calls" => [%{"server" => "fs"}]
       })
 
-    assert text == "runtime_error: boom\nboom\n[rolled back; turn upstream calls: 1]"
+    assert text == "runtime_error: boom\n[rolled back; turn upstream calls: 1]"
     refute text =~ "lisp_debug"
+  end
+
+  test "error text avoids duplicated reason prefixes and feedback" do
+    text =
+      Envelope.render_session_error_text(%{
+        "status" => "error",
+        "reason" => "type_error",
+        "message" => "type_error: sort-by key function failed",
+        "feedback" => "type_error: sort-by key function failed"
+      })
+
+    assert text == "type_error: sort-by key function failed\n[rolled back]"
   end
 
   test "prints are capped by encoded byte budget and the kept prefix stays within budget" do
