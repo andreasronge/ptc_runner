@@ -49,8 +49,6 @@ ptc_runner runs a small Clojure-like language called PTC-Lisp. There is no files
 
 Every program runs in its own lightweight BEAM process (the runtime behind Erlang and Elixir) with a wall-clock limit and a memory limit. If a program loops or balloons, that one process is killed and the model is told why, in terms it can act on. Errors are written to be recovered from, not to look like a stack trace. The model reads the feedback, adjusts, and tries again, the way you would at a REPL.
 
-For readers wondering how much "Clojure-like" means in practice, the generated [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md) tracks supported Clojure namespaces, curated Java compatibility targets, and PTC-specific extensions.
-
 This does not seem to require a frontier model. In a small [PTC-Lisp generation benchmark](https://github.com/andreasronge/ptc_runner/blob/main/docs/benchmark-eval.md), Gemini 3.1 Flash Lite and Claude Haiku 4.5 each passed 149 of 150 executions, which is enough for the practical point here: cheaper models can use the language reliably.
 
 The core path through the MCP server is a single tool, `lisp_eval`, that takes a PTC-Lisp program and optional input (sessions and diagnostics add a few more when you want them). Any MCP client can point at it: Claude Desktop, Cursor, Cline, Claude Code. You do not write Elixir, and you do not host a Python runtime. You run a binary and add it to your client config. The fact that there is a 30-year-old battle-tested VM doing the isolation underneath is an implementation detail you never have to touch.
@@ -108,11 +106,11 @@ The REPL shape now applies in two directions: the model can keep intermediate da
 
 ## Tool discovery should feel like a REPL too
 
-The same idea applies before the first tool call. MCP tool lists can get large fast. Every server brings names, descriptions, schemas, examples, and response shapes, and most of that is irrelevant to the task in front of you. If all of it is pushed into the prompt up front, tool discovery becomes another version of the context-window problem.
+The same idea applies before the first tool call. MCP tool lists get large fast — names, descriptions, schemas, examples, response shapes — and most of it is irrelevant to the task in front of you. Push all of it into the prompt up front and discovery becomes another version of the context-window problem.
 
-ptc_runner now makes discovery part of the Lisp environment. The names are deliberately familiar: `(apropos "calendar")`, `(dir 'calendar)`, `(doc 'calendar/search_events)`. They are the kinds of moves a model has seen over and over in REPL transcripts, shell sessions, and programming examples: search, inspect, read the docs, try the next thing.
+ptc_runner makes discovery part of the Lisp environment, with deliberately familiar names: `(apropos "calendar")`, `(dir 'calendar)`, `(doc 'calendar/search_events)`. Search, inspect, read the docs, try the next thing — the moves a model has seen over and over in REPL transcripts and shell sessions. It is not learning a new catalog API so much as reusing a pattern already baked into its training data, exploring the catalog one step at a time while the bulk of it stays in the runtime.
 
-That is the interesting part to me. The model is not learning a new catalog API so much as reusing a pattern already baked into its training data. The full tool catalog can stay in the runtime, while the model explores it one small step at a time.
+The same forms reach past MCP tools to the language itself. `(apropos "date")`, `(dir 'clojure.string)`, `(doc 'subs)` surface which `clojure.core` functions exist and what the limited Java interop covers, so the prompt never has to carry the whole reference. The full list lives in the [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md).
 
 ## The part that changed how I build these systems
 
