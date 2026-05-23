@@ -24,6 +24,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
@@ -43,6 +44,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     with :ok <- maybe_validate_builtin_args(builtin, args) do
       do_apply_fun(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn)
     end
+  end
+
+  defp do_apply_fun(%RuntimeCallable{} = callable, args, %EvalContext{} = eval_ctx, do_eval_fn) do
+    callable
+    |> RuntimeCallable.bind(eval_ctx, do_eval_fn)
+    |> RuntimeCallable.invoke(args, eval_ctx)
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
@@ -116,7 +123,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
     try do
-      with_side_effect_stash(eval_ctx, fn -> apply(fun, converted_args) end)
+      with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
     rescue
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
@@ -263,7 +270,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     # Convert any closures/builtins in args to callable functions
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
-    with_side_effect_stash(eval_ctx, fn -> fun.(converted_args) end)
+    with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(converted_args) end)
   rescue
     e in ExecutionError ->
       {:error, execution_error_tuple(e)}
@@ -288,7 +295,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       fun = elem(funs, idx)
 
       try do
-        with_side_effect_stash(eval_ctx, fn -> apply(fun, converted_args) end)
+        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
       rescue
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
@@ -314,9 +321,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, _do_eval_fn)
+  defp do_apply_fun(fun, args, %EvalContext{} = eval_ctx, do_eval_fn)
        when is_function(fun) do
-    with_side_effect_stash(eval_ctx, fn -> apply(fun, args) end)
+    with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
   end
 
   # Map as function: (map key) → Map.get(map, key)
@@ -580,6 +587,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   def closure_to_fun({:collect, _} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
   def closure_to_fun(%Builtin{} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
+  def closure_to_fun(%RuntimeCallable{} = callable, %EvalContext{}, _do_eval_fn), do: callable
+
   # Special forms like println - convert to a function
   def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do
     fn arg ->
@@ -760,11 +769,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Uses a stack to handle nested HOFs: each HOF pushes a fresh accumulator,
   # inner HOFs push/pop their own level, and the outer HOF collects everything.
 
-  defp with_side_effect_stash(%EvalContext{} = eval_ctx, fun) when is_function(fun, 0) do
+  defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
+       when is_function(do_eval_fn, 2) and is_function(fun, 0) do
     push_side_effect_stash()
 
     try do
-      result = fun.()
+      result = RuntimeCallable.with_context(eval_ctx, do_eval_fn, fun)
       {:ok, result, pop_side_effects(eval_ctx)}
     rescue
       e ->
@@ -779,7 +789,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp push_side_effect_stash do
     stack = Process.get(:__ptc_hof_stack, [])
-    Process.put(:__ptc_hof_stack, [%{tool_calls: [], prints: [], catalog_ops: []} | stack])
+
+    Process.put(:__ptc_hof_stack, [
+      %{tool_calls: [], prints: [], catalog_ops: [], tool_cache: %{}} | stack
+    ])
   end
 
   defp drop_side_effect_stash do
@@ -798,7 +811,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         updated = %{
           tool_calls: ctx.tool_calls ++ top.tool_calls,
           prints: ctx.prints ++ top.prints,
-          catalog_ops: ctx.catalog_ops ++ top.catalog_ops
+          catalog_ops: ctx.catalog_ops ++ top.catalog_ops,
+          tool_cache: Map.merge(Map.get(top, :tool_cache, %{}), ctx.tool_cache)
         }
 
         Process.put(:__ptc_hof_stack, [updated | rest])
@@ -820,6 +834,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
         |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
         |> Map.update!(:catalog_ops, fn existing -> top.catalog_ops ++ existing end)
+        |> Map.update!(:tool_cache, fn existing ->
+          Map.merge(existing, Map.get(top, :tool_cache, %{}))
+        end)
 
       [] ->
         eval_ctx

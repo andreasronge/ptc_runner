@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.TypeError
 
   @spec validate!(Builtin.t() | term(), [term()]) :: :ok
@@ -36,6 +37,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   @spec valid_callable?(term()) :: boolean()
   def valid_callable?(x) when is_function(x), do: true
+  def valid_callable?(%RuntimeCallable{}), do: true
   def valid_callable?({:special, :println}), do: true
   def valid_callable?(%LispKeyword{}), do: true
   def valid_callable?(x) when is_atom(x) and x not in [nil, true, false], do: true

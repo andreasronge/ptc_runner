@@ -37,6 +37,7 @@ defmodule PtcRunner.Lisp do
     Eval,
     ExecutionError,
     Parser,
+    RuntimeCallable,
     SourceAtoms,
     SymbolCounter
   }
@@ -874,6 +875,10 @@ defmodule PtcRunner.Lisp do
   # boundary contract (signature validation, mustache, chaining).
   defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
 
+  defp externalize_lisp_values(%RuntimeCallable{} = callable) do
+    RuntimeCallable.label(callable)
+  end
+
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
     %{var | name: existing_atom_or(name, name)}
   end
@@ -899,7 +904,9 @@ defmodule PtcRunner.Lisp do
   defp externalize_lisp_values(value), do: value
 
   defp externalize_memory(memory) when is_map(memory) do
-    Map.new(memory, fn {k, v} ->
+    memory
+    |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
+    |> Map.new(fn {k, v} ->
       {externalize_memory_key(k), externalize_lisp_values(v)}
     end)
   end
@@ -1007,6 +1014,9 @@ defmodule PtcRunner.Lisp do
   defp collect_tool_names({:tool_call, name, args}, acc) do
     Enum.reduce(args, MapSet.put(acc, name), &collect_tool_names/2)
   end
+
+  defp collect_tool_names({:runtime_callable, :tool, name}, acc), do: MapSet.put(acc, name)
+  defp collect_tool_names({:runtime_callable, _namespace, _name}, acc), do: acc
 
   defp collect_tool_names({:do, exprs}, acc) do
     Enum.reduce(exprs, acc, &collect_tool_names/2)
@@ -1211,6 +1221,8 @@ defmodule PtcRunner.Lisp do
   defp collect_undefined_vars({:tool_call, _name, args}, scope) do
     Enum.flat_map(args, &collect_undefined_vars(&1, scope))
   end
+
+  defp collect_undefined_vars({:runtime_callable, _namespace, _name}, _scope), do: []
 
   # def / defonce — add name to scope before recursing (enables recursive defn)
   defp collect_undefined_vars({:def, name, value, _meta}, scope) do
