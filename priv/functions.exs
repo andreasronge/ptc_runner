@@ -113,6 +113,86 @@
       divergences: nil
     },
     %{
+      name: ".toEpochDay",
+      description: "Return LocalDate epoch-day integer",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.toEpochDay local-date)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on LocalDate values returned by `LocalDate/parse`.",
+      see_also: ["LocalDate/parse", ".plusDays", ".minusDays"],
+      clojure_var: ".toEpochDay",
+      divergences: nil
+    },
+    %{
+      name: ".plusDays",
+      description: "Add days to a LocalDate",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.plusDays local-date n)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      see_also: ["LocalDate/parse", ".minusDays", ".toEpochDay"],
+      clojure_var: ".plusDays",
+      divergences: nil
+    },
+    %{
+      name: ".minusDays",
+      description: "Subtract days from a LocalDate",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.minusDays local-date n)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      see_also: ["LocalDate/parse", ".plusDays", ".toEpochDay"],
+      clojure_var: ".minusDays",
+      divergences: nil
+    },
+    %{
+      name: ".toMillis",
+      description: "Return duration length in milliseconds",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.toMillis duration)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on Duration values returned by `Duration/between`.",
+      see_also: ["Duration/between", ".toDays"],
+      clojure_var: ".toMillis",
+      divergences: nil
+    },
+    %{
+      name: ".toDays",
+      description: "Return duration length in whole days",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(.toDays duration)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Works on Duration values returned by `Duration/between`; partial days truncate toward zero.",
+      see_also: ["Duration/between", ".toMillis"],
+      clojure_var: ".toDays",
+      divergences: nil
+    },
+    %{
       name: ".contains",
       description: "Returns true if string contains substring",
       binding: :normal,
@@ -1062,6 +1142,26 @@
       notes: nil,
       see_also: [],
       clojure_var: "currentTimeMillis",
+      divergences: nil
+    },
+    %{
+      name: "Duration/between",
+      description: "Return a Duration between two DateTime instants",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: [
+        "(Duration/between start-instant end-instant)",
+        "(java.time.Duration/between start-instant end-instant)"
+      ],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected.",
+      see_also: ["Instant/parse", ".toMillis", ".toDays"],
+      clojure_var: "Duration/between",
       divergences: nil
     },
     %{
@@ -4969,6 +5069,46 @@
       notes: ""
     },
     %{
+      name: ".toEpochDay",
+      class: "java.time.LocalDate",
+      kind: :method,
+      description: "Return LocalDate epoch-day integer",
+      signatures: ["(.toEpochDay local-date)"],
+      notes: "Works on LocalDate values returned by `LocalDate/parse`."
+    },
+    %{
+      name: ".plusDays",
+      class: "java.time.LocalDate",
+      kind: :method,
+      description: "Add days to a LocalDate",
+      signatures: ["(.plusDays local-date n)"],
+      notes: "`n` must be an integer."
+    },
+    %{
+      name: ".minusDays",
+      class: "java.time.LocalDate",
+      kind: :method,
+      description: "Subtract days from a LocalDate",
+      signatures: ["(.minusDays local-date n)"],
+      notes: "`n` must be an integer."
+    },
+    %{
+      name: ".toMillis",
+      class: "java.time.Duration",
+      kind: :method,
+      description: "Return duration length in milliseconds",
+      signatures: ["(.toMillis duration)"],
+      notes: "Works on Duration values returned by `Duration/between`."
+    },
+    %{
+      name: ".toDays",
+      class: "java.time.Duration",
+      kind: :method,
+      description: "Return duration length in whole days",
+      signatures: ["(.toDays duration)"],
+      notes: "Partial days truncate toward zero."
+    },
+    %{
       name: ".isBefore",
       class: "java.time.LocalDate / java.util.Date",
       kind: :method,
@@ -5009,6 +5149,18 @@
       ],
       notes:
         "Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin."
+    },
+    %{
+      name: "Duration/between",
+      class: "java.time.Duration",
+      kind: :static,
+      description: "Return a Duration between two DateTime instants",
+      signatures: [
+        "(Duration/between start-instant end-instant)",
+        "(java.time.Duration/between start-instant end-instant)"
+      ],
+      notes:
+        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected."
     },
     %{
       name: "System/currentTimeMillis",

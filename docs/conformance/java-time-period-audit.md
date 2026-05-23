@@ -26,7 +26,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `.getDays` | 🔲 candidate | Return day component of a Period | Requested in issue #1019 for bounded Java-shaped Period support. |
-| `Period/between` | 🔲 candidate | Period between two dates | Requested in issue #1019 for LocalDate differences. |
+| `.getDays` | 🔲 candidate | Return day component of a Period | Deferred for issue #1019 because this is the day component, not total days; easy to misuse for analytics. |
+| `Period/between` | 🔲 candidate | Period between two dates | Deferred for issue #1019; `Period.getDays` is a component value, not total days. Use `.toEpochDay` subtraction for LocalDate day differences. |
 | `Period/ofDays` | 🔲 candidate | Construct period from days | Useful companion for bounded Period support. |
 | `Period/parse` | 🔲 candidate | Parse ISO-8601 period string | Useful but lower-priority than between/getDays. |

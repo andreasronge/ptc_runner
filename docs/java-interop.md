@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-24 interop entries across 11 classes.
+30 interop entries across 12 classes.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -70,6 +70,15 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `System/currentTimeMillis` | Static | `(System/currentTimeMillis), (currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
 
 
+### java.time.Duration
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `.toDays` | Method | `(.toDays duration)` | Return duration length in whole days | Partial days truncate toward zero. |
+| `.toMillis` | Method | `(.toMillis duration)` | Return duration length in milliseconds | Works on Duration values returned by `Duration/between`. |
+| `Duration/between` | Static | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a Duration between two DateTime instants | Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected. |
+
+
 ### java.time.Instant
 
 | Name | Kind | Signature | Description | Notes |
@@ -81,6 +90,9 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
+| `.minusDays` | Method | `(.minusDays local-date n)` | Subtract days from a LocalDate | `n` must be an integer. |
+| `.plusDays` | Method | `(.plusDays local-date n)` | Add days to a LocalDate | `n` must be an integer. |
+| `.toEpochDay` | Method | `(.toEpochDay local-date)` | Return LocalDate epoch-day integer | Works on LocalDate values returned by `LocalDate/parse`. |
 | `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
 
 

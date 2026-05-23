@@ -14,12 +14,12 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 3 |
-| Candidate | 6 |
+| Supported | 6 |
+| Candidate | 3 |
 | Not Relevant | 0 |
 | Not Classified | 0 |
 | Relevant Target | 9 |
-| Coverage | 3/9 (33.3%) |
+| Coverage | 6/9 (66.7%) |
 | **Total** | **9** |
 
 ## Details
@@ -29,9 +29,9 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `.format` | 🔲 candidate | Format date with a formatter | Date formatting API would need a bounded formatter surface. |
 | `.isAfter` | ✅ supported | Date ordering predicate | Works for same-type Date or DateTime values. |
 | `.isBefore` | ✅ supported | Date ordering predicate | Works for same-type Date or DateTime values. |
-| `.minusDays` | 🔲 candidate | Subtract days from a LocalDate | Requested in issue #1019 for date arithmetic. |
-| `.plusDays` | 🔲 candidate | Add days to a LocalDate | Requested in issue #1019 for date arithmetic. |
-| `.toEpochDay` | 🔲 candidate | Return LocalDate epoch-day integer | Requested in issue #1019 for day differences and date sorting. |
+| `.minusDays` | ✅ supported | Subtract days from a LocalDate | Requested in issue #1019 for date arithmetic. |
+| `.plusDays` | ✅ supported | Add days to a LocalDate | Requested in issue #1019 for date arithmetic. |
+| `.toEpochDay` | ✅ supported | Return LocalDate epoch-day integer | Requested in issue #1019 for day differences and date sorting. |
 | `LocalDate/now` | 🔲 candidate | Current date | Useful, but currentTimeMillis plus parse/Date constructors cover many cases. |
 | `LocalDate/of` | 🔲 candidate | Construct date from year/month/day | Useful Java idiom; vector/map construction plus parse is the current workaround. |
 | `LocalDate/parse` | ✅ supported | Parse ISO-8601 date string | Also available as java.time.LocalDate/parse and parse. |

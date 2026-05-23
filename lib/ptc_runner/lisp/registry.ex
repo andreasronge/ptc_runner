@@ -41,6 +41,32 @@ defmodule PtcRunner.Lisp.Registry do
   @registry Code.eval_file(@registry_path) |> elem(0)
   @audit Code.eval_file(@audit_path) |> elem(0)
   @java_compat_audit Code.eval_file(@java_compat_audit_path) |> elem(0)
+  @doc_namespaces %{
+    "clojure.core" => :"clojure.core",
+    "core" => :core,
+    "clojure.string" => :"clojure.string",
+    "str" => :str,
+    "string" => :string,
+    "clojure.set" => :"clojure.set",
+    "set" => :set,
+    "clojure.walk" => :"clojure.walk",
+    "walk" => :walk,
+    "regex" => :regex,
+    "Math" => :Math,
+    "System" => :System,
+    "Boolean" => :Boolean,
+    "Double" => :Double,
+    "Float" => :Float,
+    "Integer" => :Integer,
+    "Long" => :Long,
+    "LocalDate" => :LocalDate,
+    "java.time.LocalDate" => :"java.time.LocalDate",
+    "Instant" => :Instant,
+    "java.time.Instant" => :"java.time.Instant",
+    "Duration" => :Duration,
+    "java.time.Duration" => :"java.time.Duration",
+    "json" => :json
+  }
 
   @doc """
   Returns all implemented function entries.
@@ -166,7 +192,7 @@ defmodule PtcRunner.Lisp.Registry do
   than presentation grouping. For example, `clojure.core/str` is valid even
   though `str` is displayed in the String Functions section.
   """
-  @spec builtins_by_namespace(atom()) :: [atom()]
+  @spec builtins_by_namespace(atom()) :: [atom() | String.t()]
   def builtins_by_namespace(ns) when ns in [:"clojure.core", :core] do
     supported_core =
       clojure_core_audit()
@@ -191,11 +217,27 @@ defmodule PtcRunner.Lisp.Registry do
   def builtins_by_namespace(ns) when ns in [:"clojure.walk", :walk],
     do: builtins_by_category(:walk)
 
+  def builtins_by_namespace(:System), do: [:currentTimeMillis]
+
+  def builtins_by_namespace(:Boolean), do: ["parseBoolean"]
+
+  def builtins_by_namespace(:Double),
+    do: ["parseDouble", :POSITIVE_INFINITY, :NEGATIVE_INFINITY, :NaN]
+
+  def builtins_by_namespace(:Float), do: ["parseFloat"]
+  def builtins_by_namespace(:Integer), do: ["parseInt"]
+  def builtins_by_namespace(:Long), do: ["parseLong"]
+
+  def builtins_by_namespace(ns) when ns in [:LocalDate, :"java.time.LocalDate"], do: [:parse]
+  def builtins_by_namespace(ns) when ns in [:Instant, :"java.time.Instant"], do: [:parse]
+  def builtins_by_namespace(ns) when ns in [:Duration, :"java.time.Duration"], do: [:between]
+
   def builtins_by_namespace(ns) do
     ns
     |> Env.namespace_category()
     |> case do
       nil -> []
+      :interop -> []
       category -> builtins_by_category(category)
     end
   end
@@ -226,7 +268,8 @@ defmodule PtcRunner.Lisp.Registry do
   Looks up documentation for a function by exact name.
 
   Handles namespace-qualified names (e.g., `"LocalDate/parse"` → `"parse"`,
-  `"System/currentTimeMillis"` → `"currentTimeMillis"`).
+  `"System/currentTimeMillis"` → `"currentTimeMillis"`,
+  `"java.time.Duration/between"` → `"Duration/between"`).
 
   ## Examples
 
@@ -237,14 +280,57 @@ defmodule PtcRunner.Lisp.Registry do
       iex> entry = PtcRunner.Lisp.Registry.doc("LocalDate/parse")
       iex> entry.name
       "parse"
+
+      iex> entry = PtcRunner.Lisp.Registry.doc("java.time.Duration/between")
+      iex> entry.name
+      "Duration/between"
   """
   @spec doc(String.t()) :: map() | nil
   def doc(name) do
     Enum.find(implemented(), &(&1.name == name)) ||
       case String.split(name, "/", parts: 2) do
-        [_ns, func] -> Enum.find(implemented(), &(&1.name == func))
+        [ns, func] -> doc_for_namespaced(ns, func)
         _ -> nil
       end
+  end
+
+  defp doc_for_namespaced(ns, func) do
+    with {:ok, ns_atom} <- doc_namespace(ns),
+         true <- namespace_member?(ns_atom, func) do
+      ns
+      |> canonical_doc_names(func)
+      |> Enum.find_value(fn canonical -> Enum.find(implemented(), &(&1.name == canonical)) end)
+    else
+      _ -> nil
+    end
+  end
+
+  defp doc_namespace(ns) do
+    case Map.fetch(@doc_namespaces, ns) do
+      {:ok, ns_atom} -> {:ok, ns_atom}
+      :error -> :error
+    end
+  end
+
+  defp namespace_member?(ns, func) do
+    ns
+    |> builtins_by_namespace()
+    |> Enum.any?(&(to_string(&1) == func))
+  end
+
+  defp canonical_doc_names("Boolean", "parseBoolean"), do: ["parse-boolean"]
+  defp canonical_doc_names("Double", "parseDouble"), do: ["parse-double"]
+  defp canonical_doc_names("Float", "parseFloat"), do: ["parse-double"]
+  defp canonical_doc_names("Integer", "parseInt"), do: ["parse-long"]
+  defp canonical_doc_names("Long", "parseLong"), do: ["parse-long"]
+
+  defp canonical_doc_names(ns, func), do: [short_qualified_name(ns, func), func]
+
+  defp short_qualified_name(ns, func) do
+    ns
+    |> String.split(".")
+    |> List.last()
+    |> then(&"#{&1}/#{func}")
   end
 
   @doc """

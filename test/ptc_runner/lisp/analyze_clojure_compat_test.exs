@@ -159,6 +159,39 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
+  describe "bounded Java interop namespaces" do
+    test "Duration/between resolves without exposing bare between" do
+      assert {:ok, %{return: 1000}} =
+               PtcRunner.Lisp.run(
+                 ~s|(.toMillis (Duration/between (Instant/parse "2026-05-22T00:00:00Z") (Instant/parse "2026-05-22T00:00:01Z")))|
+               )
+
+      assert {:error, step} =
+               PtcRunner.Lisp.run(
+                 ~s|(.toMillis (between (Instant/parse "2026-05-22T00:00:00Z") (Instant/parse "2026-05-22T00:00:01Z")))|
+               )
+
+      assert step.fail.message =~ "Undefined variable: between"
+    end
+
+    test "fully-qualified java.time.Duration/between resolves to the same bounded helper" do
+      assert {:ok, %{return: 1000}} =
+               PtcRunner.Lisp.run(
+                 ~s|(.toMillis (java.time.Duration/between (Instant/parse "2026-05-22T00:00:00Z") (Instant/parse "2026-05-22T00:00:01Z")))|
+               )
+    end
+
+    test "Java time namespaces do not expose unrelated interop helpers" do
+      assert {:error, step} = PtcRunner.Lisp.run("(LocalDate/currentTimeMillis)")
+      assert step.fail.message =~ "currentTimeMillis is not available"
+      assert step.fail.message =~ "Interop functions: parse"
+
+      assert {:error, step} = PtcRunner.Lisp.run("(Duration/parse \"PT1S\")")
+      assert step.fail.message =~ "Duration/parse is not available"
+      assert step.fail.message =~ "Duration/between"
+    end
+  end
+
   describe "call position normalization" do
     test "(clojure.string/join) works in call position" do
       raw = {:list, [{:ns_symbol, :"clojure.string", :join}, {:string, ","}, {:vector, []}]}

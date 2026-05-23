@@ -56,6 +56,8 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       assert SourceAtoms.intern("catalog") == :catalog
       assert SourceAtoms.intern("java.time.LocalDate") == :"java.time.LocalDate"
       assert SourceAtoms.intern("LocalDate") == :LocalDate
+      assert SourceAtoms.intern("java.time.Duration") == :"java.time.Duration"
+      assert SourceAtoms.intern("Duration") == :Duration
       assert SourceAtoms.intern("Double") == :Double
     end
 
@@ -63,6 +65,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       assert SourceAtoms.intern("search-tools") == :"search-tools"
       assert SourceAtoms.intern("describe-tool") == :"describe-tool"
       assert SourceAtoms.intern("list-tools") == :"list-tools"
+      assert SourceAtoms.intern("between") == :between
     end
 
     test "covers analyzer-dispatched source forms outside the core list" do
@@ -151,13 +154,14 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :set,
       :regex,
       :Math,
-      :Interop,
       :System,
       :Double,
       :LocalDate,
       :Instant,
+      :Duration,
       :"java.time.LocalDate",
       :"java.time.Instant",
+      :"java.time.Duration",
       :"java.util.Date.",
       # qualified analyzer keys
       :summary,
@@ -168,6 +172,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :"search-tools",
       :"parse-string",
       :"generate-string",
+      :between,
       :text,
       :json,
       :"re-pattern"

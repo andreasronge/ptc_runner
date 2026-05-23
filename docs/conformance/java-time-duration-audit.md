@@ -14,20 +14,20 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 0 |
-| Candidate | 5 |
+| Supported | 3 |
+| Candidate | 2 |
 | Not Relevant | 0 |
 | Not Classified | 0 |
 | Relevant Target | 5 |
-| Coverage | 0/5 (0.0%) |
+| Coverage | 3/5 (60.0%) |
 | **Total** | **5** |
 
 ## Details
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `.toDays` | 🔲 candidate | Return duration length in whole days | Requested in issue #1019 for bucket/day calculations. |
-| `.toMillis` | 🔲 candidate | Return duration length in milliseconds | Requested in issue #1019 for instant differences. |
-| `Duration/between` | 🔲 candidate | Duration between two instants | Requested in issue #1019 for millisecond/day differences. |
+| `.toDays` | ✅ supported | Return duration length in whole days | Requested in issue #1019 for bucket/day calculations. |
+| `.toMillis` | ✅ supported | Return duration length in milliseconds | Requested in issue #1019 for instant differences. |
+| `Duration/between` | ✅ supported | Duration between two instants | Requested in issue #1019 for millisecond/day differences. |
 | `Duration/ofMillis` | 🔲 candidate | Construct duration from milliseconds | Useful companion for bounded Duration support. |
 | `Duration/parse` | 🔲 candidate | Parse ISO-8601 duration string | Useful but lower-priority than between/toMillis/toDays. |
