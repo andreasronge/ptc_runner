@@ -827,6 +827,35 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert {:ok, _} = Jason.encode(env)
     end
 
+    test "failed eval feedback includes compact upstream result summary" do
+      put_fake("alpha", %{
+        "x" => fn _, _ ->
+          {:ok,
+           %{
+             "structuredContent" => %{
+               "content" => "[FILE] README.md\n[DIR] docs",
+               "count" => 2
+             }
+           }}
+        end
+      })
+
+      env =
+        call(~S|
+          (do
+            (tool/mcp-call {:server "alpha" :tool "x" :args {}})
+            (+ 1 "x"))
+        |)
+
+      assert env["isError"] == true
+      feedback = structured(env)["feedback"]
+      assert feedback =~ "source=\"upstream-tool-results\""
+      assert feedback =~ "Tool results before error"
+      assert feedback =~ "alpha.x ok"
+      assert feedback =~ "map keys="
+      assert feedback =~ "content"
+    end
+
     test "upstream_calls is omitted when empty (no upstream calls made)" do
       put_fake("alpha", %{})
 

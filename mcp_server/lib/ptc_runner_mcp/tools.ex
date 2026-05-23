@@ -40,7 +40,8 @@ defmodule PtcRunnerMcp.Tools do
     ResponseProfile,
     Sandbox,
     Sessions,
-    UpstreamCalls
+    UpstreamCalls,
+    UpstreamResultFeedback
   }
 
   alias PtcRunnerMcp.AggregatorConfig
@@ -769,7 +770,11 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   defp decorate_and_wrap({:error, payload}, entries) when is_map(payload) do
-    decorated = UpstreamCalls.decorate(payload, entries)
+    decorated =
+      payload
+      |> UpstreamResultFeedback.append_to_feedback(entries)
+      |> UpstreamCalls.decorate(entries)
+
     profile = ResponseProfile.current()
 
     case profile do

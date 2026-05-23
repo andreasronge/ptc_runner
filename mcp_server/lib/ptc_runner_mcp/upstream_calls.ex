@@ -387,6 +387,20 @@ defmodule PtcRunnerMcp.UpstreamCalls do
     |> maybe_put_upstream_results(entries)
   end
 
+  @doc """
+  Projects raw upstream-call entries to compact result summaries.
+
+  This is the same projection used by `decorate/2` for the
+  client-facing `upstream_results` field, exposed so failed-eval
+  feedback can render from raw entries before output shaping.
+  """
+  @spec compact_result_entries([entry()]) :: [map()]
+  def compact_result_entries(entries) when is_list(entries) do
+    entries
+    |> Enum.map(&compact_result_entry/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
   defp maybe_put_result_overview(entry, nil), do: entry
 
   defp maybe_put_result_overview(entry, overview) when is_map(overview) do
@@ -396,10 +410,7 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   defp maybe_put_result_overview(entry, _), do: entry
 
   defp maybe_put_upstream_results(payload, entries) do
-    summaries =
-      entries
-      |> Enum.map(&compact_result_entry/1)
-      |> Enum.reject(&is_nil/1)
+    summaries = compact_result_entries(entries)
 
     if summaries == [] do
       payload

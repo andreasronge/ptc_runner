@@ -153,6 +153,29 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
       assert entry["status"] == "ok"
     end
 
+    test "failed session eval feedback includes compact upstream result summary" do
+      ResponseProfile.set(:structured)
+
+      put_fake("alpha", %{
+        "echo" => fn _, _ -> {:ok, %{"structuredContent" => %{"content" => "hello"}}} end
+      })
+
+      session_id = start_session()
+
+      envelope =
+        eval_envelope(
+          session_id,
+          ~S|(do (tool/mcp-call {:server "alpha" :tool "echo" :args {}}) (+ 1 "x"))|
+        )
+
+      assert envelope["isError"] == true
+      feedback = envelope["structuredContent"]["feedback"]
+      assert feedback =~ "source=\"upstream-tool-results\""
+      assert feedback =~ "Tool results before error"
+      assert feedback =~ "alpha.echo ok"
+      assert feedback =~ "map keys=[\"content\"]"
+    end
+
     test "limit-exceeded public response omits metrics while debug record keeps them" do
       enable_debug()
       SessionsConfig.set(%{enabled: true, max_session_memory_bytes: 64})
