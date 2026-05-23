@@ -21,6 +21,7 @@ Syntax:
 Data:
 - literals: `nil`, bools, numbers, strings, keywords, vectors/maps/sets.
 - JSON maps use string keys.
+- No `sorted-map`; use `{}` or `(hash-map)`.
 - Context example: `{"orders":[...]}` -> `(count (filter #(= "paid" (get % "status")) data/orders))`.
 - Use `data/orders`, not `(data/orders)`, `orders`, or bare `data`.
 
