@@ -21,6 +21,8 @@ defmodule PtcRunner.Lisp.CoreAST do
           | number()
           | {:string, String.t()}
           | {:keyword, name()}
+          | {:symbol_ref, String.t()}
+          | {:repl_discovery, atom(), [t()]}
 
   @type fn_params :: [pattern()] | {:variadic, [pattern()], pattern()}
 

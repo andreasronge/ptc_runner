@@ -38,6 +38,11 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :"some->>",
                   :return,
                   :fail,
+                  :quote,
+                  :apropos,
+                  :dir,
+                  :doc,
+                  :meta,
                   # Comparison operators
                   :=,
                   :"not=",
@@ -48,6 +53,8 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   # Namespaces
                   :data,
                   :tool,
+                  :mcp,
+                  :catalog,
                   # Common keywords
                   :else
                 ])
@@ -105,6 +112,8 @@ defmodule PtcRunner.Lisp.SymbolCounter do
       MapSet.put(acc, key)
     end
   end
+
+  defp collect_symbols({:quoted_symbol, _name}, acc), do: acc
 
   # Variable references (e.g. % args in #(...) short fns) — already counted as symbols
   defp collect_symbols({:var, _name}, acc), do: acc

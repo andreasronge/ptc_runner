@@ -261,6 +261,10 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("'(1 2 3)")
     end
 
+    test "quoted symbols preserve raw namespaced text" do
+      assert {:ok, {:quoted_symbol, "github/search_repos"}} = Parser.parse("'github/search_repos")
+    end
+
     test "multiline strings are supported" do
       assert {:ok, {:string, "hello\nworld"}} = Parser.parse("\"hello\nworld\"")
     end

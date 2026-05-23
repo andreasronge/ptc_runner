@@ -50,6 +50,15 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  defmodule SymbolRef do
+    @moduledoc false
+    defstruct [:name]
+
+    defimpl Inspect do
+      def inspect(%{name: name}, _opts), do: "'#{name}"
+    end
+  end
+
   defmodule RegexLiteral do
     @moduledoc false
     defstruct [:source]
@@ -182,6 +191,7 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(%Fn{params: params}, _opts), do: {"#fn[#{params}]", false}
   defp format_clojure(%Builtin{}, _opts), do: {"#<builtin>", false}
   defp format_clojure(%Var{name: name}, _opts), do: {"#'#{name}", false}
+  defp format_clojure(%SymbolRef{name: name}, _opts), do: {"'#{name}", false}
   defp format_clojure(%RegexLiteral{source: source}, _opts), do: {"#\"#{source}\"", false}
 
   # Plain Elixir functions (e.g., returned by fnil with normal builtins)
@@ -383,11 +393,13 @@ defmodule PtcRunner.Lisp.Format do
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name) or is_binary(name), do: %Var{name: name}
+  defp sanitize({:symbol_ref, name}) when is_binary(name), do: %SymbolRef{name: name}
 
   defp sanitize({:re_mp, _mp, _anchored, source}), do: %RegexLiteral{source: source}
 
   # Pass through wrapper structs unchanged (they're already sanitized)
   defp sanitize(%Var{} = v), do: v
+  defp sanitize(%SymbolRef{} = r), do: r
   defp sanitize(%Fn{} = f), do: f
   defp sanitize(%Builtin{} = b), do: b
 

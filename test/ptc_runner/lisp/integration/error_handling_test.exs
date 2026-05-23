@@ -176,8 +176,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       source = "'(1 2 3)"
 
       assert {:error, %Step{fail: %{reason: :parse_error, message: message}}} = Lisp.run(source)
-      # Quote syntax is not supported
-      assert message =~ "quote syntax"
+      assert message =~ "quoted collections"
     end
 
     test "if without then or else clause" do

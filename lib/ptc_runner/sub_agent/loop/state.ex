@@ -97,11 +97,13 @@ defmodule PtcRunner.SubAgent.Loop.State do
     summaries: %{},
     tool_cache: nil,
 
-    # Optional `(catalog/...)` executor closure. When set, `Lisp.run/2`
+    # Optional REPL discovery executor closure. When set, `Lisp.run/2`
     # threads it into the eval context so PTC-Lisp programs can call
-    # the aggregator-mode catalog builtins (`catalog/summary`,
-    # `catalog/list-servers`, etc.). Caller-owned; this loop neither
-    # constructs it nor inherits it across child SubAgents.
+    # discovery forms such as `apropos`, `dir`, `doc`, and `meta`.
+    # Caller-owned; this loop neither constructs it nor inherits it
+    # across child SubAgents.
+    discovery_exec: nil,
+    # Backward-compatible catalog/* executor option.
     catalog_exec: nil,
 
     # Pluggable progress renderer state (opaque, owned by progress_fn)
@@ -195,7 +197,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           journal: map() | nil,
           summaries: map(),
           tool_cache: map() | nil,
-          # Optional catalog/* executor closure
+          # Optional discovery/catalog executor closures
+          discovery_exec: (atom(), list() -> term()) | nil,
           catalog_exec: (atom(), list() -> term()) | nil,
           # Pluggable progress renderer state
           progress_state: term(),

@@ -121,7 +121,11 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert_quick_contract_in_first_chunk(first_2kb)
 
-      assert_before(description, "Upstreams:", "Configured upstream MCP servers:")
+      assert_before(
+        description,
+        "(tool/mcp-call",
+        "Synthetic discovery snapshot for configured upstreams:"
+      )
     end
 
     test "tool_entry/0 slim response profile preserves quick contract in first 2 KB" do
@@ -163,8 +167,9 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       description = entry["description"]
 
       assert is_binary(description)
-      assert description =~ "- alpha:"
-      assert description =~ "- alpha.ping(msg: string) Ping the upstream"
+      assert description =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert description =~ ~s|"name" "alpha"|
+      assert description =~ "alpha.ping(msg: string) Ping the upstream"
     end
 
     test "aggregator-mode tool_entry uses the aggregator outputSchema/annotations" do
@@ -246,8 +251,10 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert description =~ "Configured upstream MCP servers: beta"
-      assert description =~ "catalog/search-tools"
+      assert description =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert description =~ ~s|"name" "beta"|
+      assert description =~ ~s|"catalog_loaded" false|
+      assert description =~ "apropos"
     end
   end
 
@@ -267,8 +274,8 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
       :ok = Catalog.freeze_snapshot(catalog_snapshot)
 
       snapshot = Tools.tool_entry()["description"]
-      assert snapshot =~ "- alpha:"
-      assert snapshot =~ "- beta:"
+      assert snapshot =~ ~s|"name" "alpha"|
+      assert snapshot =~ ~s|"name" "beta"|
 
       # Kill the underlying impl pid for `beta`. Pre-fix: the live
       # `Catalog.render` path would observe `cached_tools = nil` for

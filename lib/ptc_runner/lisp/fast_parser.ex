@@ -74,6 +74,9 @@ defmodule PtcRunner.Lisp.FastParser do
       {"#'" <> rest, offset, line, column} ->
         parse_var({rest, offset + 2, line, column + 2})
 
+      {"'" <> rest, offset, line, column} ->
+        parse_quoted_symbol({rest, offset + 1, line, column + 1})
+
       {"##-Inf" <> rest, offset, line, column} ->
         if symbol_boundary?(rest),
           do: {:ok, :negative_infinity, {rest, offset + 6, line, column + 6}},
@@ -259,6 +262,21 @@ defmodule PtcRunner.Lisp.FastParser do
 
       {_rest, _offset, line, column} ->
         {:error, "syntax error: could not parse var at line #{line}, column #{column}"}
+    end
+  end
+
+  defp parse_quoted_symbol(cursor) do
+    case cursor do
+      {<<c, _rest::binary>>, _offset, _line, _column} when is_symbol_first(c) ->
+        {name, cursor} = take_symbol(cursor)
+        {:ok, {:quoted_symbol, name}, cursor}
+
+      {<<c, _rest::binary>>, _offset, line, column} when c in [?(, ?[, ?{] ->
+        {:error,
+         "quoted collections are not supported; only quoted symbols like 'github are allowed at line #{line}, column #{column}"}
+
+      {_rest, _offset, line, column} ->
+        {:error, "syntax error: could not parse quoted symbol at line #{line}, column #{column}"}
     end
   end
 

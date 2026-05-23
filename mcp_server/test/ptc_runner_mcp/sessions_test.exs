@@ -88,6 +88,15 @@ defmodule PtcRunnerMcp.SessionsTest do
     assert opts[:worker_max_heap] * opts[:max_parallel_workers] <= opts[:max_heap]
   end
 
+  test "session Lisp opts forward discovery executor" do
+    snapshot = %{memory: %{}, turn_history: []}
+    discovery_exec = fn _op, _args -> {:ok, []} end
+
+    opts = Session.lisp_opts(snapshot, "(mcp/servers)", %{discovery_exec: discovery_exec})
+
+    assert opts[:discovery_exec] == discovery_exec
+  end
+
   test "session tools advertise output schemas when enabled" do
     session_tools =
       Tools.list()["tools"]
@@ -148,7 +157,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     default_eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
 
     refute default_eval["description"] =~ "tool/mcp-call"
-    refute default_eval["description"] =~ "catalog/search-tools"
+    refute default_eval["description"] =~ "apropos"
 
     {:ok, _pid} = UpstreamRegistry.start_link(name: UpstreamRegistry)
     :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, UpstreamRegistry)
@@ -164,7 +173,7 @@ defmodule PtcRunnerMcp.SessionsTest do
              )
 
     assert eval["description"] =~ "tool/mcp-call"
-    assert eval["description"] =~ "catalog/search-tools"
+    assert eval["description"] =~ "apropos"
   end
 
   test "session utility descriptions are rendered from prompt registry" do

@@ -14,113 +14,152 @@ defmodule PtcRunner.CatalogBuiltinsTest do
   # A mock catalog_exec that returns canned data
   defp mock_catalog_exec(overrides \\ %{}) do
     fn operation, args ->
-      case {operation, args} do
-        {:summary, []} ->
-          {:ok,
-           Map.get(overrides, :summary, %{
-             "mode" => "lazy",
-             "servers" => [%{"name" => "github", "tool_count" => 5}],
-             "catalogs_loaded" => true
-           })}
-
-        {:list_servers, []} ->
-          {:ok,
-           Map.get(overrides, :list_servers, [
-             %{
-               "name" => "github",
-               "description" => "GitHub",
-               "tool_count" => 5,
-               "catalog_loaded" => true
-             },
-             %{
-               "name" => "linear",
-               "description" => "Linear",
-               "tool_count" => nil,
-               "catalog_loaded" => false
-             }
-           ])}
-
-        {:list_tools, [server]} ->
-          case Map.get(overrides, {:list_tools, server}) do
-            nil ->
-              {:ok,
-               [
-                 %{
-                   "server" => server,
-                   "tool" => "search",
-                   "summary" => "Search things",
-                   "arg_keys" => ["query"],
-                   "read_only" => true
-                 },
-                 %{
-                   "server" => server,
-                   "tool" => "get",
-                   "summary" => "Get a thing",
-                   "arg_keys" => ["id"],
-                   "read_only" => true
-                 }
-               ]}
-
-            result ->
-              result
-          end
-
-        {:list_tools, [server, _opts]} ->
-          case Map.get(overrides, {:list_tools, server}) do
-            nil ->
-              {:ok,
-               [
-                 %{
-                   "server" => server,
-                   "tool" => "search",
-                   "summary" => "Search things",
-                   "arg_keys" => ["query"],
-                   "read_only" => true
-                 }
-               ]}
-
-            result ->
-              result
-          end
-
-        {:describe_tool, [server, tool]} ->
-          case Map.get(overrides, {:describe_tool, server, tool}) do
-            nil ->
-              {:ok,
-               %{
-                 "server" => server,
-                 "tool" => tool,
-                 "summary" => "A tool",
-                 "description" => "A detailed description",
-                 "input_schema" => %{"type" => "object"},
-                 "arg_keys" => ["query"],
-                 "annotations" => %{},
-                 "call_example" => "(tool/mcp-call {:server \"#{server}\" :tool \"#{tool}\"})",
-                 "response_notes" => "Returns content"
-               }}
-
-            result ->
-              result
-          end
-
-        {:search_tools, [query | _rest]} ->
-          {:ok,
-           Map.get(overrides, {:search_tools, query}, [
-             %{
-               "server" => "github",
-               "tool" => "search",
-               "summary" => "Search things",
-               "arg_keys" => ["query"],
-               "read_only" => true,
-               "catalog_loaded" => true
-             }
-           ])}
-
-        _ ->
-          {:programmer_fault, "unknown operation: #{inspect(operation)}"}
-      end
+      mock_catalog_result(operation, args, overrides)
     end
   end
+
+  defp mock_catalog_result(:servers, [], overrides),
+    do: mock_catalog_result(:list_servers, [], overrides)
+
+  defp mock_catalog_result(:dir, args, overrides),
+    do: mock_catalog_result(:list_tools, args, overrides)
+
+  defp mock_catalog_result(:apropos, args, overrides),
+    do: mock_catalog_result(:search_tools, args, overrides)
+
+  defp mock_catalog_result(:doc, [ref], overrides),
+    do: mock_tool_ref_result(ref, overrides, :describe_tool)
+
+  defp mock_catalog_result(:meta, [ref], overrides),
+    do: mock_tool_ref_result(ref, overrides, :tool_meta)
+
+  defp mock_catalog_result(:summary, [], overrides) do
+    {:ok,
+     Map.get(overrides, :summary, %{
+       "mode" => "lazy",
+       "servers" => [%{"name" => "github", "tool_count" => 5}],
+       "catalogs_loaded" => true
+     })}
+  end
+
+  defp mock_catalog_result(:list_servers, [], overrides) do
+    {:ok,
+     Map.get(overrides, :list_servers, [
+       %{
+         "name" => "github",
+         "description" => "GitHub",
+         "tool_count" => 5,
+         "catalog_loaded" => true
+       },
+       %{
+         "name" => "linear",
+         "description" => "Linear",
+         "tool_count" => nil,
+         "catalog_loaded" => false
+       }
+     ])}
+  end
+
+  defp mock_catalog_result(:list_tools, [server], overrides) do
+    case Map.get(overrides, {:list_tools, server}) do
+      nil ->
+        {:ok,
+         [
+           mock_tool_summary(server, "search"),
+           mock_tool_summary(server, "get", "Get a thing", ["id"])
+         ]}
+
+      result ->
+        result
+    end
+  end
+
+  defp mock_catalog_result(:list_tools, [server, _opts], overrides) do
+    case Map.get(overrides, {:list_tools, server}) do
+      nil -> {:ok, [mock_tool_summary(server, "search")]}
+      result -> result
+    end
+  end
+
+  defp mock_catalog_result(:describe_tool, [server, tool], overrides) do
+    case Map.get(overrides, {:describe_tool, server, tool}) do
+      nil ->
+        {:ok,
+         %{
+           "server" => server,
+           "tool" => tool,
+           "summary" => "A tool",
+           "description" => "A detailed description",
+           "input_schema" => %{"type" => "object"},
+           "arg_keys" => ["query"],
+           "annotations" => %{},
+           "call_example" => "(tool/mcp-call {:server \"#{server}\" :tool \"#{tool}\"})",
+           "response_notes" => "Returns content"
+         }}
+
+      result ->
+        result
+    end
+  end
+
+  defp mock_catalog_result(:tool_meta, [server, tool], overrides) do
+    {:ok,
+     Map.get(overrides, {:tool_meta, server, tool}, %{
+       kind: "mcp-tool",
+       server: server,
+       tool: tool,
+       description: "A tool",
+       input_schema: %{"type" => "object"},
+       output_schema: nil,
+       annotations: %{},
+       call: "(tool/mcp-call {:server \"#{server}\" :tool \"#{tool}\" :args {}})"
+     })}
+  end
+
+  defp mock_catalog_result(:search_tools, [query | _rest], overrides) do
+    {:ok,
+     Map.get(overrides, {:search_tools, query}, [
+       %{
+         "server" => "github",
+         "tool" => "search",
+         "summary" => "Search things",
+         "arg_keys" => ["query"],
+         "read_only" => true,
+         "catalog_loaded" => true
+       }
+     ])}
+  end
+
+  defp mock_catalog_result(operation, _args, _overrides),
+    do: {:programmer_fault, "unknown operation: #{inspect(operation)}"}
+
+  defp mock_tool_ref_result(ref, overrides, operation) do
+    case split_ref(ref) do
+      {:ok, server, tool} -> mock_catalog_result(operation, [server, tool], overrides)
+      {:error, message} -> {:programmer_fault, message}
+    end
+  end
+
+  defp mock_tool_summary(server, tool, summary \\ "Search things", arg_keys \\ ["query"]) do
+    %{
+      "server" => server,
+      "tool" => tool,
+      "summary" => summary,
+      "arg_keys" => arg_keys,
+      "read_only" => true
+    }
+  end
+
+  defp split_ref({:symbol_ref, name}), do: split_ref(name)
+
+  defp split_ref(ref) when is_binary(ref) do
+    case String.split(ref, "/", parts: 2) do
+      [server, tool] when server != "" and tool != "" -> {:ok, server, tool}
+      _ -> {:error, "requires tool reference shaped as server/tool"}
+    end
+  end
+
+  defp split_ref(_), do: {:error, "requires a quoted symbol or string tool reference"}
 
   # ============================================================
   # Analyzer: catalog/ namespace dispatch
@@ -182,6 +221,123 @@ defmodule PtcRunner.CatalogBuiltinsTest do
         )
 
       assert is_list(step.return)
+    end
+
+    test "mcp/servers aliases catalog/list-servers" do
+      {:ok, step} = Lisp.run("(mcp/servers)", catalog_exec: mock_catalog_exec())
+      assert [%{"name" => "github"} | _] = step.return
+    end
+
+    test "catalog forms prefer catalog_exec when discovery_exec is also present" do
+      catalog_exec = fn
+        :summary, [] -> {:ok, %{"source" => "catalog"}}
+        operation, _args -> {:programmer_fault, "unexpected catalog op #{operation}"}
+      end
+
+      discovery_exec = fn
+        :summary, [] -> {:ok, %{"source" => "discovery"}}
+        :servers, [] -> {:ok, [%{"name" => "discovery"}]}
+        operation, _args -> {:programmer_fault, "unexpected discovery op #{operation}"}
+      end
+
+      {:ok, catalog_step} =
+        Lisp.run("(catalog/summary)", catalog_exec: catalog_exec, discovery_exec: discovery_exec)
+
+      {:ok, discovery_step} =
+        Lisp.run("(mcp/servers)", catalog_exec: catalog_exec, discovery_exec: discovery_exec)
+
+      assert catalog_step.return == %{"source" => "catalog"}
+      assert discovery_step.return == [%{"name" => "discovery"}]
+    end
+
+    test "mcp/servers is call-position-only" do
+      {:error, step} =
+        Lisp.run("(let [servers mcp/servers] servers)", catalog_exec: mock_catalog_exec())
+
+      assert step.fail.message =~ "unknown namespace mcp/"
+    end
+
+    test "apropos aliases catalog/search-tools" do
+      {:ok, step} =
+        Lisp.run(~s|(apropos "github" {:limit 5})|, catalog_exec: mock_catalog_exec())
+
+      assert is_list(step.return)
+      assert [op] = step.catalog_ops
+      assert op.operation == :apropos
+      assert op.args == %{query: "github", opts: %{limit: 5}}
+    end
+
+    test "dir accepts quoted symbol references" do
+      {:ok, step} = Lisp.run("(dir 'github)", catalog_exec: mock_catalog_exec())
+      assert hd(step.return)["server"] == "github"
+    end
+
+    test "dir treats quoted and string refs equivalently" do
+      exec = mock_catalog_exec()
+
+      {:ok, quoted} = Lisp.run("(dir 'github)", catalog_exec: exec)
+      {:ok, string} = Lisp.run(~s|(dir "github")|, catalog_exec: exec)
+
+      assert quoted.return == string.return
+    end
+
+    test "quote form returns a symbolic reference accepted by dir" do
+      {:ok, step} = Lisp.run("(dir (quote github))", catalog_exec: mock_catalog_exec())
+      assert hd(step.return)["server"] == "github"
+    end
+
+    test "doc accepts quoted tool references" do
+      exec =
+        mock_catalog_exec(%{
+          {:describe_tool, "github", "search"} => {:ok, "github.search(query) - Search things"}
+        })
+
+      {:ok, step} = Lisp.run("(doc 'github/search)", catalog_exec: exec)
+      assert step.return == "github.search(query) - Search things"
+    end
+
+    test "doc treats quoted and string refs equivalently" do
+      exec = mock_catalog_exec()
+
+      {:ok, quoted} = Lisp.run("(doc 'github/search)", catalog_exec: exec)
+      {:ok, string} = Lisp.run(~s|(doc "github/search")|, catalog_exec: exec)
+
+      assert quoted.return == string.return
+    end
+
+    test "meta returns structured MCP tool metadata" do
+      {:ok, step} = Lisp.run(~s|(meta "github/search")|, catalog_exec: mock_catalog_exec())
+      assert step.return.kind == "mcp-tool"
+      assert step.return.server == "github"
+      assert step.return.tool == "search"
+    end
+
+    test "meta accepts quoted tool refs" do
+      {:ok, step} = Lisp.run("(meta 'github/search)", catalog_exec: mock_catalog_exec())
+      assert step.return.kind == "mcp-tool"
+      assert step.return.server == "github"
+      assert step.return.tool == "search"
+    end
+
+    test "local bindings can shadow generic discovery forms" do
+      for name <- ~w(apropos dir doc meta) do
+        {:ok, step} = Lisp.run("(let [#{name} (fn [x] x)] (#{name} 42))")
+        assert step.return == 42
+      end
+    end
+
+    test "generic discovery forms are not runtime-callable values" do
+      {:error, step} =
+        Lisp.run(~s|(let [refs ["github/search"]] (map doc refs))|,
+          catalog_exec: mock_catalog_exec()
+        )
+
+      assert step.fail.message =~ "Undefined variable: doc"
+    end
+
+    test "doc rejects server-only references" do
+      {:error, step} = Lisp.run("(doc 'github)", catalog_exec: mock_catalog_exec())
+      assert step.fail.message =~ "server/tool"
     end
 
     test "catalog/search-tools with 0 args produces arity error" do
@@ -277,6 +433,14 @@ defmodule PtcRunner.CatalogBuiltinsTest do
     test "catalog/search-tools without catalog_exec raises programmer fault" do
       {:error, step} = Lisp.run(~s|(catalog/search-tools "github")|)
       assert step.fail.message =~ "aggregator mode"
+    end
+
+    test "generic discovery forms without discovery_exec raise discovery backend fault" do
+      {:error, step} = Lisp.run(~s|(apropos "github")|)
+      assert step.fail.message =~ "discovery backend"
+
+      {:error, step} = Lisp.run("(mcp/servers)")
+      assert step.fail.message =~ "discovery backend"
     end
   end
 

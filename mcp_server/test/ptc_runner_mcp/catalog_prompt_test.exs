@@ -38,10 +38,13 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
   test "discovery block is built from catalog builtin prompts" do
     block = CatalogPrompt.discovery_block()
 
-    assert block =~ ~s|`(catalog/search-tools "query" {:limit 8})`|
-    assert block =~ ~s|`(catalog/list-tools "server" {:limit 20})`|
-    assert block =~ ~s|`(catalog/describe-tool "server" "tool")`|
+    assert block =~ ~s|`(mcp/servers)`|
+    assert block =~ ~s|`(apropos "query" {:limit 8})`|
+    assert block =~ ~s|`(dir "server" {:limit 20})`|
+    assert block =~ ~s|`(doc "server/tool")`|
+    assert block =~ ~s|`(meta "server/tool")`|
     assert block =~ ~s|`(tool/mcp-call {:server "server" :tool "tool" :args {...}})`|
+    assert block =~ "Discovery inspects only"
 
     Enum.each(@forbidden_runtime_patterns, fn pattern ->
       refute String.contains?(block, pattern)
@@ -51,8 +54,8 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
   test "agentic discovery block includes discovery and quota guidance" do
     block = CatalogPrompt.agentic_discovery_block()
 
-    assert block =~ ~s|`(catalog/search-tools "query" {:limit 8})`|
-    assert block =~ "catalog/* ops have their own budget"
+    assert block =~ ~s|`(apropos "query" {:limit 8})`|
+    assert block =~ "Discovery ops have their own budget"
   end
 
   test "upstream-capable eval tool cards start with discovery guidance" do
@@ -62,8 +65,10 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
         ] do
       text = PromptRegistry.card_text(key)
 
-      assert String.starts_with?(text, "Tools below. For details:")
-      assert text =~ ~s|`(catalog/describe-tool "server" "tool")`|
+      assert String.starts_with?(text, "Synthetic discovery snapshot below. Live:")
+      assert text =~ ~s|`(mcp/servers)`|
+      assert text =~ ~s|`(doc "server/tool")`|
+      assert text =~ ~s|`(dir "server" {:limit 20})`|
       assert text =~ ~s|`(tool/mcp-call {:server "server" :tool "tool" :args {...}})`|
     end
   end

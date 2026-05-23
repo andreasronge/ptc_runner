@@ -121,22 +121,28 @@ defmodule PtcRunnerMcp.CatalogDescription do
   end
 
   defp render_inline_body(entries, description_mode) do
-    server_blocks =
-      entries
-      |> Enum.sort_by(& &1.name)
-      |> Enum.map_join("\n", &render_inline_server(&1, description_mode))
+    entries = Enum.sort_by(entries, & &1.name)
 
-    "Configured upstream MCP servers:\n" <> server_blocks
+    discovery_blocks =
+      [render_servers_snapshot(entries)] ++
+        Enum.flat_map(entries, &render_inline_server(&1, description_mode)) ++
+        render_doc_example(entries, description_mode)
+
+    "Synthetic discovery snapshot for configured upstreams:\n\n" <>
+      Enum.join(discovery_blocks, "\n\n")
   end
 
-  defp render_inline_server(%{name: server, tools: tools} = entry, description_mode)
+  defp render_inline_server(%{name: server, tools: tools}, description_mode)
        when is_list(tools) and tools != [] do
-    header = render_server_header(entry)
-    tool_lines = Enum.map_join(tools, "\n", &render_inline_tool(server, &1, description_mode))
-    header <> "\n  Tools:\n" <> tool_lines
+    lines =
+      tools
+      |> Enum.sort_by(&tool_field(&1, :name, "unknown"))
+      |> Enum.map(&render_inline_tool(server, &1, description_mode))
+
+    [render_command_result(~s|(dir #{lisp_string(server)} {:limit 20})|, lines)]
   end
 
-  defp render_inline_server(entry, _description_mode), do: render_server_header(entry)
+  defp render_inline_server(_entry, _description_mode), do: []
 
   defp render_inline_tool(server, tool, description_mode) do
     name = tool_field(tool, :name, "unknown")
@@ -146,7 +152,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
     args = render_args(input_schema)
     output = render_output(output_schema)
     desc_part = render_inline_description(description, description_mode)
-    "  - #{server}.#{name}(#{args})#{output}#{desc_part}"
+    "#{server}.#{name}(#{args})#{output}#{desc_part}"
   end
 
   defp description_mode(entries, config) do
@@ -174,32 +180,173 @@ defmodule PtcRunnerMcp.CatalogDescription do
   # -- Lazy rendering (§6.3) --
 
   defp render_lazy(entries) do
-    server_names =
-      entries
-      |> Enum.sort_by(& &1.name)
-      |> Enum.map_join(", ", & &1.name)
+    entries = Enum.sort_by(entries, & &1.name)
 
-    "Configured upstream MCP servers: " <> server_names
-  end
-
-  defp render_server_header(%{name: name, tools: nil} = entry) do
-    desc = server_description(entry)
-    "- #{name}: #{desc}Catalog loads on first use."
-  end
-
-  defp render_server_header(%{name: name, tools: []} = entry) do
-    desc = server_description(entry)
-    "- #{name}: #{desc}0 tools."
-  end
-
-  defp render_server_header(%{name: name, tools: tools} = entry) when is_list(tools) do
-    desc = server_description(entry)
-    capabilities = server_capabilities(entry)
-    tool_count = length(tools)
-    "- #{name}: #{desc}#{tool_count} tools.#{capabilities}"
+    "Synthetic discovery snapshot for configured upstreams:\n\n" <>
+      render_servers_snapshot(entries)
   end
 
   # -- Shared helpers --
+
+  defp render_servers_snapshot(entries) do
+    values = Enum.map(entries, &server_snapshot_map/1)
+
+    render_command_result("(mcp/servers)", values)
+  end
+
+  defp server_snapshot_map(%{name: name, tools: tools} = entry) do
+    %{
+      "name" => name,
+      "description" => server_description_text(entry),
+      "tool_count" => if(is_list(tools), do: length(tools), else: nil),
+      "catalog_loaded" => is_list(tools)
+    }
+  end
+
+  defp render_command_result(command, values) when is_list(values) do
+    rendered =
+      case values do
+        [] ->
+          "[]"
+
+        [single] ->
+          "[" <> render_snapshot_value(single) <> "]"
+
+        [first | rest] ->
+          first_line = "[" <> render_snapshot_value(first)
+
+          rest_lines =
+            Enum.map(rest, fn value ->
+              "    " <> render_snapshot_value(value)
+            end)
+
+          Enum.join([first_line | rest_lines], "\n") <> "]"
+      end
+
+    command <> "\n=> " <> rendered
+  end
+
+  defp render_snapshot_value(value) when is_map(value) do
+    fields = [
+      {"name", Map.get(value, "name")},
+      {"description", Map.get(value, "description")},
+      {"tool_count", Map.get(value, "tool_count")},
+      {"catalog_loaded", Map.get(value, "catalog_loaded")}
+    ]
+
+    inner =
+      fields
+      |> Enum.map_join(" ", fn {key, value} -> "#{lisp_string(key)} #{lisp_literal(value)}" end)
+
+    "{" <> inner <> "}"
+  end
+
+  defp render_snapshot_value(value) when is_binary(value), do: lisp_string(value)
+  defp render_snapshot_value(value), do: lisp_literal(value)
+
+  defp render_doc_example(entries, description_mode) do
+    entries
+    |> Enum.sort_by(& &1.name)
+    |> Enum.find_value(fn
+      %{name: server, tools: tools} when is_list(tools) and tools != [] ->
+        tool = Enum.min_by(tools, &tool_field(&1, :name, "unknown"))
+        [render_doc_block(server, tool, description_mode)]
+
+      _ ->
+        nil
+    end)
+    |> case do
+      nil -> []
+      block -> block
+    end
+  end
+
+  defp render_doc_block(server, tool, description_mode) do
+    name = tool_field(tool, :name, "unknown")
+    ref = "#{server}/#{name}"
+    doc = detailed_tool_text(server, tool, description_mode)
+
+    ~s|(doc #{lisp_string(ref)})| <> "\n=> " <> lisp_string(doc)
+  end
+
+  defp detailed_tool_text(server, tool, description_mode) do
+    name = tool_field(tool, :name, "unknown")
+    input_schema = tool_schema(tool, :input_schema)
+    output_schema = tool_schema(tool, :output_schema)
+    required = tool_required_keys(tool)
+
+    [
+      "#{server}.#{name}(#{render_args(input_schema)})#{render_output(output_schema)}#{render_inline_description(tool_field(tool, :description, ""), description_mode)}",
+      "",
+      "Required args: #{required_args_text(required)}",
+      "",
+      "Use:",
+      build_call_example(server, name, tool_arg_keys(tool), required),
+      "",
+      "Returns: `Result<T>`; if `(:ok r)`, use `(:value r)` as T."
+    ]
+    |> Enum.join("\n")
+  end
+
+  defp required_args_text([]), do: "none"
+
+  defp required_args_text(required) when is_list(required) do
+    Enum.map_join(required, ", ", &":#{&1}")
+  end
+
+  defp build_call_example(server, name, arg_keys, required) do
+    placeholders =
+      cond do
+        required != [] -> required
+        arg_keys != [] -> Enum.take(arg_keys, 1)
+        true -> []
+      end
+
+    args_clause =
+      case placeholders do
+        [] ->
+          " :args {}"
+
+        keys ->
+          inner = Enum.map_join(keys, " ", fn key -> ":#{key} ..." end)
+          " :args {#{inner}}"
+      end
+
+    "(tool/mcp-call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
+  end
+
+  defp tool_arg_keys(tool) do
+    schema = tool_schema(tool, :input_schema)
+    properties = Map.get(schema, "properties", Map.get(schema, :properties, %{}))
+
+    properties
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+    |> Enum.sort()
+  end
+
+  defp tool_required_keys(tool) do
+    schema = tool_schema(tool, :input_schema)
+
+    case Map.get(schema, "required", Map.get(schema, :required, [])) do
+      list when is_list(list) -> list |> Enum.map(&to_string/1) |> Enum.uniq()
+      _ -> []
+    end
+  end
+
+  defp lisp_literal(nil), do: "nil"
+  defp lisp_literal(true), do: "true"
+  defp lisp_literal(false), do: "false"
+  defp lisp_literal(value) when is_integer(value), do: Integer.to_string(value)
+  defp lisp_literal(value) when is_binary(value), do: lisp_string(value)
+  defp lisp_literal(value), do: inspect(value)
+
+  defp lisp_string(value) when is_binary(value) do
+    case Jason.encode(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> inspect(value)
+    end
+  end
 
   defp server_description(%{metadata: %{description: desc}})
        when is_binary(desc) and desc != "" do
@@ -213,17 +360,13 @@ defmodule PtcRunnerMcp.CatalogDescription do
 
   defp server_description(_), do: ""
 
-  defp server_capabilities(%{metadata: %{capabilities: caps}})
-       when is_list(caps) and caps != [] do
-    " " <> Enum.join(caps, ", ") <> "."
+  defp server_description_text(entry) do
+    entry
+    |> server_description()
+    |> String.trim()
+    |> String.trim_trailing(".")
+    |> truncate(80)
   end
-
-  defp server_capabilities(%{metadata: %{"capabilities" => caps}})
-       when is_list(caps) and caps != [] do
-    " " <> Enum.join(caps, ", ") <> "."
-  end
-
-  defp server_capabilities(_), do: ""
 
   defp compact_description(text) when is_binary(text) do
     text

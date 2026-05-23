@@ -19,6 +19,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     * Success returns `{:ok, value}`.
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunnerMcp.Upstream.Registry
   alias PtcRunnerMcp.UpstreamCalls
 
@@ -80,13 +81,20 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     {:ok, result}
   end
 
-  defp dispatch(:list_tools, [server | rest], call_context, registry, catalog_config) do
-    opts = parse_list_tools_opts(rest)
+  defp dispatch(:servers, [], call_context, registry, catalog_config) do
+    dispatch(:list_servers, [], call_context, registry, catalog_config)
+  end
 
-    with :ok <- validate_list_tools_opts(opts),
+  defp dispatch(:list_tools, [server | rest], call_context, registry, catalog_config) do
+    with {:ok, opts} <- parse_list_tools_opts(rest),
+         :ok <- validate_list_tools_opts(opts),
          :ok <- check_configured(registry, server, "catalog/list-tools") do
       do_list_tools(server, opts, call_context, registry, catalog_config)
     end
+  end
+
+  defp dispatch(:dir, [server | rest], call_context, registry, catalog_config) do
+    dispatch(:list_tools, [server | rest], call_context, registry, catalog_config)
   end
 
   defp dispatch(:describe_tool, [server, tool], call_context, registry, catalog_config) do
@@ -97,13 +105,36 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     end
   end
 
-  defp dispatch(:search_tools, [query | rest], call_context, registry, catalog_config) do
-    opts = parse_search_tools_opts(rest)
+  defp dispatch(:doc, [ref], call_context, registry, catalog_config) do
+    with {:ok, server, tool} <- parse_tool_ref(ref, "doc") do
+      dispatch(:describe_tool, [server, tool], call_context, registry, catalog_config)
+    end
+  end
 
-    with :ok <- validate_query_string(query),
+  defp dispatch(:tool_meta, [server, tool], call_context, registry, catalog_config) do
+    with :ok <- validate_string_arg(server, "meta", "server"),
+         :ok <- validate_string_arg(tool, "meta", "tool"),
+         :ok <- check_configured(registry, server, "meta") do
+      do_tool_meta(server, tool, call_context, registry, catalog_config)
+    end
+  end
+
+  defp dispatch(:meta, [ref], call_context, registry, catalog_config) do
+    with {:ok, server, tool} <- parse_tool_ref(ref, "meta") do
+      dispatch(:tool_meta, [server, tool], call_context, registry, catalog_config)
+    end
+  end
+
+  defp dispatch(:search_tools, [query | rest], call_context, registry, catalog_config) do
+    with {:ok, opts} <- parse_search_tools_opts(rest),
+         :ok <- validate_query_string(query),
          :ok <- validate_search_tools_opts(opts) do
       do_search_tools(query, opts, call_context, registry, catalog_config)
     end
+  end
+
+  defp dispatch(:apropos, [query | rest], call_context, registry, catalog_config) do
+    dispatch(:search_tools, [query | rest], call_context, registry, catalog_config)
   end
 
   defp dispatch(operation, _args, _call_context, _registry, _catalog_config) do
@@ -147,6 +178,23 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
 
           tool ->
             result = detailed_tool_entry(server, tool)
+            maybe_cap_single_result(result, catalog_config.max_catalog_result_bytes)
+        end
+
+      {:world_fault, _} = wf ->
+        wf
+    end
+  end
+
+  defp do_tool_meta(server, tool_name, call_context, registry, catalog_config) do
+    case get_tools_for_server(server, call_context, registry) do
+      {:ok, tools} ->
+        case Enum.find(tools, fn t -> tool_name_of(t) == tool_name end) do
+          nil ->
+            {:programmer_fault, "no tool '#{tool_name}' in upstream '#{server}'"}
+
+          tool ->
+            result = tool_meta_entry(server, tool)
             maybe_cap_single_result(result, catalog_config.max_catalog_result_bytes)
         end
 
@@ -283,7 +331,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "tool" => nil,
       "summary" => "#{server_info.description || server_info.name}. Catalog not loaded.",
       "catalog_loaded" => false,
-      "next" => "(catalog/list-tools \"#{server_info.name}\" {:limit 20})"
+      "next" => "(dir #{inspect(server_info.name)} {:limit 20})"
     }
 
     {total, entry}
@@ -420,17 +468,46 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
 
   defp parse_search_tools_opts(rest), do: parse_catalog_opts(rest)
 
-  defp parse_catalog_opts([]), do: %{}
+  defp parse_catalog_opts([]), do: {:ok, %{}}
 
   defp parse_catalog_opts([opts]) when is_map(opts) do
-    Map.new(opts, fn
-      {k, v} when is_atom(k) -> {k, v}
-      {k, v} when is_binary(k) -> {safe_to_atom(k), v}
-      kv -> kv
-    end)
+    opts =
+      Map.new(opts, fn
+        {k, v} when is_atom(k) -> {k, v}
+        {k, v} when is_binary(k) -> {safe_to_atom(k), v}
+        {%LispKeyword{name: k}, v} -> {safe_to_atom(k), v}
+        kv -> kv
+      end)
+
+    {:ok, opts}
   end
 
-  defp parse_catalog_opts(_), do: %{}
+  defp parse_catalog_opts([opts]),
+    do: {:programmer_fault, "catalog options must be a map, got #{inspect(opts)}"}
+
+  defp parse_catalog_opts(rest),
+    do:
+      {:programmer_fault,
+       "catalog forms accept at most one options map, got #{length(rest)} option arguments"}
+
+  defp parse_tool_ref({:symbol_ref, name}, form) when is_binary(name),
+    do: parse_tool_ref(name, form)
+
+  defp parse_tool_ref(name, form) when is_binary(name) do
+    case String.split(name, "/", parts: 2) do
+      [server, tool] when server != "" and tool != "" ->
+        {:ok, server, tool}
+
+      _ ->
+        {:programmer_fault,
+         "#{form} requires tool reference shaped as server/tool, got #{inspect(name)}"}
+    end
+  end
+
+  defp parse_tool_ref(other, form) do
+    {:programmer_fault,
+     "#{form} requires a quoted symbol or string tool reference, got #{inspect(other)}"}
+  end
 
   defp validate_search_tools_opts(opts) do
     limit = Map.get(opts, :limit, 8)
@@ -617,6 +694,23 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     |> detailed_tool_text()
   end
 
+  defp tool_meta_entry(server, tool) do
+    name = tool_name_of(tool)
+    arg_keys = tool_arg_keys(tool)
+    required = tool_required_keys(tool)
+
+    %{
+      kind: "mcp-tool",
+      server: server,
+      tool: name,
+      description: tool_full_description(tool),
+      input_schema: tool_input_schema(tool),
+      output_schema: tool_output_schema(tool),
+      annotations: tool_annotations(tool),
+      call: build_call_example(server, name, arg_keys, required)
+    }
+  end
+
   defp catalog_line(%{"tool" => nil} = entry) do
     summary = compact_text(Map.get(entry, "summary") || "")
     next = Map.get(entry, "next")
@@ -675,7 +769,14 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           " :args {#{inner}}"
       end
 
-    "(tool/mcp-call {:server \"#{server}\" :tool \"#{name}\"#{args_clause}})"
+    "(tool/mcp-call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
+  end
+
+  defp lisp_string(value) when is_binary(value) do
+    case Jason.encode(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> inspect(value)
+    end
   end
 
   # ----------------------------------------------------------------

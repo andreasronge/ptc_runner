@@ -75,6 +75,11 @@ defmodule PtcRunner.Lisp.ParserHelpers do
     AST.symbol(name)
   end
 
+  def build_quoted_symbol(parts) do
+    name = Enum.join(parts)
+    AST.quoted_symbol(name)
+  end
+
   # ============================================================
   # Collection building
   # ============================================================

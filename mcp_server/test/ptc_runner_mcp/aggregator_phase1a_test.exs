@@ -309,7 +309,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "no upstream 'ghost' configured"
       assert structured(env)["message"] =~ "Configured upstreams: alpha"
-      assert structured(env)["message"] =~ "(catalog/search-tools \"query\" {:limit 8})"
+      assert structured(env)["message"] =~ "(apropos \"query\" {:limit 8})"
     end
 
     test "missing :tool hints catalog discovery for that upstream" do
@@ -320,8 +320,8 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "requires :tool"
-      assert structured(env)["message"] =~ ~s|(catalog/list-tools "alpha" {:limit 20})|
-      assert structured(env)["message"] =~ ~s|(catalog/search-tools "query" {:limit 8})|
+      assert structured(env)["message"] =~ ~s|(dir "alpha" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(apropos "query" {:limit 8})|
     end
 
     test "unknown tool on a started upstream → runtime_error" do
@@ -336,8 +336,8 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "no tool 'unknown' in upstream 'alpha'"
       assert structured(env)["message"] =~ "Known tools include: known"
-      assert structured(env)["message"] =~ ~s|(catalog/list-tools "alpha" {:limit 20})|
-      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "alpha" "tool")|
+      assert structured(env)["message"] =~ ~s|(dir "alpha" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(doc "alpha/tool")|
     end
 
     test "unknown tool suggests a close cached match and describe-tool" do
@@ -351,7 +351,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert structured(env)["message"] =~ ~s|Did you mean "list_directory"?|
 
       assert structured(env)["message"] =~
-               ~s|(catalog/describe-tool "alpha" "list_directory")|
+               ~s|(doc "alpha/list_directory")|
     end
 
     test "unknown tool on a NOT-started upstream → world-fault upstream_unavailable (§7.4 cold start)" do
@@ -419,8 +419,8 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
                "no tool 'missspelled' in upstream 'fake-x'"
 
       assert structured(env)["message"] =~ "Known tools include: search"
-      assert structured(env)["message"] =~ ~s|(catalog/list-tools "fake-x" {:limit 20})|
-      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "fake-x" "tool")|
+      assert structured(env)["message"] =~ ~s|(dir "fake-x" {:limit 20})|
+      assert structured(env)["message"] =~ ~s|(doc "fake-x/tool")|
 
       # The Fake's `call/4` MUST NOT be invoked: programmer-fault
       # surfaces BEFORE the upstream call, so the test-only counter
@@ -510,7 +510,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
       assert structured(env)["message"] =~ "rejected args"
-      assert structured(env)["message"] =~ ~s|(catalog/describe-tool "alpha" "x")|
+      assert structured(env)["message"] =~ ~s|(doc "alpha/x")|
       # The upstream fun must NOT have been invoked (§7.2: the rejection
       # happens before the upstream call is attempted).
       assert :counters.get(called, 1) == 0

@@ -98,6 +98,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     doseq for
     comment
     juxt pmap pcalls
+    quote apropos dir doc meta
     .
   )a
 
@@ -129,7 +130,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # clauses (e.g. `(catalog/list-tools)`, `(catalog/search-tools)`).
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
-    summary remaining list-servers list-tools describe-tool search-tools
+    summary remaining list-servers list-tools describe-tool search-tools servers
     parse-string generate-string between text json
     re-pattern
   )a

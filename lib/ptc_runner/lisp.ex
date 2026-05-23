@@ -296,6 +296,7 @@ defmodule PtcRunner.Lisp do
     max_tool_calls = Keyword.get(opts, :max_tool_calls)
     strict_data = Keyword.get(opts, :strict_data, false)
     catalog_exec = Keyword.get(opts, :catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
     link_sandbox = Keyword.get(opts, :link, false)
 
     # Preflight: reject oversized source before any parsing
@@ -332,6 +333,7 @@ defmodule PtcRunner.Lisp do
         tool_cache: tool_cache,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
+        discovery_exec: discovery_exec,
         catalog_exec: catalog_exec,
         link: link_sandbox
       })
@@ -571,6 +573,7 @@ defmodule PtcRunner.Lisp do
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       strict_data: strict_data,
+      discovery_exec: discovery_exec,
       catalog_exec: catalog_exec
     } = opts
 
@@ -594,6 +597,7 @@ defmodule PtcRunner.Lisp do
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
+        discovery_exec: discovery_exec,
         catalog_exec: catalog_exec
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
@@ -1017,6 +1021,10 @@ defmodule PtcRunner.Lisp do
 
   defp collect_tool_names({:runtime_callable, :tool, name}, acc), do: MapSet.put(acc, name)
   defp collect_tool_names({:runtime_callable, _namespace, _name}, acc), do: acc
+  defp collect_tool_names({:symbol_ref, _name}, acc), do: acc
+
+  defp collect_tool_names({:repl_discovery, _operation, args}, acc),
+    do: Enum.reduce(args, acc, &collect_tool_names/2)
 
   defp collect_tool_names({:do, exprs}, acc) do
     Enum.reduce(exprs, acc, &collect_tool_names/2)
@@ -1223,6 +1231,10 @@ defmodule PtcRunner.Lisp do
   end
 
   defp collect_undefined_vars({:runtime_callable, _namespace, _name}, _scope), do: []
+  defp collect_undefined_vars({:symbol_ref, _name}, _scope), do: []
+
+  defp collect_undefined_vars({:repl_discovery, _operation, args}, scope),
+    do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))
 
   # def / defonce — add name to scope before recursing (enables recursive defn)
   defp collect_undefined_vars({:def, name, value, _meta}, scope) do

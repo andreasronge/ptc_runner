@@ -196,6 +196,14 @@ defmodule PtcRunner.Lisp.Parser do
   )
 
   defcombinatorp(
+    :quoted_symbol,
+    ignore(string("'"))
+    |> ascii_string(symbol_first, 1)
+    |> optional(ascii_string(symbol_rest, min: 1))
+    |> reduce({ParserHelpers, :build_quoted_symbol, []})
+  )
+
+  defcombinatorp(
     :short_fn,
     ignore(string("#("))
     |> concat(parsec(:ws))
@@ -237,6 +245,7 @@ defmodule PtcRunner.Lisp.Parser do
       parsec(:vector),
       parsec(:set),
       parsec(:var_reader),
+      parsec(:quoted_symbol),
       parsec(:short_fn),
       parsec(:map_literal),
       parsec(:list)
@@ -360,9 +369,9 @@ defmodule PtcRunner.Lisp.Parser do
       Regex.match?(~r/@[a-zA-Z]/, source_clean) ->
         "deref syntax (@var) is not supported. Atoms and refs are not available"
 
-      # Quote syntax: 'symbol or '(list) — but not #'var (var reader syntax)
-      Regex.match?(~r/(?<!#)'[a-zA-Z(]/, source_clean) ->
-        "quote syntax ('expr) is not supported. Use vectors [1 2 3] instead of quoted lists"
+      # Quoted symbols are supported. Quoted collections remain intentionally unsupported.
+      Regex.match?(~r/(?<!#)'[\(\[\{]/, source_clean) ->
+        "quoted collections are not supported; only quoted symbols like 'github are allowed"
 
       true ->
         nil
