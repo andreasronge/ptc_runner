@@ -114,7 +114,8 @@ jobs:
             EPIC_ISSUES=$(echo "$POTENTIAL_DEPENDENTS" | jq -c '.[]')
           fi
 
-          for issue in $EPIC_ISSUES; do
+          while IFS= read -r issue; do
+            [ -z "$issue" ] && continue
             [ -n "$ORPHAN_TRIGGERED" ] && break  # Only trigger one
 
             ISSUE_NUMBER=$(echo "$issue" | jq -r '.number')
@@ -168,7 +169,7 @@ jobs:
               ORPHAN_TRIGGERED="$ISSUE_NUMBER"
               break  # Only one at a time
             fi
-          done
+          done <<< "$EPIC_ISSUES"
 
           if [ -n "$ORPHAN_TRIGGERED" ]; then
             echo "Triggered orphaned issue #$ORPHAN_TRIGGERED"
