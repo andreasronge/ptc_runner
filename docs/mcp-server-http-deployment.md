@@ -78,7 +78,7 @@ HTTP request logs are JSON lines on stderr. Each request log includes an
 instance label, `X-Request-Id`, method, path, status, duration, and
 hashed owner/session ids when known.
 
-The server emits sanitized telemetry under `[:ptc_runner_mcp, :http, ...]`
+The server emits sanitized telemetry under `[:ptc_lisp, :http, ...]`
 for request start/stop, session create/close, auth failures, limit
 rejections, and cancellations.
 

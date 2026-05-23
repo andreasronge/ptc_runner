@@ -562,10 +562,10 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     owner_hash = Auth.owner_for(@token).hash
     session_hash = Telemetry.hash_id(session_id)
 
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_runner_mcp, :http, :request, :start],
+    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :request, :start],
                     %{system_time: _}, %{request_id: "http-request-1"}}
 
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_runner_mcp, :http, :session, :created],
+    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :session, :created],
                     %{count: 1},
                     %{
                       owner_hash: ^owner_hash,
@@ -573,7 +573,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
                       protocol_version: _
                     }}
 
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_runner_mcp, :http, :request, :stop],
+    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :request, :stop],
                     %{duration: duration},
                     %{
                       request_id: "http-request-1",
@@ -652,7 +652,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
 
     [file] = wait_for_files(dir, 1)
     events = read_jsonl(Path.join(dir, file))
-    call_start = Enum.find(events, &(&1["event"] == "ptc_runner_mcp.call.start"))
+    call_start = Enum.find(events, &(&1["event"] == "ptc_lisp.call.start"))
 
     assert call_start["metadata"]["owner_hash"] == owner_hash
     assert call_start["metadata"]["mcp_session_hash"] == session_hash
@@ -680,9 +680,9 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       :telemetry.attach_many(
         handler_id,
         [
-          [:ptc_runner_mcp, :http, :request, :start],
-          [:ptc_runner_mcp, :http, :request, :stop],
-          [:ptc_runner_mcp, :http, :session, :created]
+          [:ptc_lisp, :http, :request, :start],
+          [:ptc_lisp, :http, :request, :stop],
+          [:ptc_lisp, :http, :session, :created]
         ],
         fn event, measurements, metadata, _config ->
           send(parent, {:http_telemetry, handler_id, event, measurements, metadata})

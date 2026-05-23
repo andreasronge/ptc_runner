@@ -129,7 +129,7 @@ revisions.
   is reserved for world-faults. The new telemetry event is the only
   operator-visible signal for the decode-failure outcome.
 - New telemetry event
-  `[:ptc_runner_mcp, :upstream, :auto_decode, :stop]` per
+  `[:ptc_lisp, :upstream, :auto_decode, :stop]` per
   `Plans/json-support.md` §7. Metadata: `server`, `tool`,
   `mime_type`, `outcome` (one of `:promoted`, `:already_structured`,
   `:decode_failed`). Measurements vary by outcome —

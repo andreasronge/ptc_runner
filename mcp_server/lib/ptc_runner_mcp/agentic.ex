@@ -63,7 +63,7 @@ defmodule PtcRunnerMcp.Agentic do
     started = monotonic_ms()
     deadline = started + cfg.task_timeout_ms
 
-    :telemetry.span([:ptc_runner_mcp, :agentic_task], start_meta(request_id, cfg), fn ->
+    :telemetry.span([:ptc_lisp, :agentic_task], start_meta(request_id, cfg), fn ->
       envelope = do_run_validated(validated, cfg, request_id, deadline)
       {envelope, stop_meta(request_id, envelope)}
     end)
@@ -233,7 +233,7 @@ defmodule PtcRunnerMcp.Agentic do
 
           try do
             :telemetry.span(
-              [:ptc_runner_mcp, :agentic_planner],
+              [:ptc_lisp, :agentic_planner],
               %{request_id: to_string(request_id || ""), model: cfg.model},
               fn ->
                 result =

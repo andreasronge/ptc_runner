@@ -21,7 +21,7 @@ defmodule PtcRunnerMcp.Upstream.Http.SseDecoder do
     * **Array-form (backward-compat).** The parsed value is a JSON
       array — iterate, treating each element as one JSON-RPC message.
       Telemetry event
-      `[:ptc_runner_mcp, :upstream, :http, :sse_array_compat]` is
+      `[:ptc_lisp, :upstream, :http, :sse_array_compat]` is
       emitted with `%{count: 1}` so operators notice when an upstream
       is using legacy framing. See OQ-9.
 
@@ -47,7 +47,7 @@ defmodule PtcRunnerMcp.Upstream.Http.SseDecoder do
   carrying the trailing partial event between chunks.
   """
 
-  @telemetry_event [:ptc_runner_mcp, :upstream, :http, :sse_array_compat]
+  @telemetry_event [:ptc_lisp, :upstream, :http, :sse_array_compat]
 
   @type opts :: [
           request_id: integer() | String.t() | nil,

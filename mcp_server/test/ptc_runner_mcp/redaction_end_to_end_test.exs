@@ -150,7 +150,7 @@ defmodule PtcRunnerMcp.RedactionEndToEndTest do
   # ---------------------------------------------------------------------------
 
   describe "telemetry handler payloads (§7.5.3 (a) structural isolation)" do
-    test "[:ptc_runner_mcp, :upstream, :http, :sse_array_compat] metadata never carries the secret" do
+    test "[:ptc_lisp, :upstream, :http, :sse_array_compat] metadata never carries the secret" do
       secret = generate_secret()
       universe = build_universe(secret, :handshake_success)
 
@@ -160,9 +160,9 @@ defmodule PtcRunnerMcp.RedactionEndToEndTest do
       :telemetry.attach_many(
         handler_id,
         [
-          [:ptc_runner_mcp, :upstream, :http, :sse_array_compat],
-          [:ptc_runner_mcp, :upstream, :http, :request, :stop],
-          [:ptc_runner_mcp, :upstream, :auto_decode, :stop]
+          [:ptc_lisp, :upstream, :http, :sse_array_compat],
+          [:ptc_lisp, :upstream, :http, :request, :stop],
+          [:ptc_lisp, :upstream, :auto_decode, :stop]
         ],
         &__MODULE__.telemetry_capture/4,
         %{test_pid: test_pid}

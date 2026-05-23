@@ -220,7 +220,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
           response = attach_diagnostic(public, diagnostic)
 
-          :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
+          :telemetry.execute([:ptc_lisp, :session, :eval, :stop], %{turn: state.turn}, %{
             session_id: state.id,
             owner_hash: Owner.fingerprint(state.owner),
             mode: state.mode,
@@ -244,7 +244,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
          {:ok, eval} <- matching_eval(state, request_id) do
       state = clear_eval_monitor(state, eval)
 
-      :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
+      :telemetry.execute([:ptc_lisp, :session, :eval, :stop], %{turn: state.turn}, %{
         session_id: state.id,
         owner_hash: Owner.fingerprint(state.owner),
         mode: state.mode,
@@ -267,7 +267,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
         view = normalize_view(view)
         response = Projection.inspect_view(state, view)
 
-        :telemetry.execute([:ptc_runner_mcp, :session, :inspect], %{turn: state.turn}, %{
+        :telemetry.execute([:ptc_lisp, :session, :inspect], %{turn: state.turn}, %{
           session_id: state.id,
           owner_hash: Owner.fingerprint(state.owner),
           mode: state.mode
@@ -311,7 +311,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
       response = Projection.forget(state, removed_bindings, clear)
 
-      :telemetry.execute([:ptc_runner_mcp, :session, :forget], %{turn: state.turn}, %{
+      :telemetry.execute([:ptc_lisp, :session, :forget], %{turn: state.turn}, %{
         session_id: state.id,
         owner_hash: Owner.fingerprint(state.owner),
         mode: state.mode
@@ -337,7 +337,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
         Registry.mark_closed(state.id, reason, state.registry)
         response = Projection.close(state, reason)
 
-        :telemetry.execute([:ptc_runner_mcp, :session, :close], %{turn: state.turn}, %{
+        :telemetry.execute([:ptc_lisp, :session, :close], %{turn: state.turn}, %{
           session_id: state.id,
           owner_hash: Owner.fingerprint(state.owner),
           mode: state.mode,
@@ -370,7 +370,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
       eval = %{request_id: request_id, worker: worker, monitor: ref, snapshot: snapshot}
       state = state |> cancel_idle_timer() |> Map.put(:eval, eval)
 
-      :telemetry.execute([:ptc_runner_mcp, :session, :eval, :start], %{turn: state.turn}, %{
+      :telemetry.execute([:ptc_lisp, :session, :eval, :start], %{turn: state.turn}, %{
         session_id: state.id,
         owner_hash: Owner.fingerprint(state.owner),
         mode: state.mode
@@ -391,7 +391,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{eval: %{monitor: ref}} = state) do
-    :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
+    :telemetry.execute([:ptc_lisp, :session, :eval, :stop], %{turn: state.turn}, %{
       session_id: state.id,
       owner_hash: Owner.fingerprint(state.owner),
       mode: state.mode,
@@ -405,7 +405,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     cancel_worker(state.eval)
     Registry.mark_closed(state.id, :ttl_expired, state.registry)
 
-    :telemetry.execute([:ptc_runner_mcp, :session, :evict], %{turn: state.turn}, %{
+    :telemetry.execute([:ptc_lisp, :session, :evict], %{turn: state.turn}, %{
       session_id: state.id,
       owner_hash: Owner.fingerprint(state.owner),
       mode: state.mode,
@@ -422,7 +422,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   def handle_info(:idle_expired, state) do
     Registry.mark_closed(state.id, :idle_expired, state.registry)
 
-    :telemetry.execute([:ptc_runner_mcp, :session, :evict], %{turn: state.turn}, %{
+    :telemetry.execute([:ptc_lisp, :session, :evict], %{turn: state.turn}, %{
       session_id: state.id,
       owner_hash: Owner.fingerprint(state.owner),
       mode: state.mode,
@@ -481,7 +481,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
-              [:ptc_runner_mcp, :session, :eval, :stop],
+              [:ptc_lisp, :session, :eval, :stop],
               %{turn: committed.turn},
               %{
                 session_id: committed.id,
@@ -517,7 +517,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
-              [:ptc_runner_mcp, :session, :eval, :stop],
+              [:ptc_lisp, :session, :eval, :stop],
               %{turn: committed.turn},
               %{
                 session_id: committed.id,
@@ -554,7 +554,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             response = attach_diagnostic(public, diagnostic)
 
             :telemetry.execute(
-              [:ptc_runner_mcp, :session, :eval, :stop],
+              [:ptc_lisp, :session, :eval, :stop],
               %{turn: state.turn},
               %{
                 session_id: state.id,
@@ -587,7 +587,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
         response = attach_diagnostic(public, diagnostic)
 
-        :telemetry.execute([:ptc_runner_mcp, :session, :eval, :stop], %{turn: state.turn}, %{
+        :telemetry.execute([:ptc_lisp, :session, :eval, :stop], %{turn: state.turn}, %{
           session_id: state.id,
           owner_hash: Owner.fingerprint(state.owner),
           mode: state.mode,

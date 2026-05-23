@@ -24,7 +24,7 @@ defmodule PtcRunnerMcp.Lifecycle do
     %{
       "protocolVersion" => protocol_version,
       "serverInfo" => %{
-        "name" => "ptc_runner_mcp",
+        "name" => "ptc_lisp",
         "version" => Version.display_version(),
         "build" => Version.build_info()
       },

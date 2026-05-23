@@ -82,7 +82,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       init_reply = Enum.find(replies, &(&1["id"] == 1))
       assert init_reply["result"]["protocolVersion"] == "2025-11-25"
       assert init_reply["result"]["capabilities"]["tools"]["listChanged"] == false
-      assert init_reply["result"]["serverInfo"]["name"] == "ptc_runner_mcp"
+      assert init_reply["result"]["serverInfo"]["name"] == "ptc_lisp"
       assert is_binary(init_reply["result"]["serverInfo"]["version"])
 
       list_reply = Enum.find(replies, &(&1["id"] == 2))

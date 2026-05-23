@@ -260,7 +260,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
       # may both detect 404 + held-session — each emits its own event,
       # which is correct (each was an independent failed request).
       :telemetry.execute(
-        [:ptc_runner_mcp, :upstream, :http, :session_lost],
+        [:ptc_lisp, :upstream, :http, :session_lost],
         %{count: 1},
         %{name: snap.name, prior_session_id_hash: hash_session_id(snap.session_id)}
       )
@@ -826,7 +826,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
     start_mono = System.monotonic_time()
 
     :telemetry.execute(
-      [:ptc_runner_mcp, :upstream, :http, :request, :start],
+      [:ptc_lisp, :upstream, :http, :request, :start],
       %{system_time: System.system_time()},
       start_metadata
     )
@@ -842,7 +842,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
         )
 
       :telemetry.execute(
-        [:ptc_runner_mcp, :upstream, :http, :request, :stop],
+        [:ptc_lisp, :upstream, :http, :request, :stop],
         %{duration_ms: duration_ms},
         Map.merge(start_metadata, %{
           http_status: http_status_from_result(result),
@@ -871,7 +871,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
       )
 
     :telemetry.execute(
-      [:ptc_runner_mcp, :upstream, :http, :request, :stop],
+      [:ptc_lisp, :upstream, :http, :request, :stop],
       %{duration_ms: duration_ms},
       Map.merge(start_metadata, %{http_status: nil, duration_ms: duration_ms})
     )

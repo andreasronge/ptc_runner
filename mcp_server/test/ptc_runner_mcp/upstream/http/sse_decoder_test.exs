@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.Upstream.Http.SseDecoderTest do
 
   alias PtcRunnerMcp.Upstream.Http.SseDecoder
 
-  @telemetry_event [:ptc_runner_mcp, :upstream, :http, :sse_array_compat]
+  @telemetry_event [:ptc_lisp, :upstream, :http, :sse_array_compat]
   @big_cap 1_000_000
 
   # Telemetry handler that forwards events back to a test pid carried

@@ -652,11 +652,11 @@ defmodule PtcRunnerMcp.AgenticTest do
         events = read_jsonl(Path.join(dir, file))
         names = Enum.map(events, & &1["event"])
 
-        assert "ptc_runner_mcp.call.start" in names
-        assert "ptc_runner_mcp.agentic_task.start" in names
-        assert "ptc_runner_mcp.agentic_task.stop" in names
-        assert "ptc_runner_mcp.agentic_planner.start" in names
-        assert "ptc_runner_mcp.agentic_planner.stop" in names
+        assert "ptc_lisp.call.start" in names
+        assert "ptc_lisp.agentic_task.start" in names
+        assert "ptc_lisp.agentic_task.stop" in names
+        assert "ptc_lisp.agentic_planner.start" in names
+        assert "ptc_lisp.agentic_planner.stop" in names
         assert "ptc_runner.lisp.execute.start" in names
       end)
     end

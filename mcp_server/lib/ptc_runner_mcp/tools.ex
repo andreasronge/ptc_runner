@@ -713,7 +713,7 @@ defmodule PtcRunnerMcp.Tools do
         )
 
       # Thread `request_id` into the closure so
-      # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry metadata
+      # `[:ptc_lisp, :upstream, :call, :*]` telemetry metadata
       # carries the originating MCP request id. Operators correlating
       # upstream call failures back to the parent `tools/call` use
       # this as the join key.

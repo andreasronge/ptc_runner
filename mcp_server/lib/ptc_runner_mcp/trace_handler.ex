@@ -11,7 +11,7 @@ defmodule PtcRunnerMcp.TraceHandler do
 
   Subscribed events:
 
-    * `[:ptc_runner_mcp, :call, :start | :stop | :exception]`
+    * `[:ptc_lisp, :call, :start | :stop | :exception]`
     * `[:ptc_runner, :lisp, :execute, :start | :stop | :exception]`
 
   The handler explicitly does NOT subscribe to
@@ -35,16 +35,16 @@ defmodule PtcRunnerMcp.TraceHandler do
   @handler_id "ptc-runner-mcp-trace-handler"
 
   @events [
-    [:ptc_runner_mcp, :call, :start],
-    [:ptc_runner_mcp, :call, :stop],
-    [:ptc_runner_mcp, :call, :exception],
-    [:ptc_runner_mcp, :agentic_task, :start],
-    [:ptc_runner_mcp, :agentic_task, :stop],
-    [:ptc_runner_mcp, :agentic_task, :exception],
-    [:ptc_runner_mcp, :agentic_planner, :start],
-    [:ptc_runner_mcp, :agentic_planner, :stop],
-    [:ptc_runner_mcp, :agentic_planner, :exception],
-    [:ptc_runner_mcp, :agentic_validation_reject],
+    [:ptc_lisp, :call, :start],
+    [:ptc_lisp, :call, :stop],
+    [:ptc_lisp, :call, :exception],
+    [:ptc_lisp, :agentic_task, :start],
+    [:ptc_lisp, :agentic_task, :stop],
+    [:ptc_lisp, :agentic_task, :exception],
+    [:ptc_lisp, :agentic_planner, :start],
+    [:ptc_lisp, :agentic_planner, :stop],
+    [:ptc_lisp, :agentic_planner, :exception],
+    [:ptc_lisp, :agentic_validation_reject],
     [:ptc_runner, :lisp, :execute, :start],
     [:ptc_runner, :lisp, :execute, :stop],
     [:ptc_runner, :lisp, :execute, :exception]

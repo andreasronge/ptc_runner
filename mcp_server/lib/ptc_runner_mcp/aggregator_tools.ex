@@ -254,7 +254,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
     # subscribe to the `[:upstream, :call, :stop]` event and read
     # both fields off the metadata to attribute cold-start vs
     # steady-state cost; programs see tagged `McpResult` data.
-    :telemetry.span([:ptc_runner_mcp, :upstream, :call], telemetry_meta, fn ->
+    :telemetry.span([:ptc_lisp, :upstream, :call], telemetry_meta, fn ->
       result = do_dispatch(call_context, registry, server, tool, call_args)
       {result, stop_meta(telemetry_meta, result)}
     end)
@@ -449,7 +449,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
     # short-circuited via the lock for them. Either way the user-
     # visible total is `ensure + call`. Operators who need to
     # decompose the two components subscribe to the
-    # `[:ptc_runner_mcp, :upstream, :call, :*]` telemetry events
+    # `[:ptc_lisp, :upstream, :call, :*]` telemetry events
     # which carry both fields separately.
     total_duration = ensure_duration + call_duration
     durations = %{ensure_duration_ms: ensure_duration, call_duration_ms: call_duration}
@@ -843,7 +843,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
     }
 
     :telemetry.execute(
-      [:ptc_runner_mcp, :upstream, :auto_decode, :stop],
+      [:ptc_lisp, :upstream, :auto_decode, :stop],
       measurements,
       metadata
     )
