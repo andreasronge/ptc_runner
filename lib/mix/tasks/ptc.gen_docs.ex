@@ -194,12 +194,6 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       audit: nil
     },
     %{
-      namespace: "`catalog/`",
-      scope: "PTC extension / MCP aggregator profile",
-      target: "upstream catalog discovery",
-      audit: nil
-    },
-    %{
       namespace: "`budget/`",
       scope: "PTC extension / SubAgent budget profile",
       target: "budget introspection",
@@ -212,6 +206,53 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       target: "profile-gated helper namespace; unavailable in base `Lisp.run/2`",
       audit: nil
     }
+  ]
+
+  @repl_environment_support [
+    %{
+      command: "`(mcp/servers)`",
+      status: "supported",
+      scope: "MCP aggregator",
+      notes: "List configured upstream servers, tool counts, and catalog load status"
+    },
+    %{
+      command: "`(apropos query)`",
+      status: "supported",
+      scope: "REPL discovery",
+      notes: "Search available discovery backends without loading unloaded upstreams by default"
+    },
+    %{
+      command: "`(dir ref)`",
+      status: "supported",
+      scope: "REPL discovery",
+      notes: "List members for a reference; MCP backend lists tools for a server"
+    },
+    %{
+      command: "`(doc ref)`",
+      status: "supported",
+      scope: "REPL discovery",
+      notes: "Return human-readable docs for one referenced tool"
+    },
+    %{
+      command: "`(meta ref)`",
+      status: "supported",
+      scope: "REPL discovery",
+      notes: "Return structured metadata for one referenced tool"
+    },
+    %{
+      command: "`(quote symbol)`, `'symbol`",
+      status: "partial",
+      scope: "Core syntax",
+      notes: "Symbol references only; quoted collections and syntax quote are not supported"
+    }
+  ]
+
+  @repl_candidates [
+    {"Builtin var discovery",
+     "Let `apropos`, `doc`, and `meta` inspect PTC-Lisp builtins outside MCP"},
+    {"User var discovery", "Let sessions inspect `def`/`defn` bindings and captured docstrings"},
+    {"Namespace-style listing", "Let `dir` work beyond MCP servers"},
+    {"Examples/source snippets", "Expose examples only where they improve model repair"}
   ]
 
   @interop_path "docs/java-interop.md"
@@ -280,14 +321,15 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   defp section_order("Core"), do: 5
   defp section_order("Predicate Builders"), do: 6
   defp section_order("Functional Tools"), do: 7
-  defp section_order("Agent Control"), do: 8
-  defp section_order("String Functions"), do: 9
-  defp section_order("Set Operations"), do: 10
-  defp section_order("Regex Functions"), do: 11
-  defp section_order("Math Functions"), do: 12
-  defp section_order("Interop"), do: 13
-  defp section_order("JSON"), do: 14
-  defp section_order("MCP"), do: 15
+  defp section_order("Discovery"), do: 8
+  defp section_order("Agent Control"), do: 9
+  defp section_order("String Functions"), do: 10
+  defp section_order("Set Operations"), do: 11
+  defp section_order("Regex Functions"), do: 12
+  defp section_order("Math Functions"), do: 13
+  defp section_order("Interop"), do: 14
+  defp section_order("JSON"), do: 15
+  defp section_order("MCP"), do: 16
   defp section_order(_), do: 99
 
   defp render_section({section, entries}) do
@@ -442,6 +484,14 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | Namespace | Scope | Target | Supported | Candidate | Not Relevant | Coverage | Audit |
     |-----------|-------|--------|-----------|-----------|--------------|----------|-------|
     #{row_text}
+
+    ## REPL Environment Support
+
+    #{repl_environment_support_table()}
+
+    ## REPL Candidates
+
+    #{repl_candidates_table()}
     """
 
     File.mkdir_p!(Path.dirname(@audit_index_path))
@@ -486,6 +536,32 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
   defp audit_link(nil), do: "N/A"
   defp audit_link(path), do: "[audit](#{path})"
+
+  defp repl_environment_support_table do
+    rows =
+      Enum.map_join(@repl_environment_support, "\n", fn row ->
+        "| #{row.command} | #{row.status} | #{row.scope} | #{row.notes} |"
+      end)
+
+    """
+    | Command | Status | Scope | Notes |
+    |---------|--------|-------|-------|
+    #{rows}
+    """
+  end
+
+  defp repl_candidates_table do
+    rows =
+      Enum.map_join(@repl_candidates, "\n", fn {candidate, why} ->
+        "| #{candidate} | #{why} |"
+      end)
+
+    """
+    | Candidate | Why |
+    |-----------|-----|
+    #{rows}
+    """
+  end
 
   defp relevant_count(counts) do
     (counts[:supported] || 0) + (counts[:candidate] || 0) + (counts[:not_classified] || 0)

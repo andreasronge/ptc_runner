@@ -52,7 +52,7 @@ allowlisted surface with two meanings:
   namespace; cross-namespace fallback makes the advertised namespace misleading
   and should fail with a helpful list of available functions.
 - **PTC capability namespaces** such as `tool/`, `data/`, `json/`, `budget/`,
-  and `catalog/` are owned by PTC-Lisp. They do not claim Clojure library
+  and `mcp/` are owned by PTC-Lisp. They do not claim Clojure library
   compatibility and should be documented in prompts only when relevant to the
   current agent mode or enabled capability. Keep unimplemented/reserved
   namespaces such as `mcp/` out of the analyzer and prompt surfaces until they
