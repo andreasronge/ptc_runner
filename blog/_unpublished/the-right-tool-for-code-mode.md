@@ -102,13 +102,17 @@ That is awkward with a general-purpose runtime. Keeping a pool of stateful Pytho
 
 ptc_runner sessions are deliberately smaller. Definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived Python or JavaScript process. That is the performance story as much as the ergonomics story: the model gets a small workspace outside the context window, so it does not have to rebuild the same world every time it asks the next question.[^perf]
 
+The REPL shape now applies in two directions: the model can keep intermediate data outside the context window, and it can discover the available tool surface from inside the same workspace.
+
 ![Stateful sandboxed REPL sessions in ptc_runner](./assets/images/mcp_sandbox_repl.png)
 
-## Tool lists are context too
+## Tool discovery should feel like a REPL too
 
 The same idea applies before the first tool call. MCP tool lists can get large fast. Every server brings names, descriptions, schemas, examples, and response shapes, and most of that is irrelevant to the task in front of you. If all of it is pushed into the prompt up front, tool discovery becomes another version of the context-window problem.
 
-ptc_runner can make the tool catalog part of the runtime instead. A program can ask which upstream servers exist with `(catalog/list-servers)`, search for a relevant capability with `(catalog/search-tools "calendar")`, list one server's tools with `(catalog/list-tools "calendar")`, and pull the details for a single tool with `(catalog/describe-tool "calendar" "search_events")`. In a session, that means the model can explore the available tools the same way it explores the data: ask for the next small piece of structure, bind what it learned, and continue. The model does not need to carry every possible tool in its head just in case one of them matters.
+ptc_runner now makes discovery part of the Lisp environment. The names are deliberately familiar: `(apropos "calendar")`, `(dir 'calendar)`, `(doc 'calendar/search_events)`. They are the kinds of moves a model has seen over and over in REPL transcripts, shell sessions, and programming examples: search, inspect, read the docs, try the next thing.
+
+That is the interesting part to me. The model is not learning a new catalog API so much as reusing a pattern already baked into its training data. The full tool catalog can stay in the runtime, while the model explores it one small step at a time.
 
 ## The part that changed how I build these systems
 
