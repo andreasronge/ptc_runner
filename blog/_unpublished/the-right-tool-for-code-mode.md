@@ -130,7 +130,7 @@ The language is small on purpose. The servers can be dumb on purpose. Recently a
 
 That is a thought for another day, but it points the same way as everything else here: a smaller language, simpler servers, fewer layers between the model and the data.
 
-Code mode is the right idea. The win does not come from handing the model the biggest, most familiar language and then spending months caging it. It comes from picking a tool actually shaped for the job, and from being willing to leave things out. I like making things that are no longer needed go away.
+Code mode is the right idea. The win does not come from handing the model the biggest, most familiar language and then spending months caging it. It comes from picking a tool actually shaped for the job, and from being willing to leave things out. I like the kind of simplification where something becomes unnecessary, and then disappears.
 
 ---
 
