@@ -144,6 +144,22 @@ defmodule PtcRunner.Lisp.FormatTest do
     end
   end
 
+  describe "symbol references" do
+    test "formats bare symbolic refs as quoted symbols" do
+      assert Format.to_string({:symbol_ref, "github/search_repos"}) == "'github/search_repos"
+
+      assert Format.to_clojure({:symbol_ref, "github/search_repos"}) ==
+               {"'github/search_repos", false}
+    end
+
+    test "formats symbolic refs inside lists and maps" do
+      ref = {:symbol_ref, "github/search_repos"}
+
+      assert Format.to_clojure([ref]) == {"['github/search_repos]", false}
+      assert Format.to_clojure(%{ref: ref}) == {"{:ref 'github/search_repos}", false}
+    end
+  end
+
   describe "to_clojure/2 with regex values" do
     test "formats compiled regexes by source pattern" do
       regex = PtcRunner.Lisp.Runtime.Regex.re_pattern("\\d+")

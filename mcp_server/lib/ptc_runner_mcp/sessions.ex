@@ -719,7 +719,7 @@ defmodule PtcRunnerMcp.Sessions do
 
       tools = AggregatorTools.build(call_context, request_id: request_id)
 
-      catalog_exec =
+      discovery_exec =
         CatalogBuiltins.build(call_context,
           registry: UpstreamRegistry,
           catalog_config: catalog_config
@@ -728,7 +728,7 @@ defmodule PtcRunnerMcp.Sessions do
       run_opts =
         opts
         |> Map.put(:tools, tools)
-        |> Map.put(:catalog_exec, catalog_exec)
+        |> Map.put(:discovery_exec, discovery_exec)
         |> Map.put(:profile, :mcp_aggregator)
 
       {run_opts, fn -> UpstreamCalls.drain(call_context.collector_ref) end}

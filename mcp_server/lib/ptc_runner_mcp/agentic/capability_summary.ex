@@ -15,12 +15,13 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   # description. `lisp_task` callers describe what they want in plain
   # English — they do not write PTC-Lisp themselves. The pointer
   # therefore stays on the agentic surface: it tells the calling LLM
-  # that the catalog is loaded lazily by the internal planner, so it
+  # that discovery data is loaded lazily by the internal planner, so it
   # should still ask `lisp_task` (no need to pre-discover servers).
   # The planner's own system prompt has a separate lazy block (in
   # `PtcRunnerMcp.Agentic.Prompt`) that does instruct it to call
-  # `(catalog/...)` from inside the generated PTC-Lisp program.
-  @lazy_pointer "Upstream catalog is loaded lazily (catalog mode: lazy); " <>
+  # `(apropos ...)`, `(dir ...)`, and `(doc ...)` from inside the generated
+  # PTC-Lisp program.
+  @lazy_pointer "Upstream discovery is loaded lazily (catalog mode: lazy); " <>
                   "lisp_task's internal planner discovers configured upstream servers " <>
                   "and their tools at runtime. Describe the task you want in plain English " <>
                   "and the planner will pick the right upstream calls."
@@ -36,7 +37,7 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
 
   Honors `CatalogConfig.get().catalog_mode` (override with `:catalog_mode`
   in `opts`): `:lazy` returns a short pointer telling the planner to
-  use `(catalog/*)` at runtime; `:inline` and `:auto` render the
+    use discovery commands at runtime; `:inline` and `:auto` render the
   snapshot (subject to `:max_bytes` for `:auto`).
   """
   @spec from_frozen(keyword()) :: String.t()

@@ -429,7 +429,24 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       server_match = Enum.find(result, &String.starts_with?(&1, "github:"))
       assert server_match != nil
       assert server_match =~ "Catalog not loaded"
-      assert server_match =~ "catalog/list-tools"
+      assert server_match =~ ~s|dir "github"|
+    end
+
+    test "server-level matches escape non-symbol-safe server names in hints" do
+      config = tools_config(%{"t" => fn _ -> "ok" end})
+
+      :ok =
+        Registry.put_fake(
+          "my server/one",
+          Map.put(config, :metadata, %{description: "special server"}),
+          @registry_name
+        )
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:search_tools, ["special"])
+
+      assert [server_match] = Enum.filter(result, &String.starts_with?(&1, "my server/one:"))
+      assert server_match =~ ~s|Use (dir "my server/one" {:limit 20}).|
     end
 
     test ":load true loads catalogs and returns tool-level matches" do
@@ -688,6 +705,24 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result =~ ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
     end
 
+    test "call_example escapes string-sensitive server and tool names" do
+      schema = %{
+        name: ~s|say"hi|,
+        description: "quoted tool",
+        input_schema: %{"type" => "object", "properties" => %{}}
+      }
+
+      config = %{tools: %{~s|say"hi| => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake(~s|srv"quoted|, config, @registry_name)
+      {:ok, _} = Registry.ensure_started(~s|srv"quoted|, @registry_name)
+
+      {exec, _ctx} = build_exec()
+      {:ok, result} = exec.(:describe_tool, [~s|srv"quoted|, ~s|say"hi|])
+
+      assert result =~
+               ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+    end
+
     test "required args line prevents inferring trace_id from result payloads" do
       schema = %{
         name: "get_trace",
@@ -764,6 +799,102 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {exec, _ctx} = build_exec()
       assert {:programmer_fault, msg} = exec.(:describe_tool, [123, "tool"])
       assert msg =~ "non-empty string"
+    end
+  end
+
+  describe "tool_meta" do
+    test "returns structured MCP tool metadata" do
+      schema = %{
+        name: "search",
+        description: "Search repositories",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"query" => %{"type" => "string"}},
+          "required" => ["query"]
+        },
+        output_schema: %{"type" => "object"},
+        annotations: %{"readOnlyHint" => true}
+      }
+
+      config = %{tools: %{"search" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("github", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("github", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      assert {:ok, result} = exec.(:tool_meta, ["github", "search"])
+
+      assert result.kind == "mcp-tool"
+      assert result.server == "github"
+      assert result.tool == "search"
+      assert result.description == "Search repositories"
+      assert result.input_schema["required"] == ["query"]
+      assert result.output_schema == %{"type" => "object"}
+      assert result.annotations == %{"readOnlyHint" => true}
+
+      assert result.call ==
+               ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+    end
+
+    test "call form escapes string-sensitive server and tool names" do
+      schema = %{
+        name: ~s|say"hi|,
+        description: "quoted tool",
+        input_schema: %{"type" => "object", "properties" => %{}}
+      }
+
+      config = %{tools: %{~s|say"hi| => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake(~s|srv"quoted|, config, @registry_name)
+      {:ok, _} = Registry.ensure_started(~s|srv"quoted|, @registry_name)
+
+      {exec, _ctx} = build_exec()
+      assert {:ok, result} = exec.(:tool_meta, [~s|srv"quoted|, ~s|say"hi|])
+
+      assert result.call ==
+               ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+    end
+
+    test "unknown tool is programmer fault" do
+      put_fake("github", [{"search", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+      assert {:programmer_fault, msg} = exec.(:tool_meta, ["github", "missing"])
+      assert msg =~ "no tool 'missing'"
+    end
+  end
+
+  describe "generic discovery operations" do
+    test "servers, apropos, dir, doc, and meta dispatch to MCP catalog backend" do
+      put_fake("github", [{"search", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+
+      assert {:ok, [%{"name" => "github"}]} = exec.(:servers, [])
+      assert {:ok, [_]} = exec.(:apropos, ["search"])
+      assert {:ok, [_]} = exec.(:dir, ["github"])
+      assert {:ok, doc} = exec.(:doc, [{:symbol_ref, "github/search"}])
+      assert doc =~ "github.search"
+      assert {:ok, meta} = exec.(:meta, ["github/search"])
+      assert meta.kind == "mcp-tool"
+    end
+
+    test "doc rejects non MCP-shaped refs in the MCP backend" do
+      {exec, _ctx} = build_exec()
+      assert {:programmer_fault, msg} = exec.(:doc, [{:symbol_ref, "map"}])
+      assert msg =~ "server/tool"
+    end
+
+    test "apropos and dir reject non-map options" do
+      put_fake("github", [{"search", fn _ -> "ok" end}])
+
+      {exec, _ctx} = build_exec()
+
+      assert {:programmer_fault, apropos_msg} = exec.(:apropos, ["search", 123])
+      assert apropos_msg =~ "options must be a map"
+      assert apropos_msg =~ "123"
+
+      assert {:programmer_fault, dir_msg} = exec.(:dir, ["github", 123])
+      assert dir_msg =~ "options must be a map"
+      assert dir_msg =~ "123"
     end
   end
 

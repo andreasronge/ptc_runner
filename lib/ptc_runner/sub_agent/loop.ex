@@ -153,9 +153,10 @@ defmodule PtcRunner.SubAgent.Loop do
     journal = Keyword.get(opts, :journal)
     tool_cache = Keyword.get(opts, :tool_cache, %{})
 
-    # Optional catalog/* executor closure (aggregator-mode `(catalog/...)`).
+    # Optional REPL discovery executor closure (aggregator-mode discovery forms).
     # Caller-owned, not inherited by child SubAgents.
     catalog_exec = Keyword.get(opts, :catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
 
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
@@ -203,6 +204,7 @@ defmodule PtcRunner.SubAgent.Loop do
           max_heap: max_heap,
           journal: journal,
           tool_cache: tool_cache,
+          discovery_exec: discovery_exec,
           catalog_exec: catalog_exec,
           on_chunk: on_chunk,
           initial_messages: initial_messages,
@@ -302,6 +304,7 @@ defmodule PtcRunner.SubAgent.Loop do
       max_heap: run_opts.max_heap || agent.max_heap,
       journal: run_opts.journal,
       tool_cache: run_opts.tool_cache,
+      discovery_exec: run_opts.discovery_exec,
       catalog_exec: run_opts.catalog_exec,
       agent_name: agent.name,
       agent_id: run_opts.agent_id,

@@ -301,15 +301,15 @@ defmodule PtcRunner.Step do
         }
 
   @typedoc """
-  PTC-Lisp `catalog/` builtin invocation record (aggregator mode).
+  PTC-Lisp discovery invocation record (aggregator mode).
 
-  Captured for each `catalog/summary`, `catalog/list-servers`,
-  `catalog/list-tools`, `catalog/describe-tool`, and
-  `catalog/search-tools` call dispatched through `catalog_exec`.
+  Captured for legacy `catalog/*` calls and generic REPL discovery
+  forms such as `mcp/servers`, `apropos`, `dir`, `doc`, and `meta`
+  dispatched through the configured discovery executor.
 
   Fields:
-  - `operation`: The builtin variant (`:summary`, `:list_servers`,
-    `:list_tools`, `:describe_tool`, `:search_tools`)
+  - `operation`: The discovery operation (`:servers`, `:apropos`,
+    `:dir`, `:doc`, `:meta`, or a legacy `catalog/*` operation)
   - `args`: Normalized argument map (shape depends on operation)
   - `outcome`: `:ok` on success, `:nil_world_fault` when a world fault
     was swallowed to `nil`, `:error` on programmer faults that raised

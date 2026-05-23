@@ -4447,6 +4447,22 @@
       divergences: nil
     },
     %{
+      name: "apropos",
+      description: "Search loaded REPL discovery backends",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(apropos query)", "(apropos query opts)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes: "MCP-backed in aggregator mode; equivalent to catalog/search-tools in this phase.",
+      see_also: ["dir", "doc", "meta", "mcp/servers"],
+      clojure_var: "apropos",
+      divergences: nil
+    },
+    %{
       name: "as->",
       description: "",
       binding: nil,
@@ -4608,6 +4624,22 @@
       divergences: nil
     },
     %{
+      name: "dir",
+      description: "List members of a REPL discovery reference",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(dir server)", "(dir server opts)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes: "MCP-backed in aggregator mode; accepts quoted symbols or strings.",
+      see_also: ["apropos", "doc", "meta", "mcp/servers"],
+      clojure_var: "dir",
+      divergences: nil
+    },
+    %{
       name: "do",
       description: "",
       binding: nil,
@@ -4621,6 +4653,23 @@
       notes: nil,
       see_also: [],
       clojure_var: "do",
+      divergences: nil
+    },
+    %{
+      name: "doc",
+      description: "Return human-readable documentation for a REPL discovery reference",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(doc tool-ref)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
+      see_also: ["apropos", "dir", "meta"],
+      clojure_var: "doc",
       divergences: nil
     },
     %{
@@ -4803,6 +4852,23 @@
         "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
     },
     %{
+      name: "meta",
+      description: "Return structured metadata for a REPL discovery reference",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(meta tool-ref)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
+      see_also: ["doc", "dir", "apropos"],
+      clojure_var: "meta",
+      divergences: nil
+    },
+    %{
       name: "or",
       description: "Logical OR (short-circuits)",
       binding: nil,
@@ -4849,6 +4915,23 @@
       see_also: [],
       clojure_var: "pmap",
       divergences: nil
+    },
+    %{
+      name: "quote",
+      description: "Return a symbolic reference without resolving it",
+      binding: nil,
+      category: :core,
+      dispatch: :analyze,
+      signatures: ["(quote symbol)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Only symbols are supported in this phase; quoted collections remain unsupported.",
+      see_also: ["dir", "doc", "meta"],
+      clojure_var: "quote",
+      divergences:
+        "DIV: quoted lists, vectors, maps, sets, syntax quote, unquote, and reader metadata are not supported."
     },
     %{
       name: "recur",

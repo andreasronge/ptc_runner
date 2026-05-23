@@ -47,7 +47,12 @@ defmodule PtcRunner.Lisp.Analyze do
                       :"some->>",
                       :comment,
                       :doseq,
-                      :for
+                      :for,
+                      :quote,
+                      :apropos,
+                      :dir,
+                      :doc,
+                      :meta
                     ])
 
   @type error_reason ::
@@ -117,7 +122,12 @@ defmodule PtcRunner.Lisp.Analyze do
       :"task-reset",
       :def,
       :defonce,
-      :defn
+      :defn,
+      :quote,
+      :apropos,
+      :dir,
+      :doc,
+      :meta
     ]
   end
 
@@ -148,6 +158,9 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp do_analyze({:string, s}, _tail?), do: {:ok, {:string, s}}
   defp do_analyze({:keyword, k}, _tail?), do: {:ok, {:keyword, k}}
+
+  defp do_analyze({:quoted_symbol, name}, _tail?) when is_binary(name),
+    do: {:ok, {:symbol_ref, name}}
 
   # ============================================================
   # Collections
@@ -369,9 +382,86 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :defn}, rest, _list, tail?), do: analyze_defn(rest, tail?)
 
+  defp dispatch_list_form({:symbol, :quote}, [symbol_ast], _list, _tail?),
+    do: analyze_quote(symbol_ast)
+
+  defp dispatch_list_form({:symbol, :quote}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:symbol, :apropos}, [query_ast], _list, _tail?) do
+    with {:ok, query} <- do_analyze(query_ast, false) do
+      {:ok, {:repl_discovery, :apropos, [query]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :apropos}, [query_ast, opts_ast], _list, _tail?) do
+    with {:ok, query} <- do_analyze(query_ast, false),
+         {:ok, opts} <- do_analyze(opts_ast, false) do
+      {:ok, {:repl_discovery, :apropos, [query, opts]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :apropos}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :apropos,
+      "(apropos query) or (apropos query opts) — got #{length(args)} args"}}
+  end
+
+  defp dispatch_list_form({:symbol, :dir}, [server_ast], _list, _tail?) do
+    with {:ok, server} <- do_analyze(server_ast, false) do
+      {:ok, {:repl_discovery, :dir, [server]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :dir}, [server_ast, opts_ast], _list, _tail?) do
+    with {:ok, server} <- do_analyze(server_ast, false),
+         {:ok, opts} <- do_analyze(opts_ast, false) do
+      {:ok, {:repl_discovery, :dir, [server, opts]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :dir}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :dir, "(dir server) or (dir server opts) — got #{length(args)} args"}}
+  end
+
+  defp dispatch_list_form({:symbol, :doc}, [tool_ref_ast], _list, _tail?) do
+    with {:ok, tool_ref} <- do_analyze(tool_ref_ast, false) do
+      {:ok, {:repl_discovery, :doc, [tool_ref]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :doc}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :doc, "(doc tool-ref) requires exactly 1 argument, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:symbol, :meta}, [tool_ref_ast], _list, _tail?) do
+    with {:ok, tool_ref} <- do_analyze(tool_ref_ast, false) do
+      {:ok, {:repl_discovery, :meta, [tool_ref]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :meta}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :meta, "(meta tool-ref) requires exactly 1 argument, got #{length(args)}"}}
+  end
+
   # Tool invocation via tool/ namespace: (tool/name args...)
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
+
+  # MCP REPL discovery via mcp/ namespace
+  defp dispatch_list_form({:ns_symbol, :mcp, :servers}, [], _list, _tail?),
+    do: {:ok, {:repl_discovery, :servers, []}}
+
+  defp dispatch_list_form({:ns_symbol, :mcp, :servers}, _args, _list, _tail?),
+    do: {:error, {:invalid_arity, :"mcp/servers", "(mcp/servers) takes no arguments"}}
+
+  defp dispatch_list_form({:ns_symbol, :mcp, other}, _rest, _list, _tail?),
+    do: {:error, {:invalid_form, "Unknown mcp function: mcp/#{other}. Available: mcp/servers"}}
 
   # Budget introspection via budget/ namespace: (budget/remaining)
   defp dispatch_list_form({:ns_symbol, :budget, :remaining}, [], _list, _tail?),
@@ -709,6 +799,14 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_fn_params(_) do
     {:error, {:invalid_form, "fn parameters must be a vector"}}
+  end
+
+  defp analyze_quote({:symbol, name}), do: {:ok, {:symbol_ref, to_string(name)}}
+  defp analyze_quote({:ns_symbol, ns, name}), do: {:ok, {:symbol_ref, "#{ns}/#{name}"}}
+  defp analyze_quote({:quoted_symbol, name}) when is_binary(name), do: {:ok, {:symbol_ref, name}}
+
+  defp analyze_quote(other) do
+    {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
 
   defp analyze_list_of_patterns(patterns) do
@@ -1289,6 +1387,7 @@ defmodule PtcRunner.Lisp.Analyze do
       "data/",
       "tool/",
       "catalog/",
+      "mcp/",
       "budget/",
       "json/",
       "clojure.core/",

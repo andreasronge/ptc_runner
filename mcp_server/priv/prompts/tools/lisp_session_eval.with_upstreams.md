@@ -10,24 +10,14 @@
 <!-- composed-with: reference.md after this card; optional dynamic catalog after reference -->
 
 <!-- PTC_PROMPT_START -->
-Tools below. For details:
-- `(catalog/describe-tool "server" "tool")`
-- `(catalog/search-tools "query" {:limit 8})`
-- `(catalog/list-tools "server" {:limit 20})`
-Call: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
+Synthetic discovery snapshot below. Live: `(mcp/servers)`, `(apropos "query" {:limit 8})`, `(dir "server" {:limit 20})`, `(doc "server/tool")`, `(meta "server/tool")`.
+Discovery inspects schemas only. Execute: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})` -> `Result<T>`: `{:ok true :value T}` or `{:ok false :reason kw :message text}`. Check `:ok`; `:raw` optional.
 
 Evaluates PTC-Lisp against committed session memory
 - `def`/`defn` persist for later evals in the same session
 - Use `let` for temporary values
 - `output_schema` validates result; mismatch rejects the commit.
 
-Upstreams:
-`(tool/mcp-call {:server s :tool t :args {...}})`
-=> `Result<T>`: success `{:ok true :value T}`; failure `{:ok false :reason kw :message text}`.
-Catalog `-> Result<T>` shows T. Check `:ok`.
-Wrap `tool/mcp-call` in `fn`/`#(...)` for higher-order use.
-
-Unknown result shape:
-- Check `:ok`; inspect with `println`: `(keys (:value r))` or `(pr-str (:value r))`.
-- Use `(fail (:message r))` for unhandled upstream faults.
+`doc` shows args/result. Use `(map tool/mcp-call calls)` for batches.
+Unknown result shape: inspect `(keys (:value r))` or `(pr-str (:value r))`; use `(fail (:message r))` for unhandled faults.
 <!-- PTC_PROMPT_END -->

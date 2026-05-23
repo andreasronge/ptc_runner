@@ -797,6 +797,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        strict_data: true,
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
+    |> maybe_put(:discovery_exec, Map.get(opts, :discovery_exec, Map.get(opts, :catalog_exec)))
     |> maybe_put(:catalog_exec, Map.get(opts, :catalog_exec))
   end
 

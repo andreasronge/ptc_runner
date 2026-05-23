@@ -118,31 +118,35 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
     test "scenario 1: tiny fully-known fleet, auto → inline" do
       result = CatalogDescription.render_for_entries(tiny_fleet(), default_config())
 
-      assert result =~ "Configured upstream MCP servers:"
-      assert result =~ "- filesystem:"
-      assert result =~ "- github:"
-      assert result =~ "Tools:"
-      assert result =~ "- filesystem.tool_1(arg: string)"
+      assert result =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert result =~ "(mcp/servers)"
+      assert result =~ ~s|(dir "filesystem" {:limit 20})|
+      assert result =~ ~s|(dir "github" {:limit 20})|
+      assert result =~ "filesystem.tool_1(arg: string)"
+      assert result =~ ~s|(doc "filesystem/tool_1")|
       refute result =~ "catalog/search-tools"
     end
 
     test "scenario 2: large fleet (>40 tools), auto → lazy" do
       result = CatalogDescription.render_for_entries(large_fleet(), default_config())
 
-      assert result =~ "Configured upstream MCP servers:"
+      assert result =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert result =~ "(mcp/servers)"
       assert result =~ "github"
       assert result =~ "linear"
-      refute result =~ "Tools:"
+      refute result =~ "(dir "
       refute result =~ "catalog/search-tools"
     end
 
     test "scenario 3: fleet with unknown catalog, auto → lazy" do
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), default_config())
 
-      assert result =~ "Configured upstream MCP servers:"
+      assert result =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert result =~ "(mcp/servers)"
       assert result =~ "github"
       assert result =~ "linear"
-      refute result =~ "Tools:"
+      assert result =~ ~s|"catalog_loaded" false|
+      refute result =~ "(dir "
       refute result =~ "catalog/search-tools"
     end
 
@@ -162,7 +166,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_inline_max_chars: 500}
       result = CatalogDescription.render_for_entries(verbose_fleet, config)
 
-      refute result =~ "Tools:"
+      refute result =~ "(dir "
       refute result =~ "catalog/search-tools"
     end
 
@@ -170,8 +174,8 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_mode: :inline}
       result = CatalogDescription.render_for_entries(large_fleet(), config)
 
-      assert result =~ "Tools:"
-      assert result =~ "- github.tool_1(arg: string)"
+      assert result =~ ~s|(dir "github" {:limit 20})|
+      assert result =~ "github.tool_1(arg: string)"
       refute result =~ "catalog/search-tools"
     end
 
@@ -179,7 +183,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_mode: :lazy}
       result = CatalogDescription.render_for_entries(small_fleet(), config)
 
-      refute result =~ "Tools:"
+      refute result =~ "(dir "
       assert result =~ "filesystem"
       assert result =~ "github"
       refute result =~ "catalog/search-tools"
@@ -189,10 +193,10 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_mode: :inline}
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), config)
 
-      assert result =~ "Tools:"
-      assert result =~ "- github.tool_1(arg: string)"
+      assert result =~ ~s|(dir "github" {:limit 20})|
+      assert result =~ "github.tool_1(arg: string)"
       assert result =~ ~s(Warning: catalog for "linear" not loaded yet.)
-      assert result =~ "Catalog loads on first use."
+      assert result =~ ~s|"catalog_loaded" false|
       refute result =~ "catalog/search-tools"
     end
 
@@ -237,7 +241,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
         }
       ]
 
-      config = %{default_config() | catalog_inline_max_chars: 140}
+      config = %{default_config() | catalog_inline_max_chars: 500}
 
       assert {:inline, []} = CatalogDescription.resolve_mode(entries, config)
       result = CatalogDescription.render_for_entries(entries, config)
@@ -266,8 +270,12 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_mode: :inline}
       result = CatalogDescription.render_for_entries(small_fleet(), config)
 
-      assert result =~ "- github: GitHub MCP server. 8 tools. issues, pull requests."
-      assert result =~ "- filesystem: Filesystem MCP server. 7 tools. files, directories."
+      assert result =~ ~s|"name" "github"|
+      assert result =~ ~s|"description" "GitHub MCP server"|
+      assert result =~ ~s|"tool_count" 8|
+      assert result =~ ~s|"name" "filesystem"|
+      assert result =~ ~s|"description" "Filesystem MCP server"|
+      assert result =~ ~s|"tool_count" 7|
     end
 
     test "entries are sorted by server name" do
@@ -306,11 +314,10 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       result = CatalogDescription.render_for_entries(entries, default_config())
 
-      assert result =~
-               "  - srv.do_thing(required: string, optional: integer?) Does something useful."
+      assert result =~ "srv.do_thing(required: string, optional: integer?) Does something useful."
 
-      assert result =~ "  - srv.no_desc()"
-      refute result =~ "  - srv.no_desc() "
+      assert result =~ "srv.no_desc()"
+      refute result =~ "srv.no_desc() "
     end
 
     test "required schema keys render even when properties omit them" do
@@ -334,7 +341,9 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
     test "known empty tools renders 0 tools" do
       entries = [%{name: "empty", tools: [], metadata: %{}}]
       result = CatalogDescription.render_for_entries(entries, default_config())
-      assert result =~ "- empty: 0 tools."
+      assert result =~ ~s|"name" "empty"|
+      assert result =~ ~s|"tool_count" 0|
+      refute result =~ "(dir "
     end
   end
 
@@ -343,7 +352,11 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       config = %{default_config() | catalog_mode: :lazy}
       result = CatalogDescription.render_for_entries(small_fleet(), config)
 
-      assert result == "Configured upstream MCP servers: filesystem, github"
+      assert result =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert result =~ "(mcp/servers)"
+      assert result =~ ~s|"name" "filesystem"|
+      assert result =~ ~s|"name" "github"|
+      refute result =~ "(dir "
       refute result =~ "catalog/search-tools"
     end
 
@@ -352,14 +365,15 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(small_fleet(), config)
 
       refute result =~ "tool_1"
-      refute result =~ "Tools:"
+      refute result =~ "(dir "
     end
 
     test "lazy mode lists configured server names" do
       config = %{default_config() | catalog_mode: :lazy}
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), config)
 
-      assert result =~ "Configured upstream MCP servers: github, linear"
+      assert result =~ ~s|"name" "github"|
+      assert result =~ ~s|"name" "linear"|
     end
   end
 
@@ -388,19 +402,21 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       result = CatalogDescription.render_for_entries(entries, default_config())
       assert result =~ "String keyed desc"
-      assert result =~ "cap1."
+      refute result =~ "cap1."
     end
 
     test "renders cleanly without metadata" do
       entries = [%{name: "bare", tools: make_tools(2)}]
       result = CatalogDescription.render_for_entries(entries, default_config())
-      assert result =~ "- bare: 2 tools."
+      assert result =~ ~s|"name" "bare"|
+      assert result =~ ~s|"tool_count" 2|
     end
 
     test "renders cleanly with empty metadata" do
       entries = [%{name: "bare", tools: make_tools(2), metadata: %{}}]
       result = CatalogDescription.render_for_entries(entries, default_config())
-      assert result =~ "- bare: 2 tools."
+      assert result =~ ~s|"name" "bare"|
+      assert result =~ ~s|"tool_count" 2|
     end
   end
 

@@ -28,6 +28,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.TraceContext
@@ -136,6 +137,16 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  defp do_eval({:repl_discovery, operation, arg_asts}, %EvalContext{} = eval_ctx) do
+    case eval_all(arg_asts, eval_ctx) do
+      {:ok, args, eval_ctx2} ->
+        invoke_discovery(eval_ctx2, operation, args)
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   # ============================================================
   # Literals
   # ============================================================
@@ -151,6 +162,9 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:keyword, k}, %EvalContext{} = eval_ctx),
     do: {:ok, keyword_value(k), eval_ctx}
+
+  defp do_eval({:symbol_ref, name}, %EvalContext{} = eval_ctx),
+    do: {:ok, {:symbol_ref, name}, eval_ctx}
 
   defp do_eval({:literal, v}, %EvalContext{} = eval_ctx), do: {:ok, v, eval_ctx}
   defp do_eval(a, %EvalContext{} = eval_ctx) when is_atom(a), do: {:ok, a, eval_ctx}
@@ -1415,6 +1429,7 @@ defmodule PtcRunner.Lisp.Eval do
           worker_max_heap: eval_ctx.worker_max_heap,
           parallel_budget: eval_ctx.parallel_budget,
           pmap_deadline: eval_ctx.pmap_deadline,
+          discovery_exec: eval_ctx.discovery_exec,
           catalog_exec: eval_ctx.catalog_exec
       }
 
@@ -1517,16 +1532,35 @@ defmodule PtcRunner.Lisp.Eval do
   # Catalog builtin dispatch
   # ============================================================
 
-  defp invoke_catalog(%EvalContext{catalog_exec: nil}, _operation, _args) do
+  defp invoke_catalog(%EvalContext{catalog_exec: nil, discovery_exec: nil}, _operation, _args) do
     raise ExecutionError,
       reason: :runtime_error,
       message: "catalog/ builtins are only available in aggregator mode with configured upstreams"
   end
 
-  defp invoke_catalog(%EvalContext{catalog_exec: catalog_exec} = eval_ctx, operation, args) do
-    start_time = System.monotonic_time(:millisecond)
+  defp invoke_catalog(
+         %EvalContext{catalog_exec: catalog_exec, discovery_exec: discovery_exec} = eval_ctx,
+         operation,
+         args
+       ) do
+    invoke_discovery_exec(eval_ctx, catalog_exec || discovery_exec, operation, args)
+  end
 
-    case catalog_exec.(operation, args) do
+  defp invoke_discovery(%EvalContext{discovery_exec: nil}, _operation, _args) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "REPL discovery forms are only available when a discovery backend is configured"
+  end
+
+  defp invoke_discovery(%EvalContext{discovery_exec: discovery_exec} = eval_ctx, operation, args) do
+    invoke_discovery_exec(eval_ctx, discovery_exec, operation, args)
+  end
+
+  defp invoke_discovery_exec(%EvalContext{} = eval_ctx, discovery_exec, operation, args) do
+    start_time = System.monotonic_time(:millisecond)
+    args = normalize_catalog_args(operation, args)
+
+    case discovery_exec.(operation, args) do
       {:ok, result} ->
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
@@ -1563,9 +1597,57 @@ defmodule PtcRunner.Lisp.Eval do
   defp catalog_op_args(:list_tools, [server]), do: %{server: server}
   defp catalog_op_args(:list_tools, [server, opts]), do: %{server: server, opts: opts}
   defp catalog_op_args(:describe_tool, [server, tool]), do: %{server: server, tool: tool}
+  defp catalog_op_args(:tool_meta, [server, tool]), do: %{server: server, tool: tool}
+  defp catalog_op_args(:servers, []), do: %{}
+  defp catalog_op_args(:dir, [server]), do: %{server: server}
+  defp catalog_op_args(:dir, [server, opts]), do: %{server: server, opts: opts}
+  defp catalog_op_args(:doc, [ref]), do: %{ref: ref}
+  defp catalog_op_args(:meta, [ref]), do: %{ref: ref}
+  defp catalog_op_args(:apropos, [query]), do: %{query: query}
+  defp catalog_op_args(:apropos, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(:search_tools, [query]), do: %{query: query}
   defp catalog_op_args(:search_tools, [query, opts]), do: %{query: query, opts: opts}
   defp catalog_op_args(_, args), do: %{args: args}
+
+  defp normalize_catalog_args(:list_tools, [server]), do: [server_ref_name(server)]
+  defp normalize_catalog_args(:dir, [server]), do: [server_ref_name(server)]
+
+  defp normalize_catalog_args(:list_tools, [server, opts]),
+    do: [server_ref_name(server), normalize_catalog_value(opts)]
+
+  defp normalize_catalog_args(:dir, [server, opts]),
+    do: [server_ref_name(server), normalize_catalog_value(opts)]
+
+  defp normalize_catalog_args(_operation, args), do: Enum.map(args, &normalize_catalog_value/1)
+
+  defp server_ref_name({:symbol_ref, name}) when is_binary(name), do: name
+  defp server_ref_name(name), do: name
+
+  defp normalize_catalog_value(%LispKeyword{name: name}), do: safe_keyword_name(name)
+
+  defp normalize_catalog_value(map) when is_map(map) and not is_struct(map) do
+    Map.new(map, fn {key, value} ->
+      {normalize_catalog_value(key), normalize_catalog_value(value)}
+    end)
+  end
+
+  defp normalize_catalog_value(list) when is_list(list),
+    do: Enum.map(list, &normalize_catalog_value/1)
+
+  defp normalize_catalog_value(other), do: other
+
+  defp safe_keyword_name(name) when is_atom(name), do: name
+  defp safe_keyword_name("limit"), do: :limit
+  defp safe_keyword_name("offset"), do: :offset
+  defp safe_keyword_name("load"), do: :load
+
+  defp safe_keyword_name(name) when is_binary(name) do
+    case Map.get(SourceAtoms.table(), name) do
+      atom when is_atom(atom) -> atom
+      nil -> name
+      other -> other
+    end
+  end
 
   # ============================================================
   # Closure capture helpers

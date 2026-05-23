@@ -32,7 +32,7 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
       "operator prefix",
       "PTC-Lisp dialect authoring:",
       "lisp_task MCP-call contract:",
-      "Upstream catalog:\nalpha:",
+      "Upstream discovery:\nSynthetic discovery snapshot",
       "operator suffix",
       "Final MCP recap:"
     ])
@@ -166,13 +166,13 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
       prompt = Prompt.system_prompt(catalog_mode: :lazy)
 
-      assert prompt =~ "Configured upstream MCP servers: alpha"
-      refute prompt =~ "Upstream catalog: not inlined"
-      assert prompt =~ "catalog list/search returns strings like"
-      assert prompt =~ "use exact tool names"
-      assert prompt =~ "(catalog/search-tools"
-      assert prompt =~ "(catalog/list-tools"
-      assert prompt =~ "(catalog/describe-tool"
+      assert prompt =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert prompt =~ ~s|"name" "alpha"|
+      assert prompt =~ "Discovery inspects only"
+      assert prompt =~ "doc` shows args/result"
+      assert prompt =~ "(apropos"
+      assert prompt =~ "(dir"
+      assert prompt =~ "(doc"
       # The detailed frozen catalog body must not leak through.
       refute prompt =~ "alpha:\n  ping()"
     end
@@ -182,8 +182,8 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
       prompt = Prompt.system_prompt(catalog_mode: :lazy)
 
-      assert prompt =~ "Configured upstream MCP servers: alpha"
-      refute prompt =~ "Configured upstream MCP servers: alpha [transport"
+      assert prompt =~ ~s|"name" "alpha"|
+      refute prompt =~ "alpha [transport"
     end
 
     test ":auto preserves the existing inlined catalog body" do
@@ -191,14 +191,20 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
 
       prompt = Prompt.system_prompt(catalog_mode: :auto)
 
-      assert prompt =~ "Upstream catalog:\nalpha:\n  ping()"
-      refute prompt =~ "Upstream catalog: not inlined"
+      assert prompt =~ "Upstream discovery:"
+      assert prompt =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert prompt =~ ~s|"name" "alpha"|
+      refute prompt =~ "alpha:\n  ping()"
     end
 
     test ":inline behaves like :auto for the planner system prompt" do
       Catalog.freeze("alpha:\n  ping()")
 
-      assert Prompt.system_prompt(catalog_mode: :inline) =~ "Upstream catalog:\nalpha:\n  ping()"
+      prompt = Prompt.system_prompt(catalog_mode: :inline)
+
+      assert prompt =~ "Upstream discovery:"
+      assert prompt =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert prompt =~ ~s|"name" "alpha"|
     end
   end
 

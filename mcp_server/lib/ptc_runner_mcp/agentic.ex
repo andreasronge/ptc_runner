@@ -175,17 +175,17 @@ defmodule PtcRunnerMcp.Agentic do
       context: validated.context,
       continuation_guard: continuation_guard(ledger),
       trace_context: %{request_id: request_id},
-      catalog_exec: build_catalog_exec()
+      discovery_exec: build_discovery_exec()
     )
   end
 
-  # Build a `catalog/*` executor closure for the planner's generated
+  # Build a discovery executor closure for the planner's generated
   # PTC-Lisp program. Mirrors the wiring in
   # `Tools.execute_with_aggregator/4` but with a dedicated call_context
   # whose budget is independent from the agentic `tool/mcp-call`
-  # counter (`McpCall.build/2` owns its own `:atomics`). Catalog ops
+  # counter (`McpCall.build/2` owns its own `:atomics`). Discovery ops
   # therefore never consume the upstream-call quota.
-  defp build_catalog_exec do
+  defp build_discovery_exec do
     catalog_config = CatalogConfig.get()
 
     call_context =

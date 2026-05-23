@@ -720,7 +720,7 @@ defmodule PtcRunnerMcp.Tools do
       # this as the join key.
       tools = AggregatorTools.build(call_context, request_id: request_id)
 
-      catalog_exec =
+      discovery_exec =
         CatalogBuiltins.build(call_context,
           registry: UpstreamRegistry,
           catalog_config: catalog_config
@@ -731,7 +731,7 @@ defmodule PtcRunnerMcp.Tools do
           program,
           context,
           parsed_signature,
-          [tools: tools, catalog_exec: catalog_exec, profile: :mcp_aggregator] ++ sandbox_opts
+          [tools: tools, discovery_exec: discovery_exec, profile: :mcp_aggregator] ++ sandbox_opts
         )
 
       entries = UpstreamCalls.drain(call_context.collector_ref)

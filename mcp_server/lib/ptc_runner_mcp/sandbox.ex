@@ -155,6 +155,7 @@ defmodule PtcRunnerMcp.Sandbox do
     #     an aggregator-mode handler.
     tools = Keyword.get(opts, :tools, [])
     catalog_exec = Keyword.get(opts, :catalog_exec)
+    discovery_exec = Keyword.get(opts, :discovery_exec, catalog_exec)
 
     # Phase 1a (`Plans/ptc-runner-mcp-aggregator.md` §10 / §11.5): the
     # aggregator request handler passes `profile: :mcp_aggregator` so
@@ -211,7 +212,7 @@ defmodule PtcRunnerMcp.Sandbox do
          strict_data: true
        ] ++ parallel_limit_opts(max_heap_words))
       |> then(fn opts ->
-        if catalog_exec, do: Keyword.put(opts, :catalog_exec, catalog_exec), else: opts
+        if discovery_exec, do: Keyword.put(opts, :discovery_exec, discovery_exec), else: opts
       end)
 
     # No :signature passed to Lisp.run/2 — MCP performs signature

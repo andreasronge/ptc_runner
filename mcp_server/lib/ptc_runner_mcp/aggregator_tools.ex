@@ -607,18 +607,20 @@ defmodule PtcRunnerMcp.AggregatorTools do
   defp configured_servers_hint(registry) do
     case configured_server_names(registry) do
       [] ->
-        "\nHint: use (catalog/list-servers) to inspect configured upstreams."
+        "\nHint: use (mcp/servers) to inspect configured upstreams."
 
       names ->
         "\nConfigured upstreams: #{Enum.join(Enum.take(names, 8), ", ")}." <>
-          "\nHint: use (catalog/list-servers) or (catalog/search-tools \"query\" {:limit 8})."
+          "\nHint: use (mcp/servers) or (apropos \"query\" {:limit 8})."
     end
   end
 
   defp tool_discovery_hint(server) do
-    "\nHint: use (catalog/list-tools \"#{server}\" {:limit 20}) or " <>
-      "(catalog/search-tools \"query\" {:limit 8}); then use " <>
-      "(catalog/describe-tool \"#{server}\" \"tool\") for required args and a call example."
+    server_ref = lisp_string(server)
+
+    "\nHint: use (dir #{server_ref} {:limit 20}) or " <>
+      "(apropos \"query\" {:limit 8}); then use " <>
+      "(doc #{tool_ref(server, "tool")}) for required args and a call example."
   end
 
   defp describe_tool_hint(registry, server, tool) do
@@ -629,7 +631,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
       end
 
     summary <>
-      "\nHint: use (catalog/describe-tool \"#{server}\" \"#{tool}\") for required args and a call example."
+      "\nHint: use (doc #{tool_ref(server, tool)}) for required args and a call example."
   end
 
   defp known_tools_hint(server, attempted_tool, tools) do
@@ -651,10 +653,19 @@ defmodule PtcRunnerMcp.AggregatorTools do
           ""
 
         candidate ->
-          "\nDid you mean \"#{candidate}\"? Use (catalog/describe-tool \"#{server}\" \"#{candidate}\")."
+          "\nDid you mean \"#{candidate}\"? Use (doc #{tool_ref(server, candidate)})."
       end
 
     known <> did_you_mean <> tool_discovery_hint(server)
+  end
+
+  defp tool_ref(server, tool), do: lisp_string("#{server}/#{tool}")
+
+  defp lisp_string(value) when is_binary(value) do
+    case Jason.encode(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> inspect(value)
+    end
   end
 
   defp configured_server_names(registry) do

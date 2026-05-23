@@ -396,44 +396,67 @@ defmodule PtcRunnerMcp.PromptRegistry do
     config = CatalogConfig.get()
     snapshot = Catalog.frozen_snapshot()
 
-    case CatalogDescription.resolve_mode(snapshot, config) do
-      :lazy -> agentic_upstream_catalog(catalog, :lazy)
-      {:inline, _warnings} -> agentic_upstream_catalog(catalog, :inline)
+    case snapshot do
+      [] ->
+        agentic_upstream_catalog(catalog, :inline)
+
+      _ ->
+        case CatalogDescription.resolve_mode(snapshot, config) do
+          :lazy -> agentic_upstream_catalog(catalog, :lazy)
+          {:inline, _warnings} -> agentic_upstream_catalog(catalog, :inline)
+        end
     end
   end
 
-  defp agentic_upstream_catalog("", _mode), do: "Upstream catalog:\n(no upstream catalog frozen)"
-  defp agentic_upstream_catalog(catalog, _mode), do: "Upstream catalog:\n#{catalog}"
+  defp agentic_upstream_catalog("", _mode),
+    do: "Upstream discovery:\n(no upstream discovery snapshot frozen)"
+
+  defp agentic_upstream_catalog(catalog, _mode) do
+    snapshot = Catalog.frozen_snapshot()
+
+    rendered =
+      render_catalog_snapshot(snapshot, :inline) ||
+        catalog
+        |> entries_from_catalog_text()
+        |> render_catalog_snapshot(:lazy)
+
+    case rendered do
+      nil -> "Upstream discovery:\n#{catalog}"
+      text -> "Upstream discovery:\n#{text}"
+    end
+  end
 
   defp lazy_catalog_server_names(catalog) do
     snapshot = Catalog.frozen_snapshot()
-    config = %{CatalogConfig.get() | catalog_mode: :lazy}
 
-    case CatalogDescription.render_for_entries(snapshot, config) do
-      nil -> server_names_from_catalog_text(catalog)
-      server_names -> server_names
-    end
-  end
-
-  defp server_names_from_catalog_text(catalog) when is_binary(catalog) do
-    names =
+    render_catalog_snapshot(snapshot, :lazy) ||
       catalog
-      |> String.split("\n")
-      |> Enum.flat_map(fn line ->
-        case Regex.run(~r/^(\S.*):\s*$/, line) do
-          [_, header] -> [strip_catalog_header_metadata(header)]
-          _ -> []
-        end
-      end)
-      |> Enum.reject(&(&1 == ""))
-
-    case names do
-      [] -> nil
-      _ -> "Configured upstream MCP servers: " <> Enum.join(names, ", ")
-    end
+      |> entries_from_catalog_text()
+      |> render_catalog_snapshot(:lazy)
   end
 
-  defp server_names_from_catalog_text(_catalog), do: nil
+  defp render_catalog_snapshot(entries, mode) when is_list(entries) do
+    config = %{CatalogConfig.get() | catalog_mode: mode}
+
+    CatalogDescription.render_for_entries(entries, config)
+  end
+
+  defp entries_from_catalog_text(catalog) when is_binary(catalog) do
+    catalog
+    |> String.split("\n")
+    |> Enum.flat_map(fn line ->
+      case Regex.run(~r/^(\S.*):\s*$/, line) do
+        [_, header] ->
+          [%{name: strip_catalog_header_metadata(header), tools: nil, metadata: %{}}]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.reject(&(&1.name == ""))
+  end
+
+  defp entries_from_catalog_text(_catalog), do: []
 
   defp strip_catalog_header_metadata(header) do
     header

@@ -188,14 +188,14 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
 
     with_upstreams =
       PromptRegistry.render(:mcp_session_eval_with_upstreams_description,
-        catalog: "catalog/search-tools"
+        catalog: "apropos"
       )
 
     refute regular =~ "tool/mcp-call"
-    refute regular =~ "catalog/search-tools"
+    refute regular =~ "apropos"
 
     assert with_upstreams =~ "tool/mcp-call"
-    assert with_upstreams =~ "catalog/search-tools"
+    assert with_upstreams =~ "apropos"
   end
 
   defp repeated_prompt_lines(text) do

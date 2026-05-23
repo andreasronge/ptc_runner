@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.AST do
           # Symbols
           | {:symbol, name()}
           | {:ns_symbol, name(), name()}
+          | {:quoted_symbol, String.t()}
           # Calls
           | {:list, [t()]}
 
@@ -56,6 +57,9 @@ defmodule PtcRunner.Lisp.AST do
         end
     end
   end
+
+  @doc "Create a quoted symbolic reference node without namespace splitting"
+  def quoted_symbol(name) when is_binary(name), do: {:quoted_symbol, name}
 
   @doc "Create a vector node"
   def vector(elements), do: {:vector, elements}

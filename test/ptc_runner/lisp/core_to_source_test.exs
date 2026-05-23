@@ -38,6 +38,10 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert CoreToSource.format({:var, :my_var}) == "my_var"
     end
 
+    test "symbolic ref" do
+      assert CoreToSource.format({:symbol_ref, "github/search_repos"}) == "'github/search_repos"
+    end
+
     test "data access" do
       assert CoreToSource.format({:data, :task}) == "data/task"
       assert CoreToSource.format({:data, :success}) == "data/success"

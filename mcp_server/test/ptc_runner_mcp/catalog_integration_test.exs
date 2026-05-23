@@ -56,13 +56,17 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert String.starts_with?(description, "Tools below. For details:")
-      assert description =~ "Configured upstream MCP servers:"
-      assert description =~ "alpha:"
-      assert description =~ "beta:"
-      assert description =~ "3 tools."
-      assert description =~ "2 tools."
-      assert description =~ "Tools:"
+      assert String.starts_with?(
+               description,
+               "Synthetic discovery snapshot below. Live:"
+             )
+
+      assert description =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert description =~ ~s|"name" "alpha"|
+      assert description =~ ~s|"name" "beta"|
+      assert description =~ ~s|"tool_count" 3|
+      assert description =~ ~s|"tool_count" 2|
+      assert description =~ ~s|(dir "alpha" {:limit 20})|
       assert description =~ "alpha.tool_1(key: string?)"
     end
   end
@@ -81,14 +85,18 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert String.starts_with?(description, "Tools below. For details:")
-      assert description =~ "Configured upstream MCP servers:"
+      assert String.starts_with?(
+               description,
+               "Synthetic discovery snapshot below. Live:"
+             )
+
+      assert description =~ "Synthetic discovery snapshot for configured upstreams:"
       assert description =~ "srv_a"
       assert description =~ "srv_b"
-      assert description =~ "catalog/search-tools"
-      assert description =~ "catalog/list-tools"
-      assert description =~ "catalog/describe-tool"
-      refute description =~ "  Tools:"
+      assert description =~ "apropos"
+      assert description =~ "dir"
+      assert description =~ "doc"
+      refute description =~ "(dir \"srv_a\""
     end
   end
 
@@ -106,12 +114,17 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
       entry = Tools.tool_entry()
       description = entry["description"]
 
-      assert String.starts_with?(description, "Tools below. For details:")
-      assert description =~ "Configured upstream MCP servers:"
+      assert String.starts_with?(
+               description,
+               "Synthetic discovery snapshot below. Live:"
+             )
+
+      assert description =~ "Synthetic discovery snapshot for configured upstreams:"
       assert description =~ "gamma"
       assert description =~ "delta"
-      assert description =~ "catalog/search-tools"
-      refute description =~ "  Tools:"
+      assert description =~ "apropos"
+      refute description =~ ~s|(dir "delta"|
+      refute description =~ ~s|(dir "gamma"|
     end
   end
 
@@ -132,11 +145,11 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
 
       env =
         call(~S"""
-        (let [results (catalog/search-tools "warehouse" {:limit 5})
+        (let [results (apropos "warehouse" {:limit 5})
               first_line (first results)
               server (first (clojure.string/split first_line #"\."))
               first_tool (first (clojure.string/split (second (clojure.string/split first_line #"\.")) #"\("))
-              detail (catalog/describe-tool server first_tool)]
+              detail (doc (str server "/" first_tool))]
           (tool/mcp-call {:server server
                           :tool first_tool
                           :args {:item_id "abc"}}))
@@ -172,11 +185,11 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
 
       env =
         call(~S"""
-        (let [search (catalog/search-tools "analytics" {:limit 5})
+        (let [search (apropos "analytics" {:limit 5})
               server (first (clojure.string/split (first search) #":"))
-              tools (catalog/list-tools server {:limit 10})
+              tools (dir server {:limit 10})
               first_tool (first (clojure.string/split (second (clojure.string/split (first tools) #"\.")) #"\("))
-              detail (catalog/describe-tool server first_tool)]
+              detail (doc (str server "/" first_tool))]
           (tool/mcp-call {:server server
                           :tool first_tool
                           :args {:query "test"}}))

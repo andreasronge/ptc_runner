@@ -7,12 +7,7 @@
 <!-- budget: target<=650 bytes, hard<=850 bytes -->
 
 <!-- PTC_PROMPT_START -->
-Discover tools:
-- `(catalog/search-tools "query" {:limit 8})`
-- `(catalog/describe-tool "server" "tool")`
-- `(catalog/list-tools "server" {:limit 20})`
-Use `catalog/describe-tool` before calling; it shows `Result<T>`.
-Call: `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
-catalog list/search returns strings like `srv.tool_name(arg: type) -> Result<T>`; use exact tool names.
-catalog/* ops have their own budget and never consume the upstream-call quota.
+Discover: `(mcp/servers)`, `(apropos "query" {:limit 8})`, `(dir "server" {:limit 20})`, `(doc "server/tool")`, `(meta "server/tool")`.
+Discovery inspects only; `doc` shows args/result. Execute only with `(tool/mcp-call {:server "server" :tool "tool" :args {...}})`.
+Discovery ops have their own budget and never consume the upstream-call quota.
 <!-- PTC_PROMPT_END -->

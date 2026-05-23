@@ -29,6 +29,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :user_ns,
     :env,
     :tool_exec,
+    :discovery_exec,
     :catalog_exec,
     :turn_history,
     :budget,
@@ -140,11 +141,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
         }
 
   @typedoc """
-  Catalog operation record for tracing.
+  Discovery operation record for tracing.
 
   Fields:
-  - `operation`: Which catalog builtin was called
-  - `args`: Arguments passed to the builtin
+  - `operation`: Which discovery operation was called
+  - `args`: Arguments passed to the operation
   - `outcome`: `:ok`, `:nil_world_fault`, or `:error`
   - `reason`: Reason for nil/error outcome (e.g., `:catalog_cap_exhausted`)
   - `duration_ms`: How long the operation took
@@ -162,6 +163,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           user_ns: map(),
           env: map(),
           tool_exec: (String.t(), map() -> term()),
+          discovery_exec: (atom(), list() -> term()) | nil,
           catalog_exec: (atom(), list() -> term()) | nil,
           turn_history: list(),
           budget: map() | nil,
@@ -239,6 +241,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
+      discovery_exec: Keyword.get(opts, :discovery_exec, Keyword.get(opts, :catalog_exec)),
       catalog_exec: Keyword.get(opts, :catalog_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
