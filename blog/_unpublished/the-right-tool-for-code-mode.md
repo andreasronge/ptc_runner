@@ -63,30 +63,52 @@ It pulled the traces into context, read through them, and gave me an answer with
 
 I want to be careful here, because it would be easy to dress this up. This was mock data and a single recorded run, not a benchmark. I am not claiming a precise win rate. What struck me was how *ordinary* the question was and how *easily* it went wrong. This was the very first thing I asked, not some adversarial edge case. The model was not lying. It was doing mental arithmetic over a table it had to read, and it slipped, exactly the way I would if you asked me to sum a column by eye.
 
-Then I asked the same question through ptc_runner's code mode. Instead of reading the traces, the model wrote a few lines that fetched them and computed over them:
+Then I asked the same question through ptc_runner's code mode. The first thing the model did was not fetch every trace. It explored the tool surface from inside the Lisp session:
 
 ```clojure
-;; Pull the traces once. They stay inside the sandbox, not in the context window.
-(def traces
-  (get (:value (tool/mcp-call {:server "observatory"
-                               :tool "list_traces"
-                               :args {:org_id "org-acme"
-                                      :environment "production"}}))
-       "traces"))
-
-(defn cost [t] (json/parse-string (get t "total_cost")))
-(defn day  [t] (subs (get t "started_at") 0 10))
-
-;; Group by day, sum the cost, sort. Hand back only the small table.
-(sort-by :day
-  (map (fn [pair]
-         (let [d  (first pair)
-               ts (second pair)]
-           {:day d :n (count ts) :cost (reduce + 0 (map cost ts))}))
-       (group-by day traces)))
+(mcp/servers)
+(dir "observatory" {:limit 20})
+(doc "observatory/list_traces")
 ```
 
-The sum was computed, not estimated, so the answer was right. From there the model drilled into the one expensive trace, found eight loop iterations that re-sent the full transcript each time, and explained the spike. Each step was another short program against the same primitive tools.
+Then it made one small call to learn the result shape before writing the real logic:
+
+```clojure
+(let [r (tool/mcp-call {:server "observatory"
+                        :tool "list_traces"
+                        :args {:org-id "org-acme"
+                               :environment "production"
+                               :limit 5}})]
+  {:keys (keys (:value r))
+   :first (first (get (:value r) "traces"))})
+```
+
+That probe taught it the boring but important details: the response had a `traces` array and a `next_cursor`, the records used string keys, and `total_cost` came back as a string. From there it wrote a small pagination helper, stored the traces in the session, and computed the daily totals:
+
+```clojure
+(def acme-prod
+  (fetch-all {:org-id "org-acme"
+              :environment "production"
+              :limit 100}))
+
+(defn cost [t] (Double/parseDouble (get t "total_cost")))
+(defn day  [t] (subs (get t "started_at") 0 10))
+
+(reduce (fn [m t]
+          (assoc m (day t) (+ (get m (day t) 0.0) (cost t))))
+        {}
+        acme-prod)
+```
+
+The runner's feedback made the statefulness visible:
+
+```text
+[stored: acme-prod, fetch-all; turn upstream calls: 1]
+```
+
+After that, the model could aggregate by day and filter the spike locally from `acme-prod`, without another upstream call. It found that May 18 was the outlier, drilled into the expensive trace with `get_trace_steps`, and mapped the steps to a compact table. The trace showed eight loop iterations where the input grew by about 22,000 tokens each time while the output stayed flat. The bug was not hidden in a fancy observability endpoint. It fell out of a few small programs over primitive tools.
+
+The sum was computed, not estimated, so the answer was right. The investigation also surfaced useful operational signals along the way: printed shape probes were separated from return values, persisted bindings were reported explicitly, and large results were truncated with a prompt to ask for narrower fields. That feedback is exactly what lets the model recover and continue instead of dragging everything back into the chat.
 
 The other thing worth reporting is how little data crossed back into the context window. Across that investigation, roughly 27,800 tokens of trace data were fetched and processed inside the sandbox, while only about 740 tokens of results came back into the model's context. That is around 37 times less data in the window than if the traces had been read directly. The honest caveat: those are figures for data moving through the runner, not the full conversation cost, which the runner cannot see. But the shape of it is the whole point. The bulk stayed where bulk belongs, in memory, and the model only ever saw the conclusions.
 
