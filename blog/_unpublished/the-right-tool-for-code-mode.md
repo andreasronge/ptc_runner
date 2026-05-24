@@ -17,7 +17,7 @@ Then I asked for something more useful: "go through my mail, suggest a few categ
 
 Some of that was on my Gmail MCP. But the failure pointed at something deeper: the model was being asked to *be the computer*, and it is not good at that. It is good at deciding *what* to compute. Those are different jobs, and I had handed it the wrong one.
 
-That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think the popular answer to that gap reaches for the wrong tool, and what a better one looks like. It also changed how I design tools in the first place, which turned out to be the lesson I keep coming back to.
+That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think the popular answer to that gap reaches for the wrong tool, and what a better one looks like. Along the way it changed how I design tools — the part I keep coming back to.
 
 ## Code mode is having a moment
 
@@ -67,8 +67,8 @@ Then I asked the same question through ptc_runner's code mode. The first thing t
 
 ```clojure
 (mcp/servers)
-(dir "observatory" {:limit 20})
-(doc "observatory/list_traces")
+(dir 'observatory {:limit 20})
+(doc 'observatory/list_traces)
 ```
 
 Then it made one small call to learn the result shape before writing the real logic:
@@ -106,33 +106,25 @@ The runner's feedback made the statefulness visible:
 [stored: acme-prod, fetch-all; turn upstream calls: 1]
 ```
 
-After that, the model could aggregate by day and filter the spike locally from `acme-prod`, without another upstream call. It found that May 18 was the outlier, drilled into the expensive trace with `get_trace_steps`, and mapped the steps to a compact table. The trace showed eight loop iterations where the input grew by about 22,000 tokens each time while the output stayed flat. The bug was not hidden in a fancy observability endpoint. It fell out of a few small programs over primitive tools.
+After that, the model aggregated by day and filtered the spike locally from `acme-prod`, with no further upstream call. May 18 was the outlier; it drilled into the expensive trace with `get_trace_steps` and found eight loop iterations where the input kept growing while the output stayed flat. The bug fell out of a few small programs over primitive tools, not a fancy observability endpoint.
 
-The sum was computed, not estimated, so the answer was right. The investigation also surfaced useful operational signals along the way: printed shape probes were separated from return values, persisted bindings were reported explicitly, and large results were truncated with a prompt to ask for narrower fields. That feedback is exactly what lets the model recover and continue instead of dragging everything back into the chat.
+The sum was computed, not estimated, so the answer was right — and almost none of the trace data came back with it. The raw traces and steps were aggregated inside the sandbox; `acme-prod` stayed in the session, and only the derived results crossed into context: a shape probe, the by-day totals, the spike's rows, a truncated step table.
 
-The other thing worth reporting is how little data crossed back into the context window. Across that investigation, roughly 27,800 tokens of trace data were fetched and processed inside the sandbox, while only about 740 tokens of results came back into the model's context. That is around 37 times less data in the window than if the traces had been read directly. The honest caveat: those are figures for data moving through the runner, not the full conversation cost, which the runner cannot see. But the shape of it is the whole point. The bulk stayed where bulk belongs, in memory, and the model only ever saw the conclusions.
+That is the shape worth noticing. What comes back does not grow with the data — a few hundred tokens whether you process sixteen traces or sixteen thousand, while reading the raw rows grows with every one. The bulk stays where bulk belongs, and the model only ever sees the conclusions.
 
-The efficiency is the easy thing to notice. It is not the most interesting thing in that example.
+The efficiency is the easy thing to notice. The more interesting thing is *how* the model got there — search the tools, probe one call, name the result, reuse it. Nobody told it to work that way.
 
 ## Code mode should feel like a REPL
 
-The REPL part matters more than I expected. Investigations are naturally stateful. You define `cost`, bind `traces`, compute `by-day`, inspect the spike, and then ask the next question using the same small workspace. If every code-mode call is a fresh sandbox, the model has to recreate that workspace over and over, or push more of it back into the context window.
+That loop is not improvised. It is the pattern the model has seen ten thousand times — REPL transcripts, notebooks, shell sessions — and it falls into it on its own. `*1` for the last result, `def` to name something, `dir` and `doc` to look around: give a model those and you are not teaching it an API, you are reusing fluency it already has. A bespoke `catalog/find` / `catalog/get` surface would have to be spelled out in the prompt, against a model that has never seen it. The model can discover your provided tools one step at a time, instead of being handed the whole catalog up front.
 
-That is awkward with a general-purpose runtime. Keeping a pool of stateful Python or JavaScript sandboxes around means keeping imports, heaps, event loops, and capabilities alive too. Cold-starting them is simpler, but then you lose the REPL shape.
+It pays off in two directions.
 
-ptc_runner sessions are deliberately smaller. Definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived Python or JavaScript process. That is the performance story as much as the ergonomics story: the model gets a small workspace outside the context window, so it does not have to rebuild the same world every time it asks the next question.[^perf]
-
-The REPL shape now applies in two directions: the model can keep intermediate data outside the context window, and it can discover the available tool surface from inside the same workspace.
+The first is state. Investigations are naturally stateful: you bind `acme-prod`, compute the daily totals, inspect the spike, and then ask the next question against the same small workspace. If every call is a fresh sandbox, the model rebuilds that workspace over and over, or pushes it back into context. That is awkward with a general-purpose runtime — a pool of live Python or JavaScript sandboxes means keeping imports, heaps, event loops, and capabilities alive too. ptc_runner sessions are deliberately smaller: definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived process, and a workspace that lives outside the context window.[^perf]
 
 ![Stateful sandboxed REPL sessions in ptc_runner](./assets/images/mcp_sandbox_repl.png)
 
-## Tool discovery should feel like a REPL too
-
-The same idea applies before the first tool call. MCP tool lists get large fast — names, descriptions, schemas, examples, response shapes — and most of it is irrelevant to the task in front of you. Push all of it into the prompt up front and discovery becomes another version of the context-window problem.
-
-ptc_runner makes discovery part of the Lisp environment, with deliberately familiar names: `(apropos "calendar")`, `(dir 'calendar)`, `(doc 'calendar/search_events)`. Search, inspect, read the docs, try the next thing — the moves a model has seen over and over in REPL transcripts and shell sessions. It is not learning a new catalog API so much as reusing a pattern already baked into its training data, exploring the catalog one step at a time while the bulk of it stays in the runtime.
-
-The same forms reach past MCP tools to the language itself. `(apropos "date")`, `(dir 'clojure.string)`, `(doc 'subs)` surface which `clojure.core` functions exist and what the limited Java interop covers, so the prompt never has to carry the whole reference. The full list lives in the [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md).
+The second is discovery, and it starts before the first tool call. MCP tool lists get large fast — names, descriptions, schemas, response shapes — and most of it is irrelevant to the task in front of you; push all of it into the prompt and discovery becomes another version of the context-window problem. So `(apropos "calendar")`, `(dir 'calendar)`, `(doc 'calendar/search_events)` let the model explore the catalog one step at a time — the same way it explored `observatory` — while the bulk stays in the runtime. The same forms reach past MCP tools into the language itself: `(dir 'clojure.string)`, `(doc 'subs)` surface what `clojure.core` and the limited Java interop actually cover, so the prompt never has to carry the whole reference. The full list lives in the [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md).
 
 ## The part that changed how I build these systems
 
