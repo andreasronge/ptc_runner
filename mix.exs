@@ -348,7 +348,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/prompts usage-rules.md usage-rules),
+        ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md usage-rules.md usage-rules priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/prompts priv/ptc_schema.json priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",
