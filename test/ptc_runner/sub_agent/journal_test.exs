@@ -175,4 +175,133 @@ defmodule PtcRunner.SubAgent.JournalTest do
       assert step2.journal == %{"charge_100" => "tx_100"}
     end
   end
+
+  describe "mission_log_in: :user_message" do
+    test "mission log appears in first user message instead of system prompt" do
+      agent =
+        test_agent(
+          max_turns: 2,
+          journaling: true,
+          format_options: [mission_log_in: :user_message]
+        )
+
+      llm = fn %{system: system, messages: messages, turn: 1} ->
+        refute system =~ "<mission_log>"
+
+        first_user = Enum.find(messages, &(&1.role == :user))
+        assert first_user.content =~ "<mission_log>"
+        assert first_user.content =~ "[done] order_1: \"tx_123\""
+
+        {:ok, ~S|```clojure
+(return "ok")
+```|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{"order_1" => "tx_123"})
+    end
+
+    test "system prompt stays static across turns" do
+      agent =
+        test_agent(
+          max_turns: 3,
+          journaling: true,
+          format_options: [mission_log_in: :user_message]
+        )
+
+      system_prompts = :ets.new(:system_prompts, [:set, :public])
+
+      llm = fn %{system: system, turn: turn} ->
+        :ets.insert(system_prompts, {turn, system})
+
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(task "step-1" (+ 1 2))
+```|}
+
+          2 ->
+            {:ok, ~S|```clojure
+(return "done")
+```|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
+
+      [{1, sys1}] = :ets.lookup(system_prompts, 1)
+      [{2, sys2}] = :ets.lookup(system_prompts, 2)
+      assert sys1 == sys2
+      :ets.delete(system_prompts)
+    end
+
+    test "mission log updates in user message on turn 2 after task completion" do
+      tools = %{"lookup" => fn %{"id" => id} -> "user_#{id}" end}
+
+      agent =
+        test_agent(
+          max_turns: 3,
+          tools: tools,
+          journaling: true,
+          format_options: [mission_log_in: :user_message]
+        )
+
+      llm = fn %{messages: messages, turn: turn} ->
+        case turn do
+          1 ->
+            {:ok, ~S|```clojure
+(task "fetch_user_42" (tool/lookup {:id 42}))
+```|}
+
+          2 ->
+            first_user = Enum.find(messages, &(&1.role == :user))
+            assert first_user.content =~ "[done] fetch_user_42: \"user_42\""
+
+            {:ok, ~S|```clojure
+(return "ok")
+```|}
+        end
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
+    end
+
+    test "empty journal produces no injection in either mode" do
+      for mode <- [:system_prompt, :user_message] do
+        agent =
+          test_agent(
+            max_turns: 2,
+            journaling: true,
+            format_options: [mission_log_in: mode]
+          )
+
+        llm = fn %{system: system, messages: messages, turn: 1} ->
+          refute system =~ "<mission_log>"
+
+          first_user = Enum.find(messages, &(&1.role == :user))
+          refute first_user.content =~ "<mission_log>"
+
+          {:ok, ~S|```clojure
+(return "ok")
+```|}
+        end
+
+        {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{})
+      end
+    end
+
+    test "default mode :system_prompt preserves existing behavior" do
+      agent = test_agent(max_turns: 2, journaling: true)
+
+      llm = fn %{system: system, turn: 1} ->
+        assert system =~ "<mission_log>"
+        assert system =~ "[done] task_a"
+
+        {:ok, ~S|```clojure
+(return "ok")
+```|}
+      end
+
+      {:ok, _step} = SubAgent.run(agent, llm: llm, journal: %{"task_a" => "result"})
+    end
+  end
 end
