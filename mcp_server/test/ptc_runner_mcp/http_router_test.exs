@@ -359,7 +359,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
         send(parent, {:slow_done, conn.status, Jason.decode!(conn.resp_body)})
       end)
 
-    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end)
+    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end, 5_000)
     assert :ok = SessionRegistry.begin_drain()
 
     refute_receive {:slow_done, _, _}, 30
@@ -411,7 +411,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
         |> call()
       end)
 
-    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end)
+    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end, 5_000)
     [%{pid: worker_pid}] = :sys.get_state(meta.pid).in_flight |> Map.values()
     assert ConcurrencyGate.in_flight() == 1
 
@@ -487,7 +487,7 @@ defmodule PtcRunnerMcp.HttpRouterTest do
         |> call()
       end)
 
-    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end)
+    wait_until(fn -> map_size(:sys.get_state(meta.pid).in_flight) == 1 end, 5_000)
     assert ConcurrencyGate.in_flight() == 1
 
     Task.shutdown(task, :brutal_kill)
