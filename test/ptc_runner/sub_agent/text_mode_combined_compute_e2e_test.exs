@@ -33,6 +33,9 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
   @moduletag :e2e
 
   alias PtcRunner.SubAgent
+  alias PtcRunner.TestSupport.LLMSupport
+
+  @models ["haiku", "gemini-flash-lite"]
 
   # Combined into a single mission string (the SubAgent `prompt:` field is the
   # user message; the framework generates the system prompt itself, including
@@ -55,6 +58,8 @@ defmodule PtcRunner.SubAgent.TextModeCombinedComputeE2ETest do
   # simplest fit: survives across tests, GC'd when the test process exits.
 
   setup_all do
+    Enum.each(@models, &LLMSupport.ensure_api_key!/1)
+
     {:ok, agent} = Agent.start_link(fn -> [] end)
 
     on_exit(fn ->

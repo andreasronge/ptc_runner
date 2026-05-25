@@ -2,11 +2,18 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingE2ETest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
+  alias PtcRunner.TestSupport.LLMSupport
 
   @moduletag :e2e
+  @model "haiku"
 
   defp get_llm do
-    PtcRunner.LLM.callback("haiku")
+    PtcRunner.LLM.callback(@model)
+  end
+
+  setup_all do
+    LLMSupport.ensure_api_key!(@model)
+    :ok
   end
 
   describe "tool calling e2e" do

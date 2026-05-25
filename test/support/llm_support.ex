@@ -90,11 +90,11 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   Raises an error if the model requires an API key and none is set.
   """
-  @spec ensure_api_key!() :: :ok
-  def ensure_api_key! do
+  @spec ensure_api_key!(String.t() | nil) :: :ok
+  def ensure_api_key!(model \\ nil) do
     load_dotenv()
 
-    current_model = model()
+    current_model = model || model()
 
     if ReqLLMAdapter.requires_api_key?(current_model) and
          is_nil(System.get_env("OPENROUTER_API_KEY")) do
