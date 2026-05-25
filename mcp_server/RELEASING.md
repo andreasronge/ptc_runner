@@ -56,7 +56,7 @@ shasum -a 256 -c SHA256SUMS
 An install script must verify the checksum before extraction or execution.
 This is the same supply-chain boundary as any other downloaded binary.
 
-## Smoke Test
+## Smoke Tests
 
 After extracting an archive, CI should run:
 
@@ -64,12 +64,35 @@ After extracting an archive, CI should run:
 bin/ptc_runner_mcp version
 ```
 
-It should also run one stdio JSON-RPC smoke test:
+It should also run stdio JSON-RPC smoke tests for both supported tool
+surfaces.
+
+Default stateless mode:
 
 1. `initialize`
 2. `notifications/initialized`
 3. `tools/list`
-4. `notifications/exit`
+4. Assert `lisp_eval` is advertised.
+5. Call `lisp_eval` with `(+ 1 2)` and assert the slim text result is
+   `user=> 3`.
+6. `notifications/exit`
+
+Session mode:
+
+1. Start with `bin/ptc_runner_mcp start --sessions`.
+2. `initialize`
+3. `notifications/initialized`
+4. `tools/list`
+5. Assert `lisp_eval` is not advertised and `lisp_session_*` tools are
+   advertised.
+6. Assert a `lisp_eval` call returns `unknown_tool`.
+7. Call `lisp_session_start` and assert it returns a `session_id`.
+8. `notifications/exit`
+
+Pin smoke tests to an empty upstream configuration unless the release
+being tested is specifically an aggregator-mode artifact; local
+operator config must not change the release gate's expected tool
+surface.
 
 Release artifacts should not be uploaded unless these checks pass.
 

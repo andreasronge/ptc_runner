@@ -23,6 +23,11 @@ defmodule PtcRunnerMcp.Integration.StreamingStdioTest do
   @moduletag :integration
   @moduletag :release
   @moduletag timeout: 30_000
+  @no_upstreams_env [
+    {~c"RELEASE_DISTRIBUTION", ~c"none"},
+    {~c"PTC_RUNNER_MCP_UPSTREAMS", ~c"/nonexistent/ptc_runner_mcp_streaming_stdio_test"},
+    {~c"PTC_RUNNER_MCP_RESPONSE_PROFILE", ~c"slim"}
+  ]
 
   setup_all do
     unless ReleaseRunner.release_built?() do
@@ -50,7 +55,7 @@ defmodule PtcRunnerMcp.Integration.StreamingStdioTest do
           :exit_status,
           :use_stdio,
           :hide,
-          {:env, [{~c"RELEASE_DISTRIBUTION", ~c"none"}]},
+          {:env, @no_upstreams_env},
           {:args, ["-c", "exec #{bin} start 2>/dev/null"]}
         ]
       )
@@ -107,8 +112,8 @@ defmodule PtcRunnerMcp.Integration.StreamingStdioTest do
     assert call_reply["id"] == 2, "expected reply for id 2, got #{inspect(call_reply)}"
     result = call_reply["result"]
     assert result["isError"] == false, "expected isError false, got #{inspect(result)}"
-    assert result["structuredContent"]["status"] == "ok"
-    assert result["structuredContent"]["result"] == "user=> 6"
+    assert [%{"type" => "text", "text" => "user=> 6"}] = result["content"]
+    refute Map.has_key?(result, "structuredContent")
   end
 
   # The release may emit log lines on stdout in addition to JSON-RPC

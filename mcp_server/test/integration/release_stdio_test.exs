@@ -23,22 +23,11 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
   cases here fail fast with a clear message. To produce it, run the
   command above before executing this suite.
 
-  ## Known limitation (Phase 5 production-code bug, FOUND in Phase 6a)
-
-  The `tools/call name: "lisp_eval"` happy-path is currently
-  blocked in the release artifact: `:crypto` is not bundled into the
-  Mix release, and `PtcRunnerMcp.TracePayload.redact_program/2` calls
-  `:crypto.hash(:sha256, ...)` unconditionally on every `tools/call`
-  whose `arguments.program` is set. The worker raises
-  `UndefinedFunctionError` and no reply is emitted. Tests that need
-  `tools/call` with a program present are tagged
-  `@tag :skip` with a `bug:` reason — they are deferred until that
-  bug is fixed (out of scope for Phase 6a per § 20.5 risk 2).
-
-  Paths that do NOT touch `redact_program(program, level)` work
-  fine: `initialize`, `tools/list`, `tools/call name: "<unknown>"`
-  (D1 gate), and `tools/call name: "lisp_eval"` with no
-  `program` (args_error).
+  The release defaults to the `:slim` response profile. Stateless
+  `lisp_eval` results therefore return plain text only, without
+  `structuredContent` or `outputSchema`. Stateful session mode is a
+  separate API surface: starting with `--sessions` advertises only
+  `lisp_session_*` tools and treats `lisp_eval` as unknown.
   """
 
   use ExUnit.Case, async: false
@@ -50,6 +39,10 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
   # Each release boot spins up a fresh BEAM VM in a child process —
   # leave plenty of headroom for cold-start.
   @moduletag timeout: 60_000
+  @no_upstreams_env [
+    {"PTC_RUNNER_MCP_UPSTREAMS", "/nonexistent/ptc_runner_mcp_release_stdio_test"},
+    {"PTC_RUNNER_MCP_RESPONSE_PROFILE", "slim"}
+  ]
 
   setup_all do
     unless ReleaseRunner.release_built?() do
@@ -62,8 +55,8 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
     :ok
   end
 
-  describe "handshake" do
-    test "initialize → tools/list against the real release binary" do
+  describe "stateless mode smoke" do
+    test "initialize → tools/list advertises only lisp_eval in slim profile" do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
@@ -71,7 +64,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
         ReleaseRunner.exit_notif()
       ]
 
-      assert {:ok, replies, status, _stderr} = ReleaseRunner.run_session(frames)
+      assert {:ok, replies, status, _stderr} = run_stateless(frames)
       assert status == 0, "release exit_status should be 0, got #{inspect(status)}"
 
       # Two responses (initialize, tools/list) — notifications and
@@ -93,33 +86,55 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       tool = hd(tools)
       assert tool["name"] == "lisp_eval"
       assert is_map(tool["inputSchema"])
-      assert is_map(tool["outputSchema"])
+      refute Map.has_key?(tool, "outputSchema")
       assert tool["annotations"]["readOnlyHint"] == true
       assert tool["annotations"]["idempotentHint"] == true
       assert tool["annotations"]["destructiveHint"] == false
       assert tool["annotations"]["openWorldHint"] == false
     end
 
-    test "release start forwards app CLI flags through env.sh" do
+    test "lisp_eval success returns slim text" do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
-        ReleaseRunner.tools_list_request(2),
+        ReleaseRunner.tools_call_request(100, "lisp_eval", %{
+          "program" => "(+ 1 2)"
+        }),
         ReleaseRunner.exit_notif()
       ]
 
-      assert {:ok, replies, 0, _stderr} =
-               ReleaseRunner.run_session(frames, args: ["start", "--debug-tool"])
+      assert {:ok, replies, 0, _stderr} = run_stateless(frames)
+      reply = Enum.find(replies, &(&1["id"] == 100))
+      assert reply, "no reply for id 100"
 
-      list_reply = Enum.find(replies, &(&1["id"] == 2))
-      tools = list_reply["result"]["tools"]
-      names = Enum.map(tools, & &1["name"])
-
-      assert "lisp_eval" in names
-      assert "lisp_debug" in names
+      result = reply["result"]
+      assert result["isError"] == false
+      assert [%{"type" => "text", "text" => "user=> 3"}] = result["content"]
+      refute Map.has_key?(result, "structuredContent")
     end
 
-    test "release start forwards --sessions through env.sh" do
+    test "missing `program` argument returns slim args_error text" do
+      frames = [
+        ReleaseRunner.init_request(1),
+        ReleaseRunner.initialized_notif(),
+        ReleaseRunner.tools_call_request(300, "lisp_eval", %{}),
+        ReleaseRunner.exit_notif()
+      ]
+
+      assert {:ok, replies, 0, _stderr} = run_stateless(frames)
+      reply = Enum.find(replies, &(&1["id"] == 300))
+      assert reply, "no reply for id 300; got #{inspect(replies)}"
+
+      result = reply["result"]
+      assert result["isError"] == true
+      assert [%{"type" => "text", "text" => text}] = result["content"]
+      assert String.starts_with?(text, "args_error:")
+      refute Map.has_key?(result, "structuredContent")
+    end
+  end
+
+  describe "session mode smoke" do
+    test "tools/list advertises session tools and disables stateless lisp_eval" do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
@@ -128,17 +143,43 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
       ]
 
       assert {:ok, replies, 0, _stderr} =
-               ReleaseRunner.run_session(frames, args: ["start", "--sessions"])
+               run_sessions(frames)
 
       list_reply = Enum.find(replies, &(&1["id"] == 2))
       names = Enum.map(list_reply["result"]["tools"], & &1["name"])
 
-      assert "lisp_eval" in names
+      refute "lisp_eval" in names
       assert "lisp_session_start" in names
+      assert "lisp_session_list" in names
       assert "lisp_session_eval" in names
+      assert "lisp_session_inspect" in names
+      assert "lisp_session_forget" in names
       assert "lisp_session_close" in names
     end
 
+    test "lisp_eval returns unknown_tool while lisp_session_start works" do
+      frames = [
+        ReleaseRunner.init_request(1),
+        ReleaseRunner.initialized_notif(),
+        ReleaseRunner.tools_call_request(10, "lisp_eval", %{"program" => "(+ 1 2)"}),
+        ReleaseRunner.tools_call_request(11, "lisp_session_start", %{"title" => "smoke"}),
+        ReleaseRunner.exit_notif()
+      ]
+
+      assert {:ok, replies, 0, _stderr} = run_sessions(frames)
+
+      disabled_eval = Enum.find(replies, &(&1["id"] == 10))
+      assert disabled_eval["result"]["isError"] == true
+      assert disabled_eval["result"]["structuredContent"]["reason"] == "unknown_tool"
+
+      start = Enum.find(replies, &(&1["id"] == 11))
+      assert start["result"]["isError"] == false
+      assert start["result"]["structuredContent"]["status"] == "ok"
+      assert is_binary(start["result"]["structuredContent"]["session_id"])
+    end
+  end
+
+  describe "handshake compatibility" do
     test "initialize with compatibility-floor 2025-06-18 negotiates to 2025-06-18" do
       init_request =
         Map.put(ReleaseRunner.init_request(1), "params", %{
@@ -149,7 +190,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
 
       frames = [init_request, ReleaseRunner.exit_notif()]
 
-      assert {:ok, [reply], 0, _stderr} = ReleaseRunner.run_session(frames)
+      assert {:ok, [reply], 0, _stderr} = run_stateless(frames)
       assert reply["id"] == 1
       assert reply["result"]["protocolVersion"] == "2025-06-18"
     end
@@ -169,7 +210,7 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
         ReleaseRunner.exit_notif()
       ]
 
-      assert {:ok, replies, 0, _stderr} = ReleaseRunner.run_session(frames)
+      assert {:ok, replies, 0, _stderr} = run_stateless(frames)
 
       reply = Enum.find(replies, &(&1["id"] == 200))
       assert reply, "no reply for unknown-tool request id 200; got #{inspect(replies)}"
@@ -194,59 +235,27 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
     end
   end
 
-  describe "tools/call args_error path" do
-    test "missing `program` argument returns reason:args_error envelope" do
-      # This path does NOT trigger `redact_program(program, ...)` —
-      # `program` is nil — so it survives the Phase 5 `:crypto` bug
-      # and gives us a real end-to-end success-shape gate from a
-      # production-style client.
+  describe "debug tool flag" do
+    test "release start forwards app CLI flags through env.sh" do
       frames = [
         ReleaseRunner.init_request(1),
         ReleaseRunner.initialized_notif(),
-        ReleaseRunner.tools_call_request(300, "lisp_eval", %{}),
+        ReleaseRunner.tools_list_request(2),
         ReleaseRunner.exit_notif()
       ]
 
-      assert {:ok, replies, 0, _stderr} = ReleaseRunner.run_session(frames)
-      reply = Enum.find(replies, &(&1["id"] == 300))
-      assert reply, "no reply for id 300; got #{inspect(replies)}"
+      assert {:ok, replies, 0, _stderr} =
+               ReleaseRunner.run_session(frames,
+                 args: ["start", "--debug-tool"],
+                 env: @no_upstreams_env
+               )
 
-      result = reply["result"]
-      assert result["isError"] == true
-      sc = result["structuredContent"]
-      assert sc["status"] == "error"
-      assert sc["reason"] == "args_error"
-      assert is_binary(sc["message"])
-    end
-  end
+      list_reply = Enum.find(replies, &(&1["id"] == 2))
+      tools = list_reply["result"]["tools"]
+      names = Enum.map(tools, & &1["name"])
 
-  describe "tools/call success path (R22)" do
-    # Bug "phase5-crypto-missing-from-release" was Phase 6a's diagnosis:
-    # the Mix release boot script did not load `:crypto`, so
-    # `TracePayload.sha256_hex/1` raised `:crypto.hash/2 is undefined`
-    # for every tool call with a `program` argument. Fixed by adding
-    # `:crypto` to `extra_applications` in `mcp_server/mix.exs`. The
-    # @tag :skip was removed once the fix landed; this test now verifies
-    # the release end-to-end success path.
-    test "(+ 1 2) returns isError:false with result \"user=> 3\"" do
-      frames = [
-        ReleaseRunner.init_request(1),
-        ReleaseRunner.initialized_notif(),
-        ReleaseRunner.tools_call_request(100, "lisp_eval", %{
-          "program" => "(+ 1 2)"
-        }),
-        ReleaseRunner.exit_notif()
-      ]
-
-      assert {:ok, replies, 0, _stderr} = ReleaseRunner.run_session(frames)
-      reply = Enum.find(replies, &(&1["id"] == 100))
-      assert reply, "no reply for id 100"
-
-      result = reply["result"]
-      assert result["isError"] == false
-      sc = result["structuredContent"]
-      assert sc["status"] == "ok"
-      assert sc["result"] == "user=> 3"
+      assert "lisp_eval" in names
+      assert "lisp_debug" in names
     end
   end
 
@@ -257,14 +266,22 @@ defmodule PtcRunnerMcp.Integration.ReleaseStdioTest do
         ReleaseRunner.exit_notif()
       ]
 
-      assert {:ok, _replies, 0, _stderr} = ReleaseRunner.run_session(frames)
+      assert {:ok, _replies, 0, _stderr} = run_stateless(frames)
     end
 
     test "release subprocess terminates with status 0 on stdin EOF (§ 6.4 row 1)" do
       # No `exit` frame — the runner finishes writing its frames and
       # the OS pipe hits EOF; the server detects EOF and shuts down.
       frames = [ReleaseRunner.init_request(1)]
-      assert {:ok, _replies, 0, _stderr} = ReleaseRunner.run_session(frames)
+      assert {:ok, _replies, 0, _stderr} = run_stateless(frames)
     end
+  end
+
+  defp run_stateless(frames) do
+    ReleaseRunner.run_session(frames, env: @no_upstreams_env)
+  end
+
+  defp run_sessions(frames) do
+    ReleaseRunner.run_session(frames, args: ["start", "--sessions"], env: @no_upstreams_env)
   end
 end
