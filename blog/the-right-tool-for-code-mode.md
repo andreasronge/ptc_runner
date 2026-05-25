@@ -10,15 +10,17 @@ permalink: /the-right-tool-for-code-mode.html
 
 ---
 
-A while back I built my own personal assistant and wired it to my email, calendar, and phone over MCP. One of the first things I asked was to show me the last 10 emails.
+A while back I built my own personal assistant and wired it to my email, calendar, and phone over MCP. One of the first things I asked it to do was show me the last 10 emails.
 
 That was already enough to feel the problem. Email bodies are long, quoted threads are longer, and every message the tool returned was now sitting in the model's context. The model had not done any real work yet. It had just fetched data, and the context window was already being spent.
 
-Then I asked for something more useful. Go through my mail, suggest a few categories, and give me some statistics. Categorizing mail is ordinary data work. You look at subjects and senders, group by pattern, count things. But the model tried to do it by reading messages one at a time in its head. The context filled up, the answers got vague, and the counts were wrong.
+Then I asked for something more useful. Go through my mail, suggest a few categories, and give me some statistics. This was ordinary data work: grouping, counting, comparing. But the model tried to do it by reading messages one at a time in its head. The context filled up, the answers got vague, and the counts were wrong.
 
 Some of that was on my Gmail MCP. But the failure pointed at something deeper. The model was being asked to *be the computer*, and it is not good at that. It is good at deciding *what* to compute. Those are different jobs, and I had handed it the wrong one.
 
-That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think code mode needs a smaller execution language than Python or JavaScript. Along the way it changed how I design tools, which is the part I keep coming back to.
+That failure is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. I wanted the model to stop doing computation in its head and instead write small programs. 
+
+This post is about why I think code mode needs a smaller execution language than Python or JavaScript. Along the way it changed how I design tools, which is the part I keep coming back to.
 
 ## Code mode is having a moment
 
