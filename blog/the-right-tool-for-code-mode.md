@@ -1,11 +1,12 @@
 ---
 layout: default
 title: "The Right Tool for Code Mode"
+description: "Code mode asks models to write short-lived, untrusted programs. That is a different job from normal software, and it deserves a different language."
+date: 2026-05-25
+permalink: /the-right-tool-for-code-mode.html
 ---
 
 # The Right Tool for Code Mode
-
-*Letting an LLM write code to drive your tools is the right idea. The language almost everyone reaches for is the wrong one.*
 
 ---
 
@@ -17,15 +18,15 @@ Then I asked for something more useful. Go through my mail, suggest a few catego
 
 Some of that was on my Gmail MCP. But the failure pointed at something deeper. The model was being asked to *be the computer*, and it is not good at that. It is good at deciding *what* to compute. Those are different jobs, and I had handed it the wrong one.
 
-That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think the popular answer to that gap reaches for the wrong tool, and what a better one looks like. Along the way it changed how I design tools, which is the part I keep coming back to.
+That gap is the reason I built the agentic framework [ptc_runner](https://github.com/andreasronge/ptc_runner), and lately a standalone MCP server on top of it. This post is about why I think code mode needs a smaller execution language than Python or JavaScript. Along the way it changed how I design tools, which is the part I keep coming back to.
 
 ## Code mode is having a moment
 
 The idea going around is a good one. Instead of the model calling tools one at a time and dragging every result back into the conversation, it writes a small program. The program calls the tools, processes the results where they sit, and returns only the part that matters.
 
-Cloudflare shipped a version of this and called it [Code Mode](https://blog.cloudflare.com/code-mode/). They convert MCP tools into a TypeScript API and let the model write TypeScript against it. Anthropic made a closely related case in [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp), where the agent writes code so intermediate results stay in the execution environment and only the chosen return value reaches the model. Different languages, same core move. Stop making the model the runtime. Let it write code instead.
+Cloudflare shipped this as [Code Mode](https://blog.cloudflare.com/code-mode/), turning MCP tools into a TypeScript API the model can write against. Anthropic made a similar case in [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp): keep intermediate results in the execution environment and return only the chosen value. Different languages, same move. Stop making the model the runtime. Let it write code instead.
 
-The direction is right. I have been convinced of that for a while. Where I part ways is the next decision. *Which language should the model use?*
+I have been convinced by that direction for a while. Where I part ways is the next decision. *Which language should the model use?*
 
 Code mode hides two choices inside one feature. One is the sandbox. Where does generated code run, and how cheaply can it be limited and thrown away? The other is the language surface. What is the model allowed to write inside that sandbox?
 
@@ -35,7 +36,7 @@ Most systems start with a familiar general-purpose language, usually Python or J
 
 Think about what the code actually is in this setting. It is short. It is thrown away the moment it runs. It was written by something that cannot be fully trusted, and it executes on your machine or in your account. When it goes wrong, what you need most is a clear signal back so the model can fix itself on the next attempt.
 
-That is a very specific job. You need to run many small, disposable, untrusted snippets, safely, with feedback good enough to recover from. Python and JavaScript were not designed for that. They were designed for people writing real programs they intend to keep. They bring their whole surface area along, including imports, file access, network calls, a vast standard library, and a thousand ways to do almost anything.
+That is a narrow job. You need to run many small, disposable, untrusted snippets, safely, with feedback good enough to recover from. Python and JavaScript were not designed for that. They were designed for people writing programs they intend to keep. They bring their whole surface area along, including imports, file access, network calls, a vast standard library, and a thousand ways to do almost anything.
 
 When the author is an LLM, all of that reach turns into something you have to manage. You can make it safe. People do it every day, with containers, V8 isolates, and hardened interpreters that strip capabilities back out. But look at what that work is. It lives outside the language. You pick a tool that can do anything, then spend real engineering making sure it cannot. The constraint you actually wanted is not part of the tool. It is bolted on, which means you own it, and you have to keep owning it.
 
@@ -118,13 +119,11 @@ The saved tokens matter, but the habit matters more. The model searched the tool
 
 The loop is familiar from REPLs, notebooks, and shell sessions. `*1` for the last result, `def` to name something, `dir` and `doc` to look around. Give a model those and you are reusing fluency it already has. A bespoke `catalog/find` / `catalog/get` surface would have to be explained in the prompt. The model has no prior feel for it. With REPL-shaped discovery, it can inspect your tools one step at a time instead of being handed the whole catalog up front.
 
-It pays off in two directions.
-
-The first is state. Investigations are naturally stateful. You bind `acme-prod`, compute the daily totals, inspect the spike, and then ask the next question against the same small workspace. If every call is a fresh sandbox, the model rebuilds that workspace over and over, or pushes it back into context. With a general-purpose runtime, keeping that workspace alive also means keeping imports, heaps, event loops, and capabilities alive. ptc_runner sessions are deliberately smaller. Definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived process, and a workspace that lives outside the context window.[^perf]
+The first payoff is state. Investigations are naturally stateful. You bind `acme-prod`, compute the daily totals, inspect the spike, and then ask the next question against the same small workspace. If every call is a fresh sandbox, the model rebuilds that workspace over and over, or pushes it back into context. With a general-purpose runtime, keeping that workspace alive also means keeping imports, heaps, event loops, and capabilities alive. ptc_runner sessions are deliberately smaller. Definitions persist across calls, but each eval still runs with heap and timeout limits. The model gets continuity without owning a long-lived process, and a workspace that lives outside the context window.[^perf]
 
 ![Stateful sandboxed REPL sessions in ptc_runner](./assets/images/mcp_sandbox_repl.png)
 
-The second is discovery, and it starts before the first tool call. MCP tool lists get large fast, with names, descriptions, schemas, and response shapes. Most of that is irrelevant to the task in front of you.
+Discovery is the other payoff, and it starts before the first tool call. MCP tool lists get large fast, with names, descriptions, schemas, and response shapes. Most of that is irrelevant to the task in front of you.
 
 So the model can ask for the catalog one step at a time with `(apropos "calendar")`, `(dir 'calendar)`, and `(doc 'calendar/search_events)`. The same forms work for the language itself with calls like `(dir 'clojure.string)` and `(doc 'subs)`, so the prompt does not need to carry the whole reference. The full list lives in the [namespace coverage index](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md).
 
@@ -134,11 +133,11 @@ Go back to that server for a second. The `observatory` server is dumb. It expose
 
 This changed how I think about MCP servers.
 
-Before code mode, you designed MCP tools for the questions you thought people would ask. It works a bit like RAG. With RAG you have to anticipate the questions up front to tune your chunking and your embeddings, and when the questions change, your retrieval is suddenly wrong. MCP tool design can fall into a similar trap. You choose each tool's granularity, shape its responses, and then sit and watch the responses come back so you can tweak the design. You are optimizing in advance for usage you are only guessing at.
+Before code mode, MCP tool design pushed you to guess future questions. It has the same smell as RAG tuning. You shape chunks, embeddings, tool boundaries, and response payloads around workloads you have not seen yet. Then the real questions arrive, and the clever shape is suddenly in the way.
 
 Code mode loosens that grip. If the client can write code against your tools, it can use them in an exploratory way. It can run something, look at the shape, and run the next thing based on what it saw. LLMs are genuinely good at that loop, because it is the pattern they have seen endlessly in notebooks and shell sessions.
 
-So you do not have to front-load all the cleverness into your tools anymore. You can ship simple, boring servers that expose primitives, and let the code-mode client compose the logic per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that is a real simplification. You can stop pre-optimizing tools for imagined workloads and let the client compose what it needs.
+So you do not have to front-load all the cleverness into your tools anymore. You can ship narrow servers that expose primitive operations, then let the code-mode client assemble the answer per question. The intelligence moves to the edge, into generated code that is written for the moment and discarded after. For anyone designing agentic systems, that removes a surprising amount of guesswork.
 
 ## Simplify until it disappears
 
@@ -148,11 +147,9 @@ The language is small on purpose. The servers can be dumb on purpose. Recently a
 
 That is a thought for another day, but it points the same way as everything else here. Keep the language small, and keep unnecessary layers out of the way.
 
-Code mode is the right idea. Handing the model the biggest familiar language means you spend a lot of time caging it. I would rather start with a tool shaped for the job, and leave out the rest. I like the kind of simplification where something becomes unnecessary, and then disappears.
+Code mode is the move. I just do not think the default sandbox should be "Python, but with enough walls around it." I would rather start with a tool shaped for the job, and leave out the rest. I like the kind of simplification where something becomes unnecessary, and then disappears.
 
 ---
-
-*ptc_runner is a 0.x library under active development. Expect bugs and breaking changes while the design settles.*
 
 *[ptc_runner on GitHub](https://github.com/andreasronge/ptc_runner) · [Hex package](https://hex.pm/packages/ptc_runner) · [Documentation](https://hexdocs.pm/ptc_runner)*
 

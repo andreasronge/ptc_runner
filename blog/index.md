@@ -5,9 +5,6 @@ title: "PTC-Runner Blog"
 
 # PTC-Runner Blog
 
-- **[The Right Tool for Code Mode](./the-right-tool-for-code-mode.html)**
-  *Letting an LLM write code to drive your tools is the right idea. The language almost everyone reaches for is the wrong one.* — May 2026
-
 - **[Why I Built a Lisp for AI Agents](./why-i-built-a-lisp-for-ai-agents.html)**
   *PTC-Lisp: a sandboxed language for programmatic tool calling on the BEAM* — March 2026
 
