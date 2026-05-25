@@ -7,94 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed the underscore-prefix context firewall convention. `_`-prefixed
+  context keys are now visible like ordinary keys.
+- `(tool/mcp-call ...)` now returns tagged result maps directly. Remove uses
+  of `mcp/text` and `mcp/json`; check `:ok` and read `:value` instead.
+
 ### Added
 
-- **PTC-Lisp ISO-8601 instant parsing** — the `parse` builtin (also
-  reachable as `LocalDate/parse` or the new `Instant/parse` namespace
-  alias) now auto-dispatches on the string shape: `YYYY-MM-DD` → `Date`,
-  a string with a time component (`...T...`) → `DateTime`. An offset
-  (`Z`, `+02:00`, …) is honoured and an offsetless date-time is treated
-  as UTC; `.isBefore` / `.isAfter` / `.getTime` work on the result.
-  Previously `(parse "2026-01-01T00:00:00Z")` raised a type error. This
-  is a deliberate divergence from Java's strict `LocalDate.parse` (which
-  rejects time components) — see `docs/java-interop.md`. Closes #885.
-
-- **PTC-Lisp bitwise operations** — `bit-and`, `bit-or`, `bit-xor`,
-  `bit-and-not`, `bit-not`, `bit-shift-left`, `bit-shift-right`,
-  `bit-clear`, `bit-set`, `bit-flip`, and `bit-test` are now available
-  (integers only; non-integer arguments raise a clean PTC-Lisp type
-  error rather than an Erlang `ArithmeticError`). The first three plus
-  `bit-and-not` are variadic. BEAM integers are arbitrary-precision
-  two's-complement, so — unlike Clojure/JVM — the shift amount is not
-  taken modulo 64 and a left shift can grow without bound;
-  `unsigned-bit-shift-right` is intentionally not provided because it
-  has no defined meaning without a fixed integer width. Closes #825.
-
-- **PTC-Lisp `list` builtin** — `(list & args)` is now available as an alias
-  for `vector`, returning a vector (PTC-Lisp has no separate list type). This
-  matches LLM Clojure training data and removes a recurring `list`/`cons`
-  error class at zero prompt cost (`cons` was already supported). Documented
-  as DIV-25 in `docs/clojure-conformance-gaps.md`. Closes #779.
-
-- **PTC-Lisp MCP call result contract** — `(tool/mcp-call ...)` now
-  returns tagged data directly: `{:ok true :value payload
-  :value_kind :json|:text|:none}` for successful calls, or `{:ok false
-  :reason kw :message text}` for recoverable upstream/tool failures.
-  `mcp/text` and `mcp/json` are no longer exposed; use `(:value r)` after
-  checking `(:ok r)`.
-
-- **PTC-Lisp JSON builtins** — `(json/parse-string s)` and
-  `(json/generate-string v)` are now available unconditionally in every
-  PTC-Lisp run (default mode and aggregator mode alike). Cheshire-shaped
-  signatures: parse decodes JSON to Elixir values with **string** map
-  keys (no atom keys); encode runs a pre-validation walk before
-  invoking `Jason.encode/1` and rejects atoms outside `true/false/nil`,
-  atom-keyed maps, tuples, PIDs, references, and functions by returning
-  `nil` rather than silently coercing them. Both functions follow the
-  DIV-* convention and **never raise** — failures surface as `nil` so
-  programs without try/catch can guard cleanly. Documented under
-  `docs/clojure-conformance-gaps.md` as DIV-23 and DIV-24, and in
-  `Plans/json-support.md` §4. Cheshire users get an analyzer redirect:
-  `(cheshire.core/parse-string ...)` now points at `json/parse-string`.
-
-- `KeyNormalizer.canonical_cache_key/2` — deterministic, layer-agnostic
-  cache key for tool-result caching. Normalizes map keys to strings,
-  recurses through nested maps/lists/tuples, and collapses integer-equal
-  floats to integers so semantically identical calls share one cache
-  entry regardless of how the args arrived. PTC-Lisp's `(tool/...)` cache
-  path now keys via this function (`lib/ptc_runner/lisp/eval.ex`); native
-  app-tool calls (Tier 2b) will share the same key. See
-  `Plans/text-mode-ptc-compute-tool.md` "Canonical Cache Key —
-  Implementation Rule." This is a deliberate cache-compatibility
-  migration: equivalence classes are widened (atom/string keys converge,
-  map ordering stabilizes, `1` and `1.0` collapse). Value semantics are
-  preserved for ordinary callers; only old cache-miss quirks change.
-
-- `compaction:` option for pressure-triggered context compaction. Opt-in
-  (default: `false`); only fires for multi-turn agents (`max_turns > 1`) once
-  turn count or estimated token usage crosses the configured threshold. Phase 1
-  ships the `:trim` strategy; `:summarize` and custom strategy modules are
-  deferred to a follow-up. Compaction stats surface on `step.usage.compaction`.
-  See `docs/guides/subagent-compaction.md`.
+- Added PTC-Lisp ISO-8601 date-time parsing through `parse`,
+  `LocalDate/parse`, and `Instant/parse`.
+- Added PTC-Lisp bitwise integer builtins, including `bit-and`, `bit-or`,
+  shifts, bit set/clear/flip/test, and `bit-not`.
+- Added `(list & args)` as a Clojure-friendly alias for `vector`.
+- Added `json/parse-string` and `json/generate-string` to PTC-Lisp.
+- Added runtime callable support and unified REPL discovery helpers.
+- Added Java duration helpers and namespace conformance audits.
+- Added `KeyNormalizer.canonical_cache_key/2` for stable tool-result cache
+  keys across atom/string map keys, map order, and integer-equivalent floats.
+- Added opt-in `compaction:` support for pressure-triggered multi-turn context
+  trimming.
 
 ### Fixed
 
-- **PTC-Lisp: no more leaked Elixir internals in type errors** (#862) —
-  calling a collection op with the collection and predicate swapped
-  (e.g. `(filter [1 2 3] (fn [x] true))`) no longer surfaces a raw
-  `protocol Enumerable not implemented for Function, only anonymous
-  functions of arity 2 ...`; it now reports `expected a collection, got
-  a function — ... arguments may be swapped`. `(get key map)` with the
-  arguments swapped now suggests the correct `(get map key)` order
-  instead of `get: invalid argument types: keyword, map`. A builtin
-  used as a value (e.g. `(first filter)`) now renders as type
-  `function` rather than the leaky `unknown`.
-
-### Removed
-
-- Remove the underscore-prefix context firewall convention. `_`-prefixed keys
-  are now ordinary visible fields in prompt inventories, formatting, execution
-  history, signatures, and namespace export. Addresses H5 from #987.
+- Improved PTC-Lisp type errors so common argument swaps and builtin values no
+  longer leak Elixir internals.
+- Preserved `sort-by` key errors and added support for sorting maps and vector
+  paths.
+- Accepted common `format` width hints.
+- Kept compilation clean on Elixir 1.20 release candidates.
 
 ## [0.10.1] - 2026-05-04
 
