@@ -6,6 +6,7 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.LLMTool
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.Tool
 
   describe "Tool.new/2 normalization" do
@@ -461,6 +462,8 @@ defmodule PtcRunner.SubAgent.LLMToolTest do
   describe "LLMTool E2E execution" do
     @tag :e2e
     test "executes LLMTool via SubAgent and returns JSON result" do
+      LLMSupport.ensure_api_key!("haiku")
+
       llm_tool =
         LLMTool.new(
           prompt: "Is the number {{value}} even or odd? Return the parity.",

@@ -39,8 +39,14 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
 
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.TestSupport.LLMSupport
 
   @model "haiku"
+
+  setup_all do
+    LLMSupport.ensure_api_key!(@model)
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Fixtures

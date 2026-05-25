@@ -27,10 +27,16 @@ defmodule PtcRunner.SubAgent.PtcTransportE2ETest do
   @moduletag :e2e
 
   alias PtcRunner.SubAgent
+  alias PtcRunner.TestSupport.LLMSupport
 
   @model "haiku"
 
   defp get_llm, do: PtcRunner.LLM.callback(@model)
+
+  setup_all do
+    LLMSupport.ensure_api_key!(@model)
+    :ok
+  end
 
   # Different adapters / providers emit tool-call entries in slightly
   # different shapes:
