@@ -11,8 +11,8 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
 
   Scenarios:
 
-    * initialize -> notifications/initialized -> stateless
-      `lisp_eval` -> DELETE
+    * initialize -> notifications/initialized -> `lisp_session_start`
+      -> `lisp_session_eval` -> `lisp_session_close` -> DELETE
     * initialize -> `lisp_session_start` -> forced HTTP registry stop
       and restart
 
@@ -73,19 +73,24 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
      cfg: cfg, url: "http://127.0.0.1:#{port}#{cfg.path}", iters: MemorySoak.iteration_count()}
   end
 
-  test "HTTP session and stateless eval churn returns to baseline", %{url: url, iters: iters} do
+  test "HTTP session and PTC-Lisp session eval churn returns to baseline", %{
+    url: url,
+    iters: iters
+  } do
     {before, aft} =
       MemorySoak.measure(iters, fn _phase ->
         session_id = initialize!(url)
         initialized!(url, session_id)
-        execute_ok!(url, session_id, "(+ 1 2 3)")
+        lisp_session_id = start_ptc_session!(url, session_id)
+        session_eval_ok!(url, session_id, lisp_session_id, "(+ 1 2 3)")
+        close_ptc_session!(url, session_id, lisp_session_id)
         delete!(url, session_id)
       end)
 
     assert_registry_empty!()
 
-    IO.puts("BEFORE (http stateless churn, n=#{iters}):\n#{MemorySoak.format(before)}")
-    IO.puts("AFTER  (http stateless churn, n=#{iters}):\n#{MemorySoak.format(aft)}")
+    IO.puts("BEFORE (http session eval churn, n=#{iters}):\n#{MemorySoak.format(before)}")
+    IO.puts("AFTER  (http session eval churn, n=#{iters}):\n#{MemorySoak.format(aft)}")
 
     assert ConcurrencyGate.in_flight() == 0
     MemorySoak.assert_procs_stable!(before, aft, tolerance: 20)
@@ -158,7 +163,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
     assert resp.status == 202
   end
 
-  defp execute_ok!(url, session_id, program) do
+  defp session_eval_ok!(url, session_id, lisp_session_id, program) do
     resp =
       post!(
         url,
@@ -167,8 +172,34 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
           "id" => "eval",
           "method" => "tools/call",
           "params" => %{
-            "name" => "lisp_eval",
-            "arguments" => %{"program" => program, "context" => %{}}
+            "name" => "lisp_session_eval",
+            "arguments" => %{
+              "session_id" => lisp_session_id,
+              "program" => program,
+              "context" => %{}
+            }
+          }
+        },
+        session_id: session_id
+      )
+
+    assert resp.status == 200
+    assert get_in(resp.body, ["result", "isError"]) == false
+    assert get_in(resp.body, ["result", "structuredContent", "status"]) == "ok"
+    assert get_in(resp.body, ["result", "structuredContent", "result"]) == "user=> 6"
+  end
+
+  defp close_ptc_session!(url, session_id, lisp_session_id) do
+    resp =
+      post!(
+        url,
+        %{
+          "jsonrpc" => "2.0",
+          "id" => "close-session",
+          "method" => "tools/call",
+          "params" => %{
+            "name" => "lisp_session_close",
+            "arguments" => %{"session_id" => lisp_session_id}
           }
         },
         session_id: session_id
@@ -176,6 +207,7 @@ defmodule PtcRunnerMcp.HttpMcpSoakTest do
 
     assert resp.status == 200
     assert get_in(resp.body, ["result", "structuredContent", "status"]) == "ok"
+    assert get_in(resp.body, ["result", "structuredContent", "closed"]) == true
   end
 
   defp start_ptc_session!(url, session_id) do

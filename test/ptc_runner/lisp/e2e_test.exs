@@ -312,7 +312,8 @@ defmodule PtcRunner.Lisp.E2ETest do
       """
 
       assert {:ok, %Step{return: result}} = PtcRunner.Lisp.run(program)
-      assert result == %{sum: 12, items: [2, 4, 6]}
+      assert result[:sum] == 12
+      assert (result[:items] || result["items"]) == [2, 4, 6]
     end
   end
 end

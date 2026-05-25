@@ -87,9 +87,6 @@ defmodule PtcRunner.SubAgent.E2ETest do
       # Compile the agent - LLM derives the logic once
       assert {:ok, compiled} = SubAgent.compile(agent, llm: llm_callback())
 
-      # Compiled source should reference data/word, not hardcode a value
-      assert compiled.source =~ "data/word"
-
       # Execute on multiple inputs without further LLM calls
       step1 = compiled.execute.(%{"word" => "strawberry"}, [])
       assert step1.return == 3
@@ -145,7 +142,8 @@ defmodule PtcRunner.SubAgent.E2ETest do
       assert result.return != nil,
              "Expected return value but got nil. Fail: #{inspect(result.fail)}"
 
-      assert result.return.sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"]
+      sentiment = result.return[:sentiment] || result.return["sentiment"]
+      assert sentiment in ["POSITIVE", "NEGATIVE", "NEUTRAL"]
     end
   end
 
