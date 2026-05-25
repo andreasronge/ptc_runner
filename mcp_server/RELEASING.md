@@ -1,112 +1,132 @@
 # Releasing `ptc_runner_mcp`
 
-`ptc_runner_mcp` is released as a standalone MCP server binary, not as a
-Hex package. The primary distribution channel should be GitHub Releases.
+`ptc_runner_mcp` is distributed as a standalone GitHub Release archive,
+not as a Hex package. Stable MCP releases use `mcp-v*` tags so they do
+not collide with root library `v*` tags.
 
-## Release Channels
+## Target
 
-- Snapshot releases: prerelease artifacts built from the latest `main`
-  or a selected commit. Use these for testing current work before a
-  stable release.
-- Stable releases: immutable artifacts built from `mcp-v*` tags, for
-  example `mcp-v0.1.0`.
+Initial automated target:
 
-Use `mcp-v*` tags so MCP server releases do not collide with root
-library tags.
-
-## Initial Platform
-
-Start with Apple Silicon macOS:
-
-```bash
+```text
 ptc_runner_mcp-darwin-arm64.tar.gz
 ```
 
-Add `darwin-x64`, `linux-x64`, and Windows only after the artifact build
-and smoke-test process is proven for macOS arm64.
+Add other platforms only after the same build, checksum, extraction, and
+smoke-test flow is automated for them.
 
-## Local Build Shape
+## Release Gate
 
-From `mcp_server/`:
+To rehearse the gate, artifact packaging, checksum verification, and
+extracted-artifact smoke tests without publishing anything:
 
 ```bash
+cd mcp_server
+mix mcp.release_dry_run
+```
+
+This dry run creates only local build/package/smoke artifacts. It does
+not create Git tags, push tags, create GitHub Releases, or upload
+artifacts.
+
+The release artifact should be uploaded only after CI has completed this
+sequence on the target runner:
+
+```bash
+cd mcp_server
 mix deps.get
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix credo --strict
+mix test --max-failures 1 --trace --warnings-as-errors
 MIX_ENV=prod mix release --overwrite
-_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp version
 ```
 
-The distributable archive should contain the Mix release directory, not
-just the shell script in `bin/`.
-
-## Verification
-
-Every published archive must have a SHA-256 checksum. CI should generate
-a single `SHA256SUMS` file after packaging all artifacts:
+Package the full Mix release directory, not only `bin/ptc_runner_mcp`:
 
 ```bash
+mkdir -p tmp/release_dist
+tar -czf tmp/release_dist/ptc_runner_mcp-darwin-arm64.tar.gz \
+  -C _build/prod/rel ptc_runner_mcp
+cd tmp/release_dist
 shasum -a 256 ptc_runner_mcp-*.tar.gz > SHA256SUMS
-```
-
-Before extracting a downloaded release, verify it:
-
-```bash
 shasum -a 256 -c SHA256SUMS
 ```
 
-An install script must verify the checksum before extraction or execution.
-This is the same supply-chain boundary as any other downloaded binary.
+## Artifact Smoke
 
-## Smoke Tests
-
-After extracting an archive, CI should run:
+Smoke-test the extracted archive, not the build directory:
 
 ```bash
-bin/ptc_runner_mcp version
+mkdir -p tmp/release_smoke/extract
+tar -xzf tmp/release_dist/ptc_runner_mcp-darwin-arm64.tar.gz \
+  -C tmp/release_smoke/extract
+bin="$PWD/tmp/release_smoke/extract/ptc_runner_mcp/bin/ptc_runner_mcp"
+"$bin" version
 ```
 
-It should also run stdio JSON-RPC smoke tests for both supported tool
-surfaces.
+Then run stdio JSON-RPC smoke tests for both public tool surfaces.
 
-Default stateless mode:
+Pin smoke tests to an empty upstream configuration unless the artifact is
+specifically an aggregator-mode artifact:
 
-1. `initialize`
-2. `notifications/initialized`
-3. `tools/list`
-4. Assert `lisp_eval` is advertised.
-5. Call `lisp_eval` with `(+ 1 2)` and assert the slim text result is
-   `user=> 3`.
-6. `notifications/exit`
+```bash
+PTC_RUNNER_MCP_UPSTREAMS=/nonexistent/ptc_runner_mcp_release_smoke
+PTC_RUNNER_MCP_RESPONSE_PROFILE=slim
+```
+
+Stateless mode:
+
+1. Start `"$bin" start`.
+2. Send `initialize`.
+3. Send `notifications/initialized`.
+4. Send `tools/list`.
+5. Assert `lisp_eval` is advertised.
+6. Assert `lisp_eval` has `inputSchema` and no `outputSchema` in slim mode.
+7. Call `lisp_eval` with `(+ 1 2)`.
+8. Assert the slim text result is `user=> 3` and has no
+   `structuredContent`.
+9. Send `exit`.
 
 Session mode:
 
-1. Start with `bin/ptc_runner_mcp start --sessions`.
-2. `initialize`
-3. `notifications/initialized`
-4. `tools/list`
-5. Assert `lisp_eval` is not advertised and `lisp_session_*` tools are
-   advertised.
-6. Assert a `lisp_eval` call returns `unknown_tool`.
-7. Call `lisp_session_start` and assert it returns a `session_id`.
-8. `notifications/exit`
+1. Start `"$bin" start --sessions`.
+2. Send `initialize`.
+3. Send `notifications/initialized`.
+4. Send `tools/list`.
+5. Assert `lisp_eval` is not advertised.
+6. Assert `lisp_session_*` tools are advertised.
+7. Assert calling `lisp_eval` returns `unknown_tool`.
+8. Call `lisp_session_start` and assert it returns a `session_id`.
+9. Send `exit`.
 
-Pin smoke tests to an empty upstream configuration unless the release
-being tested is specifically an aggregator-mode artifact; local
-operator config must not change the release gate's expected tool
-surface.
+## Publish
 
-Release artifacts should not be uploaded unless these checks pass.
+Stable release:
 
-## GitHub Workflow Direction
+```bash
+git tag mcp-vX.Y.Z
+git push origin mcp-vX.Y.Z
+```
 
-The release workflow should eventually:
+The GitHub release should contain:
 
-1. Build on the native target runner.
-2. Run `mix format --check-formatted` and the MCP server tests.
-3. Build the production Mix release.
-4. Package the release directory as `ptc_runner_mcp-<platform>.tar.gz`.
-5. Generate `SHA256SUMS`.
-6. Extract the archive and smoke-test the extracted binary.
-7. Upload archives and `SHA256SUMS` to a GitHub Release.
+- `ptc_runner_mcp-darwin-arm64.tar.gz`
+- `SHA256SUMS`
 
-Snapshots can publish to a moving prerelease such as `mcp-snapshot`.
-Stable releases should publish from `mcp-v*` tags.
+Snapshot release automation may publish the same artifact shape to a
+moving prerelease such as `mcp-snapshot`.
+
+## Manual Fallback
+
+Until an MCP-specific GitHub Actions workflow exists, run the same steps
+locally on Apple Silicon macOS, then create the GitHub Release manually
+for the `mcp-v*` tag and upload the archive plus `SHA256SUMS`.
+
+Prefer releasing from a clean checkout/tag. If CI needs explicit build
+metadata, set:
+
+```bash
+PTC_RUNNER_MCP_GIT_COMMIT=<commit>
+PTC_RUNNER_MCP_GIT_DIRTY=false
+```
