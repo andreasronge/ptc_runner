@@ -605,9 +605,9 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTest do
       {:ok, _step} = SubAgent.run(agent, llm: capturing_llm)
 
       assert_received {:system_prompt, system_prompt}
-      # Static-card pin: `(def name value)` appears in the combined-mode
-      # reference card from priv/prompts/.
-      assert system_prompt =~ "(def name value)"
+      # Static-card pin: unsupported-form guidance appears in the
+      # combined-mode reference card from priv/prompts/.
+      assert system_prompt =~ "No `let*`, `lambda`"
       assert system_prompt =~ "<ptc_lisp_reference>"
     end
 
