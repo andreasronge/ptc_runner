@@ -246,7 +246,7 @@ See [Signature Syntax](docs/signature-syntax.md) for the full type reference.
 ```elixir
 def deps do
   [
-    {:ptc_runner, "~> 0.10.1"},
+    {:ptc_runner, "~> 0.11.0"},
     {:req_llm, "~> 1.8"}  # optional — enables built-in LLM adapter
   ]
 end
