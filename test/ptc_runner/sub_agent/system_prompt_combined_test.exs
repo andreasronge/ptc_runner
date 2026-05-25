@@ -19,8 +19,9 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
 
   # Pin a few stable substrings from the static card so we can detect
   # presence/absence without coupling to the full prose.
-  @card_def_form "(def name value)"
+  @card_core_form "`def`"
   @card_full_result_cached "full_result_cached"
+  @card_unsupported_forms "No `let*`, `lambda`"
   @card_section_open "<ptc_lisp_reference>"
 
   describe "combined mode (output: :text, ptc_transport: :tool_call)" do
@@ -35,7 +36,8 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
       prompt = SystemPrompt.generate(agent)
 
       assert prompt =~ @card_section_open
-      assert prompt =~ @card_def_form
+      assert prompt =~ @card_core_form
+      assert prompt =~ @card_unsupported_forms
       assert prompt =~ @card_full_result_cached
     end
 
@@ -50,7 +52,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
       static = SystemPrompt.generate_system(agent)
 
       assert static =~ @card_section_open
-      assert static =~ @card_def_form
+      assert static =~ @card_unsupported_forms
     end
 
     test "compact card is sourced from the internal prompt registry" do
@@ -149,7 +151,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
 
       # Static reference card MUST be present
       assert prompt =~ @card_section_open
-      assert prompt =~ @card_def_form
+      assert prompt =~ @card_unsupported_forms
       # No tools to list — the dynamic inventory section is omitted
       refute prompt =~ "<ptc_tools>"
     end
@@ -182,7 +184,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
       prompt = SystemPrompt.generate(agent)
 
       refute prompt =~ @card_section_open
-      refute prompt =~ @card_def_form
+      refute prompt =~ @card_unsupported_forms
     end
 
     test "pure :ptc_lisp mode prompt does NOT include the card" do
