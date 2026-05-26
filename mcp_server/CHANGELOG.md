@@ -9,6 +9,16 @@ revisions.
 
 ## Unreleased
 
+### Added
+
+- Human-facing PTC-Lisp REPL for Mix, Mac release, and Docker debugging.
+
+### Packaging
+
+- Docker image build/publish support for GitHub Container Registry.
+
+## 0.1.0 - 2026-05-25
+
 Initial standalone MCP server release candidate.
 
 ### Added
@@ -21,7 +31,7 @@ Initial standalone MCP server release candidate.
 - Agentic `lisp_task` planner mode plus benchmark and real-provider eval
   scripts.
 - Response profiles: `slim` (default), `structured`, and `debug`.
-- Opt-in `lisp_debug` diagnostics with `stats`, `recent`, and `get`.
+- Opt-in `lisp_debug` diagnostics with `stats`, `recent`, and `get`.Do I
 - Payload-reduction metrics for aggregator-mode and `lisp_task` responses.
 - JSON-as-text auto-decode for successful upstream tool results, with telemetry
   for decode outcomes.

@@ -93,6 +93,144 @@ xattr -d com.apple.quarantine /absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mc
 Building from source, release internals, and remote IEx debugging are
 covered in [DEVELOPMENT.md](DEVELOPMENT.md).
 
+## Use The Docker Image
+
+When published, the MCP Docker image is available from GitHub Container
+Registry:
+
+```bash
+docker pull ghcr.io/andreasronge/ptc-runner-mcp:TAG
+```
+
+Docker defaults to HTTP mode and binds inside the container on
+`0.0.0.0:7332`:
+
+```bash
+export PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)"
+
+docker run --rm -p 7332:7332 \
+  -e PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN" \
+  ghcr.io/andreasronge/ptc-runner-mcp:TAG
+```
+
+Health checks:
+
+```bash
+curl http://127.0.0.1:7332/health
+curl http://127.0.0.1:7332/ready
+```
+
+For local MCP clients that launch a stdio subprocess through Docker:
+
+```bash
+docker run --rm -i \
+  ghcr.io/andreasronge/ptc-runner-mcp:TAG \
+  start
+```
+
+To run as an HTTP aggregator with a mounted upstream config:
+
+```bash
+docker run --rm -p 7332:7332 \
+  -e PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN" \
+  -v "$PWD/upstreams.json:/etc/ptc-runner/upstreams.json:ro" \
+  ghcr.io/andreasronge/ptc-runner-mcp:TAG \
+  start --http --http-host 0.0.0.0 \
+  --upstreams-config /etc/ptc-runner/upstreams.json
+```
+
+The base image does not include Node, npm, Python, or uv. Stdio
+upstreams that depend on those runtimes should use a derived image.
+
+### Snapshot REPL Quick Start
+
+This is for human testing and debugging of the MCP server, agentic
+workflows, and upstream server wiring. It is not the normal agent
+integration path.
+
+```bash
+docker pull ghcr.io/andreasronge/ptc-runner-mcp:snapshot
+
+export RELEASE_COOKIE="$(openssl rand -base64 48)"
+export PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)"
+
+docker run --rm -it \
+  --name ptc-mcp-debug \
+  -p 7332:7332 \
+  -e RELEASE_DISTRIBUTION=name \
+  -e RELEASE_NODE=ptc_runner_mcp@127.0.0.1 \
+  -e RELEASE_COOKIE="$RELEASE_COOKIE" \
+  -e PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN" \
+  ghcr.io/andreasronge/ptc-runner-mcp:snapshot
+```
+
+In another terminal, open the bundled PTC-Lisp REPL inside the same
+container:
+
+```bash
+docker exec -it ptc-mcp-debug \
+  /opt/ptc_runner_mcp/bin/ptc_lisp_repl --display envelope
+```
+
+Try:
+
+```clojure
+(+ 1 2)
+(apropos "mcp")
+:tools
+:quit
+```
+
+Use `--display envelope` while debugging because it shows the full MCP
+tool response envelope that clients receive. The `docker exec` approach
+does not publish EPMD or BEAM distribution ports; keep the Erlang cookie
+private because it grants full VM RPC access inside the node.
+
+## Remote PTC-Lisp REPL
+
+For human debugging without installing Erlang or Elixir on the host,
+run the bundled REPL wrapper from the release:
+
+```bash
+/absolute/path/to/ptc_runner_mcp/bin/ptc_lisp_repl
+```
+
+The REPL evaluates through the same MCP tool facade as clients. In
+aggregator mode it can call configured upstream MCP tools from
+PTC-Lisp programs, and its success/error text is the same feedback
+shape the LLM sees, adjusted for an interactive terminal.
+Use `--display envelope` to show the full pretty JSON MCP tool response
+envelope, or switch while running with `:display envelope`. `--display
+json` emits the same envelope as compact JSON.
+
+The running server must have distributed Erlang enabled. The wrapper
+uses the Erlang/Elixir runtime bundled inside the release. The Erlang
+distribution cookie grants full VM RPC access, not only PTC-Lisp access,
+so use a high-entropy cookie and do not expose EPMD or BEAM distribution
+ports publicly.
+
+For Docker, use the same bundled wrapper inside the container:
+
+```bash
+docker exec -it ptc-mcp-debug \
+  /opt/ptc_runner_mcp/bin/ptc_lisp_repl --display envelope
+```
+
+Advanced users can still attach remote IEx and start the REPL manually:
+
+```elixir
+PtcRunnerMcp.Repl.start(display: :envelope)
+```
+
+For local development from this repository, the same REPL is also
+available as a Mix task from `mcp_server/`:
+
+```bash
+mix mcp.repl --display envelope
+mix mcp.repl --upstreams-config ./upstreams.json --display envelope
+mix mcp.repl --stateless --eval "(+ 1 2)"
+```
+
 ## Use From A Coding Agent
 
 Most local MCP clients should run the server in stdio mode:

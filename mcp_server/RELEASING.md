@@ -1,8 +1,9 @@
 # Releasing `ptc_runner_mcp`
 
-`ptc_runner_mcp` is distributed as a standalone GitHub Release archive,
-not as a Hex package. Stable MCP releases use `mcp-v*` tags so they do
-not collide with root library `v*` tags.
+`ptc_runner_mcp` is distributed as a standalone GitHub Release archive
+and as a Docker image on GitHub Container Registry, not as a Hex
+package. Stable MCP releases use `mcp-v*` tags so they do not collide
+with root library `v*` tags.
 
 ## Target
 
@@ -10,6 +11,7 @@ Initial automated target:
 
 ```text
 ptc_runner_mcp-darwin-arm64.tar.gz
+ghcr.io/andreasronge/ptc-runner-mcp:TAG
 ```
 
 Add other platforms only after the same build, checksum, extraction, and
@@ -109,6 +111,26 @@ git tag mcp-vX.Y.Z
 git push origin mcp-vX.Y.Z
 ```
 
+The `mcp-v*` tag triggers `.github/workflows/mcp-docker.yml`, which
+builds and pushes the Docker image to GHCR with:
+
+```text
+ghcr.io/andreasronge/ptc-runner-mcp:mcp-vX.Y.Z
+ghcr.io/andreasronge/ptc-runner-mcp:X.Y.Z
+ghcr.io/andreasronge/ptc-runner-mcp:sha-<short-sha>
+```
+
+Pushes to `main` publish snapshot tags:
+
+```text
+ghcr.io/andreasronge/ptc-runner-mcp:snapshot
+ghcr.io/andreasronge/ptc-runner-mcp:main
+ghcr.io/andreasronge/ptc-runner-mcp:sha-<short-sha>
+```
+
+The workflow uses `GITHUB_TOKEN` with `packages: write`; no personal
+access token is needed for CI publishing.
+
 The GitHub release should contain:
 
 - `ptc_runner_mcp-darwin-arm64.tar.gz`
@@ -117,11 +139,61 @@ The GitHub release should contain:
 Snapshot release automation may publish the same artifact shape to a
 moving prerelease such as `mcp-snapshot`.
 
+## Docker Smoke
+
+Before relying on CI, build and smoke-test the image locally:
+
+```bash
+mcp_server/scripts/docker-build.sh \
+  --image ghcr.io/andreasronge/ptc-runner-mcp \
+  --tag local \
+  --load
+
+docker run --rm ghcr.io/andreasronge/ptc-runner-mcp:local version
+```
+
+HTTP smoke:
+
+```bash
+export PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)"
+
+docker run --rm -d --name ptc-runner-mcp-smoke -p 7332:7332 \
+  -e PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$PTC_RUNNER_MCP_HTTP_AUTH_TOKEN" \
+  ghcr.io/andreasronge/ptc-runner-mcp:local
+
+curl http://127.0.0.1:7332/health
+curl http://127.0.0.1:7332/ready
+
+docker stop ptc-runner-mcp-smoke
+```
+
+Check publish tag selection without pushing:
+
+```bash
+mcp_server/scripts/docker-publish.sh \
+  --image ghcr.io/andreasronge/ptc-runner-mcp \
+  --ref refs/tags/mcp-vX.Y.Z \
+  --sha "$(git rev-parse HEAD)" \
+  --dry-run
+```
+
 ## Manual Fallback
 
-Until an MCP-specific GitHub Actions workflow exists, run the same steps
+If GitHub Actions publishing is unavailable, run the same archive steps
 locally on Apple Silicon macOS, then create the GitHub Release manually
 for the `mcp-v*` tag and upload the archive plus `SHA256SUMS`.
+
+For a manual Docker push, first authenticate to GHCR with a GitHub
+personal access token that has `write:packages`, then run:
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io -u andreasronge --password-stdin
+
+mcp_server/scripts/docker-publish.sh \
+  --image ghcr.io/andreasronge/ptc-runner-mcp \
+  --ref refs/tags/mcp-vX.Y.Z \
+  --sha "$(git rev-parse HEAD)"
+```
 
 Prefer releasing from a clean checkout/tag. If CI needs explicit build
 metadata, set:

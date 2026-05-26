@@ -1,0 +1,91 @@
+#!/bin/sh
+set -eu
+
+SELF="$0"
+
+while [ -h "$SELF" ]; do
+  DIR="$(CDPATH='' cd -- "$(dirname -- "$SELF")" && pwd -P)"
+  SELF="$(readlink "$SELF")"
+
+  case "$SELF" in
+    /*) ;;
+    *) SELF="$DIR/$SELF" ;;
+  esac
+done
+
+BIN_DIR="$(CDPATH='' cd -- "$(dirname -- "$SELF")" && pwd -P)"
+RELEASE_CMD="$BIN_DIR/ptc_runner_mcp"
+SESSION=":auto"
+DISPLAY=":text"
+
+usage() {
+  cat <<'USAGE'
+Usage: ptc_lisp_repl [--auto-session|--session|--stateless] [--display MODE]
+
+Connects to a running ptc_runner_mcp release and starts a PTC-Lisp REPL.
+The release must have distributed Erlang enabled, using the same
+RELEASE_DISTRIBUTION and RELEASE_NODE values for this command and the
+running server.
+
+Options:
+  --auto-session  Use lisp_session_eval when sessions are enabled (default)
+  --session       Require session-backed REPL when sessions are enabled
+  --stateless     Force stateless lisp_eval
+  --display MODE  text, envelope, or json (default: text)
+  -h, --help      Show this help
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --auto-session)
+      SESSION=":auto"
+      shift
+      ;;
+    --session)
+      SESSION="true"
+      shift
+      ;;
+    --stateless)
+      SESSION="false"
+      shift
+      ;;
+    --display)
+      if [ "$#" -lt 2 ]; then
+        echo "Missing value for --display" >&2
+        usage >&2
+        exit 2
+      fi
+
+      case "$2" in
+        text)
+          DISPLAY=":text"
+          ;;
+        envelope)
+          DISPLAY=":envelope"
+          ;;
+        json)
+          DISPLAY=":json"
+          ;;
+        *)
+          echo "Unknown display mode: $2" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+exec "$RELEASE_CMD" rpc "PtcRunnerMcp.Repl.start(session: $SESSION, display: $DISPLAY)"
