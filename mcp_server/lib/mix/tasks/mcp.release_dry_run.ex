@@ -49,6 +49,7 @@ defmodule Mix.Tasks.Mcp.ReleaseDryRun do
 
     bin = extract_archive!(archive)
     smoke_version!(bin)
+    smoke_repl_wrapper!(bin)
     smoke_stateless!(bin)
     smoke_sessions!(bin)
 
@@ -134,6 +135,26 @@ defmodule Mix.Tasks.Mcp.ReleaseDryRun do
 
       {output, status} ->
         Mix.raise("version smoke failed with exit status #{status}:\n#{output}")
+    end
+  end
+
+  defp smoke_repl_wrapper!(bin) do
+    Mix.shell().info("==> smoke bundled ptc_lisp_repl wrapper")
+    repl = Path.join(Path.dirname(bin), "ptc_lisp_repl")
+
+    unless executable?(repl) do
+      Mix.raise("ptc_lisp_repl wrapper missing or not executable at #{repl}")
+    end
+
+    case System.cmd(repl, ["--help"], stderr_to_stdout: true, env: @no_upstreams_env) do
+      {output, 0} ->
+        assert!(
+          output =~ "Usage: ptc_lisp_repl",
+          "ptc_lisp_repl --help did not print expected usage"
+        )
+
+      {output, status} ->
+        Mix.raise("ptc_lisp_repl --help failed with exit status #{status}:\n#{output}")
     end
   end
 

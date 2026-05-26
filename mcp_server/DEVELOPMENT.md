@@ -101,6 +101,66 @@ _build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp remote
 
 Use a different `RELEASE_NODE` for every concurrent debug process.
 
+The release also includes `bin/ptc_lisp_repl`, a human-facing PTC-Lisp
+REPL wrapper that connects to the running node without requiring Erlang
+or Elixir to be installed on the host:
+
+```bash
+RELEASE_DISTRIBUTION=sname \
+RELEASE_NODE=ptc_runner_mcp_debug_1 \
+_build/prod/rel/ptc_runner_mcp/bin/ptc_lisp_repl --display envelope
+```
+
+From remote IEx, the same REPL can be started manually:
+
+```elixir
+PtcRunnerMcp.Repl.start(display: :envelope)
+```
+
+The REPL routes through `lisp_eval` or, when stateful sessions are
+enabled, `lisp_session_eval`. That means it sees the same configured
+upstream MCP tools, response profile, limits, and error feedback as
+MCP clients. `:display text` shows terminal-oriented output,
+`:display envelope` shows the full pretty JSON MCP tool response
+envelope, and `:display json` shows the same envelope as compact JSON.
+
+For local development without building a release, run the same REPL
+implementation from the `mcp_server/` Mix project:
+
+```bash
+mix mcp.repl --display envelope
+mix mcp.repl --upstreams-config ./upstreams.json --display envelope
+mix mcp.repl --stateless --eval "(+ 1 2)"
+```
+
+For a Docker debug container:
+
+```bash
+export RELEASE_COOKIE="$(openssl rand -base64 48)"
+
+docker run --rm -it \
+  --name ptc-mcp-debug \
+  -p 7332:7332 \
+  -e RELEASE_DISTRIBUTION=name \
+  -e RELEASE_NODE=ptc_runner_mcp@127.0.0.1 \
+  -e RELEASE_COOKIE="$RELEASE_COOKIE" \
+  -e PTC_RUNNER_MCP_HTTP_AUTH_TOKEN="$(openssl rand -base64 32)" \
+  ghcr.io/andreasronge/ptc-runner-mcp:TAG
+
+docker exec -it ptc-mcp-debug \
+  /opt/ptc_runner_mcp/bin/ptc_lisp_repl --display envelope
+```
+
+The `docker exec` command runs the wrapper inside the image and uses the
+runtime bundled in `/opt/ptc_runner_mcp`; the Docker host does not need
+Erlang or Elixir installed.
+
+The Erlang distribution cookie grants full VM RPC access, not only
+PTC-Lisp access. Keep it high entropy, local to the debug session, and
+never expose EPMD or BEAM distribution ports publicly. The Docker example
+above does not publish those ports; prefer `docker exec` for local
+debugging.
+
 ## Release Lifecycle Commands
 
 Useful commands:

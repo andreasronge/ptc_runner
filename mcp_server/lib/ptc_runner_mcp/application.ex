@@ -167,6 +167,16 @@ defmodule PtcRunnerMcp.Application do
       debug_children()
   end
 
+  @doc false
+  @spec build_repl_children([map()], %{String.t() => Credentials.Binding.t()}) ::
+          [Supervisor.child_spec() | {module(), term()}]
+  def build_repl_children(upstreams, bindings) do
+    [{Credentials, [bindings: bindings]}] ++
+      aggregator_children(upstreams) ++
+      session_children() ++
+      debug_children()
+  end
+
   # ----------------------------------------------------------------
   # Configuration plumbing
   # ----------------------------------------------------------------
