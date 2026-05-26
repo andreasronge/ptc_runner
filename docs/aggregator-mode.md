@@ -191,25 +191,30 @@ need it. If a `transport: "http"` entry is configured but
                 :args   {<args map>}})
 ```
 
-`:server`, `:tool`, and `:args` are required keys. `:args` may
-be omitted when the upstream tool takes no arguments — the safer
-default is `{}`.
+`:server` and `:tool` are required keys. `:args` is optional and
+defaults to `{}` when omitted; include it whenever the upstream tool
+takes arguments.
 
-`tool/mcp-call` is **not** a first-class function value.
-Higher-order use **MUST** wrap it in a closure:
+`tool/mcp-call` is a runtime callable in value position, so direct
+higher-order use is valid:
 
 ```clojure
 ;; OK
-(pmap #(tool/mcp-call {:server "github"
-                       :tool "get_pr"
-                       :args {:number %}})
-      pr-numbers)
+(map tool/mcp-call
+     [{:server "github" :tool "get_pr" :args {:number 101}}
+      {:server "github" :tool "get_pr" :args {:number 102}}])
 
 ;; OK
-(map (fn [n] (tool/mcp-call {:server "fs"
-                             :tool "read"
-                             :args {:path n}}))
-     paths)
+(pmap tool/mcp-call
+      [{:server "fs" :tool "read" :args {:path "a.txt"}}
+       {:server "fs" :tool "read" :args {:path "b.txt"}}])
+
+;; Also OK when argument construction is needed
+(map (fn [n]
+       (tool/mcp-call {:server "github"
+                       :tool "get_pr"
+                       :args {:number n}}))
+     pr-numbers)
 ```
 
 ### Return-value handling
