@@ -111,6 +111,86 @@ Start the MCP server with:
 [Aggregator Mode](aggregator-mode.md) for the authoring model,
 REPL discovery, error semantics, credentials, and HTTP upstreams.
 
+## HTTPS OpenAPI Upstream For Coding Agents
+
+For services that expose a read-only JSON API and an OpenAPI document,
+configure PtcRunner as the MCP server seen by the coding agent, then
+configure the HTTPS API as an OpenAPI upstream. The agent sees
+PtcRunner's `lisp_eval` / `lisp_session_*` tools; PTC-Lisp programs
+call the API through `(tool/call ...)`.
+
+Create an upstream config:
+
+```json
+{
+  "credentials": {
+    "api-token": {
+      "source": "env",
+      "var": "API_SERVICE_TOKEN",
+      "scheme_hint": "bearer"
+    }
+  },
+  "upstreams": {
+    "api": {
+      "transport": "openapi",
+      "base_url": "https://api.example.com",
+      "schema_file": "/absolute/path/to/api.openapi.json",
+      "auth": [
+        { "scheme": "bearer", "binding": "api-token" }
+      ],
+      "include_operations": [
+        "list_items",
+        "get_item"
+      ],
+      "request_timeout_ms": 5000,
+      "max_response_bytes": 1048576,
+      "schema_max_bytes": 1048576
+    }
+  }
+}
+```
+
+Use `schema_file` when possible so PtcRunner boot does not depend on
+the upstream service. Use `schema_url` only when the service hosts a
+stable OpenAPI document and boot-time schema fetching is acceptable.
+The OpenAPI v1 adapter intentionally exposes only explicitly included
+`GET` operations with JSON or empty `204` success responses.
+
+Wire the coding agent to PtcRunner:
+
+```json
+{
+  "mcpServers": {
+    "ptc-runner": {
+      "command": "/absolute/path/to/ptc_runner_mcp/bin/ptc_runner_mcp",
+      "args": [
+        "start",
+        "--sessions",
+        "--upstreams-config",
+        "/absolute/path/to/upstreams.json"
+      ],
+      "env": {
+        "API_SERVICE_TOKEN": "..."
+      }
+    }
+  }
+}
+```
+
+Ask the agent, or use the REPL, to smoke-test discovery and one call:
+
+```clojure
+(tool/servers)
+(dir 'api)
+(tool/call {:server "api" :tool "list-items" :args {:limit 3}})
+```
+
+If the HTTPS service is not under the same team's control, keep
+`include_operations` narrow and prefer operation overrides or
+`x-ptc-*` schema extensions for clearer names, descriptions, and
+defaults. See [Aggregator Mode](aggregator-mode.md#format--openapi-upstream)
+for the full OpenAPI upstream format.
+
 ## HTTP Mode
 
 HTTP mode is opt-in and intended for private-network deployments behind

@@ -291,7 +291,9 @@ Start the MCP server with:
 `fs` server from inside one bounded PTC-Lisp program. See
 [`docs/aggregator-mode.md`](../docs/aggregator-mode.md) for the
 authoring model, catalog discovery, error semantics, credentials, and
-HTTP upstreams.
+HTTP / OpenAPI upstreams. For a coding-agent setup where PtcRunner
+talks HTTPS to a JSON API described by OpenAPI, see
+[HTTPS OpenAPI Upstream For Coding Agents](../docs/mcp-server-cli.md#https-openapi-upstream-for-coding-agents).
 
 ## Deploy As A Server
 
