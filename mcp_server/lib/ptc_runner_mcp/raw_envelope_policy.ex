@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.RawEnvelopePolicy do
   @moduledoc """
-  Resolves whether `tool/mcp-call` should retain the raw MCP envelope.
+  Resolves whether `tool/call` should retain the raw MCP envelope.
   """
 
   alias PtcRunnerMcp.AggregatorConfig

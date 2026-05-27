@@ -28,7 +28,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   This is the catalog's view of "I have nothing useful to say about
   this upstream" — it's the same shape as a `tools/list` cache miss,
   not an attempt to encode the failure reason. The upstream will be
-  re-attempted on first `(tool/mcp-call ...)` invocation per §4.3.
+  re-attempted on first `(tool/call ...)` invocation per §4.3.
 
   Empty input — no upstreams configured at all — renders as the
   empty string. `Tools.advertised_description/2` already degrades
@@ -90,7 +90,8 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   # production deploy somehow ended up wired to `Fake`.
   @transport_tags %{
     PtcRunnerMcp.Upstream.Stdio => "stdio",
-    PtcRunnerMcp.Upstream.Http => "http"
+    PtcRunnerMcp.Upstream.Http => "http",
+    PtcRunnerMcp.Upstream.OpenApi => "openapi"
   }
 
   @doc """
@@ -602,6 +603,7 @@ defmodule PtcRunnerMcp.Upstream.Catalog do
   defp tool_field(tool, key, default \\ nil) do
     case tool do
       %{^key => v} -> v
+      _ when key == :input_schema -> Map.get(tool, "inputSchema", default)
       _ -> Map.get(tool, to_string(key), default)
     end
   end

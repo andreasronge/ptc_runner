@@ -49,7 +49,7 @@ defmodule PtcRunnerMcp.Upstream.Http do
   (`upstream/connection.ex:446`) fires; `abnormal_exit?(:session_lost)`
   returns `true` per `connection.ex:629`, so Connection invalidates
   `cached_tools`, transitions to `:not_started`, and arms
-  `backoff_until_ms`. The next `(tool/mcp-call …)` cold-starts a
+  `backoff_until_ms`. The next `(tool/call …)` cold-starts a
   fresh impl with a fresh handshake. Same path applies to
   `:auth_failed` (post-handshake 401, plus per-request auth-resolution
   failures — wired here even though Phase 2 has no auth, so Phase 3

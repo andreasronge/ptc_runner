@@ -303,7 +303,7 @@ defmodule PtcRunner.Step do
   @typedoc """
   PTC-Lisp discovery invocation record (aggregator mode).
 
-  Captured for REPL discovery forms such as `mcp/servers`, `apropos`,
+  Captured for REPL discovery forms such as `tool/servers`, `apropos`,
   `dir`, `doc`, and `meta` dispatched through the configured discovery
   executor.
 

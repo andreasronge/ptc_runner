@@ -84,7 +84,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "fail" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "fail" :args {}})]
               (and (not (:ok r))
                    (= (:reason r) :tool_error)
                    (string/starts-with? (:message r) "test failure msg")
@@ -122,7 +122,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "weird" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "weird" :args {}})]
               (and (not (:ok r))
                    (= (:reason r) :tool_error)
                    (includes? (:message r) "details")))
@@ -152,7 +152,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       env =
         call(~S|
-          (let [r (tool/mcp-call {:server "alpha" :tool "ok" :args {}})]
+          (let [r (tool/call {:server "alpha" :tool "ok" :args {}})]
             (:value r))
         |)
 
@@ -182,7 +182,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
 
       env =
         call(~S|
-          (let [r (tool/mcp-call {:server "alpha" :tool "no_iserr" :args {}})]
+          (let [r (tool/call {:server "alpha" :tool "no_iserr" :args {}})]
             (:value r))
         |)
 
@@ -199,7 +199,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "null" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "null" :args {}})]
               (and (:ok r) (nil? (:value r)) (= (:value_kind r) :json)))
           |,
           %{"output_schema" => %{"type" => "boolean"}}
@@ -230,7 +230,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       })
 
       env =
-        call(~S|(tool/mcp-call {:server "alpha" :tool "fail" :args {}})|)
+        call(~S|(tool/call {:server "alpha" :tool "fail" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -282,7 +282,7 @@ defmodule PtcRunnerMcp.AggregatorIsErrorTest do
       env =
         call(
           ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "fail" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "fail" :args {}})]
               (and (not (:ok r)) (= (:reason r) :tool_error)))
           |,
           %{"output_schema" => %{"type" => "boolean"}}

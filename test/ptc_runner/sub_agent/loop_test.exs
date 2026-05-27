@@ -648,7 +648,7 @@ defmodule PtcRunner.SubAgent.LoopTest do
 
       llm = fn %{messages: _} ->
         {:ok, ~S|```clojure
-(return (mcp/servers))
+(return (tool/servers))
 ```|}
       end
 

@@ -210,7 +210,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
   @repl_environment_support [
     %{
-      command: "`(mcp/servers)`",
+      command: "`(tool/servers)`",
       status: "supported",
       scope: "MCP aggregator",
       notes: "List configured upstream servers, tool counts, and catalog load status"

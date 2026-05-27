@@ -47,17 +47,14 @@ defmodule PtcRunnerMcp.Upstream do
   @type reason ::
           :upstream_unavailable
           | :upstream_error
+          | :tool_error
+          | :auth_failed
+          | :rate_limited
           | :timeout
           | :response_too_large
 
   @typedoc "Tool schema as returned by an upstream's `tools/list`."
-  @type tool_schema :: %{
-          required(:name) => String.t(),
-          required(:input_schema) => map(),
-          optional(:description) => String.t(),
-          optional(:output_schema) => map(),
-          optional(:annotations) => map()
-        }
+  @type tool_schema :: map()
 
   @typedoc "Per-call options threaded through from `Limits`."
   @type call_opts :: [

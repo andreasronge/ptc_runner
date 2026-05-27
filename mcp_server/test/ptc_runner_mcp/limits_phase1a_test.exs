@@ -176,7 +176,7 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
       env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "slow" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "slow" :args {}})|
         })
 
       assert env["isError"] == false
@@ -211,7 +211,7 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
 
       env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "big" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "big" :args {}})|
         })
 
       [entry] = env["structuredContent"]["upstream_calls"]
@@ -244,10 +244,10 @@ defmodule PtcRunnerMcp.LimitsPhase1aTest do
       env =
         Tools.call_with_gate(%{
           "program" => ~S|
-            [(tool/mcp-call {:server "alpha" :tool "x" :args {:i 1}})
-             (tool/mcp-call {:server "alpha" :tool "x" :args {:i 2}})
-             (tool/mcp-call {:server "alpha" :tool "x" :args {:i 3}})
-             (tool/mcp-call {:server "alpha" :tool "x" :args {:i 4}})]
+            [(tool/call {:server "alpha" :tool "x" :args {:i 1}})
+             (tool/call {:server "alpha" :tool "x" :args {:i 2}})
+             (tool/call {:server "alpha" :tool "x" :args {:i 3}})
+             (tool/call {:server "alpha" :tool "x" :args {:i 4}})]
           |
         })
 

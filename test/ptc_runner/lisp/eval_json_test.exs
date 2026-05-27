@@ -107,7 +107,7 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
       assert {:error, %{fail: %{message: msg}}} = Lisp.run(~S|(mcp/text {})|)
 
       assert msg =~ "Unknown mcp function: mcp/text"
-      assert msg =~ "mcp/servers"
+      assert msg =~ "tool/servers"
       refute msg =~ "MCP functions"
     end
   end

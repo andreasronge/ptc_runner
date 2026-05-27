@@ -174,7 +174,7 @@ defmodule PtcRunnerMcp.Repl do
 
     Evaluate PTC-Lisp directly at the prompt. In aggregator mode,
     upstream MCP tools are available from programs through
-    (tool/mcp-call ...), and discovery forms such as (apropos ...)
+    (tool/call ...), and discovery forms such as (apropos ...)
     use the running server's upstream catalog.
     """)
 

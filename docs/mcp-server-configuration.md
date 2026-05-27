@@ -147,7 +147,7 @@ In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp R
 
 | Form | Purpose |
 |---|---|
-| `(mcp/servers)` | All servers with tool counts and load status |
+| `(tool/servers)` | All servers with tool counts and load status |
 | `(apropos "query" {:limit 8})` | Cross-server lexical search returning `server.tool - description` strings |
 | `(dir "server" {:limit 50})` | Tool names and descriptions for one server |
 | `(doc "server/tool")` | Detailed args/result description with required args and call example |
@@ -165,7 +165,7 @@ Discovery forms have a separate budget from upstream calls: `--max-catalog-ops-p
 
 ## Aggregator-mode flags
 
-These come into effect when at least one upstream is configured. The first two override the v1 1 s / 10 MB defaults to be more realistic for programs that orchestrate real subprocess upstreams. See [`aggregator-mode.md`](aggregator-mode.md) for the conceptual reference (PTC-Lisp authoring against `tool/mcp-call`, catalog format, error model, example programs).
+These come into effect when at least one upstream is configured. The first two override the v1 1 s / 10 MB defaults to be more realistic for programs that orchestrate real subprocess upstreams. See [`aggregator-mode.md`](aggregator-mode.md) for the conceptual reference (PTC-Lisp authoring against `tool/call`, catalog format, error model, example programs).
 
 | Flag | Env var | Default (aggregator) | Meaning |
 |---|---|---|---|
@@ -174,10 +174,33 @@ These come into effect when at least one upstream is configured. The first two o
 | `--program-memory-limit-bytes` | `PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES` | `100 * 1024 * 1024` (100 MB) | Sandbox heap cap (replaces v1's 10 MB). |
 | `--upstream-call-timeout-ms` | `PTC_RUNNER_MCP_UPSTREAM_CALL_TIMEOUT_MS` | `5_000` (5 s) | Per-upstream-call wall-clock cap. Exceeded → `{:ok false :reason :timeout :message ...}` + entry with reason `timeout`. |
 | `--max-upstream-response-bytes` | `PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES` | `2 * 1024 * 1024` (2 MB) | Per-response size cap, enforced pre-decode. Exceeded → `{:ok false :reason :response_too_large :message ...}` + entry with reason `response_too_large`. |
-| `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` | `50` | Total `tool/mcp-call` budget per program. Exceeded → `{:ok false :reason :cap_exhausted :message ...}` + entry with reason `cap_exhausted`. Stops `pmap` over an unbounded list from runaway-firing. |
+| `--max-upstream-calls-per-program` | `PTC_RUNNER_MCP_MAX_UPSTREAM_CALLS_PER_PROGRAM` | `50` | Total `tool/call` budget per program. Exceeded → `{:ok false :reason :cap_exhausted :message ...}` + entry with reason `cap_exhausted`. Stops `pmap` over an unbounded list from runaway-firing. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Advertise aggregator mode as read-only/non-destructive for clients like Codex when upstreams enforce read-only behavior. |
 
 CLI flag wins over env var; aggregator-mode defaults only apply when no explicit value is given.
+
+### OpenAPI Upstreams
+
+An upstream entry with `"transport": "openapi"` exposes a curated set
+of read-only JSON `GET` operations through the same `tool/call` path as
+MCP upstreams. Required fields:
+
+- `base_url`: HTTPS origin used for all operation calls.
+- exactly one of `schema_file` or `schema_url`: OpenAPI schema source.
+- `include_operations`: non-empty list of OpenAPI `operationId` strings
+  to expose.
+
+Optional fields include `auth`, `static_headers`,
+`operation_overrides`, `request_timeout_ms`, `connect_timeout_ms`,
+`max_response_bytes`, and `schema_max_bytes`. `schema_file` is the
+recommended production shape; `schema_url` is fetched during upstream
+startup and can delay boot up to its request timeout if the schema host
+hangs.
+
+See [`docs/examples/observatory-openapi-upstreams.json`](examples/observatory-openapi-upstreams.json)
+for a production-shaped Observatory config. The matching test fixture
+schema lives at
+[`mcp_server/test/fixtures/openapi/observatory.openapi.json`](../mcp_server/test/fixtures/openapi/observatory.openapi.json).
 
 ## Tracing
 

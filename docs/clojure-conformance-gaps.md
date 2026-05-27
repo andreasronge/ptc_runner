@@ -520,7 +520,7 @@ The negative-start rule specifically kills the `(.indexOf s needle) → -1 → s
 
 **Rationale:** No exception handling in the sandbox (DIV-10) means raising = unrecoverable program crash. `json/parse-string` returns `nil` on any failure (invalid JSON, `nil` input, non-binary input) so callers can guard with `(when result ...)` or thread through `(some->)`. Map keys are decoded as **strings** (not atoms) to match PTC-Lisp's tool-boundary convention and avoid atom memory leaks on untrusted input.
 
-The `nil` return for both real JSON `null` and parse failure is a known ambiguity (OQ-1 in the plan). Programs that need to distinguish should guard on `(empty? s)` / shape *before* calling. MCP aggregator calls use a separate tagged `tool/mcp-call` result where `:ok` distinguishes success from failure.
+The `nil` return for both real JSON `null` and parse failure is a known ambiguity (OQ-1 in the plan). Programs that need to distinguish should guard on `(empty? s)` / shape *before* calling. MCP aggregator calls use a separate tagged `tool/call` result where `:ok` distinguishes success from failure.
 
 ### DIV-24: `json/generate-string` returns `nil` on non-encodable input
 

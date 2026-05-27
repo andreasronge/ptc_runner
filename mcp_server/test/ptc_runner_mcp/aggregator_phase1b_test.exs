@@ -82,7 +82,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1bTest do
           @registry_name
         )
 
-      # The program issues two concurrent (tool/mcp-call ...) calls
+      # The program issues two concurrent (tool/call ...) calls
       # via pmap, one per upstream. Each cold-starts its own
       # Connection's Fake (200 ms). Pre-Phase-1b: the Registry's
       # serial `handle_call` runs `attempt_start/3` for the two
@@ -90,7 +90,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1bTest do
       # mailboxes are independent — wall-clock ≈ 200 ms.
       program = """
       (pmap (fn [server]
-              (tool/mcp-call {:server server :tool "ping" :args {}}))
+              (tool/call {:server server :tool "ping" :args {}}))
             [#{Jason.encode!(alpha)} #{Jason.encode!(beta)}])
       """
 

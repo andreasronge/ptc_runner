@@ -103,16 +103,16 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     prompt = Prompt.system_prompt(catalog: "docs:\n  search()")
 
     assert count(prompt, "lisp_task MCP-call contract:") == 1
-    assert count(prompt, "In `lisp_task`, `tool/mcp-call` returns `Result<T>`") == 1
+    assert count(prompt, "In `lisp_task`, `tool/call` returns `Result<T>`") == 1
     assert prompt =~ "success `{:ok true :value T}`"
     assert prompt =~ "unexpected shape, handle or fail"
     assert prompt =~ "inspect `:ok`"
     refute prompt =~ ":tag"
     refute prompt =~ "returns `nil`"
-    refute prompt =~ "tool/mcp-call returns nil"
+    refute prompt =~ "tool/call returns nil"
   end
 
-  test "direct aggregator and agentic planner share tagged mcp-call contract" do
+  test "direct aggregator and agentic planner share tagged call contract" do
     direct = Tools.advertised_description(:mcp_aggregator, catalog: nil)
     agentic = Prompt.system_prompt(catalog: "docs:\n  search()")
 
@@ -155,8 +155,8 @@ defmodule PtcRunnerMcp.AgenticPromptTest do
     assert assembled.user_message =~ ~S|"max_items":3|
 
     assert assembled.tool_rendering == %{
-             "suppress_generic_tools" => ["mcp-call"],
-             "authoritative_tool_contracts" => ["mcp-call"]
+             "suppress_generic_tools" => ["call"],
+             "authoritative_tool_contracts" => ["call"]
            }
   end
 

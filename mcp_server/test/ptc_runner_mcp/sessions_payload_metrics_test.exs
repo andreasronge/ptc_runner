@@ -66,7 +66,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
       envelope =
         eval_envelope(
           session_id,
-          ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
+          ~S|(tool/call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
         )
 
       response = envelope["structuredContent"]
@@ -84,7 +84,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
       session_id = start_session()
 
       envelope =
-        eval_envelope(session_id, ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|)
+        eval_envelope(session_id, ~S|(tool/call {:server "alpha" :tool "echo" :args {}})|)
 
       assert envelope["isError"] == false
       refute Map.has_key?(envelope, "structuredContent")
@@ -102,7 +102,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
         json_rpc_eval(
           "session-metrics-1",
           session_id,
-          ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
+          ~S|(tool/call {:server "alpha" :tool "echo" :args {:msg "hi"}})|
         )
 
       refute Map.has_key?(env, "structuredContent")
@@ -139,7 +139,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
         json_rpc_eval(
           "session-metrics-2",
           session_id,
-          ~S|(do (tool/mcp-call {:server "alpha" :tool "echo" :args {}}) (/ 1 0))|
+          ~S|(do (tool/call {:server "alpha" :tool "echo" :args {}}) (/ 1 0))|
         )
 
       assert env["isError"] == true
@@ -165,7 +165,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
       envelope =
         eval_envelope(
           session_id,
-          ~S|(do (tool/mcp-call {:server "alpha" :tool "echo" :args {}}) (+ 1 "x"))|
+          ~S|(do (tool/call {:server "alpha" :tool "echo" :args {}}) (+ 1 "x"))|
         )
 
       assert envelope["isError"] == true
@@ -190,7 +190,7 @@ defmodule PtcRunnerMcp.SessionsPayloadMetricsTest do
         json_rpc_eval(
           "session-metrics-3",
           session_id,
-          ~S|(def big (tool/mcp-call {:server "alpha" :tool "echo" :args {}}))|
+          ~S|(def big (tool/call {:server "alpha" :tool "echo" :args {}}))|
         )
 
       assert env["isError"] == true

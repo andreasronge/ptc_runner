@@ -179,13 +179,13 @@ def main():
     # PTC-Lisp programs, and the native fs calls they're compared against.
     ptc_programs = {
         "read_one_file":
-            f'(:value (tool/mcp-call {{:server "fs" :tool "read_text_file" :args {{:path "{f1}"}}}}))',
+            f'(:value (tool/call {{:server "fs" :tool "read_text_file" :args {{:path "{f1}"}}}}))',
         "first_line_of_3":
             ('(map (fn [p] (first (clojure.string/split-lines '
-             '(:value (tool/mcp-call {:server "fs" :tool "read_text_file" :args {:path p}})))))'
+             '(:value (tool/call {:server "fs" :tool "read_text_file" :args {:path p}})))))'
              f' ["{f1}" "{f2}" "{f3}"])'),
         "one_line_grep":
-            (f'(->> (:value (tool/mcp-call {{:server "fs" :tool "read_text_file" :args {{:path "{f1}"}}}}))'
+            (f'(->> (:value (tool/call {{:server "fs" :tool "read_text_file" :args {{:path "{f1}"}}}}))'
              ' clojure.string/split-lines (filter #(clojure.string/starts-with? % "Lead")) first)'),
     }
     native_cases = {

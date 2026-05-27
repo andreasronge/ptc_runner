@@ -10,7 +10,7 @@ mode](aggregator-mode.md). It adds a second MCP tool, `lisp_task`, for
 clients that want to ask for a natural-language task instead of
 authoring PTC-Lisp directly. The server uses the configured planner
 model to run a SubAgent in explicit completion mode with one MCP-owned
-tool available inside the planner: `tool/mcp-call`. The planner may
+tool available inside the planner: `tool/call`. The planner may
 call upstream MCP servers, inspect the tagged result, and must finish
 with `(return ...)` or `(fail ...)`. Successful answers are intended to
 be human-readable text.
@@ -201,7 +201,7 @@ results. Supported conversions include JSON Schema `string`,
 `:map`. If an upstream omits `outputSchema`, the generated catalog
 marks the tool as `-> :unknown_content`. That means the upstream did
 not advertise a domain output schema; the planner should inspect the
-tagged `tool/mcp-call` result's `:value` before assuming a shape.
+tagged `tool/call` result's `:value` before assuming a shape.
 
 ## Real-provider smoke
 

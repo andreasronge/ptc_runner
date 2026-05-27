@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.UpstreamCalls do
   side-channel.
 
   Per `Plans/ptc-runner-mcp-aggregator.md` §6.4 + §8.5: the MCP
-  request handler is the collector. Each `(tool/mcp-call ...)`
+  request handler is the collector. Each `(tool/call ...)`
   closure invocation sends `{:upstream_call_recorded, ref, entry}`
   to the worker process at completion; the worker drains its mailbox
   in arrival order (= upstream call **completion order**) and
@@ -44,12 +44,12 @@ defmodule PtcRunnerMcp.UpstreamCalls do
 
   alias PtcRunnerMcp.Credentials.Redactor
 
-  @typedoc "An entry recorded for a single `(tool/mcp-call ...)` invocation."
+  @typedoc "An entry recorded for a single `(tool/call ...)` invocation."
   @type entry :: %{required(String.t()) => term()}
 
   @typedoc """
   Closed map of state shared by the worker (collector) and every
-  `mcp-call` closure executing under it. The closure captures the
+  `call` closure executing under it. The closure captures the
   entire context — never the process dictionary, never ETS — so
   `pmap` children spawned with empty pdicts still see the same
   counter, ref, and limits.
@@ -124,7 +124,7 @@ defmodule PtcRunnerMcp.UpstreamCalls do
 
   @doc """
   Records that this program's `ensure_started(name)` already failed
-  with `{reason, detail}`. Subsequent `(tool/mcp-call ...)` calls
+  with `{reason, detail}`. Subsequent `(tool/call ...)` calls
   targeting `name` in the same program short-circuit via
   `cached_failure/2` and return `nil` without re-attempting the
   spawn (§4.3 "no automatic retry within a single program").

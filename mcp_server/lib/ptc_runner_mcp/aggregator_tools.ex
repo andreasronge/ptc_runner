@@ -2,8 +2,8 @@ defmodule PtcRunnerMcp.AggregatorTools do
   @moduledoc """
   Builds the PTC-Lisp tools registry used in aggregator mode.
 
-  The single tool registered today is `mcp-call`, callable as
-  `(tool/mcp-call {:server "..." :tool "..." :args {...}})`. Per
+  The single tool registered today is `call`, callable as
+  `(tool/call {:server "..." :tool "..." :args {...}})`. Per
   `Plans/ptc-runner-mcp-aggregator.md` §6.4 the closure captures
   the entire `call_context` map (collector pid, unique ref,
   `:counters`-backed cap, per-call timeout, byte cap) — not the
@@ -36,7 +36,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
   alias PtcRunnerMcp.Upstream.Registry
   alias PtcRunnerMcp.UpstreamCalls
 
-  @tool_name "mcp-call"
+  @tool_name "call"
   @allowed_arg_keys %{
     "server" => :server,
     "tool" => :tool,
@@ -49,7 +49,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
   @doc """
   Builds the tools map for `Sandbox.execute(..., tools: ...)`.
 
-  Returns `%{"mcp-call" => closure}`. The closure captures
+  Returns `%{"call" => closure}`. The closure captures
   `call_context` (per §6.4) and `request_id` (for telemetry).
 
   Pass `registry: Upstream.Registry` (the default) or any other
@@ -89,7 +89,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
   end
 
   # ----------------------------------------------------------------
-  # Step 1: structural validation of (tool/mcp-call ...) args
+  # Step 1: structural validation of (tool/call ...) args
   # ----------------------------------------------------------------
 
   defp validate_args(args, registry) do
@@ -106,7 +106,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # upstream name, so this is the recover-by-reading-the-catalog
         # path.
         raise_programmer_fault(
-          "tool/mcp-call requires :server (string), got #{inspect_short(server)}" <>
+          "tool/call requires :server (string), got #{inspect_short(server)}" <>
             configured_servers_hint(registry)
         )
 
@@ -115,7 +115,7 @@ defmodule PtcRunnerMcp.AggregatorTools do
         # the error to a specific server entry in the catalog without
         # re-reading the program.
         raise_programmer_fault(
-          "tool/mcp-call on upstream '#{server}' requires :tool (string), got #{inspect_short(tool)}" <>
+          "tool/call on upstream '#{server}' requires :tool (string), got #{inspect_short(tool)}" <>
             tool_discovery_hint(server)
         )
 
@@ -146,13 +146,13 @@ defmodule PtcRunnerMcp.AggregatorTools do
       case Map.fetch(@allowed_arg_keys, key) do
         {:ok, normalized_key} ->
           if Map.has_key?(acc, normalized_key) do
-            raise_programmer_fault("tool/mcp-call got duplicate key #{inspect(normalized_key)}")
+            raise_programmer_fault("tool/call got duplicate key #{inspect(normalized_key)}")
           else
             Map.put(acc, normalized_key, value)
           end
 
         :error ->
-          raise_programmer_fault("tool/mcp-call got unknown key #{inspect(key)}")
+          raise_programmer_fault("tool/call got unknown key #{inspect(key)}")
       end
     end)
   end
@@ -577,7 +577,15 @@ defmodule PtcRunnerMcp.AggregatorTools do
         end
 
       {:error, reason, detail}
-      when reason in [:upstream_unavailable, :upstream_error, :timeout, :response_too_large] ->
+      when reason in [
+             :upstream_unavailable,
+             :upstream_error,
+             :tool_error,
+             :auth_failed,
+             :rate_limited,
+             :timeout,
+             :response_too_large
+           ] ->
         # `:response_too_large` → `oversize: true` (set by
         # `error_entry/6` from the reason). `result_bytes` is left
         # `nil`: the overflow paths abort without retaining an exact
@@ -661,11 +669,11 @@ defmodule PtcRunnerMcp.AggregatorTools do
   defp configured_servers_hint(registry) do
     case configured_server_names(registry) do
       [] ->
-        "\nHint: use (mcp/servers) to inspect configured upstreams."
+        "\nHint: use (tool/servers) to inspect configured upstreams."
 
       names ->
         "\nConfigured upstreams: #{Enum.join(Enum.take(names, 8), ", ")}." <>
-          "\nHint: use (mcp/servers) or (apropos \"query\" {:limit 8})."
+          "\nHint: use (tool/servers) or (apropos \"query\" {:limit 8})."
     end
   end
 

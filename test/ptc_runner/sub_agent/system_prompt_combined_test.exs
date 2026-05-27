@@ -156,7 +156,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
       refute prompt =~ "<ptc_tools>"
     end
 
-    test "compact card does not include MCP aggregator-only mcp-call semantics" do
+    test "compact card does not include MCP aggregator-only call semantics" do
       agent =
         SubAgent.new(
           prompt: "do work",
@@ -166,7 +166,7 @@ defmodule PtcRunner.SubAgent.SystemPromptCombinedTest do
 
       prompt = SystemPrompt.generate(agent)
 
-      refute prompt =~ "tool/mcp-call"
+      refute prompt =~ "tool/call"
       refute prompt =~ ":json-null"
       refute prompt =~ "World-fault"
       refute prompt =~ "upstream_calls"

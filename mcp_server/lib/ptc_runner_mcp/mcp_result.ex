@@ -34,7 +34,7 @@ defmodule PtcRunnerMcp.McpResult do
   @doc """
   Extracts the default domain payload from an upstream MCP result envelope.
 
-  The order matches the public `tool/mcp-call` contract:
+  The order matches the public `tool/call` contract:
   structuredContent, JSON text, plain text, then no default payload.
   """
   @spec unwrap(term()) :: {term(), value_kind()}

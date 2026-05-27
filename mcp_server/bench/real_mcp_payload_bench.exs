@@ -345,7 +345,7 @@ defmodule RealMcpPayloadBench.Cases do
         native_tool: "list_email_labels",
         native_args: %{},
         ptc_program: """
-        (let [r (tool/mcp-call {:server "gmail" :tool "list_email_labels" :args {}})
+        (let [r (tool/call {:server "gmail" :tool "list_email_labels" :args {}})
               txt (:value r)]
           {:chars (count txt)
            :label-lines (count (filter #(.startsWith % "ID: ") (split-lines txt)))})
@@ -362,7 +362,7 @@ defmodule RealMcpPayloadBench.Cases do
           "maxResults" => 3
         },
         ptc_program: """
-        (let [r (tool/mcp-call {:server "gmail"
+        (let [r (tool/call {:server "gmail"
                                 :tool "search_emails"
                                 :args {:query "newer_than:1d -in:sent -in:trash -in:spam"
                                        :maxResults 3}})]
@@ -380,7 +380,7 @@ defmodule RealMcpPayloadBench.Cases do
           "maxResults" => 100
         },
         ptc_program: """
-        (let [r (tool/mcp-call {:server "gmail"
+        (let [r (tool/call {:server "gmail"
                                 :tool "search_emails"
                                 :args {:query "newer_than:30d -in:sent -in:trash -in:spam"
                                        :maxResults 100}})
@@ -405,7 +405,7 @@ defmodule RealMcpPayloadBench.Cases do
           "maxResults" => 100
         },
         ptc_program: """
-        (let [r (tool/mcp-call {:server "gmail"
+        (let [r (tool/call {:server "gmail"
                                 :tool "search_emails"
                                 :args {:query "newer_than:180d (invoice OR receipt OR faktura OR kvitto) -in:sent -in:trash -in:spam"
                                        :maxResults 100}})
@@ -431,7 +431,7 @@ defmodule RealMcpPayloadBench.Cases do
           "maxResults" => 100
         },
         ptc_program: """
-        (let [r (tool/mcp-call {:server "gmail"
+        (let [r (tool/call {:server "gmail"
                                 :tool "search_emails"
                                 :args {:query "is:unread -in:sent -in:trash -in:spam"
                                        :maxResults 100}})

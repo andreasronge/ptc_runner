@@ -87,6 +87,28 @@ defmodule PtcRunnerMcp.CatalogTest do
                "github:\n  search_repos(query: string, limit: integer?) -> Result<:unknown_content> - Search repositories"
     end
 
+    test "renders OpenAPI inputSchema camel-case args" do
+      tools = [
+        %{
+          "name" => "list-traces",
+          "inputSchema" => %{
+            "type" => "object",
+            "properties" => %{
+              "limit" => %{"type" => "integer"},
+              "tenant" => %{"type" => "string"}
+            },
+            "required" => ["tenant"]
+          },
+          "description" => "List traces"
+        }
+      ]
+
+      output = Catalog.render_entries([%{name: "observatory", tools: tools}])
+
+      assert output ==
+               "observatory:\n  list-traces(tenant: string, limit: integer?) -> Result<:unknown_content> - List traces"
+    end
+
     test "all-required args render with no `?`" do
       tools = [
         %{
@@ -281,7 +303,7 @@ defmodule PtcRunnerMcp.CatalogTest do
 
   describe "render_entries/1 — enum / const constraints take priority over `type`" do
     # The catalog's job is to give the LLM enough info to write correct
-    # `(tool/mcp-call ...)` programs. Constrained args are exactly where
+    # `(tool/call ...)` programs. Constrained args are exactly where
     # the LLM needs the hint most — a real-world Linear `list_tickets`
     # tool whose `:status` arg is `{type: "string", enum: ["open",
     # "closed"]}` MUST render `enum<string>`, not `string`, otherwise

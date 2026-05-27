@@ -1023,7 +1023,7 @@ defmodule PtcRunnerMcp.Application do
 
   # Phase 1a: when at least one upstream is configured, start the
   # `Upstream.Supervisor` (which owns the registry GenServer + child
-  # supervisor for upstream processes) so `tool/mcp-call` invocations
+  # supervisor for upstream processes) so `tool/call` invocations
   # have a routing destination. When no upstreams are configured the
   # server runs in `:mcp_no_tools` mode and the upstream subsystem is
   # absent — `configured_aggregator_mode?/0` is `false`.
@@ -1194,11 +1194,14 @@ defmodule PtcRunnerMcp.Application do
       "http" ->
         parse_http_upstream(name, config, path)
 
+      "openapi" ->
+        parse_openapi_upstream(name, config, path)
+
       other ->
         raise """
         upstreams_config: upstream '#{name}' has unknown transport '#{inspect(other)}'.
 
-        Supported transports: "stdio" (default if absent), "http".
+        Supported transports: "stdio" (default if absent), "http", "openapi".
 
         Source: #{path}
         """
@@ -1592,6 +1595,162 @@ defmodule PtcRunnerMcp.Application do
 
   defp check_insecure_auth_gate!(_name, _allow_insecure_http, _allow_insecure_auth, _auth, _path),
     do: :ok
+
+  @doc false
+  @spec parse_openapi_upstream(String.t(), map(), String.t()) :: %{
+          name: String.t(),
+          impl: module(),
+          config: map(),
+          metadata: map()
+        }
+  def parse_openapi_upstream(name, config, path) when is_map(config) do
+    {metadata, config} = extract_upstream_metadata(config)
+
+    allow_insecure_http = bool_field!(config, "allow_insecure_http", false, name, path)
+    allow_insecure_auth = bool_field!(config, "allow_insecure_auth", false, name, path)
+
+    base_url = openapi_url_field!(name, config, "base_url", allow_insecure_http, path)
+    schema_source = openapi_schema_source!(name, config, allow_insecure_http, path)
+    static_headers = http_static_headers!(name, config, path)
+    auth = parse_auth_emitters!(name, Map.get(config, "auth"), path)
+    :ok = check_auth_static_collision!(name, auth, static_headers, path)
+    :ok = check_insecure_auth_gate!(name, allow_insecure_http, allow_insecure_auth, auth, path)
+
+    include_operations = openapi_include_operations!(name, config, path)
+    operation_overrides = openapi_operation_overrides!(name, config, path)
+
+    out_config =
+      %{
+        base_url: base_url,
+        static_headers: static_headers,
+        auth: auth,
+        request_timeout_ms:
+          pos_int_field!(
+            config,
+            "request_timeout_ms",
+            @http_default_request_timeout_ms,
+            name,
+            path
+          ),
+        connect_timeout_ms:
+          pos_int_field!(
+            config,
+            "connect_timeout_ms",
+            @http_default_connect_timeout_ms,
+            name,
+            path
+          ),
+        max_response_bytes:
+          pos_int_field!(
+            config,
+            "max_response_bytes",
+            @http_default_max_response_bytes,
+            name,
+            path
+          ),
+        schema_max_bytes:
+          pos_int_field!(config, "schema_max_bytes", @http_default_max_response_bytes, name, path),
+        include_operations: include_operations,
+        operation_overrides: operation_overrides
+      }
+      |> Map.merge(schema_source)
+
+    %{
+      name: name,
+      impl: PtcRunnerMcp.Upstream.OpenApi,
+      config: out_config,
+      metadata: metadata
+    }
+  end
+
+  defp openapi_url_field!(name, config, field, allow_insecure_http, path) do
+    raw = Map.get(config, field)
+
+    if not is_binary(raw) or raw == "" do
+      raise """
+      upstreams_config: upstream '#{name}' is transport: "openapi" but `#{field}:` is missing or empty.
+
+      Source: #{path}
+      """
+    else
+      case URI.new(raw) do
+        {:ok, %URI{scheme: scheme, host: host}}
+        when is_binary(scheme) and is_binary(host) and host != "" ->
+          validate_url_scheme!(name, raw, scheme, allow_insecure_http, path)
+          raw
+
+        _ ->
+          raise """
+          upstreams_config: upstream '#{name}' has malformed `#{field}:` value: #{inspect(raw)}.
+
+          Source: #{path}
+          """
+      end
+    end
+  end
+
+  defp openapi_schema_source!(name, config, allow_insecure_http, path) do
+    file = Map.get(config, "schema_file")
+    url = Map.get(config, "schema_url")
+
+    case {file, url} do
+      {file, nil} when is_binary(file) and file != "" ->
+        %{schema_file: file}
+
+      {nil, url} when is_binary(url) and url != "" ->
+        %{schema_url: openapi_url_field!(name, config, "schema_url", allow_insecure_http, path)}
+
+      {nil, nil} ->
+        raise """
+        upstreams_config: upstream '#{name}' is transport: "openapi" but exactly one of `schema_file:` or `schema_url:` is required.
+
+        Source: #{path}
+        """
+
+      {_file, _url} ->
+        raise """
+        upstreams_config: upstream '#{name}' is transport: "openapi" but must set exactly one of `schema_file:` or `schema_url:`.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp openapi_include_operations!(name, config, path) do
+    case Map.get(config, "include_operations") do
+      list when is_list(list) ->
+        if list != [] and Enum.all?(list, &(is_binary(&1) and &1 != "")) do
+          list
+        else
+          raise """
+          upstreams_config: upstream '#{name}' openapi `include_operations:` must be a non-empty list of operationId strings, got: #{inspect(list)}.
+
+          Source: #{path}
+          """
+        end
+
+      other ->
+        raise """
+        upstreams_config: upstream '#{name}' openapi `include_operations:` must be a non-empty list of operationId strings, got: #{inspect(other)}.
+
+        Source: #{path}
+        """
+    end
+  end
+
+  defp openapi_operation_overrides!(name, config, path) do
+    case Map.get(config, "operation_overrides", %{}) do
+      overrides when is_map(overrides) ->
+        overrides
+
+      other ->
+        raise """
+        upstreams_config: upstream '#{name}' openapi `operation_overrides:` must be an object, got: #{inspect(other)}.
+
+        Source: #{path}
+        """
+    end
+  end
 
   # ----------------------------------------------------------------
   # Phase 3B: `auth:` emitter list parser (§5.3.1, §5.5 ##7, 8)
@@ -2002,10 +2161,13 @@ defmodule PtcRunnerMcp.Application do
       when is_map(upstreams) and is_binary(source_path) and is_function(loaded?, 1) do
     for {name, entry} <- upstreams,
         is_map(entry),
-        Map.get(entry, "transport") == "http" do
+        transport = Map.get(entry, "transport"),
+        transport in ["http", "openapi"] do
       unless loaded?.(Req) do
+        transport_label = if transport == "openapi", do: "OpenAPI", else: "HTTP"
+
         raise """
-        upstreams_config: upstream '#{name}' uses HTTP transport but :req is not available.
+        upstreams_config: upstream '#{name}' uses #{transport_label} transport but :req is not available.
         Add `{:req, "~> 0.5"}` to your deps in mix.exs and run `mix deps.get`.
         Source: #{source_path}
         """

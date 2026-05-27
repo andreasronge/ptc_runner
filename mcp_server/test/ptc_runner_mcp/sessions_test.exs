@@ -92,7 +92,7 @@ defmodule PtcRunnerMcp.SessionsTest do
     snapshot = %{memory: %{}, turn_history: []}
     discovery_exec = fn _op, _args -> {:ok, []} end
 
-    opts = Session.lisp_opts(snapshot, "(mcp/servers)", %{discovery_exec: discovery_exec})
+    opts = Session.lisp_opts(snapshot, "(tool/servers)", %{discovery_exec: discovery_exec})
 
     assert opts[:discovery_exec] == discovery_exec
   end
@@ -156,8 +156,8 @@ defmodule PtcRunnerMcp.SessionsTest do
     tools = Tools.list()["tools"]
     default_eval = Enum.find(tools, &(&1["name"] == "lisp_session_eval"))
 
-    refute default_eval["description"] =~ "tool/mcp-call"
-    refute default_eval["description"] =~ "mcp/servers"
+    refute default_eval["description"] =~ "tool/call"
+    refute default_eval["description"] =~ "tool/servers"
 
     {:ok, _pid} = UpstreamRegistry.start_link(name: UpstreamRegistry)
     :ok = UpstreamRegistry.put_fake("alpha", %{tools: %{}}, UpstreamRegistry)
@@ -172,7 +172,7 @@ defmodule PtcRunnerMcp.SessionsTest do
                catalog: CatalogDescription.render()
              )
 
-    assert eval["description"] =~ "tool/mcp-call"
+    assert eval["description"] =~ "tool/call"
     assert eval["description"] =~ "apropos"
   end
 

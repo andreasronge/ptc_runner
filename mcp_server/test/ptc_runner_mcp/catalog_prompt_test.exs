@@ -38,12 +38,12 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
   test "discovery block is built from discovery prompts" do
     block = CatalogPrompt.discovery_block()
 
-    assert block =~ ~s|`(mcp/servers)`|
+    assert block =~ ~s|`(tool/servers)`|
     assert block =~ ~s|`(apropos "query" {:limit 8})`|
     assert block =~ ~s|`(dir "server" {:limit 20})`|
     assert block =~ ~s|`(doc "server/tool")`|
     assert block =~ ~s|`(meta "server/tool")`|
-    assert block =~ ~s|`(tool/mcp-call {:server "server" :tool "tool" :args {...}})`|
+    assert block =~ ~s|`(tool/call {:server "server" :tool "tool" :args {...}})`|
     assert block =~ "Discovery inspects only"
 
     Enum.each(@forbidden_runtime_patterns, fn pattern ->
@@ -66,10 +66,10 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
       text = PromptRegistry.card_text(key)
 
       assert String.starts_with?(text, "Synthetic discovery snapshot below. Live:")
-      assert text =~ ~s|`(mcp/servers)`|
+      assert text =~ ~s|`(tool/servers)`|
       assert text =~ ~s|`(doc "server/tool")`|
       assert text =~ ~s|`(dir "server" {:limit 20})`|
-      assert text =~ ~s|`(tool/mcp-call {:server "server" :tool "tool" :args {...}})`|
+      assert text =~ ~s|`(tool/call {:server "server" :tool "tool" :args {...}})`|
     end
   end
 end

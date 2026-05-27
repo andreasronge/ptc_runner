@@ -134,7 +134,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   # ============================================================
 
   describe "PTC-Lisp discovery flow" do
-    test "search → describe → mcp-call returns compact result" do
+    test "search → describe → call returns compact result" do
       put_fake_with_tools("warehouse", 3, "Warehouse inventory", ["stock"],
         handler: fn _tool_name ->
           fn args, _opts -> {:ok, %{"structuredContent" => %{"count" => args["item_id"]}}} end
@@ -151,7 +151,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
               server (first (clojure.string/split first_line #"\."))
               first_tool (first (clojure.string/split (second (clojure.string/split first_line #"\.")) #" "))
               detail (doc (str server "/" first_tool))]
-          (tool/mcp-call {:server server
+          (tool/call {:server server
                           :tool first_tool
                           :args {:item_id "abc"}}))
         """)
@@ -173,7 +173,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   # ============================================================
 
   describe "unloaded discovery flow" do
-    test "search server-level → list-tools → describe → mcp-call" do
+    test "search server-level → list-tools → describe → call" do
       put_fake_with_tools("analytics", 2, "Analytics platform", ["metrics"],
         handler: fn tool_name ->
           fn _args, _opts ->
@@ -191,7 +191,7 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
               tools (dir server {:limit 10})
               first_tool (first (clojure.string/split (first tools) #" "))
               detail (doc (str server "/" first_tool))]
-          (tool/mcp-call {:server server
+          (tool/call {:server server
                           :tool first_tool
                           :args {:query "test"}}))
         """)
@@ -211,14 +211,14 @@ defmodule PtcRunnerMcp.CatalogIntegrationTest do
   # ============================================================
 
   describe "direct call in inline mode" do
-    test "mcp-call works without discovery forms in inline mode" do
+    test "call works without discovery forms in inline mode" do
       put_fake_with_tools("storage", 2, "Storage backend", ["blobs"])
 
       freeze_snapshot()
 
       env =
         call(~S"""
-        (tool/mcp-call {:server "storage"
+        (tool/call {:server "storage"
                         :tool "tool_1"
                         :args {:key "myfile"}})
         """)

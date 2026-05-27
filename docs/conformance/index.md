@@ -52,7 +52,7 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Command | Status | Scope | Notes |
 |---------|--------|-------|-------|
-| `(mcp/servers)` | supported | MCP aggregator | List configured upstream servers, tool counts, and catalog load status |
+| `(tool/servers)` | supported | MCP aggregator | List configured upstream servers, tool counts, and catalog load status |
 | `(apropos query)` | supported | local + MCP discovery | Search executable local PTC/Clojure/curated Java capabilities and, in aggregator mode, configured MCP tools. MCP matches rank before local matches. |
 | `(dir ref)` | supported | local + MCP discovery | List members for a local namespace/curated Java class, or tools for an MCP server. |
 | `(doc ref)` | supported | local + MCP discovery | Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs. |

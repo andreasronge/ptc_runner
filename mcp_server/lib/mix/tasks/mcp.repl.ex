@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Mcp.Repl do
     * `--stateless` - force stateless `lisp_eval`.
     * `--display MODE` - `text`, `envelope`, or `json`.
     * `--upstreams-config PATH` - load upstream MCP servers for discovery
-      forms and `(tool/mcp-call ...)`.
+      forms and `(tool/call ...)`.
     * `-e`, `--eval PROGRAM` - evaluate one program and exit.
   """
 

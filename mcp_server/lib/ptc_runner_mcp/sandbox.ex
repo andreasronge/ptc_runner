@@ -148,7 +148,7 @@ defmodule PtcRunnerMcp.Sandbox do
     #   * `:tools` is the new aggregator seam. An empty list (the only
     #     Phase 0 value) leaves Lisp.run/2's behavior unchanged versus
     #     v1, where no tools were registered. Phase 1a will populate
-    #     it with the `mcp-call` virtual-tool registry.
+    #     it with the `call` virtual-tool registry.
     #   * `:profile` is a pure-instrumentation tag attached to the
     #     `[:ptc_runner, :lisp, :execute, *]` span. v1 always passes
     #     `:mcp_no_tools`; Phase 1a flips it to `:mcp_aggregator` from
