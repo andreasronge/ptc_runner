@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.CancellationPhase1aTest do
   @moduledoc """
   Phase 1a tests for `notifications/cancelled` against in-flight
-  `(tool/mcp-call ...)` invocations.
+  `(tool/call ...)` invocations.
 
   Per `Plans/ptc-runner-mcp-aggregator.md` §6.4 last paragraphs +
   §12.2:

@@ -20,7 +20,7 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
     * Children are lazy-spawned at the IMPL level: a Connection is
       started up-front in `:not_started` state; the impl
       subprocess / Fake instance starts on the first
-      `(tool/mcp-call ...)` invocation that targets it.
+      `(tool/call ...)` invocation that targets it.
 
   ## Children
 
@@ -185,6 +185,7 @@ defmodule PtcRunnerMcp.Upstream.Supervisor do
       Upstream.Fake.child_spec_for_registry(),
       Upstream.Stdio.child_spec_for_registry(),
       Upstream.Http.child_spec_for_registry(),
+      Upstream.OpenApi.child_spec_for_registry(),
       Upstream.Connection.child_spec_for_registry(),
       {DynamicSupervisor,
        name: PtcRunnerMcp.Upstream.DynamicSupervisor,

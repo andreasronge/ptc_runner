@@ -722,7 +722,7 @@ defmodule PtcRunner.Lisp.Eval do
     # Evaluate all arguments
     case eval_all(arg_asts, eval_ctx) do
       {:ok, arg_vals, eval_ctx2} ->
-        # Convert args list to map for tool executor
+        # Convert args list to map for tool executor.
         case build_args_map(arg_vals, tool_name) do
           {:ok, args_map} ->
             # Convert to string for backward compatibility with tool_exec
@@ -832,6 +832,31 @@ defmodule PtcRunner.Lisp.Eval do
   # - Match JSON conventions (like Phoenix params)
   defp build_args_map([], _tool_name), do: {:ok, %{}}
 
+  defp build_args_map([{:symbol_ref, ref}, args], tool_name)
+       when is_binary(ref) and is_map(args) and not is_struct(args) do
+    if tool_call_name?(tool_name) do
+      case String.split(ref, "/", parts: 2) do
+        [server, tool] when server != "" and tool != "" ->
+          {:ok, %{"server" => server, "tool" => tool, "args" => stringify_keys(args)}}
+
+        _ ->
+          {:error,
+           {:invalid_tool_args,
+            "tool/call symbol form requires a qualified symbol like 'server/tool"}}
+      end
+    else
+      invalid_positional_args([{:symbol_ref, ref}, args], tool_name)
+    end
+  end
+
+  defp build_args_map([{:symbol_ref, ref}], tool_name) when is_binary(ref) do
+    if tool_call_name?(tool_name) do
+      build_args_map([{:symbol_ref, ref}, %{}], tool_name)
+    else
+      invalid_positional_args([{:symbol_ref, ref}], tool_name)
+    end
+  end
+
   defp build_args_map([arg], _tool_name) when is_map(arg) and not is_struct(arg),
     do: {:ok, stringify_keys(arg)}
 
@@ -839,22 +864,30 @@ defmodule PtcRunner.Lisp.Eval do
     if keyword_style_args?(args) do
       {:ok, args_to_string_map(args)}
     else
-      hint =
-        case args do
-          [single] when is_binary(single) ->
-            " Got string \"#{String.slice(single, 0, 40)}\" — try (tool/#{tool_name} {:url \"...\"})"
-
-          [single] ->
-            " Got #{inspect(single, limit: 3, printable_limit: 40)} — wrap in {:key value}"
-
-          _ ->
-            ""
-        end
-
-      {:error,
-       {:invalid_tool_args,
-        "Tool calls require named arguments. Use (tool/#{tool_name} {:key value}), not positional args.#{hint}"}}
+      invalid_positional_args(args, tool_name)
     end
+  end
+
+  defp tool_call_name?(:call), do: true
+  defp tool_call_name?("call"), do: true
+  defp tool_call_name?(_), do: false
+
+  defp invalid_positional_args(args, tool_name) do
+    hint =
+      case args do
+        [single] when is_binary(single) ->
+          " Got string \"#{String.slice(single, 0, 40)}\" — try (tool/#{tool_name} {:url \"...\"})"
+
+        [single] ->
+          " Got #{inspect(single, limit: 3, printable_limit: 40)} — wrap in {:key value}"
+
+        _ ->
+          ""
+      end
+
+    {:error,
+     {:invalid_tool_args,
+      "Tool calls require named arguments. Use (tool/#{tool_name} {:key value}), not positional args.#{hint}"}}
   end
 
   # Check if args list is keyword-style: [:key1, val1, :key2, val2, ...]

@@ -55,7 +55,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       encoded_size = byte_size(Jason.encode!(payload))
       put_fake("alpha", %{"fetch" => fn _args, _ -> {:ok, payload} end})
 
-      env = call(~S|(get (tool/mcp-call {:server "alpha" :tool "fetch" :args {}}) "items")|)
+      env = call(~S|(get (tool/call {:server "alpha" :tool "fetch" :args {}}) "items")|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -68,7 +68,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       Limits.set(Map.put(Limits.defaults(), :max_upstream_response_bytes, 100))
       put_fake("alpha", %{"big" => fn _args, _ -> {:ok, String.duplicate("x", 5_000)} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "big" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "big" :args {}})|)
 
       [entry] = upstream_calls(env)
       assert entry["status"] == "error"
@@ -80,7 +80,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
     test "a failed upstream call records oversize: false and result_bytes: null" do
       put_fake("alpha", %{"boom" => fn _args, _ -> {:error, :upstream_error, "kaboom"} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "boom" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "boom" :args {}})|)
 
       [entry] = upstream_calls(env)
       assert entry["status"] == "error"
@@ -95,8 +95,8 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       env =
         call(~S|
           (do
-            (tool/mcp-call {:server "alpha" :tool "echo" :args {:n 1}})
-            (tool/mcp-call {:server "alpha" :tool "echo" :args {:n 2}}))
+            (tool/call {:server "alpha" :tool "echo" :args {:n 1}})
+            (tool/call {:server "alpha" :tool "echo" :args {:n 2}}))
         |)
 
       [_first, capped] = upstream_calls(env)
@@ -116,7 +116,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       upstream_size = byte_size(Jason.encode!(big))
       put_fake("alpha", %{"all" => fn _args, _ -> {:ok, big} end})
 
-      env = call(~S|(count (get (tool/mcp-call {:server "alpha" :tool "all" :args {}}) "rows"))|)
+      env = call(~S|(count (get (tool/call {:server "alpha" :tool "all" :args {}}) "rows"))|)
 
       assert env["isError"] == false
       m = metrics(env)
@@ -142,7 +142,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       env =
         call(~S|
           (do
-            (tool/mcp-call {:server "alpha" :tool "get" :args {}})
+            (tool/call {:server "alpha" :tool "get" :args {}})
             (.substring "ab" 5 9))
         |)
 
@@ -167,7 +167,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
       env =
         call(~S|
           (do
-            (tool/mcp-call {:server "alpha" :tool "get" :args {}})
+            (tool/call {:server "alpha" :tool "get" :args {}})
             (fail {:reason :on-purpose :detail "a long-ish failure preview here"}))
         |)
 
@@ -196,7 +196,7 @@ defmodule PtcRunnerMcp.PayloadReductionTest do
     test "the decorated envelope still validates against the aggregator outputSchema" do
       big = %{"v" => Enum.to_list(1..30)}
       put_fake("alpha", %{"f" => fn _args, _ -> {:ok, big} end})
-      env = call(~S|(count (get (tool/mcp-call {:server "alpha" :tool "f" :args {}}) "v"))|)
+      env = call(~S|(count (get (tool/call {:server "alpha" :tool "f" :args {}}) "v"))|)
 
       schema = Tools.output_schema_for(:mcp_aggregator)
       sc = structured(env)

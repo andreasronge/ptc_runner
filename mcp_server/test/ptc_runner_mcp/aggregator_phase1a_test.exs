@@ -80,7 +80,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
   # § 13.2 bullets
   # ============================================================
 
-  describe "(tool/mcp-call ...) dispatch" do
+  describe "(tool/call ...) dispatch" do
     test "first call to a configured upstream succeeds, returning the upstream's value" do
       put_fake("alpha", %{
         "echo" => fn args, _ -> {:ok, %{"structuredContent" => %{"echo" => args["msg"]}}} end
@@ -88,7 +88,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       env =
         call(~S|
-          (tool/mcp-call {:server "alpha" :tool "echo" :args {:msg "hi"}})
+          (tool/call {:server "alpha" :tool "echo" :args {:msg "hi"}})
         |)
 
       assert env["isError"] == false
@@ -128,7 +128,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
           @registry_name
         )
 
-      env = call(~S|(tool/mcp-call {:server "slowstart" :tool "echo" :args {}})|)
+      env = call(~S|(tool/call {:server "slowstart" :tool "echo" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -143,7 +143,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     test "configured but ensure_started failure → nil + upstream_unavailable" do
       put_fake_failing("broken", "boom")
 
-      env = call(~S|(tool/mcp-call {:server "broken" :tool "any" :args {}})|)
+      env = call(~S|(tool/call {:server "broken" :tool "any" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -157,8 +157,8 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       env =
         call(~S|
-          [(tool/mcp-call {:server "broken" :tool "x" :args {}})
-           (tool/mcp-call {:server "broken" :tool "y" :args {}})]
+          [(tool/call {:server "broken" :tool "x" :args {}})
+           (tool/call {:server "broken" :tool "y" :args {}})]
         |)
 
       [a, b] = upstream_calls(env)
@@ -206,7 +206,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       program = """
       (pmap (fn [i]
-              (tool/mcp-call {:server "broken" :tool "x" :args {:i i}}))
+              (tool/call {:server "broken" :tool "x" :args {:i i}}))
             [1 2 3 4 5 6 7 8])
       """
 
@@ -250,7 +250,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # invoking `start_link/2` at all).
       put_fake_failing("transient", "down")
 
-      env1 = call(~S|(tool/mcp-call {:server "transient" :tool "x" :args {}})|)
+      env1 = call(~S|(tool/call {:server "transient" :tool "x" :args {}})|)
       [entry1] = upstream_calls(env1)
       assert entry1["reason"] == "upstream_unavailable"
       assert entry1["error"] == "down"
@@ -266,7 +266,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # the registry attempts a fresh start_link, which fails
       # again with the same configured `init_result`, and reports
       # the wall-clock of that fresh attempt.
-      env2 = call(~S|(tool/mcp-call {:server "transient" :tool "x" :args {}})|)
+      env2 = call(~S|(tool/call {:server "transient" :tool "x" :args {}})|)
       [entry2] = upstream_calls(env2)
       assert entry2["reason"] == "upstream_unavailable"
       assert entry2["error"] == "down"
@@ -302,7 +302,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # the witness upstream and "ghost" is the unknown :server.
       put_fake("alpha", %{})
 
-      env = call(~S|(tool/mcp-call {:server "ghost" :tool "x" :args {}})|)
+      env = call(~S|(tool/call {:server "ghost" :tool "x" :args {}})|)
 
       assert env["isError"] == true
       assert structured(env)["status"] == "error"
@@ -315,7 +315,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     test "missing :tool hints REPL discovery for that upstream" do
       put_fake("alpha", %{"known" => fn _, _ -> {:ok, "ok"} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :args {}})|)
 
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
@@ -328,9 +328,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       put_fake("alpha", %{"known" => fn _, _ -> {:ok, "ok"} end})
 
       # Warm the cache by making one successful call first.
-      _warm = call(~S|(tool/mcp-call {:server "alpha" :tool "known" :args {}})|)
+      _warm = call(~S|(tool/call {:server "alpha" :tool "known" :args {}})|)
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "unknown" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "unknown" :args {}})|)
 
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
@@ -343,9 +343,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     test "unknown tool suggests a close cached match and describe-tool" do
       put_fake("alpha", %{"list_directory" => fn _, _ -> {:ok, "ok"} end})
 
-      _warm = call(~S|(tool/mcp-call {:server "alpha" :tool "list_directory" :args {}})|)
+      _warm = call(~S|(tool/call {:server "alpha" :tool "list_directory" :args {}})|)
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "list_directry" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "list_directry" :args {}})|)
 
       assert env["isError"] == true
       assert structured(env)["message"] =~ ~s|Did you mean "list_directory"?|
@@ -359,7 +359,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # so we must classify as world-fault, not programmer-fault.
       put_fake_failing("cold", "cold-start failure")
 
-      env = call(~S|(tool/mcp-call {:server "cold" :tool "anything" :args {}})|)
+      env = call(~S|(tool/call {:server "cold" :tool "anything" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -407,7 +407,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       # re-check catches the absence and raises programmer-fault.
       assert MapSet.size(Registry.started_upstreams(@registry_name)) == 0
 
-      env = call(~S|(tool/mcp-call {:server "fake-x" :tool "missspelled" :args {}})|)
+      env = call(~S|(tool/call {:server "fake-x" :tool "missspelled" :args {}})|)
 
       # Programmer-fault: the program is terminated with a
       # runtime_error envelope. Pre-fix the envelope was a success
@@ -443,7 +443,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     test ":upstream_error → nil + reason upstream_error" do
       put_fake("alpha", %{"err" => fn _, _ -> {:error, :upstream_error, "404"} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "err" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -462,7 +462,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       put_fake("alpha", %{"slow" => slow})
 
       started = System.monotonic_time(:millisecond)
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "slow" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "slow" :args {}})|)
       elapsed = System.monotonic_time(:millisecond) - started
 
       assert env["isError"] == false
@@ -478,7 +478,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       payload = String.duplicate("x", 5_000)
       put_fake("alpha", %{"big" => fn _, _ -> {:ok, payload} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "big" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "big" :args {}})|)
 
       assert env["isError"] == false
       [entry] = upstream_calls(env)
@@ -505,7 +505,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       })
 
       env =
-        call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {:bad (fn [x] x)}})|)
+        call(~S|(tool/call {:server "alpha" :tool "x" :args {:bad (fn [x] x)}})|)
 
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
@@ -546,14 +546,12 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
         )
 
       warm =
-        call(~S|(tool/mcp-call {:server "observatory" :tool "get_trace" :args {:id "uuid-1"}})|)
+        call(~S|(tool/call {:server "observatory" :tool "get_trace" :args {:id "uuid-1"}})|)
 
       assert warm["isError"] == false
 
       env =
-        call(
-          ~S|(tool/mcp-call {:server "observatory" :tool "get_trace" :args {:trace-id "uuid-1"}})|
-        )
+        call(~S|(tool/call {:server "observatory" :tool "get_trace" :args {:trace-id "uuid-1"}})|)
 
       assert env["isError"] == true
       assert structured(env)["reason"] == "runtime_error"
@@ -572,7 +570,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       env =
         Tools.call_with_gate(%{
           "program" => ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "null" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "null" :args {}})]
               (and (:ok r) (nil? (:value r)) (= (:value_kind r) :json)))
           |,
           "output_schema" => %{"type" => "boolean"}
@@ -593,7 +591,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       env =
         Tools.call_with_gate(%{
           "program" => ~S|
-            (let [r (tool/mcp-call {:server "alpha" :tool "mixed" :args {}})]
+            (let [r (tool/call {:server "alpha" :tool "mixed" :args {}})]
               (and (:ok r)
                    (= (:value_kind r) :json)
                    (nil? (get (:value r) "a"))
@@ -615,9 +613,9 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       env =
         call(~S|
-          [(tool/mcp-call {:server "alpha" :tool "x" :args {:i 1}})
-           (tool/mcp-call {:server "alpha" :tool "x" :args {:i 2}})
-           (tool/mcp-call {:server "alpha" :tool "x" :args {:i 3}})]
+          [(tool/call {:server "alpha" :tool "x" :args {:i 1}})
+           (tool/call {:server "alpha" :tool "x" :args {:i 2}})
+           (tool/call {:server "alpha" :tool "x" :args {:i 3}})]
         |)
 
       assert env["isError"] == false
@@ -647,7 +645,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       program = """
       (def results
         (pmap (fn [i]
-                (tool/mcp-call {:server "alpha" :tool "x" :args {:i i}}))
+                (tool/call {:server "alpha" :tool "x" :args {:i i}}))
               [1 2 3 4 5]))
       results
       """
@@ -682,7 +680,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
 
       program = """
       (pmap (fn [i]
-              (tool/mcp-call {:server "alpha" :tool "x" :args {:i i}}))
+              (tool/call {:server "alpha" :tool "x" :args {:i i}}))
             [1 2 3 4 5 6 7 8])
       """
 
@@ -715,7 +713,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       program = """
       (pmap (fn [pair]
               (let [i (get pair "i") sleep (get pair "sleep")]
-                (tool/mcp-call {:server "alpha" :tool "task" :args {:i i :sleep sleep}})))
+                (tool/call {:server "alpha" :tool "task" :args {:i i :sleep sleep}})))
             [{"i" 1 "sleep" 200} {"i" 2 "sleep" 50} {"i" 3 "sleep" 100}])
       """
 
@@ -744,7 +742,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       desc = Tools.tool_entry()["description"]
       # Aggregator description includes the call shape and tagged
       # unwrapped result contract early in the tool description.
-      assert desc =~ "tool/mcp-call"
+      assert desc =~ "tool/call"
       assert desc =~ "Check `:ok`"
     end
 
@@ -817,7 +815,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
     test "upstream_calls field appears in both structuredContent and mirrored text" do
       put_fake("alpha", %{"x" => fn _, _ -> {:ok, "v"} end})
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "x" :args {}})|)
 
       structured = structured(env)
       assert is_list(structured["upstream_calls"])
@@ -840,7 +838,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
         end
       })
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "x" :args {}})|)
 
       assert [
                %{
@@ -867,7 +865,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
         end
       })
 
-      env = call(~S|(tool/mcp-call {:server "alpha" :tool "x" :args {}})|)
+      env = call(~S|(tool/call {:server "alpha" :tool "x" :args {}})|)
       preview = structured(env)["upstream_results"] |> hd() |> Map.fetch!("preview")
 
       assert String.valid?(preview)
@@ -891,7 +889,7 @@ defmodule PtcRunnerMcp.AggregatorPhase1aTest do
       env =
         call(~S|
           (do
-            (tool/mcp-call {:server "alpha" :tool "x" :args {}})
+            (tool/call {:server "alpha" :tool "x" :args {}})
             (+ 1 "x"))
         |)
 

@@ -48,7 +48,7 @@ Use it for deterministic computation that LLMs often do unreliably:
 counts, sums, filters, schema-shaped extraction, and data reshaping.
 
 **MCP aggregation.** With an upstream config file, PTC-Lisp programs
-can call other MCP servers through `(tool/mcp-call ...)`. One
+can call other MCP servers through `(tool/call ...)`. One
 sandboxed program can search, filter, join, and reduce upstream tool
 results before the final answer reaches the LLM. This reduces
 round-trips and context size without exposing arbitrary I/O to the
@@ -287,7 +287,7 @@ Start the MCP server with:
 "args": ["start", "--upstreams-config", "/absolute/path/to/upstreams.json"]
 ```
 
-`lisp_eval` can now use `(tool/mcp-call ...)` to call the configured
+`lisp_eval` can now use `(tool/call ...)` to call the configured
 `fs` server from inside one bounded PTC-Lisp program. See
 [`docs/aggregator-mode.md`](../docs/aggregator-mode.md) for the
 authoring model, catalog discovery, error semantics, credentials, and

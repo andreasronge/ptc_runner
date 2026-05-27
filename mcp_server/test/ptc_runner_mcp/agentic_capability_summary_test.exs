@@ -148,7 +148,7 @@ defmodule PtcRunnerMcp.AgenticCapabilitySummaryTest do
       assert summary =~ "plain English"
       refute summary =~ "lisp_eval"
       refute summary =~ "(catalog/list-servers"
-      refute summary =~ "tool/mcp-call"
+      refute summary =~ "tool/call"
       refute summary =~ "- alpha:"
       refute summary =~ "- beta:"
     end

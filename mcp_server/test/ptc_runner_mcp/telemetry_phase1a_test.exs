@@ -5,7 +5,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
   Asserts:
 
-    * `:start` and `:stop` events fire around every `(tool/mcp-call ...)`
+    * `:start` and `:stop` events fire around every `(tool/call ...)`
       attempt, with metadata `caller: :mcp` (FIXED, NOT widened),
       `profile: :mcp_aggregator`, `server`, `tool`.
     * `:stop` carries `status: :ok | :error` and (on error) `reason`.
@@ -67,7 +67,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {:k "v"}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
@@ -91,7 +91,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "err" :args {}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, meta}
@@ -110,7 +110,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {:k "v"}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, stop_meta}
@@ -124,7 +124,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _env =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "err" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "err" :args {}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :stop], _, meta}
@@ -141,8 +141,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _env =
         Tools.call_with_gate(%{
-          "program" =>
-            ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:secret_in "hidden"}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {:secret_in "hidden"}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}
@@ -179,7 +178,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
 
       _envelope =
         Tools.call_validated(
-          ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {:k "v"}})|,
+          ~S|(tool/call {:server "alpha" :tool "echo" :args {:k "v"}})|,
           %{},
           nil,
           request_id: request_id
@@ -205,7 +204,7 @@ defmodule PtcRunnerMcp.TelemetryPhase1aTest do
       # crashing or omitting the key.
       _envelope =
         Tools.call_with_gate(%{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {}})|
         })
 
       assert_receive {:telemetry, [:ptc_lisp, :upstream, :call, :start], _, start_meta}

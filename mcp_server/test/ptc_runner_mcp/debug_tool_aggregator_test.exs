@@ -140,10 +140,10 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     # Two ok calls + one error call against "alpha".
     env1 =
       call_execute(1, ~S|(do
-        (tool/mcp-call {:server "alpha" :tool "ok" :args {:msg "a"}})
-        (tool/mcp-call {:server "alpha" :tool "ok" :args {:msg "b"}}))|)
+        (tool/call {:server "alpha" :tool "ok" :args {:msg "a"}})
+        (tool/call {:server "alpha" :tool "ok" :args {:msg "b"}}))|)
 
-    env2 = call_execute(2, ~S|(tool/mcp-call {:server "alpha" :tool "boom" :args {}})|)
+    env2 = call_execute(2, ~S|(tool/call {:server "alpha" :tool "boom" :args {}})|)
 
     # Sum the per-envelope `upstream_calls` decorations as the oracle.
     decorations =
@@ -257,13 +257,13 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
     env1 =
       call_execute(
         1,
-        ~S|(count (get (tool/mcp-call {:server "alpha" :tool "big" :args {}}) "rows"))|
+        ~S|(count (get (tool/call {:server "alpha" :tool "big" :args {}}) "rows"))|
       )
 
     env2 =
       call_execute(
         2,
-        ~S|(count (get (tool/mcp-call {:server "alpha" :tool "small" :args {}}) "v"))|
+        ~S|(count (get (tool/call {:server "alpha" :tool "small" :args {}}) "v"))|
       )
 
     # A pure-compute aggregator program: 0 upstream calls → no ptc_metrics.
@@ -383,7 +383,7 @@ defmodule PtcRunnerMcp.DebugToolAggregatorTest do
       _ =
         call_execute(
           id,
-          ~S|(count (get (tool/mcp-call {:server "alpha" :tool "big" :args {}}) "rows"))|
+          ~S|(count (get (tool/call {:server "alpha" :tool "big" :args {}}) "rows"))|
         )
     end)
 

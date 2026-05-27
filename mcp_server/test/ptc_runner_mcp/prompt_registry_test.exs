@@ -191,10 +191,10 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
         catalog: "apropos"
       )
 
-    refute regular =~ "tool/mcp-call"
-    refute regular =~ "mcp/servers"
+    refute regular =~ "tool/call"
+    refute regular =~ "tool/servers"
 
-    assert with_upstreams =~ "tool/mcp-call"
+    assert with_upstreams =~ "tool/call"
     assert with_upstreams =~ "apropos"
   end
 

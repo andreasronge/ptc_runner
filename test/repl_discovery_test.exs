@@ -33,7 +33,7 @@ defmodule PtcRunner.ReplDiscoveryTest do
   defp discovery_result(:doc, [{:symbol_ref, "github/search"}]),
     do:
       {:ok,
-       "github.search(query)\nUse:\n(tool/mcp-call {:server \"github\" :tool \"search\" :args {:query ...}})"}
+       "github.search(query)\nUse:\n(tool/call {:server \"github\" :tool \"search\" :args {:query ...}})"}
 
   defp discovery_result(:doc, ["github/search"]),
     do: discovery_result(:doc, [{:symbol_ref, "github/search"}])
@@ -48,8 +48,8 @@ defmodule PtcRunner.ReplDiscoveryTest do
     do: {:programmer_fault, "unexpected discovery call #{inspect({operation, args})}"}
 
   describe "REPL discovery forms" do
-    test "mcp/servers dispatches through discovery_exec" do
-      assert {:ok, step} = Lisp.run("(mcp/servers)", discovery_exec: discovery_exec())
+    test "tool/servers dispatches through discovery_exec" do
+      assert {:ok, step} = Lisp.run("(tool/servers)", discovery_exec: discovery_exec())
 
       assert [%{"name" => "github"}] = step.return
       assert [%{operation: :servers, args: %{}}] = step.catalog_ops
@@ -153,7 +153,7 @@ defmodule PtcRunner.ReplDiscoveryTest do
     end
 
     test "mcp servers still requires discovery_exec" do
-      assert {:error, step} = Lisp.run("(mcp/servers)")
+      assert {:error, step} = Lisp.run("(tool/servers)")
       assert step.fail.message =~ "REPL discovery forms are only available"
     end
 

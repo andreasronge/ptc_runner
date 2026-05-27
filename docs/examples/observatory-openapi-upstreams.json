@@ -1,0 +1,33 @@
+{
+  "credentials": {
+    "observatory-token": {
+      "source": "file",
+      "path": "/run/secrets/observatory-token",
+      "scheme_hint": "bearer"
+    }
+  },
+  "upstreams": {
+    "observatory": {
+      "transport": "openapi",
+      "base_url": "https://observatory.example",
+      "schema_file": "/absolute/path/to/observatory.openapi.json",
+      "auth": [
+        { "scheme": "bearer", "binding": "observatory-token" }
+      ],
+      "include_operations": [
+        "list_traces",
+        "get_trace",
+        "list_trace_steps",
+        "get_trace_cost"
+      ],
+      "operation_overrides": {
+        "list_trace_steps": {
+          "default_args": { "summary": true }
+        }
+      },
+      "request_timeout_ms": 5000,
+      "max_response_bytes": 1048576,
+      "schema_max_bytes": 1048576
+    }
+  }
+}

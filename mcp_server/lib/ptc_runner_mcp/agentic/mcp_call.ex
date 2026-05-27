@@ -1,6 +1,6 @@
 defmodule PtcRunnerMcp.Agentic.McpCall do
   @moduledoc """
-  Agentic-only `tool/mcp-call` wrapper foundation.
+  Agentic-only `tool/call` wrapper foundation.
 
   This module is deliberately separate from `PtcRunnerMcp.AggregatorTools`.
   The public `lisp_eval` adapter keeps its existing raw-value / `nil`
@@ -29,7 +29,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
         }
 
   @doc """
-  Builds a SubAgent tool map containing the agentic `"mcp-call"` closure.
+  Builds a SubAgent tool map containing the agentic `"call"` closure.
   """
   @spec build(Ledger.t(), keyword()) :: map()
   def build(ledger, opts \\ []) when is_pid(ledger) and is_list(opts) do
@@ -41,7 +41,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
       |> Keyword.put(:call_counter, call_counter)
 
     %{
-      "mcp-call" => fn args -> call(args, opts) end
+      "call" => fn args -> call(args, opts) end
     }
   end
 
@@ -91,7 +91,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   end
 
   def call(args, _opts) do
-    raise_programmer_fault("tool/mcp-call expects a map, got #{inspect_short(args)}")
+    raise_programmer_fault("tool/call expects a map, got #{inspect_short(args)}")
   end
 
   defp resolve_turn(turn) when is_integer(turn) and turn > 0, do: turn
@@ -106,7 +106,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   defp resolve_turn(_other), do: 1
 
   @doc """
-  Normalizes top-level `mcp-call` args.
+  Normalizes top-level `call` args.
 
   Accepts string or keyword/atom keys for `server`, `tool`, and `args`.
   Unknown keys and duplicated normalized keys are programmer faults reported
@@ -123,7 +123,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
   end
 
   def normalize_args(args) do
-    {:error, "tool/mcp-call expects a map, got #{inspect_short(args)}"}
+    {:error, "tool/call expects a map, got #{inspect_short(args)}"}
   end
 
   @doc """
@@ -159,13 +159,13 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
       case Map.fetch(@allowed_keys, key) do
         {:ok, normalized_key} ->
           if Map.has_key?(acc, normalized_key) do
-            {:halt, {:error, "tool/mcp-call got duplicate key #{inspect(normalized_key)}"}}
+            {:halt, {:error, "tool/call got duplicate key #{inspect(normalized_key)}"}}
           else
             {:cont, {:ok, Map.put(acc, normalized_key, value)}}
           end
 
         :error ->
-          {:halt, {:error, "tool/mcp-call got unknown key #{inspect(key)}"}}
+          {:halt, {:error, "tool/call got unknown key #{inspect(key)}"}}
       end
     end)
   end
@@ -176,7 +176,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
         {:ok, value}
 
       value ->
-        {:error, "tool/mcp-call requires :#{label} (string), got #{inspect_short(value)}"}
+        {:error, "tool/call requires :#{label} (string), got #{inspect_short(value)}"}
     end
   end
 
@@ -184,7 +184,7 @@ defmodule PtcRunnerMcp.Agentic.McpCall do
     case Map.get(args, :args, %{}) do
       nil -> {:ok, %{}}
       value when is_map(value) -> {:ok, value}
-      value -> {:error, "tool/mcp-call requires :args (map), got #{inspect_short(value)}"}
+      value -> {:error, "tool/call requires :args (map), got #{inspect_short(value)}"}
     end
   end
 

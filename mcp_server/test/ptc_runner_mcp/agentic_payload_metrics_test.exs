@@ -26,7 +26,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   defmodule NoTokensPlanner do
     def call(_model, _prompt, _opts) do
       {:ok,
-       ~S|(let [r (tool/mcp-call {:server "alpha" :tool "fetch" :args {}})] (return {:count (count (:value r))}))|,
+       ~S|(let [r (tool/call {:server "alpha" :tool "fetch" :args {}})] (return {:count (count (:value r))}))|,
        %{
          "model" => "stub:model",
          "duration_ms" => 1,
@@ -57,7 +57,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   # subset is empty so `final_result_bytes` is 0.
   defmodule FailAfterFetchPlanner do
     def call(_model, _prompt, _opts) do
-      {:ok, ~S|(do (tool/mcp-call {:server "alpha" :tool "ok" :args {}}) (fail {:reason :bad}))|,
+      {:ok, ~S|(do (tool/call {:server "alpha" :tool "ok" :args {}}) (fail {:reason :bad}))|,
        %{
          "model" => "stub:model",
          "prompt_bytes" => 50,
@@ -74,7 +74,7 @@ defmodule PtcRunnerMcp.AgenticPayloadMetricsTest do
   defmodule IsErrorFetchPlanner do
     def call(_model, _prompt, _opts) do
       {:ok,
-       ~S|(let [r (tool/mcp-call {:server "alpha" :tool "err" :args {}})] (return {:fallback (:reason r)}))|,
+       ~S|(let [r (tool/call {:server "alpha" :tool "err" :args {}})] (return {:fallback (:reason r)}))|,
        %{
          "model" => "stub:model",
          "prompt_bytes" => 30,

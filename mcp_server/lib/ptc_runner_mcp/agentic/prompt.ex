@@ -37,14 +37,14 @@ defmodule PtcRunnerMcp.Agentic.Prompt do
   @doc """
   Metadata for the later SubAgent adapter.
 
-  `lisp_task` owns the authoritative `mcp-call` card, so a generic SubAgent
+  `lisp_task` owns the authoritative `call` card, so a generic SubAgent
   renderer should not add a second tool description for this tool.
   """
   @spec tool_rendering() :: map()
   def tool_rendering do
     %{
-      "suppress_generic_tools" => ["mcp-call"],
-      "authoritative_tool_contracts" => ["mcp-call"]
+      "suppress_generic_tools" => ["call"],
+      "authoritative_tool_contracts" => ["call"]
     }
   end
 
