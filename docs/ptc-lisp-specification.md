@@ -119,8 +119,8 @@ symbol-first  = letter | special-initial
 symbol-rest   = letter | digit | special-rest
 letter        = a-z | A-Z
 digit         = 0-9
-special-initial = + | - | * | / | < | > | = | ? | !
-special-rest    = special-initial | - | _ | / | . | % | &
+special-initial = + | - | * | / | < | > | = | ? | ! | _ | % | . | &
+special-rest    = special-initial | '
 ```
 
 Notes:
@@ -128,6 +128,8 @@ Notes:
 - `.` enables Clojure-style multi-level namespaces (e.g., `clojure.string/join`)
 - `%` supports parameter placeholders in `#()` short function syntax (`%1`, `%&`, etc.)
 - `&` supports rest parameter destructuring (`[a & rest]`)
+- `_` is allowed (e.g., ignored bindings)
+- `'` is allowed only after the first character, for Clojure prime-notation names like `inc'`, `+'`
 
 Valid symbols: `filter`, `map`, `sort-by`, `empty?`, `+`, `->>`, `high-paid`, `data/bar`, `tool/search`, `clojure.string/join`
 
@@ -138,8 +140,11 @@ Reserved symbols (cannot be redefined): `nil`, `true`, `false`
 Keywords are symbolic identifiers that evaluate to themselves:
 
 ```
-keyword = : symbol
+keyword      = ":" keyword-char+
+keyword-char = letter | digit | + | - | * | < | > | = | ? | ! | _
 ```
+
+Keywords use a stricter character set than symbols — `/`, `.`, `%`, and `&` are **not** allowed (this is why namespaced keywords are unsupported).
 
 Examples: `:name`, `:user-id`, `:total`, `:else`
 
@@ -166,7 +171,7 @@ false
 
 ### 3.3 Numbers
 
-**Integers** — arbitrary precision:
+**Integers** — arbitrary-precision arithmetic (literals are limited to 100 digits):
 ```clojure
 0
 42
@@ -191,7 +196,7 @@ false
 | `##-Inf` | `Double/NEGATIVE_INFINITY` | Negative infinity |
 | `##NaN` | `Double/NaN` | Not a Number |
 
-Special values are returned by operations like division by zero (`(/ 1.0 0.0)`) or indeterminate forms (`(/ 0.0 0.0)`). They are formatted using Clojure's reader syntax (`##Inf`, `##NaN`) and are supported as both input literals and output format.
+Special values are returned by operations like division by zero (`(/ 1.0 0.0)`) or indeterminate forms (`(/ 0.0 0.0)`). They are formatted using Clojure's reader syntax (`##Inf`, `##-Inf`, `##NaN`) and are supported as both input literals and output format.
 
 **Not supported:** Ratios (`1/3`), BigDecimals (`1.0M`), octal/hex literals
 
@@ -330,14 +335,20 @@ Key-value associations:
 {"string-key" 42}  ; string keys allowed
 ```
 
-**Map keys:** Only keywords and strings are valid map keys. Keywords are preferred for their readability and self-documenting nature. Using other types (numbers, vectors, maps) as keys raises a `validation-error`.
+**Map keys:** Keywords and strings are the standard map key types — keywords are preferred for their readability and self-documenting nature. Other key types (numbers, vectors) evaluate without error inside a program, but you should not rely on them for outputs because the serialization boundaries treat them inconsistently:
+
+- **`return` value:** maps with non-string/non-keyword keys are **rejected** (the program errors).
+- **Tool-call arguments:** all keys are **stringified** (e.g. `1` → `"1"`, `[:a :b]` → its inspected form), never rejected.
+- **`json/generate-string`:** integer keys are stringified (`{1 "a"}` → `{"1":"a"}`), but vector/float keys (and even keyword keys) return `nil`.
 
 ```clojure
 {:name "Alice"}           ; OK - keyword key
 {"name" "Alice"}          ; OK - string key
-{1 "one"}                 ; VALIDATION ERROR - number key
-{[:a :b] "nested"}        ; VALIDATION ERROR - vector key
+{1 "one"}                 ; evaluates fine; serialization depends on the boundary (see above)
+{[:a :b] "nested"}        ; evaluates fine; rejected by `return`, stringified for tool args
 ```
+
+For predictable behavior, use keyword or string keys for any map you intend to return or pass to a tool.
 
 **Maps as functions:** Maps can be invoked as functions to look up values by key:
 
@@ -394,7 +405,7 @@ Sets are **unordered** - iteration order is not guaranteed.
 | `(filter #{:a :b} [:a :c :b])` | `[:a :b]` | Filter using set membership |
 | `(some #{"x"} ["a" "x"])` | `"x"` | Find first matching element |
 
-**Not supported for sets:** `first`, `last`, `nth`, `sort`, `sort-by` (sets are unordered).
+**Not supported for sets:** `first`, `last`, `nth`, `sort` (sets are unordered). Note that `sort-by` *is* supported on sets — it iterates the elements and returns a sorted vector.
 
 **Not supported:** Lists (`'()`)
 
@@ -1085,7 +1096,7 @@ PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tai
 
 ### 5.17 `for` — List Comprehension
 
-`for` produces a list by evaluating a body expression for each element of one or more collections.
+`for` produces a vector by evaluating a body expression for each element of one or more collections. (Unlike Clojure's lazy sequence, PTC-Lisp's `for` returns an eager vector, displayed as `[...]`.)
 
 **Single binding:**
 
@@ -1170,7 +1181,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 **Semantics:**
 
 - **With journal:** Expression result is cached by ID on first execution. Subsequent calls with the same ID return the cached result without re-executing.
-- **Without journal:** Expression executes normally with no caching. A warning is emitted to alert developers that idempotency is inactive.
+- **Without journal:** Expression executes normally with no caching. A debug-level log message is emitted to note that caching and idempotency are inactive.
 - **Failure handling:** If `expr` raises an error or calls `(fail)`, the result is not cached and the error propagates.
 
 **Examples:**
@@ -1200,7 +1211,7 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 **Important Notes:**
 
-- Task IDs must be **string literals** (not variables or expressions)
+- Task IDs are typically **string literals** for predictable caching; expressions that evaluate to strings are also accepted (and coerced via `to_string`)
 - IDs should be **semantically meaningful** to enable consistent caching across retries (e.g., `"fetch-users"` rather than `"step1"`)
 - The journal is provided at execution time; running without a journal disables caching but still executes the expression
 - Task results must be serializable (maps, lists, primitives, etc.)
@@ -1459,7 +1470,7 @@ Threads through forms, short-circuiting to `nil` if any intermediate result is `
 - `some->` threads as the **first argument**
 - `some->>` threads as the **last argument**
 - `false` is NOT nil — threading continues through `false` values
-- With zero forms, returns expr directly
+- With no pipeline steps — `(some-> expr)` — returns `expr` directly
 
 ```clojure
 (some-> 1 inc)                        ; => 2
@@ -1560,7 +1571,8 @@ Keyword accessors (`(:status m)`, `(get m :status)`, `(get-in m [:a :b])`) and t
 
 - Atom keys in code (`:status`) match both atom and string keys in data
 - String keys in code (`"status"`) match both string and atom keys in data
-- Atom keys take precedence when both exist on the same map
+- When both exist on the same map, the exact key type matching the accessor takes precedence (an atom accessor wins the atom key; a string accessor wins the string key)
+- As a final fallback, hyphens in the key name are normalized to underscores and retried (so `:turn-summaries` matches a `:turn_summaries` or `"turn_summaries"` key)
 
 ```clojure
 ;; Atom keys (preferred Elixir style)
@@ -1582,9 +1594,10 @@ Keyword accessors (`(:status m)`, `(get m :status)`, `(get-in m [:a :b])`) and t
 **How it works:**
 1. When looking up a field, the accessor tries the exact key type first.
 2. If not found, it falls back to the alternative type (atom ↔ string).
-3. When both exist on the same map, the exact key type takes precedence.
-4. This applies to nested fields independently at each level.
-5. Missing fields at any level still return `nil`.
+3. If still not found, the key name's hyphens are normalized to underscores and both atom and string forms of the normalized name are tried.
+4. When both exist on the same map, the exact key type takes precedence.
+5. This applies to nested fields independently at each level.
+6. Missing fields at any level still return `nil`.
 
 This eliminates the need to manually convert JSON responses to atom-keyed maps before filtering and gives some resilience against LLM-generated code that uses strings instead of keywords.
 
@@ -1694,7 +1707,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 
 **Limitation:** Variadic builtins (`+`, `*`, `str`) don't work directly with 3-collection map—use explicit closures. See [#668](https://github.com/andreasronge/ptc_runner/issues/668).
 
-**Note:** Since PTC-Lisp has no lazy sequences (see Section 13.1), `map` and `mapv` are functionally identical—both return vectors. `mapv` is provided for Clojure compatibility and to make intent explicit.
+**Note:** Since PTC-Lisp has no lazy sequences (see §13), `map` and `mapv` are functionally identical—both return vectors. `mapv` is provided for Clojure compatibility and to make intent explicit.
 
 **Parallel Map (`pmap`):** Executes the function for each element concurrently using BEAM processes. Useful when the mapping function involves I/O-bound operations (like tool calls) that can benefit from parallelism:
 
@@ -1743,6 +1756,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `sort` | `(sort coll)` | Sort by natural order |
+| `sort` | `(sort comparator coll)` | Sort with comparator (`:asc`, `:desc`, a 2-arg fn, or a boolean comparator) |
 | `sort-by` | `(sort-by keyfn coll)` | Sort by extracted key |
 | `sort-by` | `(sort-by keyfn comp coll)` | Sort with comparator |
 | `reverse` | `(reverse coll)` | Reverse order |
@@ -1799,6 +1813,8 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `nnext` | `(nnext coll)` | Next of next |
 | `take` | `(take n coll)` | First n items |
 | `drop` | `(drop n coll)` | Skip first n items |
+| `nthrest` | `(nthrest coll n)` | Drop first n items (alias for `drop` with swapped args) |
+| `nthnext` | `(nthnext coll n)` | Drop first n items, returning a seq or `nil` if empty |
 | `take-last` | `(take-last n coll)` | Last n items |
 | `drop-last` | `(drop-last coll)` `(drop-last n coll)` | All but last n items (default n=1) |
 | `take-while` | `(take-while pred coll)` | Take while pred is true |
@@ -1892,6 +1908,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 | `zipmap` | `(zipmap keys vals)` | Create map from keys and values seqs |
+| `hash-set` | `(hash-set & items)` | Create a set from the given items |
 | `empty` | `(empty coll)` | Return empty collection of same type |
 | `peek` | `(peek coll)` | Return last element without removing |
 | `pop` | `(pop coll)` | Return collection without last element |
@@ -2027,13 +2044,16 @@ The `seq` function converts a collection to a sequence:
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `count` | `(count coll)` | Number of items |
-| `reduce` | `(reduce f init coll)` | Fold collection |
+| `reduce` | `(reduce f coll)` | Fold using the first element as the initial value |
+| `reduce` | `(reduce f init coll)` | Fold collection with an explicit initial value |
 | `sum` | `(sum coll)` | Sum of numbers |
 | `avg` | `(avg coll)` | Average of numbers |
 | `sum-by` | `(sum-by key coll)` | Sum field values |
 | `avg-by` | `(avg-by key coll)` | Average field values |
-| `min-by` | `(min-by key coll)` | Item with minimum field |
-| `max-by` | `(max-by key coll)` | Item with maximum field |
+| `min-by` | `(min-by f coll)` | Item with minimum f-value in coll |
+| `min-by` | `(min-by f x y & more)` | Minimum item among individual args |
+| `max-by` | `(max-by f coll)` | Item with maximum f-value in coll |
+| `max-by` | `(max-by f x y & more)` | Maximum item among individual args |
 | `distinct-by` | `(distinct-by key coll)` | Items with unique field values |
 | `min-key` | `(min-key f x y & more)` | Return x for which (f x) is least |
 | `max-key` | `(max-key f x y & more)` | Return x for which (f x) is greatest |
@@ -2153,8 +2173,10 @@ The `seq` function converts a collection to a sequence:
 | `update` | `(update m key f & args)` | Update with extra args passed to f |
 | `update-in` | `(update-in m path f)` | Update nested with function |
 | `update-in` | `(update-in m path f & args)` | Update nested with extra args |
-| `dissoc` | `(dissoc m key)` | Remove key |
+| `dissoc` | `(dissoc m key ...)` | Remove one or more keys |
 | `merge` | `(merge m1 m2 ...)` | Merge maps (later wins) |
+| `hash-map` | `(hash-map & kvs)` | Build a map from alternating key/value args (equivalent to a map literal) |
+| `array-map` | `(array-map & kvs)` | Alias for `hash-map` |
 | `select-keys` | `(select-keys m keys)` | Pick specific keys |
 | `keys` | `(keys m)` | Get all keys |
 | `vals` | `(vals m)` | Get all values |
@@ -2176,6 +2198,8 @@ The `seq` function converts a collection to a sequence:
 (update {:n nil} :n (fnil + 0) 5)  ; => {:n 5} - fnil with 2-arity fn + extra arg
 (update-in {:a {:b 1}} [:a :b] + 10) ; => {:a {:b 11}}
 (dissoc {:a 1 :b 2} :b)            ; => {:a 1}
+(dissoc {:a 1 :b 2 :c 3} :a :b)    ; => {:c 3}
+(hash-map :a 1 :b 2)               ; => {:a 1 :b 2}
 (merge {:a 1} {:b 2} {:a 3})       ; => {:a 3 :b 2}
 (select-keys {:a 1 :b 2 :c 3} [:a :c])  ; => {:a 1 :c 3}
 (keys {:a 1 :b 2})                 ; => [:a :b]
@@ -2235,6 +2259,10 @@ The `seq` function converts a collection to a sequence:
 | `join` | `(join separator coll)` | Join collection elements with separator |
 | `join` | `(join coll)` | Join collection elements (no separator) |
 | `trim` | `(trim s)` | Remove leading/trailing whitespace |
+| `triml` | `(triml s)` | Remove leading whitespace |
+| `trimr` | `(trimr s)` | Remove trailing whitespace |
+| `trim-newline` | `(trim-newline s)` | Remove trailing newline/carriage-return characters |
+| `blank?` | `(blank? s)` | True if `s` is nil, empty, or only whitespace |
 | `replace` | `(replace s pattern replacement)` | Replace all occurrences |
 | `upcase` / `upper-case` | `(upcase s)` | Convert to uppercase |
 | `downcase` / `lower-case` | `(downcase s)` | Convert to lowercase |
@@ -2341,6 +2369,9 @@ The `seq` function converts a collection to a sequence:
 | `inc` | `(inc x)` | Add 1 |
 | `dec` | `(dec x)` | Subtract 1 |
 | `abs` | `(abs x)` | Absolute value |
+| `sqrt` | `(sqrt x)` | Square root (returns float; `##NaN` for negatives) |
+| `pow` | `(pow x y)` | Exponentiation (returns float) |
+| `trunc` | `(trunc x)` | Truncate toward zero |
 | `compare` | `(compare x y)` | Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp. |
 | `max` | `(max x y ...)` | Maximum value |
 | `min` | `(min x y ...)` | Minimum value |
@@ -2354,7 +2385,7 @@ The `seq` function converts a collection to a sequence:
 
 **Special Value Behavior:**
 - **NaN Propagation**: Any arithmetic operation involving `Double/NaN` returns `Double/NaN`.
-- **Division by Zero**: `(/ n 0)` returns `Double/POSITIVE_INFINITY` (if `n > 0`), `Double/NEGATIVE_INFINITY` (if `n < 0`), or `Double/NaN` (if `n = 0`).
+- **Division by Zero**: An **integer** zero divisor — `(/ n 0)` — raises an `arithmetic-error` (Clojure conformance). A **float** zero divisor follows IEEE 754: `(/ n 0.0)` returns `Double/POSITIVE_INFINITY` (if `n > 0`), `Double/NEGATIVE_INFINITY` (if `n < 0`), or `Double/NaN` (if `n = 0`).
 - **Indeterminate Forms**: Operations like `(- Double/POSITIVE_INFINITY Double/POSITIVE_INFINITY)` or `(* Double/POSITIVE_INFINITY 0)` return `Double/NaN`.
 - **Coercion**: Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
 
@@ -2440,6 +2471,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `=` | `(= x)`, `(= x y & more)` | Equality |
+| `==` | `(== x)`, `(== x y & more)` | Numeric equality (alias for `=`; unlike Clojure, accepts any type rather than throwing on non-numbers — DIV-10) |
 | `not=` | `(not= x)`, `(not= x y & more)` | Inequality |
 | `<` | `(< x)`, `(< x y & more)` | Less than |
 | `>` | `(> x)`, `(> x y & more)` | Greater than |
@@ -2530,7 +2562,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `seqable?` | Can produce a seq? (collections, strings, nil) |
 | `ifn?` | Is invokable via direct call? (functions, keywords, maps, sets — NOT vectors). Note: maps/sets are invokable as `(my-map :key)` but cannot be passed directly to HOFs like `mapv`; wrap in a lambda: `(mapv #(my-map %) coll)` |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
-| `type` | Returns type as keyword: `:nil`, `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function` |
+| `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`. For `nil`, returns `nil` (not `:nil`). |
 
 ```clojure
 ;; coll? returns true for vectors, maps, and sets
@@ -2948,7 +2980,7 @@ PTC-Lisp supports a minimal subset of Java interop for date and time handling, s
 | `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string (`YYYY-MM-DD`) into a Date; if the string contains a time component (`...T...`), returns a DateTime instead |
 | `Instant/parse` | `(Instant/parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime (offsetless `...T...` strings treated as UTC; bare `YYYY-MM-DD` returns a Date instead); also available as `(parse iso-string)` |
 | `parse` | `(parse iso-string)` | Alias for `Instant/parse` / `LocalDate/parse` auto-dispatch — same as `(Instant/parse ...)` |
-| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only** — works on results from `Instant/parse` and `LocalDate/parse` when input had a time component; does NOT work on Date objects) |
+| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only** — works on results from `java.util.Date.`, `Instant/parse`, and `LocalDate/parse` when the input had a time component; does NOT work on bare Date objects, e.g. `LocalDate/parse` of a `YYYY-MM-DD` string) |
 | `.toEpochDay` | `(.toEpochDay local-date)` | Return a LocalDate's epoch-day integer (`1970-01-01` is `0`) |
 | `.plusDays` | `(.plusDays local-date n)` | Add integer days to a LocalDate |
 | `.minusDays` | `(.minusDays local-date n)` | Subtract integer days from a LocalDate |
@@ -3052,6 +3084,10 @@ PTC-Lisp supports Java-style string methods for common operations.
 | `.toUpperCase` | `(.toUpperCase s)` | Convert string to upper case |
 | `.startsWith` | `(.startsWith s prefix)` | Returns true if string starts with prefix |
 | `.endsWith` | `(.endsWith s suffix)` | Returns true if string ends with suffix |
+| `.contains` | `(.contains s substr)` | Returns true if string contains substring; raises on non-string |
+| `.length` | `(.length s)` | Grapheme count of string; raises on non-string |
+| `.substring` | `(.substring s start)` | Suffix from grapheme index `start`; raises on out-of-range index |
+| `.substring` | `(.substring s start end)` | Graphemes in `[start, end)`; raises on out-of-range index |
 
 ```clojure
 (.indexOf "hello" "ll")      ; => 2
@@ -3062,7 +3098,13 @@ PTC-Lisp supports Java-style string methods for common operations.
 (.toUpperCase "Hello")       ; => "HELLO"
 (.startsWith "hello" "he")   ; => true
 (.endsWith "hello" "lo")     ; => true
+(.contains "hello" "ell")    ; => true
+(.length "hello")            ; => 5
+(.substring "hello" 2)       ; => "llo"
+(.substring "hello" 1 3)     ; => "el"
 ```
+
+Unlike the Clojure-named string functions (which return signal values), these Java-named methods **raise** on bad input — `.substring` raises when `start < 0`, `start > length`, `end > length`, or `start > end`.
 
 **Return Value**: These methods return -1 when the substring is not found (Java semantics). **Prefer `index-of` / `last-index-of`** (§8.3) which return `nil` when not found (Clojure semantics).
 
@@ -3083,11 +3125,12 @@ Programs have access to data and functions through **namespaced symbols** and **
 
 | Access Pattern | Source | Description |
 |----------------|--------|-------------|
-| Plain symbols | Stored values | Values from map returns (defined via `def` form) |
+| Plain symbols | Stored values | Values defined via `def`/`defn`, persisted across turns |
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
-| `mcp/` plus `apropos`/`dir`/`doc`/`meta` | REPL discovery | (MCP aggregator mode) inspect configured upstream servers and their tools |
+| `mcp/servers` | REPL discovery | List configured MCP upstream servers (requires a discovery backend) |
+| `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery | Inspect local PTC-Lisp builtins (and MCP tools when a discovery backend is configured) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3149,7 +3192,7 @@ Access results from previous turns using the turn history symbols:
 - `*1` returns the result of the most recent turn
 - Returns `nil` if the turn doesn't exist (e.g., `*1` on turn 1)
 - Results are **truncated** to ~1KB to prevent memory bloat
-- Use stored values (plain symbols from map returns) for persistent access to full values
+- Use stored values (plain symbols defined via `def`) for persistent access to full values
 
 **Use cases:**
 - Quick inspection of previous results during debugging
@@ -3191,6 +3234,8 @@ The `budget/remaining` primitive returns a map with hyphenated keys (Clojure-sty
           :cache-read 2000}
  :llm-requests 3}             ; LLM API calls made
 ```
+
+**Note:** The `:turns`, `:work-turns`, and `:retry-turns` fields report **remaining** budget, whereas the `:tokens` fields report **accumulated usage** so far (not remaining).
 
 **Accessing hyphenated keys:**
 
@@ -3267,7 +3312,7 @@ Programs can inspect executable PTC-Lisp capabilities through REPL-style discove
 
 | Form | Signature | Returns |
 |------|-----------|---------|
-| `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. |
+| `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. Raises a runtime error if no discovery backend is configured (this is neither a world fault nor a recoverable programmer fault). |
 | `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and MCP tools. MCP loaded tools rank before MCP unloaded-server hints, which rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
 | `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one MCP server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
 | `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
@@ -3322,7 +3367,7 @@ built-ins or reserved runtime operations at analysis time.
 | PTC runtime/helper | `tool` | Registered tool invocation |
 | PTC runtime/helper | `budget` | Remaining-budget introspection |
 | PTC runtime/helper | `json` | JSON parse/generate helpers |
-| MCP server extension | `mcp` | Profile-gated helper namespace used by the MCP server; unavailable in base `Lisp.run/2` unless that profile enables it |
+| MCP server extension | `mcp` | MCP server namespace. The `mcp/servers` form is parsed unconditionally but requires a configured discovery backend at runtime (raises if none is set); there is no profile gate. |
 
 **Examples of normalization:**
 
@@ -3578,14 +3623,14 @@ Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable in PTC-Lisp. They re
 Aggregation functions require numeric field values:
 
 ```clojure
-;; Type error - string in numeric aggregation
-(sum-by :amount [{:amount "10"} {:amount 20}])  ; => TYPE ERROR
+;; Arithmetic error - string in numeric aggregation
+(sum-by :amount [{:amount "10"} {:amount 20}])  ; => ARITHMETIC ERROR
 
-;; Type error - map in numeric aggregation
-(avg-by :value [{:value {:x 1}}])              ; => TYPE ERROR
+;; Arithmetic error - map in numeric aggregation
+(avg-by :value [{:value {:x 1}}])              ; => ARITHMETIC ERROR
 ```
 
-**Rule:** If a field exists and is not `nil` but is non-numeric, aggregation functions raise a type error. Only `nil` and missing fields are silently skipped.
+**Rule:** If a field exists and is not `nil` but is non-numeric, aggregation functions raise an arithmetic error (`:arithmetic_error`). Only `nil` and missing fields are silently skipped.
 
 ### 11.6 Short-Circuit Evaluation
 
@@ -3623,9 +3668,8 @@ Maps can be called as functions with a keyword argument:
 (flatten [1 [2 {:a 3}] "str"])    ; => [1 2 {:a 3} "str"]
 ```
 
-- Only vectors are flattened (they satisfy `coll?`)
-- Maps, strings, and other non-collection values pass through unchanged
-- Flattening depth is bounded by `max_depth` limit
+- Only vectors (Erlang lists) are flattened — `flatten` delegates to `List.flatten/1`, which recurses only into lists
+- Maps, sets, strings, and other non-list values pass through unchanged (even though sets satisfy `coll?`, they are not flattened)
 
 ### 11.10 Tool Call Evaluation Order
 
@@ -3650,9 +3694,9 @@ Errors are represented as tagged tuples: `{:error, {error_type, details}}`. The 
 
 ```elixir
 {:error, {:parse_error, "unexpected token at line 3"}}
-{:error, {:analysis_error, "unknown function: foo"}}
-{:error, {:type_error, "expected number", "got string"}}
-{:error, {:eval_error, "runtime evaluation failed"}}
+{:error, {:invalid_form, "let bindings require even number of forms"}}
+{:error, {:type_error, "expected number, got string", [nil]}}  # 3rd element is the arg list / bad value
+{:error, {:runtime_error, "runtime evaluation failed"}}
 {:error, {:tool_error, "get-users", "connection refused"}}
 {:error, {:timeout, 5000}}
 {:error, {:memory_exceeded, 10_000_000}}
@@ -3665,18 +3709,21 @@ The formatted strings shown below are human-readable renderings for display to u
 | Error Type (atom) | Cause |
 |------------|-------|
 | `:parse_error` | Invalid syntax |
-| `:analysis_error` | Invalid program structure (static analysis phase) |
-| `:invalid_arity` | Wrong number of arguments (detected during analysis) |
+| `:invalid_form` | Malformed program structure (static analysis phase) |
+| `:invalid_arity` | Wrong number of arguments to a special form (detected during analysis) |
 | `:type_error` | Wrong argument type |
-| `:arithmetic_error` | Arithmetic operation error (division by zero) |
-| `:arity_error` | Wrong number of arguments (detected at runtime) |
+| `:arithmetic_error` | Arithmetic operation error (e.g. integer division by zero) |
+| `:arity_error` / `:arity_mismatch` | Wrong number of arguments / closure arity mismatch (detected at runtime) |
 | `:unbound_var` | Unknown symbol/variable |
 | `:not_callable` | Attempt to call a non-callable value |
-| `:eval_error` | General runtime evaluation error |
+| `:runtime_error` | General runtime evaluation error |
+| `:loop_limit_exceeded` | `loop`/`recur` iteration limit exceeded |
 | `:unknown_tool` | Tool not registered |
 | `:tool_error` | Tool execution failed |
 | `:destructure_error` | Destructuring pattern mismatch |
 | `:invalid_placeholder` | Invalid placeholder in `#()` syntax |
+| `:unsupported_pattern` | Unsupported destructuring/binding pattern |
+| `:unsupported_method` | Unknown Java-interop method |
 | `:timeout` | Execution time exceeded |
 | `:memory_exceeded` | Memory limit exceeded |
 
@@ -3699,20 +3746,20 @@ type-error at line 5:
 | Error | Hint |
 |-------|------|
 | Unknown symbol `foo` | Did you mean: `filter`, `first`, `find`? |
-| Wrong arity for `if` | `if` requires 2 or 3 arguments (condition, then, else?) |
+| Wrong arity for `if` | `expected (if cond then else?)` |
 | `let` bindings not paired | `let` requires an even number of binding forms |
 
 ---
 
-## 13. What Is NOT Supported
+## 13. Language Scope and Restrictions
 
-PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences-by-design-not-bugs).
+PTC-Lisp intentionally omits many Clojure features for sandbox safety and simplicity, and supports a few (like anonymous functions) only with restrictions. For a complete list of intentional divergences with rationale, see [Clojure Conformance Gaps — Intentional Divergences](clojure-conformance-gaps.md#intentional-divergences-by-design-not-bugs).
 
-Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.13).
+Key omissions: lazy sequences, macros, mutable state (`atom`/`ref`/`agent`), `eval`/`read-string`, file I/O, `try`/`catch`/`throw`, multi-methods/protocols, user-defined namespaces, and full Java interop (minimal Date/Time subset supported: see §8.14).
 
-**Note:** `println` IS supported — see section 8.12. It writes to an internal trace buffer, not stdout.
+**Note:** `println` IS supported — see §8.13. It writes to an internal trace buffer, not stdout.
 
-### 13.1 Anonymous Functions
+### 13.1 Anonymous Functions (Supported, With Restrictions)
 
 Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 
@@ -3818,7 +3865,7 @@ float       = ["-"] digit+ "." digit+ [exponent]
             | ["-"] digit+ exponent ;
 exponent    = ("e" | "E") ["+" | "-"] digit+ ;
 string      = '"' string-char* '"' ;
-string-char = escape-seq | (any char except '"', '\', and newline) ;
+string-char = escape-seq | (any char except '"' and '\') ;  (* literal newlines allowed *)
 escape-seq  = '\\' ('"' | '\\' | 'n' | 't' | 'r') ;
 char        = '\\' (char-name | any-char) ;
 char-name   = "newline" | "space" | "tab" | "return" | "backspace" | "formfeed" ;
@@ -3829,8 +3876,8 @@ symbol-first = letter | special-initial ;
 symbol-rest  = letter | digit | special-rest ;
 letter      = "a"-"z" | "A"-"Z" ;
 digit       = "0"-"9" ;
-special-initial = "+" | "-" | "*" | "/" | "<" | ">" | "=" | "?" | "!" ;
-special-rest    = special-initial | "-" | "_" | "/" | "." | "%" | "&" ;
+special-initial = "+" | "-" | "*" | "/" | "<" | ">" | "=" | "?" | "!" | "_" | "%" | "." | "&" ;
+special-rest    = special-initial | "'" ;  (* "'" only after the first char, e.g. inc' *)
 
 keyword     = ":" keyword-char+ ;
 keyword-char = letter | digit | "-" | "_" | "?" | "!" | "+" | "*" | "<" | ">" | "=" ;  (* no "/" in keywords *)
@@ -3885,7 +3932,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 | Max Heap | ~10 MB | Sandbox-process memory limit (1,250,000 words) |
 | Worker Max Heap | = Max Heap | Fixed per-worker `pmap`/`pcalls` heap cap |
 | Max Parallel Workers | 8 | Global cap on live `pmap`/`pcalls` workers |
-| Max Tool Calls | 10 | Per-program tool invocation limit |
+| Max Tool Calls | unlimited (`nil`) | Per-program tool invocation limit; enforced only when set via the `:max_tool_calls` option |
 | Loop/Recur Iterations | 1,000 | Per-loop/recur jump limit; ordinary non-tail recursion is bounded by timeout and heap |
 
 Every `pmap`/`pcalls` worker process — top-level *and* nested — is
@@ -3954,7 +4001,7 @@ The host builds an execution environment for each program:
     turn: 3,
     retry_count: 0,
     timestamp: ~U[2024-01-15 10:30:00Z],
-    limits: %{max_tool_calls: 10, timeout_ms: 5000}
+    limits: %{max_tool_calls: nil, timeout_ms: 1000}   # illustrative; max_tool_calls defaults to nil (unlimited), sandbox timeout to 1000 ms
   }
 }
 ```
@@ -4151,7 +4198,7 @@ Every execution produces a log entry:
 |-------|---------|-------------|
 | `timeout_ms` | 1,000 | Max execution time per program |
 | `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
-| `max_tool_calls` | 10 | Max tool invocations per program |
+| `max_tool_calls` | unlimited (`nil`) | Max tool invocations per program; no limit unless explicitly set |
 
 *Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
@@ -4199,11 +4246,13 @@ The LLM receives this error and can generate a corrected program.
 
 ### Resolution Order
 
-When the interpreter encounters a symbol, it resolves in this order:
+When the interpreter encounters a plain symbol, it resolves in this order:
 
-1. **Local bindings** — `let`-bound variables in current scope
-2. **Namespaced symbols** — `data/y`, `tool/z`, `budget/remaining`
+1. **Local bindings** — `let`-/`loop`-bound variables in current scope
+2. **`def` bindings** — values stored via `def`/`defn` (the User Namespace; persists across turns and shadows builtins)
 3. **Built-in functions** — `filter`, `map`, `count`, etc.
+
+Namespaced accesses (`data/y`, `tool/z`, `budget/remaining`) are *not* part of this plain-symbol chain — they are dispatched by a separate AST path before plain-symbol lookup is reached.
 
 ### Namespace Symbols
 
@@ -4212,8 +4261,8 @@ When the interpreter encounters a symbol, it resolves in this order:
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
-| `mcp/servers`, `apropos`, `dir`, `doc`, `meta` | REPL discovery (MCP aggregator mode) |
-| `foo` | Local binding or built-in |
+| `mcp/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery |
+| `foo` | Local binding, `def` binding, or built-in |
 
 ### Example
 
