@@ -3,6 +3,25 @@ defmodule PtcRunnerMcp.HttpConfigTest do
 
   alias PtcRunnerMcp.Http.Config
 
+  setup do
+    original_http_env =
+      System.get_env()
+      |> Enum.filter(fn {key, _value} -> String.starts_with?(key, "PTC_RUNNER_MCP_HTTP_") end)
+
+    Enum.each(original_http_env, fn {key, _value} -> System.delete_env(key) end)
+
+    on_exit(fn ->
+      System.get_env()
+      |> Map.keys()
+      |> Enum.filter(&String.starts_with?(&1, "PTC_RUNNER_MCP_HTTP_"))
+      |> Enum.each(&System.delete_env/1)
+
+      Enum.each(original_http_env, fn {key, value} -> System.put_env(key, value) end)
+    end)
+
+    :ok
+  end
+
   test "rejects short auth tokens" do
     assert {:error, message} =
              Config.resolve(%{
