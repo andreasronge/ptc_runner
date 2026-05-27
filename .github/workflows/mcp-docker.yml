@@ -2,7 +2,6 @@ name: MCP Docker
 
 on:
   push:
-    branches: [main]
     tags:
       - 'mcp-v*'
   workflow_dispatch:
