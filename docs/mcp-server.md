@@ -21,7 +21,7 @@ tools enabled.
 Several capabilities are opt-in and add their own top-level tools:
 
 - [Aggregator mode](aggregator-mode.md) lets PTC-Lisp programs call
-  configured upstream MCP servers via `(tool/mcp-call ...)`.
+  configured upstream MCP servers via `(tool/call ...)`.
 - [Agentic mode](agentic-mode.md) adds `lisp_task`, a
   natural-language task tool backed by a planner LLM (requires
   aggregator mode).
@@ -165,7 +165,7 @@ Each `tools/call` request flows top-to-bottom:
    1 s wall-clock cap and a 10 MB heap cap (10 s / 100 MB in
    aggregator mode). Filesystem and network APIs are not exposed to
    the program; aggregator-mode programs reach out only through the
-   mediated `(tool/mcp-call …)` builtin.
+   mediated `(tool/call …)` builtin.
 5. The result flows back up: `PtcToolProtocol.render_success_from_step/2`
    builds the R22 success payload, or `render_error/3` builds the R23
    error payload. The MCP envelope (`isError`, `structuredContent`,
@@ -319,7 +319,7 @@ the full set.
   every flag, environment variable, response profile, catalog mode,
   tracing setup, and lifecycle command.
 - [`docs/aggregator-mode.md`](aggregator-mode.md) — calling configured
-  upstream MCP servers from inside the sandbox via `(tool/mcp-call …)`,
+  upstream MCP servers from inside the sandbox via `(tool/call …)`,
   plus the payload-reduction metrics emitted on every aggregator
   response.
 - [`docs/agentic-mode.md`](agentic-mode.md) — `lisp_task`, the

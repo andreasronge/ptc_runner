@@ -190,7 +190,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   defp render_servers_snapshot(entries) do
     values = Enum.map(entries, &server_snapshot_map/1)
 
-    render_command_result("(mcp/servers)", values)
+    render_command_result("(tool/servers)", values)
   end
 
   defp server_snapshot_map(%{name: name, tools: tools} = entry) do
@@ -324,7 +324,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
           " :args {#{inner}}"
       end
 
-    "(tool/mcp-call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
+    "(tool/call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
   end
 
   defp tool_arg_keys(tool) do

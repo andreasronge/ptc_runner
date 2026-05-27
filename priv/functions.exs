@@ -4459,7 +4459,7 @@
       ptc_extension?: true,
       examples: [],
       notes: "MCP-backed in aggregator mode; searches loaded discovery backends.",
-      see_also: ["dir", "doc", "meta", "mcp/servers"],
+      see_also: ["dir", "doc", "meta", "tool/servers"],
       clojure_var: "apropos",
       divergences: nil
     },
@@ -4636,7 +4636,7 @@
       ptc_extension?: true,
       examples: [],
       notes: "MCP-backed in aggregator mode; accepts quoted symbols or strings.",
-      see_also: ["apropos", "doc", "meta", "mcp/servers"],
+      see_also: ["apropos", "doc", "meta", "tool/servers"],
       clojure_var: "dir",
       divergences: nil
     },
@@ -4870,12 +4870,12 @@
       divergences: nil
     },
     %{
-      name: "mcp/servers",
+      name: "tool/servers",
       description: "List configured upstream MCP servers",
       binding: nil,
       category: :mcp,
       dispatch: :analyze,
-      signatures: ["(mcp/servers)"],
+      signatures: ["(tool/servers)"],
       since: nil,
       section: "Discovery",
       ptc_extension?: true,

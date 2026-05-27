@@ -71,7 +71,7 @@ I want to be careful here, because it would be easy to dress this up. This was m
 Then I asked the same question through ptc_runner's code mode. The first thing the model did was not fetch every trace. It explored the tool surface from inside the Lisp session:
 
 ```clojure
-(mcp/servers)
+(tool/servers)
 (dir 'observatory {:limit 20})
 (doc 'observatory/list_traces)
 ```
@@ -79,7 +79,7 @@ Then I asked the same question through ptc_runner's code mode. The first thing t
 Then it made one small call to learn the result shape before writing the real logic:
 
 ```clojure
-(let [r (tool/mcp-call {:server "observatory"
+(let [r (tool/call {:server "observatory"
                         :tool "list_traces"
                         :args {:org-id "org-acme"
                                :environment "production"

@@ -320,7 +320,7 @@ defmodule Bench.AgenticAggregatorSpike do
     You are the internal planner for ptc_runner_mcp agentic aggregator mode.
 
     Convert the user's task into one PTC-Lisp program that calls upstream MCP
-    tools through `(tool/mcp-call ...)`, reduces large upstream payloads inside
+    tools through `(tool/call ...)`, reduces large upstream payloads inside
     the program, and returns only the compact final answer.
 
     Rules:
@@ -620,7 +620,7 @@ defmodule Bench.AgenticAggregatorSpike do
   defp stub_program do
     ~S"""
     (let [fetch (fn [n]
-                  (let [r (tool/mcp-call {:server "github"
+                  (let [r (tool/call {:server "github"
                                           :tool "issue_read"
                                           :args {:owner "github"
                                                  :repo "github-mcp-server"

@@ -129,7 +129,7 @@ defmodule PtcRunner.Lisp.Analyze do
       :doc,
       :meta,
       :"ns-publics",
-      :"mcp/servers"
+      :"tool/servers"
     ]
   end
 
@@ -450,18 +450,18 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # Tool invocation via tool/ namespace: (tool/name args...)
+  # Tool discovery via tool/ namespace
+  defp dispatch_list_form({:ns_symbol, :tool, :servers}, [], _list, _tail?),
+    do: {:ok, {:repl_discovery, :servers, []}}
+
+  defp dispatch_list_form({:ns_symbol, :tool, :servers}, _args, _list, _tail?),
+    do: {:error, {:invalid_arity, :"tool/servers", "(tool/servers) takes no arguments"}}
+
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
 
-  # MCP REPL discovery via mcp/ namespace
-  defp dispatch_list_form({:ns_symbol, :mcp, :servers}, [], _list, _tail?),
-    do: {:ok, {:repl_discovery, :servers, []}}
-
-  defp dispatch_list_form({:ns_symbol, :mcp, :servers}, _args, _list, _tail?),
-    do: {:error, {:invalid_arity, :"mcp/servers", "(mcp/servers) takes no arguments"}}
-
   defp dispatch_list_form({:ns_symbol, :mcp, other}, _rest, _list, _tail?),
-    do: {:error, {:invalid_form, "Unknown mcp function: mcp/#{other}. Available: mcp/servers"}}
+    do: {:error, {:invalid_form, "Unknown mcp function: mcp/#{other}. Available: tool/servers"}}
 
   # Budget introspection via budget/ namespace: (budget/remaining)
   defp dispatch_list_form({:ns_symbol, :budget, :remaining}, [], _list, _tail?),

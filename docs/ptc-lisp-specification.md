@@ -3129,7 +3129,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
-| `mcp/servers` | REPL discovery | List configured MCP upstream servers (requires a discovery backend) |
+| `tool/servers` | REPL discovery | List configured MCP upstream servers (requires a discovery backend) |
 | `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery | Inspect local PTC-Lisp builtins (and MCP tools when a discovery backend is configured) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
@@ -3308,11 +3308,11 @@ Invoke registered tools using the `tool/` namespace:
 
 ### 9.7 REPL Discovery
 
-Programs can inspect executable PTC-Lisp capabilities through REPL-style discovery forms. Plain `Lisp.run/2` exposes local PTC/Clojure builtins and curated Java interop. When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), the same forms also inspect configured upstream MCP tools. `mcp/servers` remains MCP-only and requires a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the aggregator details.
+Programs can inspect executable PTC-Lisp capabilities through REPL-style discovery forms. Plain `Lisp.run/2` exposes local PTC/Clojure builtins and curated Java interop. When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), the same forms also inspect configured upstream MCP tools. `tool/servers` remains MCP-only and requires a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the aggregator details.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
-| `mcp/servers` | `(mcp/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. Raises a runtime error if no discovery backend is configured (this is neither a world fault nor a recoverable programmer fault). |
+| `tool/servers` | `(tool/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. Raises a runtime error if no discovery backend is configured (this is neither a world fault nor a recoverable programmer fault). |
 | `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and MCP tools. MCP loaded tools rank before MCP unloaded-server hints, which rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
 | `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one MCP server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
 | `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
@@ -3321,13 +3321,13 @@ Programs can inspect executable PTC-Lisp capabilities through REPL-style discove
 
 Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compatibility aliases, discovery returns executable refs such as `Integer/parseInt`, `System/currentTimeMillis`, `Math/abs`, and `java.time.LocalDate/parse`; it does not advertise unsupported fully-qualified `java.lang.*` call forms.
 
-**MCP error model** (same split as `tool/mcp-call`):
+**MCP error model** (same split as `tool/call`):
 - *World faults* — an upstream that can't be started, an oversized discovery result, or an exhausted per-program discovery budget — make the form return `nil`. The program continues.
 - *Programmer faults* — an unknown server name, an unknown tool name, or a bad argument (e.g. `:limit` out of range) — raise an execution error that terminates the program.
 
 ```clojure
 ;; Discover which upstreams are available, then describe a tool on one of them
-(let [servers (mcp/servers)]
+(let [servers (tool/servers)]
   (when (some (fn [s] (= (:name s) "github")) servers)
     (doc 'github/search_repos)))
 
@@ -3335,7 +3335,7 @@ Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compati
 (apropos "read")
 ```
 
-The discovery op budget is separate from the `tool/mcp-call` budget; discovery never consumes upstream-call quota.
+The discovery op budget is separate from the `tool/call` budget; discovery never consumes upstream-call quota.
 
 ### 9.8 Namespace Compatibility
 
@@ -3367,7 +3367,7 @@ built-ins or reserved runtime operations at analysis time.
 | PTC runtime/helper | `tool` | Registered tool invocation |
 | PTC runtime/helper | `budget` | Remaining-budget introspection |
 | PTC runtime/helper | `json` | JSON parse/generate helpers |
-| MCP server extension | `mcp` | MCP server namespace. The `mcp/servers` form is parsed unconditionally but requires a configured discovery backend at runtime (raises if none is set); there is no profile gate. |
+| MCP server extension | `mcp` | MCP server namespace. The `tool/servers` form is parsed unconditionally but requires a configured discovery backend at runtime (raises if none is set); there is no profile gate. |
 
 **Examples of normalization:**
 
@@ -4261,7 +4261,7 @@ Namespaced accesses (`data/y`, `tool/z`, `budget/remaining`) are *not* part of t
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
-| `mcp/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery |
+| `tool/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery |
 | `foo` | Local binding, `def` binding, or built-in |
 
 ### Example

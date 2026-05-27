@@ -6,7 +6,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
   Spawns an actual `@modelcontextprotocol/server-filesystem` subprocess
   via `npx` and exercises the aggregator end-to-end through the real
   `Upstream.Stdio` implementation (no Fake). A PTC-Lisp program reads
-  one known small file via `tool/mcp-call`, transforms the result to
+  one known small file via `tool/call`, transforms the result to
   a line count, and returns ONLY the transform — verifying that the
   raw file contents stay inside the sandbox.
 
@@ -171,12 +171,12 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
     test "PTC-Lisp reads file via filesystem-MCP, returns only the line count", %{
       file_path: file_path
     } do
-      # The program calls `tool/mcp-call` against the real filesystem
+      # The program calls `tool/call` against the real filesystem
       # MCP server, extracts the file text from the upstream's
       # `content` payload, splits into lines, and returns ONLY the
       # count. The raw file contents never leave the sandbox.
       #
-      # `(tool/mcp-call ...)` returns a tagged result map whose
+      # `(tool/call ...)` returns a tagged result map whose
       # `:value` is the upstream result. Filesystem-MCP versions have
       # returned both `%{"content" => "<file>"}` and
       # `%{"content" => [%{"type" => "text", "text" => "<file>"}]}`.
@@ -189,7 +189,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # what `System.tmp_dir!()` returns — Windows backslashes,
       # quotes in $TMPDIR, etc. all survive intact.
       program = """
-      (let [r (tool/mcp-call {:server "#{@upstream_name}"
+      (let [r (tool/call {:server "#{@upstream_name}"
                               :tool "read_text_file"
                               :args {:path #{Jason.encode!(file_path)}}})
             resp (:value r)
@@ -248,7 +248,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # ensure_started/1 succeeds and the upstream lands in
       # `started_upstreams` with a populated `tools/list`.
       warm_program = """
-      (tool/mcp-call {:server "#{@upstream_name}"
+      (tool/call {:server "#{@upstream_name}"
                       :tool "list_allowed_directories"
                       :args {}})
       """
@@ -260,7 +260,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # `started_upstreams` AND its cached `tools/list` lacking the
       # name, this MUST raise programmer-fault BEFORE any dispatch.
       program = """
-      (tool/mcp-call {:server "#{@upstream_name}"
+      (tool/call {:server "#{@upstream_name}"
                       :tool "nonexistent_tool_xyz"
                       :args {}})
       """
@@ -308,7 +308,7 @@ defmodule PtcRunnerMcp.Integration.RealFilesystemTest do
       # test above — emits a JSON-encoded (quote-and-escape-safe)
       # Lisp string literal regardless of $TMPDIR contents.
       program = """
-      (let [r (tool/mcp-call {:server "#{@upstream_name}"
+      (let [r (tool/call {:server "#{@upstream_name}"
                               :tool "read_text_file"
                               :args {:path #{Jason.encode!(missing)}}})]
         {:ok (:ok r) :reason (:reason r)})

@@ -236,7 +236,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert index =~ "PTC extension / MCP server profile"
       assert index =~ "profile-gated helper namespace"
       assert index =~ "## REPL Environment Support"
-      assert index =~ "`(mcp/servers)`"
+      assert index =~ "`(tool/servers)`"
       assert index =~ "`(apropos query)`"
       refute index =~ "`catalog/`"
     end

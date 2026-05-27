@@ -252,7 +252,7 @@ defmodule PtcRunnerMcp.AgenticMcpCallTest do
       :ok = AggregatorConfig.set(%{read_only: true})
       :ok = put_fake("alpha", %{"ok" => fn _, _ -> {:ok, true} end})
       {:ok, ledger} = Ledger.start_link()
-      %{"mcp-call" => mcp_call} = McpCall.build(ledger, registry: @registry_name, max_calls: 1)
+      %{"call" => mcp_call} = McpCall.build(ledger, registry: @registry_name, max_calls: 1)
 
       args = %{"server" => "alpha", "tool" => "ok", "args" => %{}}
 

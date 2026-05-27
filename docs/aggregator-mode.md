@@ -6,7 +6,7 @@ tool-calling aggregator over configured upstream MCP servers.
 ## Overview
 
 Aggregator mode does not advertise upstream tools individually. It
-adds `(tool/mcp-call ...)` to the PTC-Lisp sandbox — a programmatic
+adds `(tool/call ...)` to the PTC-Lisp sandbox — a programmatic
 primitive that calls configured upstream MCP servers and composes their
 results deterministically inside the sandbox. In an aggregator-only
 configuration, the MCP server advertises `lisp_eval`; optional
@@ -48,7 +48,7 @@ config from the first match in:
 3. `~/.config/ptc_runner_mcp/upstreams.json` (XDG default).
 
 If none is found, the server runs in MCP v1 (`:mcp_no_tools`)
-mode and `(tool/mcp-call ...)` is unavailable.
+mode and `(tool/call ...)` is unavailable.
 
 ### Format — stdio upstream
 
@@ -112,6 +112,58 @@ Aggregator mode also supports Streamable HTTP upstreams (MCP rev
 Mixed transports are fully supported. From the program's
 perspective, an HTTP upstream and a stdio upstream are
 indistinguishable.
+
+### Format — OpenAPI upstream
+
+Read-only JSON OpenAPI upstreams can be configured beside MCP stdio
+and MCP HTTP upstreams. The v1 OpenAPI adapter is intentionally narrow:
+only explicitly included `GET` operations are compiled, request bodies
+are rejected, header/cookie parameters are rejected, and successful
+responses must be JSON or empty `204` responses.
+
+Prefer `schema_file` for production so boot does not depend on the
+schema host. `schema_url` is supported for controlled environments; it
+uses the same `static_headers` / `auth` emitters as HTTP upstreams and
+is fetched at upstream start with `schema_max_bytes` enforced before
+decode.
+
+```json
+{
+  "credentials": {
+    "observatory-token": {
+      "source": "file",
+      "path": "/run/secrets/observatory-token",
+      "scheme_hint": "bearer"
+    }
+  },
+  "upstreams": {
+    "observatory": {
+      "transport": "openapi",
+      "base_url": "https://observatory.example",
+      "schema_file": "/absolute/path/to/observatory.openapi.json",
+      "auth": [
+        { "scheme": "bearer", "binding": "observatory-token" }
+      ],
+      "include_operations": [
+        "list_traces",
+        "get_trace",
+        "list_trace_steps",
+        "get_trace_cost"
+      ],
+      "operation_overrides": {
+        "list_trace_steps": {
+          "default_args": { "summary": true }
+        }
+      }
+    }
+  }
+}
+```
+
+The compiled tool names are the exposed catalog names, normalized to
+the same `server/tool` surface as MCP tools. Original OpenAPI
+`operationId` values are retained in `meta` under `_ptc.operationId`
+for provenance.
 
 **Credentials.** Top-level `credentials:` block holds named
 bindings. Three sources are supported in v1: `env` (read from
@@ -181,12 +233,12 @@ need it. If a `transport: "http"` entry is configured but
   for the next call. The aggregator does not refuse to boot
   because a remote MCP is down.
 
-## Writing PTC-Lisp programs against `tool/mcp-call`
+## Writing PTC-Lisp programs against `tool/call`
 
 ### Call shape
 
 ```clojure
-(tool/mcp-call {:server "<configured-name>"
+(tool/call {:server "<configured-name>"
                 :tool   "<upstream-tool>"
                 :args   {<args map>}})
 ```
@@ -195,23 +247,23 @@ need it. If a `transport: "http"` entry is configured but
 defaults to `{}` when omitted; include it whenever the upstream tool
 takes arguments.
 
-`tool/mcp-call` is a runtime callable in value position, so direct
+`tool/call` is a runtime callable in value position, so direct
 higher-order use is valid:
 
 ```clojure
 ;; OK
-(map tool/mcp-call
+(map tool/call
      [{:server "github" :tool "get_pr" :args {:number 101}}
       {:server "github" :tool "get_pr" :args {:number 102}}])
 
 ;; OK
-(pmap tool/mcp-call
+(pmap tool/call
       [{:server "fs" :tool "read" :args {:path "a.txt"}}
        {:server "fs" :tool "read" :args {:path "b.txt"}}])
 
 ;; Also OK when argument construction is needed
 (map (fn [n]
-       (tool/mcp-call {:server "github"
+       (tool/call {:server "github"
                        :tool "get_pr"
                        :args {:number n}}))
      pr-numbers)
@@ -224,7 +276,7 @@ and then treats `:value` as an ordinary value:
 
 ```clojure
 (def repos
-  (let [r (tool/mcp-call {:server "github"
+  (let [r (tool/call {:server "github"
                           :tool "search_repos"
                           :args {:query "infra" :limit 50}})]
     (if (:ok r)
@@ -237,7 +289,7 @@ and then treats `:value` as an ordinary value:
 
 ### JSON helpers (`json/*`)
 
-`tool/mcp-call` returns tagged data. Always inspect `:ok` before using
+`tool/call` returns tagged data. Always inspect `:ok` before using
 `:value`.
 
 | Shape | Meaning |
@@ -253,7 +305,7 @@ with typed JSON in `"structuredContent"`. The aggregator unwraps the
 common domain payload for you:
 
 ```clojure
-(let [r (tool/mcp-call {:server "issues" :tool "list" :args {}})]
+(let [r (tool/call {:server "issues" :tool "list" :args {}})]
   (if (:ok r)
     (get (:value r) "items")
     (fail (:message r))))
@@ -263,7 +315,7 @@ common domain payload for you:
 
 | Class | Behavior | When |
 |---|---|---|
-| **World-fault** | `(tool/mcp-call ...)` returns `{:ok false :reason kw :message text}`; entry recorded in `upstream_calls`; program continues | Upstream couldn't be started, returned a JSON-RPC error, timed out, oversized response, per-program cap exhausted, or returned an MCP `isError` envelope |
+| **World-fault** | `(tool/call ...)` returns `{:ok false :reason kw :message text}`; entry recorded in `upstream_calls`; program continues | Upstream couldn't be started, returned a JSON-RPC error, timed out, oversized response, per-program cap exhausted, or returned an MCP `isError` envelope |
 | **Programmer-fault** | Raises a runtime error; program terminates | Unknown server, unknown tool on a healthy upstream, malformed args |
 
 World-faults are **expected runtime conditions** — write
@@ -280,7 +332,7 @@ retry on the next turn.
 In aggregator mode, upstream-capable `lisp_eval` and
 `lisp_session_eval` descriptions start with a short discovery hint:
 use `(apropos ...)`, `(dir ...)`, and `(doc ...)`, then call the
-selected upstream with `tool/mcp-call`. In inline catalog mode the
+selected upstream with `tool/call`. In inline catalog mode the
 dynamic tail also includes a synthetic discovery snapshot:
 
 ```
@@ -363,7 +415,7 @@ upstream-name:
 ```
 
 The Connection is still re-attempted on the first
-`(tool/mcp-call ...)` invocation that targets it (per §4.3
+`(tool/call ...)` invocation that targets it (per §4.3
 backoff) — only the catalog text is frozen, not the runtime
 upstream state.
 
@@ -379,10 +431,10 @@ search across catalogs, or read a tool's full input schema.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
-| `mcp/servers` | `(mcp/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
+| `tool/servers` | `(tool/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
 | `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Loaded MCP tool matches rank before unloaded MCP server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
 | `dir` | `(dir ref)`<br>`(dir ref opts)` | For known local namespaces/classes, lists executable local members. Otherwise, lists `tool - description` strings for one MCP server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `doc` | `(doc ref)` | One detailed local or MCP description string. Known local refs win; unknown refs fall through to MCP tool refs shaped as `server/tool`. MCP docs include args, required args, a ready-to-edit `(tool/mcp-call …)` example, and the `Result<...>` payload shape. |
+| `doc` | `(doc ref)` | One detailed local or MCP description string. Known local refs win; unknown refs fall through to MCP tool refs shaped as `server/tool`. MCP docs include args, required args, a ready-to-edit `(tool/call …)` example, and the `Result<...>` payload shape. |
 | `meta` | `(meta ref)` | Structured local or MCP metadata. Known local refs win; unknown refs fall through to MCP tool refs. |
 | `ns-publics` | `(ns-publics ns)` | Local-only map of public names to compact metadata for PTC/Clojure namespaces. Java classes and MCP servers are not supported. |
 
@@ -399,13 +451,13 @@ is stable across runs.
 `dir`, `doc`, and `meta` (and `apropos` when called with `:load true`)
 trigger a lazy `ensure_started/1` for the target upstream if its tools
 aren't cached yet — using the same per-program failure cache and ensure
-locks as `(tool/mcp-call ...)`, so concurrent `pmap` children cooperate
+locks as `(tool/call ...)`, so concurrent `pmap` children cooperate
 instead of stampeding. Result lists are size-capped at
 `--max-catalog-result-bytes` (default 256 KiB) of JSON: an over-cap
 `dir` / `apropos` list is truncated entry-by-entry, an over-cap `doc`
 or `meta` result becomes a world fault.
 
-**Error model** — identical split to `(tool/mcp-call ...)`:
+**Error model** — identical split to `(tool/call ...)`:
 
 - **World fault → `nil`**: upstream can't be started, the result
   is too large to cap, or the per-program discovery op budget is
@@ -416,7 +468,7 @@ or `meta` result becomes a world fault.
   `server`/`tool` not a non-empty string).
 
 The discovery op budget is a **separate** atomics counter from the
-`(tool/mcp-call ...)` budget — discovery calls never eat into a
+`(tool/call ...)` budget — discovery calls never eat into a
 program's upstream-call quota.
 
 ```clojure
@@ -424,7 +476,7 @@ program's upstream-call quota.
 (dir 'github {:limit 100})
 
 ;; Only describe a tool if its server is actually configured
-(when (some (fn [s] (= (:name s) "fs")) (mcp/servers))
+(when (some (fn [s] (= (:name s) "fs")) (tool/servers))
   (doc 'fs/read_text_file))
 
 ;; Search every configured upstream for "read"-related tools,
@@ -440,7 +492,7 @@ Read a single text file via the filesystem MCP and return its
 contents:
 
 ```clojure
-(let [r (tool/mcp-call {:server "fs"
+(let [r (tool/call {:server "fs"
                         :tool   "read_text_file"
                         :args   {:path "/tmp/sandbox/notes.md"}})]
   (if (:ok r)
@@ -463,12 +515,12 @@ file path discovered from the filesystem upstream:
       (fail (:message r)))))
 
 (def open-prs
-  (unwrap (tool/mcp-call {:server "github"
+  (unwrap (tool/call {:server "github"
                           :tool   "list_prs"
                           :args   {:state "open" :limit 50}})))
 
 (def watched-paths
-  (unwrap (tool/mcp-call {:server "fs"
+  (unwrap (tool/call {:server "fs"
                           :tool   "read_text_file"
                           :args   {:path "/etc/watched-paths.txt"}})))
 
@@ -496,7 +548,7 @@ Fetch ten upstream items in parallel:
 
 (def items
   (pmap (fn [id]
-          (tool/mcp-call {:server "store"
+          (tool/call {:server "store"
                           :tool   "get"
                           :args   {:id id}}))
         ids))
@@ -517,8 +569,8 @@ cap (see Limits in §9 of the spec). Filter on `:ok` before taking
 
 | Error message | Cause |
 |---|---|
-| `tool/mcp-call requires :server (string), got <value>` | `:server` key missing or not a non-empty string |
-| `tool/mcp-call on upstream '<server>' requires :tool (string), got <value>` | `:tool` key missing or not a non-empty string |
+| `tool/call requires :server (string), got <value>` | `:server` key missing or not a non-empty string |
+| `tool/call on upstream '<server>' requires :tool (string), got <value>` | `:tool` key missing or not a non-empty string |
 | `tool '<server>.<tool>' rejected args: :args must be a map, got <value>` | `:args` not a map |
 | `tool '<server>.<tool>' rejected args: not JSON-encodable (<reason>)` | `:args` map contains a value Jason can't encode (e.g. a closure) |
 | `no upstream '<name>' configured` | `:server` value is not in the configured upstreams |

@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
 
   The SubAgent-backed `lisp_task` adapter owns this ledger. Generated
   PTC-Lisp never writes ledger entries directly; it only calls the
-  MCP-owned `tool/mcp-call` wrapper that records attempts here.
+  MCP-owned `tool/call` wrapper that records attempts here.
 
   This module intentionally defines the shape and a small in-memory API
   before the full adapter is wired. Worker D can replace internals without

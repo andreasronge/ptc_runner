@@ -714,7 +714,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
       "annotations" => annotations,
       "call_example" => build_call_example(server, name, arg_keys, required),
       "response_notes" =>
-        "`tool/mcp-call` returns `Result<T>`; success has `:value T`, failure has `:reason`/`:message`."
+        "`tool/call` returns `Result<T>`; success has `:value T`, failure has `:reason`/`:message`."
     }
     |> detailed_tool_text()
   end
@@ -725,13 +725,14 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
     required = tool_required_keys(tool)
 
     %{
-      kind: "mcp-tool",
+      kind: tool_kind(tool),
       server: server,
       tool: name,
       description: tool_full_description(tool),
       input_schema: tool_input_schema(tool),
       output_schema: tool_output_schema(tool),
       annotations: tool_annotations(tool),
+      _ptc: tool_ptc(tool),
       call: build_call_example(server, name, arg_keys, required)
     }
   end
@@ -842,7 +843,7 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
           " :args {#{inner}}"
       end
 
-    "(tool/mcp-call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
+    "(tool/call {:server #{lisp_string(server)} :tool #{lisp_string(name)}#{args_clause}})"
   end
 
   defp lisp_string(value) when is_binary(value) do
@@ -883,6 +884,17 @@ defmodule PtcRunnerMcp.CatalogBuiltins do
   defp tool_output_schema(%{outputSchema: s}) when is_map(s), do: s
   defp tool_output_schema(%{"outputSchema" => s}) when is_map(s), do: s
   defp tool_output_schema(_), do: nil
+
+  defp tool_ptc(%{_ptc: p}) when is_map(p), do: p
+  defp tool_ptc(%{"_ptc" => p}) when is_map(p), do: p
+  defp tool_ptc(_), do: %{}
+
+  defp tool_kind(tool) do
+    case Map.get(tool_ptc(tool), "transport", Map.get(tool_ptc(tool), :transport)) do
+      "openapi" -> "openapi-tool"
+      _ -> "mcp-tool"
+    end
+  end
 
   defp tool_arg_keys(tool) do
     schema = tool_input_schema(tool)

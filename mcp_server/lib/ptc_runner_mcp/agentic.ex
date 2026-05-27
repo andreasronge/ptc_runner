@@ -182,7 +182,7 @@ defmodule PtcRunnerMcp.Agentic do
   # Build a discovery executor closure for the planner's generated
   # PTC-Lisp program. Mirrors the wiring in
   # `Tools.execute_with_aggregator/4` but with a dedicated call_context
-  # whose budget is independent from the agentic `tool/mcp-call`
+  # whose budget is independent from the agentic `tool/call`
   # counter (`McpCall.build/2` owns its own `:atomics`). Discovery ops
   # therefore never consume the upstream-call quota.
   defp build_discovery_exec do

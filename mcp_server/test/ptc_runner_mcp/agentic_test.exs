@@ -55,14 +55,14 @@ defmodule PtcRunnerMcp.AgenticTest do
   defmodule UpstreamErrorPlanner do
     def call(_model, _prompt, _opts) do
       {:ok,
-       ~S|(let [r (tool/mcp-call {:server "alpha" :tool "err" :args {}})] (if (:ok r) (return (:value r)) (return {:fallback (:reason r)})))|,
+       ~S|(let [r (tool/call {:server "alpha" :tool "err" :args {}})] (if (:ok r) (return (:value r)) (return {:fallback (:reason r)})))|,
        %{"model" => "stub:model", "duration_ms" => 1, "prompt_bytes" => 10, "output_bytes" => 20}}
     end
   end
 
   defmodule RuntimeErrorAfterUpstreamPlanner do
     def call(_model, _prompt, _opts) do
-      {:ok, ~S|(do (tool/mcp-call {:server "alpha" :tool "ok" :args {}}) (fail {:reason :bad}))|,
+      {:ok, ~S|(do (tool/call {:server "alpha" :tool "ok" :args {}}) (fail {:reason :bad}))|,
        %{"model" => "stub:model", "duration_ms" => 1, "prompt_bytes" => 10, "output_bytes" => 20}}
     end
   end
@@ -324,7 +324,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       assert [%{"status" => "error", "reason" => "upstream_error", "error" => "404"}] =
                sc["upstream_calls"]
 
-      assert sc["program"] =~ "tool/mcp-call"
+      assert sc["program"] =~ "tool/call"
     end
 
     test "agent failures preserve upstream_calls recorded before the failure" do
@@ -368,8 +368,8 @@ defmodule PtcRunnerMcp.AgenticTest do
       {:ok, sequence} =
         Agent.start_link(fn ->
           [
-            ~S|(tool/mcp-call {:server "alpha" :tool "ok" :args {"turn" 1}})|,
-            ~S|(return (tool/mcp-call {:server "alpha" :tool "ok" :args {"turn" 2}}))|
+            ~S|(tool/call {:server "alpha" :tool "ok" :args {"turn" 1}})|,
+            ~S|(return (tool/call {:server "alpha" :tool "ok" :args {"turn" 2}}))|
           ]
         end)
 
@@ -447,7 +447,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       {:ok, sequence} =
         Agent.start_link(fn ->
           [
-            ~S|(do (tool/mcp-call {:server "alpha" :tool "get" :args {}}) (+ 1 "x"))|,
+            ~S|(do (tool/call {:server "alpha" :tool "get" :args {}}) (+ 1 "x"))|,
             ~S|(return 11)|
           ]
         end)
@@ -490,7 +490,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       {:ok, sequence} =
         Agent.start_link(fn ->
           [
-            ~S|(tool/mcp-call {:server "alpha" :tool "write" :args {}})|,
+            ~S|(tool/call {:server "alpha" :tool "write" :args {}})|,
             ~S|(return :should-not-run)|
           ]
         end)
@@ -523,7 +523,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       {:ok, sequence} =
         Agent.start_link(fn ->
           [
-            ~S|(do (tool/mcp-call {:server "alpha" :tool "unknown" :args {}}) (+ 1 "x"))|,
+            ~S|(do (tool/call {:server "alpha" :tool "unknown" :args {}}) (+ 1 "x"))|,
             ~S|(return :should-not-run)|
           ]
         end)
@@ -564,7 +564,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       {:ok, sequence} =
         Agent.start_link(fn ->
-          [~S|(tool/mcp-call {:server "alpha" :tool "write" :args {}})|]
+          [~S|(tool/call {:server "alpha" :tool "write" :args {}})|]
         end)
 
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
@@ -605,7 +605,7 @@ defmodule PtcRunnerMcp.AgenticTest do
 
       {:ok, sequence} =
         Agent.start_link(fn ->
-          [~S|(return (tool/mcp-call {:server "alpha" :tool "write" :args {}}))|]
+          [~S|(return (tool/call {:server "alpha" :tool "write" :args {}}))|]
         end)
 
       Elixir.Application.put_env(:ptc_runner_mcp, :agentic_test_sequence, sequence)
@@ -646,7 +646,7 @@ defmodule PtcRunnerMcp.AgenticTest do
       {:ok, sequence} =
         Agent.start_link(fn ->
           [
-            ~S|(do (tool/mcp-call {:server "alpha" :tool "write" :args {}}) (fail {:reason :after-write}))|
+            ~S|(do (tool/call {:server "alpha" :tool "write" :args {}}) (fail {:reason :after-write}))|
           ]
         end)
 

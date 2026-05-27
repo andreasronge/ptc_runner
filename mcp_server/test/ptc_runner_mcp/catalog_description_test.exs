@@ -119,7 +119,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(tiny_fleet(), default_config())
 
       assert result =~ "Synthetic discovery snapshot for configured upstreams:"
-      assert result =~ "(mcp/servers)"
+      assert result =~ "(tool/servers)"
       assert result =~ ~s|(dir "filesystem" {:limit 20})|
       assert result =~ ~s|(dir "github" {:limit 20})|
       assert result =~ "tool_1 - Description for tool 1."
@@ -132,7 +132,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(large_fleet(), default_config())
 
       assert result =~ "Synthetic discovery snapshot for configured upstreams:"
-      assert result =~ "(mcp/servers)"
+      assert result =~ "(tool/servers)"
       assert result =~ "github"
       assert result =~ "linear"
       refute result =~ "(dir "
@@ -143,7 +143,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(fleet_with_unknown(), default_config())
 
       assert result =~ "Synthetic discovery snapshot for configured upstreams:"
-      assert result =~ "(mcp/servers)"
+      assert result =~ "(tool/servers)"
       assert result =~ "github"
       assert result =~ "linear"
       assert result =~ ~s|"catalog_loaded" false|
@@ -359,7 +359,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       result = CatalogDescription.render_for_entries(small_fleet(), config)
 
       assert result =~ "Synthetic discovery snapshot for configured upstreams:"
-      assert result =~ "(mcp/servers)"
+      assert result =~ "(tool/servers)"
       assert result =~ ~s|"name" "filesystem"|
       assert result =~ ~s|"name" "github"|
       refute result =~ "(dir "

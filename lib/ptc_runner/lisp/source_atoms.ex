@@ -127,7 +127,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   )a
 
   # Qualified analyzer keys — atom literals after `ns/` in dispatch
-  # clauses (e.g. `(mcp/servers)` and other REPL discovery forms).
+  # clauses (e.g. `(tool/servers)` and other REPL discovery forms).
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
     summary remaining servers

@@ -372,7 +372,7 @@ end
 scenario_b_program = """
 (let [files ["a.txt" "b.txt" "c.txt"]
       counts (map (fn [path]
-                    (let [resp (tool/mcp-call {:server "#{server_name}"
+                    (let [resp (tool/call {:server "#{server_name}"
                                                :tool "read_file"
                                                :args {:path path}})
                           text (get-in resp ["content" 0 "text"])
@@ -523,7 +523,7 @@ end
 sequential_program = """
 (let [files ["a.txt" "b.txt" "c.txt"]
       counts (map (fn [path]
-                    (let [resp (tool/mcp-call {:server "#{server_name}"
+                    (let [resp (tool/call {:server "#{server_name}"
                                                :tool "read_file"
                                                :args {:path path}})
                           text (get-in resp ["content" 0 "text"])
@@ -536,7 +536,7 @@ sequential_program = """
 pmap_program = """
 (let [files ["a.txt" "b.txt" "c.txt"]
       counts (pmap (fn [path]
-                     (let [resp (tool/mcp-call {:server "#{server_name}"
+                     (let [resp (tool/call {:server "#{server_name}"
                                                 :tool "read_file"
                                                 :args {:path path}})
                            text (get-in resp ["content" 0 "text"])
@@ -584,10 +584,10 @@ Limits.set(Map.merge(Limits.defaults(), Limits.aggregator_defaults()))
   )
 
 failure_program = """
-(let [ok-resp (tool/mcp-call {:server "#{server_name}"
+(let [ok-resp (tool/call {:server "#{server_name}"
                               :tool "read_file"
                               :args {:path "a.txt"}})
-      bad-resp (tool/mcp-call {:server "#{server_name}"
+      bad-resp (tool/call {:server "#{server_name}"
                                :tool "broken_read"
                                :args {:path "a.txt"}})]
   {:ok-content (get-in ok-resp ["content" 0 "text"])
@@ -632,7 +632,7 @@ Limits.set(Map.merge(Limits.defaults(), Limits.aggregator_defaults()))
   )
 
 null_program = """
-(let [resp (tool/mcp-call {:server "#{server_name}"
+(let [resp (tool/call {:server "#{server_name}"
                            :tool "null_tool"
                            :args {}})]
   {:resp resp

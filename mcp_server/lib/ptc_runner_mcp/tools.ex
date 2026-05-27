@@ -685,9 +685,9 @@ defmodule PtcRunnerMcp.Tools do
   #
   # In aggregator mode, the request handler:
   #   1. Builds a fresh `call_context` (unique ref + :counters cap).
-  #   2. Registers the `mcp-call` virtual tool whose closure captures
+  #   2. Registers the `call` virtual tool whose closure captures
   #      that context.
-  #   3. Runs `Sandbox.execute(..., tools: %{"mcp-call" => closure},
+  #   3. Runs `Sandbox.execute(..., tools: %{"call" => closure},
   #      profile: :mcp_aggregator)`.
   #   4. On normal completion or caught Lisp/runtime error producing
   #      an envelope, drains the worker's mailbox for

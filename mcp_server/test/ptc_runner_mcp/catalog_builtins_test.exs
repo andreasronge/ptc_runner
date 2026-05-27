@@ -88,7 +88,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   end
 
   # ============================================================
-  # mcp/servers
+  # tool/servers
   # ============================================================
 
   describe "servers" do
@@ -664,7 +664,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result =~ "Args: {:query string}"
       assert result =~ "Required args: :query"
       assert result =~ "Call:"
-      assert result =~ ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+      assert result =~ ~s|(tool/call {:server "github" :tool "search" :args {:query ...}})|
       assert result =~ "Returns: Result<any>"
       assert result =~ "Use `(:value r)` after checking `(:ok r)`."
     end
@@ -676,7 +676,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:doc, ["github/search"])
 
       assert result =~
-               ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+               ~s|(tool/call {:server "github" :tool "search" :args {:query ...}})|
     end
 
     test "call_example includes empty :args clause when tool has no properties" do
@@ -696,7 +696,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result =~ "util/ping"
       assert result =~ "Args: {}"
       assert result =~ "Required args: none"
-      assert result =~ ~s|(tool/mcp-call {:server "util" :tool "ping" :args {}})|
+      assert result =~ ~s|(tool/call {:server "util" :tool "ping" :args {}})|
     end
 
     test "call_example escapes string-sensitive server and tool names" do
@@ -714,7 +714,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       {:ok, result} = exec.(:doc, [~s|srv"quoted/say"hi|])
 
       assert result =~
-               ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+               ~S|(tool/call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
     end
 
     test "tool refs can address configured upstream names containing slash" do
@@ -847,7 +847,38 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert result.annotations == %{"readOnlyHint" => true}
 
       assert result.call ==
-               ~s|(tool/mcp-call {:server "github" :tool "search" :args {:query ...}})|
+               ~s|(tool/call {:server "github" :tool "search" :args {:query ...}})|
+    end
+
+    test "returns OpenAPI provenance in tool metadata" do
+      schema = %{
+        "name" => "list-traces",
+        "description" => "List traces",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{"tenant" => %{"type" => "string"}},
+          "required" => ["tenant"]
+        },
+        "outputSchema" => %{"type" => "object"},
+        "_ptc" => %{
+          "transport" => "openapi",
+          "operationId" => "list_traces",
+          "method" => "GET",
+          "path" => "/api/traces"
+        }
+      }
+
+      config = %{tools: %{"list-traces" => {schema, fn _ -> "ok" end}}, metadata: %{}}
+      :ok = Registry.put_fake("observatory", config, @registry_name)
+      {:ok, _} = Registry.ensure_started("observatory", @registry_name)
+
+      {exec, _ctx} = build_exec()
+      assert {:ok, result} = exec.(:meta, ["observatory/list-traces"])
+
+      assert result.kind == "openapi-tool"
+      assert result._ptc["transport"] == "openapi"
+      assert result._ptc["operationId"] == "list_traces"
+      assert result.input_schema["required"] == ["tenant"]
     end
 
     test "call form escapes string-sensitive server and tool names" do
@@ -865,7 +896,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
       assert {:ok, result} = exec.(:meta, [~s|srv"quoted/say"hi|])
 
       assert result.call ==
-               ~S|(tool/mcp-call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
+               ~S|(tool/call {:server "srv\"quoted" :tool "say\"hi" :args {}})|
     end
 
     test "tool refs with slash-containing upstream names work for meta" do
@@ -979,7 +1010,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
   # ============================================================
 
   describe "shared ensure coordination" do
-    test "catalog and tool/mcp-call share failure cache" do
+    test "catalog and tool/call share failure cache" do
       # Register upstream but DON'T ensure_started — cached_tools stays nil
       config = tools_config(%{"t" => fn _ -> "ok" end})
       :ok = Registry.put_fake("srv", config, @registry_name)
@@ -993,7 +1024,7 @@ defmodule PtcRunnerMcp.CatalogBuiltinsTest do
           max_response_bytes: 1_000_000
         )
 
-      # Simulate a failure cached by tool/mcp-call for "srv"
+      # Simulate a failure cached by tool/call for "srv"
       UpstreamCalls.mark_failure(call_context, "srv", :upstream_unavailable, "boom")
 
       exec =

@@ -183,7 +183,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
 
     env =
       Tools.call_with_gate(%{
-        "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|
+        "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {}})|
       })
 
     assert env["isError"] == false
@@ -211,7 +211,7 @@ defmodule PtcRunnerMcp.SlimResponseTest do
       "params" => %{
         "name" => "lisp_eval",
         "arguments" => %{
-          "program" => ~S|(tool/mcp-call {:server "alpha" :tool "echo" :args {}})|
+          "program" => ~S|(tool/call {:server "alpha" :tool "echo" :args {}})|
         }
       }
     }

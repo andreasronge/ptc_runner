@@ -10,7 +10,7 @@ production-shaped test bed.
 
 `ptc_runner_mcp` already acts as an MCP aggregator: client LLMs write small
 PTC-Lisp programs, and the sandbox calls configured upstream MCP servers via
-`(tool/mcp-call ...)`. This works well for reducing large upstream payloads
+`(tool/call ...)`. This works well for reducing large upstream payloads
 before they reach the model.
 
 Not every production service should expose MCP directly. Many services already
@@ -20,7 +20,7 @@ be able to consume the API schema, compile selected operations into tool
 metadata, and expose them to PTC-Lisp through the same tool-discovery and
 tool-call model as MCP upstreams.
 
-Tilda Observatory is the initial proving ground. The target use case is coding
+Observatory is the initial proving ground. The target use case is coding
 agents accessing production logs/traces safely and cheaply, with PTC-Lisp doing
 local filtering/aggregation before returning a compact answer to the client.
 
@@ -518,7 +518,7 @@ Code touchpoints:
   - Preserve the existing validation, per-program cap, upstream ledger,
     telemetry, `McpResult` tagging, and programmer-fault vs world-fault
     classification.
-  - Update user-facing hints from `(tool/mcp-call ...)` / `(mcp/servers)` to
+  - Update user-facing hints from `(tool/call ...)` / `(tool/servers)` to
     `(tool/call ...)` / `(tool/servers)` plus `dir` / `doc` / `apropos`.
 - `mcp_server/lib/ptc_runner_mcp/catalog_prompt.ex`,
   `mcp_server/lib/ptc_runner_mcp/tools.ex`,
@@ -705,7 +705,7 @@ Acceptance:
 
 ### 6. Observatory fixture and docs
 
-Use Tilda Observatory as the production-shaped fixture after the generic
+Use Observatory as the production-shaped fixture after the generic
 OpenAPI adapter works against local tests.
 
 Code/docs touchpoints:

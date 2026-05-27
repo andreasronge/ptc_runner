@@ -123,7 +123,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
       assert_before(
         description,
-        "(tool/mcp-call",
+        "(tool/call",
         "Synthetic discovery snapshot for configured upstreams:"
       )
     end
@@ -338,7 +338,7 @@ defmodule PtcRunnerMcp.ToolsPhase3Test do
 
   defp assert_quick_contract_in_first_chunk(text) do
     for marker <- [
-          "(tool/mcp-call",
+          "(tool/call",
           "Result<T>",
           "Check `:ok`",
           ":value T",
