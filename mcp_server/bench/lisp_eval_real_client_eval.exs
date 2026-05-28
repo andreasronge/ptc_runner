@@ -21,7 +21,15 @@ PtcRunner.Dotenv.load()
 defmodule Bench.LispExecuteRealClientEval do
   @moduledoc false
 
-  alias PtcRunnerMcp.{AggregatorConfig, CatalogConfig, ResponseProfile, Tools}
+  alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
+
+  alias PtcRunnerMcp.{
+    AggregatorConfig,
+    CatalogConfig,
+    ResponseProfile,
+    RootUpstreamRuntime,
+    Tools
+  }
 
   @repo_root Path.expand(Path.join([__DIR__, "..", ".."]))
   @tmp_dir Path.join(@repo_root, "tmp/lisp-execute-real-client-eval")
@@ -215,25 +223,36 @@ defmodule Bench.LispExecuteRealClientEval do
 
   defp maybe_start_upstream_subsystem!(opts) do
     if :with_upstreams in opts.profiles do
-      start_upstream_subsystem!()
+      ensure_root_upstream_runtime!()
     else
       :ok
     end
   end
 
-  defp start_upstream_subsystem! do
-    %{upstreams: upstreams, credentials: bindings} =
-      PtcRunnerMcp.Application.load_aggregator_config(%{upstreams_config: @upstreams_path})
+  defp ensure_root_upstream_runtime! do
+    if RootUpstreamRuntime.configured?() do
+      :ok
+    else
+      %{root_runtime_opts: opts} =
+        PtcRunnerMcp.Application.load_aggregator_config(%{upstreams_config: @upstreams_path})
 
-    if Process.whereis(PtcRunnerMcp.Credentials) == nil do
-      {:ok, _pid} = PtcRunnerMcp.Credentials.start_link(bindings: bindings)
+      {:ok, _pid} = UpstreamRuntime.start_link(root_runtime_opts(opts))
+      :ok
     end
+  end
 
-    if Process.whereis(PtcRunnerMcp.Upstream.Supervisor) == nil do
-      {:ok, _pid} = PtcRunnerMcp.Upstream.Supervisor.start_link(upstreams: upstreams)
-    end
+  defp root_runtime_opts(opts) do
+    catalog = CatalogConfig.get()
 
-    :ok
+    opts
+    |> Keyword.put(:name, RootUpstreamRuntime.name())
+    |> Keyword.put(:catalog_exposure_mode, catalog.catalog_mode)
+    |> Keyword.put(:catalog_inline_max_chars, catalog.catalog_inline_max_chars)
+    |> Keyword.put(:catalog_inline_max_tools, catalog.catalog_inline_max_tools)
+    |> Keyword.put(
+      :redaction_sink,
+      {RootUpstreamRuntime, :register_redaction_secrets, []}
+    )
   end
 
   defp write_upstreams_config! do
@@ -242,6 +261,7 @@ defmodule Bench.LispExecuteRealClientEval do
     config = %{
       "upstreams" => %{
         "filesystem" => %{
+          "transport" => "mcp_stdio",
           "command" => "npx",
           "args" => [
             "--yes",
@@ -712,7 +732,9 @@ defmodule Bench.LispExecuteRealClientEval do
     program = get_in(tool_call, [:args, "program"]) || get_in(tool_call, [:args, :program]) || ""
     upstream_calls = Map.get(tool_result, "upstream_calls", []) || []
     all_upstream_calls = Map.get(result, "upstream_calls", []) ++ upstream_calls
-    catalog_op_mentions = Map.get(result, "catalog_op_mentions", 0) + count_catalog_mentions(program)
+
+    catalog_op_mentions =
+      Map.get(result, "catalog_op_mentions", 0) + count_catalog_mentions(program)
 
     result
     |> Map.update!("tool_call_count", &(&1 + 1))
@@ -721,7 +743,10 @@ defmodule Bench.LispExecuteRealClientEval do
     |> Map.put("tool_reason", Map.get(tool_result, "reason"))
     |> Map.put("tool_result", Map.take(tool_result, ["status", "result", "reason", "message"]))
     |> Map.put("upstream_calls", all_upstream_calls)
-    |> Map.put("upstream_ok_count", Enum.count(all_upstream_calls, &(Map.get(&1, "status") == "ok")))
+    |> Map.put(
+      "upstream_ok_count",
+      Enum.count(all_upstream_calls, &(Map.get(&1, "status") == "ok"))
+    )
     |> Map.put(
       "upstream_error_count",
       Enum.count(all_upstream_calls, &(Map.get(&1, "status") == "error"))
