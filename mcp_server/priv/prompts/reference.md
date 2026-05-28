@@ -10,26 +10,26 @@
 <!-- PTC_PROMPT_START -->
 PTC-Lisp reference
 
-Core includes `let`, `fn`, `defn`, `#(...)`, `loop`/`recur`, collections/strings/sets/regex/math, `parse-*`, destructing.
+Clojure-core subset. Includes `let`, `fn`, `defn`, `#(...)`, `loop`/`recur`, collections/strings/sets/regex/math, `parse-*`, destructuring.
 
 Syntax:
 - One or more top-level forms. Final value = result.
-- Use `(fn [x] body)` or `#(...)`; No `lambda`, `let*`.
+- No `lambda`, `let*`, `ns`, `require`, `refer`, `import`, macros.
 - Inspect shapes with `println`, `pr-str`, `keys`.
 
 Data:
-- literals: `nil`, bools, numbers, strings, keywords, vectors/maps/sets.
+- literals: `nil`, bools, numbers, strings, keywords, vectors, maps, sets.
 - JSON maps use string keys.
 - No `sorted-map`; use `{}` or `(hash-map)`.
 - Context example: `{"orders":[...]}` -> `(count (filter #(= "paid" (get % "status")) data/orders))`.
-- Use `data/orders`, not `(data/orders)`, `orders`, or bare `data`.
+- Use `data/orders`, not `(data/orders)` or bare `data`.
 
 Helpers:
 - Namespaces are fixed; no `require`/`import`.
-- `json/parse-string`, `json/generate-string`; `str/join`, `set/union`.
-- Java-shaped: `Double/parseDouble`, `LocalDate/parse`.
+- `json/parse-string`, `json/generate-string`; `str/join`, `set/union`; `fail`.
+- Java-shaped: `Double/parseDouble`, `LocalDate/parse`, `System/currentTimeMillis`, String methods.
 - Discover: `apropos`, `dir`, `doc`, `meta`; `ns-publics` is local only.
 - Prefer core fns; use `pmap`/`pcalls` when useful.
 
-No: `let*`, `ns`, `require`, `refer`, `import`, macros; lazy/infinite seqs; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network
+No: lazy/infinite seq producers; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network I/O; general Java interop.
 <!-- PTC_PROMPT_END -->
