@@ -78,7 +78,7 @@ defmodule PtcRunnerMcp.AggregatorConfigTest do
     end
 
     @tag :tmp_dir
-    test "loads policy keys without leaving them in stdio transport config", %{tmp_dir: tmp_dir} do
+    test "loads policy keys while routing upstream config to root runtime", %{tmp_dir: tmp_dir} do
       path = Path.join(tmp_dir, "upstreams.json")
 
       File.write!(
@@ -86,6 +86,7 @@ defmodule PtcRunnerMcp.AggregatorConfigTest do
         Jason.encode!(%{
           "upstreams" => %{
             "alpha" => %{
+              "transport" => "mcp_stdio",
               "command" => "echo",
               "raw_envelope" => true,
               "tools" => %{"read" => %{"raw_envelope" => false}}
@@ -96,8 +97,20 @@ defmodule PtcRunnerMcp.AggregatorConfigTest do
 
       args = Application.parse_args(["--upstreams-config", path])
 
-      assert %{upstreams: [%{config: %{command: "echo"}}]} =
-               Application.load_aggregator_config(args)
+      assert %{
+               upstreams: [],
+               root_runtime_opts: [
+                 config_path: ^path,
+                 catalog_exposure_mode: :auto,
+                 catalog_snapshot_mode: :frozen
+               ],
+               raw_envelope_policy: %{
+                 raw_envelope_default: false,
+                 upstreams: %{
+                   "alpha" => %{raw_envelope: true, tools: %{"read" => %{raw_envelope: false}}}
+                 }
+               }
+             } = Application.load_aggregator_config(args)
     end
   end
 end

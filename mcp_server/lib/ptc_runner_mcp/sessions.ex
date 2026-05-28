@@ -9,9 +9,9 @@ defmodule PtcRunnerMcp.Sessions do
 
   import Kernel, except: [inspect: 1]
 
+  alias PtcRunner.Upstream.{RunContext, Runtime}
+
   alias PtcRunnerMcp.{
-    AggregatorTools,
-    CatalogBuiltins,
     CatalogConfig,
     DebugConfig,
     Envelope,
@@ -19,11 +19,9 @@ defmodule PtcRunnerMcp.Sessions do
     OutputLimits,
     PromptRegistry,
     ResponseProfile,
-    Tools,
-    UpstreamCalls
+    RootUpstreamRuntime,
+    Tools
   }
-
-  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   alias PtcRunnerMcp.Sessions.{Config, Owner, Projection, Registry, Session, Supervisor}
 
@@ -702,39 +700,43 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  defp aggregator_run_opts(opts, request_id) do
-    if Tools.configured_aggregator_mode?() do
-      catalog_config = CatalogConfig.get()
-
-      call_context =
-        UpstreamCalls.new_call_context(
-          collector_pid: self(),
-          collector_ref: make_ref(),
-          max_calls: Limits.max_upstream_calls_per_program(),
-          max_catalog_ops: catalog_config.max_catalog_ops_per_program,
-          call_timeout_ms: Limits.upstream_call_timeout_ms(),
-          max_response_bytes: Limits.max_upstream_response_bytes(),
-          max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
-        )
-
-      tools = AggregatorTools.build(call_context, request_id: request_id)
-
-      discovery_exec =
-        CatalogBuiltins.build(call_context,
-          registry: UpstreamRegistry,
-          catalog_config: catalog_config
-        )
-
-      run_opts =
-        opts
-        |> Map.put(:tools, tools)
-        |> Map.put(:discovery_exec, discovery_exec)
-        |> Map.put(:profile, :mcp_aggregator)
-
-      {run_opts, fn -> UpstreamCalls.drain(call_context.collector_ref) end}
+  defp aggregator_run_opts(opts, _request_id) do
+    if RootUpstreamRuntime.configured?() do
+      root_aggregator_run_opts(opts)
     else
       {opts, fn -> [] end}
     end
+  end
+
+  defp root_aggregator_run_opts(opts) do
+    catalog_config = CatalogConfig.get()
+
+    {:ok, context} =
+      Runtime.run_context(RootUpstreamRuntime.runtime(),
+        max_tool_calls: Limits.max_upstream_calls_per_program(),
+        max_catalog_ops: catalog_config.max_catalog_ops_per_program,
+        call_timeout_ms: Limits.upstream_call_timeout_ms(),
+        max_response_bytes: Limits.max_upstream_response_bytes(),
+        max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
+      )
+
+    eval_opts = RunContext.eval_options(context)
+
+    run_opts =
+      opts
+      |> Map.put(:tools, eval_opts[:tools])
+      |> Map.put(:discovery_exec, eval_opts[:discovery_exec])
+      |> Map.put(:profile, :mcp_aggregator)
+
+    drain = fn ->
+      try do
+        RunContext.drain_calls(context)
+      after
+        RunContext.close(context)
+      end
+    end
+
+    {run_opts, drain}
   end
 
   defp maybe_put(map, _key, nil), do: map

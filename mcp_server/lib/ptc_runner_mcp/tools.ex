@@ -23,12 +23,11 @@ defmodule PtcRunnerMcp.Tools do
   """
 
   alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.Upstream.{Result, RunContext, Runtime}
 
   alias PtcRunnerMcp.{
     Agentic,
     AgenticConfig,
-    AggregatorTools,
-    CatalogBuiltins,
     CatalogConfig,
     ConcurrencyGate,
     DebugConfig,
@@ -38,15 +37,14 @@ defmodule PtcRunnerMcp.Tools do
     PayloadMetrics,
     PromptRegistry,
     ResponseProfile,
+    RootUpstreamRuntime,
     Sandbox,
     Sessions,
-    UpstreamCalls,
     UpstreamResultFeedback
   }
 
   alias PtcRunnerMcp.AggregatorConfig
   alias PtcRunnerMcp.CatalogDescription
-  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "lisp_eval"
 
@@ -149,6 +147,8 @@ defmodule PtcRunnerMcp.Tools do
             "upstream_unavailable",
             "tool_error",
             "upstream_error",
+            "auth_failed",
+            "rate_limited",
             "timeout",
             "response_too_large",
             "cap_exhausted"
@@ -351,17 +351,7 @@ defmodule PtcRunnerMcp.Tools do
   """
   @spec configured_aggregator_mode?() :: boolean()
   def configured_aggregator_mode? do
-    case Process.whereis(UpstreamRegistry) do
-      nil ->
-        false
-
-      pid when is_pid(pid) ->
-        try do
-          UpstreamRegistry.configured_count() > 0
-        catch
-          :exit, _ -> false
-        end
-    end
+    RootUpstreamRuntime.configured?()
   end
 
   defp current_profile do
@@ -422,7 +412,14 @@ defmodule PtcRunnerMcp.Tools do
   # CatalogDescription, which resolves the effective mode (auto,
   # inline, lazy) and renders the appropriate description fragment.
   defp catalog_for(:mcp_no_tools), do: nil
-  defp catalog_for(:mcp_aggregator), do: CatalogDescription.render()
+
+  defp catalog_for(:mcp_aggregator) do
+    if RootUpstreamRuntime.configured?() do
+      RootUpstreamRuntime.catalog_text()
+    else
+      CatalogDescription.render()
+    end
+  end
 
   @doc "Handle a `tools/list` request."
   @spec list() :: map()
@@ -696,50 +693,48 @@ defmodule PtcRunnerMcp.Tools do
   #      via `Envelope.success/1` or `Envelope.error_envelope/1`.
   #      Cancellation / worker crash skips the drain (§6.4 last
   #      paragraph) — this code path simply isn't reached.
-  defp execute_with_aggregator(program, context, parsed_signature, sandbox_opts, exec_opts) do
-    if configured_aggregator_mode?() do
-      request_id = Keyword.get(exec_opts, :request_id)
+  defp execute_with_aggregator(program, context, parsed_signature, sandbox_opts, _exec_opts) do
+    if RootUpstreamRuntime.configured?() do
+      execute_with_root_runtime(program, context, parsed_signature, sandbox_opts)
+    else
+      program
+      |> Sandbox.execute(context, parsed_signature, sandbox_opts)
+      |> wrap_sandbox_result()
+    end
+  end
 
-      catalog_config = CatalogConfig.get()
+  defp execute_with_root_runtime(program, context, parsed_signature, sandbox_opts) do
+    runtime = RootUpstreamRuntime.runtime()
 
-      call_context =
-        UpstreamCalls.new_call_context(
-          collector_pid: self(),
-          collector_ref: make_ref(),
-          max_calls: Limits.max_upstream_calls_per_program(),
-          max_catalog_ops: catalog_config.max_catalog_ops_per_program,
-          call_timeout_ms: Limits.upstream_call_timeout_ms(),
-          max_response_bytes: Limits.max_upstream_response_bytes(),
-          max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
-        )
+    {:ok, run_context} =
+      Runtime.run_context(runtime,
+        max_tool_calls: Limits.max_upstream_calls_per_program(),
+        max_catalog_ops: CatalogConfig.get().max_catalog_ops_per_program,
+        call_timeout_ms: Limits.upstream_call_timeout_ms(),
+        max_response_bytes: Limits.max_upstream_response_bytes(),
+        max_catalog_result_bytes: CatalogConfig.get().max_catalog_result_bytes
+      )
 
-      # Thread `request_id` into the closure so
-      # `[:ptc_lisp, :upstream, :call, :*]` telemetry metadata
-      # carries the originating MCP request id. Operators correlating
-      # upstream call failures back to the parent `tools/call` use
-      # this as the join key.
-      tools = AggregatorTools.build(call_context, request_id: request_id)
-
-      discovery_exec =
-        CatalogBuiltins.build(call_context,
-          registry: UpstreamRegistry,
-          catalog_config: catalog_config
-        )
+    try do
+      eval_opts = RunContext.eval_options(run_context)
 
       sandbox_result =
         Sandbox.execute(
           program,
           context,
           parsed_signature,
-          [tools: tools, discovery_exec: discovery_exec, profile: :mcp_aggregator] ++ sandbox_opts
+          [
+            tools: eval_opts[:tools],
+            discovery_exec: eval_opts[:discovery_exec],
+            profile: :mcp_aggregator
+          ] ++
+            sandbox_opts
         )
 
-      entries = UpstreamCalls.drain(call_context.collector_ref)
+      entries = RunContext.drain_calls(run_context)
       decorate_and_wrap(sandbox_result, entries)
-    else
-      program
-      |> Sandbox.execute(context, parsed_signature, sandbox_opts)
-      |> wrap_sandbox_result()
+    after
+      RunContext.close(run_context)
     end
   end
 
@@ -749,7 +744,7 @@ defmodule PtcRunnerMcp.Tools do
     case profile do
       :debug ->
         payload
-        |> UpstreamCalls.decorate(entries)
+        |> Result.decorate_payload(entries)
         |> decorate_ptc_metrics(:ok, entries)
         |> OutputLimits.shape_lisp_payload(:ok, profile)
         |> Envelope.ptc_lisp_success()
@@ -758,7 +753,7 @@ defmodule PtcRunnerMcp.Tools do
       _ ->
         debug_payload =
           payload
-          |> UpstreamCalls.decorate(entries)
+          |> Result.decorate_payload(entries)
           |> decorate_ptc_metrics(:ok, entries)
 
         payload
@@ -773,7 +768,7 @@ defmodule PtcRunnerMcp.Tools do
     decorated =
       payload
       |> UpstreamResultFeedback.append_to_feedback(entries)
-      |> UpstreamCalls.decorate(entries)
+      |> Result.decorate_payload(entries)
 
     profile = ResponseProfile.current()
 

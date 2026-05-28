@@ -1,0 +1,46 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "PTC Runner Dummy Upstream",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/echo": {
+      "get": {
+        "operationId": "echo",
+        "summary": "Echo a message",
+        "parameters": [
+          {
+            "name": "message",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Echo response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "echo": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["echo", "path"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

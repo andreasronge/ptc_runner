@@ -1,0 +1,11 @@
+{
+  "upstreams": {
+    "dummy": {
+      "transport": "openapi",
+      "base_url": "http://127.0.0.1:4017",
+      "allow_insecure_http": true,
+      "schema_file": "./openapi.json",
+      "include_operations": ["echo"]
+    }
+  }
+}

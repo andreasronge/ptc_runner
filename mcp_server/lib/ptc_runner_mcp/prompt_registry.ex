@@ -2,8 +2,8 @@ defmodule PtcRunnerMcp.PromptRegistry do
   @moduledoc false
 
   alias PtcRunner.PromptLoader
-  alias PtcRunnerMcp.{CatalogConfig, CatalogDescription, CatalogPrompt}
-  alias PtcRunnerMcp.Upstream.Catalog
+  alias PtcRunner.Upstream.Runtime
+  alias PtcRunnerMcp.{CatalogConfig, CatalogDescription, CatalogPrompt, RootUpstreamRuntime}
 
   @agentic_role "You are an agent that writes PTC-Lisp programs to fulfill plain-English tasks via the configured upstream MCP servers and return human-readable text."
 
@@ -154,7 +154,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   end
 
   def render(:mcp_agentic_task_prompt, opts) do
-    catalog = Keyword.get_lazy(opts, :catalog, &Catalog.frozen/0)
+    catalog = Keyword.get_lazy(opts, :catalog, &default_catalog_text/0)
 
     catalog_mode =
       Keyword.get_lazy(opts, :catalog_mode, fn -> CatalogConfig.get().catalog_mode end)
@@ -394,7 +394,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
 
   defp agentic_upstream_catalog(catalog, :auto) do
     config = CatalogConfig.get()
-    snapshot = Catalog.frozen_snapshot()
+    snapshot = default_catalog_snapshot()
 
     case snapshot do
       [] ->
@@ -412,7 +412,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     do: "Upstream discovery:\n(no upstream discovery snapshot frozen)"
 
   defp agentic_upstream_catalog(catalog, _mode) do
-    snapshot = Catalog.frozen_snapshot()
+    snapshot = default_catalog_snapshot()
 
     rendered =
       render_catalog_snapshot(snapshot, :inline) ||
@@ -427,7 +427,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   end
 
   defp lazy_catalog_server_names(catalog) do
-    snapshot = Catalog.frozen_snapshot()
+    snapshot = default_catalog_snapshot()
 
     render_catalog_snapshot(snapshot, :lazy) ||
       catalog
@@ -462,6 +462,22 @@ defmodule PtcRunnerMcp.PromptRegistry do
     header
     |> String.replace(~r/\s+\[[^\]]+\]\s*$/, "")
     |> String.trim()
+  end
+
+  defp default_catalog_text do
+    if RootUpstreamRuntime.configured?() do
+      RootUpstreamRuntime.catalog_text()
+    else
+      ""
+    end
+  end
+
+  defp default_catalog_snapshot do
+    if RootUpstreamRuntime.configured?() do
+      Runtime.catalog_snapshot(RootUpstreamRuntime.runtime())
+    else
+      []
+    end
   end
 
   defp agentic_final_recap do

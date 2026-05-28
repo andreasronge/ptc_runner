@@ -312,6 +312,20 @@ defmodule PtcRunnerMcp.Credentials do
     GenServer.call(server, :list_bindings)
   end
 
+  @doc false
+  @spec register_redaction_secrets([String.t()]) :: :ok
+  def register_redaction_secrets(secrets) when is_list(secrets) do
+    register_redaction_secrets(__MODULE__, secrets)
+  end
+
+  @doc false
+  @spec register_redaction_secrets(GenServer.server(), [String.t()]) :: :ok
+  def register_redaction_secrets(server, secrets) when is_list(secrets) do
+    GenServer.call(server, {:register_redaction_secrets, secrets})
+  catch
+    :exit, _ -> :ok
+  end
+
   @doc """
   ETS table name. Compile-time constant — exposed so the redactor
   filter (stream 1C) can look the table up without reaching into this
@@ -341,6 +355,15 @@ defmodule PtcRunnerMcp.Credentials do
 
   def handle_call(:list_bindings, _from, %{bindings: bindings} = state) do
     {:reply, bindings |> Map.keys() |> Enum.sort(), state}
+  end
+
+  def handle_call({:register_redaction_secrets, secrets}, _from, %{table: table} = state)
+      when is_list(secrets) do
+    secrets
+    |> Enum.filter(&(is_binary(&1) and byte_size(&1) > 0))
+    |> Enum.each(&:ets.insert(table, {&1, true}))
+
+    {:reply, :ok, state}
   end
 
   # ---------------------------------------------------------------------------

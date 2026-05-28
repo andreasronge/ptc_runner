@@ -16,8 +16,8 @@ defmodule PtcRunnerMcp.CatalogDescription do
   by the prompt cards that include this dynamic tail.
   """
 
-  alias PtcRunnerMcp.CatalogConfig
-  alias PtcRunnerMcp.Upstream.Catalog, as: UpstreamCatalog
+  alias PtcRunner.Upstream.Runtime
+  alias PtcRunnerMcp.{CatalogConfig, RootUpstreamRuntime}
 
   @inline_description_max_chars 120
 
@@ -37,7 +37,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   """
   @spec render() :: String.t() | nil
   def render do
-    entries = UpstreamCatalog.frozen_snapshot()
+    entries = frozen_snapshot()
 
     case entries do
       [] -> nil
@@ -54,6 +54,8 @@ defmodule PtcRunnerMcp.CatalogDescription do
   def render_for_entries([], _config), do: nil
 
   def render_for_entries(entries, config) do
+    entries = normalize_entries(entries)
+
     case resolve_mode(entries, config) do
       {:inline, warnings} ->
         render_inline(entries, warnings, config)
@@ -73,6 +75,8 @@ defmodule PtcRunnerMcp.CatalogDescription do
   @spec resolve_mode([snapshot_entry()], CatalogConfig.t()) ::
           {:inline, [String.t()]} | :lazy
   def resolve_mode(entries, config) do
+    entries = normalize_entries(entries)
+
     case config.catalog_mode do
       :lazy ->
         :lazy
@@ -192,6 +196,37 @@ defmodule PtcRunnerMcp.CatalogDescription do
 
     render_command_result("(tool/servers)", values)
   end
+
+  defp frozen_snapshot do
+    if RootUpstreamRuntime.configured?() do
+      Runtime.catalog_snapshot(RootUpstreamRuntime.runtime())
+    else
+      []
+    end
+  end
+
+  defp normalize_entries(entries) when is_list(entries) do
+    Enum.map(entries, fn entry ->
+      %{
+        name: entry_field(entry, :name, ""),
+        tools: entry_tools(entry),
+        metadata: entry_metadata(entry)
+      }
+    end)
+  end
+
+  defp entry_field(entry, key, default) when is_map(entry) do
+    string_key = Atom.to_string(key)
+
+    cond do
+      Map.has_key?(entry, key) -> Map.fetch!(entry, key)
+      Map.has_key?(entry, string_key) -> Map.fetch!(entry, string_key)
+      true -> default
+    end
+  end
+
+  defp entry_tools(entry), do: entry_field(entry, :tools, [])
+  defp entry_metadata(entry), do: entry_field(entry, :metadata, %{})
 
   defp server_snapshot_map(%{name: name, tools: tools} = entry) do
     %{

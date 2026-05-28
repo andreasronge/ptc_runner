@@ -5,7 +5,7 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
   string `"[REDACTED]"`.
 
   This is the **defense-in-depth** filter wired into `Log`, `TraceFile`,
-  `TracePayload`, and `UpstreamCalls` per
+  `TracePayload`, and upstream call records per
   `Plans/http-transport-credentials.md` §7.5.1. The primary safety
   guarantee is structural (resolved bindings live only in the
   Credentials state, the redaction set, and the in-flight `Req`
@@ -20,7 +20,7 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
 
   Critically, `scrub/1` is **safe to call when `Credentials` has not
   been started**: many test contexts wire `Log` / `TraceFile` /
-  `UpstreamCalls` without booting `Credentials`. When the named ETS
+  upstream call rendering without booting `Credentials`. When the named ETS
   table does not exist, `scrub/1` returns its input unchanged.
 
   ## Plaintext, not hashes
@@ -59,7 +59,7 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
   Returns the input unchanged when the redaction-set ETS table does
   not exist (i.e. `PtcRunnerMcp.Credentials` has not booted yet, or
   has crashed). This makes the filter safe to wire into the four hot
-  emission paths (Log/TraceFile/TracePayload/UpstreamCalls) without
+  emission paths (Log/TraceFile/TracePayload/upstream records) without
   forcing every test that exercises those paths to also boot
   `Credentials`.
   """

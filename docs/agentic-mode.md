@@ -171,7 +171,7 @@ It makes no LLM calls. It freezes synthetic upstream catalogs and
 routes through `Tools.list/0`, `Agentic.Prompt.system_prompt/1`,
 `CatalogDescription.render/0`, and `CapabilitySummary.from_frozen/1`.
 With the default `--agentic-capability-summary-max-bytes=800` and
-default auto inline thresholds (`40` tools / `12000` chars), the
+default auto inline thresholds (`8` tools / `800` chars), the
 current bench reports:
 
 | Fleet | `:auto` effective mode | Planner prompt `:auto` | Planner prompt `:inline` | Planner prompt `:lazy` | `lisp_task` tool entry `:auto` | `lisp_task` tool entry `:inline` | `lisp_task` tool entry `:lazy` |

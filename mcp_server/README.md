@@ -325,6 +325,7 @@ as the deployment runbook.
 - Conceptual overview and security model: [`docs/mcp-server.md`](../docs/mcp-server.md)
 - Full configuration reference: [`docs/mcp-server-configuration.md`](../docs/mcp-server-configuration.md)
 - Aggregator mode: [`docs/aggregator-mode.md`](../docs/aggregator-mode.md)
+- Root upstream runtime: [`docs/upstream-runtime.md`](../docs/upstream-runtime.md)
 - Agentic mode: [`docs/agentic-mode.md`](../docs/agentic-mode.md)
 - HTTP deployment: [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
 - Diagnostics: [`docs/mcp-debug.md`](../docs/mcp-debug.md)
