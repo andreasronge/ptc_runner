@@ -188,7 +188,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
   # Keep only the structurally-scalar, non-secret-bearing fields of
   # each `upstream_calls[]` entry. `error` (a free-text detail string)
   # is already `Redactor.scrub/1`-ed at construction time
-  # (`UpstreamCalls.error_entry/6` / `Ledger`), but we drop it here
+  # (upstream call records / `Ledger`), but we drop it here
   # anyway — `lisp_debug` surfaces *reasons*, not raw error text — to
   # keep the redaction surface minimal (spec § 8 "residual leakage").
   # `result_bytes` (`integer | null`) and `oversize` (`boolean`) are

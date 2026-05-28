@@ -32,7 +32,7 @@ defmodule PtcRunnerMcp.Credentials.RedactedHeaders do
   Unwrap the inner header list.
 
   This is the **only legitimate exit point** for the wrapped bytes.
-  Per §7.3 the only legitimate caller is `PtcRunnerMcp.Upstream.Http`'s
+  Per §7.3 the only legitimate caller is upstream HTTP transport auth
   request layer, which splices the headers into an outbound `Req`
   request and drops its reference once the request returns.
   """

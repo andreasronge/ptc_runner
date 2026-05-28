@@ -127,18 +127,28 @@ defmodule Mix.Tasks.Mcp.Repl do
     PtcRunner.Dotenv.load()
     {:ok, _apps} = Application.ensure_all_started(:telemetry)
 
+    aggregator_config = PtcRunnerMcp.Application.load_aggregator_config(args)
+
     %{upstreams: upstreams, credentials: bindings, raw_envelope_policy: raw_envelope_policy} =
-      PtcRunnerMcp.Application.load_aggregator_config(args)
+      aggregator_config
+
+    root_runtime_opts = root_runtime_opts(Map.get(aggregator_config, :root_runtime_opts))
 
     :ok = PtcRunnerMcp.Application.apply_aggregator_config(args, raw_envelope_policy)
     :ok = PtcRunnerMcp.Application.apply_catalog_config(args)
     :ok = PtcRunnerMcp.Application.apply_debug_config(args)
     :ok = PtcRunnerMcp.Application.apply_response_profile(args)
-    :ok = PtcRunnerMcp.Application.apply_limits(args, aggregator?: upstreams != [])
+    :ok = PtcRunnerMcp.Application.apply_limits(args, aggregator?: root_runtime_opts != nil)
     :ok = PtcRunnerMcp.Application.apply_sessions_config(args)
     :ok = PtcRunnerMcp.ConcurrencyGate.init()
 
-    children = PtcRunnerMcp.Application.build_repl_children(upstreams, bindings)
+    children =
+      PtcRunnerMcp.Application.build_repl_children(
+        upstreams,
+        bindings,
+        root_runtime_opts
+      )
+
     opts = [strategy: :rest_for_one, name: PtcRunnerMcp.ReplSupervisor]
 
     case Supervisor.start_link(children, opts) do
@@ -151,6 +161,17 @@ defmodule Mix.Tasks.Mcp.Repl do
       {:error, reason} ->
         Mix.raise("could not start MCP REPL runtime: #{inspect(reason)}")
     end
+  end
+
+  defp root_runtime_opts(nil), do: nil
+
+  defp root_runtime_opts(opts) when is_list(opts) do
+    catalog = PtcRunnerMcp.CatalogConfig.get()
+
+    opts
+    |> Keyword.put(:catalog_exposure_mode, catalog.catalog_mode)
+    |> Keyword.put(:catalog_inline_max_chars, catalog.catalog_inline_max_chars)
+    |> Keyword.put(:catalog_inline_max_tools, catalog.catalog_inline_max_tools)
   end
 
   defp session_mode(opts) do

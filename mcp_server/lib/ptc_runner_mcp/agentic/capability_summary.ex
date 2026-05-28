@@ -6,8 +6,8 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   parsing the human-oriented upstream catalog text.
   """
 
-  alias PtcRunnerMcp.CatalogConfig
-  alias PtcRunnerMcp.Upstream.Catalog
+  alias PtcRunner.Upstream.Runtime
+  alias PtcRunnerMcp.{CatalogConfig, RootUpstreamRuntime}
 
   @default_max_bytes 800
 
@@ -42,7 +42,7 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
   """
   @spec from_frozen(keyword()) :: String.t()
   def from_frozen(opts \\ []) do
-    generate(Catalog.frozen_snapshot(), opts)
+    generate(frozen_snapshot(), opts)
   end
 
   @doc """
@@ -119,6 +119,14 @@ defmodule PtcRunnerMcp.Agentic.CapabilitySummary do
       %{name: entry_name(entry), tools: entry_tools(entry)}
     end)
     |> Enum.sort_by(& &1.name)
+  end
+
+  defp frozen_snapshot do
+    if RootUpstreamRuntime.configured?() do
+      Runtime.catalog_snapshot(RootUpstreamRuntime.runtime())
+    else
+      []
+    end
   end
 
   defp entry_name(%{name: name}), do: to_string(name)

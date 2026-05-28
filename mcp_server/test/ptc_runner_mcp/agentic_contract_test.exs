@@ -1,6 +1,7 @@
 defmodule PtcRunnerMcp.AgenticContractTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunnerMcp.Agentic
   alias PtcRunnerMcp.Agentic.{Ledger, Projection}
   alias PtcRunnerMcp.AgenticConfig
 
@@ -65,5 +66,51 @@ defmodule PtcRunnerMcp.AgenticContractTest do
                "turn" => 1
              }
            ] = Projection.ledger_entries(entries)
+  end
+
+  test "root agentic tool wrapper records unknown side-effect attempt before dispatch" do
+    {:ok, ledger} = Ledger.start_link()
+    parent = self()
+
+    tools =
+      Agentic.root_tools_with_ledger(
+        %{
+          "call" => fn _args ->
+            send(parent, {:attempted_during_dispatch, Ledger.side_effecting_attempted?(ledger)})
+            %{ok: true, value: %{"done" => true}}
+          end
+        },
+        ledger
+      )
+
+    assert tools["call"].(%{server: "github", tool: "create_issue", args: %{title: "x"}}) == %{
+             ok: true,
+             value: %{"done" => true}
+           }
+
+    assert_receive {:attempted_during_dispatch, true}
+
+    assert [
+             %{
+               server: "github",
+               tool: "create_issue",
+               status: :ok,
+               effect: :unknown,
+               result_overview: %{
+                 "value_kind" => "json",
+                 "shape" => "map keys=[\"done\"] count=1"
+               }
+             }
+           ] = Ledger.entries(ledger)
+
+    assert [
+             %{
+               "server" => "github",
+               "tool" => "create_issue",
+               "status" => "ok",
+               "value_kind" => "json",
+               "shape" => "map keys=[\"done\"] count=1"
+             }
+           ] = Projection.upstream_results(Ledger.entries(ledger))
   end
 end

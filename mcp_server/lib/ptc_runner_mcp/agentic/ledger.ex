@@ -90,6 +90,34 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
     complete(ledger, id, :error, Keyword.merge(opts, error_reason: reason, error: error))
   end
 
+  @doc false
+  @spec record_completed(t(), String.t(), String.t(), status(), keyword()) :: :ok
+  def record_completed(ledger, server, tool, status, opts \\ [])
+      when is_pid(ledger) and is_binary(server) and is_binary(tool) and status in [:ok, :error] do
+    now = DateTime.utc_now()
+
+    entry =
+      %{
+        id: make_ref(),
+        server: server,
+        tool: tool,
+        args_hash: Keyword.get(opts, :args_hash, ""),
+        status: status,
+        effect: Keyword.get(opts, :effect, :unknown),
+        turn: Keyword.get(opts, :turn, 1),
+        started_at: now,
+        completed_at: now,
+        oversize: Keyword.get(opts, :oversize, false) == true
+      }
+      |> maybe_put(:duration_ms, Keyword.get(opts, :duration_ms))
+      |> maybe_put(:result_bytes, Keyword.get(opts, :result_bytes))
+      |> maybe_put(:result_overview, Keyword.get(opts, :result_overview))
+      |> maybe_put(:error_reason, Keyword.get(opts, :error_reason))
+      |> maybe_put(:error, Keyword.get(opts, :error))
+
+    Agent.update(ledger, &[entry | &1])
+  end
+
   @doc "Returns entries in attempt order."
   @spec entries(t()) :: [entry()]
   def entries(ledger) when is_pid(ledger) do

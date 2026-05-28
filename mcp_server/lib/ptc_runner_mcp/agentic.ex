@@ -4,30 +4,27 @@ defmodule PtcRunnerMcp.Agentic do
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop.StepAssembler
+  alias PtcRunner.Upstream.{Result, RunContext, Runtime}
 
   alias PtcRunnerMcp.{
     AgenticConfig,
-    CatalogBuiltins,
     CatalogConfig,
     Envelope,
     Limits,
     PayloadMetrics,
     PromptRegistry,
-    UpstreamCalls,
+    RootUpstreamRuntime,
     UpstreamResultFeedback
   }
 
   alias PtcRunnerMcp.Agentic.{
     CapabilitySummary,
     Ledger,
-    McpCall,
     Planner,
     Projection,
     Prompt,
     Renderer
   }
-
-  alias PtcRunnerMcp.Upstream.Registry, as: UpstreamRegistry
 
   @tool_name "lisp_task"
 
@@ -76,7 +73,7 @@ defmodule PtcRunnerMcp.Agentic do
          {:ok, turn_tracker} <- Agent.start_link(fn -> 1 end),
          {:ok, planner_log} <- Agent.start_link(fn -> [] end),
          assembled <- assemble_prompt(validated, cfg),
-         agent <- build_subagent(assembled, ledger, turn_tracker, cfg),
+         agent <- build_subagent(assembled, cfg),
          llm <- planner_llm(cfg, deadline, request_id, planner_log, turn_tracker, ledger),
          result <- run_subagent(agent, llm, validated, request_id, ledger),
          :ok <- require_budget(deadline) do
@@ -96,15 +93,11 @@ defmodule PtcRunnerMcp.Agentic do
     )
   end
 
-  defp build_subagent(assembled, ledger, turn_tracker, cfg) do
+  defp build_subagent(assembled, cfg) do
     SubAgent.new(
       prompt: assembled.user_message,
       system_prompt: assembled.system_prompt,
-      tools:
-        McpCall.build(ledger,
-          max_calls: Limits.max_upstream_calls_per_program(),
-          turn: fn -> Agent.get(turn_tracker, & &1) end
-        ),
+      tools: %{},
       max_turns: cfg.max_turns,
       retry_turns: cfg.retry_turns,
       completion_mode: :explicit,
@@ -170,39 +163,134 @@ defmodule PtcRunnerMcp.Agentic do
   defp retry_feedback_turn?(_messages), do: false
 
   defp run_subagent(agent, llm, validated, request_id, ledger) do
-    SubAgent.run(agent,
-      llm: llm,
-      context: validated.context,
-      continuation_guard: continuation_guard(ledger),
-      trace_context: %{request_id: request_id},
-      discovery_exec: build_discovery_exec()
+    if RootUpstreamRuntime.configured?() do
+      {result, _records} =
+        Runtime.with_run_context(
+          RootUpstreamRuntime.runtime(),
+          root_context_opts(),
+          fn context ->
+            eval_opts = RunContext.eval_options(context)
+            root_agent = %{agent | tools: root_tools_with_ledger(eval_opts[:tools], ledger)}
+
+            SubAgent.run(root_agent,
+              llm: llm,
+              context: validated.context,
+              continuation_guard: continuation_guard(ledger),
+              trace_context: %{request_id: request_id},
+              discovery_exec: eval_opts[:discovery_exec]
+            )
+          end
+        )
+
+      result
+    else
+      SubAgent.run(agent,
+        llm: llm,
+        context: validated.context,
+        continuation_guard: continuation_guard(ledger),
+        trace_context: %{request_id: request_id}
+      )
+    end
+  end
+
+  @doc false
+  @spec root_tools_with_ledger(map(), Ledger.t()) :: map()
+  def root_tools_with_ledger(%{"call" => call} = tools, ledger) when is_function(call, 1) do
+    %{tools | "call" => fn args -> call_with_ledger(call, ledger, args) end}
+  end
+
+  def root_tools_with_ledger(tools, _ledger), do: tools
+
+  defp call_with_ledger(call, ledger, args) do
+    attempt = ledger_attempt(ledger, args)
+
+    try do
+      result = call.(args)
+      complete_ledger_attempt(ledger, attempt, result)
+      result
+    rescue
+      exception ->
+        complete_ledger_exception(ledger, attempt, exception)
+        reraise exception, __STACKTRACE__
+    end
+  end
+
+  defp ledger_attempt(ledger, args) do
+    case ledger_call_args(args) do
+      {:ok, server, tool, call_args} ->
+        {:ok, Ledger.record_attempt(ledger, server, tool, call_args, :unknown, 1)}
+
+      :error ->
+        :none
+    end
+  end
+
+  defp ledger_call_args(args) when is_map(args) do
+    server = Map.get(args, :server) || Map.get(args, "server")
+    tool = Map.get(args, :tool) || Map.get(args, "tool")
+    call_args = Map.get(args, :args) || Map.get(args, "args") || %{}
+
+    if is_binary(server) and server != "" and is_binary(tool) and tool != "" and
+         is_map(call_args) do
+      {:ok, server, tool, call_args}
+    else
+      :error
+    end
+  end
+
+  defp ledger_call_args(_args), do: :error
+
+  defp complete_ledger_attempt(_ledger, :none, _result), do: :ok
+
+  defp complete_ledger_attempt(ledger, {:ok, id}, %{ok: true} = result) do
+    value = Map.get(result, :value)
+    value_kind = Map.get(result, :value_kind, Result.value_kind(value))
+
+    Ledger.complete_success(ledger, id,
+      result_overview: Result.result_overview(value, value_kind),
+      result_bytes: safe_external_size(value),
+      effect: :unknown
     )
   end
 
-  # Build a discovery executor closure for the planner's generated
-  # PTC-Lisp program. Mirrors the wiring in
-  # `Tools.execute_with_aggregator/4` but with a dedicated call_context
-  # whose budget is independent from the agentic `tool/call`
-  # counter (`McpCall.build/2` owns its own `:atomics`). Discovery ops
-  # therefore never consume the upstream-call quota.
-  defp build_discovery_exec do
+  defp complete_ledger_attempt(ledger, {:ok, id}, %{ok: false} = result) do
+    Ledger.complete_error(
+      ledger,
+      id,
+      result[:reason] |> to_string(),
+      result[:message] || "",
+      effect: :unknown
+    )
+  end
+
+  defp complete_ledger_attempt(ledger, {:ok, id}, _result) do
+    Ledger.complete_success(ledger, id, effect: :unknown)
+  end
+
+  defp complete_ledger_exception(_ledger, :none, _exception), do: :ok
+
+  defp complete_ledger_exception(ledger, {:ok, id}, exception) do
+    Ledger.complete_error(ledger, id, "runtime_error", Exception.message(exception),
+      effect: :unknown
+    )
+  end
+
+  defp safe_external_size(value) do
+    :erlang.external_size(value)
+  rescue
+    _ -> nil
+  end
+
+  defp root_context_opts do
     catalog_config = CatalogConfig.get()
 
-    call_context =
-      UpstreamCalls.new_call_context(
-        collector_pid: self(),
-        collector_ref: make_ref(),
-        max_calls: Limits.max_upstream_calls_per_program(),
-        max_catalog_ops: catalog_config.max_catalog_ops_per_program,
-        call_timeout_ms: Limits.upstream_call_timeout_ms(),
-        max_response_bytes: Limits.max_upstream_response_bytes(),
-        max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
-      )
-
-    CatalogBuiltins.build(call_context,
-      registry: UpstreamRegistry,
-      catalog_config: catalog_config
-    )
+    [
+      max_tool_calls: Limits.max_upstream_calls_per_program(),
+      max_catalog_ops: catalog_config.max_catalog_ops_per_program,
+      call_timeout_ms: Limits.upstream_call_timeout_ms(),
+      max_response_bytes: Limits.max_upstream_response_bytes(),
+      max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
+    ]
   end
 
   defp continuation_guard(ledger) do
