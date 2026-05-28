@@ -50,16 +50,18 @@ config from the first match in:
 If none is found, the server runs in MCP v1 (`:mcp_no_tools`)
 mode and `(tool/call ...)` is unavailable.
 
-### Format — stdio upstream
+### Format — MCP stdio upstream
 
 ```json
 {
   "upstreams": {
     "fs": {
+      "transport": "mcp_stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/sandbox"]
     },
     "github": {
+      "transport": "mcp_stdio",
       "command": "github-mcp",
       "args": [],
       "env": {
@@ -74,10 +76,10 @@ mode and `(tool/call ...)` is unavailable.
 from the parent-process environment at startup. Unset
 variables abort startup with a clear error. **Note**: the
 `${VAR}` resolver is narrowed to stdio `env` only — credentials,
-HTTP `url`, `static_headers`, `proxy`, and other fields are
+MCP HTTP `url`, `static_headers`, `proxy`, and other fields are
 parsed literally.
 
-### Format — HTTP upstream + credentials
+### Format — MCP HTTP upstream + credentials
 
 Aggregator mode also supports Streamable HTTP upstreams (MCP rev
 2025-06-18) alongside stdio, with a credentials registry:
@@ -92,7 +94,7 @@ Aggregator mode also supports Streamable HTTP upstreams (MCP rev
   },
   "upstreams": {
     "github": {
-      "transport": "http",
+      "transport": "mcp_http",
       "url": "https://api.githubcopilot.com/mcp/",
       "auth": [
         { "scheme": "bearer", "binding": "github-pat" }
@@ -102,6 +104,7 @@ Aggregator mode also supports Streamable HTTP upstreams (MCP rev
       }
     },
     "fs": {
+      "transport": "mcp_stdio",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/sandbox"]
     }
@@ -110,7 +113,7 @@ Aggregator mode also supports Streamable HTTP upstreams (MCP rev
 ```
 
 Mixed transports are fully supported. From the program's
-perspective, an HTTP upstream and a stdio upstream are
+perspective, an MCP HTTP upstream and an MCP stdio upstream are
 indistinguishable.
 
 ### Format — OpenAPI upstream
@@ -167,11 +170,9 @@ for provenance.
 
 **Credentials.** Top-level `credentials:` block holds named
 bindings. Three sources are supported in v1: `env` (read from
-process env at request time, never cached), `file` (read +
-trim trailing whitespace at request time), and `literal`
-(value embedded in config — emits a `Logger.warning` outside
-`MIX_ENV: :test`). The reserved source `exec` is deferred to
-v1.1.
+process env during runtime startup), `file` (read + trim trailing
+whitespace during runtime startup), and `literal` (value embedded
+in config). The reserved source `exec` is deferred.
 
 **Auth emitters.** Each HTTP upstream's `auth:` is an ordered
 list. Three schemes:
@@ -199,9 +200,9 @@ emitters for any secret-bearing header.
 HTTP additionally requires `allow_insecure_auth: true` — two
 explicit opt-ins.
 
-**Optional `:req` dep.** HTTP transport requires the `:req`
+**Optional `:req` dep.** MCP HTTP and OpenAPI transports require the `:req`
 package. It's an optional Mix dep — stdio-only operators don't
-need it. If a `transport: "http"` entry is configured but
+need it. If a `transport: "mcp_http"` entry is configured but
 `:req` is unloaded, boot fails loudly with a clear message.
 
 **Resolution semantics.**
@@ -212,9 +213,17 @@ need it. If a `transport: "http"` entry is configured but
 - The redactor (substring-replaces registered plaintext with
   `[REDACTED]` in any formatted string the logger / trace /
   upstream_calls writers emit) is defense in depth.
-- env / file bindings are re-resolved on every request — no
-  in-process value cache. Rotating an env var or replacing a
-  file is picked up on the next request without restart.
+- Catalog and discovery output is scrubbed before it reaches MCP
+  `tools/list`, REPL discovery forms, traces, debug records, or
+  session history. This protects against a malicious or buggy
+  authenticated upstream echoing a credential in `tools/list`.
+- The MCP server registers root upstream runtime secrets with its
+  process-wide redaction stack so trace files, `lisp_debug`, session
+  stores, logs, and agentic planner prompts share the same
+  defense-in-depth scrub set.
+- env / file bindings are resolved once when the root upstream
+  runtime starts. Rotate an env var or replace a credential file
+  by restarting the REPL or MCP server process.
 
 ### Operational notes
 
@@ -224,14 +233,13 @@ need it. If a `transport: "http"` entry is configured but
   pointing at this PtcRunner's loopback is technically possible
   and unsafeguarded — programs that loop will eventually hit
   `max_upstream_calls_per_program`.
-- `fake` fields are NOT honored from the JSON config — fakes
-  exist only for tests and require the `Upstream.Registry`
-  test API.
-- Boot-time HTTP failures (handshake 503, binding resolution
-  failure) are non-fatal — the upstream renders as
-  "(unavailable at startup)" in the catalog and arms backoff
-  for the next call. The aggregator does not refuse to boot
-  because a remote MCP is down.
+- There is no JSON `fake` transport. Tests use root-runtime
+  fixtures/helpers rather than production config fields.
+- The MCP server runs the shared root upstream runtime in frozen
+  snapshot mode. Config parse failures, credential binding failures,
+  MCP client startup failures, or `tools/list` failures fail server
+  startup. Root `mix ptc.repl` defaults to live snapshot mode, where
+  MCP client startup/listing is attempted on discovery or call.
 
 ## Writing PTC-Lisp programs against `tool/call`
 
@@ -388,36 +396,25 @@ Configured upstream MCP servers:
 
 ### When the catalog is populated
 
-The catalog is built once at MCP-server startup:
+Catalog population is controlled by the root upstream runtime's
+snapshot mode:
 
-1. The supervisor eagerly calls `ensure_started/1` against every
-   configured upstream so each Connection's `tools/list` response
-   is cached.
-2. The catalog string is rendered from those caches.
-3. The string is **frozen** into `:persistent_term` and read from
-   there on every subsequent `tools/list` request.
+- **Frozen** starts and lists configured MCP stdio/http upstreams
+  during runtime startup, then reuses that scrubbed structured
+  snapshot for MCP `tools/list` and discovery. `ptc_runner_mcp`
+  uses frozen mode so one server process presents a stable tool
+  surface for its lifetime. If a configured MCP upstream cannot
+  start or cannot answer `tools/list`, MCP server startup fails.
+- **Live** defers MCP stdio/http client startup and listing until
+  discovery or `(tool/call ...)` needs the upstream. Root
+  `mix ptc.repl --upstreams-config ...` defaults to live mode and
+  accepts `--catalog-snapshot-mode frozen` when a fail-fast startup
+  check is preferred.
 
-The frozen string is **stable for the lifetime of the MCP-server
-process**. Post-boot upstream crashes, recoveries, and config
-changes do **not** alter what the calling LLM sees — schema
-changes require a PtcRunner restart. This matches §12.5's
-"rebuilt only on PtcRunner restart" contract; without the freeze,
-a crashed upstream would retroactively flip to
-`(unavailable at startup)` mid-session and confuse programs that
-were authored against the original catalog.
-
-An upstream that fails the boot-time `ensure_started/1` renders
-as:
-
-```
-upstream-name:
-  (unavailable at startup)
-```
-
-The Connection is still re-attempted on the first
-`(tool/call ...)` invocation that targets it (per §4.3
-backoff) — only the catalog text is frozen, not the runtime
-upstream state.
+OpenAPI schemas are still loaded during runtime startup in both
+modes because the runtime compiles the explicitly included
+operations before exposing them. Prefer `schema_file` for production
+so startup does not depend on a schema host.
 
 ### REPL discovery from PTC-Lisp
 
@@ -432,7 +429,7 @@ search across catalogs, or read a tool's full input schema.
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `tool/servers` | `(tool/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Loaded MCP tool matches rank before unloaded MCP server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` every configured upstream is `ensure_started`ed first and only tool-level matches are returned. |
+| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Loaded MCP tool matches rank before unloaded MCP server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` live-mode runtimes attempt to load configured upstreams first and only tool-level matches are returned. |
 | `dir` | `(dir ref)`<br>`(dir ref opts)` | For known local namespaces/classes, lists executable local members. Otherwise, lists `tool - description` strings for one MCP server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
 | `doc` | `(doc ref)` | One detailed local or MCP description string. Known local refs win; unknown refs fall through to MCP tool refs shaped as `server/tool`. MCP docs include args, required args, a ready-to-edit `(tool/call …)` example, and the `Result<...>` payload shape. |
 | `meta` | `(meta ref)` | Structured local or MCP metadata. Known local refs win; unknown refs fall through to MCP tool refs. |
@@ -449,10 +446,9 @@ entries are returned; ties break on `{server, tool}` so ordering
 is stable across runs.
 
 `dir`, `doc`, and `meta` (and `apropos` when called with `:load true`)
-trigger a lazy `ensure_started/1` for the target upstream if its tools
-aren't cached yet — using the same per-program failure cache and ensure
-locks as `(tool/call ...)`, so concurrent `pmap` children cooperate
-instead of stampeding. Result lists are size-capped at
+trigger live-mode upstream loading when a target MCP server has not
+been listed yet. Frozen-mode runtimes read the startup snapshot.
+Result lists are size-capped at
 `--max-catalog-result-bytes` (default 256 KiB) of JSON: an over-cap
 `dir` / `apropos` list is truncated entry-by-entry, an over-cap `doc`
 or `meta` result becomes a world fault.

@@ -141,7 +141,7 @@ The `--catalog-mode` flag (env: `PTC_RUNNER_MCP_CATALOG_MODE`) controls how upst
 |---|---|
 | `inline` | A synthetic discovery snapshot inlined in `lisp_eval` / `lisp_session_eval` descriptions: server summaries, compact `dir` name/description lists, and one `doc` example. Best for small fleets. |
 | `lazy` | Configured server names plus front-loaded discovery guidance; tools discovered at runtime via REPL discovery forms. Best for large fleets or cost-conscious setups. |
-| `auto` | Inline when ≤ `--catalog-inline-max-tools` (40) and the synthetic discovery snapshot fits within `--catalog-inline-max-chars` (12000); lazy otherwise. Optional prose is capped/dropped before switching to lazy mode. |
+| `auto` | Inline when ≤ `--catalog-inline-max-tools` (8) and the synthetic discovery snapshot fits within `--catalog-inline-max-chars` (800); lazy otherwise. Optional prose is capped/dropped before switching to lazy mode. |
 
 In **lazy** (or auto-resolved-lazy) mode, programs discover tools via PTC-Lisp REPL discovery forms that run inside `lisp_eval` — no extra MCP tool calls:
 
@@ -158,10 +158,17 @@ Discovery forms have a separate budget from upstream calls: `--max-catalog-ops-p
 | Flag | Env var | Default | Meaning |
 |---|---|---|---|
 | `--catalog-mode` | `PTC_RUNNER_MCP_CATALOG_MODE` | `auto` | `auto` \| `inline` \| `lazy` |
-| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `12000` | Auto→lazy threshold for the rendered synthetic discovery snapshot |
-| `--catalog-inline-max-tools` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS` | `40` | Auto→lazy threshold (tool count) |
+| `--catalog-inline-max-chars` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS` | `800` | Auto→lazy threshold for the rendered synthetic discovery snapshot |
+| `--catalog-inline-max-tools` | `PTC_RUNNER_MCP_CATALOG_INLINE_MAX_TOOLS` | `8` | Auto→lazy threshold (tool count) |
 | `--max-catalog-ops-per-program` | `PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM` | `25` | Discovery call budget per program |
 | `--max-catalog-result-bytes` | `PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES` | `262144` (256 KiB) | Per-discovery-result cap |
+
+The MCP server uses the root upstream runtime in frozen snapshot mode:
+configured MCP stdio/http upstreams are started and listed during
+server boot, and the scrubbed snapshot is reused for `tools/list`.
+Root `mix ptc.repl` uses the same upstream config format but defaults
+to live snapshot mode, where MCP client startup/listing is attempted on
+discovery or call.
 
 ## Aggregator-mode flags
 
@@ -178,6 +185,25 @@ These come into effect when at least one upstream is configured. The first two o
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Advertise aggregator mode as read-only/non-destructive for clients like Codex when upstreams enforce read-only behavior. |
 
 CLI flag wins over env var; aggregator-mode defaults only apply when no explicit value is given.
+
+### Upstream Config Format
+
+The upstream JSON format is owned by the root `ptc_runner` upstream
+runtime and shared by `mix ptc.repl` and `ptc_runner_mcp`. The MCP
+server keeps its own flag/env names, including `PTC_RUNNER_MCP_UPSTREAMS`,
+but translates the selected config into root runtime options at boot.
+See [`upstream-runtime.md`](upstream-runtime.md) for the root REPL
+entrypoint and snapshot-mode behavior.
+
+Use the explicit root transport names in new configs:
+
+- `"openapi"` for curated read-only JSON OpenAPI operations.
+- `"mcp_stdio"` for external MCP servers launched over stdio.
+- `"mcp_http"` for external MCP servers reached over Streamable HTTP/SSE.
+
+See [`aggregator-mode.md`](aggregator-mode.md) for complete examples,
+credential emitters, static-header restrictions, and the `tool/call`
+authoring model.
 
 ### OpenAPI Upstreams
 
