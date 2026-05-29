@@ -3191,7 +3191,8 @@ Access results from previous turns using the turn history symbols:
 **Semantics:**
 - `*1` returns the result of the most recent turn
 - Returns `nil` if the turn doesn't exist (e.g., `*1` on turn 1)
-- Results are **truncated** to ~1KB to prevent memory bloat
+- The host controls how many prior return values are supplied. The public
+  `PtcRunner.Session` wrapper keeps the last 3 successful returns by default.
 - Use stored values (plain symbols defined via `def`) for persistent access to full values
 
 **Use cases:**

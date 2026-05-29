@@ -77,6 +77,39 @@ like `mock_llm` above. There is no separate `stub`/`mock` helper. See the
 [Testing guide](docs/guides/subagent-testing.md) for scripted callbacks and
 integration patterns.
 
+### Embed a stateful PTC-Lisp session
+
+Use `PtcRunner.Session` when your application already owns the chat loop and
+only needs REPL-like Lisp state:
+
+```elixir
+session = PtcRunner.Session.new(timeout: 1_000)
+
+{{:ok, step}, session} =
+  PtcRunner.Session.eval(session, "(def total (+ 1 2))")
+
+step.memory["total"]
+#=> 3
+
+{{:ok, step}, session} =
+  PtcRunner.Session.eval(session, "(* total 10)")
+
+step.return
+#=> 30
+
+{{:ok, step}, _session} =
+  PtcRunner.Session.eval(session, "*1")
+
+step.return
+#=> 30
+```
+
+The session stores explicit `(def ...)` memory and the bounded return history
+used by `*1`, `*2`, and `*3` (default depth: 3). Runtime options such as tools,
+context, signatures, and timeouts can be stored as session defaults or passed
+per eval call. Pass `upstream_runtime: runtime` to evaluate through the root
+upstream runtime while keeping the session focused on Lisp state.
+
 **Try it yourself:** The [Getting Started guide](docs/guides/subagent-getting-started.md) includes fully runnable examples you can copy-paste.
 
 The SubAgent doesn't answer directly - it writes a program that computes the answer:
