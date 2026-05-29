@@ -3560,7 +3560,7 @@
       name: "ceil",
       status: :supported,
       description: "Returns the smallest integer >= argument",
-      notes: ""
+      notes: "BUG GAP-J21: finite results are returned as integers instead of Java doubles"
     },
     %{
       name: "copySign",
@@ -3602,7 +3602,7 @@
       name: "floor",
       status: :supported,
       description: "Returns the largest integer <= argument",
-      notes: ""
+      notes: "BUG GAP-J21: finite results are returned as integers instead of Java doubles"
     },
     %{
       name: "floorDiv",
