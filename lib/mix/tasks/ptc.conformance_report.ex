@@ -27,7 +27,11 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
     covered = covered_keys(cases)
 
     if "--write-inventory" in args do
-      File.write!("conformance_inventory.json", Jason.encode!(inventory, pretty: true))
+      File.write!(
+        "conformance_inventory.json",
+        Jason.encode!(ordered_inventory(inventory), pretty: true)
+      )
+
       Mix.shell().info("Wrote conformance_inventory.json")
     end
 
@@ -86,6 +90,18 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
       compatibility_target: target,
       notes: Map.get(entry, :notes, "")
     }
+  end
+
+  defp ordered_inventory(inventory) do
+    Enum.map(inventory, fn entry ->
+      Jason.OrderedObject.new(
+        status: entry.status,
+        symbol: entry.symbol,
+        namespace: entry.namespace,
+        compatibility_target: entry.compatibility_target,
+        notes: entry.notes
+      )
+    end)
   end
 
   defp java_namespace(:java_lang_boolean_audit), do: "java.lang.Boolean"

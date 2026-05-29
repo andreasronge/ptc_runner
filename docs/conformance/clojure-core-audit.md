@@ -227,7 +227,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `fnil` | ✅ supported | Returns function with nil defaults | BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position |
 | `for` | ✅ supported | List comprehension from nested iteration | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `force` | ❌ not_relevant | Forces evaluation of delay | relies on lazy evaluation/delays |
-| `format` | ✅ supported | Returns formatted string | BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null |
+| `format` | ✅ supported | Returns formatted string | DIV-39: %s collection rendering uses deterministic PTC readable formatting. BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null |
 | `frequencies` | ✅ supported | Returns map of item frequencies | BUG GAP-S20: nil input currently raises instead of returning an empty frequency map; direct map input raises instead of counting map entries. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `future` | ❌ not_relevant | Async computation | concurrency primitive |
 | `future-call` | ❌ not_relevant | Calls function asynchronously | concurrency primitive |
@@ -368,7 +368,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `pos-int?` | ✅ supported | Returns true if positive integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
 | `pos?` | ✅ supported | Returns true if number positive | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `pr` | ❌ not_relevant | Prints value in readable form | I/O operation |
-| `pr-str` | ✅ supported | Returns readable string of value | BUG GAP-S126: character literals print as strings instead of character syntax |
+| `pr-str` | ✅ supported | Returns readable string of value | DIV-39: collection rendering is deterministic, key-sorted for maps, and space-separated. BUG GAP-S126: character literals print as strings instead of character syntax |
 | `prefer-method` | ❌ not_relevant | Prefers multimethod implementation | multimethods are unsupported |
 | `prefers` | ❌ not_relevant | Returns multimethod preferences | multimethods are unsupported |
 | `print` | ❌ not_relevant | Prints value without quoting | I/O operation |

@@ -7589,6 +7589,33 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "PTC-Lisp map value views follow sorted key order instead of preserving Clojure map iteration order."
       ),
       div_case(
+        "div/pr-str-map-rendering-001",
+        "clojure.core",
+        ["pr-str"],
+        "(pr-str {:b 2 :a 1})",
+        "DIV-39",
+        "{:a 1 :b 2}",
+        "PTC-Lisp readable map rendering is deterministic, key-sorted, and space-separated."
+      ),
+      div_case(
+        "div/pr-str-nested-map-rendering-001",
+        "clojure.core",
+        ["pr-str"],
+        "(pr-str {:a {:b 2 :c 3}})",
+        "DIV-39",
+        "{:a {:b 2 :c 3}}",
+        "PTC-Lisp readable map rendering omits optional commas recursively."
+      ),
+      div_case(
+        "div/format-map-rendering-001",
+        "clojure.core",
+        ["format"],
+        ~S|(format "%s" {:b 2 :a 1})|,
+        "DIV-39",
+        "{:a 1 :b 2}",
+        "PTC-Lisp format %s uses the same deterministic collection rendering as str/pr-str."
+      ),
+      div_case(
         "div/quot-long-min-overflow-001",
         "clojure.core",
         ["quot"],

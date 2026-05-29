@@ -5320,6 +5320,33 @@ ordered views by sorting entries by key. This avoids accidental dependence on
 host map iteration order and matches the explicit map-view guidance in the
 PTC-Lisp specification.
 
+### DIV-39: Readable collection rendering is deterministic and space-separated
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `div/pr-str-map-rendering-001`, `div/pr-str-nested-map-rendering-001`, `div/format-map-rendering-001` |
+
+```clojure
+;; Clojure
+(pr-str {:b 2 :a 1})           ;=> "{:b 2, :a 1}"
+(pr-str {:a {:b 2 :c 3}})      ;=> "{:a {:b 2, :c 3}}"
+(format "%s" {:b 2 :a 1})      ;=> "{:b 2, :a 1}"
+
+;; PTC-Lisp
+(pr-str {:b 2 :a 1})           ;=> "{:a 1 :b 2}"
+(pr-str {:a {:b 2 :c 3}})      ;=> "{:a {:b 2 :c 3}}"
+(format "%s" {:b 2 :a 1})      ;=> "{:a 1 :b 2}"
+```
+
+**Rationale:** PTC-Lisp treats maps as unordered data and renders them in a
+stable key-sorted order. It also follows its own reader/formatter convention
+that commas are optional and output is space-separated. This keeps printed data
+stable for agent feedback and aligns with the PTC-Lisp specification's readable
+representation, even though Clojure's `pr-str` includes commas and preserves
+the host map iteration order.
+
 ### DIV-37: Integer operations and predicates use arbitrary-precision semantics
 
 | Field | Value |
