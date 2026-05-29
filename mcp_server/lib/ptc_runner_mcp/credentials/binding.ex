@@ -31,7 +31,7 @@ defmodule PtcRunnerMcp.Credentials.Binding do
   defstruct [:name, :source, :scheme_hint, :spec]
 
   # Whitelisted source-string → atom map. We never call
-  # `String.to_atom/1` on user input (CLAUDE.md guideline).
+  # `String.to_atom/1` on user input (AGENTS.md / usage rules).
   @sources %{
     "env" => :env,
     "file" => :file,

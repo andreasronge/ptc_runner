@@ -134,7 +134,7 @@ grep -r "pattern" lib/
 # Check if similar functionality already exists
 grep -r "similar_pattern" lib/
 # See how similar cases are handled in the codebase
-# Read CLAUDE.md for project conventions
+# Read AGENTS.md for project conventions
 ```
 
 Flag if PR introduces code that duplicates or reimplements existing functionality.
@@ -165,7 +165,7 @@ grep -r "relevant_feature" docs/architecture.md
 Ask:
 - Does this PR change public API? If yes, are `@doc` and `@moduledoc` updated?
 - Does this add/change DSL operations? If yes, is `docs/architecture.md` updated?
-- Does this change project structure or conventions? If yes, is `CLAUDE.md` updated?
+- Does this change project structure or conventions? If yes, is `AGENTS.md` updated?
 
 ## Output Format for Triage
 

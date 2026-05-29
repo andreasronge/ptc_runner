@@ -68,7 +68,7 @@ defmodule PtcRunnerMcp.Sandbox do
   @type result :: {:ok | :error, map()}
 
   # Word size of the running BEAM in bytes. 8 on 64-bit (the only
-  # supported target — see CLAUDE.md "Tech Stack: OTP 28"). Cached
+  # supported target — see AGENTS.md). Cached
   # at compile time because the value cannot change for a given
   # release. Used to convert
   # `Limits.program_memory_limit_bytes/0` (bytes, the user-facing

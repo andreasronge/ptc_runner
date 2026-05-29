@@ -10,7 +10,7 @@ The MetaAgent prompt must stay domain-blind. When ALMA underperforms, the tempta
 
 ## Domain leakage audit
 
-The CLAUDE.md project rules require domain-blind orchestration: "System prompts, planner prompts, and agent configurations must not contain hints about test data, benchmark domains, or expected answer patterns." An audit of the ALMA codebase found the following:
+The AGENTS.md project rules require domain-blind orchestration: "System prompts, planner prompts, and agent configurations must not contain hints about test data, benchmark domains, or expected answer patterns." An audit of the ALMA codebase found the following:
 
 ### Clean (no leakage)
 

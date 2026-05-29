@@ -1,9 +1,13 @@
 defmodule PtcRunnerMcp.AgenticContractTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias PtcRunner.Upstream.Runtime
   alias PtcRunnerMcp.Agentic
   alias PtcRunnerMcp.Agentic.{Ledger, Projection}
   alias PtcRunnerMcp.AgenticConfig
+  alias PtcRunnerMcp.RootUpstreamRuntime
+
+  @schema Path.expand("../fixtures/openapi/observatory.openapi.json", __DIR__)
 
   test "agentic config carries Phase 0 SubAgent-backed defaults" do
     defaults = AgenticConfig.defaults()
@@ -112,5 +116,62 @@ defmodule PtcRunnerMcp.AgenticContractTest do
                "shape" => "map keys=[\"done\"] count=1"
              }
            ] = Projection.upstream_results(Ledger.entries(ledger))
+  end
+
+  test "root agentic tool wrapper records read-only annotated upstream calls as read" do
+    Runtime.stop(RootUpstreamRuntime.name())
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: root_config(),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    on_exit(fn -> Runtime.stop(RootUpstreamRuntime.name()) end)
+
+    {:ok, ledger} = Ledger.start_link()
+    parent = self()
+
+    tools =
+      Agentic.root_tools_with_ledger(
+        %{
+          "call" => fn _args ->
+            send(parent, {:attempted_during_dispatch, Ledger.side_effecting_attempted?(ledger)})
+            %{ok: true, value: %{"done" => true}}
+          end
+        },
+        ledger
+      )
+
+    assert tools["call"].(%{
+             server: "observatory",
+             tool: "list-traces",
+             args: %{"limit" => 1}
+           }) == %{ok: true, value: %{"done" => true}}
+
+    assert_receive {:attempted_during_dispatch, false}
+
+    assert [
+             %{
+               server: "observatory",
+               tool: "list-traces",
+               status: :ok,
+               effect: :read
+             }
+           ] = Ledger.entries(ledger)
+  end
+
+  defp root_config do
+    %{
+      "upstreams" => %{
+        "observatory" => %{
+          "transport" => "openapi",
+          "base_url" => "https://observatory.example",
+          "schema_file" => @schema,
+          "include_operations" => ["list_traces"]
+        }
+      }
+    }
   end
 end
