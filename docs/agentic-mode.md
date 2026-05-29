@@ -160,31 +160,18 @@ Agentic mode has two separate prompt-cost surfaces:
 - The planner system prompt is paid server-side on every `lisp_task`
   invocation.
 
-Run the deterministic tier-1 benchmark from `mcp_server/`:
+The deterministic planner-prompt-size bench (`agentic_prompt_bench.exs`)
+was removed in the `move upstream runtime to root` refactor — it stood
+on the deleted in-memory fake-upstream/catalog-freeze harness and has
+not yet been rebuilt on the config-driven `PtcRunner.Upstream.Runtime`
+(tracked in issue #1029). For catalog-description
+sizing (inline vs lazy, by tool count), use the working
+`bench/catalog_bench.exs`.
 
-```bash
-mix run --no-start bench/agentic_prompt_bench.exs \
-  --out=../tmp/agentic_prompt_bench.json
-```
-
-It makes no LLM calls. It freezes synthetic upstream catalogs and
-routes through `Tools.list/0`, `Agentic.Prompt.system_prompt/1`,
-`CatalogDescription.render/0`, and `CapabilitySummary.from_frozen/1`.
-With the default `--agentic-capability-summary-max-bytes=800` and
-default auto inline thresholds (`8` tools / `800` chars), the
-current bench reports:
-
-| Fleet | `:auto` effective mode | Planner prompt `:auto` | Planner prompt `:inline` | Planner prompt `:lazy` | `lisp_task` tool entry `:auto` | `lisp_task` tool entry `:inline` | `lisp_task` tool entry `:lazy` |
-|---|---|---:|---:|---:|---:|---:|---:|
-| small: 3 servers x 10 tools | inline | ~2.4 K tokens | ~2.4 K | ~0.7 K | ~0.7 K | ~1.1 K | ~0.6 K |
-| medium: 5 servers x 30 tools | lazy | ~0.7 K | ~9.7 K | ~0.7 K | ~0.7 K | ~3.2 K | ~0.6 K |
-| large: 10 servers x 100 tools | lazy | ~0.7 K | ~61.2 K | ~0.7 K | ~0.7 K | ~18.6 K | ~0.6 K |
-
-For the large synthetic fleet, forced `:inline` adds roughly 60 K
-estimated tokens to every planner invocation versus `:auto`/`:lazy`.
-For the small fleet, `:auto` intentionally stays inline, and forcing
-`:lazy` saves roughly 1.7 K estimated planner tokens per `lisp_task`
-call at the cost of runtime REPL discovery.
+The tradeoff it measured still holds: forcing `:inline` on a large
+synthetic fleet adds tens of thousands of estimated planner tokens per
+invocation versus `:auto`/`:lazy`, while `:lazy` trades a small
+per-call saving for runtime REPL discovery.
 
 When an upstream tool advertises `outputSchema`, the generated catalog
 turns the supported JSON Schema subset into compact PTC-style output
@@ -202,21 +189,6 @@ results. Supported conversions include JSON Schema `string`,
 marks the tool as `-> :unknown_content`. That means the upstream did
 not advertise a domain output schema; the planner should inspect the
 tagged `tool/call` result's `:value` before assuming a shape.
-
-## Real-provider smoke
-
-From `mcp_server/`, with `OPENROUTER_API_KEY` available:
-
-```bash
-mix run --no-start bench/agentic_real_provider_smoke.exs \
-  --model=gemini-flash-lite \
-  --runs=1 \
-  --fail-on-skip
-```
-
-The smoke starts a local filesystem upstream and exercises `lisp_task`
-through the real planner provider. It exits non-zero on failures and
-prints the generated program for failed cases.
 
 ## Real-provider eval
 
