@@ -10,6 +10,7 @@ defmodule PtcRunner.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
+      usage_rules: usage_rules(),
       name: "PtcRunner",
       description:
         "A BEAM-native Elixir library for Programmatic Tool Calling (PTC) with a lispy DSL (subset of Clojure). PTC lets LLMs generate small programs that orchestrate multiple tool calls and data transformations in code.",
@@ -44,6 +45,19 @@ defmodule PtcRunner.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  # Generated dependency rules in AGENTS.md. Link bulky rules rather than
+  # inlining them so the repo's own instructions stay readable.
+  defp usage_rules do
+    [
+      file: "AGENTS.md",
+      usage_rules: [
+        {:usage_rules, link: :markdown, sub_rules: []},
+        {"usage_rules:elixir", link: :markdown, main: false},
+        {"usage_rules:otp", link: :markdown, main: false}
+      ]
+    ]
+  end
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
