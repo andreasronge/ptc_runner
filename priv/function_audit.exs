@@ -1229,7 +1229,7 @@
       status: :supported,
       description: "Returns formatted string",
       notes:
-        "BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null"
+        "DIV-39: %s collection rendering uses deterministic PTC readable formatting. BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null"
     },
     %{
       name: "frequencies",
@@ -2068,7 +2068,8 @@
       name: "pr-str",
       status: :supported,
       description: "Returns readable string of value",
-      notes: "BUG GAP-S126: character literals print as strings instead of character syntax"
+      notes:
+        "DIV-39: collection rendering is deterministic, key-sorted for maps, and space-separated. BUG GAP-S126: character literals print as strings instead of character syntax"
     },
     %{
       name: "prefer-method",
