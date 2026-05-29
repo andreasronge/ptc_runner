@@ -231,17 +231,24 @@ defmodule PtcRunner.PtcToolProtocol do
       `render_success/2` and surfaced as the top-level `"validated"`
       field. Only meaningful when the caller validated the program's
       return value against a signature.
+    * `:include_memory` — boolean (default `false`). When `true`, the
+      rendered payload includes `memory.{changed,stored_keys,truncated}`.
+      Use this for stateful embedding loops where Lisp memory persists
+      across invocations.
+    * `:prior_memory` — memory map from before this turn (default `%{}`).
+      Used only to compute `memory.changed` when `include_memory: true`.
+    * `:format_options` — optional format options for result, print, and
+      memory previews.
 
   Unknown opts are silently ignored, matching `render_success/2`.
 
-  ## One-shot semantics — no `memory` field
+  ## One-shot and stateful semantics
 
-  This wrapper is the canonical path for one-shot callers (MCP server,
-  text-mode rendering of single programs). One-shot calls never see
-  state across invocations, so the response omits the `memory` field
-  entirely (issue #879). Multi-turn callers — `SubAgent` loops where
-  `defn`'d names persist across turns — should call `render_success/2`
-  directly with the default `include_memory: true`.
+  By default, this wrapper keeps one-shot behavior: state never persists
+  across invocations, so the response omits the `memory` field entirely
+  (issue #879). Stateful embedders can pass `include_memory: true` and
+  `prior_memory: previous_memory` to get the same LLM-facing execution
+  feedback without reaching into `PtcRunner.SubAgent.Loop.TurnFeedback`.
 
   ## Example
 
@@ -253,12 +260,18 @@ defmodule PtcRunner.PtcToolProtocol do
   """
   @spec render_success_from_step(map(), keyword()) :: String.t()
   def render_success_from_step(lisp_step, opts \\ []) do
-    agent = mcp_render_agent()
-    state = %{memory: %{}}
+    include_memory = Keyword.get(opts, :include_memory, false)
+    prior_memory = Keyword.get(opts, :prior_memory, %{})
+    agent = render_agent(include_memory, Keyword.get(opts, :format_options))
+    state = %{memory: prior_memory}
     execution = TurnFeedback.execution_feedback(agent, state, lisp_step)
 
     forwarded_opts =
-      [{:execution, execution}, {:include_memory, false} | Keyword.take(opts, [:validated])]
+      [
+        {:execution, execution},
+        {:include_memory, include_memory}
+        | Keyword.take(opts, [:validated])
+      ]
 
     render_success(lisp_step, forwarded_opts)
   end
@@ -266,17 +279,16 @@ defmodule PtcRunner.PtcToolProtocol do
   # Synthetic minimum agent for `render_success_from_step/2`.
   #
   # `TurnFeedback.execution_feedback/3` reads `agent.format_options`
-  # and `agent.max_turns` only. We use the default format options and
-  # pin `max_turns: 1`, which makes the human-feedback string apply
-  # the single-shot suppression rules (no result-preview line, no
-  # "Stored:" hint when nothing changed). The structured `:result`
-  # and `:memory.changed` fields are populated unconditionally per
-  # `execution_feedback/3`'s contract, so this mirrors the MCP v1
-  # request semantics: each call is single-shot and stateless.
-  defp mcp_render_agent do
+  # and `agent.max_turns` only. Single-shot rendering pins
+  # `max_turns: 1`, which applies the historical suppression rules to
+  # the feedback string. Stateful rendering uses `max_turns: 2` so the
+  # LLM-facing feedback includes result and memory hints for the next
+  # turn; structured `:result` and `:memory.changed` are populated in
+  # both modes.
+  defp render_agent(include_memory, format_options) do
     %Definition{
-      format_options: Definition.default_format_options(),
-      max_turns: 1
+      format_options: format_options || Definition.default_format_options(),
+      max_turns: if(include_memory, do: 2, else: 1)
     }
   end
 

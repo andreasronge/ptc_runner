@@ -13,6 +13,15 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "format_value/2" do
+    test "delegates to Clojure-style value formatting" do
+      assert Lisp.format_value(%{count: 2, ids: [1, 2]}) ==
+               {"{:count 2 :ids [1 2]}", false}
+
+      assert Lisp.format_value([1, 2, 3], limit: 2) == {"[1 2 ...] (2/3)", true}
+    end
+  end
+
   describe "context access" do
     test "accesses context variables" do
       assert {:ok, %{return: 10, memory: %{}}} =

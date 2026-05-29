@@ -398,6 +398,27 @@ defmodule PtcRunner.PtcToolProtocolTest do
       assert decoded["validated"] == %{"count" => 3}
     end
 
+    test "include_memory: true compares prior memory and includes stored keys" do
+      prior_memory = %{"session_api_value" => 1}
+      {:ok, step} = PtcToolProtocol.lisp_run("(def session_api_value 2)", memory: prior_memory)
+
+      decoded =
+        step
+        |> PtcToolProtocol.render_success_from_step(
+          include_memory: true,
+          prior_memory: prior_memory
+        )
+        |> Jason.decode!()
+
+      assert decoded["memory"] == %{
+               "changed" => %{"session_api_value" => "2"},
+               "stored_keys" => ["session_api_value"],
+               "truncated" => false
+             }
+
+      assert decoded["feedback"] =~ "session_api_value = 2"
+    end
+
     test "ignores unknown opts (Addendum #12)" do
       {:ok, step} = PtcToolProtocol.lisp_run("(+ 1 2)")
 

@@ -36,6 +36,7 @@ defmodule PtcRunner.Lisp do
     Env,
     Eval,
     ExecutionError,
+    Format,
     Parser,
     RuntimeCallable,
     SourceAtoms,
@@ -59,6 +60,30 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
 
+  @valid_callers [:in_process_v1, :text_mode, :mcp]
+  @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
+
+  @doc """
+  Format a PTC-Lisp value as Clojure-style syntax for display.
+
+  This is the public wrapper around `PtcRunner.Lisp.Format.to_clojure/2` used by
+  LLM-facing renderers and embedding applications.
+
+  Returns `{formatted_string, truncated?}`.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.format_value(%{count: 2, ids: [1, 2]})
+      {"{:count 2 :ids [1 2]}", false}
+
+      iex> PtcRunner.Lisp.format_value([1, 2, 3], limit: 2)
+      {"[1 2 ...] (2/3)", true}
+  """
+  @spec format_value(term(), keyword()) :: {String.t(), boolean()}
+  def format_value(value, opts \\ []) do
+    Format.to_clojure(value, opts)
+  end
+
   @doc """
   Run a PTC-Lisp program.
 
@@ -68,6 +93,8 @@ defmodule PtcRunner.Lisp do
   - `opts`: Keyword list of options
     - `:context` - Initial context map (default: %{})
     - `:memory` - Initial memory map (default: %{})
+    - `:turn_history` - Prior turn return values, oldest first, used by
+      `*1`, `*2`, and `*3` (default: `[]`)
     - `:tools` - Map of tool names to functions (default: %{})
     - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
@@ -133,8 +160,18 @@ defmodule PtcRunner.Lisp do
   is **explicit**: `(def x v)` persists `v` in memory (`step.memory["x"]`), and
   that memory survives across turns within a single `SubAgent` run.
 
+  `:turn_history` is separate from memory. Hosts pass a list of prior
+  successful `step.return` values in chronological order; `*1` reads the most
+  recent value, `*2` the previous value, and `*3` the third-most-recent value.
+  Missing history reads return `nil`. `run/2` does not mutate the supplied
+  history; callers that want REPL semantics should append `step.return` only
+  after a successful run and keep their chosen bounded depth. For direct
+  embedding use, `PtcRunner.Session` implements this contract with a default
+  depth of 3.
+
   **Related modules:**
   - `PtcRunner.SubAgent.Loop` - Uses this contract to persist memory across turns
+  - `PtcRunner.Session` - Public stateful embedding wrapper for memory and turn history
   - `PtcRunner.Lisp.Eval` - Evaluates programs with user_ns (memory) symbol resolution
 
   ## Float Precision
@@ -181,9 +218,6 @@ defmodule PtcRunner.Lisp do
 
   See `PtcRunner.Lisp.DataKeys` for the static analysis implementation.
   """
-  @valid_callers [:in_process_v1, :text_mode, :mcp]
-  @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
-
   @spec run(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
