@@ -15,20 +15,21 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | Status | Count |
 |--------|-------|
 | Supported | 4 |
-| Candidate | 2 |
+| Candidate | 3 |
 | Not Relevant | 0 |
 | Not Classified | 0 |
-| Relevant Target | 6 |
-| Coverage | 4/6 (66.7%) |
-| **Total** | **6** |
+| Relevant Target | 7 |
+| Coverage | 4/7 (57.1%) |
+| **Total** | **7** |
 
 ## Details
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `.getTime` | ✅ supported | Unix timestamp in milliseconds | Works on DateTime values. |
+| `.getTime` | ✅ supported | Unix timestamp in milliseconds | BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience. |
 | `.isAfter` | ✅ supported | Instant ordering predicate | Works for same-type Date or DateTime values. |
 | `.isBefore` | ✅ supported | Instant ordering predicate | Works for same-type Date or DateTime values. |
+| `.toEpochMilli` | 🔲 candidate | Return Instant epoch millisecond | BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed. |
 | `Instant/now` | 🔲 candidate | Current instant | System/currentTimeMillis plus java.util.Date. covers many cases. |
 | `Instant/ofEpochMilli` | 🔲 candidate | Construct instant from epoch milliseconds | java.util.Date. already accepts seconds or milliseconds. |
-| `Instant/parse` | ✅ supported | Parse ISO-8601 instant string | Also available as java.time.Instant/parse and parse. |
+| `Instant/parse` | ✅ supported | Parse ISO-8601 instant string | Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected. |

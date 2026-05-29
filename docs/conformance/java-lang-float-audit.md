@@ -28,6 +28,6 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 |-----|--------|-------------|-------|
 | `Float/isInfinite` | 🔲 candidate | Return true if value is infinite | Common guard around parsed floating data. |
 | `Float/isNaN` | 🔲 candidate | Return true if value is NaN | Common guard around parsed floating data. |
-| `Float/parseFloat` | ✅ supported | Parse string to float | Compatibility alias for parse-double; PTC-Lisp uses one floating type. |
+| `Float/parseFloat` | ✅ supported | Parse string to float | BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type. |
 | `Float/valueOf` | 🔲 candidate | Parse or box a float value | parse-double covers string parsing; boxing is not relevant. |
 | `floatValue` | ❌ not_relevant | Unbox a Float object | PTC-Lisp has one floating type, not boxed Java numbers. |

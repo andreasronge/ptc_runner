@@ -1,0 +1,4608 @@
+[
+  {
+    "status": "supported",
+    "symbol": "*",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "*'",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for *; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "supported",
+    "symbol": "+",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "+'",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for +; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "supported",
+    "symbol": "-",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S28: zero-arity form currently returns 0 instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "-'",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for -; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "supported",
+    "symbol": "->",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "->>",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": ".",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "..",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "supported",
+    "symbol": "/",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S29: unary form currently returns the argument instead of reciprocal. BUG GAP-S69: floating division by zero returns infinity instead of raising. BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "<",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+  },
+  {
+    "status": "supported",
+    "symbol": "<=",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+  },
+  {
+    "status": "supported",
+    "symbol": "=",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings"
+  },
+  {
+    "status": "supported",
+    "symbol": "==",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for numeric equality; BUG GAP-S120: character literals compare equal to strings"
+  },
+  {
+    "status": "supported",
+    "symbol": ">",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+  },
+  {
+    "status": "supported",
+    "symbol": ">=",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: ordering predicates use PTC's recoverable total term ordering"
+  },
+  {
+    "status": "supported",
+    "symbol": "abs",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "accessor",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "legacy structmap helper; structmaps are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "aclone",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java array manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "add-tap",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "I/O and global state side effects"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "add-watch",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state and referencing"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "agent",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive (mutable state)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "agent-error",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "depends on agent state and exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "aget",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop (Java array access)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "alength",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop (Java array length)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "alias",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespace manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "all-ns",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespace system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "alter",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive (ref mutation)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "alter-meta!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "metadata and mutability"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "alter-var-root",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "var root mutation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "amap",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop (Java array iteration)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ancestors",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Clojure's global hierarchy/multimethod system"
+  },
+  {
+    "status": "supported",
+    "symbol": "and",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "candidate",
+    "symbol": "any?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure predicate function"
+  },
+  {
+    "status": "supported",
+    "symbol": "apply",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. BUG GAP-S109: nil function position returns nil instead of raising. BUG GAP-S13: vector function position is rejected"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "areduce",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java array interoperability"
+  },
+  {
+    "status": "supported",
+    "symbol": "array-map",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for hash-map; no separate small-map representation"
+  },
+  {
+    "status": "supported",
+    "symbol": "as->",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "aset",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "performs mutable operations on Java arrays"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "assert",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on exception handling/throwing"
+  },
+  {
+    "status": "supported",
+    "symbol": "assoc",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S105: one-arity form returns the collection instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "assoc!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on transient collections (mutability)"
+  },
+  {
+    "status": "supported",
+    "symbol": "assoc-in",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key"
+  },
+  {
+    "status": "supported",
+    "symbol": "associative?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "atom",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "await",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "await-for",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bases",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop and class inspection"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bean",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop (JavaBeans)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bigdec",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BEAM runtime has no BigDecimal type in PTC-Lisp"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bigint",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "biginteger",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM-specific BigInteger coercion; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "binding",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on thread-local var binding mechanism"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-and",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-and-not",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-clear",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-flip",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-not",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-or",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-shift-left",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-shift-right",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; arithmetic (sign-extending) shift; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-test",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "bit-xor",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "boolean",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "boolean-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "creates Java array, incompatible with BEAM/non-JVM environments"
+  },
+  {
+    "status": "supported",
+    "symbol": "boolean?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "booleans",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java array manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bound-fn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on thread-local/dynamic scope bindings"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bound-fn*",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on thread-local/dynamic scope bindings"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bound?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on dynamic var binding state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bounded-count",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "designed for lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "butlast",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "byte",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM primitive width coercion"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "byte-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java array creation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bytes",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java array casting"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "bytes?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java array type check"
+  },
+  {
+    "status": "supported",
+    "symbol": "case",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S37: no-match/no-default form currently returns nil instead of raising. BUG GAP-S72: duplicate constants are accepted and compound constants are rejected. BUG GAP-S120: character literals dispatch as equal to one-character strings. DIV-32: numeric dispatch follows PTC's type-independent numeric equality"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "cast",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java type system and exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "cat",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "transducers are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "char",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM character coercion; PTC-Lisp strings are UTF-8 binaries"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "char-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "creates Java array"
+  },
+  {
+    "status": "supported",
+    "symbol": "char?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S44: one-character strings currently return true"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "chars",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java char array types"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "class",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java class introspection"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "class?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java type system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "clojure-version",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "environment info irrelevant to pure data transformation"
+  },
+  {
+    "status": "supported",
+    "symbol": "coll?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "comment",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "REPL/source code construct"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "commute",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state primitive (refs)"
+  },
+  {
+    "status": "supported",
+    "symbol": "comp",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set/vector callables are rejected in composed function position. BUG GAP-S135: nil composed function returns nil instead of raising"
+  },
+  {
+    "status": "candidate",
+    "symbol": "comparator",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure function to create a comparison function"
+  },
+  {
+    "status": "supported",
+    "symbol": "compare",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "compare-and-set!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "operates on mutable state (atoms)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "compile",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "compilation and class generation"
+  },
+  {
+    "status": "supported",
+    "symbol": "complement",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set callables are rejected in predicate position"
+  },
+  {
+    "status": "candidate",
+    "symbol": "completing",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure function for reducing transformations"
+  },
+  {
+    "status": "supported",
+    "symbol": "concat",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S57: string inputs currently raise instead of being treated as seqable"
+  },
+  {
+    "status": "supported",
+    "symbol": "cond",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S112: zero-clause cond raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "cond->",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "cond->>",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "condp",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "conj",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "conj!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "operates on transient collections (mutable)"
+  },
+  {
+    "status": "supported",
+    "symbol": "cons",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "constantly",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "contains?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
+  },
+  {
+    "status": "supported",
+    "symbol": "count",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-36: string counts use Unicode graphemes instead of JVM UTF-16 code units. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "counted?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S70: strings currently return true but Clojure returns false"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "create-ns",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires namespace system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "create-struct",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on legacy fixed-key structure system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "cycle",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "dec",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "dec'",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for dec; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "supported",
+    "symbol": "decimal?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "always false; BigDecimal literals are unsupported, see DIV-20"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "declare",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace/var system"
+  },
+  {
+    "status": "supported",
+    "symbol": "dedupe",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "def",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S140: no-init def raises instead of creating an unbound var. BUG GAP-S141: return value omits the user namespace"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "definterface",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defmacro",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "macro system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defmethod",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "multimethods"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defmulti",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "multimethods"
+  },
+  {
+    "status": "supported",
+    "symbol": "defn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defn-",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespacing/metadata"
+  },
+  {
+    "status": "supported",
+    "symbol": "defonce",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S141: return value omits the user namespace"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defprotocol",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "protocols"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defrecord",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "custom types/Java-like classes"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "defstruct",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "obsolete type system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "deftype",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "custom types/Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "delay",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "lazy evaluation/stateful caching"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "delay?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on delay/concurrency which is not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "deliver",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on promise/mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "denominator",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "ratio values are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "deref",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state/concurrency types"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "derive",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on global namespace/hierarchy state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "descendants",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on global namespace/hierarchy state"
+  },
+  {
+    "status": "supported",
+    "symbol": "disj",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "disj!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on transient/mutable data structures"
+  },
+  {
+    "status": "supported",
+    "symbol": "dissoc",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "dissoc!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on transient/mutable data structures"
+  },
+  {
+    "status": "supported",
+    "symbol": "distinct",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "distinct?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S64: zero-arity distinct? returns true instead of raising. BUG GAP-S101: repeated NaN values are treated as duplicates"
+  },
+  {
+    "status": "supported",
+    "symbol": "do",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "doall",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "dorun",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "doseq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S18: def side effects inside doseq are not visible after the loop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "dosync",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on concurrency/STM primitives"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "dotimes",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on side-effecting loops"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "doto",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java interop"
+  },
+  {
+    "status": "supported",
+    "symbol": "double",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "double-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java arrays"
+  },
+  {
+    "status": "supported",
+    "symbol": "double?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S127: special float literals return false instead of true"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "doubles",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java arrays"
+  },
+  {
+    "status": "supported",
+    "symbol": "drop",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count drops from the end instead of returning the input; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts"
+  },
+  {
+    "status": "supported",
+    "symbol": "drop-last",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "drop-while",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "eduction",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy/transducer abstractions"
+  },
+  {
+    "status": "supported",
+    "symbol": "empty",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S56: string input returns an empty string instead of nil. BUG GAP-S88: non-collection inputs should return nil but currently raise or return an empty map"
+  },
+  {
+    "status": "supported",
+    "symbol": "empty?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ensure",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on software transactional memory (ref/transactional state)"
+  },
+  {
+    "status": "candidate",
+    "symbol": "ensure-reduced",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure utility for reduction flow control"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "enumeration-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences and Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "error-handler",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "error-mode",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "eval",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires runtime compilation and namespace support"
+  },
+  {
+    "status": "supported",
+    "symbol": "even?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: numeric predicates return false for non-numeric inputs"
+  },
+  {
+    "status": "supported",
+    "symbol": "every-pred",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set/vector callables are rejected in predicate position"
+  },
+  {
+    "status": "supported",
+    "symbol": "every?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ex-cause",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ex-data",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ex-info",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ex-message",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "extend",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "extend-protocol",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "extend-type",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "extenders",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "extends?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols"
+  },
+  {
+    "status": "supported",
+    "symbol": "false?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "ffirst",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "file-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences and file I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "filter",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "filterv",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "find",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "find-keyword",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespaces"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "find-ns",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "find-var",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on vars/namespace system"
+  },
+  {
+    "status": "supported",
+    "symbol": "first",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "flatten",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S81: scalar/string/character/map roots raise instead of returning an empty seq"
+  },
+  {
+    "status": "supported",
+    "symbol": "float",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S122: infinite inputs return infinities instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "float-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "creates Java array"
+  },
+  {
+    "status": "supported",
+    "symbol": "float?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S127: special float literals return false instead of true"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "floats",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "handles Java arrays"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "flush",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "I/O operation"
+  },
+  {
+    "status": "supported",
+    "symbol": "fn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+  },
+  {
+    "status": "supported",
+    "symbol": "fn?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "fnext",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "fnil",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position"
+  },
+  {
+    "status": "supported",
+    "symbol": "for",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "force",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy evaluation/delays"
+  },
+  {
+    "status": "supported",
+    "symbol": "format",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null"
+  },
+  {
+    "status": "supported",
+    "symbol": "frequencies",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty frequency map; direct map input raises instead of counting map entries. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future-call",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future-cancel",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future-cancelled?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future-done?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "future?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "gensym",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "macro system utility"
+  },
+  {
+    "status": "supported",
+    "symbol": "get",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S12: string indexes and non-index keys currently raise. BUG GAP-S36: set lookup currently raises instead of returning value/default, including nil members"
+  },
+  {
+    "status": "supported",
+    "symbol": "get-in",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup; BUG GAP-S144: nil paths return nil instead of the root value"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "get-method",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "multimethods not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "get-proxy-class",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "get-thread-bindings",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive / thread locals"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "get-validator",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state validator"
+  },
+  {
+    "status": "supported",
+    "symbol": "group-by",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S67: string inputs are rejected instead of treated as seqable. BUG GAP-S71: map/set/vector callables are rejected or misapplied as key functions"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "halt-when",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on transducers which often involve stateful reduction and lazy-like sequence processing"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "hash",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "runtime-specific hash values are not stable across hosts"
+  },
+  {
+    "status": "supported",
+    "symbol": "hash-map",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "hash-ordered-coll",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Clojure hashing internals; not stable across PTC-Lisp hosts"
+  },
+  {
+    "status": "supported",
+    "symbol": "hash-set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "constructs a PTC-Lisp set from variadic arguments"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "hash-unordered-coll",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Clojure hashing internals; not stable across PTC-Lisp hosts"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ident?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "PTC-Lisp has keywords but no first-class symbol or namespaced identifier values"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "identical?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on object identity which is not meaningful for serializable data in a BEAM-based environment"
+  },
+  {
+    "status": "supported",
+    "symbol": "identity",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "if",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "if-let",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+  },
+  {
+    "status": "supported",
+    "symbol": "if-not",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "if-some",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+  },
+  {
+    "status": "supported",
+    "symbol": "ifn?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S13: vectors are callable in Clojure but not in PTC-Lisp"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "import",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "in-ns",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace support"
+  },
+  {
+    "status": "supported",
+    "symbol": "inc",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "inc'",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "alias for inc; BEAM integers are already arbitrary precision"
+  },
+  {
+    "status": "supported",
+    "symbol": "indexed?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S70: strings currently return true but Clojure returns false"
+  },
+  {
+    "status": "supported",
+    "symbol": "infinite?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "NaN?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "inst-ms",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "covered by existing temporal interop .getTime"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "inst?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Clojure instant predicate; PTC-Lisp temporal interop uses host date structs"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "instance?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java class system"
+  },
+  {
+    "status": "supported",
+    "symbol": "int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S62: NaN input raises instead of returning 0. BUG GAP-S111: out-of-range integer inputs return unchanged instead of raising. BUG GAP-S121: character literals raise instead of returning code points"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "int-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java array/mutability"
+  },
+  {
+    "status": "supported",
+    "symbol": "int?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
+  },
+  {
+    "status": "supported",
+    "symbol": "integer?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "interleave",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. BUG GAP-S143: unary arity is rejected instead of returning the source seq. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "intern",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "operates on namespaces"
+  },
+  {
+    "status": "supported",
+    "symbol": "interpose",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
+  },
+  {
+    "status": "supported",
+    "symbol": "into",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S41: zero/one arities, string sources, and nil targets currently raise instead of following Clojure seq/list behavior"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "into-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ints",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "isa?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on hierarchy/multimethods system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "iterate",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "creates lazy sequences"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "iteration",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "wraps Java iterators"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "iterator-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "creates lazy sequences from Java iterators"
+  },
+  {
+    "status": "supported",
+    "symbol": "juxt",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position"
+  },
+  {
+    "status": "supported",
+    "symbol": "keep",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "keep-indexed",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "key",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S17: currently accepts plain vectors/list pairs as map entries"
+  },
+  {
+    "status": "supported",
+    "symbol": "keys",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order"
+  },
+  {
+    "status": "supported",
+    "symbol": "keyword",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S34: namespace/name arity is unsupported. BUG GAP-S63: keyword invocation matches string keys. BUG GAP-S78: non-string/non-keyword inputs raise instead of returning nil. DIV-13/DIV-34/DIV-35: namespaced, empty, and broad-character keywords are outside the PTC-Lisp data model."
+  },
+  {
+    "status": "supported",
+    "symbol": "keyword?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "last",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "lazy-cat",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "lazy-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "let",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "letfn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutual recursion binding form is outside PTC-Lisp's small evaluator surface"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "line-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences and reader I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "list",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "implemented as alias for vector"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "list*",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "PTC-Lisp is vector-first and has no separate list runtime type"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "list?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "PTC-Lisp is vector-first and has no separate list runtime type"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "load",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on file I/O and classpath"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "load-file",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on file I/O"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "load-reader",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on reader I/O"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "load-string",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "evaluates code/REPL feature"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "locking",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive/locking"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "long",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM primitive width coercion; use int for integer coercion"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "long-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop/primitive array"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "longs",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop/primitive array"
+  },
+  {
+    "status": "supported",
+    "symbol": "loop",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S114: bodyless loop raises instead of returning nil"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "macroexpand",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "macro system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "macroexpand-1",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "macro system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "make-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop/array creation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "make-hierarchy",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on multimethods system"
+  },
+  {
+    "status": "supported",
+    "symbol": "map",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S102: multi-collection arity rejects string inputs. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "map-entry?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S136: explicit seq map entries are not recognized as map entries"
+  },
+  {
+    "status": "supported",
+    "symbol": "map-indexed",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map callables are rejected in function position"
+  },
+  {
+    "status": "supported",
+    "symbol": "map?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "mapcat",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S49: multiple input collections, nil results, and string results currently raise. BUG GAP-S71: map callables are rejected in function position"
+  },
+  {
+    "status": "supported",
+    "symbol": "mapv",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "max",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+  },
+  {
+    "status": "supported",
+    "symbol": "max-key",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "memfn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "memoize",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state for caching"
+  },
+  {
+    "status": "supported",
+    "symbol": "merge",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected"
+  },
+  {
+    "status": "supported",
+    "symbol": "merge-with",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "meta",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on metadata support"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "methods",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on multimethods"
+  },
+  {
+    "status": "supported",
+    "symbol": "min",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+  },
+  {
+    "status": "supported",
+    "symbol": "min-key",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
+  },
+  {
+    "status": "supported",
+    "symbol": "mod",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
+  },
+  {
+    "status": "supported",
+    "symbol": "name",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "namespace",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace support"
+  },
+  {
+    "status": "supported",
+    "symbol": "nat-int?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
+  },
+  {
+    "status": "supported",
+    "symbol": "neg-int?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
+  },
+  {
+    "status": "supported",
+    "symbol": "neg?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "newline",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "next",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "nfirst",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "nil?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "nnext",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "not",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "not-any?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "not-empty",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "not-every?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "not=",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings"
+  },
+  {
+    "status": "supported",
+    "symbol": "nth",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-26 for out-of-range signal values; DIV-36 for string grapheme indexing; BUG GAP-S10/GAP-S11/GAP-S79/GAP-S94. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "nthnext",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "implemented as seq after nthrest. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "nthrest",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "implemented as drop alias with Clojure argument order. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "num",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM Number coercion; parse-long/parse-double cover string parsing"
+  },
+  {
+    "status": "supported",
+    "symbol": "number?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "numerator",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "ratio values are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "object-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java interop and host arrays"
+  },
+  {
+    "status": "supported",
+    "symbol": "odd?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: numeric predicates return false for non-numeric inputs"
+  },
+  {
+    "status": "supported",
+    "symbol": "or",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "parents",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "metadata/hierarchy manipulation not supported in PTC-Lisp"
+  },
+  {
+    "status": "supported",
+    "symbol": "parse-boolean",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns true, false, or nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "parse-double",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S61: surrounding whitespace and Java decimal spellings return nil instead of parsing"
+  },
+  {
+    "status": "supported",
+    "symbol": "parse-long",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S85: out-of-range long values return arbitrary-precision integers instead of nil"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "parse-uuid",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "no UUID runtime type; keep UUIDs as strings"
+  },
+  {
+    "status": "supported",
+    "symbol": "partial",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set/vector callables are rejected in function position"
+  },
+  {
+    "status": "supported",
+    "symbol": "partition",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S31: nil padding collection currently raises instead of acting empty. BUG GAP-S53: negative partition size raises instead of returning an empty seq. BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts."
+  },
+  {
+    "status": "supported",
+    "symbol": "partition-all",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "partition-by",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "pcalls",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "peek",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-25 for list alias behavior"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "persistent!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "transients are unsupported"
+  },
+  {
+    "status": "supported",
+    "symbol": "pmap",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported"
+  },
+  {
+    "status": "supported",
+    "symbol": "pop",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-25 for list alias behavior; DIV-26 for empty collection signal value"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "pop!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "transients are unsupported"
+  },
+  {
+    "status": "supported",
+    "symbol": "pos-int?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
+  },
+  {
+    "status": "supported",
+    "symbol": "pos?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "pr",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "I/O operation"
+  },
+  {
+    "status": "supported",
+    "symbol": "pr-str",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S126: character literals print as strings instead of character syntax"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "prefer-method",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "multimethods are unsupported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "prefers",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "multimethods are unsupported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "print",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "I/O operation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "print-str",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on printing logic/I/O"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "printf",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "performs stdout I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "println",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "promise",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "proxy",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "push-thread-bindings",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "thread-local mutability/state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "qualified-ident?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespaced identifiers are not supported as runtime values"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "qualified-keyword?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespaced keywords are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "qualified-symbol?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "symbols are not supported as runtime values"
+  },
+  {
+    "status": "supported",
+    "symbol": "quot",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow. BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "quote",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "quote syntax is intentionally unsupported; use vectors and data literals directly"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rand",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "non-deterministic randomness contradicts sandbox determinism"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rand-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on non-deterministic side effects/state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rand-nth",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on non-deterministic side effects/state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "random-sample",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on non-deterministic side effects/state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "random-uuid",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on non-deterministic side effects"
+  },
+  {
+    "status": "supported",
+    "symbol": "range",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S45: zero-step range currently returns an empty vector. BUG GAP-S99: nil and nonnumeric bounds/steps return an empty vector instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "ratio?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "always false; ratio literals are unsupported, see DIV-20"
+  },
+  {
+    "status": "supported",
+    "symbol": "rational?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rationalize",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "ratio values are not supported"
+  },
+  {
+    "status": "supported",
+    "symbol": "re-find",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "re-groups",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "capture groups are returned directly by re-find, re-matches, and re-seq"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "re-matcher",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns an object maintaining mutable state/matcher position"
+  },
+  {
+    "status": "supported",
+    "symbol": "re-matches",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "re-pattern",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S66: existing regex patterns are rejected instead of returned. BUG GAP-S131: character patterns are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "re-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S82: no-match returns [] instead of nil. BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "read",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "implies I/O and interaction with reader contexts"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "read-line",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "I/O operation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "read-string",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "invokes reader/eval capabilities not supported in sandbox"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "realized?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on concurrency/lazy primitives not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "record?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on class/type system not supported"
+  },
+  {
+    "status": "supported",
+    "symbol": "recur",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "reduce",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S21: empty/nil input without init returns nil instead of calling the reducing function's zero-arity identity. BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "reduce-kv",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S59: vector input currently raises instead of reducing indexes and values"
+  },
+  {
+    "status": "candidate",
+    "symbol": "reduced",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure control flow mechanism for reduction interruption"
+  },
+  {
+    "status": "candidate",
+    "symbol": "reduced?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure predicate for checking reduction status"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "reductions",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns a lazy sequence"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ref",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state/concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "ref-set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state/concurrency primitive"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "reify",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on protocols and class generation"
+  },
+  {
+    "status": "supported",
+    "symbol": "rem",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
+  },
+  {
+    "status": "supported",
+    "symbol": "remove",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "remove-all-methods",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on multimethods"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "remove-method",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on multimethods"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "remove-ns",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespaces"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "remove-tap",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on global mutable state/taps"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "remove-watch",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state references"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "repeat",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns lazy sequences"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "repeatedly",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "replace",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S16: clojure.core sequence replacement form is not implemented"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "require",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace/load system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "requiring-resolve",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on namespace/load system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "reset!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state (atoms)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "reset-meta!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "metadata manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "reset-vals!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "mutable state (atoms)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "resolve",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespace/symbol resolution"
+  },
+  {
+    "status": "supported",
+    "symbol": "rest",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "restart-agent",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "concurrency primitives (agents)"
+  },
+  {
+    "status": "supported",
+    "symbol": "reverse",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S20: nil input currently raises instead of returning an empty seq"
+  },
+  {
+    "status": "supported",
+    "symbol": "reversible?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S70: strings currently return true but Clojure returns false"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rseq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy/sorted sequence implementation details"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "rsubseq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy/sorted sequence implementation details"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "run!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on side effects"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "satisfies?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "protocol/type system feature"
+  },
+  {
+    "status": "supported",
+    "symbol": "second",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "select-keys",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S23: nil and string keyseqs currently raise instead of returning an empty map; BUG GAP-S43: vector inputs currently raise instead of selecting indexes"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "send",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "send-off",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "send-via",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on agent mutable state"
+  },
+  {
+    "status": "supported",
+    "symbol": "seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "seq?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S84: vectors currently return true instead of false"
+  },
+  {
+    "status": "supported",
+    "symbol": "seqable?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S125: character literals return true instead of false"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "sequence",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences"
+  },
+  {
+    "status": "supported",
+    "symbol": "sequential?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S30: nil and string inputs currently raise instead of producing sets"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "set!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state"
+  },
+  {
+    "status": "supported",
+    "symbol": "set?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "short",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "JVM primitive width coercion"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "short-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java array instantiation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "shorts",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java array interaction"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "shuffle",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on non-deterministic side effects (randomness)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "shutdown-agents",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "manages thread pools which is unsupported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "simple-ident?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "PTC-Lisp has keywords but no first-class symbol or namespaced identifier values"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "simple-keyword?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "namespaced keywords are not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "simple-symbol?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "symbols are not supported as runtime values"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "slurp",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "involves file/network I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "some",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "some->",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "some->>",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "some-fn",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set/vector callables are rejected in predicate position"
+  },
+  {
+    "status": "supported",
+    "symbol": "some?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "sort",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
+  },
+  {
+    "status": "supported",
+    "symbol": "sort-by",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
+  },
+  {
+    "status": "candidate",
+    "symbol": "sorted-map",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure collection construction"
+  },
+  {
+    "status": "candidate",
+    "symbol": "sorted-map-by",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure collection construction with custom comparator"
+  },
+  {
+    "status": "candidate",
+    "symbol": "sorted-set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure collection construction"
+  },
+  {
+    "status": "candidate",
+    "symbol": "sorted-set-by",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure collection construction with custom comparator"
+  },
+  {
+    "status": "supported",
+    "symbol": "sorted?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "spit",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "file I/O"
+  },
+  {
+    "status": "supported",
+    "symbol": "split-at",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "split-with",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-36: string sequence predicates receive one-character strings. BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "str",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S93: regex patterns render as internal tuples instead of source pattern text"
+  },
+  {
+    "status": "supported",
+    "symbol": "string?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S133: character literals return true instead of false"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "struct",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "legacy structure system, discouraged/deprecated"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "struct-map",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "legacy structure system, discouraged/deprecated"
+  },
+  {
+    "status": "supported",
+    "symbol": "subs",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-22: returns signal values instead of raising on out-of-range indices; DIV-36: string indexes use Unicode graphemes; BUG GAP-S79: numeric index coercion rejects floats Clojure accepts"
+  },
+  {
+    "status": "candidate",
+    "symbol": "subseq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure operation on sorted collections"
+  },
+  {
+    "status": "supported",
+    "symbol": "subvec",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-26: clamps out-of-range indices instead of raising. BUG GAP-S79: numeric index coercion rejects floats Clojure accepts"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "supers",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java class hierarchy/interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "swap!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires mutable state (atom)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "swap-vals!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires mutable state (atom)"
+  },
+  {
+    "status": "candidate",
+    "symbol": "symbol",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure data coercion"
+  },
+  {
+    "status": "supported",
+    "symbol": "symbol?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "take",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count returns a tail instead of an empty seq; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts"
+  },
+  {
+    "status": "supported",
+    "symbol": "take-last",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "take-nth",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "returns a lazy sequence"
+  },
+  {
+    "status": "supported",
+    "symbol": "take-while",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "tap>",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "side-effecting I/O mechanism"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "test",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "built-in testing framework/REPL tool"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "throw",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "exception handling"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "time",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "side-effecting I/O and timing"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "to-array",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop for array creation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "to-array-2d",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java interop for array creation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "trampoline",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "lazy/mutual-recursion utility outside PTC-Lisp's small evaluator surface"
+  },
+  {
+    "status": "candidate",
+    "symbol": "transduce",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Pure data transformation utility"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "transient",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Mutable state/transients are not supported"
+  },
+  {
+    "status": "supported",
+    "symbol": "tree-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S77: string roots can recurse until heap limit"
+  },
+  {
+    "status": "supported",
+    "symbol": "true?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "try",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Exception handling is not supported"
+  },
+  {
+    "status": "supported",
+    "symbol": "type",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-28: returns stable PTC type keywords instead of host JVM classes"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-add",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java-specific math optimization"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-add-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java-specific math optimization"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-byte",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Java-specific primitive casting"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-char",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-dec",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-dec-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-divide-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-double",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-float",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-inc",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-inc-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-long",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "Relies on Java primitive casting/low-level JVM semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-multiply",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-multiply-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-negate",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-negate-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-remainder-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-short",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java type casting/interop"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-subtract",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unchecked-subtract-int",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on JVM-specific primitive behavior/overflow semantics"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "underive",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires global hierarchy/multimethod infrastructure"
+  },
+  {
+    "status": "candidate",
+    "symbol": "unreduced",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "pure transformation used for handling reduced values in reductions"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "unsigned-bit-shift-right",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from"
+  },
+  {
+    "status": "supported",
+    "symbol": "update",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S19: nil map root currently raises instead of building a map. BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
+  },
+  {
+    "status": "supported",
+    "symbol": "update-in",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
+  },
+  {
+    "status": "supported",
+    "symbol": "update-keys",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as key transforms. BUG GAP-S75: vector inputs are rejected"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "update-proxy",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on Java interop/proxy class system"
+  },
+  {
+    "status": "supported",
+    "symbol": "update-vals",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as value transforms. BUG GAP-S75: vector inputs are rejected"
+  },
+  {
+    "status": "supported",
+    "symbol": "val",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S17: currently accepts plain vectors/list pairs as map entries"
+  },
+  {
+    "status": "supported",
+    "symbol": "vals",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "var-get",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on specific var/namespace system"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "var-set",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable thread-local bindings"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "var?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on var data structure absent in PTC-Lisp"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "vary-meta",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on metadata feature"
+  },
+  {
+    "status": "supported",
+    "symbol": "vec",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S40: nil input currently returns nil instead of an empty vector. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "vector",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "vector?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-25 for list alias behavior"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "volatile!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "volatile?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "vreset!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on mutable state"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "vswap!",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "involves mutable state (volatiles)"
+  },
+  {
+    "status": "supported",
+    "symbol": "when",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S113: bodyless when raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "when-first",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+  },
+  {
+    "status": "supported",
+    "symbol": "when-let",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+  },
+  {
+    "status": "supported",
+    "symbol": "when-not",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S113: bodyless when-not raises instead of returning nil"
+  },
+  {
+    "status": "supported",
+    "symbol": "when-some",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "while",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "imperative looping construct typically relying on side effects"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-bindings",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on thread-local state which is not supported in the BEAM model for PTC-Lisp"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-in-str",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on I/O streams"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-local-vars",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "requires mutable local vars"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-meta",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "metadata is not supported"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-open",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on I/O and resource management"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-out-str",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on capturing side-effecting I/O"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-precision",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on specific BigDecimal support and dynamic binding context not present in PTC-Lisp"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "with-redefs",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "modifies global var bindings, which is not supported in a functional, immutable sandbox"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "xml-seq",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "relies on lazy sequences and I/O-related parsing"
+  },
+  {
+    "status": "supported",
+    "symbol": "zero?",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "zipmap",
+    "namespace": "clojure.core",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "blank?",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising"
+  },
+  {
+    "status": "candidate",
+    "symbol": "capitalize",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "pure string transformation"
+  },
+  {
+    "status": "supported",
+    "symbol": "ends-with?",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "candidate",
+    "symbol": "escape",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "pure character mapping"
+  },
+  {
+    "status": "supported",
+    "symbol": "includes?",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "supported",
+    "symbol": "index-of",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "supported",
+    "symbol": "join",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S26: nil collections, nil separators, string collections, and map collections currently raise instead of joining"
+  },
+  {
+    "status": "supported",
+    "symbol": "last-index-of",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S80: negative from-index returns 0 instead of nil; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "supported",
+    "symbol": "lower-case",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S139: numeric inputs raise instead of being stringified"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "re-quote-replacement",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "Java regex-specific utility"
+  },
+  {
+    "status": "supported",
+    "symbol": "replace",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S27: replacement function form is not implemented. BUG GAP-S73: regex replacement string group references are not honored. BUG GAP-S116: character match/replacement arguments are accepted instead of raising for mismatched replacement types. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "candidate",
+    "symbol": "replace-first",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "pure string transformation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "reverse",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "pure string transformation"
+  },
+  {
+    "status": "supported",
+    "symbol": "split",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S74: plain string delimiter is accepted even though Clojure requires a regex; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "split-lines",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S51: empty string currently returns [] instead of [\"\"]"
+  },
+  {
+    "status": "supported",
+    "symbol": "starts-with?",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
+  },
+  {
+    "status": "supported",
+    "symbol": "trim",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+  },
+  {
+    "status": "supported",
+    "symbol": "trim-newline",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S116: character inputs are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "triml",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+  },
+  {
+    "status": "supported",
+    "symbol": "trimr",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+  },
+  {
+    "status": "supported",
+    "symbol": "upper-case",
+    "namespace": "clojure.string",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S139: numeric inputs raise instead of being stringified"
+  },
+  {
+    "status": "supported",
+    "symbol": "difference",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S30: nil and finite seqable inputs currently raise instead of following Clojure behavior"
+  },
+  {
+    "status": "candidate",
+    "symbol": "index",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure set/map operation"
+  },
+  {
+    "status": "supported",
+    "symbol": "intersection",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S30: nil, finite map-entry, and finite seqable inputs currently raise instead of following Clojure behavior"
+  },
+  {
+    "status": "candidate",
+    "symbol": "join",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "relational algebra operation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "map-invert",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure map transformation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "project",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "relational algebra operation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "rename",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "relational algebra operation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "rename-keys",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure map transformation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "select",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure set filtering"
+  },
+  {
+    "status": "candidate",
+    "symbol": "subset?",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure set predicate"
+  },
+  {
+    "status": "candidate",
+    "symbol": "superset?",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "pure set predicate"
+  },
+  {
+    "status": "supported",
+    "symbol": "union",
+    "namespace": "clojure.set",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S30: nil, map, and non-set seqable inputs currently raise instead of following Clojure union behavior"
+  },
+  {
+    "status": "candidate",
+    "symbol": "keywordize-keys",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "pure recursive map transformation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "macroexpand-all",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "macros are not supported in PTC-Lisp"
+  },
+  {
+    "status": "supported",
+    "symbol": "postwalk",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set callables are rejected as transform functions"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "postwalk-demo",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "debug/demo side-effect helper"
+  },
+  {
+    "status": "candidate",
+    "symbol": "postwalk-replace",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "pure recursive data transformation"
+  },
+  {
+    "status": "supported",
+    "symbol": "prewalk",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set callables are rejected as transform functions"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "prewalk-demo",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "debug/demo side-effect helper"
+  },
+  {
+    "status": "candidate",
+    "symbol": "prewalk-replace",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "pure recursive data transformation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "stringify-keys",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "pure recursive map transformation"
+  },
+  {
+    "status": "supported",
+    "symbol": "walk",
+    "namespace": "clojure.walk",
+    "compatibility_target": "Clojure",
+    "notes": "BUG GAP-S71: map/set/vector callables are rejected as inner/outer functions. BUG GAP-S91: invalid transformed map-entry shapes are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": "Boolean/parseBoolean",
+    "namespace": "java.lang.Boolean",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J02: currently aliases parse-boolean, returns nil for non-true/nil inputs, misses Java's case-insensitive true handling, and returns nil instead of raising for non-string inputs."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Boolean/valueOf",
+    "namespace": "java.lang.Boolean",
+    "compatibility_target": "Java",
+    "notes": "Common LLM spelling; parse-boolean covers string parsing but not Java's object API."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Boolean/TRUE",
+    "namespace": "java.lang.Boolean",
+    "compatibility_target": "Java",
+    "notes": "Low-cost compatibility constant if models emit Java constants."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Boolean/FALSE",
+    "namespace": "java.lang.Boolean",
+    "compatibility_target": "Java",
+    "notes": "Low-cost compatibility constant if models emit Java constants."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "booleanValue",
+    "namespace": "java.lang.Boolean",
+    "compatibility_target": "Java",
+    "notes": "PTC-Lisp has primitive booleans, not boxed Java Boolean objects."
+  },
+  {
+    "status": "supported",
+    "symbol": "Double/parseDouble",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts."
+  },
+  {
+    "status": "supported",
+    "symbol": "Double/POSITIVE_INFINITY",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "Double/NEGATIVE_INFINITY",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": ""
+  },
+  {
+    "status": "supported",
+    "symbol": "Double/NaN",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": ""
+  },
+  {
+    "status": "candidate",
+    "symbol": "Double/isNaN",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": "Common guard around parsed floating data."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Double/isInfinite",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": "Common guard around parsed floating data."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Double/valueOf",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": "parse-double covers string parsing; boxing is not relevant."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "doubleValue",
+    "namespace": "java.lang.Double",
+    "compatibility_target": "Java",
+    "notes": "PTC-Lisp has one numeric value model, not boxed Java numbers."
+  },
+  {
+    "status": "supported",
+    "symbol": "Float/parseFloat",
+    "namespace": "java.lang.Float",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Float/isNaN",
+    "namespace": "java.lang.Float",
+    "compatibility_target": "Java",
+    "notes": "Common guard around parsed floating data."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Float/isInfinite",
+    "namespace": "java.lang.Float",
+    "compatibility_target": "Java",
+    "notes": "Common guard around parsed floating data."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Float/valueOf",
+    "namespace": "java.lang.Float",
+    "compatibility_target": "Java",
+    "notes": "parse-double covers string parsing; boxing is not relevant."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "floatValue",
+    "namespace": "java.lang.Float",
+    "compatibility_target": "Java",
+    "notes": "PTC-Lisp has one floating type, not boxed Java numbers."
+  },
+  {
+    "status": "supported",
+    "symbol": "Integer/parseInt",
+    "namespace": "java.lang.Integer",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Integer/valueOf",
+    "namespace": "java.lang.Integer",
+    "compatibility_target": "Java",
+    "notes": "parse-long covers string parsing; boxing is not relevant."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Integer/toString",
+    "namespace": "java.lang.Integer",
+    "compatibility_target": "Java",
+    "notes": "str covers the common PTC-Lisp need."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Integer/MAX_VALUE",
+    "namespace": "java.lang.Integer",
+    "compatibility_target": "Java",
+    "notes": "BEAM integers are arbitrary precision; Java int bounds are misleading."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Integer/MIN_VALUE",
+    "namespace": "java.lang.Integer",
+    "compatibility_target": "Java",
+    "notes": "BEAM integers are arbitrary precision; Java int bounds are misleading."
+  },
+  {
+    "status": "supported",
+    "symbol": "Long/parseLong",
+    "namespace": "java.lang.Long",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Long/valueOf",
+    "namespace": "java.lang.Long",
+    "compatibility_target": "Java",
+    "notes": "parse-long covers string parsing; boxing is not relevant."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Long/toString",
+    "namespace": "java.lang.Long",
+    "compatibility_target": "Java",
+    "notes": "str covers the common PTC-Lisp need."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Long/MAX_VALUE",
+    "namespace": "java.lang.Long",
+    "compatibility_target": "Java",
+    "notes": "BEAM integers are arbitrary precision; Java long bounds are misleading."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Long/MIN_VALUE",
+    "namespace": "java.lang.Long",
+    "compatibility_target": "Java",
+    "notes": "BEAM integers are arbitrary precision; Java long bounds are misleading."
+  },
+  {
+    "status": "supported",
+    "symbol": ".contains",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".indexOf",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".lastIndexOf",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".length",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".substring",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".toLowerCase",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".toUpperCase",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".startsWith",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "supported",
+    "symbol": ".endsWith",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+  },
+  {
+    "status": "candidate",
+    "symbol": ".trim",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "Common LLM spelling; clojure.string/trim is not currently implemented."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".isEmpty",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "empty? covers the common PTC-Lisp need."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".equalsIgnoreCase",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "Common Java idiom in generated code."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".charAt",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "Potentially useful, but PTC-Lisp must define grapheme semantics."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": ".getBytes",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "Byte arrays and charsets are outside the sandbox data model."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": ".intern",
+    "namespace": "java.lang.String",
+    "compatibility_target": "Java",
+    "notes": "JVM string pool operation; not meaningful on BEAM."
+  },
+  {
+    "status": "supported",
+    "symbol": "System/currentTimeMillis",
+    "namespace": "java.lang.System",
+    "compatibility_target": "Java",
+    "notes": ""
+  },
+  {
+    "status": "candidate",
+    "symbol": "System/nanoTime",
+    "namespace": "java.lang.System",
+    "compatibility_target": "Java",
+    "notes": "Potential benchmark/timing helper; not wall-clock time."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "System/getenv",
+    "namespace": "java.lang.System",
+    "compatibility_target": "Java",
+    "notes": "Host environment access is intentionally not exposed."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "System/getProperty",
+    "namespace": "java.lang.System",
+    "compatibility_target": "Java",
+    "notes": "JVM property access is not meaningful and would leak host details."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "System/exit",
+    "namespace": "java.lang.System",
+    "compatibility_target": "Java",
+    "notes": "Process termination is forbidden in the sandbox."
+  },
+  {
+    "status": "supported",
+    "symbol": "Duration/between",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
+  },
+  {
+    "status": "supported",
+    "symbol": ".toMillis",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for instant differences."
+  },
+  {
+    "status": "supported",
+    "symbol": ".toDays",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for bucket/day calculations."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Duration/ofMillis",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Useful companion for bounded Duration support."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Duration/parse",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Useful but lower-priority than between/toMillis/toDays."
+  },
+  {
+    "status": "supported",
+    "symbol": "Instant/parse",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Instant/now",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "System/currentTimeMillis plus java.util.Date. covers many cases."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isBefore",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isAfter",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".getTime",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".toEpochMilli",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Instant/ofEpochMilli",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "java.util.Date. already accepts seconds or milliseconds."
+  },
+  {
+    "status": "supported",
+    "symbol": "LocalDate/parse",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected."
+  },
+  {
+    "status": "candidate",
+    "symbol": "LocalDate/now",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Useful, but currentTimeMillis plus parse/Date constructors cover many cases."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isBefore",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isAfter",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "candidate",
+    "symbol": "LocalDate/of",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Useful Java idiom; vector/map construction plus parse is the current workaround."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".format",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Date formatting API would need a bounded formatter surface."
+  },
+  {
+    "status": "supported",
+    "symbol": ".toEpochDay",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for day differences and date sorting."
+  },
+  {
+    "status": "supported",
+    "symbol": ".plusDays",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+  },
+  {
+    "status": "supported",
+    "symbol": ".minusDays",
+    "namespace": "java.time.LocalDate",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Period/between",
+    "namespace": "java.time.Period",
+    "compatibility_target": "Java",
+    "notes": "Deferred for issue #1019; `Period.getDays` is a component value, not total days. Use `.toEpochDay` subtraction for LocalDate day differences."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".getDays",
+    "namespace": "java.time.Period",
+    "compatibility_target": "Java",
+    "notes": "Deferred for issue #1019 because this is the day component, not total days; easy to misuse for analytics."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Period/ofDays",
+    "namespace": "java.time.Period",
+    "compatibility_target": "Java",
+    "notes": "Useful companion for bounded Period support."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Period/parse",
+    "namespace": "java.time.Period",
+    "compatibility_target": "Java",
+    "notes": "Useful but lower-priority than between/getDays."
+  },
+  {
+    "status": "supported",
+    "symbol": "java.util.Date.",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected."
+  },
+  {
+    "status": "supported",
+    "symbol": ".getTime",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": "Works on DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isBefore",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isAfter",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".before",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": ".isBefore covers the current PTC-Lisp spelling."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".after",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": ".isAfter covers the current PTC-Lisp spelling."
+  },
+  {
+    "status": "not_relevant",
+    "symbol": ".setTime",
+    "namespace": "java.util.Date",
+    "compatibility_target": "Java",
+    "notes": "Mutable Java object operations are outside the sandbox model."
+  }
+]

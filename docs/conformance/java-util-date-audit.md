@@ -14,13 +14,13 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 2 |
+| Supported | 4 |
 | Candidate | 2 |
 | Not Relevant | 1 |
 | Not Classified | 0 |
-| Relevant Target | 4 |
-| Coverage | 2/4 (50.0%) |
-| **Total** | **5** |
+| Relevant Target | 6 |
+| Coverage | 4/6 (66.7%) |
+| **Total** | **7** |
 
 ## Details
 
@@ -29,5 +29,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `.after` | 🔲 candidate | Date ordering predicate | .isAfter covers the current PTC-Lisp spelling. |
 | `.before` | 🔲 candidate | Date ordering predicate | .isBefore covers the current PTC-Lisp spelling. |
 | `.getTime` | ✅ supported | Unix timestamp in milliseconds | Works on DateTime values. |
+| `.isAfter` | ✅ supported | Date ordering predicate | BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias. |
+| `.isBefore` | ✅ supported | Date ordering predicate | BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias. |
 | `.setTime` | ❌ not_relevant | Mutate Date timestamp | Mutable Java object operations are outside the sandbox model. |
-| `java.util.Date.` | ✅ supported | Construct DateTime value | Accepts no arg, timestamp, ISO/RFC string, or temporal value. |
+| `java.util.Date.` | ✅ supported | Construct DateTime value | BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. |

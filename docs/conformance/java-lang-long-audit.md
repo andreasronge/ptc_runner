@@ -28,6 +28,6 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 |-----|--------|-------------|-------|
 | `Long/MAX_VALUE` | ❌ not_relevant | Maximum Java long constant | BEAM integers are arbitrary precision; Java long bounds are misleading. |
 | `Long/MIN_VALUE` | ❌ not_relevant | Minimum Java long constant | BEAM integers are arbitrary precision; Java long bounds are misleading. |
-| `Long/parseLong` | ✅ supported | Parse string to integer | Compatibility alias for parse-long; nil on invalid input. |
+| `Long/parseLong` | ✅ supported | Parse string to integer | BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported. |
 | `Long/toString` | 🔲 candidate | Convert long to string | str covers the common PTC-Lisp need. |
 | `Long/valueOf` | 🔲 candidate | Parse or box a long value | parse-long covers string parsing; boxing is not relevant. |

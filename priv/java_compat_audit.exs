@@ -4,7 +4,8 @@
       name: "Boolean/parseBoolean",
       status: :supported,
       description: "Parse string to boolean",
-      notes: "Compatibility alias for parse-boolean; nil on invalid input."
+      notes:
+        "BUG GAP-J02: currently aliases parse-boolean, returns nil for non-true/nil inputs, misses Java's case-insensitive true handling, and returns nil instead of raising for non-string inputs."
     },
     %{
       name: "Boolean/valueOf",
@@ -36,7 +37,8 @@
       name: "Double/parseDouble",
       status: :supported,
       description: "Parse string to double",
-      notes: "Compatibility alias for parse-double; nil on invalid input."
+      notes:
+        "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts."
     },
     %{
       name: "Double/POSITIVE_INFINITY",
@@ -81,7 +83,8 @@
       name: "Float/parseFloat",
       status: :supported,
       description: "Parse string to float",
-      notes: "Compatibility alias for parse-double; PTC-Lisp uses one floating type."
+      notes:
+        "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type."
     },
     %{
       name: "Float/isNaN",
@@ -113,7 +116,8 @@
       name: "Integer/parseInt",
       status: :supported,
       description: "Parse string to integer",
-      notes: "Compatibility alias for parse-long; nil on invalid input."
+      notes:
+        "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
     },
     %{
       name: "Integer/valueOf",
@@ -145,7 +149,8 @@
       name: "Long/parseLong",
       status: :supported,
       description: "Parse string to integer",
-      notes: "Compatibility alias for parse-long; nil on invalid input."
+      notes:
+        "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
     },
     %{
       name: "Long/valueOf",
@@ -173,20 +178,67 @@
     }
   ],
   java_lang_string_audit: [
-    %{name: ".contains", status: :supported, description: "Substring containment", notes: ""},
-    %{name: ".indexOf", status: :supported, description: "First substring index", notes: ""},
+    %{
+      name: ".contains",
+      status: :supported,
+      description: "Substring containment",
+      notes:
+        "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".indexOf",
+      status: :supported,
+      description: "First substring index",
+      notes:
+        "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
     %{
       name: ".lastIndexOf",
       status: :supported,
       description: "Last substring index",
-      notes: ""
+      notes:
+        "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
     },
-    %{name: ".length", status: :supported, description: "String length", notes: ""},
-    %{name: ".substring", status: :supported, description: "Extract substring", notes: ""},
-    %{name: ".toLowerCase", status: :supported, description: "Lowercase string", notes: ""},
-    %{name: ".toUpperCase", status: :supported, description: "Uppercase string", notes: ""},
-    %{name: ".startsWith", status: :supported, description: "Prefix test", notes: ""},
-    %{name: ".endsWith", status: :supported, description: "Suffix test", notes: ""},
+    %{
+      name: ".length",
+      status: :supported,
+      description: "String length",
+      notes:
+        "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".substring",
+      status: :supported,
+      description: "Extract substring",
+      notes:
+        "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".toLowerCase",
+      status: :supported,
+      description: "Lowercase string",
+      notes: "BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".toUpperCase",
+      status: :supported,
+      description: "Uppercase string",
+      notes: "BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".startsWith",
+      status: :supported,
+      description: "Prefix test",
+      notes:
+        "BUG GAP-J05: prefix/offset overload is unsupported. BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
+    %{
+      name: ".endsWith",
+      status: :supported,
+      description: "Suffix test",
+      notes:
+        "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    },
     %{
       name: ".trim",
       status: :candidate,
@@ -261,7 +313,8 @@
       name: "LocalDate/parse",
       status: :supported,
       description: "Parse ISO-8601 date string",
-      notes: "Also available as java.time.LocalDate/parse and parse."
+      notes:
+        "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected."
     },
     %{
       name: "LocalDate/now",
@@ -303,13 +356,15 @@
       name: ".plusDays",
       status: :supported,
       description: "Add days to a LocalDate",
-      notes: "Requested in issue #1019 for date arithmetic."
+      notes:
+        "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
     },
     %{
       name: ".minusDays",
       status: :supported,
       description: "Subtract days from a LocalDate",
-      notes: "Requested in issue #1019 for date arithmetic."
+      notes:
+        "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
     }
   ],
   java_time_instant_audit: [
@@ -317,7 +372,8 @@
       name: "Instant/parse",
       status: :supported,
       description: "Parse ISO-8601 instant string",
-      notes: "Also available as java.time.Instant/parse and parse."
+      notes:
+        "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
     },
     %{
       name: "Instant/now",
@@ -341,7 +397,14 @@
       name: ".getTime",
       status: :supported,
       description: "Unix timestamp in milliseconds",
-      notes: "Works on DateTime values."
+      notes:
+        "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
+    },
+    %{
+      name: ".toEpochMilli",
+      status: :candidate,
+      description: "Return Instant epoch millisecond",
+      notes: "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
     },
     %{
       name: "Instant/ofEpochMilli",
@@ -355,7 +418,8 @@
       name: "Duration/between",
       status: :supported,
       description: "Duration between two instants",
-      notes: "Requested in issue #1019 for millisecond/day differences."
+      notes:
+        "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
     },
     %{
       name: ".toMillis",
@@ -415,13 +479,28 @@
       name: "java.util.Date.",
       status: :supported,
       description: "Construct DateTime value",
-      notes: "Accepts no arg, timestamp, ISO/RFC string, or temporal value."
+      notes:
+        "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected."
     },
     %{
       name: ".getTime",
       status: :supported,
       description: "Unix timestamp in milliseconds",
       notes: "Works on DateTime values."
+    },
+    %{
+      name: ".isBefore",
+      status: :supported,
+      description: "Date ordering predicate",
+      notes:
+        "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias."
+    },
+    %{
+      name: ".isAfter",
+      status: :supported,
+      description: "Date ordering predicate",
+      notes:
+        "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias."
     },
     %{
       name: ".before",
