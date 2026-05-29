@@ -233,5 +233,63 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     test "local binding can shadow when-first" do
       assert {:ok, %{return: 8}} = Lisp.run("(let [when-first 8] when-first)")
     end
+
+    test "local binding shadows pmap as a callable" do
+      assert {:ok, %{return: 30}} =
+               Lisp.run("(let [pmap (fn [x] (* x 10))] (pmap 3))")
+    end
+
+    test "local binding shadows pmap inside a thread" do
+      assert {:ok, %{return: 30}} =
+               Lisp.run("(let [pmap (fn [x] (* x 10))] (-> 3 (pmap)))")
+    end
+
+    test "local binding shadows juxt as a callable" do
+      assert {:ok, %{return: 4}} = Lisp.run("(let [juxt (fn [x] (+ x 1))] (juxt 3))")
+    end
+
+    test "local binding shadows a bare thread step" do
+      assert {:ok, %{return: 30}} =
+               Lisp.run("(let [pmap (fn [x] (* x 10))] (-> 3 pmap))")
+    end
+  end
+
+  # ============================================================
+  # Special forms inside threading macros
+  #
+  # Threading must re-dispatch each step as a full list form, so analyzer
+  # special forms that are semantically plain functions (pmap, pcalls, juxt,
+  # apply) work in step position instead of erroring as undefined variables.
+  # ============================================================
+
+  describe "special forms threaded through -> and ->>" do
+    test "pmap as the last ->> step" do
+      assert {:ok, %{return: [2, 3, 4]}} = Lisp.run("(->> [1 2 3] (pmap inc))")
+    end
+
+    test "pmap after intermediate steps" do
+      assert {:ok, %{return: [1, 2, 3]}} =
+               Lisp.run("(->> [1 2 3] (map inc) (pmap dec))")
+    end
+
+    test "juxt threaded with ->" do
+      assert {:ok, %{return: f}} = Lisp.run("(-> 5 (juxt inc dec))")
+      assert is_function(f, 1)
+    end
+
+    test "apply threaded with ->>" do
+      assert {:ok, %{return: [1, 2, 3, 4]}} =
+               Lisp.run("(->> [[1 2] [3 4]] (apply concat))")
+    end
+
+    test "special form threaded through some->" do
+      assert {:ok, %{return: f}} = Lisp.run("(some-> 5 (juxt inc dec))")
+      assert is_function(f, 1)
+    end
+
+    test "special form threaded through cond->" do
+      assert {:ok, %{return: f}} = Lisp.run("(cond-> 5 true (juxt inc dec))")
+      assert is_function(f, 1)
+    end
   end
 end

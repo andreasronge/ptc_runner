@@ -45,6 +45,13 @@ defmodule PtcRunner.Lisp.Analyze do
                       :"cond->>",
                       :"some->",
                       :"some->>",
+                      # Function-like forms intercepted by the analyzer but
+                      # semantically plain functions in Clojure — must stay
+                      # rebindable so `(let [pmap f] (pmap x))` calls the local.
+                      :juxt,
+                      :pmap,
+                      :pcalls,
+                      :apply,
                       :comment,
                       :doseq,
                       :for,
@@ -231,6 +238,13 @@ defmodule PtcRunner.Lisp.Analyze do
   # Var reader syntax: #'name produces {:var, name} from the parser
   defp do_analyze({:var, name}, _tail?) when is_atom(name) or is_binary(name),
     do: {:ok, {:var, name}}
+
+  # Pre-analyzed core spliced in by the threading macros (-> ->> some-> cond->).
+  # Threading is macro-like: it rewrites each step into a full list form and
+  # re-analyzes it so the head dispatches as a special form (pmap, juxt, apply,
+  # recur, ...) or a plain call. The already-analyzed accumulator rides through
+  # this passthrough node instead of being re-analyzed from source.
+  defp do_analyze({:analyzed, core}, _tail?), do: {:ok, core}
 
   defp do_analyze({:ns_symbol, :data, key}, _tail?), do: {:ok, {:data, key}}
 
@@ -805,29 +819,27 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
+  # Splice the threaded value into the step form and re-analyze the whole list,
+  # so the head dispatches like any other list form. This keeps special forms
+  # (pmap, pcalls, juxt, apply, return, recur, ...) working inside threads — a
+  # direct {:call, ...} would treat their head as an undefined variable.
   defp apply_thread_step(kind, acc, {:list, [f_ast | arg_asts]}, tail?) do
-    # Handle special forms (return, fail) that need the threaded value
-    case f_ast do
-      {:symbol, :return} when arg_asts == [] ->
-        {:ok, {:return, acc}}
+    acc_ast = {:analyzed, acc}
 
-      {:symbol, :fail} when arg_asts == [] ->
-        {:ok, {:fail, acc}}
+    new_arg_asts =
+      case kind do
+        :-> -> [acc_ast | arg_asts]
+        :"->>" -> arg_asts ++ [acc_ast]
+      end
 
-      _ ->
-        with {:ok, f} <- do_analyze(f_ast, false),
-             {:ok, args} <- analyze_list(arg_asts) do
-          new_args =
-            case kind do
-              :-> -> [acc | args]
-              :"->>" -> args ++ [acc]
-            end
-
-          resolve_call_or_recur(f, new_args, tail?)
-        end
-    end
+    do_analyze({:list, [f_ast | new_arg_asts]}, tail?)
   end
 
+  # Bare step (e.g. `(-> x inc)`): resolve the head as a value and call it with
+  # the threaded arg. A bare symbol is value position in source, so it is never
+  # a special form here — resolving it as a var preserves local bindings that
+  # shadow a form name (`(let [pmap f] (-> 3 pmap))`), which call-position shadow
+  # marking can't reach.
   defp apply_thread_step(_kind, acc, step_ast, tail?) do
     with {:ok, f} <- do_analyze(step_ast, false) do
       resolve_call_or_recur(f, [acc], tail?)
