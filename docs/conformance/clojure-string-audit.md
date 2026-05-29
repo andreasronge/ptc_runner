@@ -26,24 +26,24 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace | Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 counts as blank here but not in Clojure |
+| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising |
 | `capitalize` | 🔲 candidate | Converts first character to upper-case, rest to lower-case | pure string transformation |
-| `ends-with?` | ✅ supported | True if s ends with substr |  |
+| `ends-with?` | ✅ supported | True if s ends with substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
 | `escape` | 🔲 candidate | Return a new string applying cmap to each character | pure character mapping |
-| `includes?` | ✅ supported | True if s includes substr |  |
-| `index-of` | ✅ supported | Return index of value in string |  |
-| `join` | ✅ supported | Returns a string of elements joined by separator |  |
-| `last-index-of` | ✅ supported | Return last index of value in string |  |
-| `lower-case` | ✅ supported | Converts string to all lower-case |  |
+| `includes?` | ✅ supported | True if s includes substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
+| `index-of` | ✅ supported | Return index of value in string | DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified |
+| `join` | ✅ supported | Returns a string of elements joined by separator | BUG GAP-S26: nil collections, nil separators, string collections, and map collections currently raise instead of joining |
+| `last-index-of` | ✅ supported | Return last index of value in string | DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S80: negative from-index returns 0 instead of nil; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified |
+| `lower-case` | ✅ supported | Converts string to all lower-case | BUG GAP-S139: numeric inputs raise instead of being stringified |
 | `re-quote-replacement` | ❌ not_relevant | Escapes special characters in replacement string | Java regex-specific utility |
-| `replace` | ✅ supported | Replaces all instances of match in s |  |
+| `replace` | ✅ supported | Replaces all instances of match in s | BUG GAP-S27: replacement function form is not implemented. BUG GAP-S73: regex replacement string group references are not honored. BUG GAP-S116: character match/replacement arguments are accepted instead of raising for mismatched replacement types. BUG GAP-S139: numeric receivers raise instead of being stringified |
 | `replace-first` | 🔲 candidate | Replaces first instance of match in s | pure string transformation |
 | `reverse` | 🔲 candidate | Returns s with characters reversed | pure string transformation |
-| `split` | ✅ supported | Splits string on regex or string |  |
-| `split-lines` | ✅ supported | Splits string on \n or \r\n |  |
-| `starts-with?` | ✅ supported | True if s starts with substr |  |
-| `trim` | ✅ supported | Removes whitespace from both ends of string | Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
-| `trim-newline` | ✅ supported | Removes all trailing newline or return characters |  |
-| `triml` | ✅ supported | Removes whitespace from the left side of string | Unicode whitespace (Elixir String.trim_leading), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
-| `trimr` | ✅ supported | Removes whitespace from the right side of string | Unicode whitespace (Elixir String.trim_trailing), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure |
-| `upper-case` | ✅ supported | Converts string to all upper-case |  |
+| `split` | ✅ supported | Splits string on regex | BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S74: plain string delimiter is accepted even though Clojure requires a regex; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising |
+| `split-lines` | ✅ supported | Splits string on \n or \r\n | BUG GAP-S51: empty string currently returns [] instead of [""] |
+| `starts-with?` | ✅ supported | True if s starts with substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
+| `trim` | ✅ supported | Removes whitespace from both ends of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
+| `trim-newline` | ✅ supported | Removes all trailing newline or return characters | BUG GAP-S116: character inputs are accepted instead of raising |
+| `triml` | ✅ supported | Removes whitespace from the left side of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
+| `trimr` | ✅ supported | Removes whitespace from the right side of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
+| `upper-case` | ✅ supported | Converts string to all upper-case | BUG GAP-S139: numeric inputs raise instead of being stringified |

@@ -31,6 +31,6 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `Double/POSITIVE_INFINITY` | ✅ supported | Positive infinity constant |  |
 | `Double/isInfinite` | 🔲 candidate | Return true if value is infinite | Common guard around parsed floating data. |
 | `Double/isNaN` | 🔲 candidate | Return true if value is NaN | Common guard around parsed floating data. |
-| `Double/parseDouble` | ✅ supported | Parse string to double | Compatibility alias for parse-double; nil on invalid input. |
+| `Double/parseDouble` | ✅ supported | Parse string to double | BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. |
 | `Double/valueOf` | 🔲 candidate | Parse or box a double value | parse-double covers string parsing; boxing is not relevant. |
 | `doubleValue` | ❌ not_relevant | Unbox a Double object | PTC-Lisp has one numeric value model, not boxed Java numbers. |

@@ -28,11 +28,11 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 |-----|--------|-------------|-------|
 | `keywordize-keys` | 🔲 candidate | Recursively transforms all map keys from strings to keywords | pure recursive map transformation |
 | `macroexpand-all` | ❌ not_relevant | Recursively performs all possible macroexpansions in form | macros are not supported in PTC-Lisp |
-| `postwalk` | ✅ supported | Performs a depth-first, post-order traversal of form |  |
+| `postwalk` | ✅ supported | Performs a depth-first, post-order traversal of form | BUG GAP-S71: map/set callables are rejected as transform functions |
 | `postwalk-demo` | ❌ not_relevant | Demonstrates postwalk by printing each form as it is walked | debug/demo side-effect helper |
 | `postwalk-replace` | 🔲 candidate | Recursively replaces keys in smap with their values, leaves first | pure recursive data transformation |
-| `prewalk` | ✅ supported | Performs a pre-order traversal of form |  |
+| `prewalk` | ✅ supported | Performs a pre-order traversal of form | BUG GAP-S71: map/set callables are rejected as transform functions |
 | `prewalk-demo` | ❌ not_relevant | Demonstrates prewalk by printing each form as it is walked | debug/demo side-effect helper |
 | `prewalk-replace` | 🔲 candidate | Recursively replaces keys in smap with their values, root first | pure recursive data transformation |
 | `stringify-keys` | 🔲 candidate | Recursively transforms all map keys from keywords to strings | pure recursive map transformation |
-| `walk` | ✅ supported | Traverses form by applying inner to children and outer to the result |  |
+| `walk` | ✅ supported | Traverses form by applying inner to children and outer to the result | BUG GAP-S71: map/set/vector callables are rejected as inner/outer functions. BUG GAP-S91: invalid transformed map-entry shapes are accepted instead of raising |

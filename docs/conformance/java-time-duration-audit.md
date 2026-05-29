@@ -28,6 +28,6 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 |-----|--------|-------------|-------|
 | `.toDays` | ✅ supported | Return duration length in whole days | Requested in issue #1019 for bucket/day calculations. |
 | `.toMillis` | ✅ supported | Return duration length in milliseconds | Requested in issue #1019 for instant differences. |
-| `Duration/between` | ✅ supported | Duration between two instants | Requested in issue #1019 for millisecond/day differences. |
+| `Duration/between` | ✅ supported | Duration between two instants | Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected. |
 | `Duration/ofMillis` | 🔲 candidate | Construct duration from milliseconds | Useful companion for bounded Duration support. |
 | `Duration/parse` | 🔲 candidate | Parse ISO-8601 duration string | Useful but lower-priority than between/toMillis/toDays. |

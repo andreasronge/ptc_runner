@@ -29,9 +29,9 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `.format` | 🔲 candidate | Format date with a formatter | Date formatting API would need a bounded formatter surface. |
 | `.isAfter` | ✅ supported | Date ordering predicate | Works for same-type Date or DateTime values. |
 | `.isBefore` | ✅ supported | Date ordering predicate | Works for same-type Date or DateTime values. |
-| `.minusDays` | ✅ supported | Subtract days from a LocalDate | Requested in issue #1019 for date arithmetic. |
-| `.plusDays` | ✅ supported | Add days to a LocalDate | Requested in issue #1019 for date arithmetic. |
+| `.minusDays` | ✅ supported | Subtract days from a LocalDate | Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion. |
+| `.plusDays` | ✅ supported | Add days to a LocalDate | Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion. |
 | `.toEpochDay` | ✅ supported | Return LocalDate epoch-day integer | Requested in issue #1019 for day differences and date sorting. |
 | `LocalDate/now` | 🔲 candidate | Current date | Useful, but currentTimeMillis plus parse/Date constructors cover many cases. |
 | `LocalDate/of` | 🔲 candidate | Construct date from year/month/day | Useful Java idiom; vector/map construction plus parse is the current workaround. |
-| `LocalDate/parse` | ✅ supported | Parse ISO-8601 date string | Also available as java.time.LocalDate/parse and parse. |
+| `LocalDate/parse` | ✅ supported | Parse ISO-8601 date string | Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected. |

@@ -28,6 +28,6 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 |-----|--------|-------------|-------|
 | `Boolean/FALSE` | 🔲 candidate | Boolean false constant | Low-cost compatibility constant if models emit Java constants. |
 | `Boolean/TRUE` | 🔲 candidate | Boolean true constant | Low-cost compatibility constant if models emit Java constants. |
-| `Boolean/parseBoolean` | ✅ supported | Parse string to boolean | Compatibility alias for parse-boolean; nil on invalid input. |
+| `Boolean/parseBoolean` | ✅ supported | Parse string to boolean | BUG GAP-J02: currently aliases parse-boolean, returns nil for non-true/nil inputs, misses Java's case-insensitive true handling, and returns nil instead of raising for non-string inputs. |
 | `Boolean/valueOf` | 🔲 candidate | Return Boolean value for a string or boolean | Common LLM spelling; parse-boolean covers string parsing but not Java's object API. |
 | `booleanValue` | ❌ not_relevant | Unbox a Boolean object | PTC-Lisp has primitive booleans, not boxed Java Boolean objects. |

@@ -24,6 +24,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
 
   @default_timeout 5_000
   @local_bb_path "_build/tools/bb"
+  @result_marker "__PTC_CLOJURE_RESULT__ "
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.SourceAtoms
@@ -126,7 +127,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
         wrapped = wrap_with_stubs(source, context, memory)
 
         case run_bb(bb, wrapped, timeout) do
-          {:ok, output} -> parse_edn_output(output)
+          {:ok, output} -> output |> extract_result_output() |> parse_edn_output()
           {:error, _} = err -> err
         end
     end
@@ -176,27 +177,46 @@ defmodule PtcRunner.Lisp.ClojureValidator do
 
       #{ptc_stubs()}
 
-      ;; User program
-      #{source})
+      ;; User program. Print a marker after execution so user stdout from
+      ;; expressions like println is not mistaken for the return value.
+      (let [ptc-result (do #{source})]
+        (println "#{@result_marker}" (pr-str ptc-result))))
     """
   end
 
   # Private functions
 
   defp run_bb(bb_path, source, timeout \\ @default_timeout) do
-    case System.cmd(bb_path, ["-e", source],
-           stderr_to_stdout: true,
-           env: [{"BABASHKA_DISABLE_WARNINGS", "true"}]
-         ) do
-      {output, 0} ->
+    task =
+      Task.async(fn ->
+        System.cmd(bb_path, ["-e", source],
+          stderr_to_stdout: true,
+          env: [{"BABASHKA_DISABLE_WARNINGS", "true"}]
+        )
+      end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {output, 0}} ->
         {:ok, String.trim(output)}
 
-      {output, _exit_code} ->
+      {:ok, {output, _exit_code}} ->
         {:error, String.trim(output)}
+
+      nil ->
+        {:error, "Babashka execution timed out after #{timeout}ms"}
     end
-  catch
-    :exit, {:timeout, _} ->
-      {:error, "Babashka execution timed out after #{timeout}ms"}
+  end
+
+  defp extract_result_output(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.reverse()
+    |> Enum.find_value(output, fn line ->
+      case String.split(line, @result_marker, parts: 2) do
+        ["", result] -> String.trim(result)
+        _ -> nil
+      end
+    end)
   end
 
   defp parse_edn_output(output) when output == "" do
@@ -204,12 +224,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
   end
 
   defp parse_edn_output(output) do
-    # Special handling for sets to preserve type
-    if String.match?(output, ~r/^\#\{.*\}$/s) do
-      parse_edn_set(output)
-    else
-      parse_edn_via_json(output)
-    end
+    parse_edn_via_json(output)
   end
 
   # Parse EDN by converting through JSON
@@ -219,14 +234,25 @@ defmodule PtcRunner.Lisp.ClojureValidator do
         {:error, "Babashka not available"}
 
       bb ->
-        # Use read-string to safely parse EDN (handles lists like (1 2 3))
-        # Then convert to JSON. The read-string prevents (1 2 3) being interpreted
-        # as a function call.
+        # Use read-string to safely parse EDN (handles lists like (1 2 3)).
+        # Encode EDN-specific structures before JSON conversion so sets,
+        # keywords, and non-string map keys survive round-tripping.
         escaped = output |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
 
         json_convert = """
         (require '[cheshire.core :as json])
-        (println (json/generate-string (read-string "#{escaped}")))
+        (declare ptc-encode)
+        (defn ptc-encode-map-entry [[k v]]
+          [(ptc-encode k) (ptc-encode v)])
+        (defn ptc-encode [x]
+          (cond
+            (keyword? x) (subs (str x) 1)
+            (set? x) {:__ptc_edn_type "set" :items (mapv ptc-encode x)}
+            (map? x) {:__ptc_edn_type "map" :entries (mapv ptc-encode-map-entry x)}
+            (sequential? x) (mapv ptc-encode x)
+            (var? x) {:__ptc_edn_type "var" :name (str x)}
+            :else x))
+        (println (json/generate-string (ptc-encode (read-string "#{escaped}"))))
         """
 
         case run_bb(bb, json_convert) do
@@ -240,26 +266,6 @@ defmodule PtcRunner.Lisp.ClojureValidator do
             # Fallback to simple parsing
             {:ok, parse_simple_edn(output)}
         end
-    end
-  end
-
-  # Parse Clojure set notation #{...} and return as MapSet
-  defp parse_edn_set(output) do
-    # Extract content between #{ and }
-    case Regex.run(~r/^\#\{(.*)\}$/s, output, capture: :all_but_first) do
-      [content] ->
-        # Split by whitespace and parse each element
-        elements =
-          content
-          |> String.trim()
-          |> String.split(~r/\s+/, trim: true)
-          |> Enum.map(&parse_simple_edn/1)
-
-        {:ok, MapSet.new(elements)}
-
-      _ ->
-        # Fallback: parse as simple EDN
-        {:ok, parse_simple_edn(output)}
     end
   end
 
@@ -331,7 +337,21 @@ defmodule PtcRunner.Lisp.ClojureValidator do
     end
   end
 
-  # Normalize JSON values (convert string keys back to atoms for keywords)
+  # Normalize JSON values (convert tagged EDN structures back to Elixir terms)
+  defp normalize_from_json(%{"__ptc_edn_type" => "set", "items" => items}) do
+    items
+    |> Enum.map(&normalize_from_json/1)
+    |> MapSet.new()
+  end
+
+  defp normalize_from_json(%{"__ptc_edn_type" => "map", "entries" => entries}) do
+    Map.new(entries, fn [key, value] -> {normalize_from_json(key), normalize_from_json(value)} end)
+  end
+
+  defp normalize_from_json(%{"__ptc_edn_type" => "var", "name" => name}) do
+    ["var", name]
+  end
+
   defp normalize_from_json(value) when is_map(value) do
     Map.new(value, fn {k, v} ->
       key =
@@ -461,7 +481,7 @@ defmodule PtcRunner.Lisp.ClojureValidator do
             (apply max-key #(get % key) valid)))))
 
     ;; Parallel execution stubs (run sequentially in BB/Clojure for validation)
-    (defn pmap [f coll] (map f coll))
+    (defn pmap [f & colls] (apply map f colls))
     (defn pcalls [& fns] (mapv #(%) fns))
 
     ;; Tool call stub (returns nil by default)

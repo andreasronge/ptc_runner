@@ -304,9 +304,9 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `apropos` * | `(apropos query), (apropos query opts)` | Search loaded REPL discovery backends |
 | `dir` * | `(dir server), (dir server opts)` | List members of a REPL discovery reference |
 | `doc` * | `(doc tool-ref)` | Return human-readable documentation for a REPL discovery reference |
-| `tool/servers` * | `(tool/servers)` | List configured upstream MCP servers |
 | `meta` * | `(meta tool-ref)` | Return structured metadata for a REPL discovery reference |
 | `ns-publics` | `(ns-publics namespace)` | Return public vars for a local PTC/Clojure namespace |
+| `tool/servers` * | `(tool/servers)` | List configured upstream MCP servers |
 
 
 

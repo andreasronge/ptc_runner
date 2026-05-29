@@ -1243,6 +1243,17 @@ defmodule PtcRunner.Lisp do
     collect_undefined_vars(body, extended_scope)
   end
 
+  defp collect_undefined_vars({:fn, name, params, body}, scope) do
+    param_names = fn_param_vars(params)
+
+    extended_scope =
+      [name | param_names]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.reduce(scope, &MapSet.put(&2, &1))
+
+    collect_undefined_vars(body, extended_scope)
+  end
+
   # loop — extend scope with binding vars
   defp collect_undefined_vars({:loop, bindings, body}, scope) do
     {binding_errors, extended_scope} = reduce_bindings(bindings, scope)

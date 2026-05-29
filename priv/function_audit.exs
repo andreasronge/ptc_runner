@@ -4,7 +4,7 @@
       name: "*",
       status: :supported,
       description: "Multiplies numbers; returns 1 with no args",
-      notes: ""
+      notes: "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
     },
     %{
       name: "*'",
@@ -16,7 +16,7 @@
       name: "+",
       status: :supported,
       description: "Adds numbers; returns 0 with no args",
-      notes: ""
+      notes: "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
     },
     %{
       name: "+'",
@@ -28,7 +28,7 @@
       name: "-",
       status: :supported,
       description: "Subtracts numbers or negates single argument",
-      notes: ""
+      notes: "BUG GAP-S28: zero-arity form currently returns 0 instead of raising"
     },
     %{
       name: "-'",
@@ -40,13 +40,13 @@
       name: "->",
       status: :supported,
       description: "Threads expression as second argument through forms",
-      notes: ""
+      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
     },
     %{
       name: "->>",
       status: :supported,
       description: "Threads expression as last argument through forms",
-      notes: ""
+      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
     },
     %{
       name: ".",
@@ -60,43 +60,57 @@
       description: "Chains member access operations",
       notes: "Java interop"
     },
-    %{name: "/", status: :supported, description: "Divides numbers", notes: ""},
+    %{
+      name: "/",
+      status: :supported,
+      description: "Divides numbers",
+      notes:
+        "BUG GAP-S29: unary form currently returns the argument instead of reciprocal. BUG GAP-S69: floating division by zero returns infinity instead of raising. BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+    },
     %{
       name: "<",
       status: :supported,
       description: "Returns true if numbers monotonically increase",
-      notes: ""
+      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
     },
     %{
       name: "<=",
       status: :supported,
       description: "Returns true if numbers non-decreasing",
-      notes: ""
+      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
     },
-    %{name: "=", status: :supported, description: "Equality comparison", notes: ""},
+    %{
+      name: "=",
+      status: :supported,
+      description: "Equality comparison",
+      notes:
+        "DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings"
+    },
     %{
       name: "==",
       status: :supported,
       description: "Type-independent numeric equality",
-      notes: "alias for numeric equality"
+      notes:
+        "alias for numeric equality; BUG GAP-S120: character literals compare equal to strings"
     },
     %{
       name: ">",
       status: :supported,
       description: "Returns true if numbers monotonically decrease",
-      notes: ""
+      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
     },
     %{
       name: ">=",
       status: :supported,
       description: "Returns true if numbers non-increasing",
-      notes: ""
+      notes: "DIV-30: ordering predicates use PTC's recoverable total term ordering"
     },
     %{
       name: "abs",
       status: :supported,
       description: "Returns absolute value of number",
-      notes: ""
+      notes:
+        "DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow"
     },
     %{
       name: "accessor",
@@ -199,7 +213,8 @@
       name: "apply",
       status: :supported,
       description: "Applies function to argument sequence",
-      notes: ""
+      notes:
+        "BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. BUG GAP-S109: nil function position returns nil instead of raising. BUG GAP-S13: vector function position is rejected"
     },
     %{
       name: "areduce",
@@ -217,7 +232,8 @@
       name: "as->",
       status: :supported,
       description: "Binds name to expr, threads through forms",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "aset",
@@ -235,7 +251,7 @@
       name: "assoc",
       status: :supported,
       description: "Returns map/vector with added key-value pairs",
-      notes: ""
+      notes: "BUG GAP-S105: one-arity form returns the collection instead of raising"
     },
     %{
       name: "assoc!",
@@ -247,13 +263,15 @@
       name: "assoc-in",
       status: :supported,
       description: "Associates value in nested structure",
-      notes: ""
+      notes:
+        "BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key"
     },
     %{
       name: "associative?",
       status: :supported,
       description: "Returns true if coll implements Associative",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "atom",
@@ -313,67 +331,77 @@
       name: "bit-and",
       status: :supported,
       description: "Bitwise AND",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-and-not",
       status: :supported,
       description: "Bitwise AND with complement",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-clear",
       status: :supported,
       description: "Clears bit at index",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-flip",
       status: :supported,
       description: "Flips bit at index",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-not",
       status: :supported,
       description: "Bitwise complement",
-      notes: "integers only"
+      notes: "integers only; BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-or",
       status: :supported,
       description: "Bitwise OR",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-set",
       status: :supported,
       description: "Sets bit at index",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-shift-left",
       status: :supported,
       description: "Bitwise left shift",
-      notes: "integers only; BEAM has no fixed integer width (shift amount not mod 64)"
+      notes:
+        "integers only; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-shift-right",
       status: :supported,
       description: "Bitwise right shift",
-      notes: "integers only; arithmetic (sign-extending) shift"
+      notes:
+        "integers only; arithmetic (sign-extending) shift; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-test",
       status: :supported,
       description: "Tests bit at index",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-xor",
       status: :supported,
       description: "Bitwise exclusive OR",
-      notes: "integers only"
+      notes:
+        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{name: "boolean", status: :supported, description: "Coerces to boolean", notes: ""},
     %{
@@ -386,7 +414,8 @@
       name: "boolean?",
       status: :supported,
       description: "Returns true if value is Boolean",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "booleans",
@@ -418,7 +447,13 @@
       description: "Counts up to n elements",
       notes: "designed for lazy sequences"
     },
-    %{name: "butlast", status: :supported, description: "Returns all but last item", notes: ""},
+    %{
+      name: "butlast",
+      status: :supported,
+      description: "Returns all but last item",
+      notes:
+        "BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "byte",
       status: :not_relevant,
@@ -447,7 +482,8 @@
       name: "case",
       status: :supported,
       description: "Constant-time dispatch on expression value",
-      notes: ""
+      notes:
+        "BUG GAP-S37: no-match/no-default form currently returns nil instead of raising. BUG GAP-S72: duplicate constants are accepted and compound constants are rejected. BUG GAP-S120: character literals dispatch as equal to one-character strings. DIV-32: numeric dispatch follows PTC's type-independent numeric equality"
     },
     %{
       name: "cast",
@@ -477,7 +513,7 @@
       name: "char?",
       status: :supported,
       description: "Returns true if value is Character",
-      notes: ""
+      notes: "BUG GAP-S44: one-character strings currently return true"
     },
     %{
       name: "chars",
@@ -525,7 +561,8 @@
       name: "comp",
       status: :supported,
       description: "Composes functions right-to-left",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/set/vector callables are rejected in composed function position. BUG GAP-S135: nil composed function returns nil instead of raising"
     },
     %{
       name: "comparator",
@@ -537,7 +574,8 @@
       name: "compare",
       status: :supported,
       description: "Compares values returning neg/zero/pos",
-      notes: ""
+      notes:
+        "DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises"
     },
     %{
       name: "compare-and-set!",
@@ -555,7 +593,7 @@
       name: "complement",
       status: :supported,
       description: "Returns function with opposite truth value",
-      notes: ""
+      notes: "BUG GAP-S71: map/set callables are rejected in predicate position"
     },
     %{
       name: "completing",
@@ -567,32 +605,41 @@
       name: "concat",
       status: :supported,
       description: "Returns lazy seq concatenating collections",
-      notes: ""
+      notes: "BUG GAP-S57: string inputs currently raise instead of being treated as seqable"
     },
-    %{name: "cond", status: :supported, description: "Multi-way conditional", notes: ""},
+    %{
+      name: "cond",
+      status: :supported,
+      description: "Multi-way conditional",
+      notes: "BUG GAP-S112: zero-clause cond raises instead of returning nil"
+    },
     %{
       name: "cond->",
       status: :supported,
       description: "Threads through forms where tests true",
-      notes: ""
+      notes:
+        "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
     },
     %{
       name: "cond->>",
       status: :supported,
       description: "Threads as last arg where tests true",
-      notes: ""
+      notes:
+        "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
     },
     %{
       name: "condp",
       status: :supported,
       description: "Predicate dispatch against expression",
-      notes: ""
+      notes:
+        "BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising"
     },
     %{
       name: "conj",
       status: :supported,
       description: "Returns collection with items added",
-      notes: ""
+      notes:
+        "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
     },
     %{
       name: "conj!",
@@ -604,7 +651,8 @@
       name: "cons",
       status: :supported,
       description: "Returns seq with item prepended",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "constantly",
@@ -616,19 +664,21 @@
       name: "contains?",
       status: :supported,
       description: "Returns true if key present in collection",
-      notes: ""
+      notes:
+        "DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
     },
     %{
       name: "count",
       status: :supported,
       description: "Returns number of items in collection",
-      notes: ""
+      notes:
+        "DIV-36: string counts use Unicode graphemes instead of JVM UTF-16 code units. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "counted?",
       status: :supported,
       description: "Returns true if constant-time count",
-      notes: ""
+      notes: "BUG GAP-S70: strings currently return true but Clojure returns false"
     },
     %{
       name: "create-ns",
@@ -655,7 +705,12 @@
       description: "Decrements with arbitrary precision",
       notes: "alias for dec; BEAM integers are already arbitrary precision"
     },
-    %{name: "decimal?", status: :supported, description: "Returns true if BigDecimal", notes: ""},
+    %{
+      name: "decimal?",
+      status: :supported,
+      description: "Returns true if BigDecimal",
+      notes: "always false; BigDecimal literals are unsupported, see DIV-20"
+    },
     %{
       name: "declare",
       status: :not_relevant,
@@ -666,9 +721,16 @@
       name: "dedupe",
       status: :supported,
       description: "Removes consecutive duplicates",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
-    %{name: "def", status: :supported, description: "Creates and interns global var", notes: ""},
+    %{
+      name: "def",
+      status: :supported,
+      description: "Creates and interns global var",
+      notes:
+        "BUG GAP-S140: no-init def raises instead of creating an unbound var. BUG GAP-S141: return value omits the user namespace"
+    },
     %{
       name: "definterface",
       status: :not_relevant,
@@ -693,7 +755,13 @@
       description: "Creates multimethod with dispatch function",
       notes: "multimethods"
     },
-    %{name: "defn", status: :supported, description: "Defines named function", notes: ""},
+    %{
+      name: "defn",
+      status: :supported,
+      description: "Defines named function",
+      notes:
+        "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+    },
     %{
       name: "defn-",
       status: :not_relevant,
@@ -704,7 +772,7 @@
       name: "defonce",
       status: :supported,
       description: "Defines var only if not already defined",
-      notes: ""
+      notes: "BUG GAP-S141: return value omits the user namespace"
     },
     %{
       name: "defprotocol",
@@ -779,7 +847,12 @@
       description: "Removes from transient set",
       notes: "relies on transient/mutable data structures"
     },
-    %{name: "dissoc", status: :supported, description: "Returns map with key removed", notes: ""},
+    %{
+      name: "dissoc",
+      status: :supported,
+      description: "Returns map with key removed",
+      notes: "BUG GAP-S19: nil map root currently raises instead of returning nil"
+    },
     %{
       name: "dissoc!",
       status: :not_relevant,
@@ -790,13 +863,15 @@
       name: "distinct",
       status: :supported,
       description: "Returns seq removing duplicates",
-      notes: ""
+      notes:
+        "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising"
     },
     %{
       name: "distinct?",
       status: :supported,
       description: "Returns true if all args distinct",
-      notes: ""
+      notes:
+        "BUG GAP-S64: zero-arity distinct? returns true instead of raising. BUG GAP-S101: repeated NaN values are treated as duplicates"
     },
     %{
       name: "do",
@@ -820,7 +895,7 @@
       name: "doseq",
       status: :supported,
       description: "Iterates over sequences for side effects",
-      notes: ""
+      notes: "BUG GAP-S18: def side effects inside doseq are not visible after the loop"
     },
     %{
       name: "dosync",
@@ -847,7 +922,12 @@
       description: "Creates double Java array",
       notes: "relies on Java arrays"
     },
-    %{name: "double?", status: :supported, description: "Returns true if Double", notes: ""},
+    %{
+      name: "double?",
+      status: :supported,
+      description: "Returns true if Double",
+      notes: "BUG GAP-S127: special float literals return false instead of true"
+    },
     %{
       name: "doubles",
       status: :not_relevant,
@@ -858,19 +938,22 @@
       name: "drop",
       status: :supported,
       description: "Returns seq skipping first n items",
-      notes: ""
+      notes:
+        "BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count drops from the end instead of returning the input; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts"
     },
     %{
       name: "drop-last",
       status: :supported,
       description: "Returns seq without last n items",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "drop-while",
       status: :supported,
       description: "Drops items while predicate true",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "eduction",
@@ -882,13 +965,15 @@
       name: "empty",
       status: :supported,
       description: "Returns empty collection of same type",
-      notes: ""
+      notes:
+        "BUG GAP-S56: string input returns an empty string instead of nil. BUG GAP-S88: non-collection inputs should return nil but currently raise or return an empty map"
     },
     %{
       name: "empty?",
       status: :supported,
       description: "Returns true if collection empty",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "ensure",
@@ -930,19 +1015,20 @@
       name: "even?",
       status: :supported,
       description: "Returns true if number is even",
-      notes: ""
+      notes: "DIV-31: numeric predicates return false for non-numeric inputs"
     },
     %{
       name: "every-pred",
       status: :supported,
       description: "Returns combined predicate (all must be true)",
-      notes: ""
+      notes: "BUG GAP-S71: map/set/vector callables are rejected in predicate position"
     },
     %{
       name: "every?",
       status: :supported,
       description: "Returns true if pred true for all items",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "ex-cause",
@@ -1004,7 +1090,12 @@
       description: "Returns true if value is false",
       notes: ""
     },
-    %{name: "ffirst", status: :supported, description: "First of first item", notes: ""},
+    %{
+      name: "ffirst",
+      status: :supported,
+      description: "First of first item",
+      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+    },
     %{
       name: "file-seq",
       status: :not_relevant,
@@ -1015,19 +1106,22 @@
       name: "filter",
       status: :supported,
       description: "Returns items where predicate true",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "filterv",
       status: :supported,
       description: "Returns vector of items where pred true",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "find",
       status: :supported,
       description: "Returns map entry for key or nil",
-      notes: ""
+      notes:
+        "BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup"
     },
     %{
       name: "find-keyword",
@@ -1047,16 +1141,38 @@
       description: "Returns var or nil",
       notes: "relies on vars/namespace system"
     },
-    %{name: "first", status: :supported, description: "Returns first item", notes: ""},
-    %{name: "flatten", status: :supported, description: "Flattens nested collections", notes: ""},
-    %{name: "float", status: :supported, description: "Coerces to float", notes: ""},
+    %{
+      name: "first",
+      status: :supported,
+      description: "Returns first item",
+      notes:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
+    %{
+      name: "flatten",
+      status: :supported,
+      description: "Flattens nested collections",
+      notes:
+        "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S81: scalar/string/character/map roots raise instead of returning an empty seq"
+    },
+    %{
+      name: "float",
+      status: :supported,
+      description: "Coerces to float",
+      notes: "BUG GAP-S122: infinite inputs return infinities instead of raising"
+    },
     %{
       name: "float-array",
       status: :not_relevant,
       description: "Creates float Java array",
       notes: "creates Java array"
     },
-    %{name: "float?", status: :supported, description: "Returns true if Float", notes: ""},
+    %{
+      name: "float?",
+      status: :supported,
+      description: "Returns true if Float",
+      notes: "BUG GAP-S127: special float literals return false instead of true"
+    },
     %{
       name: "floats",
       status: :not_relevant,
@@ -1069,25 +1185,38 @@
       description: "Flushes output writer",
       notes: "I/O operation"
     },
-    %{name: "fn", status: :supported, description: "Defines anonymous function", notes: ""},
+    %{
+      name: "fn",
+      status: :supported,
+      description: "Defines anonymous function",
+      notes:
+        "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+    },
     %{
       name: "fn?",
       status: :supported,
       description: "Returns true if value is function",
       notes: ""
     },
-    %{name: "fnext", status: :supported, description: "First of next item", notes: ""},
+    %{
+      name: "fnext",
+      status: :supported,
+      description: "First of next item",
+      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+    },
     %{
       name: "fnil",
       status: :supported,
       description: "Returns function with nil defaults",
-      notes: ""
+      notes:
+        "BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position"
     },
     %{
       name: "for",
       status: :supported,
       description: "List comprehension from nested iteration",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "force",
@@ -1095,12 +1224,19 @@
       description: "Forces evaluation of delay",
       notes: "relies on lazy evaluation/delays"
     },
-    %{name: "format", status: :supported, description: "Returns formatted string", notes: ""},
+    %{
+      name: "format",
+      status: :supported,
+      description: "Returns formatted string",
+      notes:
+        "BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null"
+    },
     %{
       name: "frequencies",
       status: :supported,
       description: "Returns map of item frequencies",
-      notes: ""
+      notes:
+        "BUG GAP-S20: nil input currently raises instead of returning an empty frequency map; direct map input raises instead of counting map entries. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "future",
@@ -1144,12 +1280,19 @@
       description: "Returns unique symbol",
       notes: "macro system utility"
     },
-    %{name: "get", status: :supported, description: "Returns value for key or nil", notes: ""},
+    %{
+      name: "get",
+      status: :supported,
+      description: "Returns value for key or nil",
+      notes:
+        "BUG GAP-S12: string indexes and non-index keys currently raise. BUG GAP-S36: set lookup currently raises instead of returning value/default, including nil members"
+    },
     %{
       name: "get-in",
       status: :supported,
       description: "Returns value at nested key path",
-      notes: ""
+      notes:
+        "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup; BUG GAP-S144: nil paths return nil instead of the root value"
     },
     %{
       name: "get-method",
@@ -1179,7 +1322,8 @@
       name: "group-by",
       status: :supported,
       description: "Groups items by function result",
-      notes: ""
+      notes:
+        "BUG GAP-S67: string inputs are rejected instead of treated as seqable. BUG GAP-S71: map/set/vector callables are rejected or misapplied as key functions"
     },
     %{
       name: "halt-when",
@@ -1233,10 +1377,27 @@
     },
     %{name: "identity", status: :supported, description: "Returns argument unchanged", notes: ""},
     %{name: "if", status: :supported, description: "Conditional branch", notes: ""},
-    %{name: "if-let", status: :supported, description: "Conditional with binding", notes: ""},
+    %{
+      name: "if-let",
+      status: :supported,
+      description: "Conditional with binding",
+      notes:
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+    },
     %{name: "if-not", status: :supported, description: "Negated conditional", notes: ""},
-    %{name: "if-some", status: :supported, description: "Binds if not nil", notes: ""},
-    %{name: "ifn?", status: :supported, description: "Returns true if invokable", notes: ""},
+    %{
+      name: "if-some",
+      status: :supported,
+      description: "Binds if not nil",
+      notes:
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+    },
+    %{
+      name: "ifn?",
+      status: :supported,
+      description: "Returns true if invokable",
+      notes: "BUG GAP-S13: vectors are callable in Clojure but not in PTC-Lisp"
+    },
     %{
       name: "import",
       status: :not_relevant,
@@ -1260,13 +1421,19 @@
       name: "indexed?",
       status: :supported,
       description: "Returns true if supports indexed access",
-      notes: ""
+      notes: "BUG GAP-S70: strings currently return true but Clojure returns false"
     },
     %{
       name: "infinite?",
       status: :supported,
       description: "Returns true if number infinite",
-      notes: ""
+      notes: "DIV-31: returns false for nil/non-numeric inputs instead of raising"
+    },
+    %{
+      name: "NaN?",
+      status: :supported,
+      description: "Returns true if number is NaN",
+      notes: "DIV-31: returns false for nil/non-numeric inputs instead of raising"
     },
     %{
       name: "inst-ms",
@@ -1286,20 +1453,32 @@
       description: "Returns true if instance of class",
       notes: "relies on Java class system"
     },
-    %{name: "int", status: :supported, description: "Coerces to int", notes: ""},
+    %{
+      name: "int",
+      status: :supported,
+      description: "Coerces to int",
+      notes:
+        "BUG GAP-S62: NaN input raises instead of returning 0. BUG GAP-S111: out-of-range integer inputs return unchanged instead of raising. BUG GAP-S121: character literals raise instead of returning code points"
+    },
     %{
       name: "int-array",
       status: :not_relevant,
       description: "Creates int Java array",
       notes: "relies on Java array/mutability"
     },
-    %{name: "int?", status: :supported, description: "Returns true if Integer", notes: ""},
+    %{
+      name: "int?",
+      status: :supported,
+      description: "Returns true if Integer",
+      notes: "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
+    },
     %{name: "integer?", status: :supported, description: "Returns true if integer", notes: ""},
     %{
       name: "interleave",
       status: :supported,
       description: "Interleaves items from collections",
-      notes: ""
+      notes:
+        "BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. BUG GAP-S143: unary arity is rejected instead of returning the source seq. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
     },
     %{
       name: "intern",
@@ -1311,13 +1490,15 @@
       name: "interpose",
       status: :supported,
       description: "Inserts separator between items",
-      notes: ""
+      notes:
+        "BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
     },
     %{
       name: "into",
       status: :supported,
       description: "Conjoins items from source into target",
-      notes: ""
+      notes:
+        "BUG GAP-S41: zero/one arities, string sources, and nil targets currently raise instead of following Clojure seq/list behavior"
     },
     %{
       name: "into-array",
@@ -1359,25 +1540,51 @@
       name: "juxt",
       status: :supported,
       description: "Applies multiple functions, collects results",
-      notes: ""
+      notes:
+        "BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position"
     },
     %{
       name: "keep",
       status: :supported,
       description: "Keeps non-nil results of function",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "keep-indexed",
       status: :supported,
       description: "Keeps non-nil results with index",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
-    %{name: "key", status: :supported, description: "Returns key of map entry", notes: ""},
-    %{name: "keys", status: :supported, description: "Returns map keys", notes: ""},
-    %{name: "keyword", status: :supported, description: "Coerces to keyword", notes: ""},
+    %{
+      name: "key",
+      status: :supported,
+      description: "Returns key of map entry",
+      notes: "BUG GAP-S17: currently accepts plain vectors/list pairs as map entries"
+    },
+    %{
+      name: "keys",
+      status: :supported,
+      description: "Returns map keys",
+      notes:
+        "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order"
+    },
+    %{
+      name: "keyword",
+      status: :supported,
+      description: "Coerces to keyword",
+      notes:
+        "BUG GAP-S34: namespace/name arity is unsupported. BUG GAP-S63: keyword invocation matches string keys. BUG GAP-S78: non-string/non-keyword inputs raise instead of returning nil. DIV-13/DIV-34/DIV-35: namespaced, empty, and broad-character keywords are outside the PTC-Lisp data model."
+    },
     %{name: "keyword?", status: :supported, description: "Returns true if keyword", notes: ""},
-    %{name: "last", status: :supported, description: "Returns last item", notes: ""},
+    %{
+      name: "last",
+      status: :supported,
+      description: "Returns last item",
+      notes:
+        "BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "lazy-cat",
       status: :not_relevant,
@@ -1390,7 +1597,13 @@
       description: "Creates lazy sequence from expression",
       notes: "relies on lazy sequences"
     },
-    %{name: "let", status: :supported, description: "Local variable bindings", notes: ""},
+    %{
+      name: "let",
+      status: :supported,
+      description: "Local variable bindings",
+      notes:
+        "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
+    },
     %{
       name: "letfn",
       status: :not_relevant,
@@ -1473,7 +1686,7 @@
       name: "loop",
       status: :supported,
       description: "Loop with recur for tail recursion",
-      notes: ""
+      notes: "BUG GAP-S114: bodyless loop raises instead of returning nil"
     },
     %{
       name: "macroexpand",
@@ -1499,38 +1712,52 @@
       description: "Returns empty hierarchy",
       notes: "relies on multimethods system"
     },
-    %{name: "map", status: :supported, description: "Applies function to each item", notes: ""},
+    %{
+      name: "map",
+      status: :supported,
+      description: "Applies function to each item",
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S102: multi-collection arity rejects string inputs. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "map-entry?",
       status: :supported,
       description: "Returns true if map entry",
-      notes: ""
+      notes: "BUG GAP-S136: explicit seq map entries are not recognized as map entries"
     },
     %{
       name: "map-indexed",
       status: :supported,
       description: "Applies function with index to items",
-      notes: ""
+      notes: "BUG GAP-S71: map callables are rejected in function position"
     },
     %{name: "map?", status: :supported, description: "Returns true if map", notes: ""},
     %{
       name: "mapcat",
       status: :supported,
       description: "Maps then concatenates results",
-      notes: ""
+      notes:
+        "BUG GAP-S49: multiple input collections, nil results, and string results currently raise. BUG GAP-S71: map callables are rejected in function position"
     },
     %{
       name: "mapv",
       status: :supported,
       description: "Returns vector from mapping function",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
-    %{name: "max", status: :supported, description: "Returns greatest number", notes: ""},
+    %{
+      name: "max",
+      status: :supported,
+      description: "Returns greatest number",
+      notes: "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+    },
     %{
       name: "max-key",
       status: :supported,
       description: "Returns item with greatest function value",
-      notes: ""
+      notes:
+        "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
     },
     %{
       name: "memfn",
@@ -1544,12 +1771,19 @@
       description: "Caches function results by arguments",
       notes: "relies on mutable state for caching"
     },
-    %{name: "merge", status: :supported, description: "Merges maps", notes: ""},
+    %{
+      name: "merge",
+      status: :supported,
+      description: "Merges maps",
+      notes:
+        "BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected"
+    },
     %{
       name: "merge-with",
       status: :supported,
       description: "Merges maps with combining function",
-      notes: ""
+      notes:
+        "BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected"
     },
     %{
       name: "meta",
@@ -1563,19 +1797,32 @@
       description: "Returns multimethod implementations",
       notes: "relies on multimethods"
     },
-    %{name: "min", status: :supported, description: "Returns least number", notes: ""},
+    %{
+      name: "min",
+      status: :supported,
+      description: "Returns least number",
+      notes: "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values"
+    },
     %{
       name: "min-key",
       status: :supported,
       description: "Returns item with least function value",
-      notes: ""
+      notes:
+        "DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions"
     },
-    %{name: "mod", status: :supported, description: "Returns modulo", notes: ""},
+    %{
+      name: "mod",
+      status: :supported,
+      description: "Returns modulo",
+      notes:
+        "BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
+    },
     %{
       name: "name",
       status: :supported,
       description: "Returns name string of symbol/keyword",
-      notes: ""
+      notes:
+        "DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising"
     },
     %{
       name: "namespace",
@@ -1587,19 +1834,19 @@
       name: "nat-int?",
       status: :supported,
       description: "Returns true if non-negative integer",
-      notes: ""
+      notes: "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
     },
     %{
       name: "neg-int?",
       status: :supported,
       description: "Returns true if negative integer",
-      notes: ""
+      notes: "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
     },
     %{
       name: "neg?",
       status: :supported,
       description: "Returns true if number negative",
-      notes: ""
+      notes: "DIV-31: returns false for nil/non-numeric inputs instead of raising"
     },
     %{
       name: "newline",
@@ -1607,42 +1854,75 @@
       description: "Writes newline to output",
       notes: "relies on I/O"
     },
-    %{name: "next", status: :supported, description: "Returns seq after first item", notes: ""},
-    %{name: "nfirst", status: :supported, description: "Next of first item", notes: ""},
+    %{
+      name: "next",
+      status: :supported,
+      description: "Returns seq after first item",
+      notes:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
+    %{
+      name: "nfirst",
+      status: :supported,
+      description: "Next of first item",
+      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+    },
     %{name: "nil?", status: :supported, description: "Returns true if nil", notes: ""},
-    %{name: "nnext", status: :supported, description: "Next of next item", notes: ""},
+    %{
+      name: "nnext",
+      status: :supported,
+      description: "Next of next item",
+      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+    },
     %{name: "not", status: :supported, description: "Logical complement", notes: ""},
     %{
       name: "not-any?",
       status: :supported,
       description: "Returns true if pred false for all",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "not-empty",
       status: :supported,
       description: "Returns collection or nil if empty",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "not-every?",
       status: :supported,
       description: "Returns true if pred false for some",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
-    %{name: "not=", status: :supported, description: "Returns true if not equal", notes: ""},
-    %{name: "nth", status: :supported, description: "Returns item at index", notes: ""},
+    %{
+      name: "not=",
+      status: :supported,
+      description: "Returns true if not equal",
+      notes:
+        "DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings"
+    },
+    %{
+      name: "nth",
+      status: :supported,
+      description: "Returns item at index",
+      notes:
+        "DIV-26 for out-of-range signal values; DIV-36 for string grapheme indexing; BUG GAP-S10/GAP-S11/GAP-S79/GAP-S94. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "nthnext",
       status: :supported,
       description: "Returns nth next",
-      notes: "implemented as seq after nthrest"
+      notes:
+        "implemented as seq after nthrest. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "nthrest",
       status: :supported,
       description: "Returns rest after nth item",
-      notes: "implemented as drop alias with Clojure argument order"
+      notes:
+        "implemented as drop alias with Clojure argument order. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "num",
@@ -1663,7 +1943,12 @@
       description: "Creates object Java array",
       notes: "relies on Java interop and host arrays"
     },
-    %{name: "odd?", status: :supported, description: "Returns true if number odd", notes: ""},
+    %{
+      name: "odd?",
+      status: :supported,
+      description: "Returns true if number odd",
+      notes: "DIV-31: numeric predicates return false for non-numeric inputs"
+    },
     %{name: "or", status: :supported, description: "Short-circuit logical OR", notes: ""},
     %{
       name: "parents",
@@ -1681,9 +1966,16 @@
       name: "parse-double",
       status: :supported,
       description: "Parses string to double",
-      notes: ""
+      notes:
+        "BUG GAP-S61: surrounding whitespace and Java decimal spellings return nil instead of parsing"
     },
-    %{name: "parse-long", status: :supported, description: "Parses string to long", notes: ""},
+    %{
+      name: "parse-long",
+      status: :supported,
+      description: "Parses string to long",
+      notes:
+        "BUG GAP-S85: out-of-range long values return arbitrary-precision integers instead of nil"
+    },
     %{
       name: "parse-uuid",
       status: :not_relevant,
@@ -1694,25 +1986,28 @@
       name: "partial",
       status: :supported,
       description: "Fixes supplied arguments to function",
-      notes: ""
+      notes: "BUG GAP-S71: map/set/vector callables are rejected in function position"
     },
     %{
       name: "partition",
       status: :supported,
       description: "Partitions items into groups of n",
-      notes: ""
+      notes:
+        "BUG GAP-S31: nil padding collection currently raises instead of acting empty. BUG GAP-S53: negative partition size raises instead of returning an empty seq. BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts."
     },
     %{
       name: "partition-all",
       status: :supported,
       description: "Partitions without dropping partial group",
-      notes: ""
+      notes:
+        "BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "partition-by",
       status: :supported,
       description: "Partitions by change in function value",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "pcalls",
@@ -1724,7 +2019,7 @@
       name: "peek",
       status: :supported,
       description: "Returns first/last without removing",
-      notes: ""
+      notes: "DIV-25 for list alias behavior"
     },
     %{
       name: "persistent!",
@@ -1732,12 +2027,18 @@
       description: "Converts transient to persistent",
       notes: "transients are unsupported"
     },
-    %{name: "pmap", status: :supported, description: "Parallel map over collection", notes: ""},
+    %{
+      name: "pmap",
+      status: :supported,
+      description: "Parallel map over collection",
+      notes:
+        "BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported"
+    },
     %{
       name: "pop",
       status: :supported,
       description: "Returns collection without first/last",
-      notes: ""
+      notes: "DIV-25 for list alias behavior; DIV-26 for empty collection signal value"
     },
     %{
       name: "pop!",
@@ -1749,13 +2050,13 @@
       name: "pos-int?",
       status: :supported,
       description: "Returns true if positive integer",
-      notes: ""
+      notes: "DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width"
     },
     %{
       name: "pos?",
       status: :supported,
       description: "Returns true if number positive",
-      notes: ""
+      notes: "DIV-31: returns false for nil/non-numeric inputs instead of raising"
     },
     %{
       name: "pr",
@@ -1767,7 +2068,7 @@
       name: "pr-str",
       status: :supported,
       description: "Returns readable string of value",
-      notes: ""
+      notes: "BUG GAP-S126: character literals print as strings instead of character syntax"
     },
     %{
       name: "prefer-method",
@@ -1840,7 +2141,8 @@
       name: "quot",
       status: :supported,
       description: "Returns integer division quotient",
-      notes: ""
+      notes:
+        "DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow. BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
     },
     %{
       name: "quote",
@@ -1878,8 +2180,19 @@
       description: "Returns random UUID",
       notes: "relies on non-deterministic side effects"
     },
-    %{name: "range", status: :supported, description: "Returns sequence of numbers", notes: ""},
-    %{name: "ratio?", status: :supported, description: "Returns true if ratio", notes: ""},
+    %{
+      name: "range",
+      status: :supported,
+      description: "Returns sequence of numbers",
+      notes:
+        "BUG GAP-S45: zero-step range currently returns an empty vector. BUG GAP-S99: nil and nonnumeric bounds/steps return an empty vector instead of raising"
+    },
+    %{
+      name: "ratio?",
+      status: :supported,
+      description: "Returns true if ratio",
+      notes: "always false; ratio literals are unsupported, see DIV-20"
+    },
     %{
       name: "rational?",
       status: :supported,
@@ -1892,7 +2205,13 @@
       description: "Coerces to ratio",
       notes: "ratio values are not supported"
     },
-    %{name: "re-find", status: :supported, description: "Returns first regex match", notes: ""},
+    %{
+      name: "re-find",
+      status: :supported,
+      description: "Returns first regex match",
+      notes:
+        "BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
+    },
     %{
       name: "re-groups",
       status: :not_relevant,
@@ -1909,15 +2228,23 @@
       name: "re-matches",
       status: :supported,
       description: "Returns full regex match or nil",
-      notes: ""
+      notes:
+        "BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
     },
     %{
       name: "re-pattern",
       status: :supported,
       description: "Returns compiled regex pattern",
-      notes: ""
+      notes:
+        "BUG GAP-S66: existing regex patterns are rejected instead of returned. BUG GAP-S131: character patterns are accepted instead of raising"
     },
-    %{name: "re-seq", status: :supported, description: "Returns seq of regex matches", notes: ""},
+    %{
+      name: "re-seq",
+      status: :supported,
+      description: "Returns seq of regex matches",
+      notes:
+        "BUG GAP-S82: no-match returns [] instead of nil. BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising"
+    },
     %{
       name: "read",
       status: :not_relevant,
@@ -1958,13 +2285,14 @@
       name: "reduce",
       status: :supported,
       description: "Reduces collection with function",
-      notes: ""
+      notes:
+        "BUG GAP-S21: empty/nil input without init returns nil instead of calling the reducing function's zero-arity identity. BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "reduce-kv",
       status: :supported,
       description: "Reduces map with key-value function",
-      notes: ""
+      notes: "BUG GAP-S59: vector input currently raises instead of reducing indexes and values"
     },
     %{
       name: "reduced",
@@ -2002,12 +2330,19 @@
       description: "Creates instance implementing protocols",
       notes: "relies on protocols and class generation"
     },
-    %{name: "rem", status: :supported, description: "Returns remainder of division", notes: ""},
+    %{
+      name: "rem",
+      status: :supported,
+      description: "Returns remainder of division",
+      notes:
+        "BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
+    },
     %{
       name: "remove",
       status: :supported,
       description: "Returns items where predicate false",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "remove-all-methods",
@@ -2055,7 +2390,7 @@
       name: "replace",
       status: :supported,
       description: "Replaces values by map mapping",
-      notes: ""
+      notes: "BUG GAP-S16: clojure.core sequence replacement form is not implemented"
     },
     %{
       name: "require",
@@ -2093,19 +2428,31 @@
       description: "Resolves symbol in namespace",
       notes: "namespace/symbol resolution"
     },
-    %{name: "rest", status: :supported, description: "Returns seq after first item", notes: ""},
+    %{
+      name: "rest",
+      status: :supported,
+      description: "Returns seq after first item",
+      notes:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "restart-agent",
       status: :not_relevant,
       description: "Restarts failed agent",
       notes: "concurrency primitives (agents)"
     },
-    %{name: "reverse", status: :supported, description: "Reverses order of items", notes: ""},
+    %{
+      name: "reverse",
+      status: :supported,
+      description: "Reverses order of items",
+      notes:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S20: nil input currently raises instead of returning an empty seq"
+    },
     %{
       name: "reversible?",
       status: :supported,
       description: "Returns true if collection reversible",
-      notes: ""
+      notes: "BUG GAP-S70: strings currently return true but Clojure returns false"
     },
     %{
       name: "rseq",
@@ -2131,12 +2478,19 @@
       description: "Returns true if type satisfies protocol",
       notes: "protocol/type system feature"
     },
-    %{name: "second", status: :supported, description: "Returns second item", notes: ""},
+    %{
+      name: "second",
+      status: :supported,
+      description: "Returns second item",
+      notes:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{
       name: "select-keys",
       status: :supported,
       description: "Returns map with only specified keys",
-      notes: ""
+      notes:
+        "BUG GAP-S23: nil and string keyseqs currently raise instead of returning an empty map; BUG GAP-S43: vector inputs currently raise instead of selecting indexes"
     },
     %{
       name: "send",
@@ -2160,19 +2514,20 @@
       name: "seq",
       status: :supported,
       description: "Returns sequence or nil if empty",
-      notes: ""
+      notes:
+        "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "seq?",
       status: :supported,
       description: "Returns true if value is sequence",
-      notes: ""
+      notes: "BUG GAP-S84: vectors currently return true instead of false"
     },
     %{
       name: "seqable?",
       status: :supported,
       description: "Returns true if implements Seqable",
-      notes: ""
+      notes: "BUG GAP-S125: character literals return true instead of false"
     },
     %{
       name: "sequence",
@@ -2186,7 +2541,12 @@
       description: "Returns true if sequential",
       notes: ""
     },
-    %{name: "set", status: :supported, description: "Creates set from items", notes: ""},
+    %{
+      name: "set",
+      status: :supported,
+      description: "Creates set from items",
+      notes: "BUG GAP-S30: nil and string inputs currently raise instead of producing sets"
+    },
     %{
       name: "set!",
       status: :not_relevant,
@@ -2252,33 +2612,41 @@
       name: "some",
       status: :supported,
       description: "Returns first truthy result or nil",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "some->",
       status: :supported,
       description: "Threads through forms while non-nil",
-      notes: ""
+      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
     },
     %{
       name: "some->>",
       status: :supported,
       description: "Threads as last arg while non-nil",
-      notes: ""
+      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
     },
     %{
       name: "some-fn",
       status: :supported,
       description: "Returns pred true if any fn truthy",
-      notes: ""
+      notes: "BUG GAP-S71: map/set/vector callables are rejected in predicate position"
     },
     %{name: "some?", status: :supported, description: "Returns true if not nil", notes: ""},
-    %{name: "sort", status: :supported, description: "Returns sorted sequence", notes: ""},
+    %{
+      name: "sort",
+      status: :supported,
+      description: "Returns sorted sequence",
+      notes:
+        "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
+    },
     %{
       name: "sort-by",
       status: :supported,
       description: "Returns seq sorted by function result",
-      notes: ""
+      notes:
+        "DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics"
     },
     %{
       name: "sorted-map",
@@ -2316,10 +2684,33 @@
       description: "Writes content to file",
       notes: "file I/O"
     },
-    %{name: "split-at", status: :supported, description: "Splits seq at index", notes: ""},
-    %{name: "split-with", status: :supported, description: "Splits seq by predicate", notes: ""},
-    %{name: "str", status: :supported, description: "Converts to string", notes: ""},
-    %{name: "string?", status: :supported, description: "Returns true if string", notes: ""},
+    %{
+      name: "split-at",
+      status: :supported,
+      description: "Splits seq at index",
+      notes:
+        "BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
+    %{
+      name: "split-with",
+      status: :supported,
+      description: "Splits seq by predicate",
+      notes:
+        "DIV-36: string sequence predicates receive one-character strings. BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
+    %{
+      name: "str",
+      status: :supported,
+      description: "Converts to string",
+      notes:
+        "BUG GAP-S93: regex patterns render as internal tuples instead of source pattern text"
+    },
+    %{
+      name: "string?",
+      status: :supported,
+      description: "Returns true if string",
+      notes: "BUG GAP-S133: character literals return true instead of false"
+    },
     %{
       name: "struct",
       status: :not_relevant,
@@ -2332,14 +2723,26 @@
       description: "Creates structure map from basis",
       notes: "legacy structure system, discouraged/deprecated"
     },
-    %{name: "subs", status: :supported, description: "Returns substring", notes: ""},
+    %{
+      name: "subs",
+      status: :supported,
+      description: "Returns substring",
+      notes:
+        "DIV-22: returns signal values instead of raising on out-of-range indices; DIV-36: string indexes use Unicode graphemes; BUG GAP-S79: numeric index coercion rejects floats Clojure accepts"
+    },
     %{
       name: "subseq",
       status: :candidate,
       description: "Returns subseq of sorted collection",
       notes: "pure operation on sorted collections"
     },
-    %{name: "subvec", status: :supported, description: "Returns subvector", notes: ""},
+    %{
+      name: "subvec",
+      status: :supported,
+      description: "Returns subvector",
+      notes:
+        "DIV-26: clamps out-of-range indices instead of raising. BUG GAP-S79: numeric index coercion rejects floats Clojure accepts"
+    },
     %{
       name: "supers",
       status: :not_relevant,
@@ -2365,8 +2768,20 @@
       notes: "pure data coercion"
     },
     %{name: "symbol?", status: :supported, description: "Returns true if symbol", notes: ""},
-    %{name: "take", status: :supported, description: "Returns first n items", notes: ""},
-    %{name: "take-last", status: :supported, description: "Returns last n items", notes: ""},
+    %{
+      name: "take",
+      status: :supported,
+      description: "Returns first n items",
+      notes:
+        "BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count returns a tail instead of an empty seq; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts"
+    },
+    %{
+      name: "take-last",
+      status: :supported,
+      description: "Returns last n items",
+      notes:
+        "BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil"
+    },
     %{
       name: "take-nth",
       status: :not_relevant,
@@ -2377,7 +2792,8 @@
       name: "take-while",
       status: :supported,
       description: "Takes items while predicate true",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "tap>",
@@ -2433,7 +2849,12 @@
       description: "Creates transient collection",
       notes: "Mutable state/transients are not supported"
     },
-    %{name: "tree-seq", status: :supported, description: "Depth-first seq from root", notes: ""},
+    %{
+      name: "tree-seq",
+      status: :supported,
+      description: "Depth-first seq from root",
+      notes: "BUG GAP-S77: string roots can recurse until heap limit"
+    },
     %{name: "true?", status: :supported, description: "Returns true if value is true", notes: ""},
     %{
       name: "try",
@@ -2441,7 +2862,12 @@
       description: "Exception handling",
       notes: "Exception handling is not supported"
     },
-    %{name: "type", status: :supported, description: "Returns type of value", notes: ""},
+    %{
+      name: "type",
+      status: :supported,
+      description: "Returns type of value",
+      notes: "DIV-28: returns stable PTC type keywords instead of host JVM classes"
+    },
     %{
       name: "unchecked-add",
       status: :not_relevant,
@@ -2591,19 +3017,22 @@
       name: "update",
       status: :supported,
       description: "Applies function to map value at key",
-      notes: ""
+      notes:
+        "BUG GAP-S19: nil map root currently raises instead of building a map. BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
     },
     %{
       name: "update-in",
       status: :supported,
       description: "Applies function to nested map value",
-      notes: ""
+      notes:
+        "BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
     },
     %{
       name: "update-keys",
       status: :supported,
       description: "Applies function to map keys",
-      notes: ""
+      notes:
+        "BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as key transforms. BUG GAP-S75: vector inputs are rejected"
     },
     %{
       name: "update-proxy",
@@ -2615,10 +3044,22 @@
       name: "update-vals",
       status: :supported,
       description: "Applies function to map values",
-      notes: ""
+      notes:
+        "BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as value transforms. BUG GAP-S75: vector inputs are rejected"
     },
-    %{name: "val", status: :supported, description: "Returns value of map entry", notes: ""},
-    %{name: "vals", status: :supported, description: "Returns map values", notes: ""},
+    %{
+      name: "val",
+      status: :supported,
+      description: "Returns value of map entry",
+      notes: "BUG GAP-S17: currently accepts plain vectors/list pairs as map entries"
+    },
+    %{
+      name: "vals",
+      status: :supported,
+      description: "Returns map values",
+      notes:
+        "DIV-38: map views are sorted by key instead of preserving Clojure map iteration order"
+    },
     %{
       name: "var-get",
       status: :not_relevant,
@@ -2643,9 +3084,20 @@
       description: "Returns value with transformed metadata",
       notes: "relies on metadata feature"
     },
-    %{name: "vec", status: :supported, description: "Converts to vector", notes: ""},
+    %{
+      name: "vec",
+      status: :supported,
+      description: "Converts to vector",
+      notes:
+        "BUG GAP-S40: nil input currently returns nil instead of an empty vector. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    },
     %{name: "vector", status: :supported, description: "Creates vector from items", notes: ""},
-    %{name: "vector?", status: :supported, description: "Returns true if vector", notes: ""},
+    %{
+      name: "vector?",
+      status: :supported,
+      description: "Returns true if vector",
+      notes: "DIV-25 for list alias behavior"
+    },
     %{
       name: "volatile!",
       status: :not_relevant,
@@ -2670,30 +3122,38 @@
       description: "Updates volatile with function",
       notes: "involves mutable state (volatiles)"
     },
-    %{name: "when", status: :supported, description: "Evaluates body if test true", notes: ""},
+    %{
+      name: "when",
+      status: :supported,
+      description: "Evaluates body if test true",
+      notes: "BUG GAP-S113: bodyless when raises instead of returning nil"
+    },
     %{
       name: "when-first",
       status: :supported,
       description: "Evaluates body if seq non-empty",
-      notes: ""
+      notes:
+        "BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "when-let",
       status: :supported,
       description: "Binds if truthy, evaluates body",
-      notes: ""
+      notes:
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "when-not",
       status: :supported,
       description: "Evaluates body if test false",
-      notes: ""
+      notes: "BUG GAP-S113: bodyless when-not raises instead of returning nil"
     },
     %{
       name: "when-some",
       status: :supported,
       description: "Binds if not nil, evaluates body",
-      notes: ""
+      notes:
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "while",
@@ -2761,13 +3221,14 @@
       name: "zero?",
       status: :supported,
       description: "Returns true if number is zero",
-      notes: ""
+      notes: "DIV-31: returns false for nil/non-numeric inputs instead of raising"
     },
     %{
       name: "zipmap",
       status: :supported,
       description: "Creates map from keys and values seqs",
-      notes: ""
+      notes:
+        "BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     }
   ],
   clojure_string_audit: [
@@ -2776,7 +3237,7 @@
       status: :supported,
       description: "True if s is nil, empty, or contains only whitespace",
       notes:
-        "Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 counts as blank here but not in Clojure"
+        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising"
     },
     %{
       name: "capitalize",
@@ -2788,7 +3249,8 @@
       name: "ends-with?",
       status: :supported,
       description: "True if s ends with substr",
-      notes: ""
+      notes:
+        "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
     },
     %{
       name: "escape",
@@ -2796,30 +3258,39 @@
       description: "Return a new string applying cmap to each character",
       notes: "pure character mapping"
     },
-    %{name: "includes?", status: :supported, description: "True if s includes substr", notes: ""},
+    %{
+      name: "includes?",
+      status: :supported,
+      description: "True if s includes substr",
+      notes:
+        "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
+    },
     %{
       name: "index-of",
       status: :supported,
       description: "Return index of value in string",
-      notes: ""
+      notes:
+        "DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified"
     },
     %{
       name: "join",
       status: :supported,
       description: "Returns a string of elements joined by separator",
-      notes: ""
+      notes:
+        "BUG GAP-S26: nil collections, nil separators, string collections, and map collections currently raise instead of joining"
     },
     %{
       name: "last-index-of",
       status: :supported,
       description: "Return last index of value in string",
-      notes: ""
+      notes:
+        "DIV-36: returns grapheme offsets instead of JVM UTF-16 code-unit offsets; BUG GAP-S80: negative from-index returns 0 instead of nil; BUG GAP-S124: finite numeric from-index arguments are rejected instead of coerced. BUG GAP-S139: numeric receivers raise instead of being stringified"
     },
     %{
       name: "lower-case",
       status: :supported,
       description: "Converts string to all lower-case",
-      notes: ""
+      notes: "BUG GAP-S139: numeric inputs raise instead of being stringified"
     },
     %{
       name: "re-quote-replacement",
@@ -2831,7 +3302,8 @@
       name: "replace",
       status: :supported,
       description: "Replaces all instances of match in s",
-      notes: ""
+      notes:
+        "BUG GAP-S27: replacement function form is not implemented. BUG GAP-S73: regex replacement string group references are not honored. BUG GAP-S116: character match/replacement arguments are accepted instead of raising for mismatched replacement types. BUG GAP-S139: numeric receivers raise instead of being stringified"
     },
     %{
       name: "replace-first",
@@ -2848,53 +3320,55 @@
     %{
       name: "split",
       status: :supported,
-      description: "Splits string on regex or string",
-      notes: ""
+      description: "Splits string on regex",
+      notes:
+        "BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S74: plain string delimiter is accepted even though Clojure requires a regex; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising"
     },
     %{
       name: "split-lines",
       status: :supported,
       description: "Splits string on \\n or \\r\\n",
-      notes: ""
+      notes: "BUG GAP-S51: empty string currently returns [] instead of [\"\"]"
     },
     %{
       name: "starts-with?",
       status: :supported,
       description: "True if s starts with substr",
-      notes: ""
+      notes:
+        "BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified"
     },
     %{
       name: "trim",
       status: :supported,
       description: "Removes whitespace from both ends of string",
       notes:
-        "Unicode whitespace (Elixir String.trim), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
+        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
     },
     %{
       name: "trim-newline",
       status: :supported,
       description: "Removes all trailing newline or return characters",
-      notes: ""
+      notes: "BUG GAP-S116: character inputs are accepted instead of raising"
     },
     %{
       name: "triml",
       status: :supported,
       description: "Removes whitespace from the left side of string",
       notes:
-        "Unicode whitespace (Elixir String.trim_leading), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
+        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
     },
     %{
       name: "trimr",
       status: :supported,
       description: "Removes whitespace from the right side of string",
       notes:
-        "Unicode whitespace (Elixir String.trim_trailing), not Java Character.isWhitespace; e.g. U+00A0 is trimmed here but not in Clojure"
+        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
     },
     %{
       name: "upper-case",
       status: :supported,
       description: "Converts string to all upper-case",
-      notes: ""
+      notes: "BUG GAP-S139: numeric inputs raise instead of being stringified"
     }
   ],
   clojure_set_audit: [
@@ -2902,7 +3376,8 @@
       name: "difference",
       status: :supported,
       description: "Return a set that is the first set without elements of the remaining sets",
-      notes: ""
+      notes:
+        "BUG GAP-S30: nil and finite seqable inputs currently raise instead of following Clojure behavior"
     },
     %{
       name: "index",
@@ -2914,7 +3389,8 @@
       name: "intersection",
       status: :supported,
       description: "Return a set that is the intersection of the input sets",
-      notes: ""
+      notes:
+        "BUG GAP-S30: nil, finite map-entry, and finite seqable inputs currently raise instead of following Clojure behavior"
     },
     %{
       name: "join",
@@ -2968,7 +3444,8 @@
       name: "union",
       status: :supported,
       description: "Return a set that is the union of the input sets",
-      notes: ""
+      notes:
+        "BUG GAP-S30: nil, map, and non-set seqable inputs currently raise instead of following Clojure union behavior"
     }
   ],
   clojure_walk_audit: [
@@ -2988,7 +3465,7 @@
       name: "postwalk",
       status: :supported,
       description: "Performs a depth-first, post-order traversal of form",
-      notes: ""
+      notes: "BUG GAP-S71: map/set callables are rejected as transform functions"
     },
     %{
       name: "postwalk-demo",
@@ -3006,7 +3483,7 @@
       name: "prewalk",
       status: :supported,
       description: "Performs a pre-order traversal of form",
-      notes: ""
+      notes: "BUG GAP-S71: map/set callables are rejected as transform functions"
     },
     %{
       name: "prewalk-demo",
@@ -3030,11 +3507,18 @@
       name: "walk",
       status: :supported,
       description: "Traverses form by applying inner to children and outer to the result",
-      notes: ""
+      notes:
+        "BUG GAP-S71: map/set/vector callables are rejected as inner/outer functions. BUG GAP-S91: invalid transformed map-entry shapes are accepted instead of raising"
     }
   ],
   java_math_audit: [
-    %{name: "abs", status: :supported, description: "Returns the absolute value", notes: ""},
+    %{
+      name: "abs",
+      status: :supported,
+      description: "Returns the absolute value",
+      notes:
+        "BUG GAP-J10: Long/MIN_VALUE does not preserve Java primitive overflow behavior, and BigInt overloads are accepted instead of rejected"
+    },
     %{
       name: "acos",
       status: :candidate,
@@ -3183,13 +3667,15 @@
       name: "max",
       status: :supported,
       description: "Returns the greater of two values",
-      notes: ""
+      notes:
+        "BUG GAP-J07: Java Math/max currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution"
     },
     %{
       name: "min",
       status: :supported,
       description: "Returns the smaller of two values",
-      notes: ""
+      notes:
+        "BUG GAP-J07: Java Math/min currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution"
     },
     %{
       name: "multiplyExact",
@@ -3231,7 +3717,8 @@
       name: "pow",
       status: :supported,
       description: "Returns the value of a raised to the power of b",
-      notes: ""
+      notes:
+        "BUG GAP-J13: special double results such as NaN and infinities currently raise or return 1.0 incorrectly"
     },
     %{
       name: "random",
@@ -3249,7 +3736,8 @@
       name: "round",
       status: :supported,
       description: "Returns the closest long/int to the argument",
-      notes: ""
+      notes:
+        "BUG GAP-J08: negative half values round away from zero, NaN returns NaN, and infinities are not saturated to long bounds. BUG GAP-J10: integer and BigInt arguments are accepted despite no Java long overload"
     },
     %{
       name: "scalb",

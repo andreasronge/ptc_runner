@@ -27,7 +27,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
 | `IEEEremainder` | ❌ not_relevant | Returns IEEE 754 remainder | low-level IEEE 754 semantics; use rem/mod |
-| `abs` | ✅ supported | Returns the absolute value |  |
+| `abs` | ✅ supported | Returns the absolute value | BUG GAP-J10: Long/MIN_VALUE does not preserve Java primitive overflow behavior, and BigInt overloads are accepted instead of rejected |
 | `acos` | 🔲 candidate | Returns the arc cosine of a value | pure math |
 | `addExact` | ❌ not_relevant | Returns sum, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `asin` | 🔲 candidate | Returns the arc sine of a value | pure math |
@@ -51,18 +51,18 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `log` | 🔲 candidate | Returns the natural logarithm (base e) of a value | pure math |
 | `log10` | 🔲 candidate | Returns the base 10 logarithm of a value | pure math |
 | `log1p` | ❌ not_relevant | Returns ln(1 + x) | specialized numerical precision, low demand |
-| `max` | ✅ supported | Returns the greater of two values |  |
-| `min` | ✅ supported | Returns the smaller of two values |  |
+| `max` | ✅ supported | Returns the greater of two values | BUG GAP-J07: Java Math/max currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution |
+| `min` | ✅ supported | Returns the smaller of two values | BUG GAP-J07: Java Math/min currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution |
 | `multiplyExact` | ❌ not_relevant | Returns product, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `multiplyHigh` | ❌ not_relevant | Returns high 64 bits of 128-bit product | low-level 64-bit arithmetic |
 | `negateExact` | ❌ not_relevant | Returns negation, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `nextAfter` | ❌ not_relevant | Returns adjacent floating-point value | low-level IEEE 754 manipulation |
 | `nextDown` | ❌ not_relevant | Returns adjacent floating-point value towards negative infinity | low-level IEEE 754 manipulation |
 | `nextUp` | ❌ not_relevant | Returns adjacent floating-point value towards positive infinity | low-level IEEE 754 manipulation |
-| `pow` | ✅ supported | Returns the value of a raised to the power of b |  |
+| `pow` | ✅ supported | Returns the value of a raised to the power of b | BUG GAP-J13: special double results such as NaN and infinities currently raise or return 1.0 incorrectly |
 | `random` | 🔲 candidate | Returns a pseudorandom double between 0.0 and 1.0 | pure (non-deterministic but side-effect free) |
 | `rint` | ❌ not_relevant | Returns closest double to argument that is a mathematical integer | use round instead |
-| `round` | ✅ supported | Returns the closest long/int to the argument |  |
+| `round` | ✅ supported | Returns the closest long/int to the argument | BUG GAP-J08: negative half values round away from zero, NaN returns NaN, and infinities are not saturated to long bounds. BUG GAP-J10: integer and BigInt arguments are accepted despite no Java long overload |
 | `scalb` | ❌ not_relevant | Returns d × 2^scaleFactor | low-level IEEE 754 manipulation |
 | `signum` | 🔲 candidate | Returns the signum function of the argument | pure math |
 | `sin` | 🔲 candidate | Returns the trigonometric sine of an angle | pure math |

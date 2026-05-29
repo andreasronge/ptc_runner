@@ -13,18 +13,18 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Metric | Count |
 |--------|-------|
-| Supported | 297 |
-| Candidate | 81 |
+| Supported | 300 |
+| Candidate | 82 |
 | Not Relevant | 325 |
 | Not Classified | 0 |
-| Relevant Target | 378 |
-| Coverage | 297/378 (78.6%) |
+| Relevant Target | 382 |
+| Coverage | 300/382 (78.5%) |
 
 ## Namespace Index
 
 | Namespace | Scope | Target | Supported | Candidate | Not Relevant | Coverage | Audit |
 |-----------|-------|--------|-----------|-----------|--------------|----------|-------|
-| `clojure.core/`, `core/` | Clojure standard | Clojure standard vars (534) | 234 | 14 | 286 | 234/248 (94.4%) | [audit](clojure-core-audit.md) |
+| `clojure.core/`, `core/` | Clojure standard | Clojure standard vars (535) | 235 | 14 | 286 | 235/249 (94.4%) | [audit](clojure-core-audit.md) |
 | `clojure.string/`, `str/`, `string/` | Clojure standard | Clojure standard vars (21) | 16 | 4 | 1 | 16/20 (80.0%) | [audit](clojure-string-audit.md) |
 | `clojure.set/`, `set/` | Clojure standard | Clojure standard vars (12) | 3 | 9 | 0 | 3/12 (25.0%) | [audit](clojure-set-audit.md) |
 | `clojure.walk/`, `walk/` | Clojure standard | Clojure standard vars (10) | 3 | 4 | 3 | 3/7 (42.9%) | [audit](clojure-walk-audit.md) |
@@ -37,10 +37,10 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | `java.lang.String` dot methods | Java standard | curated Java standard methods (15) | 9 | 4 | 2 | 9/13 (69.2%) | [audit](java-lang-string-audit.md) |
 | `System/`, `java.lang.System` | Java standard | curated Java standard methods (5) | 1 | 1 | 3 | 1/2 (50.0%) | [audit](java-lang-system-audit.md) |
 | `LocalDate/`, `java.time.LocalDate/` | Java standard | curated Java standard methods (9) | 6 | 3 | 0 | 6/9 (66.7%) | [audit](java-time-local-date-audit.md) |
-| `Instant/`, `java.time.Instant/` | Java standard | curated Java standard methods (6) | 4 | 2 | 0 | 4/6 (66.7%) | [audit](java-time-instant-audit.md) |
+| `Instant/`, `java.time.Instant/` | Java standard | curated Java standard methods (7) | 4 | 3 | 0 | 4/7 (57.1%) | [audit](java-time-instant-audit.md) |
 | `Duration/`, `java.time.Duration` | Java standard candidate | curated Java standard methods (5) | 3 | 2 | 0 | 3/5 (60.0%) | [audit](java-time-duration-audit.md) |
 | `Period/`, `java.time.Period` | Java standard candidate | curated Java standard methods (4) | 0 | 4 | 0 | 0/4 (0.0%) | [audit](java-time-period-audit.md) |
-| `java.util.Date.` | Java standard | curated Java standard methods/constructors (5) | 2 | 2 | 1 | 2/4 (50.0%) | [audit](java-util-date-audit.md) |
+| `java.util.Date.` | Java standard | curated Java standard methods/constructors (7) | 4 | 2 | 1 | 4/6 (66.7%) | [audit](java-util-date-audit.md) |
 | `regex/` | Clojure standard | audited through `clojure.core` regex vars | N/A | N/A | N/A | N/A | [audit](clojure-core-audit.md) |
 | `data/` | PTC extension | context access | N/A | N/A | N/A | N/A | N/A |
 | `tool/` | PTC extension / capability | registered tool calls | N/A | N/A | N/A | N/A | N/A |

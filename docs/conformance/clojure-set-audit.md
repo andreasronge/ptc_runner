@@ -26,9 +26,9 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `difference` | ✅ supported | Return a set that is the first set without elements of the remaining sets |  |
+| `difference` | ✅ supported | Return a set that is the first set without elements of the remaining sets | BUG GAP-S30: nil and finite seqable inputs currently raise instead of following Clojure behavior |
 | `index` | 🔲 candidate | Returns a map of the distinct values of ks mapped to sets of maps | pure set/map operation |
-| `intersection` | ✅ supported | Return a set that is the intersection of the input sets |  |
+| `intersection` | ✅ supported | Return a set that is the intersection of the input sets | BUG GAP-S30: nil, finite map-entry, and finite seqable inputs currently raise instead of following Clojure behavior |
 | `join` | 🔲 candidate | When passed 2 rels, returns the rel corresponding to the natural join | relational algebra operation |
 | `map-invert` | 🔲 candidate | Returns the map with vals mapped to keys | pure map transformation |
 | `project` | 🔲 candidate | Returns a rel of the elements of xrel with only the keys in ks | relational algebra operation |
@@ -37,4 +37,4 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `select` | 🔲 candidate | Returns a set of the elements for which pred is true | pure set filtering |
 | `subset?` | 🔲 candidate | Is set1 a subset of set2? | pure set predicate |
 | `superset?` | 🔲 candidate | Is set1 a superset of set2? | pure set predicate |
-| `union` | ✅ supported | Return a set that is the union of the input sets |  |
+| `union` | ✅ supported | Return a set that is the union of the input sets | BUG GAP-S30: nil, map, and non-set seqable inputs currently raise instead of following Clojure union behavior |

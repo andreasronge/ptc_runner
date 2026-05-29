@@ -14,36 +14,37 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 234 |
+| Supported | 235 |
 | Candidate | 14 |
 | Not Relevant | 286 |
 | Not Classified | 0 |
-| Relevant Target | 248 |
-| Coverage | 234/248 (94.4%) |
-| **Total** | **534** |
+| Relevant Target | 249 |
+| Coverage | 235/249 (94.4%) |
+| **Total** | **535** |
 
 ## Details
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `*` | ✅ supported | Multiplies numbers; returns 1 with no args |  |
+| `*` | ✅ supported | Multiplies numbers; returns 1 with no args | BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
 | `*'` | ✅ supported | Multiplies numbers with arbitrary precision | alias for *; BEAM integers are already arbitrary precision |
-| `+` | ✅ supported | Adds numbers; returns 0 with no args |  |
+| `+` | ✅ supported | Adds numbers; returns 0 with no args | BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
 | `+'` | ✅ supported | Adds numbers with arbitrary precision | alias for +; BEAM integers are already arbitrary precision |
-| `-` | ✅ supported | Subtracts numbers or negates single argument |  |
+| `-` | ✅ supported | Subtracts numbers or negates single argument | BUG GAP-S28: zero-arity form currently returns 0 instead of raising |
 | `-'` | ✅ supported | Subtracts numbers with arbitrary precision | alias for -; BEAM integers are already arbitrary precision |
-| `->` | ✅ supported | Threads expression as second argument through forms |  |
-| `->>` | ✅ supported | Threads expression as last argument through forms |  |
+| `->` | ✅ supported | Threads expression as second argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
+| `->>` | ✅ supported | Threads expression as last argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
 | `.` | ❌ not_relevant | Java member access and method calls | Java interop |
 | `..` | ❌ not_relevant | Chains member access operations | Java interop |
-| `/` | ✅ supported | Divides numbers |  |
-| `<` | ✅ supported | Returns true if numbers monotonically increase |  |
-| `<=` | ✅ supported | Returns true if numbers non-decreasing |  |
-| `=` | ✅ supported | Equality comparison |  |
-| `==` | ✅ supported | Type-independent numeric equality | alias for numeric equality |
-| `>` | ✅ supported | Returns true if numbers monotonically decrease |  |
-| `>=` | ✅ supported | Returns true if numbers non-increasing |  |
-| `abs` | ✅ supported | Returns absolute value of number |  |
+| `/` | ✅ supported | Divides numbers | BUG GAP-S29: unary form currently returns the argument instead of reciprocal. BUG GAP-S69: floating division by zero returns infinity instead of raising. BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
+| `<` | ✅ supported | Returns true if numbers monotonically increase | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `<=` | ✅ supported | Returns true if numbers non-decreasing | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `=` | ✅ supported | Equality comparison | DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings |
+| `==` | ✅ supported | Type-independent numeric equality | alias for numeric equality; BUG GAP-S120: character literals compare equal to strings |
+| `>` | ✅ supported | Returns true if numbers monotonically decrease | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `>=` | ✅ supported | Returns true if numbers non-increasing | DIV-30: ordering predicates use PTC's recoverable total term ordering |
+| `NaN?` | ✅ supported | Returns true if number is NaN | DIV-31: returns false for nil/non-numeric inputs instead of raising |
+| `abs` | ✅ supported | Returns absolute value of number | DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow |
 | `accessor` | ❌ not_relevant | Returns function accessing structmap value at key | legacy structmap helper; structmaps are not supported |
 | `aclone` | ❌ not_relevant | Returns clone of Java array | Java array manipulation |
 | `add-tap` | ❌ not_relevant | Adds function to receive tap> values | I/O and global state side effects |
@@ -61,16 +62,16 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `ancestors` | ❌ not_relevant | Returns parents of tag via hierarchy | relies on Clojure's global hierarchy/multimethod system |
 | `and` | ✅ supported | Short-circuit logical AND |  |
 | `any?` | 🔲 candidate | Returns true for any argument | pure predicate function |
-| `apply` | ✅ supported | Applies function to argument sequence |  |
+| `apply` | ✅ supported | Applies function to argument sequence | BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. BUG GAP-S109: nil function position returns nil instead of raising. BUG GAP-S13: vector function position is rejected |
 | `areduce` | ❌ not_relevant | Reduces expression across Java array | relies on Java array interoperability |
 | `array-map` | ✅ supported | Constructs array-map from key-value pairs | alias for hash-map; no separate small-map representation |
-| `as->` | ✅ supported | Binds name to expr, threads through forms |  |
+| `as->` | ✅ supported | Binds name to expr, threads through forms | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `aset` | ❌ not_relevant | Sets value in Java array at index | performs mutable operations on Java arrays |
 | `assert` | ❌ not_relevant | Throws AssertionError if expr false | relies on exception handling/throwing |
-| `assoc` | ✅ supported | Returns map/vector with added key-value pairs |  |
+| `assoc` | ✅ supported | Returns map/vector with added key-value pairs | BUG GAP-S105: one-arity form returns the collection instead of raising |
 | `assoc!` | ❌ not_relevant | Sets value in transient collection | relies on transient collections (mutability) |
-| `assoc-in` | ✅ supported | Associates value in nested structure |  |
-| `associative?` | ✅ supported | Returns true if coll implements Associative |  |
+| `assoc-in` | ✅ supported | Associates value in nested structure | BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key |
+| `associative?` | ✅ supported | Returns true if coll implements Associative | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `atom` | ❌ not_relevant | Creates atom with initial value | relies on mutable state |
 | `await` | ❌ not_relevant | Blocks until agent actions complete | relies on agent state |
 | `await-for` | ❌ not_relevant | Blocks with timeout for agent actions | relies on agent state |
@@ -80,36 +81,36 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `bigint` | ❌ not_relevant | Coerces to BigInt | BEAM integers are already arbitrary precision |
 | `biginteger` | ❌ not_relevant | Coerces to BigInteger | JVM-specific BigInteger coercion; BEAM integers are already arbitrary precision |
 | `binding` | ❌ not_relevant | Binds vars to new values for body duration | relies on thread-local var binding mechanism |
-| `bit-and` | ✅ supported | Bitwise AND | integers only |
-| `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only |
-| `bit-clear` | ✅ supported | Clears bit at index | integers only |
-| `bit-flip` | ✅ supported | Flips bit at index | integers only |
-| `bit-not` | ✅ supported | Bitwise complement | integers only |
-| `bit-or` | ✅ supported | Bitwise OR | integers only |
-| `bit-set` | ✅ supported | Sets bit at index | integers only |
-| `bit-shift-left` | ✅ supported | Bitwise left shift | integers only; BEAM has no fixed integer width (shift amount not mod 64) |
-| `bit-shift-right` | ✅ supported | Bitwise right shift | integers only; arithmetic (sign-extending) shift |
-| `bit-test` | ✅ supported | Tests bit at index | integers only |
-| `bit-xor` | ✅ supported | Bitwise exclusive OR | integers only |
+| `bit-and` | ✅ supported | Bitwise AND | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-clear` | ✅ supported | Clears bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-flip` | ✅ supported | Flips bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-not` | ✅ supported | Bitwise complement | integers only; BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-or` | ✅ supported | Bitwise OR | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-set` | ✅ supported | Sets bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-shift-left` | ✅ supported | Bitwise left shift | integers only; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-shift-right` | ✅ supported | Bitwise right shift | integers only; arithmetic (sign-extending) shift; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-test` | ✅ supported | Tests bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-xor` | ✅ supported | Bitwise exclusive OR | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `boolean` | ✅ supported | Coerces to boolean |  |
 | `boolean-array` | ❌ not_relevant | Creates boolean Java array | creates Java array, incompatible with BEAM/non-JVM environments |
-| `boolean?` | ✅ supported | Returns true if value is Boolean |  |
+| `boolean?` | ✅ supported | Returns true if value is Boolean | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `booleans` | ❌ not_relevant | Casts to boolean array | Java array manipulation |
 | `bound-fn` | ❌ not_relevant | Returns function with call-site bindings | relies on thread-local/dynamic scope bindings |
 | `bound-fn*` | ❌ not_relevant | Returns function applying creation-context bindings | relies on thread-local/dynamic scope bindings |
 | `bound?` | ❌ not_relevant | Returns true if all vars have bound value | relies on dynamic var binding state |
 | `bounded-count` | ❌ not_relevant | Counts up to n elements | designed for lazy sequences |
-| `butlast` | ✅ supported | Returns all but last item |  |
+| `butlast` | ✅ supported | Returns all but last item | BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `byte` | ❌ not_relevant | Coerces to byte | JVM primitive width coercion |
 | `byte-array` | ❌ not_relevant | Creates byte Java array | Java array creation |
 | `bytes` | ❌ not_relevant | Casts to byte array | Java array casting |
 | `bytes?` | ❌ not_relevant | Returns true if value is byte array | Java array type check |
-| `case` | ✅ supported | Constant-time dispatch on expression value |  |
+| `case` | ✅ supported | Constant-time dispatch on expression value | BUG GAP-S37: no-match/no-default form currently returns nil instead of raising. BUG GAP-S72: duplicate constants are accepted and compound constants are rejected. BUG GAP-S120: character literals dispatch as equal to one-character strings. DIV-32: numeric dispatch follows PTC's type-independent numeric equality |
 | `cast` | ❌ not_relevant | Throws ClassCastException if not instance | relies on Java type system and exception handling |
 | `cat` | ❌ not_relevant | Transducer concatenating input collections | transducers are not supported |
 | `char` | ❌ not_relevant | Coerces to char | JVM character coercion; PTC-Lisp strings are UTF-8 binaries |
 | `char-array` | ❌ not_relevant | Creates char Java array | creates Java array |
-| `char?` | ✅ supported | Returns true if value is Character |  |
+| `char?` | ✅ supported | Returns true if value is Character | BUG GAP-S44: one-character strings currently return true |
 | `chars` | ❌ not_relevant | Casts to char array | relies on Java char array types |
 | `class` | ❌ not_relevant | Returns class of value | relies on Java class introspection |
 | `class?` | ❌ not_relevant | Returns true if value is Class instance | relies on Java type system |
@@ -117,41 +118,41 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `coll?` | ✅ supported | Returns true if implements IPersistentCollection |  |
 | `comment` | ❌ not_relevant | Ignores body, yields nil | REPL/source code construct |
 | `commute` | ❌ not_relevant | Sets ref value via commutative function | mutable state primitive (refs) |
-| `comp` | ✅ supported | Composes functions right-to-left |  |
+| `comp` | ✅ supported | Composes functions right-to-left | BUG GAP-S71: map/set/vector callables are rejected in composed function position. BUG GAP-S135: nil composed function returns nil instead of raising |
 | `comparator` | 🔲 candidate | Returns Comparator from predicate | pure function to create a comparison function |
-| `compare` | ✅ supported | Compares values returning neg/zero/pos |  |
+| `compare` | ✅ supported | Compares values returning neg/zero/pos | DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises |
 | `compare-and-set!` | ❌ not_relevant | Atomically sets atom if current equals old | operates on mutable state (atoms) |
 | `compile` | ❌ not_relevant | Compiles namespace into classfiles | compilation and class generation |
-| `complement` | ✅ supported | Returns function with opposite truth value |  |
+| `complement` | ✅ supported | Returns function with opposite truth value | BUG GAP-S71: map/set callables are rejected in predicate position |
 | `completing` | 🔲 candidate | Returns reducing function with completion | pure function for reducing transformations |
-| `concat` | ✅ supported | Returns lazy seq concatenating collections |  |
-| `cond` | ✅ supported | Multi-way conditional |  |
-| `cond->` | ✅ supported | Threads through forms where tests true |  |
-| `cond->>` | ✅ supported | Threads as last arg where tests true |  |
-| `condp` | ✅ supported | Predicate dispatch against expression |  |
-| `conj` | ✅ supported | Returns collection with items added |  |
+| `concat` | ✅ supported | Returns lazy seq concatenating collections | BUG GAP-S57: string inputs currently raise instead of being treated as seqable |
+| `cond` | ✅ supported | Multi-way conditional | BUG GAP-S112: zero-clause cond raises instead of returning nil |
+| `cond->` | ✅ supported | Threads through forms where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
+| `cond->>` | ✅ supported | Threads as last arg where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
+| `condp` | ✅ supported | Predicate dispatch against expression | BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising |
+| `conj` | ✅ supported | Returns collection with items added | BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics |
 | `conj!` | ❌ not_relevant | Adds item to transient collection | operates on transient collections (mutable) |
-| `cons` | ✅ supported | Returns seq with item prepended |  |
+| `cons` | ✅ supported | Returns seq with item prepended | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `constantly` | ✅ supported | Returns function ignoring args, returning value |  |
-| `contains?` | ✅ supported | Returns true if key present in collection |  |
-| `count` | ✅ supported | Returns number of items in collection |  |
-| `counted?` | ✅ supported | Returns true if constant-time count |  |
+| `contains?` | ✅ supported | Returns true if key present in collection | DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts |
+| `count` | ✅ supported | Returns number of items in collection | DIV-36: string counts use Unicode graphemes instead of JVM UTF-16 code units. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `counted?` | ✅ supported | Returns true if constant-time count | BUG GAP-S70: strings currently return true but Clojure returns false |
 | `create-ns` | ❌ not_relevant | Creates or returns namespace | requires namespace system |
 | `create-struct` | ❌ not_relevant | Returns structure basis object | relies on legacy fixed-key structure system |
 | `cycle` | ❌ not_relevant | Returns infinite lazy seq repeating collection | relies on lazy sequences |
 | `dec` | ✅ supported | Returns number minus one |  |
 | `dec'` | ✅ supported | Decrements with arbitrary precision | alias for dec; BEAM integers are already arbitrary precision |
-| `decimal?` | ✅ supported | Returns true if BigDecimal |  |
+| `decimal?` | ✅ supported | Returns true if BigDecimal | always false; BigDecimal literals are unsupported, see DIV-20 |
 | `declare` | ❌ not_relevant | Defines var names with no bindings | relies on namespace/var system |
-| `dedupe` | ✅ supported | Removes consecutive duplicates |  |
-| `def` | ✅ supported | Creates and interns global var |  |
+| `dedupe` | ✅ supported | Removes consecutive duplicates | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `def` | ✅ supported | Creates and interns global var | BUG GAP-S140: no-init def raises instead of creating an unbound var. BUG GAP-S141: return value omits the user namespace |
 | `definterface` | ❌ not_relevant | Creates Java interface | Java interop |
 | `defmacro` | ❌ not_relevant | Defines macro | macro system |
 | `defmethod` | ❌ not_relevant | Creates multimethod implementation | multimethods |
 | `defmulti` | ❌ not_relevant | Creates multimethod with dispatch function | multimethods |
-| `defn` | ✅ supported | Defines named function |  |
+| `defn` | ✅ supported | Defines named function | DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
 | `defn-` | ❌ not_relevant | Defines private function | namespacing/metadata |
-| `defonce` | ✅ supported | Defines var only if not already defined |  |
+| `defonce` | ✅ supported | Defines var only if not already defined | BUG GAP-S141: return value omits the user namespace |
 | `defprotocol` | ❌ not_relevant | Creates protocol with method signatures | protocols |
 | `defrecord` | ❌ not_relevant | Creates record type with fields | custom types/Java-like classes |
 | `defstruct` | ❌ not_relevant | Creates structure type | obsolete type system |
@@ -165,36 +166,36 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `descendants` | ❌ not_relevant | Returns all descendants of tag | relies on global namespace/hierarchy state |
 | `disj` | ✅ supported | Returns set with item removed |  |
 | `disj!` | ❌ not_relevant | Removes from transient set | relies on transient/mutable data structures |
-| `dissoc` | ✅ supported | Returns map with key removed |  |
+| `dissoc` | ✅ supported | Returns map with key removed | BUG GAP-S19: nil map root currently raises instead of returning nil |
 | `dissoc!` | ❌ not_relevant | Removes from transient map | relies on transient/mutable data structures |
-| `distinct` | ✅ supported | Returns seq removing duplicates |  |
-| `distinct?` | ✅ supported | Returns true if all args distinct |  |
+| `distinct` | ✅ supported | Returns seq removing duplicates | BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising |
+| `distinct?` | ✅ supported | Returns true if all args distinct | BUG GAP-S64: zero-arity distinct? returns true instead of raising. BUG GAP-S101: repeated NaN values are treated as duplicates |
 | `do` | ✅ supported | Evaluates expressions, returns last |  |
 | `doall` | ❌ not_relevant | Realizes entire lazy seq | relies on lazy sequences |
 | `dorun` | ❌ not_relevant | Realizes lazy seq, returns nil | relies on lazy sequences |
-| `doseq` | ✅ supported | Iterates over sequences for side effects |  |
+| `doseq` | ✅ supported | Iterates over sequences for side effects | BUG GAP-S18: def side effects inside doseq are not visible after the loop |
 | `dosync` | ❌ not_relevant | Executes body in STM transaction | relies on concurrency/STM primitives |
 | `dotimes` | ❌ not_relevant | Executes body n times with counter | relies on side-effecting loops |
 | `doto` | ❌ not_relevant | Calls methods on object, returns object | relies on Java interop |
 | `double` | ✅ supported | Coerces to double |  |
 | `double-array` | ❌ not_relevant | Creates double Java array | relies on Java arrays |
-| `double?` | ✅ supported | Returns true if Double |  |
+| `double?` | ✅ supported | Returns true if Double | BUG GAP-S127: special float literals return false instead of true |
 | `doubles` | ❌ not_relevant | Casts to double array | relies on Java arrays |
-| `drop` | ✅ supported | Returns seq skipping first n items |  |
-| `drop-last` | ✅ supported | Returns seq without last n items |  |
-| `drop-while` | ✅ supported | Drops items while predicate true |  |
+| `drop` | ✅ supported | Returns seq skipping first n items | BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count drops from the end instead of returning the input; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts |
+| `drop-last` | ✅ supported | Returns seq without last n items | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `drop-while` | ✅ supported | Drops items while predicate true | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `eduction` | ❌ not_relevant | Returns reducible wrapper of transducer | relies on lazy/transducer abstractions |
-| `empty` | ✅ supported | Returns empty collection of same type |  |
-| `empty?` | ✅ supported | Returns true if collection empty |  |
+| `empty` | ✅ supported | Returns empty collection of same type | BUG GAP-S56: string input returns an empty string instead of nil. BUG GAP-S88: non-collection inputs should return nil but currently raise or return an empty map |
+| `empty?` | ✅ supported | Returns true if collection empty | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `ensure` | ❌ not_relevant | Ensures ref not written by other transaction | relies on software transactional memory (ref/transactional state) |
 | `ensure-reduced` | 🔲 candidate | Wraps in reduced if not already | pure utility for reduction flow control |
 | `enumeration-seq` | ❌ not_relevant | Lazy seq from Java Enumeration | relies on lazy sequences and Java interop |
 | `error-handler` | ❌ not_relevant | Returns agent error handler | relies on agent state |
 | `error-mode` | ❌ not_relevant | Returns agent error mode | relies on agent state |
 | `eval` | ❌ not_relevant | Evaluates form in current namespace | requires runtime compilation and namespace support |
-| `even?` | ✅ supported | Returns true if number is even |  |
-| `every-pred` | ✅ supported | Returns combined predicate (all must be true) |  |
-| `every?` | ✅ supported | Returns true if pred true for all items |  |
+| `even?` | ✅ supported | Returns true if number is even | DIV-31: numeric predicates return false for non-numeric inputs |
+| `every-pred` | ✅ supported | Returns combined predicate (all must be true) | BUG GAP-S71: map/set/vector callables are rejected in predicate position |
+| `every?` | ✅ supported | Returns true if pred true for all items | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `ex-cause` | ❌ not_relevant | Returns cause of exception | relies on exception handling |
 | `ex-data` | ❌ not_relevant | Returns data map of exception | relies on exception handling |
 | `ex-info` | ❌ not_relevant | Creates exception with message and data | relies on exception handling |
@@ -205,29 +206,29 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `extenders` | ❌ not_relevant | Returns types extending protocol | relies on protocols |
 | `extends?` | ❌ not_relevant | Returns true if type extends protocol | relies on protocols |
 | `false?` | ✅ supported | Returns true if value is false |  |
-| `ffirst` | ✅ supported | First of first item |  |
+| `ffirst` | ✅ supported | First of first item | BUG GAP-S48: nil input currently raises instead of returning nil |
 | `file-seq` | ❌ not_relevant | Lazy seq of files in directory tree | relies on lazy sequences and file I/O |
-| `filter` | ✅ supported | Returns items where predicate true |  |
-| `filterv` | ✅ supported | Returns vector of items where pred true |  |
-| `find` | ✅ supported | Returns map entry for key or nil |  |
+| `filter` | ✅ supported | Returns items where predicate true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `filterv` | ✅ supported | Returns vector of items where pred true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `find` | ✅ supported | Returns map entry for key or nil | BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup |
 | `find-keyword` | ❌ not_relevant | Returns keyword with ns and name | relies on namespaces |
 | `find-ns` | ❌ not_relevant | Returns namespace or nil | relies on namespace system |
 | `find-var` | ❌ not_relevant | Returns var or nil | relies on vars/namespace system |
-| `first` | ✅ supported | Returns first item |  |
-| `flatten` | ✅ supported | Flattens nested collections |  |
-| `float` | ✅ supported | Coerces to float |  |
+| `first` | ✅ supported | Returns first item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `flatten` | ✅ supported | Flattens nested collections | BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S81: scalar/string/character/map roots raise instead of returning an empty seq |
+| `float` | ✅ supported | Coerces to float | BUG GAP-S122: infinite inputs return infinities instead of raising |
 | `float-array` | ❌ not_relevant | Creates float Java array | creates Java array |
-| `float?` | ✅ supported | Returns true if Float |  |
+| `float?` | ✅ supported | Returns true if Float | BUG GAP-S127: special float literals return false instead of true |
 | `floats` | ❌ not_relevant | Casts to float array | handles Java arrays |
 | `flush` | ❌ not_relevant | Flushes output writer | I/O operation |
-| `fn` | ✅ supported | Defines anonymous function |  |
+| `fn` | ✅ supported | Defines anonymous function | DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
 | `fn?` | ✅ supported | Returns true if value is function |  |
-| `fnext` | ✅ supported | First of next item |  |
-| `fnil` | ✅ supported | Returns function with nil defaults |  |
-| `for` | ✅ supported | List comprehension from nested iteration |  |
+| `fnext` | ✅ supported | First of next item | BUG GAP-S48: nil input currently raises instead of returning nil |
+| `fnil` | ✅ supported | Returns function with nil defaults | BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position |
+| `for` | ✅ supported | List comprehension from nested iteration | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `force` | ❌ not_relevant | Forces evaluation of delay | relies on lazy evaluation/delays |
-| `format` | ✅ supported | Returns formatted string |  |
-| `frequencies` | ✅ supported | Returns map of item frequencies |  |
+| `format` | ✅ supported | Returns formatted string | BUG GAP-S65: width/alignment/zero-padding and sign flags are currently ignored or rejected. BUG GAP-S89: boolean and newline conversions are currently rejected. BUG GAP-S96: several Java Formatter conversions and argument indexes are unsupported. BUG GAP-S117: supported numeric conversions reject nil instead of rendering null |
+| `frequencies` | ✅ supported | Returns map of item frequencies | BUG GAP-S20: nil input currently raises instead of returning an empty frequency map; direct map input raises instead of counting map entries. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `future` | ❌ not_relevant | Async computation | concurrency primitive |
 | `future-call` | ❌ not_relevant | Calls function asynchronously | concurrency primitive |
 | `future-cancel` | ❌ not_relevant | Cancels future | concurrency primitive |
@@ -235,13 +236,13 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `future-done?` | ❌ not_relevant | Returns true if future complete | concurrency primitive |
 | `future?` | ❌ not_relevant | Returns true if value is future | concurrency primitive |
 | `gensym` | ❌ not_relevant | Returns unique symbol | macro system utility |
-| `get` | ✅ supported | Returns value for key or nil |  |
-| `get-in` | ✅ supported | Returns value at nested key path |  |
+| `get` | ✅ supported | Returns value for key or nil | BUG GAP-S12: string indexes and non-index keys currently raise. BUG GAP-S36: set lookup currently raises instead of returning value/default, including nil members |
+| `get-in` | ✅ supported | Returns value at nested key path | BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup; BUG GAP-S144: nil paths return nil instead of the root value |
 | `get-method` | ❌ not_relevant | Returns multimethod implementation | multimethods not supported |
 | `get-proxy-class` | ❌ not_relevant | Returns proxy class | Java interop |
 | `get-thread-bindings` | ❌ not_relevant | Returns thread-local bindings | concurrency primitive / thread locals |
 | `get-validator` | ❌ not_relevant | Returns reference validator | mutable state validator |
-| `group-by` | ✅ supported | Groups items by function result |  |
+| `group-by` | ✅ supported | Groups items by function result | BUG GAP-S67: string inputs are rejected instead of treated as seqable. BUG GAP-S71: map/set/vector callables are rejected or misapplied as key functions |
 | `halt-when` | ❌ not_relevant | Transducer halting on predicate | relies on transducers which often involve stateful reduction and lazy-like sequence processing |
 | `hash` | ❌ not_relevant | Returns hash code | runtime-specific hash values are not stable across hosts |
 | `hash-map` | ✅ supported | Creates hash map from pairs |  |
@@ -252,44 +253,44 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `identical?` | ❌ not_relevant | Returns true if same object | relies on object identity which is not meaningful for serializable data in a BEAM-based environment |
 | `identity` | ✅ supported | Returns argument unchanged |  |
 | `if` | ✅ supported | Conditional branch |  |
-| `if-let` | ✅ supported | Conditional with binding |  |
+| `if-let` | ✅ supported | Conditional with binding | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `if-not` | ✅ supported | Negated conditional |  |
-| `if-some` | ✅ supported | Binds if not nil |  |
-| `ifn?` | ✅ supported | Returns true if invokable |  |
+| `if-some` | ✅ supported | Binds if not nil | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S115: no-else arity is unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `ifn?` | ✅ supported | Returns true if invokable | BUG GAP-S13: vectors are callable in Clojure but not in PTC-Lisp |
 | `import` | ❌ not_relevant | Imports Java classes | relies on Java interop |
 | `in-ns` | ❌ not_relevant | Changes current namespace | relies on namespace support |
 | `inc` | ✅ supported | Returns number plus one |  |
 | `inc'` | ✅ supported | Increments with arbitrary precision | alias for inc; BEAM integers are already arbitrary precision |
-| `indexed?` | ✅ supported | Returns true if supports indexed access |  |
-| `infinite?` | ✅ supported | Returns true if number infinite |  |
+| `indexed?` | ✅ supported | Returns true if supports indexed access | BUG GAP-S70: strings currently return true but Clojure returns false |
+| `infinite?` | ✅ supported | Returns true if number infinite | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `inst-ms` | ❌ not_relevant | Milliseconds since epoch for instant | covered by existing temporal interop .getTime |
 | `inst?` | ❌ not_relevant | Returns true if instant | Clojure instant predicate; PTC-Lisp temporal interop uses host date structs |
 | `instance?` | ❌ not_relevant | Returns true if instance of class | relies on Java class system |
-| `int` | ✅ supported | Coerces to int |  |
+| `int` | ✅ supported | Coerces to int | BUG GAP-S62: NaN input raises instead of returning 0. BUG GAP-S111: out-of-range integer inputs return unchanged instead of raising. BUG GAP-S121: character literals raise instead of returning code points |
 | `int-array` | ❌ not_relevant | Creates int Java array | relies on Java array/mutability |
-| `int?` | ✅ supported | Returns true if Integer |  |
+| `int?` | ✅ supported | Returns true if Integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
 | `integer?` | ✅ supported | Returns true if integer |  |
-| `interleave` | ✅ supported | Interleaves items from collections |  |
+| `interleave` | ✅ supported | Interleaves items from collections | BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. BUG GAP-S143: unary arity is rejected instead of returning the source seq. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. |
 | `intern` | ❌ not_relevant | Creates or returns var in namespace | operates on namespaces |
-| `interpose` | ✅ supported | Inserts separator between items |  |
-| `into` | ✅ supported | Conjoins items from source into target |  |
+| `interpose` | ✅ supported | Inserts separator between items | BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. |
+| `into` | ✅ supported | Conjoins items from source into target | BUG GAP-S41: zero/one arities, string sources, and nil targets currently raise instead of following Clojure seq/list behavior |
 | `into-array` | ❌ not_relevant | Creates Java array from items | Java interop |
 | `ints` | ❌ not_relevant | Casts to int array | Java interop |
 | `isa?` | ❌ not_relevant | Returns true if child is parent instance | relies on hierarchy/multimethods system |
 | `iterate` | ❌ not_relevant | Lazy seq of repeated function application | creates lazy sequences |
 | `iteration` | ❌ not_relevant | Reducible wrapper of iterator | wraps Java iterators |
 | `iterator-seq` | ❌ not_relevant | Lazy seq from Java Iterator | creates lazy sequences from Java iterators |
-| `juxt` | ✅ supported | Applies multiple functions, collects results |  |
-| `keep` | ✅ supported | Keeps non-nil results of function |  |
-| `keep-indexed` | ✅ supported | Keeps non-nil results with index |  |
-| `key` | ✅ supported | Returns key of map entry |  |
-| `keys` | ✅ supported | Returns map keys |  |
-| `keyword` | ✅ supported | Coerces to keyword |  |
+| `juxt` | ✅ supported | Applies multiple functions, collects results | BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position |
+| `keep` | ✅ supported | Keeps non-nil results of function | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `keep-indexed` | ✅ supported | Keeps non-nil results with index | BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `key` | ✅ supported | Returns key of map entry | BUG GAP-S17: currently accepts plain vectors/list pairs as map entries |
+| `keys` | ✅ supported | Returns map keys | DIV-38: map views are sorted by key instead of preserving Clojure map iteration order |
+| `keyword` | ✅ supported | Coerces to keyword | BUG GAP-S34: namespace/name arity is unsupported. BUG GAP-S63: keyword invocation matches string keys. BUG GAP-S78: non-string/non-keyword inputs raise instead of returning nil. DIV-13/DIV-34/DIV-35: namespaced, empty, and broad-character keywords are outside the PTC-Lisp data model. |
 | `keyword?` | ✅ supported | Returns true if keyword |  |
-| `last` | ✅ supported | Returns last item |  |
+| `last` | ✅ supported | Returns last item | BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `lazy-cat` | ❌ not_relevant | Lazy concatenation of expressions | relies on lazy sequences |
 | `lazy-seq` | ❌ not_relevant | Creates lazy sequence from expression | relies on lazy sequences |
-| `let` | ✅ supported | Local variable bindings |  |
+| `let` | ✅ supported | Local variable bindings | BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion |
 | `letfn` | ❌ not_relevant | Binds function names for mutual recursion | mutual recursion binding form is outside PTC-Lisp's small evaluator surface |
 | `line-seq` | ❌ not_relevant | Lazy seq of lines from reader | relies on lazy sequences and reader I/O |
 | `list` | ✅ supported | Alias for vector (PTC-Lisp is vector-first) | implemented as alias for vector |
@@ -303,71 +304,71 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `long` | ❌ not_relevant | Coerces to long | JVM primitive width coercion; use int for integer coercion |
 | `long-array` | ❌ not_relevant | Creates long Java array | Java interop/primitive array |
 | `longs` | ❌ not_relevant | Casts to long array | Java interop/primitive array |
-| `loop` | ✅ supported | Loop with recur for tail recursion |  |
+| `loop` | ✅ supported | Loop with recur for tail recursion | BUG GAP-S114: bodyless loop raises instead of returning nil |
 | `macroexpand` | ❌ not_relevant | Recursively expands macro | macro system |
 | `macroexpand-1` | ❌ not_relevant | Expands macro one level | macro system |
 | `make-array` | ❌ not_relevant | Creates Java array | Java interop/array creation |
 | `make-hierarchy` | ❌ not_relevant | Returns empty hierarchy | relies on multimethods system |
-| `map` | ✅ supported | Applies function to each item |  |
-| `map-entry?` | ✅ supported | Returns true if map entry |  |
-| `map-indexed` | ✅ supported | Applies function with index to items |  |
+| `map` | ✅ supported | Applies function to each item | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S102: multi-collection arity rejects string inputs. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `map-entry?` | ✅ supported | Returns true if map entry | BUG GAP-S136: explicit seq map entries are not recognized as map entries |
+| `map-indexed` | ✅ supported | Applies function with index to items | BUG GAP-S71: map callables are rejected in function position |
 | `map?` | ✅ supported | Returns true if map |  |
-| `mapcat` | ✅ supported | Maps then concatenates results |  |
-| `mapv` | ✅ supported | Returns vector from mapping function |  |
-| `max` | ✅ supported | Returns greatest number |  |
-| `max-key` | ✅ supported | Returns item with greatest function value |  |
+| `mapcat` | ✅ supported | Maps then concatenates results | BUG GAP-S49: multiple input collections, nil results, and string results currently raise. BUG GAP-S71: map callables are rejected in function position |
+| `mapv` | ✅ supported | Returns vector from mapping function | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `max` | ✅ supported | Returns greatest number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
+| `max-key` | ✅ supported | Returns item with greatest function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
 | `memfn` | ❌ not_relevant | Returns function calling Java method | relies on Java interop |
 | `memoize` | ❌ not_relevant | Caches function results by arguments | relies on mutable state for caching |
-| `merge` | ✅ supported | Merges maps |  |
-| `merge-with` | ✅ supported | Merges maps with combining function |  |
+| `merge` | ✅ supported | Merges maps | BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected |
+| `merge-with` | ✅ supported | Merges maps with combining function | BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected |
 | `meta` | ❌ not_relevant | Returns metadata | relies on metadata support |
 | `methods` | ❌ not_relevant | Returns multimethod implementations | relies on multimethods |
-| `min` | ✅ supported | Returns least number |  |
-| `min-key` | ✅ supported | Returns item with least function value |  |
-| `mod` | ✅ supported | Returns modulo |  |
-| `name` | ✅ supported | Returns name string of symbol/keyword |  |
+| `min` | ✅ supported | Returns least number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
+| `min-key` | ✅ supported | Returns item with least function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
+| `mod` | ✅ supported | Returns modulo | BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
+| `name` | ✅ supported | Returns name string of symbol/keyword | DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising |
 | `namespace` | ❌ not_relevant | Returns namespace of symbol/keyword | relies on namespace support |
-| `nat-int?` | ✅ supported | Returns true if non-negative integer |  |
-| `neg-int?` | ✅ supported | Returns true if negative integer |  |
-| `neg?` | ✅ supported | Returns true if number negative |  |
+| `nat-int?` | ✅ supported | Returns true if non-negative integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
+| `neg-int?` | ✅ supported | Returns true if negative integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
+| `neg?` | ✅ supported | Returns true if number negative | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `newline` | ❌ not_relevant | Writes newline to output | relies on I/O |
-| `next` | ✅ supported | Returns seq after first item |  |
-| `nfirst` | ✅ supported | Next of first item |  |
+| `next` | ✅ supported | Returns seq after first item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `nfirst` | ✅ supported | Next of first item | BUG GAP-S48: nil input currently raises instead of returning nil |
 | `nil?` | ✅ supported | Returns true if nil |  |
-| `nnext` | ✅ supported | Next of next item |  |
+| `nnext` | ✅ supported | Next of next item | BUG GAP-S48: nil input currently raises instead of returning nil |
 | `not` | ✅ supported | Logical complement |  |
-| `not-any?` | ✅ supported | Returns true if pred false for all |  |
-| `not-empty` | ✅ supported | Returns collection or nil if empty |  |
-| `not-every?` | ✅ supported | Returns true if pred false for some |  |
-| `not=` | ✅ supported | Returns true if not equal |  |
-| `nth` | ✅ supported | Returns item at index |  |
-| `nthnext` | ✅ supported | Returns nth next | implemented as seq after nthrest |
-| `nthrest` | ✅ supported | Returns rest after nth item | implemented as drop alias with Clojure argument order |
+| `not-any?` | ✅ supported | Returns true if pred false for all | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `not-empty` | ✅ supported | Returns collection or nil if empty | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `not-every?` | ✅ supported | Returns true if pred false for some | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `not=` | ✅ supported | Returns true if not equal | DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings |
+| `nth` | ✅ supported | Returns item at index | DIV-26 for out-of-range signal values; DIV-36 for string grapheme indexing; BUG GAP-S10/GAP-S11/GAP-S79/GAP-S94. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `nthnext` | ✅ supported | Returns nth next | implemented as seq after nthrest. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `nthrest` | ✅ supported | Returns rest after nth item | implemented as drop alias with Clojure argument order. BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `num` | ❌ not_relevant | Coerces to number | JVM Number coercion; parse-long/parse-double cover string parsing |
 | `number?` | ✅ supported | Returns true if number |  |
 | `numerator` | ❌ not_relevant | Returns numerator of ratio | ratio values are not supported |
 | `object-array` | ❌ not_relevant | Creates object Java array | relies on Java interop and host arrays |
-| `odd?` | ✅ supported | Returns true if number odd |  |
+| `odd?` | ✅ supported | Returns true if number odd | DIV-31: numeric predicates return false for non-numeric inputs |
 | `or` | ✅ supported | Short-circuit logical OR |  |
 | `parents` | ❌ not_relevant | Returns immediate parents of tag | metadata/hierarchy manipulation not supported in PTC-Lisp |
 | `parse-boolean` | ✅ supported | Parses string to boolean | returns true, false, or nil |
-| `parse-double` | ✅ supported | Parses string to double |  |
-| `parse-long` | ✅ supported | Parses string to long |  |
+| `parse-double` | ✅ supported | Parses string to double | BUG GAP-S61: surrounding whitespace and Java decimal spellings return nil instead of parsing |
+| `parse-long` | ✅ supported | Parses string to long | BUG GAP-S85: out-of-range long values return arbitrary-precision integers instead of nil |
 | `parse-uuid` | ❌ not_relevant | Parses string to UUID | no UUID runtime type; keep UUIDs as strings |
-| `partial` | ✅ supported | Fixes supplied arguments to function |  |
-| `partition` | ✅ supported | Partitions items into groups of n |  |
-| `partition-all` | ✅ supported | Partitions without dropping partial group |  |
-| `partition-by` | ✅ supported | Partitions by change in function value |  |
+| `partial` | ✅ supported | Fixes supplied arguments to function | BUG GAP-S71: map/set/vector callables are rejected in function position |
+| `partition` | ✅ supported | Partitions items into groups of n | BUG GAP-S31: nil padding collection currently raises instead of acting empty. BUG GAP-S53: negative partition size raises instead of returning an empty seq. BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts. |
+| `partition-all` | ✅ supported | Partitions without dropping partial group | BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `partition-by` | ✅ supported | Partitions by change in function value | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `pcalls` | ✅ supported | Parallel calls to zero-arity functions |  |
-| `peek` | ✅ supported | Returns first/last without removing |  |
+| `peek` | ✅ supported | Returns first/last without removing | DIV-25 for list alias behavior |
 | `persistent!` | ❌ not_relevant | Converts transient to persistent | transients are unsupported |
-| `pmap` | ✅ supported | Parallel map over collection |  |
-| `pop` | ✅ supported | Returns collection without first/last |  |
+| `pmap` | ✅ supported | Parallel map over collection | BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported |
+| `pop` | ✅ supported | Returns collection without first/last | DIV-25 for list alias behavior; DIV-26 for empty collection signal value |
 | `pop!` | ❌ not_relevant | Removes from transient collection | transients are unsupported |
-| `pos-int?` | ✅ supported | Returns true if positive integer |  |
-| `pos?` | ✅ supported | Returns true if number positive |  |
+| `pos-int?` | ✅ supported | Returns true if positive integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
+| `pos?` | ✅ supported | Returns true if number positive | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `pr` | ❌ not_relevant | Prints value in readable form | I/O operation |
-| `pr-str` | ✅ supported | Returns readable string of value |  |
+| `pr-str` | ✅ supported | Returns readable string of value | BUG GAP-S126: character literals print as strings instead of character syntax |
 | `prefer-method` | ❌ not_relevant | Prefers multimethod implementation | multimethods are unsupported |
 | `prefers` | ❌ not_relevant | Returns multimethod preferences | multimethods are unsupported |
 | `print` | ❌ not_relevant | Prints value without quoting | I/O operation |
@@ -380,39 +381,39 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `qualified-ident?` | ❌ not_relevant | Returns true if ident has namespace | namespaced identifiers are not supported as runtime values |
 | `qualified-keyword?` | ❌ not_relevant | Returns true if keyword has namespace | namespaced keywords are not supported |
 | `qualified-symbol?` | ❌ not_relevant | Returns true if symbol has namespace | symbols are not supported as runtime values |
-| `quot` | ✅ supported | Returns integer division quotient |  |
+| `quot` | ✅ supported | Returns integer division quotient | DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow. BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
 | `quote` | ❌ not_relevant | Returns form unevaluated | quote syntax is intentionally unsupported; use vectors and data literals directly |
 | `rand` | ❌ not_relevant | Returns random float 0-1 | non-deterministic randomness contradicts sandbox determinism |
 | `rand-int` | ❌ not_relevant | Returns random int less than arg | relies on non-deterministic side effects/state |
 | `rand-nth` | ❌ not_relevant | Returns random item from seq | relies on non-deterministic side effects/state |
 | `random-sample` | ❌ not_relevant | Returns random sample of items | relies on non-deterministic side effects/state |
 | `random-uuid` | ❌ not_relevant | Returns random UUID | relies on non-deterministic side effects |
-| `range` | ✅ supported | Returns sequence of numbers |  |
-| `ratio?` | ✅ supported | Returns true if ratio |  |
+| `range` | ✅ supported | Returns sequence of numbers | BUG GAP-S45: zero-step range currently returns an empty vector. BUG GAP-S99: nil and nonnumeric bounds/steps return an empty vector instead of raising |
+| `ratio?` | ✅ supported | Returns true if ratio | always false; ratio literals are unsupported, see DIV-20 |
 | `rational?` | ✅ supported | Returns true if rational number |  |
 | `rationalize` | ❌ not_relevant | Coerces to ratio | ratio values are not supported |
-| `re-find` | ✅ supported | Returns first regex match |  |
+| `re-find` | ✅ supported | Returns first regex match | BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising |
 | `re-groups` | ❌ not_relevant | Returns regex match groups | capture groups are returned directly by re-find, re-matches, and re-seq |
 | `re-matcher` | ❌ not_relevant | Returns matcher for pattern | returns an object maintaining mutable state/matcher position |
-| `re-matches` | ✅ supported | Returns full regex match or nil |  |
-| `re-pattern` | ✅ supported | Returns compiled regex pattern |  |
-| `re-seq` | ✅ supported | Returns seq of regex matches |  |
+| `re-matches` | ✅ supported | Returns full regex match or nil | BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising |
+| `re-pattern` | ✅ supported | Returns compiled regex pattern | BUG GAP-S66: existing regex patterns are rejected instead of returned. BUG GAP-S131: character patterns are accepted instead of raising |
+| `re-seq` | ✅ supported | Returns seq of regex matches | BUG GAP-S82: no-match returns [] instead of nil. BUG GAP-S92: optional unmatched capture groups are dropped instead of returned as nil slots. BUG GAP-S131: character inputs are accepted instead of raising |
 | `read` | ❌ not_relevant | Reads next form from reader | implies I/O and interaction with reader contexts |
 | `read-line` | ❌ not_relevant | Reads line from input | I/O operation |
 | `read-string` | ❌ not_relevant | Reads form from string | invokes reader/eval capabilities not supported in sandbox |
 | `realized?` | ❌ not_relevant | Returns true if delay/future complete | relies on concurrency/lazy primitives not supported |
 | `record?` | ❌ not_relevant | Returns true if record | relies on class/type system not supported |
 | `recur` | ✅ supported | Rebinds loop vars and jumps to loop start |  |
-| `reduce` | ✅ supported | Reduces collection with function |  |
-| `reduce-kv` | ✅ supported | Reduces map with key-value function |  |
+| `reduce` | ✅ supported | Reduces collection with function | BUG GAP-S21: empty/nil input without init returns nil instead of calling the reducing function's zero-arity identity. BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `reduce-kv` | ✅ supported | Reduces map with key-value function | BUG GAP-S59: vector input currently raises instead of reducing indexes and values |
 | `reduced` | 🔲 candidate | Wraps value indicating reduction complete | pure control flow mechanism for reduction interruption |
 | `reduced?` | 🔲 candidate | Returns true if wrapped in reduced | pure predicate for checking reduction status |
 | `reductions` | ❌ not_relevant | Returns intermediate reduction results | returns a lazy sequence |
 | `ref` | ❌ not_relevant | Creates STM reference | mutable state/concurrency primitive |
 | `ref-set` | ❌ not_relevant | Sets ref value in transaction | mutable state/concurrency primitive |
 | `reify` | ❌ not_relevant | Creates instance implementing protocols | relies on protocols and class generation |
-| `rem` | ✅ supported | Returns remainder of division |  |
-| `remove` | ✅ supported | Returns items where predicate false |  |
+| `rem` | ✅ supported | Returns remainder of division | BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
+| `remove` | ✅ supported | Returns items where predicate false | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `remove-all-methods` | ❌ not_relevant | Removes all multimethod impls | relies on multimethods |
 | `remove-method` | ❌ not_relevant | Removes multimethod impl | relies on multimethods |
 | `remove-ns` | ❌ not_relevant | Removes namespace | relies on namespaces |
@@ -420,32 +421,32 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `remove-watch` | ❌ not_relevant | Removes watch from reference | relies on mutable state references |
 | `repeat` | ❌ not_relevant | Returns infinite seq repeating value | returns lazy sequences |
 | `repeatedly` | ❌ not_relevant | Returns seq calling function repeatedly | returns lazy sequences |
-| `replace` | ✅ supported | Replaces values by map mapping |  |
+| `replace` | ✅ supported | Replaces values by map mapping | BUG GAP-S16: clojure.core sequence replacement form is not implemented |
 | `require` | ❌ not_relevant | Requires namespace | relies on namespace/load system |
 | `requiring-resolve` | ❌ not_relevant | Requires ns and resolves symbol | relies on namespace/load system |
 | `reset!` | ❌ not_relevant | Sets atom value | mutable state (atoms) |
 | `reset-meta!` | ❌ not_relevant | Sets metadata | metadata manipulation |
 | `reset-vals!` | ❌ not_relevant | Sets atom, returns [old new] | mutable state (atoms) |
 | `resolve` | ❌ not_relevant | Resolves symbol in namespace | namespace/symbol resolution |
-| `rest` | ✅ supported | Returns seq after first item |  |
+| `rest` | ✅ supported | Returns seq after first item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `restart-agent` | ❌ not_relevant | Restarts failed agent | concurrency primitives (agents) |
-| `reverse` | ✅ supported | Reverses order of items |  |
-| `reversible?` | ✅ supported | Returns true if collection reversible |  |
+| `reverse` | ✅ supported | Reverses order of items | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S20: nil input currently raises instead of returning an empty seq |
+| `reversible?` | ✅ supported | Returns true if collection reversible | BUG GAP-S70: strings currently return true but Clojure returns false |
 | `rseq` | ❌ not_relevant | Returns reverse seq of sorted collection | relies on lazy/sorted sequence implementation details |
 | `rsubseq` | ❌ not_relevant | Returns reverse subseq of sorted coll | relies on lazy/sorted sequence implementation details |
 | `run!` | ❌ not_relevant | Runs side effects, returns nil | relies on side effects |
 | `satisfies?` | ❌ not_relevant | Returns true if type satisfies protocol | protocol/type system feature |
-| `second` | ✅ supported | Returns second item |  |
-| `select-keys` | ✅ supported | Returns map with only specified keys |  |
+| `second` | ✅ supported | Returns second item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `select-keys` | ✅ supported | Returns map with only specified keys | BUG GAP-S23: nil and string keyseqs currently raise instead of returning an empty map; BUG GAP-S43: vector inputs currently raise instead of selecting indexes |
 | `send` | ❌ not_relevant | Dispatches action to agent | relies on agent mutable state |
 | `send-off` | ❌ not_relevant | Dispatches blocking action to agent | relies on agent mutable state |
 | `send-via` | ❌ not_relevant | Sends action via executor to agent | relies on agent mutable state |
-| `seq` | ✅ supported | Returns sequence or nil if empty |  |
-| `seq?` | ✅ supported | Returns true if value is sequence |  |
-| `seqable?` | ✅ supported | Returns true if implements Seqable |  |
+| `seq` | ✅ supported | Returns sequence or nil if empty | DIV-38: map views are sorted by key instead of preserving Clojure map iteration order. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `seq?` | ✅ supported | Returns true if value is sequence | BUG GAP-S84: vectors currently return true instead of false |
+| `seqable?` | ✅ supported | Returns true if implements Seqable | BUG GAP-S125: character literals return true instead of false |
 | `sequence` | ❌ not_relevant | Returns seq applying transducer | relies on lazy sequences |
 | `sequential?` | ✅ supported | Returns true if sequential |  |
-| `set` | ✅ supported | Creates set from items |  |
+| `set` | ✅ supported | Creates set from items | BUG GAP-S30: nil and string inputs currently raise instead of producing sets |
 | `set!` | ❌ not_relevant | Sets thread-local var value | relies on mutable state |
 | `set?` | ✅ supported | Returns true if set |  |
 | `short` | ❌ not_relevant | Coerces to short | JVM primitive width coercion |
@@ -457,37 +458,37 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `simple-keyword?` | ❌ not_relevant | Returns true if keyword has no ns | namespaced keywords are not supported |
 | `simple-symbol?` | ❌ not_relevant | Returns true if symbol has no ns | symbols are not supported as runtime values |
 | `slurp` | ❌ not_relevant | Reads entire contents of file/URL | involves file/network I/O |
-| `some` | ✅ supported | Returns first truthy result or nil |  |
-| `some->` | ✅ supported | Threads through forms while non-nil |  |
-| `some->>` | ✅ supported | Threads as last arg while non-nil |  |
-| `some-fn` | ✅ supported | Returns pred true if any fn truthy |  |
+| `some` | ✅ supported | Returns first truthy result or nil | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `some->` | ✅ supported | Threads through forms while non-nil | BUG GAP-S128: nil thread form returns nil instead of raising |
+| `some->>` | ✅ supported | Threads as last arg while non-nil | BUG GAP-S128: nil thread form returns nil instead of raising |
+| `some-fn` | ✅ supported | Returns pred true if any fn truthy | BUG GAP-S71: map/set/vector callables are rejected in predicate position |
 | `some?` | ✅ supported | Returns true if not nil |  |
-| `sort` | ✅ supported | Returns sorted sequence |  |
-| `sort-by` | ✅ supported | Returns seq sorted by function result |  |
+| `sort` | ✅ supported | Returns sorted sequence | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
+| `sort-by` | ✅ supported | Returns seq sorted by function result | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S71: map/vector callables are rejected as key functions; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |
 | `sorted-map` | 🔲 candidate | Creates sorted map from pairs | pure collection construction |
 | `sorted-map-by` | 🔲 candidate | Creates sorted map with comparator | pure collection construction with custom comparator |
 | `sorted-set` | 🔲 candidate | Creates sorted set from items | pure collection construction |
 | `sorted-set-by` | 🔲 candidate | Creates sorted set with comparator | pure collection construction with custom comparator |
 | `sorted?` | ✅ supported | Returns true if collection sorted |  |
 | `spit` | ❌ not_relevant | Writes content to file | file I/O |
-| `split-at` | ✅ supported | Splits seq at index |  |
-| `split-with` | ✅ supported | Splits seq by predicate |  |
-| `str` | ✅ supported | Converts to string |  |
-| `string?` | ✅ supported | Returns true if string |  |
+| `split-at` | ✅ supported | Splits seq at index | BUG GAP-S79: numeric count coercion rejects floats Clojure accepts. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `split-with` | ✅ supported | Splits seq by predicate | DIV-36: string sequence predicates receive one-character strings. BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `str` | ✅ supported | Converts to string | BUG GAP-S93: regex patterns render as internal tuples instead of source pattern text |
+| `string?` | ✅ supported | Returns true if string | BUG GAP-S133: character literals return true instead of false |
 | `struct` | ❌ not_relevant | Creates structure instance | legacy structure system, discouraged/deprecated |
 | `struct-map` | ❌ not_relevant | Creates structure map from basis | legacy structure system, discouraged/deprecated |
-| `subs` | ✅ supported | Returns substring |  |
+| `subs` | ✅ supported | Returns substring | DIV-22: returns signal values instead of raising on out-of-range indices; DIV-36: string indexes use Unicode graphemes; BUG GAP-S79: numeric index coercion rejects floats Clojure accepts |
 | `subseq` | 🔲 candidate | Returns subseq of sorted collection | pure operation on sorted collections |
-| `subvec` | ✅ supported | Returns subvector |  |
+| `subvec` | ✅ supported | Returns subvector | DIV-26: clamps out-of-range indices instead of raising. BUG GAP-S79: numeric index coercion rejects floats Clojure accepts |
 | `supers` | ❌ not_relevant | Returns all ancestors of class | relies on Java class hierarchy/interop |
 | `swap!` | ❌ not_relevant | Updates atom with function | requires mutable state (atom) |
 | `swap-vals!` | ❌ not_relevant | Updates atom, returns [old new] | requires mutable state (atom) |
 | `symbol` | 🔲 candidate | Coerces to symbol | pure data coercion |
 | `symbol?` | ✅ supported | Returns true if symbol |  |
-| `take` | ✅ supported | Returns first n items |  |
-| `take-last` | ✅ supported | Returns last n items |  |
+| `take` | ✅ supported | Returns first n items | BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count returns a tail instead of an empty seq; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts |
+| `take-last` | ✅ supported | Returns last n items | BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil |
 | `take-nth` | ❌ not_relevant | Returns every nth item | returns a lazy sequence |
-| `take-while` | ✅ supported | Takes items while predicate true |  |
+| `take-while` | ✅ supported | Takes items while predicate true | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `tap>` | ❌ not_relevant | Sends value to taps | side-effecting I/O mechanism |
 | `test` | ❌ not_relevant | Runs tests for namespace | built-in testing framework/REPL tool |
 | `throw` | ❌ not_relevant | Throws exception | exception handling |
@@ -497,10 +498,10 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `trampoline` | ❌ not_relevant | Mutual recursion without stack overflow | lazy/mutual-recursion utility outside PTC-Lisp's small evaluator surface |
 | `transduce` | 🔲 candidate | Reduces with transducer | Pure data transformation utility |
 | `transient` | ❌ not_relevant | Creates transient collection | Mutable state/transients are not supported |
-| `tree-seq` | ✅ supported | Depth-first seq from root |  |
+| `tree-seq` | ✅ supported | Depth-first seq from root | BUG GAP-S77: string roots can recurse until heap limit |
 | `true?` | ✅ supported | Returns true if value is true |  |
 | `try` | ❌ not_relevant | Exception handling | Exception handling is not supported |
-| `type` | ✅ supported | Returns type of value |  |
+| `type` | ✅ supported | Returns type of value | DIV-28: returns stable PTC type keywords instead of host JVM classes |
 | `unchecked-add` | ❌ not_relevant | Adds without overflow check | Java-specific math optimization |
 | `unchecked-add-int` | ❌ not_relevant | Adds ints without overflow check | Java-specific math optimization |
 | `unchecked-byte` | ❌ not_relevant | Casts to byte without check | Java-specific primitive casting |
@@ -525,29 +526,29 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `underive` | ❌ not_relevant | Removes hierarchical relationship | requires global hierarchy/multimethod infrastructure |
 | `unreduced` | 🔲 candidate | Unwraps from reduced | pure transformation used for handling reduced values in reductions |
 | `unsigned-bit-shift-right` | ❌ not_relevant | Unsigned right shift | no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from |
-| `update` | ✅ supported | Applies function to map value at key |  |
-| `update-in` | ✅ supported | Applies function to nested map value |  |
-| `update-keys` | ✅ supported | Applies function to map keys |  |
+| `update` | ✅ supported | Applies function to map value at key | BUG GAP-S19: nil map root currently raises instead of building a map. BUG GAP-S83: vector append at count index raises instead of following assoc semantics |
+| `update-in` | ✅ supported | Applies function to nested map value | BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics |
+| `update-keys` | ✅ supported | Applies function to map keys | BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as key transforms. BUG GAP-S75: vector inputs are rejected |
 | `update-proxy` | ❌ not_relevant | Updates proxy method implementations | relies on Java interop/proxy class system |
-| `update-vals` | ✅ supported | Applies function to map values |  |
-| `val` | ✅ supported | Returns value of map entry |  |
-| `vals` | ✅ supported | Returns map values |  |
+| `update-vals` | ✅ supported | Applies function to map values | BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as value transforms. BUG GAP-S75: vector inputs are rejected |
+| `val` | ✅ supported | Returns value of map entry | BUG GAP-S17: currently accepts plain vectors/list pairs as map entries |
+| `vals` | ✅ supported | Returns map values | DIV-38: map views are sorted by key instead of preserving Clojure map iteration order |
 | `var-get` | ❌ not_relevant | Gets value of var | relies on specific var/namespace system |
 | `var-set` | ❌ not_relevant | Sets var in thread-local binding | relies on mutable thread-local bindings |
 | `var?` | ❌ not_relevant | Returns true if var | relies on var data structure absent in PTC-Lisp |
 | `vary-meta` | ❌ not_relevant | Returns value with transformed metadata | relies on metadata feature |
-| `vec` | ✅ supported | Converts to vector |  |
+| `vec` | ✅ supported | Converts to vector | BUG GAP-S40: nil input currently returns nil instead of an empty vector. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `vector` | ✅ supported | Creates vector from items |  |
-| `vector?` | ✅ supported | Returns true if vector |  |
+| `vector?` | ✅ supported | Returns true if vector | DIV-25 for list alias behavior |
 | `volatile!` | ❌ not_relevant | Creates volatile with initial value | relies on mutable state |
 | `volatile?` | ❌ not_relevant | Returns true if volatile | relies on mutable state |
 | `vreset!` | ❌ not_relevant | Sets volatile value | relies on mutable state |
 | `vswap!` | ❌ not_relevant | Updates volatile with function | involves mutable state (volatiles) |
-| `when` | ✅ supported | Evaluates body if test true |  |
-| `when-first` | ✅ supported | Evaluates body if seq non-empty |  |
-| `when-let` | ✅ supported | Binds if truthy, evaluates body |  |
-| `when-not` | ✅ supported | Evaluates body if test false |  |
-| `when-some` | ✅ supported | Binds if not nil, evaluates body |  |
+| `when` | ✅ supported | Evaluates body if test true | BUG GAP-S113: bodyless when raises instead of returning nil |
+| `when-first` | ✅ supported | Evaluates body if seq non-empty | BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `when-let` | ✅ supported | Binds if truthy, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `when-not` | ✅ supported | Evaluates body if test false | BUG GAP-S113: bodyless when-not raises instead of returning nil |
+| `when-some` | ✅ supported | Binds if not nil, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `while` | ❌ not_relevant | Repeats body while test true | imperative looping construct typically relying on side effects |
 | `with-bindings` | ❌ not_relevant | Executes body with thread-local bindings | relies on thread-local state which is not supported in the BEAM model for PTC-Lisp |
 | `with-in-str` | ❌ not_relevant | Evaluates body with string as input | relies on I/O streams |
@@ -558,5 +559,5 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `with-precision` | ❌ not_relevant | Sets decimal precision for body | relies on specific BigDecimal support and dynamic binding context not present in PTC-Lisp |
 | `with-redefs` | ❌ not_relevant | Redefines vars for body duration | modifies global var bindings, which is not supported in a functional, immutable sandbox |
 | `xml-seq` | ❌ not_relevant | Lazy seq of XML elements | relies on lazy sequences and I/O-related parsing |
-| `zero?` | ✅ supported | Returns true if number is zero |  |
-| `zipmap` | ✅ supported | Creates map from keys and values seqs |  |
+| `zero?` | ✅ supported | Returns true if number is zero | DIV-31: returns false for nil/non-numeric inputs instead of raising |
+| `zipmap` | ✅ supported | Creates map from keys and values seqs | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
