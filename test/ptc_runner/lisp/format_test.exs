@@ -3,6 +3,9 @@ defmodule PtcRunner.Lisp.FormatTest do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Format.RegexLiteral
+  alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.Format.Var
 
   doctest PtcRunner.Lisp.Format
 
@@ -123,6 +126,29 @@ defmodule PtcRunner.Lisp.FormatTest do
 
     test "formats var nested in list" do
       assert Format.to_string([{:var, :a}, {:var, :b}]) == "[#'a, #'b]"
+    end
+  end
+
+  describe "wrapper protocols" do
+    test "Var renders as the display string for string and JSON protocols" do
+      var = %Var{name: :x}
+
+      assert to_string(var) == "#'x"
+      assert Jason.encode!(var) == ~s("#'x")
+    end
+
+    test "sibling wrappers render as display strings for string and JSON protocols" do
+      values = [
+        {%Format.Fn{params: "x y"}, "#fn[x y]"},
+        {%Format.Builtin{}, "#<builtin>"},
+        {%SymbolRef{name: "github/search_repos"}, "'github/search_repos"},
+        {%RegexLiteral{source: "\\d+"}, ~S(#"\d+")}
+      ]
+
+      for {value, display} <- values do
+        assert to_string(value) == display
+        assert Jason.encode!(value) == Jason.encode!(display)
+      end
     end
   end
 
