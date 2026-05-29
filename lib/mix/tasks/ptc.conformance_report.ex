@@ -198,14 +198,16 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
     |> Enum.each(fn {policy, count} -> Mix.shell().info("  #{policy}: #{count}") end)
   end
 
+  @spec print_gap_div_summary([String.t()], [String.t()]) :: :ok
   defp print_gap_div_summary(documented_ids, case_ids) do
-    missing_cases = MapSet.difference(documented_ids, case_ids)
-    undocumented_cases = MapSet.difference(case_ids, documented_ids)
+    missing_cases = documented_ids -- case_ids
+    undocumented_cases = case_ids -- documented_ids
+    covered_count = Enum.count(documented_ids, &(&1 in case_ids))
 
     Mix.shell().info("")
 
     Mix.shell().info(
-      "Documented GAP/DIV ids with regression cases: #{MapSet.size(MapSet.intersection(documented_ids, case_ids))}/#{MapSet.size(documented_ids)}"
+      "Documented GAP/DIV ids with regression cases: #{covered_count}/#{length(documented_ids)}"
     )
 
     print_id_list("Documented GAP/DIV ids without regression cases:", missing_cases)
@@ -229,6 +231,7 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
   defp policy_name(%{policy: {:diverges, _id}}), do: "diverges"
   defp policy_name(%{policy: policy}), do: to_string(policy)
 
+  @spec case_gap_div_ids([map()]) :: [String.t()]
   defp case_gap_div_ids(cases) do
     cases
     |> Enum.flat_map(fn
@@ -241,19 +244,22 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
       case_data ->
         Map.get(case_data, :regression_ids, [])
     end)
-    |> MapSet.new()
+    |> Enum.uniq()
+    |> Enum.sort()
   end
 
+  @spec documented_gap_div_ids() :: [String.t()]
   defp documented_gap_div_ids do
     case File.read("docs/clojure-conformance-gaps.md") do
       {:ok, content} ->
         ~r/^### ((?:GAP-[A-Z]\d+)|(?:DIV-\d+)):/m
         |> Regex.scan(content, capture: :all_but_first)
-        |> List.flatten()
-        |> MapSet.new()
+        |> Enum.map(fn [id] -> id end)
+        |> Enum.uniq()
+        |> Enum.sort()
 
       {:error, _reason} ->
-        MapSet.new()
+        []
     end
   end
 end
