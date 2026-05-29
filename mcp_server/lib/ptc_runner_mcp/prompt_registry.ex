@@ -364,7 +364,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     `:server`, `:tool`, and `:args` are required; use `{}` when the upstream tool takes no arguments.
     In `lisp_task`, `tool/call` returns `Result<T>`: success `{:ok true :value T}`, failure `{:ok false :reason k :message s}`.
     Use the field names shown by `doc`; keyword lookup works on upstream result maps.
-    If T is `{:content string}`, read text with `(:content (:value r))`.
+    If T is `{:content string}`, bind text with `(:content (:value r))`; do not pass the whole `(:value r)` map to string helpers.
     #{agentic_unknown_content_guidance(catalog)}
     If `(:value r)` has an unexpected shape, handle or fail with a clear message.
     On world faults, the tagged map has `:ok false`, a stable `:reason`, and a `:message`; handle it as data instead of assuming `nil`.

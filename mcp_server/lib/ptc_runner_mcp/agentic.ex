@@ -218,7 +218,8 @@ defmodule PtcRunnerMcp.Agentic do
   defp ledger_attempt(ledger, args) do
     case ledger_call_args(args) do
       {:ok, server, tool, call_args} ->
-        {:ok, Ledger.record_attempt(ledger, server, tool, call_args, :unknown, 1)}
+        effect = upstream_tool_effect(server, tool)
+        {:ok, Ledger.record_attempt(ledger, server, tool, call_args, effect, 1)}
 
       :error ->
         :none
@@ -239,6 +240,55 @@ defmodule PtcRunnerMcp.Agentic do
   end
 
   defp ledger_call_args(_args), do: :error
+
+  defp upstream_tool_effect(server, tool) do
+    if RootUpstreamRuntime.configured?() do
+      RootUpstreamRuntime.runtime()
+      |> Runtime.catalog_snapshot()
+      |> find_tool_annotations(server, tool)
+      |> annotations_effect()
+    else
+      :unknown
+    end
+  rescue
+    _ -> :unknown
+  end
+
+  defp find_tool_annotations(snapshot, server, tool) when is_list(snapshot) do
+    snapshot
+    |> Enum.find(&(Map.get(&1, "name") == server))
+    |> case do
+      %{"tools" => tools} when is_list(tools) ->
+        tools
+        |> Enum.find(&(Map.get(&1, "name") == tool))
+        |> case do
+          %{"annotations" => annotations} -> annotations
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp annotations_effect(%{} = annotations) do
+    cond do
+      annotation_true?(annotations, "readOnlyHint") -> :read
+      annotation_true?(annotations, "destructiveHint") -> :write
+      true -> :unknown
+    end
+  end
+
+  defp annotations_effect(_annotations), do: :unknown
+
+  defp annotation_true?(annotations, "readOnlyHint"),
+    do:
+      Map.get(annotations, "readOnlyHint") == true or Map.get(annotations, :readOnlyHint) == true
+
+  defp annotation_true?(annotations, "destructiveHint"),
+    do:
+      Map.get(annotations, "destructiveHint") == true or
+        Map.get(annotations, :destructiveHint) == true
 
   defp complete_ledger_attempt(_ledger, :none, _result), do: :ok
 

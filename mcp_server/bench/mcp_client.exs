@@ -217,6 +217,7 @@ defmodule PtcRunnerMcp.Bench.OsProcessClient do
       RELEASE_DISTRIBUTION=none PTC_RUNNER_MCP_LOG_LEVEL=error \
       printf '%s\\n' '#{frame}' | \
       RELEASE_DISTRIBUTION=none PTC_RUNNER_MCP_LOG_LEVEL=error \
+      PTC_RUNNER_MCP_UPSTREAMS=/nonexistent/ptc_runner_mcp_bench_upstreams.json \
       #{release_path} start 2>/dev/null
       """
 

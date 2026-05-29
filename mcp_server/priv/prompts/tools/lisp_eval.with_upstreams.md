@@ -16,6 +16,7 @@ Discovery inspects schemas only; `dir` lists names/descriptions, `doc` shows arg
 One stateless PTC-Lisp program
 Final value = result
 No persistence across calls
+Context JSON is exposed as `data/key` paths, e.g. records -> `data/records`; do not use bare `data`.
 
 Use `(map tool/call calls)` for batches. Raw schema/debug: `(meta "server/tool")`.
 Unknown result shape: inspect `(keys (:value r))` or `(pr-str (:value r))`; use `(fail (:message r))` for unhandled faults.

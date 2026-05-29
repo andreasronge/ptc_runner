@@ -12,7 +12,7 @@
 #     API key is in env; otherwise a canned-response stub that mimics
 #     the kind of guess the model would make (correct on simple
 #     workloads, wrong on the larger one). Per § 20.5 risk 2 /
-#     CLAUDE.md, prompts are domain-blind.
+#     AGENTS.md, prompts are domain-blind.
 #
 #   * Mode 2 (`in_process_ptc`) — runs the deterministic program via
 #     `PtcRunner.Lisp.run/2` in this BEAM node.
@@ -88,6 +88,32 @@ defmodule Bench.Helpers do
 
   def mean([]), do: 0.0
   def mean(xs), do: Enum.sum(xs) / length(xs)
+
+  def mcp_lisp_result(%{"structuredContent" => %{"status" => "ok", "result" => result}}),
+    do: {:ok, result}
+
+  def mcp_lisp_result(%{"structuredContent" => %{"status" => "error"} = payload}),
+    do: {:error, payload}
+
+  def mcp_lisp_result(%{
+        "isError" => false,
+        "content" => [%{"type" => "text", "text" => text} | _]
+      })
+      when is_binary(text),
+      do: {:ok, text}
+
+  def mcp_lisp_result(%{
+        "isError" => true,
+        "content" => [%{"type" => "text", "text" => text} | _]
+      })
+      when is_binary(text) do
+    case Jason.decode(text) do
+      {:ok, payload} -> {:error, payload}
+      {:error, _} -> {:error, text}
+    end
+  end
+
+  def mcp_lisp_result(other), do: {:error, other}
 end
 
 # ---------------------------------------------------------------------------
@@ -275,13 +301,16 @@ run_mcp = fn workload, mcp ->
   wall_us = System.monotonic_time(:microsecond) - t0
 
   case reply do
-    {:ok, %{"result" => %{"isError" => false, "structuredContent" => sc}}, _state} ->
-      # `result` field is the human-readable repl form ("user=> 3");
-      # parse the trailing token as an integer for comparison.
-      {:ok, Bench.Helpers.parse_integer_in(Map.get(sc, "result", "")), wall_us}
+    {:ok, %{"result" => result}, _state} ->
+      case Bench.Helpers.mcp_lisp_result(result) do
+        {:ok, text} ->
+          # The result text is a human-readable REPL form ("user=> 3");
+          # parse the trailing token as an integer for comparison.
+          {:ok, Bench.Helpers.parse_integer_in(text), wall_us}
 
-    {:ok, %{"result" => %{"isError" => true, "structuredContent" => sc}}, _state} ->
-      {:error, "mcp tool error: #{inspect(sc)}", wall_us}
+        {:error, payload} ->
+          {:error, "mcp tool error: #{inspect(payload)}", wall_us}
+      end
 
     {:error, full, _state} ->
       {:error, "mcp rpc error: #{inspect(full)}", wall_us}

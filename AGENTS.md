@@ -1,171 +1,91 @@
 # Repository Instructions
 
-This is a **0.x library** — expect breaking changes. Backward compatibility is not a priority. When refactoring:
-- Delete old code rather than deprecate
-- Simplify aggressively
-- Don't add compatibility shims
+Canonical agent instructions for this repo. `CLAUDE.md` is a symlink to this
+file, so Claude Code and Codex read the same rules. Edit only this file.
+
+PtcRunner is a BEAM-native Elixir library for Programmatic Tool Calling (PTC):
+LLMs write safe PTC-Lisp programs that orchestrate tools and transform data in
+a sandboxed BEAM process (1s timeout, 10MB memory). Key docs: SubAgent guides
+in `docs/guides/`, language reference in `docs/ptc-lisp-specification.md`,
+built-ins in `docs/function-reference.md`.
+
+## Working Style
+
+This is a **0.x library** — expect breaking changes. Backward compatibility is
+not a priority. When refactoring: delete old code rather than deprecate,
+simplify aggressively, add no compatibility shims.
+
+Explore the codebase before proposing changes — never claim a feature is
+missing without evidence from the source files. When you find a problem, fix
+the code and the docs together.
 
 ## Commit Messages
 
-Use a concise Conventional Commit subject, e.g.
-`feat(mcp): add stateful sessions`.
+Use a concise Conventional Commit subject, e.g. `feat(mcp): add stateful
+sessions`. For non-trivial commits, add a short body covering what changed and
+how it was verified.
 
-For non-trivial commits, add a short body covering what changed and how
-it was verified.
+## Commands
+
+- `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
+  tests); run before every commit.
+- `mix prepush` — slower checks (dialyzer, unused-deps) before `git push`; CI
+  runs these on every PR regardless.
+- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
+- Fix all failures before committing/pushing.
+
+## Project Structure
+
+- `lib/ptc_runner/` — the library (`sub_agent/`, `lisp/`, `sandbox.ex`, …).
+- `docs/` — specs and guidelines. `priv/prompts/` — LLM prompt templates,
+  **compiled in; recompile after editing**.
+- Sibling Mix projects: `mcp_server/` (`ptc_runner_mcp` on Hex, stdio MCP
+  server), `ptc_viewer/` (trace viewer), `demo/` (LLM benchmarks).
+
+## Conventions
+
+- Timestamps: `:utc_datetime`, never `:naive_datetime`. Durations: integer
+  milliseconds (`duration_ms`).
+- Never nest multiple modules in one file. Avoid `mix deps.clean --all`.
+- After fixing a dialyzer/Credo issue, re-run the tool to verify — never assume.
+- Use `gh` for GitHub tasks. When touching LLM integrations, verify model IDs
+  are current and check `.env` overrides.
 
 ## PTC-Lisp Changes
 
-Clojure compatibility is the default, but sandbox safety and recoverable
-signal values take precedence for Clojure-named functions where Clojure
-would raise; Java-named dot methods keep Java semantics.
+Clojure compatibility is the default, but sandbox safety and recoverable signal
+values take precedence for Clojure-named functions where Clojure would raise;
+Java-named dot methods keep Java semantics. See
+`docs/clojure-conformance-gaps.md` for the DIV-* rationale.
+
+## Prompts (domain-blind)
+
+System prompts, planner prompts, and agent configurations **must not** contain
+hints about test data, benchmark domains, or expected answer patterns. The
+orchestration layer must work across unrelated domains without prompt changes.
+Tool descriptions *may* reference their own domain. Benchmarks and test prompts
+must be generic and not overlap existing domains unless asked.
+
+## Testing
+
+- Bug fixes: write a failing test that reproduces the bug **before** fixing it.
+- Prefer integration tests over unit tests that mirror the implementation; if a
+  test is as simple as the code it tests, delete it.
+- No `Process.sleep` — use monitors or async helpers.
 
 <!-- usage-rules-start -->
-<!-- usage-rules-header -->
-# Usage Rules
-
-**IMPORTANT**: Consult these usage rules early and often when working with the packages listed below.
-Before attempting to use any of these packages or to discover if you should use them, review their
-usage rules to understand the correct patterns, conventions, and best practices.
-<!-- usage-rules-header-end -->
-
 <!-- usage_rules-start -->
 ## usage_rules usage
-_A dev tool for Elixir projects to gather LLM usage rules from dependencies_
+_A config-driven dev tool for Elixir projects to manage AGENTS.md files and agent skills from dependencies_
 
-## Using Usage Rules
-
-Many packages have usage rules, which you should *thoroughly* consult before taking any
-action. These usage rules contain guidelines and rules *directly from the package authors*.
-They are your best source of knowledge for making decisions.
-
-Run `mix usage_rules.*` tasks from the repo root by default. Some nested Mix projects, such as
-`mcp_server/`, may not define these tasks; if a task is unavailable there, retry from the repo root.
-
-Use `mix usage_rules.search_docs` first when the exact dependency module or
-function is uncertain. Only call `mix usage_rules.docs` with a confirmed module
-or `Module.function/arity` returned by search/docs; `usage_rules.docs` does not not accept package filters such as `-p`.
-
-## Modules & functions in the current app and dependencies
-
-When looking for docs for modules & functions that are dependencies of the current project,
-or for Elixir itself, use `mix usage_rules.docs`
-
-```
-# Search a whole module
-mix usage_rules.docs Enum
-
-# Search a specific function
-mix usage_rules.docs Enum.zip
-
-# Search a specific function & arity
-mix usage_rules.docs Enum.zip/1
-```
-
-
-## Searching Documentation
-
-You should also consult the documentation of any tools you are using, early and often. The best 
-way to accomplish this is to use the `usage_rules.search_docs` mix task. Once you have
-found what you are looking for, use the links in the search results to get more detail. For example:
-
-```
-# Search docs for all packages in the current application, including Elixir
-mix usage_rules.search_docs Enum.zip
-
-# Search docs for specific packages
-mix usage_rules.search_docs Req.get -p req
-
-# Search docs for multi-word queries
-mix usage_rules.search_docs "making requests" -p req
-
-# Search only in titles (useful for finding specific functions/modules)
-mix usage_rules.search_docs "Enum.zip" --query-by title
-```
-
-
+[usage_rules usage rules](deps/usage_rules/usage-rules.md)
 <!-- usage_rules-end -->
 <!-- usage_rules:elixir-start -->
 ## usage_rules:elixir usage
-# Elixir Core Usage Rules
-
-## Pattern Matching
-- Use pattern matching over conditional logic when possible
-- Prefer to match on function heads instead of using `if`/`else` or `case` in function bodies
-- `%{}` matches ANY map, not just empty maps. Use `map_size(map) == 0` guard to check for truly empty maps
-
-## Error Handling
-- Use `{:ok, result}` and `{:error, reason}` tuples for operations that can fail
-- Avoid raising exceptions for control flow
-- Use `with` for chaining operations that return `{:ok, _}` or `{:error, _}`
-
-## Common Mistakes to Avoid
-- Elixir has no `return` statement, nor early returns. The last expression in a block is always returned.
-- Don't use `Enum` functions on large collections when `Stream` is more appropriate
-- Avoid nested `case` statements - refactor to a single `case`, `with` or separate functions
-- Don't use `String.to_atom/1` on user input (memory leak risk)
-- Lists and enumerables cannot be indexed with brackets. Use pattern matching or `Enum` functions
-- Prefer `Enum` functions like `Enum.reduce` over recursion
-- When recursion is necessary, prefer to use pattern matching in function heads for base case detection
-- Using the process dictionary is typically a sign of unidiomatic code
-- Only use macros if explicitly requested
-- There are many useful standard library functions, prefer to use them where possible
-
-## Function Design
-- Use guard clauses: `when is_binary(name) and byte_size(name) > 0`
-- Prefer multiple function clauses over complex conditional logic
-- Name functions descriptively: `calculate_total_price/2` not `calc/2`
-- Predicate function names should not start with `is` and should end in a question mark.
-- Names like `is_thing` should be reserved for guards
-
-## Data Structures
-- Use structs over maps when the shape is known: `defstruct [:name, :age]`
-- Prefer keyword lists for options: `[timeout: 5000, retries: 3]`
-- Use maps for dynamic key-value data
-- Prefer to prepend to lists `[new | list]` not `list ++ [new]`
-
-## Mix Tasks
-
-- Use `mix help` to list available mix tasks
-- Use `mix help task_name` to get docs for an individual task
-- Read the docs and options fully before using tasks
-
-## Testing
-- Run tests in a specific file with `mix test test/my_test.exs` and a specific test with the line number `mix test path/to/test.exs:123`
-- Limit the number of failed tests with `mix test --max-failures n`
-- Use `@tag` to tag specific tests, and `mix test --only tag` to run only those tests
-- Use `assert_raise` for testing expected exceptions: `assert_raise ArgumentError, fn -> invalid_function() end`
-- Use `mix help test` to for full documentation on running tests
-
-## Debugging
-
-- Use `dbg/1` to print values while debugging. This will display the formatted value and other relevant information in the console.
-
+[usage_rules:elixir usage rules](deps/usage_rules/usage-rules/elixir.md)
 <!-- usage_rules:elixir-end -->
 <!-- usage_rules:otp-start -->
 ## usage_rules:otp usage
-# OTP Usage Rules
-
-## GenServer Best Practices
-- Keep state simple and serializable
-- Handle all expected messages explicitly
-- Use `handle_continue/2` for post-init work
-- Implement proper cleanup in `terminate/2` when necessary
-
-## Process Communication
-- Use `GenServer.call/3` for synchronous requests expecting replies
-- Use `GenServer.cast/2` for fire-and-forget messages.
-- When in doubt, use `call` over `cast`, to ensure back-pressure
-- Set appropriate timeouts for `call/3` operations
-
-## Fault Tolerance
-- Set up processes such that they can handle crashing and being restarted by supervisors
-- Use `:max_restarts` and `:max_seconds` to prevent restart loops
-
-## Task and Async
-- Use `Task.Supervisor` for better fault tolerance
-- Handle task failures with `Task.yield/2` or `Task.shutdown/2`
-- Set appropriate task timeouts
-- Use `Task.async_stream/3` for concurrent enumeration with back-pressure
-
+[usage_rules:otp usage rules](deps/usage_rules/usage-rules/otp.md)
 <!-- usage_rules:otp-end -->
 <!-- usage-rules-end -->
