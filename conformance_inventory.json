@@ -2356,7 +2356,7 @@
     "symbol": "pmap",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S132: nil/string/threaded collections are rejected, and multi-collection arity is unsupported"
+    "notes": "BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported"
   },
   {
     "status": "supported",
