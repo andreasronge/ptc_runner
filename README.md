@@ -47,6 +47,12 @@ for install, setup, client config, and server deployment. See
 [`docs/mcp-server.md`](docs/mcp-server.md) for the security model, sessions, and
 architecture.
 
+For applications that already run inside Elixir, use the
+[`Root Upstream Runtime`](docs/upstream-runtime.md) directly to embed OpenAPI
+and MCP upstream tools without starting the MCP server. The MCP server's
+[`aggregator mode`](docs/aggregator-mode.md) uses the same upstream config and
+`(tool/call ...)` authoring model behind an MCP boundary.
+
 ### Build agents in Elixir
 
 Use the `ptc_runner` library when you want SubAgents, signatures, tools, memory,
@@ -306,6 +312,8 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[PTC-Lisp Transport](docs/guides/subagent-ptc-transport.md)** - `ptc_transport: :content` (default) vs `:tool_call` (opt-in)
 - **[Text Mode + PTC-Lisp Compute](docs/guides/text-mode-ptc-compute.md)** - Combined mode (`output: :text, ptc_transport: :tool_call`) for chat agents that escalate to deterministic compute
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
+- **[Root Upstream Runtime](docs/upstream-runtime.md)** - Embed OpenAPI/MCP upstream tools in Elixir callers or `mix ptc.repl`
+- **[MCP Aggregator Mode](docs/aggregator-mode.md)** - Expose the same upstream runtime through `ptc_runner_mcp`
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
 - **[MCP Getting Started](docs/guides/mcp-getting-started.md)** - Using `ptc_runner_mcp` from MCP clients or server-side agent runtimes (overview: [`docs/mcp-server.md`](docs/mcp-server.md))
@@ -314,7 +322,6 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 
 - **[Signature Syntax](docs/signature-syntax.md)** - Input/output type contracts
 - **[PTC-Lisp Specification](docs/ptc-lisp-specification.md)** - The language SubAgents write (a Clojure subset: 211 of 534 `clojure.core` vars, plus `clojure.string`, `clojure.set`, `clojure.walk`, and `java.lang.Math`)
-- **[Root Upstream Runtime](docs/upstream-runtime.md)** - Use OpenAPI/MCP upstream tools from `mix ptc.repl` or embedded root callers
 - **[Namespace Conformance](https://github.com/andreasronge/ptc_runner/blob/main/docs/conformance/index.md)** - Generated coverage index for supported Clojure namespaces, Java compatibility targets, and PTC-specific extensions
 - **[Function Reference](docs/function-reference.md)** - All built-in functions with signatures
 - **Clojure Conformance** - [Gaps](docs/clojure-conformance-gaps.md) | [Java Interop](docs/java-interop.md)

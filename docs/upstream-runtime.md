@@ -49,6 +49,19 @@ Old transport names such as `"stdio"` and `"http"` are rejected. See
 credential bindings, static-header restrictions, OpenAPI validation,
 and the `(tool/call ...)` authoring model.
 
+## OpenAPI v1 Contract
+
+OpenAPI upstreams are a narrow read-only JSON contract, not a general
+OpenAPI client. The v1 adapter compiles only explicitly included `GET`
+operations. Operations with request bodies are rejected at compile time,
+as are header and cookie parameters; configure service-level headers with
+`auth:` or `static_headers:` instead.
+
+Successful responses must be JSON responses or empty `204` responses.
+Non-JSON success responses are rejected during schema compilation so
+callers do not have to branch on transport-specific body formats at
+runtime.
+
 ## Snapshot Modes
 
 `live` mode is the root REPL default. MCP stdio/http clients are not
