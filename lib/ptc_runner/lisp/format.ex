@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Format do
   Handles special Lisp types that should not expose internal implementation:
   - Closures: `{:closure, params, body, env, history, metadata}` → `#fn[x y]`
   - Builtins: `{:normal, fun}` etc. → `#<builtin>`
+  - Wrapper structs implement `String.Chars` and `Jason.Encoder` as their display string.
 
   Works recursively, so closures nested in maps/lists are also formatted.
 
@@ -20,15 +21,25 @@ defmodule PtcRunner.Lisp.Format do
       "%{a: 1}"
   """
 
-  # Wrapper struct for formatted closures/builtins that inspects nicely
+  # Wrapper structs for values with Lisp display forms. They encode as their
+  # display strings so generic JSON renderers do not treat them as maps.
   defmodule Fn do
     @moduledoc false
     defstruct [:params]
 
+    @doc false
+    def display(%__MODULE__{params: params}), do: "#fn[#{params}]"
+
     defimpl Inspect do
-      def inspect(%{params: params}, _opts) do
-        "#fn[#{params}]"
-      end
+      def inspect(%{params: params}, _opts), do: "#fn[#{params}]"
+    end
+
+    defimpl String.Chars do
+      def to_string(%{params: params}), do: "#fn[#{params}]"
+    end
+
+    defimpl Jason.Encoder do
+      def encode(fn_value, opts), do: Jason.Encode.string(Kernel.to_string(fn_value), opts)
     end
   end
 
@@ -36,8 +47,19 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct []
 
+    @doc false
+    def display(%__MODULE__{}), do: "#<builtin>"
+
     defimpl Inspect do
       def inspect(%Builtin{}, _opts), do: "#<builtin>"
+    end
+
+    defimpl String.Chars do
+      def to_string(%Builtin{}), do: "#<builtin>"
+    end
+
+    defimpl Jason.Encoder do
+      def encode(builtin, opts), do: Jason.Encode.string(Kernel.to_string(builtin), opts)
     end
   end
 
@@ -45,8 +67,19 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:name]
 
+    @doc false
+    def display(%__MODULE__{name: name}), do: "#'#{name}"
+
     defimpl Inspect do
       def inspect(%{name: name}, _opts), do: "#'#{name}"
+    end
+
+    defimpl String.Chars do
+      def to_string(%{name: name}), do: "#'#{name}"
+    end
+
+    defimpl Jason.Encoder do
+      def encode(var, opts), do: Jason.Encode.string(Kernel.to_string(var), opts)
     end
   end
 
@@ -54,8 +87,19 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:name]
 
+    @doc false
+    def display(%__MODULE__{name: name}), do: "'#{name}"
+
     defimpl Inspect do
       def inspect(%{name: name}, _opts), do: "'#{name}"
+    end
+
+    defimpl String.Chars do
+      def to_string(%{name: name}), do: "'#{name}"
+    end
+
+    defimpl Jason.Encoder do
+      def encode(symbol_ref, opts), do: Jason.Encode.string(Kernel.to_string(symbol_ref), opts)
     end
   end
 
@@ -63,8 +107,20 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:source]
 
+    @doc false
+    def display(%__MODULE__{source: source}), do: "#\"#{source}\""
+
     defimpl Inspect do
       def inspect(%{source: source}, _opts), do: "#\"#{source}\""
+    end
+
+    defimpl String.Chars do
+      def to_string(%{source: source}), do: "#\"#{source}\""
+    end
+
+    defimpl Jason.Encoder do
+      def encode(regex_literal, opts),
+        do: Jason.Encode.string(Kernel.to_string(regex_literal), opts)
     end
   end
 

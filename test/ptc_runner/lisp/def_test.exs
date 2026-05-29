@@ -473,6 +473,14 @@ defmodule PtcRunner.Lisp.DefTest do
       assert inspect(var) == "#'x"
     end
 
+    test "def return renders as display string for string and JSON protocols" do
+      {:ok, %{return: result}} = Lisp.run("(def x 41)")
+
+      assert result == %Var{name: :x}
+      assert to_string(result) == "#'x"
+      assert Jason.encode!(result) == ~s("#'x")
+    end
+
     test "Var with hyphenated name inspects correctly" do
       var = %Var{name: :"my-var"}
       assert inspect(var) == "#'my-var"
