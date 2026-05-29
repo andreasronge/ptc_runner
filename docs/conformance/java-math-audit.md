@@ -34,14 +34,14 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `atan` | 🔲 candidate | Returns the arc tangent of a value | pure math |
 | `atan2` | 🔲 candidate | Returns angle theta from (x,y) to polar (r,theta) | pure math |
 | `cbrt` | 🔲 candidate | Returns the cube root of a value | pure math |
-| `ceil` | ✅ supported | Returns the smallest integer >= argument |  |
+| `ceil` | ✅ supported | Returns the smallest integer >= argument | BUG GAP-J21: finite results are returned as integers instead of Java doubles |
 | `copySign` | ❌ not_relevant | Returns first arg with sign of second arg | low-level IEEE 754 manipulation |
 | `cos` | 🔲 candidate | Returns the trigonometric cosine of an angle | pure math |
 | `cosh` | 🔲 candidate | Returns the hyperbolic cosine of a value | pure math |
 | `decrementExact` | ❌ not_relevant | Returns argument decremented by one, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `exp` | 🔲 candidate | Returns Euler's number e raised to the power of a | pure math |
 | `expm1` | ❌ not_relevant | Returns e^x - 1 | specialized numerical precision, low demand |
-| `floor` | ✅ supported | Returns the largest integer <= argument |  |
+| `floor` | ✅ supported | Returns the largest integer <= argument | BUG GAP-J21: finite results are returned as integers instead of Java doubles |
 | `floorDiv` | ❌ not_relevant | Returns floor of integer division | Java integer division semantics; use quot + floor |
 | `floorMod` | ❌ not_relevant | Returns floor modulus of arguments | Java integer semantics; use mod |
 | `fma` | ❌ not_relevant | Fused multiply-add | specialized numerical precision |

@@ -6422,6 +6422,22 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(Math/pow -0.0 -3)",
         "GAP-J13",
         "Java Math.pow returns negative infinity for negative zero raised to a negative odd exponent; PTC-Lisp currently raises."
+      ),
+      bug_case(
+        "java/math-ceil-double-rendering-bug-001",
+        "java.lang.Math",
+        ["Math/ceil", "str"],
+        "(str (Math/ceil 1.2))",
+        "GAP-J21",
+        "Java Math.ceil returns a double value that renders as 2.0; PTC-Lisp currently returns an integer-shaped value."
+      ),
+      bug_case(
+        "java/math-floor-double-rendering-bug-001",
+        "java.lang.Math",
+        ["Math/floor", "str"],
+        "(str (Math/floor -1.2))",
+        "GAP-J21",
+        "Java Math.floor returns a double value that renders as -2.0; PTC-Lisp currently returns an integer-shaped value."
       )
     ]
   end

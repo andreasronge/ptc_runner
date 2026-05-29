@@ -1053,6 +1053,29 @@ semantics produce `NaN` or signed infinities for these edge values; PTC-Lisp
 should not convert those Java-defined results into recoverable arithmetic
 errors or plausible finite values.
 
+### GAP-J21: Java `Math/ceil` and `Math/floor` return integer-shaped values
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | open |
+| **Source** | Manual conformance cases `java/math-ceil-double-rendering-bug-001`, `java/math-floor-double-rendering-bug-001` |
+
+```clojure
+;; Java / Clojure
+(str (Math/ceil 1.2))   ;=> "2.0"
+(str (Math/floor -1.2)) ;=> "-2.0"
+
+;; PTC-Lisp current behavior
+(str (Math/ceil 1.2))   ;=> "2"
+(str (Math/floor -1.2)) ;=> "-2"
+```
+
+**Decision:** BUG. These are Java-shaped static method calls. Java
+`Math.ceil` and `Math.floor` return `double` values even when the mathematical
+result is integral, so observable rendering should keep the `.0` double shape
+instead of collapsing to PTC-Lisp integers.
+
 ### DIV-34: Empty keyword names are not supported
 
 | Field | Value |
