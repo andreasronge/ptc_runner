@@ -2032,7 +2032,7 @@
       status: :supported,
       description: "Parallel map over collection",
       notes:
-        "BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported"
+        "BUG GAP-S132: nil/string/threaded collections are rejected, and multi-collection arity is unsupported"
     },
     %{
       name: "pop",

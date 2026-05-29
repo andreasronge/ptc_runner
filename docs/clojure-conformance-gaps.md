@@ -3366,31 +3366,33 @@ Character literals are scalar values in Clojure, not seqable strings. Treating
 them as single-character strings turns invalid program structure into plausible
 collection data.
 
-### GAP-S132: `pmap` rejects nil/string collections and multiple collections
+### GAP-S132: `pmap` rejects valid finite sequence forms
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | open |
-| **Source** | Manual conformance cases `core/pmap-nil-bug-001`, `core/pmap-string-bug-001`, `core/pmap-multi-coll-bug-001` |
+| **Source** | Manual conformance cases `core/pmap-nil-bug-001`, `core/pmap-string-bug-001`, `core/pmap-multi-coll-bug-001`, `core/thread-last-pmap-bug-001` |
 
 ```clojure
 ;; Clojure
 (pmap inc nil)          ;=> ()
 (pmap str "ab")         ;=> ("a" "b")
 (pmap + [1 2] [3 4])    ;=> (4 6)
+(->> [1 2 3] (pmap inc));=> (2 3 4)
 
 ;; PTC-Lisp current behavior
 (pmap inc nil)          ;=> runtime_error
 (pmap str "ab")         ;=> runtime_error
 (pmap + [1 2] [3 4])    ;=> invalid_arity
+(->> [1 2 3] (pmap inc));=> unbound_var
 ```
 
 **Decision:** BUG. `pmap` is a supported Clojure-named finite higher-order
 helper in this audit, even though PTC-Lisp implements it with bounded sandbox
 workers. It should preserve Clojure's finite sequence contract for empty/nil
-inputs, string inputs, and multiple collection arities while keeping PTC-Lisp's
-parallel safety limits.
+inputs, string inputs, threaded calls, and multiple collection arities while
+keeping PTC-Lisp's parallel safety limits.
 
 ### GAP-S68: `assoc-in` empty or nil path does not update the nil key
 
