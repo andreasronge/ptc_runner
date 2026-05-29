@@ -2487,6 +2487,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "Clojure pmap supports multiple collections; PTC-Lisp currently rejects the arity."
       ),
       bug_case(
+        "core/thread-last-pmap-bug-001",
+        "clojure.core",
+        ["->>", "pmap"],
+        "(->> [1 2 3] (pmap inc))",
+        "GAP-S132",
+        "Clojure ->> threads the collection into pmap; PTC-Lisp currently expands to an unbound pmap variable."
+      ),
+      bug_case(
         "core/assoc-in-empty-path-bug-001",
         "clojure.core",
         ["assoc-in"],
