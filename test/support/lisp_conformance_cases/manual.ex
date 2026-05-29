@@ -941,7 +941,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
       {"core/recur-001", "recur", "(loop [i 0] (if (< i 2) (recur (inc i)) i))", []},
       {"core/doseq-println-001", "doseq", ~S|(doseq [x [1 2]] (println x))|, []},
       {"core/pcalls-001", "pcalls", "(pcalls (fn [] 1) (fn [] 2))", []},
+      {"core/thread-pcalls-001", "pcalls", "(-> (fn [] 1) (pcalls))", []},
       {"core/pmap-001", "pmap", "(pmap inc [1 2])", [:collection]},
+      {"core/thread-last-pmap-001", "pmap", "(->> [1 2 3] (pmap inc))", [:collection]},
+      {"core/thread-shadowed-pmap-001", "pmap",
+       "(let [pmap (fn [f xs] [:shadow (f (first xs))])] (->> [1] (pmap inc)))", []},
+      {"core/thread-last-apply-001", "apply", "(->> [[1 2] [3 4]] (apply concat))",
+       [
+         :collection
+       ]},
       {"core/some-thread-001", "some->", "(some-> {:a 1} :a inc)", []},
       {"core/some-thread-last-001", "some->>", "(some->> [1 2 3] (map inc) (filter odd?))", []},
       {"core/condp-001", "condp", "(condp = 2 1 :one 2 :two :other)", []}
@@ -2485,14 +2493,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(pmap + [1 2] [3 4])",
         "GAP-S132",
         "Clojure pmap supports multiple collections; PTC-Lisp currently rejects the arity."
-      ),
-      bug_case(
-        "core/thread-last-pmap-bug-001",
-        "clojure.core",
-        ["->>", "pmap"],
-        "(->> [1 2 3] (pmap inc))",
-        "GAP-S132",
-        "Clojure ->> threads the collection into pmap; PTC-Lisp currently expands to an unbound pmap variable."
       ),
       bug_case(
         "core/assoc-in-empty-path-bug-001",
