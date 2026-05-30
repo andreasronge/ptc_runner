@@ -362,7 +362,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `pcalls` | ✅ supported | Parallel calls to zero-arity functions |  |
 | `peek` | ✅ supported | Returns first/last without removing | DIV-25 for list alias behavior |
 | `persistent!` | ❌ not_relevant | Converts transient to persistent | transients are unsupported |
-| `pmap` | ✅ supported | Parallel map over collection | BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported |
+| `pmap` | ✅ supported | Parallel map over one or more collections | Matches map's finite seqable contract: nil collections, string collections, and multiple collections (zip-truncate to shortest) are supported while keeping bounded parallel limits |
 | `pop` | ✅ supported | Returns collection without first/last | DIV-25 for list alias behavior; DIV-26 for empty collection signal value |
 | `pop!` | ❌ not_relevant | Removes from transient collection | transients are unsupported |
 | `pos-int?` | ✅ supported | Returns true if positive integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |

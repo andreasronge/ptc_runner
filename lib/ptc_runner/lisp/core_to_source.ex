@@ -187,8 +187,8 @@ defmodule PtcRunner.Lisp.CoreToSource do
   end
 
   # Parallel operations
-  def format({:pmap, fn_expr, coll_expr}) do
-    "(pmap #{format(fn_expr)} #{format(coll_expr)})"
+  def format({:pmap, fn_expr, coll_exprs}) do
+    "(pmap #{format(fn_expr)} #{format_list(coll_exprs)})"
   end
 
   def format({:pcalls, fn_exprs}) do
@@ -373,9 +373,9 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp collect_var_refs({:def, _name, val, _meta}, acc), do: collect_var_refs(val, acc)
 
-  defp collect_var_refs({:pmap, fn_expr, coll_expr}, acc) do
+  defp collect_var_refs({:pmap, fn_expr, coll_exprs}, acc) do
     acc = collect_var_refs(fn_expr, acc)
-    collect_var_refs(coll_expr, acc)
+    Enum.reduce(coll_exprs, acc, &collect_var_refs/2)
   end
 
   defp collect_var_refs({:pcalls, fn_exprs}, acc) do

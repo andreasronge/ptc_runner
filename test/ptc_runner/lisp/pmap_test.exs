@@ -11,7 +11,7 @@ defmodule PtcRunner.Lisp.PmapTest do
   describe "analyze pmap" do
     test "valid pmap with function and collection" do
       raw = {:list, [{:symbol, :pmap}, {:symbol, :inc}, {:symbol, :items}]}
-      assert {:ok, {:pmap, {:var, :inc}, {:var, :items}}} = Analyze.analyze(raw)
+      assert {:ok, {:pmap, {:var, :inc}, [{:var, :items}]}} = Analyze.analyze(raw)
     end
 
     test "valid pmap with anonymous function" do
@@ -23,20 +23,21 @@ defmodule PtcRunner.Lisp.PmapTest do
            {:vector, [1, 2, 3]}
          ]}
 
-      assert {:ok, {:pmap, {:fn, [{:var, :x}], {:var, :x}}, {:vector, [1, 2, 3]}}} =
+      assert {:ok, {:pmap, {:fn, [{:var, :x}], {:var, :x}}, [{:vector, [1, 2, 3]}]}} =
                Analyze.analyze(raw)
     end
 
-    test "pmap requires exactly 2 arguments" do
+    test "pmap requires at least one collection" do
       raw = {:list, [{:symbol, :pmap}, {:symbol, :inc}]}
       assert {:error, {:invalid_arity, :pmap, msg}} = Analyze.analyze(raw)
       assert msg =~ "expected (pmap f coll)"
     end
 
-    test "pmap with too many arguments fails" do
-      raw = {:list, [{:symbol, :pmap}, {:symbol, :inc}, {:symbol, :items}, {:symbol, :extra}]}
-      assert {:error, {:invalid_arity, :pmap, msg}} = Analyze.analyze(raw)
-      assert msg =~ "expected (pmap f coll)"
+    test "pmap accepts multiple collections" do
+      raw = {:list, [{:symbol, :pmap}, {:symbol, :+}, {:symbol, :items}, {:symbol, :extra}]}
+
+      assert {:ok, {:pmap, {:var, :+}, [{:var, :items}, {:var, :extra}]}} =
+               Analyze.analyze(raw)
     end
 
     test "pmap with no arguments fails" do
@@ -49,7 +50,7 @@ defmodule PtcRunner.Lisp.PmapTest do
   describe "eval pmap" do
     test "pmap with builtin function" do
       env = Env.initial()
-      ast = {:pmap, {:var, :inc}, {:vector, [1, 2, 3]}}
+      ast = {:pmap, {:var, :inc}, [{:vector, [1, 2, 3]}]}
 
       assert {:ok, [2, 3, 4], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
@@ -58,7 +59,7 @@ defmodule PtcRunner.Lisp.PmapTest do
       env = Env.initial()
       # (pmap (fn [x] (* x 2)) [1 2 3 4])
       fn_ast = {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}
-      ast = {:pmap, fn_ast, {:vector, [1, 2, 3, 4]}}
+      ast = {:pmap, fn_ast, [{:vector, [1, 2, 3, 4]}]}
 
       assert {:ok, [2, 4, 6, 8], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
@@ -74,7 +75,7 @@ defmodule PtcRunner.Lisp.PmapTest do
            {:map, [{{:keyword, :name}, {:string, "Bob"}}]}
          ]}
 
-      ast = {:pmap, {:keyword, :name}, coll_ast}
+      ast = {:pmap, {:keyword, :name}, [coll_ast]}
 
       assert {:ok, ["Alice", "Bob"], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
@@ -83,7 +84,7 @@ defmodule PtcRunner.Lisp.PmapTest do
       env = Env.initial()
       # Test with larger collection to increase chance of detecting ordering issues
       items = Enum.to_list(1..100)
-      ast = {:pmap, {:var, :inc}, {:vector, items}}
+      ast = {:pmap, {:var, :inc}, [{:vector, items}]}
 
       assert {:ok, result, %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
       assert result == Enum.map(items, &(&1 + 1))
@@ -91,23 +92,47 @@ defmodule PtcRunner.Lisp.PmapTest do
 
     test "pmap with empty collection returns empty list" do
       env = Env.initial()
-      ast = {:pmap, {:var, :inc}, {:vector, []}}
+      ast = {:pmap, {:var, :inc}, [{:vector, []}]}
 
       assert {:ok, [], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "pmap with single element" do
       env = Env.initial()
-      ast = {:pmap, {:var, :inc}, {:vector, [42]}}
+      ast = {:pmap, {:var, :inc}, [{:vector, [42]}]}
 
       assert {:ok, [43], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "pmap over a string maps graphemes" do
+      env = Env.initial()
+      # (pmap str "ab") => ["a" "b"] — strings are seqable
+      ast = {:pmap, {:var, :str}, [{:string, "ab"}]}
+
+      assert {:ok, ["a", "b"], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "pmap over multiple collections zips element-wise" do
+      env = Env.initial()
+      # (pmap + [1 2] [3 4]) => [4 6]
+      ast = {:pmap, {:var, :+}, [{:vector, [1, 2]}, {:vector, [3, 4]}]}
+
+      assert {:ok, [4, 6], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "pmap over multiple collections truncates to the shortest" do
+      env = Env.initial()
+      # (pmap + [1 2 3] [10 20]) => [11 22]
+      ast = {:pmap, {:var, :+}, [{:vector, [1, 2, 3]}, {:vector, [10, 20]}]}
+
+      assert {:ok, [11, 22], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "pmap with closure capturing outer scope" do
       env = Map.merge(Env.initial(), %{multiplier: 10})
       # (pmap (fn [x] (* x multiplier)) [1 2 3])
       fn_ast = {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, {:var, :multiplier}]}}
-      ast = {:pmap, fn_ast, {:vector, [1, 2, 3]}}
+      ast = {:pmap, fn_ast, [{:vector, [1, 2, 3]}]}
 
       assert {:ok, [10, 20, 30], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
@@ -116,7 +141,7 @@ defmodule PtcRunner.Lisp.PmapTest do
       env = Env.initial()
       # (let [factor 5] (pmap (fn [x] (* x factor)) [1 2 3]))
       fn_ast = {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, {:var, :factor}]}}
-      pmap_ast = {:pmap, fn_ast, {:vector, [1, 2, 3]}}
+      pmap_ast = {:pmap, fn_ast, [{:vector, [1, 2, 3]}]}
       ast = {:let, [{:binding, {:var, :factor}, 5}], pmap_ast}
 
       assert {:ok, [5, 10, 15], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
@@ -125,7 +150,7 @@ defmodule PtcRunner.Lisp.PmapTest do
     test "pmap propagates errors from function" do
       env = Env.initial()
       # Trying to increment a string should fail
-      ast = {:pmap, {:var, :inc}, {:vector, [{:string, "not"}, {:string, "numbers"}]}}
+      ast = {:pmap, {:var, :inc}, [{:vector, [{:string, "not"}, {:string, "numbers"}]}]}
 
       assert {:error, _} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
@@ -145,7 +170,7 @@ defmodule PtcRunner.Lisp.PmapTest do
       fn_ast =
         {:fn, [{:var, :x}], {:tool_call, :process, [{:map, [{{:keyword, :value}, {:var, :x}}]}]}}
 
-      ast = {:pmap, fn_ast, {:vector, [1, 2, 3]}}
+      ast = {:pmap, fn_ast, [{:vector, [1, 2, 3]}]}
 
       assert {:ok, [2, 4, 6], %{}} = Eval.eval(ast, %{}, %{}, env, tool_exec)
       assert :counters.get(call_count, 1) == 3
@@ -161,7 +186,7 @@ defmodule PtcRunner.Lisp.PmapTest do
       # This is a contrived test - in practice def in pmap would be unusual
       # but we want to verify the isolation guarantees
       # (pmap identity [1 2 3]) - simple case preserves user_ns
-      ast = {:pmap, {:var, :identity}, {:vector, [1, 2, 3]}}
+      ast = {:pmap, {:var, :identity}, [{:vector, [1, 2, 3]}]}
 
       initial_user_ns = %{existing: "value"}
 

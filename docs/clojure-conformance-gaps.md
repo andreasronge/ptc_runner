@@ -3371,8 +3371,8 @@ collection data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/pmap-nil-bug-001`, `core/pmap-string-bug-001`, `core/pmap-multi-coll-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/pmap-nil-001`, `core/pmap-string-001`, `core/pmap-multi-coll-001`, `core/pmap-multi-coll-truncate-001` |
 
 ```clojure
 ;; Clojure
@@ -3380,17 +3380,19 @@ collection data.
 (pmap str "ab")         ;=> ("a" "b")
 (pmap + [1 2] [3 4])    ;=> (4 6)
 
-;; PTC-Lisp current behavior
-(pmap inc nil)          ;=> runtime_error
-(pmap str "ab")         ;=> runtime_error
-(pmap + [1 2] [3 4])    ;=> invalid_arity
+;; PTC-Lisp (fixed)
+(pmap inc nil)          ;=> ()
+(pmap str "ab")         ;=> ("a" "b")
+(pmap + [1 2] [3 4])    ;=> (4 6)
 ```
 
-**Decision:** BUG. `pmap` is a supported Clojure-named finite higher-order
-helper in this audit, even though PTC-Lisp implements it with bounded sandbox
-workers. It should preserve Clojure's finite sequence contract for empty/nil
-inputs, string inputs, and multiple collection arities while keeping PTC-Lisp's
-parallel safety limits.
+**Fix:** `pmap` now shares `map`'s finite seqable contract. The `{:pmap, …}`
+core node carries a list of collection expressions; each collection is coerced
+through `Collection.Normalize.to_seq/1` (nil → `[]`, string → graphemes,
+map → `[k v]` pairs) and multiple collections are zipped element-wise,
+truncating to the shortest. Bounded parallel safety limits (per-worker heap,
+worker budget, shared deadline) are unchanged. The single-collection keyword
+accessor guard (`(pmap :k single-map)`) is preserved.
 
 ### GAP-S68: `assoc-in` empty or nil path does not update the nil key
 

@@ -1675,6 +1675,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `map` | `(map f c1 c2 c3)` | Apply f to triples |
 | `mapcat` | `(mapcat f coll)` | Apply f to each item, concatenate results |
 | `pmap` | `(pmap f coll)` | Apply f to each item in parallel |
+| `pmap` | `(pmap f c1 c2 ...)` | Apply f to zipped items from multiple collections in parallel |
 | `pcalls` | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
 | `mapv` | `(mapv f coll)` | Like map, returns vector |
 | `mapv` | `(mapv f c1 c2)` | Like map with two collections |
@@ -1722,6 +1723,9 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 
 **pmap semantics:**
 - Order is preserved - results match input order
+- Shares `map`'s finite seqable contract: `(pmap inc nil)` → `()`, strings map
+  over graphemes (`(pmap str "ab")` → `("a" "b")`), and multiple collections
+  zip element-wise, truncating to the shortest (`(pmap + [1 2 3] [10 20])` → `(11 22)`)
 - Each parallel branch gets a read-only snapshot of the user namespace
 - Writes within branches (via `def`) are isolated and discarded
 - Errors in any branch propagate to the caller

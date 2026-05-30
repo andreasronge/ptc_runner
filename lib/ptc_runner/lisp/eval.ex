@@ -28,6 +28,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.SubAgent.KeyNormalizer
@@ -421,21 +422,27 @@ defmodule PtcRunner.Lisp.Eval do
   # Parallel map: pmap
   # ============================================================
 
-  defp do_eval({:pmap, fn_ast, coll_ast}, %EvalContext{} = eval_ctx) do
+  defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
-         {:ok, coll_val, eval_ctx2} <- do_eval(coll_ast, eval_ctx1) do
-      # Consistency check: keywords don't work with single hash-map in map/pmap
-      if keyword_runtime?(fn_val) and is_map(coll_val) and
-           not is_struct(coll_val) do
+         {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
+      # Consistency check: keywords don't work with a single hash-map in
+      # map/pmap. Only meaningful for the single-collection arity; with
+      # multiple collections a keyword would be a 2-arg lookup-with-default.
+      single_map_coll? = match?([m] when is_map(m) and not is_struct(m), coll_vals)
+
+      if keyword_runtime?(fn_val) and single_map_coll? do
         {:error,
          {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
-          [fn_val, coll_val]}}
+          [fn_val, hd(coll_vals)]}}
       else
         # Record start time for pmap execution
         start_time = System.monotonic_time(:millisecond)
         timestamp = DateTime.utc_now()
-        coll_list = Enum.to_list(coll_val)
-        count = length(coll_list)
+        # Coerce each collection to a seq (nil -> [], string -> graphemes,
+        # map -> [k v] pairs) and zip multiple collections element-wise,
+        # truncating to the shortest — matching `map`'s finite contract.
+        arg_lists = pmap_arg_lists(coll_vals)
+        count = length(arg_lists)
 
         # Security H1: every pmap/pcalls worker — top-level and nested —
         # is spawned with a FIXED `max_heap_size` (`worker_max_heap`),
@@ -459,13 +466,13 @@ defmodule PtcRunner.Lisp.Eval do
         # Capture trace context for propagation into worker processes
         trace_ctx = TraceContext.capture()
 
-        worker_fun = fn elem ->
+        worker_fun = fn arg_list ->
           try do
             TraceContext.take_child_result()
 
             value =
               RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
-                Callable.call(callable_fn, [elem])
+                Callable.call(callable_fn, arg_list)
               end)
 
             case TraceContext.take_child_result() do
@@ -494,7 +501,7 @@ defmodule PtcRunner.Lisp.Eval do
         end
 
         runner_result =
-          ParallelRunner.run(coll_list, worker_fun,
+          ParallelRunner.run(arg_lists, worker_fun,
             worker_max_heap: worker_max_heap,
             max_concurrency: concurrency,
             budget: eval_ctx2.parallel_budget,
@@ -1109,6 +1116,23 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Evaluate all expressions in order, returning results in original order
+  # Build the per-element argument lists for pmap.
+  #
+  # Single collection: each element becomes a one-arg call `[x]`.
+  # Multiple collections: zip element-wise, truncating to the shortest
+  # (matching `map`'s multi-collection contract). Each collection is coerced
+  # through `Normalize.to_seq` first — nil -> [], string -> graphemes,
+  # map -> [k v] pairs — so pmap shares `map`'s finite seqable contract.
+  defp pmap_arg_lists([coll]) do
+    coll |> Normalize.to_seq() |> Enum.map(&[&1])
+  end
+
+  defp pmap_arg_lists(colls) do
+    colls
+    |> Enum.map(&Normalize.to_seq/1)
+    |> Enum.zip_with(& &1)
+  end
+
   defp eval_all(asts, eval_ctx) do
     result =
       Enum.reduce_while(asts, {:ok, [], eval_ctx}, fn ast, {:ok, acc, ctx} ->

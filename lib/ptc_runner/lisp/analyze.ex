@@ -993,16 +993,18 @@ defmodule PtcRunner.Lisp.Analyze do
   # Parallel map: pmap
   # ============================================================
 
-  # (pmap f coll) - parallel map, evaluates f for each element concurrently
-  defp analyze_pmap([fn_ast, coll_ast], _tail?) do
+  # (pmap f coll) / (pmap f c1 c2 ...) - parallel map over one or more finite
+  # collections, evaluating f for each (zipped) element concurrently. Multiple
+  # collections zip element-wise and truncate to the shortest, matching `map`.
+  defp analyze_pmap([fn_ast | coll_asts], _tail?) when coll_asts != [] do
     with {:ok, fn_core} <- do_analyze(fn_ast, false),
-         {:ok, coll_core} <- do_analyze(coll_ast, false) do
-      {:ok, {:pmap, fn_core, coll_core}}
+         {:ok, coll_cores} <- analyze_list(coll_asts) do
+      {:ok, {:pmap, fn_core, coll_cores}}
     end
   end
 
   defp analyze_pmap(_, _tail?) do
-    {:error, {:invalid_arity, :pmap, "expected (pmap f coll)"}}
+    {:error, {:invalid_arity, :pmap, "expected (pmap f coll) or (pmap f c1 c2 ...)"}}
   end
 
   # ============================================================
