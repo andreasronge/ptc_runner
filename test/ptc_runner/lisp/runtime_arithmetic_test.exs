@@ -114,6 +114,67 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     test "Math namespace shorthand" do
       assert_lisp("(Math/pow 3 2)", 9.0)
     end
+
+    # GAP-J13: IEEE 754 special cases return recoverable signal values
+    # (java.lang.Math.pow semantics) instead of raising.
+    test "negative base with fractional exponent is NaN" do
+      assert_lisp("(str (Math/pow -1 0.5))", "NaN")
+    end
+
+    test "zero base with negative exponent is positive infinity" do
+      assert_lisp("(str (Math/pow 0 -1))", "Infinity")
+    end
+
+    test "negative zero base with negative odd exponent is negative infinity" do
+      assert_lisp("(str (Math/pow -0.0 -3))", "-Infinity")
+    end
+
+    test "one to NaN/infinite exponent is NaN" do
+      assert_lisp("(str (Math/pow 1 ##NaN))", "NaN")
+      assert_lisp("(str (Math/pow 1 ##Inf))", "NaN")
+      assert_lisp("(str (Math/pow -1 ##Inf))", "NaN")
+    end
+
+    test "zero exponent wins over any base" do
+      assert_lisp("(Math/pow ##NaN 0)", 1.0)
+      assert_lisp("(Math/pow ##Inf 0)", 1.0)
+    end
+
+    test "negative base with integer exponent stays real" do
+      assert_lisp("(Math/pow -2 3)", -8.0)
+      assert_lisp("(Math/pow -2 2)", 4.0)
+    end
+
+    test "infinite base and infinite exponent together" do
+      assert_lisp("(str (Math/pow ##Inf ##Inf))", "Infinity")
+      assert_lisp("(str (Math/pow ##-Inf ##Inf))", "Infinity")
+      assert_lisp("(Math/pow ##Inf ##-Inf)", 0.0)
+      assert_lisp("(Math/pow ##-Inf ##-Inf)", 0.0)
+    end
+
+    test "finite overflow becomes signed infinity (not an error)" do
+      assert_lisp("(str (Math/pow 2 1024))", "Infinity")
+      assert_lisp("(str (Math/pow -2 1025))", "-Infinity")
+      assert_lisp("(str (Math/pow -2 1024))", "Infinity")
+      # underflow still rounds to zero
+      assert_lisp("(Math/pow 2 -2000)", 0.0)
+    end
+
+    test "negative-infinity base preserves odd-exponent sign" do
+      assert_lisp("(str (Math/pow ##-Inf 3))", "-Infinity")
+      assert_lisp("(str (Math/pow ##-Inf 3.0))", "-Infinity")
+      assert_lisp("(str (Math/pow ##-Inf 2))", "Infinity")
+      assert_lisp("(str (Math/pow ##-Inf 2.5))", "Infinity")
+      assert_lisp("(str (Math/pow ##-Inf -3))", "-0.0")
+      assert_lisp("(str (Math/pow ##-Inf -2))", "0.0")
+    end
+
+    test "exponent parity follows double coercion beyond 2^53" do
+      # 9223372036854775807 (Long/MAX) rounds to an EVEN double, so the
+      # odd-integer special case does not apply (matches java.lang.Math.pow).
+      assert_lisp("(str (Math/pow -0.0 -9223372036854775807))", "Infinity")
+      assert_lisp("(str (Math/pow -0.0 9223372036854775807))", "0.0")
+    end
   end
 
   describe "float - alias for double" do

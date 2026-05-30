@@ -6403,53 +6403,53 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J10",
         "Java Math.round has float/double overloads but no BigInt overload selected by Clojure; PTC-Lisp currently accepts arbitrary-precision integers."
       ),
-      bug_case(
-        "java/math-pow-negative-fractional-bug-001",
+      regression_case(
+        "java/math-pow-negative-fractional-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow -1 0.5)",
-        "GAP-J13",
-        "Java Math.pow returns NaN for negative bases with non-integer exponents; PTC-Lisp currently raises."
+        ["GAP-J13"],
+        [:numeric]
       ),
-      bug_case(
-        "java/math-pow-zero-negative-exponent-bug-001",
+      regression_case(
+        "java/math-pow-zero-negative-exponent-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow 0 -1)",
-        "GAP-J13",
-        "Java Math.pow returns positive infinity for zero to a negative exponent; PTC-Lisp currently raises."
+        ["GAP-J13"],
+        [:numeric]
       ),
-      bug_case(
-        "java/math-pow-one-nan-exponent-bug-001",
+      regression_case(
+        "java/math-pow-one-nan-exponent-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow 1 ##NaN)",
-        "GAP-J13",
-        "Java Math.pow returns NaN for one raised to a NaN exponent; PTC-Lisp currently returns 1.0."
+        ["GAP-J13"],
+        [:numeric]
       ),
-      bug_case(
-        "java/math-pow-one-infinite-exponent-bug-001",
+      regression_case(
+        "java/math-pow-one-infinite-exponent-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow 1 ##Inf)",
-        "GAP-J13",
-        "Java Math.pow returns NaN for one raised to an infinite exponent; PTC-Lisp currently returns 1.0."
+        ["GAP-J13"],
+        [:numeric]
       ),
-      bug_case(
-        "java/math-pow-negative-one-infinite-exponent-bug-001",
+      regression_case(
+        "java/math-pow-negative-one-infinite-exponent-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow -1 ##Inf)",
-        "GAP-J13",
-        "Java Math.pow returns NaN for negative one raised to an infinite exponent; PTC-Lisp currently returns 1.0."
+        ["GAP-J13"],
+        [:numeric]
       ),
-      bug_case(
-        "java/math-pow-negative-zero-negative-odd-exponent-bug-001",
+      regression_case(
+        "java/math-pow-negative-zero-negative-odd-exponent-001",
         "java.lang.Math",
         ["Math/pow"],
         "(Math/pow -0.0 -3)",
-        "GAP-J13",
-        "Java Math.pow returns negative infinity for negative zero raised to a negative odd exponent; PTC-Lisp currently raises."
+        ["GAP-J13"],
+        [:numeric]
       ),
       bug_case(
         "java/math-ceil-double-rendering-bug-001",

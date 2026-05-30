@@ -3719,7 +3719,7 @@
       status: :supported,
       description: "Returns the value of a raised to the power of b",
       notes:
-        "BUG GAP-J13: special double results such as NaN and infinities currently raise or return 1.0 incorrectly"
+        "Follows java.lang.Math.pow's IEEE 754 special-case table, returning :nan / :infinity / :negative_infinity as recoverable signal values instead of raising (e.g. (pow -1 0.5) => NaN, (pow 0 -1) => Inf)"
     },
     %{
       name: "random",
