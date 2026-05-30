@@ -6063,101 +6063,113 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J05",
         "Java String.lastIndexOf supports an integer character-code/from-index overload; PTC-Lisp currently rejects it."
       ),
-      bug_case(
-        "java/string-starts-with-char-bug-001",
+      div_case(
+        "java/string-starts-with-char-001",
         "java.lang.String",
         [".startsWith"],
         ~S|(.startsWith "abc" \a)|,
-        "GAP-J16",
-        "Java String.startsWith requires a String prefix; PTC-Lisp currently accepts Character arguments."
+        "DIV-40",
+        true,
+        "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .startsWith accepts it as a String prefix (see DIV-35/GAP-S120)."
       ),
-      bug_case(
-        "java/string-ends-with-char-bug-001",
+      div_case(
+        "java/string-ends-with-char-001",
         "java.lang.String",
         [".endsWith"],
         ~S|(.endsWith "abc" \c)|,
-        "GAP-J16",
-        "Java String.endsWith requires a String suffix; PTC-Lisp currently accepts Character arguments."
+        "DIV-40",
+        true,
+        "PTC-Lisp has no Character type; \\c is the one-char string \"c\", so .endsWith accepts it as a String suffix."
       ),
-      bug_case(
-        "java/string-contains-char-bug-001",
+      div_case(
+        "java/string-contains-char-001",
         "java.lang.String",
         [".contains"],
         ~S|(.contains "abc" \b)|,
-        "GAP-J16",
-        "Java String.contains requires a CharSequence; PTC-Lisp currently accepts Character arguments."
+        "DIV-40",
+        true,
+        "PTC-Lisp has no Character type; \\b is the one-char string \"b\", so .contains accepts it as a CharSequence."
       ),
-      bug_case(
-        "java/string-length-char-receiver-bug-001",
+      div_case(
+        "java/string-length-char-receiver-001",
         "java.lang.String",
         [".length"],
         ~S|(.length \a)|,
-        "GAP-J17",
-        "Java Character values do not expose String.length; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        1,
+        "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .length returns 1 instead of raising."
       ),
-      bug_case(
-        "java/string-to-lower-case-char-receiver-bug-001",
+      div_case(
+        "java/string-to-lower-case-char-receiver-001",
         "java.lang.String",
         [".toLowerCase"],
         ~S|(.toLowerCase \A)|,
-        "GAP-J17",
-        "Java Character values do not expose String.toLowerCase; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        "a",
+        "PTC-Lisp has no Character type; \\A is the one-char string \"A\", so .toLowerCase returns \"a\" instead of raising."
       ),
-      bug_case(
-        "java/string-to-upper-case-char-receiver-bug-001",
+      div_case(
+        "java/string-to-upper-case-char-receiver-001",
         "java.lang.String",
         [".toUpperCase"],
         ~S|(.toUpperCase \a)|,
-        "GAP-J17",
-        "Java Character values do not expose String.toUpperCase; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        "A",
+        "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .toUpperCase returns \"A\" instead of raising."
       ),
-      bug_case(
-        "java/string-contains-char-receiver-bug-001",
+      div_case(
+        "java/string-contains-char-receiver-001",
         "java.lang.String",
         [".contains"],
         ~S|(.contains \a "a")|,
-        "GAP-J17",
-        "Java Character values do not expose String.contains; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        true,
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .contains operates on it as a String."
       ),
-      bug_case(
-        "java/string-index-of-char-receiver-bug-001",
+      div_case(
+        "java/string-index-of-char-receiver-001",
         "java.lang.String",
         [".indexOf"],
         ~S|(.indexOf \a "a")|,
-        "GAP-J17",
-        "Java Character values do not expose String.indexOf; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        0,
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .indexOf operates on it as a String."
       ),
-      bug_case(
-        "java/string-last-index-of-char-receiver-bug-001",
+      div_case(
+        "java/string-last-index-of-char-receiver-001",
         "java.lang.String",
         [".lastIndexOf"],
         ~S|(.lastIndexOf \a "a")|,
-        "GAP-J17",
-        "Java Character values do not expose String.lastIndexOf; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        0,
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .lastIndexOf operates on it as a String."
       ),
-      bug_case(
-        "java/string-starts-with-char-receiver-bug-001",
+      div_case(
+        "java/string-starts-with-char-receiver-001",
         "java.lang.String",
         [".startsWith"],
         ~S|(.startsWith \a "a")|,
-        "GAP-J17",
-        "Java Character values do not expose String.startsWith; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        true,
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .startsWith operates on it as a String."
       ),
-      bug_case(
-        "java/string-ends-with-char-receiver-bug-001",
+      div_case(
+        "java/string-ends-with-char-receiver-001",
         "java.lang.String",
         [".endsWith"],
         ~S|(.endsWith \a "a")|,
-        "GAP-J17",
-        "Java Character values do not expose String.endsWith; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        true,
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .endsWith operates on it as a String."
       ),
-      bug_case(
-        "java/string-substring-char-receiver-bug-001",
+      div_case(
+        "java/string-substring-char-receiver-001",
         "java.lang.String",
         [".substring"],
         ~S|(.substring \a 0)|,
-        "GAP-J17",
-        "Java Character values do not expose String.substring; PTC-Lisp currently treats character receivers as one-character strings."
+        "DIV-41",
+        "a",
+        "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .substring operates on it as a String."
       ),
       bug_case(
         "java/string-length-utf16-bug-001",

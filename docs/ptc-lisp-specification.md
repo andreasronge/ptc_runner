@@ -43,9 +43,16 @@ rules decide:
    `(parse-long "abc")` returns `nil`, not a `NumberFormatException`.
 2. **Eager, not lazy.** Inputs must be finite and bounded; programs
    run under wall-clock and memory caps.
-3. **Java-named methods follow Java semantics.** `.substring`,
-   `.indexOf`, `.length` raise on out-of-range — the dot prefix
-   signals "Java idiom expected." `subs`, `parse-long`, `get` follow
+3. **Java-named methods follow Java-compatible conventions where those
+   conventions are meaningful in PTC-Lisp.** The dot prefix signals
+   "Java idiom expected": familiar names, arities, not-found values
+   (`.indexOf` returns `-1`), and bounds errors for invalid indexes
+   (`.substring` raises on out-of-range; `.length`/`.indexOf` raise on
+   non-string-like receivers). They do **not** preserve Java
+   object/type distinctions PTC-Lisp intentionally does not model — e.g.
+   `Character` vs one-character `String`, so `(.toUpperCase \a)` returns
+   `"A"` rather than raising (see DIV-40/DIV-41). Java is a compatibility
+   heuristic, not the design owner. `subs`, `parse-long`, `get` follow
    the safer-for-sandbox signal pattern.
 4. **Properties of input data may signal; properties of the program
    raise.** `(parse-long "abc")` signals (bad data); `(+ 1 nil)`,

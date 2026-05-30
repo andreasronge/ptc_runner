@@ -183,61 +183,63 @@
       status: :supported,
       description: "Substring containment",
       notes:
-        "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
     },
     %{
       name: ".indexOf",
       status: :supported,
       description: "First substring index",
       notes:
-        "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".lastIndexOf",
       status: :supported,
       description: "Last substring index",
       notes:
-        "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".length",
       status: :supported,
       description: "String length",
       notes:
-        "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".substring",
       status: :supported,
       description: "Extract substring",
       notes:
-        "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".toLowerCase",
       status: :supported,
       description: "Lowercase string",
-      notes: "BUG GAP-J17: Character receivers are accepted instead of raising"
+      notes:
+        "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".toUpperCase",
       status: :supported,
       description: "Uppercase string",
-      notes: "BUG GAP-J17: Character receivers are accepted instead of raising"
+      notes:
+        "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
     },
     %{
       name: ".startsWith",
       status: :supported,
       description: "Prefix test",
       notes:
-        "BUG GAP-J05: prefix/offset overload is unsupported. BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
     },
     %{
       name: ".endsWith",
       status: :supported,
       description: "Suffix test",
       notes:
-        "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+        "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
     },
     %{
       name: ".trim",

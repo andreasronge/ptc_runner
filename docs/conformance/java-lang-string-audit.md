@@ -27,17 +27,17 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
 | `.charAt` | 🔲 candidate | Return character at index | Potentially useful, but PTC-Lisp must define grapheme semantics. |
-| `.contains` | ✅ supported | Substring containment | BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.endsWith` | ✅ supported | Suffix test | BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising |
+| `.contains` | ✅ supported | Substring containment | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
+| `.endsWith` | ✅ supported | Suffix test | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
 | `.equalsIgnoreCase` | 🔲 candidate | Case-insensitive string equality | Common Java idiom in generated code. |
 | `.getBytes` | ❌ not_relevant | Encode string to bytes | Byte arrays and charsets are outside the sandbox data model. |
-| `.indexOf` | ✅ supported | First substring index | BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising |
+| `.indexOf` | ✅ supported | First substring index | BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
 | `.intern` | ❌ not_relevant | Intern a Java string | JVM string pool operation; not meaningful on BEAM. |
 | `.isEmpty` | 🔲 candidate | Return true for empty string | empty? covers the common PTC-Lisp need. |
-| `.lastIndexOf` | ✅ supported | Last substring index | BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.length` | ✅ supported | String length | BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.startsWith` | ✅ supported | Prefix test | BUG GAP-J05: prefix/offset overload is unsupported. BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.substring` | ✅ supported | Extract substring | BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.toLowerCase` | ✅ supported | Lowercase string | BUG GAP-J17: Character receivers are accepted instead of raising |
-| `.toUpperCase` | ✅ supported | Uppercase string | BUG GAP-J17: Character receivers are accepted instead of raising |
+| `.lastIndexOf` | ✅ supported | Last substring index | BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.length` | ✅ supported | String length | BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.startsWith` | ✅ supported | Prefix test | BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
+| `.substring` | ✅ supported | Extract substring | BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.toLowerCase` | ✅ supported | Lowercase string | DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.toUpperCase` | ✅ supported | Uppercase string | DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
 | `.trim` | 🔲 candidate | Trim leading and trailing whitespace | Common LLM spelling; clojure.string/trim is not currently implemented. |
