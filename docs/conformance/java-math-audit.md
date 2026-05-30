@@ -27,21 +27,21 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
 | `IEEEremainder` | ❌ not_relevant | Returns IEEE 754 remainder | low-level IEEE 754 semantics; use rem/mod |
-| `abs` | ✅ supported | Returns the absolute value | BUG GAP-J10: Long/MIN_VALUE does not preserve Java primitive overflow behavior, and BigInt overloads are accepted instead of rejected |
+| `abs` | ✅ supported | Returns the absolute value | DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts |
 | `acos` | 🔲 candidate | Returns the arc cosine of a value | pure math |
 | `addExact` | ❌ not_relevant | Returns sum, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `asin` | 🔲 candidate | Returns the arc sine of a value | pure math |
 | `atan` | 🔲 candidate | Returns the arc tangent of a value | pure math |
 | `atan2` | 🔲 candidate | Returns angle theta from (x,y) to polar (r,theta) | pure math |
 | `cbrt` | 🔲 candidate | Returns the cube root of a value | pure math |
-| `ceil` | ✅ supported | Returns the smallest integer >= argument | BUG GAP-J21: finite results are returned as integers instead of Java doubles |
+| `ceil` | ✅ supported | Returns the smallest integer >= argument | DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape |
 | `copySign` | ❌ not_relevant | Returns first arg with sign of second arg | low-level IEEE 754 manipulation |
 | `cos` | 🔲 candidate | Returns the trigonometric cosine of an angle | pure math |
 | `cosh` | 🔲 candidate | Returns the hyperbolic cosine of a value | pure math |
 | `decrementExact` | ❌ not_relevant | Returns argument decremented by one, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `exp` | 🔲 candidate | Returns Euler's number e raised to the power of a | pure math |
 | `expm1` | ❌ not_relevant | Returns e^x - 1 | specialized numerical precision, low demand |
-| `floor` | ✅ supported | Returns the largest integer <= argument | BUG GAP-J21: finite results are returned as integers instead of Java doubles |
+| `floor` | ✅ supported | Returns the largest integer <= argument | DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape |
 | `floorDiv` | ❌ not_relevant | Returns floor of integer division | Java integer division semantics; use quot + floor |
 | `floorMod` | ❌ not_relevant | Returns floor modulus of arguments | Java integer semantics; use mod |
 | `fma` | ❌ not_relevant | Fused multiply-add | specialized numerical precision |
@@ -51,8 +51,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `log` | 🔲 candidate | Returns the natural logarithm (base e) of a value | pure math |
 | `log10` | 🔲 candidate | Returns the base 10 logarithm of a value | pure math |
 | `log1p` | ❌ not_relevant | Returns ln(1 + x) | specialized numerical precision, low demand |
-| `max` | ✅ supported | Returns the greater of two values | BUG GAP-J07: Java Math/max currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution |
-| `min` | ✅ supported | Returns the smaller of two values | BUG GAP-J07: Java Math/min currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution |
+| `max` | ✅ supported | Returns the greater of two values | DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads |
+| `min` | ✅ supported | Returns the smaller of two values | DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads |
 | `multiplyExact` | ❌ not_relevant | Returns product, throwing on overflow | Java overflow semantics not applicable on BEAM |
 | `multiplyHigh` | ❌ not_relevant | Returns high 64 bits of 128-bit product | low-level 64-bit arithmetic |
 | `negateExact` | ❌ not_relevant | Returns negation, throwing on overflow | Java overflow semantics not applicable on BEAM |
@@ -62,7 +62,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `pow` | ✅ supported | Returns the value of a raised to the power of b | Follows java.lang.Math.pow's IEEE 754 special-case table, returning :nan / :infinity / :negative_infinity as recoverable signal values instead of raising (e.g. (pow -1 0.5) => NaN, (pow 0 -1) => Inf) |
 | `random` | 🔲 candidate | Returns a pseudorandom double between 0.0 and 1.0 | pure (non-deterministic but side-effect free) |
 | `rint` | ❌ not_relevant | Returns closest double to argument that is a mathematical integer | use round instead |
-| `round` | ✅ supported | Returns the closest long/int to the argument | BUG GAP-J08: negative half values round away from zero, NaN returns NaN, and infinities are not saturated to long bounds. BUG GAP-J10: integer and BigInt arguments are accepted despite no Java long overload |
+| `round` | ✅ supported | Returns the closest long/int to the argument | DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads |
 | `scalb` | ❌ not_relevant | Returns d × 2^scaleFactor | low-level IEEE 754 manipulation |
 | `signum` | 🔲 candidate | Returns the signum function of the argument | pure math |
 | `sin` | 🔲 candidate | Returns the trigonometric sine of an angle | pure math |

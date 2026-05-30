@@ -957,39 +957,55 @@ Clojure's Java interop coerces finite numeric index arguments for Java `int`
 parameters. This is separate from PTC-Lisp's intentional grapheme indexing
 policy for Clojure-named string helpers such as `subs`.
 
-### GAP-J07: Java `Math/min` and `Math/max` accept non-two-arg arities
+### ~~GAP-J07~~: Reclassified as DIV-44 (intentional divergence)
+
+`Math/min` / `Math/max` are variadic aliases of the Clojure-named helpers — see
+**DIV-44**.
+
+### ~~GAP-J08~~: Reclassified as DIV-43 (intentional divergence)
+
+`Math/round` keeps PTC-Lisp's round semantics (half-away, integer result,
+preserves special values) — see **DIV-43**.
+
+### ~~GAP-J10~~: Reclassified as DIV-45 (intentional divergence)
+
+`Math/abs` / `Math/min` / `Math/max` / `Math/round` follow PTC-Lisp's
+arbitrary-precision, generic-comparison value model — see **DIV-45**.
+
+### DIV-44: Java `Math/min` / `Math/max` are variadic
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/math-min-three-args-bug-001`, `java/math-min-one-arg-bug-001`, `java/math-max-three-args-bug-001`, `java/math-max-one-arg-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/math-min-three-args-001`, `java/math-min-one-arg-001`, `java/math-max-three-args-001`, `java/math-max-one-arg-001` |
 
 ```clojure
 ;; Java / Clojure
 (Math/min 3 2 1)   ;=> IllegalArgumentException
-(Math/min 1)       ;=> IllegalArgumentException
-(Math/max 1 2 3)   ;=> IllegalArgumentException
 (Math/max 1)       ;=> IllegalArgumentException
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (Math/min 3 2 1)   ;=> 1
 (Math/min 1)       ;=> 1
 (Math/max 1 2 3)   ;=> 3
 (Math/max 1)       ;=> 1
 ```
 
-**Decision:** BUG. These are Java-shaped static method calls. Java only exposes
-two-argument `Math.min`/`Math.max` overloads, even though Clojure's `min` and
-`max` are variadic.
+**Rationale:** PTC-Lisp's `min`/`max` are the Clojure-named variadic helpers,
+and `Math/min`/`Math/max` are aliases for them — they are not separate
+two-argument Java primitives. Restricting them to Java's two-argument overloads
+would mean manufacturing a `Math/`-namespace distinction solely to raise an
+unrecoverable error (no `try`/`catch`) on a well-defined variadic call. Java is
+a compatibility heuristic here, not the design owner.
 
-### GAP-J08: Java `Math/round` edge semantics differ
+### DIV-43: `Math/round` keeps PTC-Lisp round semantics
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/math-round-negative-half-bug-001`, `java/math-round-nan-bug-001`, `java/math-round-pos-inf-bug-001`, `java/math-round-neg-inf-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/math-round-negative-half-001`, `java/math-round-nan-001`, `java/math-round-pos-inf-001`, `java/math-round-neg-inf-001` |
 
 ```clojure
 ;; Java / Clojure
@@ -998,39 +1014,43 @@ two-argument `Math.min`/`Math.max` overloads, even though Clojure's `min` and
 (Math/round ##Inf)  ;=> 9223372036854775807
 (Math/round ##-Inf) ;=> -9223372036854775808
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (Math/round -1.5)   ;=> -2
 (Math/round ##NaN)  ;=> ##NaN
 (Math/round ##Inf)  ;=> ##Inf
 (Math/round ##-Inf) ;=> ##-Inf
 ```
 
-**Decision:** BUG. `Math.round` is a Java-shaped static method. Java defines
-the result as floor of `x + 0.5`, which differs from common half-away-from-zero
-rounding for negative halves. Java also returns zero for NaN and saturates
-infinities to the signed long bounds.
+**Rationale:** PTC-Lisp's `round` is an integer-returning extension that uses
+round-half-away-from-zero and **preserves** the special signal values
+(`:nan`, `:infinity`, `:negative_infinity`). Java's `Math.round` instead uses
+`floor(x + 0.5)` for negative halves and converts NaN/infinity to long values
+(`0` / `Long/MAX_VALUE` / `Long/MIN_VALUE`). Preserving the special value is
+more useful in the agent loop (it stays recoverable and informative) than
+saturating to a long bound, and matching Java would require a `Math/`-namespace
+distinction from the bare `round` extension (pinned to half-away integer
+results). The `Math/round` integer/bignum argument cases live under DIV-45.
 
-### GAP-J10: Java `Math` overload and primitive edge semantics are too loose
+### DIV-45: Java `Math` uses PTC-Lisp's arbitrary-precision / generic value model
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/math-abs-long-min-bug-001`, `java/math-abs-bigint-bug-001`, `java/math-max-mixed-numeric-bug-001`, `java/math-min-mixed-numeric-bug-001`, `java/math-min-nil-bug-001`, `java/math-max-string-bug-001`, `java/math-round-integer-overload-bug-001`, `java/math-round-bigint-overload-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/math-abs-long-min-001`, `java/math-abs-bigint-001`, `java/math-max-mixed-numeric-001`, `java/math-min-mixed-numeric-001`, `java/math-min-nil-001`, `java/math-max-string-001`, `java/math-round-integer-overload-001`, `java/math-round-bigint-overload-001` |
 
 ```clojure
 ;; Java / Clojure
-(Math/abs -9223372036854775808) ;=> -9223372036854775808
+(Math/abs -9223372036854775808) ;=> -9223372036854775808  (long overflow)
 (Math/abs 9223372036854775808)  ;=> IllegalArgumentException
 (Math/max 1 2.0)                ;=> IllegalArgumentException
-(Math/min 1 2.0)                ;=> IllegalArgumentException
 (Math/min nil 1)                ;=> IllegalArgumentException
 (Math/max "a" 1)                ;=> IllegalArgumentException
 (Math/round 1)                  ;=> IllegalArgumentException
 (Math/round 9223372036854775808);=> IllegalArgumentException
 
-;; PTC-Lisp current behavior
-(Math/abs -9223372036854775808) ;=> 9223372036854775808
+;; PTC-Lisp
+(Math/abs -9223372036854775808) ;=> 9223372036854775808  (mathematically correct)
 (Math/abs 9223372036854775808)  ;=> 9223372036854775808
 (Math/max 1 2.0)                ;=> 2.0
 (Math/min 1 2.0)                ;=> 1
@@ -1040,10 +1060,16 @@ infinities to the signed long bounds.
 (Math/round 9223372036854775808);=> 9223372036854775808
 ```
 
-**Decision:** BUG. These are Java-shaped static method calls. PTC-Lisp may use
-generic arbitrary-precision arithmetic for Clojure-named numeric helpers, but
-`java.lang.Math` calls should preserve Java/Clojure overload selection and
-primitive edge behavior.
+**Rationale:** PTC-Lisp numbers are arbitrary-precision integers and floats,
+and `min`/`max` compare generically across the numeric tower (and via total
+ordering across types). The `Math/*` aliases inherit that value model. Java's
+behaviors here are *primitive* artifacts — 64-bit two's-complement overflow
+(`Math/abs` of `Long/MIN_VALUE`), no mixed `long`/`double` overload, and
+exceptions for out-of-range or non-numeric arguments — that PTC-Lisp
+intentionally does not model. Reproducing them would manufacture a
+`Math/`-namespace distinction purely to emit overflow values or unrecoverable
+errors; PTC-Lisp's answers (e.g. the correct positive `abs`) are more useful in
+the agent loop.
 
 ### GAP-J13: Java `Math/pow` special double results differ
 
@@ -1082,28 +1108,36 @@ for any base; `|base| == 1` with an infinite exponent yields `NaN`; a negative
 base with a non-integer exponent yields `NaN`; a zero base with a negative
 exponent yields signed infinity.
 
-### GAP-J21: Java `Math/ceil` and `Math/floor` return integer-shaped values
+### ~~GAP-J21~~: Reclassified as DIV-42 (intentional divergence)
+
+`Math/ceil` / `Math/floor` are integer-returning extensions — see **DIV-42**.
+
+### DIV-42: Java `Math/ceil` / `Math/floor` return integer-shaped values
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/math-ceil-double-rendering-bug-001`, `java/math-floor-double-rendering-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/math-ceil-double-rendering-001`, `java/math-floor-double-rendering-001` |
 
 ```clojure
 ;; Java / Clojure
 (str (Math/ceil 1.2))   ;=> "2.0"
 (str (Math/floor -1.2)) ;=> "-2.0"
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (str (Math/ceil 1.2))   ;=> "2"
 (str (Math/floor -1.2)) ;=> "-2"
 ```
 
-**Decision:** BUG. These are Java-shaped static method calls. Java
-`Math.ceil` and `Math.floor` return `double` values even when the mathematical
-result is integral, so observable rendering should keep the `.0` double shape
-instead of collapsing to PTC-Lisp integers.
+**Rationale:** PTC-Lisp's `ceil` and `floor` are integer-returning extensions
+(pinned as such; see the function reference), so an integral result renders as
+`2`, not Java's `double` `2.0`. The `Math/ceil`/`Math/floor` aliases inherit
+that. The int-vs-double *shape* is the only difference (the numeric value is
+equal), and matching Java's `.0` rendering would require manufacturing a
+`Math/`-namespace distinction from the bare integer-returning extensions solely
+for that rendering. Java is a compatibility heuristic here, not the design
+owner.
 
 ### DIV-34: Empty keyword names are not supported
 
