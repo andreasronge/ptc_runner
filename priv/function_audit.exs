@@ -3518,7 +3518,7 @@
       status: :supported,
       description: "Returns the absolute value",
       notes:
-        "BUG GAP-J10: Long/MIN_VALUE does not preserve Java primitive overflow behavior, and BigInt overloads are accepted instead of rejected"
+        "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts"
     },
     %{
       name: "acos",
@@ -3560,7 +3560,8 @@
       name: "ceil",
       status: :supported,
       description: "Returns the smallest integer >= argument",
-      notes: "BUG GAP-J21: finite results are returned as integers instead of Java doubles"
+      notes:
+        "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
     },
     %{
       name: "copySign",
@@ -3602,7 +3603,8 @@
       name: "floor",
       status: :supported,
       description: "Returns the largest integer <= argument",
-      notes: "BUG GAP-J21: finite results are returned as integers instead of Java doubles"
+      notes:
+        "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
     },
     %{
       name: "floorDiv",
@@ -3669,14 +3671,14 @@
       status: :supported,
       description: "Returns the greater of two values",
       notes:
-        "BUG GAP-J07: Java Math/max currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution"
+        "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
     },
     %{
       name: "min",
       status: :supported,
       description: "Returns the smaller of two values",
       notes:
-        "BUG GAP-J07: Java Math/min currently accepts variadic arguments. BUG GAP-J10: mixed numeric and nonnumeric overloads are accepted instead of matching Java/Clojure overload resolution"
+        "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
     },
     %{
       name: "multiplyExact",
@@ -3738,7 +3740,7 @@
       status: :supported,
       description: "Returns the closest long/int to the argument",
       notes:
-        "BUG GAP-J08: negative half values round away from zero, NaN returns NaN, and infinities are not saturated to long bounds. BUG GAP-J10: integer and BigInt arguments are accepted despite no Java long overload"
+        "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads"
     },
     %{
       name: "scalb",

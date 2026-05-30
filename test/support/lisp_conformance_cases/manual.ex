@@ -6275,133 +6275,149 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J11",
         "Java Date string constructor accepts legacy date strings; PTC-Lisp currently rejects this Java-accepted format."
       ),
-      bug_case(
-        "java/math-min-three-args-bug-001",
+      div_case(
+        "java/math-min-three-args-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 3 2 1)",
-        "GAP-J07",
-        "Java Math.min only has two-argument overloads; PTC-Lisp currently accepts variadic arguments."
+        "DIV-44",
+        1,
+        "PTC-Lisp min/max are Clojure-variadic; Math/min and Math/max are aliases that stay variadic rather than reproducing Java's two-argument-only overloads."
       ),
-      bug_case(
-        "java/math-min-one-arg-bug-001",
+      div_case(
+        "java/math-min-one-arg-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 1)",
-        "GAP-J07",
-        "Java Math.min only has two-argument overloads; PTC-Lisp currently accepts one argument."
+        "DIV-44",
+        1,
+        "PTC-Lisp min/max are Clojure-variadic; one argument returns that argument rather than raising as Java's two-argument-only overloads would."
       ),
-      bug_case(
-        "java/math-max-three-args-bug-001",
+      div_case(
+        "java/math-max-three-args-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1 2 3)",
-        "GAP-J07",
-        "Java Math.max only has two-argument overloads; PTC-Lisp currently accepts variadic arguments."
+        "DIV-44",
+        3,
+        "PTC-Lisp min/max are Clojure-variadic; Math/max stays variadic rather than reproducing Java's two-argument-only overloads."
       ),
-      bug_case(
-        "java/math-max-one-arg-bug-001",
+      div_case(
+        "java/math-max-one-arg-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1)",
-        "GAP-J07",
-        "Java Math.max only has two-argument overloads; PTC-Lisp currently accepts one argument."
+        "DIV-44",
+        1,
+        "PTC-Lisp min/max are Clojure-variadic; one argument returns that argument rather than raising as Java's two-argument-only overloads would."
       ),
-      bug_case(
-        "java/math-abs-long-min-bug-001",
+      div_case(
+        "java/math-abs-long-min-001",
         "java.lang.Math",
         ["Math/abs"],
         "(Math/abs -9223372036854775808)",
-        "GAP-J10",
-        "Java Math.abs overflows Long/MIN_VALUE and returns it unchanged; PTC-Lisp currently returns the positive arbitrary-precision value."
+        "DIV-45",
+        9_223_372_036_854_775_808,
+        "PTC-Lisp uses arbitrary-precision integers, so Math/abs returns the mathematically correct positive value rather than reproducing Java's Long/MIN_VALUE two's-complement overflow."
       ),
-      bug_case(
-        "java/math-abs-bigint-bug-001",
+      div_case(
+        "java/math-abs-bigint-001",
         "java.lang.Math",
         ["Math/abs"],
         "(Math/abs 9223372036854775808)",
-        "GAP-J10",
-        "Java Math.abs has no overload selected for BigInt input; PTC-Lisp currently accepts arbitrary-precision integers."
+        "DIV-45",
+        9_223_372_036_854_775_808,
+        "PTC-Lisp uses arbitrary-precision integers, so Math/abs accepts values beyond the Java long range rather than failing Java's primitive overload selection."
       ),
-      bug_case(
-        "java/math-max-mixed-numeric-bug-001",
+      div_case(
+        "java/math-max-mixed-numeric-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1 2.0)",
-        "GAP-J10",
-        "Java Math.max has primitive overloads but no mixed long/double overload selected by Clojure; PTC-Lisp currently accepts mixed numeric arguments."
+        "DIV-45",
+        2.0,
+        "PTC-Lisp min/max compare generically across the numeric tower, so mixed integer/float arguments are accepted rather than failing Java's primitive overload selection."
       ),
-      bug_case(
-        "java/math-min-mixed-numeric-bug-001",
+      div_case(
+        "java/math-min-mixed-numeric-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 1 2.0)",
-        "GAP-J10",
-        "Java Math.min has primitive overloads but no mixed long/double overload selected by Clojure; PTC-Lisp currently accepts mixed numeric arguments."
+        "DIV-45",
+        1,
+        "PTC-Lisp min/max compare generically across the numeric tower, so mixed integer/float arguments are accepted rather than failing Java's primitive overload selection."
       ),
-      bug_case(
-        "java/math-min-nil-bug-001",
+      div_case(
+        "java/math-min-nil-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min nil 1)",
-        "GAP-J10",
-        "Java Math.min has no overload accepting nil; PTC-Lisp currently accepts nil through total ordering."
+        "DIV-45",
+        1,
+        "PTC-Lisp min/max use total ordering, so nil sorts as the smallest value rather than raising as Java's primitive overloads would."
       ),
-      bug_case(
-        "java/math-max-string-bug-001",
+      div_case(
+        "java/math-max-string-001",
         "java.lang.Math",
         ["Math/max"],
         ~S|(Math/max "a" 1)|,
-        "GAP-J10",
-        "Java Math.max has no overload accepting strings; PTC-Lisp currently accepts strings through total ordering."
+        "DIV-45",
+        "a",
+        "PTC-Lisp min/max use total ordering across types, so a string compares against a number rather than raising as Java's primitive overloads would."
       ),
-      bug_case(
-        "java/math-round-negative-half-bug-001",
+      div_case(
+        "java/math-round-negative-half-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round -1.5)",
-        "GAP-J08",
-        "Java Math.round rounds negative halves toward zero after floor(x + 0.5); PTC-Lisp currently returns -2."
+        "DIV-43",
+        -2,
+        "PTC-Lisp round uses round-half-away-from-zero, so -1.5 rounds to -2 rather than Java's floor(x + 0.5) result of -1."
       ),
-      bug_case(
-        "java/math-round-nan-bug-001",
+      div_case(
+        "java/math-round-nan-001",
         "java.lang.Math",
-        ["Math/round"],
-        "(Math/round ##NaN)",
-        "GAP-J08",
-        "Java Math.round returns 0 for NaN; PTC-Lisp currently returns NaN."
+        ["Math/round", "str"],
+        "(str (Math/round ##NaN))",
+        "DIV-43",
+        "NaN",
+        "PTC-Lisp round preserves the NaN signal value rather than reproducing Java's NaN -> 0 long conversion."
       ),
-      bug_case(
-        "java/math-round-pos-inf-bug-001",
+      div_case(
+        "java/math-round-pos-inf-001",
         "java.lang.Math",
-        ["Math/round"],
-        "(Math/round ##Inf)",
-        "GAP-J08",
-        "Java Math.round saturates positive infinity to Long/MAX_VALUE; PTC-Lisp currently returns infinity."
+        ["Math/round", "str"],
+        "(str (Math/round ##Inf))",
+        "DIV-43",
+        "Infinity",
+        "PTC-Lisp round preserves the infinity signal value rather than reproducing Java's saturation to Long/MAX_VALUE."
       ),
-      bug_case(
-        "java/math-round-neg-inf-bug-001",
+      div_case(
+        "java/math-round-neg-inf-001",
         "java.lang.Math",
-        ["Math/round"],
-        "(Math/round ##-Inf)",
-        "GAP-J08",
-        "Java Math.round saturates negative infinity to Long/MIN_VALUE; PTC-Lisp currently returns negative infinity."
+        ["Math/round", "str"],
+        "(str (Math/round ##-Inf))",
+        "DIV-43",
+        "-Infinity",
+        "PTC-Lisp round preserves the negative-infinity signal value rather than reproducing Java's saturation to Long/MIN_VALUE."
       ),
-      bug_case(
-        "java/math-round-integer-overload-bug-001",
+      div_case(
+        "java/math-round-integer-overload-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round 1)",
-        "GAP-J10",
-        "Java Math.round has float/double overloads but no long overload selected by Clojure; PTC-Lisp currently accepts integer arguments."
+        "DIV-45",
+        1,
+        "PTC-Lisp round accepts integers (returning them unchanged) rather than failing Java's float/double-only overload selection."
       ),
-      bug_case(
-        "java/math-round-bigint-overload-bug-001",
+      div_case(
+        "java/math-round-bigint-overload-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round 9223372036854775808)",
-        "GAP-J10",
-        "Java Math.round has float/double overloads but no BigInt overload selected by Clojure; PTC-Lisp currently accepts arbitrary-precision integers."
+        "DIV-45",
+        9_223_372_036_854_775_808,
+        "PTC-Lisp round accepts arbitrary-precision integers (returning them unchanged) rather than failing Java's float/double-only overload selection."
       ),
       regression_case(
         "java/math-pow-negative-fractional-001",
@@ -6451,21 +6467,23 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-J13"],
         [:numeric]
       ),
-      bug_case(
-        "java/math-ceil-double-rendering-bug-001",
+      div_case(
+        "java/math-ceil-double-rendering-001",
         "java.lang.Math",
         ["Math/ceil", "str"],
         "(str (Math/ceil 1.2))",
-        "GAP-J21",
-        "Java Math.ceil returns a double value that renders as 2.0; PTC-Lisp currently returns an integer-shaped value."
+        "DIV-42",
+        "2",
+        "PTC-Lisp ceil/floor are integer-returning extensions, so the result renders as 2 rather than reproducing Java's double 2.0 shape."
       ),
-      bug_case(
-        "java/math-floor-double-rendering-bug-001",
+      div_case(
+        "java/math-floor-double-rendering-001",
         "java.lang.Math",
         ["Math/floor", "str"],
         "(str (Math/floor -1.2))",
-        "GAP-J21",
-        "Java Math.floor returns a double value that renders as -2.0; PTC-Lisp currently returns an integer-shaped value."
+        "DIV-42",
+        "-2",
+        "PTC-Lisp ceil/floor are integer-returning extensions, so the result renders as -2 rather than reproducing Java's double -2.0 shape."
       )
     ]
   end
