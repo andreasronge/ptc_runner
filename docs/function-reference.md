@@ -293,7 +293,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 |----------|-----------|-------------|
 | `juxt` | `(juxt f1 f2 ...)` | Returns a function that applies all functions and returns a vector of results |
 | `pcalls` * | `(pcalls f1 f2 ...)` | Execute thunks in parallel |
-| `pmap` * | `(pmap f coll)` | Apply f to each item in parallel |
+| `pmap` * | `(pmap f coll), (pmap f c1 c2 ...)` | Apply f to each (zipped) item in parallel |
 
 
 

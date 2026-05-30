@@ -1106,9 +1106,9 @@ defmodule PtcRunner.Lisp do
 
   defp collect_tool_names({:set, elems}, acc), do: Enum.reduce(elems, acc, &collect_tool_names/2)
 
-  defp collect_tool_names({:pmap, fn_expr, coll}, acc) do
+  defp collect_tool_names({:pmap, fn_expr, colls}, acc) do
     acc = collect_tool_names(fn_expr, acc)
-    collect_tool_names(coll, acc)
+    Enum.reduce(colls, acc, &collect_tool_names/2)
   end
 
   defp collect_tool_names({:pcalls, fns}, acc), do: Enum.reduce(fns, acc, &collect_tool_names/2)
@@ -1350,8 +1350,9 @@ defmodule PtcRunner.Lisp do
   end
 
   # Parallel operations
-  defp collect_undefined_vars({:pmap, fn_expr, coll_expr}, scope) do
-    collect_undefined_vars(fn_expr, scope) ++ collect_undefined_vars(coll_expr, scope)
+  defp collect_undefined_vars({:pmap, fn_expr, coll_exprs}, scope) do
+    collect_undefined_vars(fn_expr, scope) ++
+      Enum.flat_map(coll_exprs, &collect_undefined_vars(&1, scope))
   end
 
   defp collect_undefined_vars({:pcalls, fn_exprs}, scope) do

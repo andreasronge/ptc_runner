@@ -1104,6 +1104,38 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(ratio? 1)",
         ["DIV-20"],
         [:numeric]
+      ),
+      regression_case(
+        "regression/gap-s132-pmap-nil-001",
+        "clojure.core",
+        ["pmap"],
+        "(pmap inc nil)",
+        ["GAP-S132"],
+        [:parallel]
+      ),
+      regression_case(
+        "regression/gap-s132-pmap-string-001",
+        "clojure.core",
+        ["pmap"],
+        ~S|(pmap str "ab")|,
+        ["GAP-S132"],
+        [:parallel]
+      ),
+      regression_case(
+        "regression/gap-s132-pmap-multi-coll-001",
+        "clojure.core",
+        ["pmap"],
+        "(pmap + [1 2] [3 4])",
+        ["GAP-S132"],
+        [:parallel]
+      ),
+      regression_case(
+        "regression/gap-s132-pmap-multi-coll-truncate-001",
+        "clojure.core",
+        ["pmap"],
+        "(pmap + [1 2 3] [10 20])",
+        ["GAP-S132"],
+        [:parallel]
       )
     ]
   end
@@ -2469,30 +2501,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ~S|(not-any? identity \a)|,
         "GAP-S130",
         "Clojure not-any? rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
-      ),
-      bug_case(
-        "core/pmap-nil-bug-001",
-        "clojure.core",
-        ["pmap"],
-        "(pmap inc nil)",
-        "GAP-S132",
-        "Clojure pmap treats nil as an empty collection; PTC-Lisp currently raises a runtime Enumerable error."
-      ),
-      bug_case(
-        "core/pmap-string-bug-001",
-        "clojure.core",
-        ["pmap"],
-        ~S|(pmap str "ab")|,
-        "GAP-S132",
-        "Clojure pmap treats strings as seqable; PTC-Lisp currently raises a runtime Enumerable error."
-      ),
-      bug_case(
-        "core/pmap-multi-coll-bug-001",
-        "clojure.core",
-        ["pmap"],
-        "(pmap + [1 2] [3 4])",
-        "GAP-S132",
-        "Clojure pmap supports multiple collections; PTC-Lisp currently rejects the arity."
       ),
       bug_case(
         "core/assoc-in-empty-path-bug-001",

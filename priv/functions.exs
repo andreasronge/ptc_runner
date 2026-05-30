@@ -4936,17 +4936,20 @@
     },
     %{
       name: "pmap",
-      description: "Apply f to each item in parallel",
+      description: "Apply f to each (zipped) item in parallel",
       binding: nil,
       category: :core,
       dispatch: :analyze,
-      signatures: ["(pmap f coll)"],
+      signatures: ["(pmap f coll)", "(pmap f c1 c2 ...)"],
       since: nil,
       section: "Functional Tools",
       ptc_extension?: true,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Shares map's finite seqable contract: nil -> empty, strings map over graphemes, " <>
+          "and multiple collections zip element-wise truncating to the shortest. Runs under " <>
+          "bounded parallel limits (per-worker heap, worker budget, shared deadline).",
+      see_also: ["map", "pcalls"],
       clojure_var: "pmap",
       divergences: nil
     },

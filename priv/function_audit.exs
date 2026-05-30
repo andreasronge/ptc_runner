@@ -2030,9 +2030,9 @@
     %{
       name: "pmap",
       status: :supported,
-      description: "Parallel map over collection",
+      description: "Parallel map over one or more collections",
       notes:
-        "BUG GAP-S132: nil and string collections are rejected, and multi-collection arity is unsupported"
+        "Matches map's finite seqable contract: nil collections, string collections, and multiple collections (zip-truncate to shortest) are supported while keeping bounded parallel limits"
     },
     %{
       name: "pop",

@@ -160,8 +160,13 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
 
   describe "format/1 parallel operations" do
     test "pmap" do
-      ast = {:pmap, {:var, :inc}, {:var, :items}}
+      ast = {:pmap, {:var, :inc}, [{:var, :items}]}
       assert CoreToSource.format(ast) == "(pmap inc items)"
+    end
+
+    test "pmap with multiple collections" do
+      ast = {:pmap, {:var, :+}, [{:var, :xs}, {:var, :ys}]}
+      assert CoreToSource.format(ast) == "(pmap + xs ys)"
     end
 
     test "pcalls" do
