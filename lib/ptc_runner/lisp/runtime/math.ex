@@ -272,34 +272,118 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def pow(_x, 0), do: 1.0
-  def pow(1, _y), do: 1.0
+  # `pow` follows java.lang.Math.pow's IEEE 754 special-case table. PTC-Lisp
+  # has no `try`/`catch`, so the IEEE results (`:nan`, `:infinity`,
+  # `:negative_infinity`) are returned as recoverable signal values rather than
+  # raising — `(pow -1 0.5)` yields `:nan`, `(pow 0 -1)` yields `:infinity`.
+  # Java's `Math.pow` takes two doubles, so both operands are coerced to double
+  # first via the same IEEE rounding the runtime uses for int->float: an integer
+  # within double range (including one just past Double.MAX, which rounds back to
+  # Double.MAX) stays finite, while one whose magnitude overflows the double
+  # range becomes a signed infinity. The clause order mirrors Java's precedence.
+  def pow(x, y), do: do_pow(pow_coerce(x), pow_coerce(y))
 
-  def pow(x, y) do
+  defp pow_coerce(n) when is_integer(n) do
+    n * 1.0
+  rescue
+    ArithmeticError -> if n > 0, do: :infinity, else: :negative_infinity
+  end
+
+  defp pow_coerce(n), do: n
+
+  # An exponent of (positive or negative) zero always yields 1.0, even for a
+  # NaN or infinite base.
+  defp do_pow(_x, y) when y == 0, do: 1.0
+
+  defp do_pow(x, y) do
     cond do
-      SpecialValues.nan?(x) or SpecialValues.nan?(y) -> :nan
-      SpecialValues.pos_infinite?(x) -> pow_pos_inf_base(y)
-      SpecialValues.neg_infinite?(x) -> pow_neg_inf_base(y)
+      # A NaN exponent (the zero-exponent case is handled above) -> NaN.
+      SpecialValues.nan?(y) -> :nan
+      # A NaN base with a non-zero exponent -> NaN.
+      SpecialValues.nan?(x) -> :nan
+      # |base| == 1 with an infinite exponent -> NaN (Java-specific rule).
+      SpecialValues.infinite?(y) and abs_one?(x) -> :nan
       SpecialValues.pos_infinite?(y) -> pow_pos_inf_exp(x)
       SpecialValues.neg_infinite?(y) -> pow_neg_inf_exp(x)
-      true -> :math.pow(x, y)
+      SpecialValues.pos_infinite?(x) -> pow_pos_inf_base(y)
+      SpecialValues.neg_infinite?(x) -> pow_neg_inf_base(y)
+      # Zero base with a negative exponent -> signed infinity (would raise in
+      # Erlang's :math.pow): +0.0 -> +Inf; -0.0 with a negative odd integer
+      # exponent -> -Inf.
+      x == 0 and y < 0 -> pow_zero_base_neg_exp(x, y)
+      # Negative base with a non-integer exponent has no real result -> NaN
+      # (would raise in Erlang's :math.pow).
+      x < 0 and not integer_valued?(y) -> :nan
+      true -> pow_finite(x, y)
     end
   end
+
+  # Finite base and exponent. Erlang's :math.pow raises on overflow (BEAM has
+  # no float infinity) whereas java.lang.Math.pow returns a signed infinity, so
+  # convert the overflow to the appropriately-signed infinity. Underflow returns
+  # 0.0 without raising, so any ArithmeticError here is an overflow. A negative
+  # base reaching this point always has an integer-valued exponent (a non-integer
+  # exponent was already mapped to :nan), so the result sign follows exponent
+  # parity.
+  defp pow_finite(x, y) do
+    :math.pow(x, y)
+  rescue
+    ArithmeticError ->
+      if x < 0 and odd_exponent?(y), do: :negative_infinity, else: :infinity
+  end
+
+  # Exponent parity as Java computes it: the exponent is coerced to a double, so
+  # integer magnitudes beyond 2^53 (not exactly representable) become
+  # even-valued. Non-integer exponents are never odd.
+  defp odd_exponent?(y) do
+    yf = y * 1.0
+    Kernel.trunc(yf) == yf and rem(Kernel.trunc(yf), 2) != 0
+  end
+
+  defp abs_one?(x), do: is_number(x) and Kernel.abs(x) == 1
+
+  defp integer_valued?(y) when is_integer(y), do: true
+  defp integer_valued?(y) when is_float(y), do: Kernel.trunc(y) == y
+  defp integer_valued?(_y), do: false
+
+  defp pow_zero_base_neg_exp(x, y) do
+    if negative_zero?(x) and odd_exponent?(y),
+      do: :negative_infinity,
+      else: :infinity
+  end
+
+  defp negative_zero?(x), do: x === -0.0
 
   defp pow_pos_inf_base(y) when y > 0, do: :infinity
   defp pow_pos_inf_base(_y), do: 0.0
 
-  defp pow_neg_inf_base(y) when y < 0, do: 0.0
-  defp pow_neg_inf_base(y) when is_integer(y) and rem(y, 2) != 0, do: :negative_infinity
-  defp pow_neg_inf_base(_y), do: :infinity
+  # base == -Inf (exponent is finite and non-zero here). Java preserves the
+  # odd-exponent sign for both integer and integer-valued double exponents:
+  #   y > 0: odd -> -Inf, else +Inf
+  #   y < 0: odd -> -0.0, else +0.0
+  defp pow_neg_inf_base(y) do
+    odd? = odd_exponent?(y)
 
+    cond do
+      y > 0 and odd? -> :negative_infinity
+      y > 0 -> :infinity
+      odd? -> -0.0
+      true -> 0.0
+    end
+  end
+
+  # An infinite base has magnitude > 1, so it follows the |base| > 1 rule. The
+  # |base| == 1 fallback is pre-empted by the abs_one?/infinite-exponent guard
+  # in pow/2 (it yields NaN there), so it is unreachable from pow/2.
+  defp pow_pos_inf_exp(x) when x in [:infinity, :negative_infinity], do: :infinity
   defp pow_pos_inf_exp(x) when Kernel.abs(x) > 1, do: :infinity
   defp pow_pos_inf_exp(x) when Kernel.abs(x) < 1, do: 0.0
-  defp pow_pos_inf_exp(_x), do: 1.0
+  defp pow_pos_inf_exp(_x), do: :nan
 
+  defp pow_neg_inf_exp(x) when x in [:infinity, :negative_infinity], do: 0.0
   defp pow_neg_inf_exp(x) when Kernel.abs(x) > 1, do: 0.0
   defp pow_neg_inf_exp(x) when Kernel.abs(x) < 1, do: :infinity
-  defp pow_neg_inf_exp(_x), do: 1.0
+  defp pow_neg_inf_exp(_x), do: :nan
 
   # ============================================================
   # Bitwise operations (integers only)

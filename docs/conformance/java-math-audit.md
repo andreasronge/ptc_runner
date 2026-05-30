@@ -59,7 +59,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `nextAfter` | ❌ not_relevant | Returns adjacent floating-point value | low-level IEEE 754 manipulation |
 | `nextDown` | ❌ not_relevant | Returns adjacent floating-point value towards negative infinity | low-level IEEE 754 manipulation |
 | `nextUp` | ❌ not_relevant | Returns adjacent floating-point value towards positive infinity | low-level IEEE 754 manipulation |
-| `pow` | ✅ supported | Returns the value of a raised to the power of b | BUG GAP-J13: special double results such as NaN and infinities currently raise or return 1.0 incorrectly |
+| `pow` | ✅ supported | Returns the value of a raised to the power of b | Follows java.lang.Math.pow's IEEE 754 special-case table, returning :nan / :infinity / :negative_infinity as recoverable signal values instead of raising (e.g. (pow -1 0.5) => NaN, (pow 0 -1) => Inf) |
 | `random` | 🔲 candidate | Returns a pseudorandom double between 0.0 and 1.0 | pure (non-deterministic but side-effect free) |
 | `rint` | ❌ not_relevant | Returns closest double to argument that is a mathematical integer | use round instead |
 | `round` | ✅ supported | Returns the closest long/int to the argument | BUG GAP-J08: negative half values round away from zero, NaN returns NaN, and infinities are not saturated to long bounds. BUG GAP-J10: integer and BigInt arguments are accepted despite no Java long overload |

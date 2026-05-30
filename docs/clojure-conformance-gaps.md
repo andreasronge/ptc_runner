@@ -1050,8 +1050,8 @@ primitive edge behavior.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/math-pow-negative-fractional-bug-001`, `java/math-pow-zero-negative-exponent-bug-001`, `java/math-pow-one-nan-exponent-bug-001`, `java/math-pow-one-infinite-exponent-bug-001`, `java/math-pow-negative-one-infinite-exponent-bug-001`, `java/math-pow-negative-zero-negative-odd-exponent-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `java/math-pow-negative-fractional-001`, `java/math-pow-zero-negative-exponent-001`, `java/math-pow-one-nan-exponent-001`, `java/math-pow-one-infinite-exponent-001`, `java/math-pow-negative-one-infinite-exponent-001`, `java/math-pow-negative-zero-negative-odd-exponent-001` |
 
 ```clojure
 ;; Java / Clojure
@@ -1062,19 +1062,25 @@ primitive edge behavior.
 (Math/pow -1 ##Inf) ;=> ##NaN
 (Math/pow -0.0 -3) ;=> ##-Inf
 
-;; PTC-Lisp current behavior
-(Math/pow -1 0.5) ;=> arithmetic_error
-(Math/pow 0 -1)   ;=> arithmetic_error
-(Math/pow 1 ##NaN) ;=> 1.0
-(Math/pow 1 ##Inf) ;=> 1.0
-(Math/pow -1 ##Inf) ;=> 1.0
-(Math/pow -0.0 -3) ;=> arithmetic_error
+;; PTC-Lisp (fixed)
+(Math/pow -1 0.5) ;=> ##NaN
+(Math/pow 0 -1)   ;=> ##Inf
+(Math/pow 1 ##NaN) ;=> ##NaN
+(Math/pow 1 ##Inf) ;=> ##NaN
+(Math/pow -1 ##Inf) ;=> ##NaN
+(Math/pow -0.0 -3) ;=> ##-Inf
 ```
 
-**Decision:** BUG. `Math.pow` is a Java-shaped static method. Java's double
-semantics produce `NaN` or signed infinities for these edge values; PTC-Lisp
-should not convert those Java-defined results into recoverable arithmetic
-errors or plausible finite values.
+**Fix:** `Runtime.Math.pow/2` now follows `java.lang.Math.pow`'s IEEE 754
+special-case table. Because PTC-Lisp has no `try`/`catch`, the IEEE results are
+returned as **recoverable signal values** (`:nan`, `:infinity`,
+`:negative_infinity`) rather than raising — consistent with the Design
+Philosophy rule that bad numeric input may signal. This applies to both the
+Java-shaped `Math/pow` and the bare `pow` extension (there is no separate
+Clojure `pow` with different semantics). An exponent of zero still yields `1.0`
+for any base; `|base| == 1` with an infinite exponent yields `NaN`; a negative
+base with a non-integer exponent yields `NaN`; a zero base with a negative
+exponent yields signed infinity.
 
 ### GAP-J21: Java `Math/ceil` and `Math/floor` return integer-shaped values
 
