@@ -728,13 +728,23 @@ values in a Java-named API.
 **Decision:** BUG. These are Java-shaped method calls, so Java overload
 semantics should win for supported `java.lang.String` methods.
 
-### GAP-J16: Java string predicate methods accept Character arguments
+### ~~GAP-J16~~: Reclassified as DIV-40 (intentional divergence)
+
+Java string predicate methods accept character literals as arguments — see
+**DIV-40**. PTC-Lisp has no `Character` type, so this is by design.
+
+### ~~GAP-J17~~: Reclassified as DIV-41 (intentional divergence)
+
+Java string methods accept character literals as receivers — see **DIV-41**.
+PTC-Lisp has no `Character` type, so this is by design.
+
+### DIV-40: Java string methods accept character literals as arguments
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/string-starts-with-char-bug-001`, `java/string-ends-with-char-bug-001`, `java/string-contains-char-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/string-starts-with-char-001`, `java/string-ends-with-char-001`, `java/string-contains-char-001` |
 
 ```clojure
 ;; Java / Clojure
@@ -742,23 +752,31 @@ semantics should win for supported `java.lang.String` methods.
 (.endsWith "abc" \c)     ;=> ClassCastException
 (.contains "abc" \b)     ;=> ClassCastException
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (.startsWith "abc" \a)   ;=> true
 (.endsWith "abc" \c)     ;=> true
 (.contains "abc" \b)     ;=> true
 ```
 
-**Decision:** BUG. These are Java-shaped method calls. PTC-Lisp's
-one-character string representation for character literals should not widen
-Java `String` method argument types beyond Java's accepted overloads.
+**Rationale:** PTC-Lisp has no `Character` type — character literals are
+one-character strings (see DIV-35 and the char-literal cases under GAP-S120,
+GAP-S133). So `\a` *is* the string `"a"`, and these Java `String` methods
+operate on it correctly. Java raises only because a `char` is not a `String`;
+that distinction does not exist in PTC-Lisp's value model. Reproducing the Java
+exception would require tracking char *provenance* (so `"a"` behaves
+differently depending on whether it came from `\a` or `"a"`) purely to raise an
+unrecoverable error — exactly the invisible distinction that makes
+LLM-generated programs worse. Java-named methods follow Java-compatible
+*conventions* that are meaningful in PTC-Lisp; they do not preserve Java
+object/type distinctions PTC-Lisp intentionally does not model.
 
-### GAP-J17: Java string methods accept Character receivers
+### DIV-41: Java string methods accept character literals as receivers
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/string-length-char-receiver-bug-001`, `java/string-to-lower-case-char-receiver-bug-001`, `java/string-to-upper-case-char-receiver-bug-001`, `java/string-contains-char-receiver-bug-001`, `java/string-index-of-char-receiver-bug-001`, `java/string-last-index-of-char-receiver-bug-001`, `java/string-starts-with-char-receiver-bug-001`, `java/string-ends-with-char-receiver-bug-001`, `java/string-substring-char-receiver-bug-001` |
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `java/string-length-char-receiver-001`, `java/string-to-lower-case-char-receiver-001`, `java/string-to-upper-case-char-receiver-001`, `java/string-contains-char-receiver-001`, `java/string-index-of-char-receiver-001`, `java/string-last-index-of-char-receiver-001`, `java/string-starts-with-char-receiver-001`, `java/string-ends-with-char-receiver-001`, `java/string-substring-char-receiver-001` |
 
 ```clojure
 ;; Java / Clojure
@@ -772,7 +790,7 @@ Java `String` method argument types beyond Java's accepted overloads.
 (.endsWith \a "a")    ;=> IllegalArgumentException
 (.substring \a 0)     ;=> IllegalArgumentException
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (.length \a)          ;=> 1
 (.toLowerCase \A)     ;=> "a"
 (.toUpperCase \a)     ;=> "A"
@@ -784,10 +802,15 @@ Java `String` method argument types beyond Java's accepted overloads.
 (.substring \a 0)     ;=> "a"
 ```
 
-**Decision:** BUG. These are Java-shaped `String` method calls, so Java
-receiver semantics should win. PTC-Lisp's one-character string representation
-for character literals should not make `Character` receivers behave like
-`String` receivers.
+**Rationale:** Same as DIV-40 — PTC-Lisp has no `Character` type, so a
+character-literal receiver is the one-character string `"a"` and these Java
+`String` methods return the correct values for that string. Combined with the
+no-`try`/`catch` policy (raising is an unrecoverable dead program), raising
+here would be both incoherent (treating a string as a non-string) and strictly
+worse for the agent loop. Non-string-like receivers (e.g. `(.length 5)`) still
+raise — the divergence only covers values PTC-Lisp genuinely models as strings.
+The UTF-16-vs-grapheme index-unit difference is a separate axis tracked under
+GAP-J09.
 
 ### GAP-J06: Java temporal parsers/constructors accept date strings Java rejects
 
