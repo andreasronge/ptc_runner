@@ -19,10 +19,15 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert {:ok, {:if, true, {:call, {:var, :+}, [1, 2]}, nil}} = Analyze.analyze(raw)
     end
 
-    test "when with wrong arity fails" do
-      raw = {:list, [{:symbol, :when}, true]}
+    test "when with no condition fails" do
+      raw = {:list, [{:symbol, :when}]}
       assert {:error, {:invalid_arity, :when, msg}} = Analyze.analyze(raw)
       assert msg =~ "expected"
+    end
+
+    test "bodyless when analyzes to (if cond nil nil) (GAP-S113)" do
+      raw = {:list, [{:symbol, :when}, true]}
+      assert {:ok, {:if, _cond, nil, nil}} = Analyze.analyze(raw)
     end
 
     test "implicit do with multiple body expressions" do
@@ -205,9 +210,14 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert {:ok, {:if, false, nil, {:do, [_, _]}}} = Analyze.analyze(raw)
     end
 
-    test "error case: when-not too few args" do
-      raw = {:list, [{:symbol, :"when-not"}, true]}
+    test "error case: when-not with no condition" do
+      raw = {:list, [{:symbol, :"when-not"}]}
       assert {:error, {:invalid_arity, :"when-not", _}} = Analyze.analyze(raw)
+    end
+
+    test "bodyless when-not analyzes to (if cond nil nil) (GAP-S113)" do
+      raw = {:list, [{:symbol, :"when-not"}, true]}
+      assert {:ok, {:if, _cond, nil, nil}} = Analyze.analyze(raw)
     end
   end
 

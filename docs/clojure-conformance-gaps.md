@@ -4344,22 +4344,22 @@ default — the same nil a no-match `cond` yields.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/when-no-body-bug-001`, `core/when-not-no-body-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/when-no-body-001`, `core/when-not-no-body-001` |
 
 ```clojure
 ;; Clojure
 (when true)      ;=> nil
 (when-not true)  ;=> nil
 
-;; PTC-Lisp current behavior
-(when true)      ;=> invalid_arity
-(when-not true)  ;=> invalid_arity
+;; PTC-Lisp (fixed)
+(when true)      ;=> nil
+(when-not true)  ;=> nil
 ```
 
-**Decision:** BUG. `when` and `when-not` are marked supported, and the
-bodyless forms are valid Clojure syntax that return nil regardless of the test
-result.
+**Fix:** `analyze_when`/`analyze_when_not` now accept zero body expressions, and
+a new `wrap_body([])` clause analyzes an empty implicit-do body to nil. So
+`(when test)` desugars to `(if test nil nil)` → nil regardless of the test.
 
 ### GAP-S114: Bodyless binding/function forms raise instead of returning nil
 

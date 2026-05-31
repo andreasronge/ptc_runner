@@ -4206,21 +4206,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S112"],
         [:control_flow]
       ),
-      bug_case(
-        "core/when-no-body-bug-001",
+      regression_case(
+        "core/when-no-body-001",
         "clojure.core",
         ["when"],
         "(when true)",
-        "GAP-S113",
-        "Clojure bodyless when returns nil; PTC-Lisp currently raises."
+        ["GAP-S113"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/when-not-no-body-bug-001",
+      regression_case(
+        "core/when-not-no-body-001",
         "clojure.core",
         ["when-not"],
         "(when-not true)",
-        "GAP-S113",
-        "Clojure bodyless when-not returns nil; PTC-Lisp currently raises."
+        ["GAP-S113"],
+        [:control_flow]
       ),
       bug_case(
         "core/let-no-body-bug-001",

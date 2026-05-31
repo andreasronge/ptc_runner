@@ -1150,6 +1150,10 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Wrap multiple bodies in {:do, ...}, pass single body through (implicit do)
   @spec wrap_body([term()], boolean()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
+  # An empty implicit-do body (e.g. `(when test)`, `(let [x 1])`) evaluates to
+  # nil in Clojure rather than raising an arity error.
+  defp wrap_body([], _tail?), do: {:ok, nil}
+
   defp wrap_body([single], tail?), do: do_analyze(single, tail?)
 
   defp wrap_body(bodies, tail?) when length(bodies) > 1 do

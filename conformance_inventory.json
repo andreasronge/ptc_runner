@@ -3630,7 +3630,7 @@
     "symbol": "when",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S113: bodyless when raises instead of returning nil"
+    "notes": "Bodyless form returns nil, matching Clojure"
   },
   {
     "status": "supported",
@@ -3651,7 +3651,7 @@
     "symbol": "when-not",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S113: bodyless when-not raises instead of returning nil"
+    "notes": "Bodyless form returns nil, matching Clojure"
   },
   {
     "status": "supported",
