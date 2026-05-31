@@ -3226,13 +3226,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S20"],
         [:collection]
       ),
-      bug_case(
-        "core/frequencies-map-bug-001",
+      regression_case(
+        "core/frequencies-map-001",
         "clojure.core",
         ["frequencies"],
         "(frequencies {:a 1})",
-        "GAP-S20",
-        "Clojure treats maps as seqable map entries; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
       regression_case(
         "core/flatten-nil-001",
@@ -3250,13 +3250,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S20"],
         [:collection]
       ),
-      bug_case(
-        "core/distinct-map-bug-001",
+      regression_case(
+        "core/distinct-map-001",
         "clojure.core",
         ["distinct"],
         "(distinct {:a 1 :b 2})",
-        "GAP-S134",
-        "Clojure distinct raises on direct map input; PTC-Lisp currently returns map entries."
+        ["GAP-S134"],
+        [:collection]
       ),
       regression_case(
         "core/interleave-left-nil-001",

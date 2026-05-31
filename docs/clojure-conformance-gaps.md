@@ -1861,8 +1861,8 @@ Clojure-compatible predicate behavior.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **fixed** (nil input; `frequencies` on a direct *map* tracked separately) |
-| **Source** | Manual conformance cases `core/take-nil-001`, `core/drop-nil-001`, `core/frequencies-nil-001`, `core/frequencies-map-bug-001`, `core/flatten-nil-001`, `core/distinct-nil-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `core/reverse-nil-001`, `core/sort-nil-input-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/take-nil-001`, `core/drop-nil-001`, `core/frequencies-nil-001`, `core/frequencies-map-001`, `core/flatten-nil-001`, `core/distinct-nil-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `core/reverse-nil-001`, `core/sort-nil-input-001` |
 
 ```clojure
 ;; Clojure
@@ -1881,7 +1881,7 @@ Clojure-compatible predicate behavior.
 (take 2 nil)       ;=> []
 (drop 2 nil)       ;=> []
 (frequencies nil)  ;=> {}
-(frequencies {:a 1}) ;=> type_error   ; direct map still rejected (see below)
+(frequencies {:a 1}) ;=> {[:a 1] 1}   ; order-insensitive, accepts a direct map
 (flatten nil)      ;=> []
 (distinct nil)     ;=> []
 (interleave nil [1]);=> []
@@ -1899,26 +1899,26 @@ design reason.
 `reverse`, `sort` (both arities) return `[]` and `frequencies` returns `{}` for
 `nil` input — matching the already-nil-tolerant `map`/`filter`/`dedupe`/`sort-by`/
 `group-by`. The `interleave` sub-cases were closed alongside
-[GAP-S98](#gap-s98-interleave-rejects-string-inputs). Only `(frequencies
-{direct-map})` remains divergent (`core/frequencies-map-bug-001`): treating a
-direct map as a seq of entries is the separate map-seqable question also tracked
-for `distinct` in [GAP-S134](#gap-s134-distinct-accepts-direct-map-input-clojure-rejects),
-not a `nil` issue.
+[GAP-S98](#gap-s98-interleave-rejects-string-inputs). `(frequencies {direct-map})`
+now also accepts the map (counting its `[k v]` entries) — `frequencies` is
+order-insensitive like `count`, so it belongs with the accepting set; the
+order-EXPOSING `distinct` instead rejects direct maps
+([GAP-S134](#gap-s134-distinct-accepts-direct-map-input-clojure-rejects)).
 
 ### GAP-S134: `distinct` accepts direct map input Clojure rejects
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/distinct-map-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/distinct-map-001` |
 
 ```clojure
 ;; Clojure
 (distinct {:a 1 :b 2}) ;=> UnsupportedOperationException
 
-;; PTC-Lisp current behavior
-(distinct {:a 1 :b 2}) ;=> [[:a 1] [:b 2]]
+;; PTC-Lisp (fixed)
+(distinct {:a 1 :b 2}) ;=> type_error "distinct does not support maps ... Use (keys m), (vals m), or (entries m)"
 ```
 
 **Decision:** BUG. `distinct` is a supported Clojure-named sequence helper,
@@ -1926,6 +1926,13 @@ but direct map inputs are not a supported ordered map view in PTC-Lisp's
 documented map policy. Returning entries silently makes an invalid direct-map
 call look successful; callers should use `seq`, `entries`, `keys`, or `vals`
 when they need an ordered map view.
+
+**Fix:** Removed `distinct`'s direct-map clause so a map now raises a clean
+`type_error` (via the `:first`/`:last`/`:reverse`/`:distinct` map message in
+`Eval.Helpers`), matching Clojure and the [DIV-29](#div-29-direct-positional-sequence-operations-reject-maps)
+map policy. This is the order-EXPOSING half of the map-as-collection rule: an
+op whose result depends on or exposes traversal order rejects a direct map,
+while order-INSENSITIVE consumers (`count`, `frequencies`) accept it (GAP-S20).
 
 ### GAP-S21: `reduce` without init on empty input ignores the reducing function identity
 

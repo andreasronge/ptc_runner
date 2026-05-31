@@ -2035,6 +2035,27 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "direct map as a collection argument (order-sensitivity rule)" do
+    test "order-insensitive consumers accept a direct map (count, frequencies)" do
+      assert {:ok, %Step{return: 2}} = Lisp.run("(count {:a 1 :b 2})")
+      # frequencies counts the [k v] entries — matches Clojure and count.
+      assert {:ok, %Step{return: %{["a", 1] => 1, ["b", 1] => 1}}} =
+               Lisp.run("(frequencies {:a 1 :b 1})")
+    end
+
+    test "distinct rejects a direct map and guides to an explicit ordered view (GAP-S134)" do
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(distinct {:a 1 :b 2})")
+
+      assert message =~ "does not support maps"
+      assert message =~ "(keys m)"
+    end
+
+    test "single-element positional access on a map still rejects (DIV-29)" do
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run("(first {:a 1})")
+    end
+  end
+
   # ============================================================
   # reduce on various collection types
   # ============================================================
@@ -2179,9 +2200,13 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == []
     end
 
-    test "distinct on map returns all pairs" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(distinct {:a 1 :b 2})|)
-      assert length(result) == 2
+    test "distinct on a map rejects with a clean type_error (GAP-S134)" do
+      # distinct's result order would expose unordered map traversal; Clojure
+      # also raises. Use an explicit ordered view, e.g. (distinct (entries m)).
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run(~S|(distinct {:a 1 :b 2})|)
+
+      assert message =~ "does not support maps"
     end
   end
 
