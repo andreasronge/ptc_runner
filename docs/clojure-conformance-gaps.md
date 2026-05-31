@@ -1932,20 +1932,26 @@ supports vectors by passing each index and value to the reducing function.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/interpose-string-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/interpose-string-001` |
 
 ```clojure
 ;; Clojure
 (interpose "," "ab")   ;=> ("a" "," "b")
 
-;; PTC-Lisp current behavior
-(interpose "," "ab")   ;=> type error
+;; PTC-Lisp (fixed)
+(interpose "," "ab")   ;=> ["a" "," "b"]
+(interpose "," "")     ;=> []
 ```
 
 **Decision:** BUG. `interpose` is a supported Clojure-named sequence helper,
 and PTC-Lisp already treats strings as seqable in adjacent helpers such as
 `map`, `filter`, `partition`, `seq`, and `dedupe`.
+
+**Fix:** Added a string clause that interposes the separator between the
+string's characters (graphemes). Direct maps/sets still raise, preserving
+[DIV-29](#div-29-direct-positional-sequence-operations-reject-maps) (positional
+ops require an explicit ordered view via `seq`/`entries`/`keys`/`vals`).
 
 ### GAP-S98: `interleave` rejects string inputs
 

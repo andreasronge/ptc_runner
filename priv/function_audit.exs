@@ -1491,7 +1491,7 @@
       status: :supported,
       description: "Inserts separator between items",
       notes:
-        "BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
+        "Strings are seqable (interposed as characters). DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
     },
     %{
       name: "into",
