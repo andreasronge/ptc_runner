@@ -2480,21 +2480,21 @@ contract as a divergence.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/get-in-nil-path-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/get-in-nil-path-001` |
 
 ```clojure
 ;; Clojure
 (get-in {:a 1} nil) ;=> {:a 1}
 
-;; PTC-Lisp current behavior
-(get-in {:a 1} nil) ;=> nil
+;; PTC-Lisp (fixed)
+(get-in {:a 1} nil) ;=> {:a 1}
 ```
 
-**Decision:** BUG. `get-in` is a supported Clojure-named associative helper.
-Clojure treats a nil key path like an empty sequence for lookup, returning the
-root value. PTC-Lisp already handles empty paths this way, so nil paths should
-not silently return a missing-value signal.
+**Fix:** Added a `flex_get_in(data, nil)` clause that returns the root, matching
+Clojure's treatment of a nil key path as an empty sequence (PTC-Lisp already
+handled empty `[]` paths this way). The with-default arity also returns the
+root rather than the default, since the path resolves successfully.
 
 ### GAP-S100: `merge` rejects vector map-entry sources
 

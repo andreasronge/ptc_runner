@@ -237,7 +237,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `future?` | ❌ not_relevant | Returns true if value is future | concurrency primitive |
 | `gensym` | ❌ not_relevant | Returns unique symbol | macro system utility |
 | `get` | ✅ supported | Returns value for key or nil | BUG GAP-S12: string indexes and non-index keys currently raise. BUG GAP-S36: set lookup currently raises instead of returning value/default, including nil members |
-| `get-in` | ✅ supported | Returns value at nested key path | BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup; BUG GAP-S144: nil paths return nil instead of the root value |
+| `get-in` | ✅ supported | Returns value at nested key path | BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure |
 | `get-method` | ❌ not_relevant | Returns multimethod implementation | multimethods not supported |
 | `get-proxy-class` | ❌ not_relevant | Returns proxy class | Java interop |
 | `get-thread-bindings` | ❌ not_relevant | Returns thread-local bindings | concurrency primitive / thread locals |

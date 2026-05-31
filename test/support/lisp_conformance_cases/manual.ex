@@ -1334,13 +1334,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S19",
         "Clojure get-in returns the default for nil roots; PTC-Lisp currently raises."
       ),
-      bug_case(
-        "core/get-in-nil-path-bug-001",
+      regression_case(
+        "core/get-in-nil-path-001",
         "clojure.core",
         ["get-in"],
         "(get-in {:a 1} nil)",
-        "GAP-S144",
-        "Clojure get-in treats a nil path as empty and returns the root; PTC-Lisp currently returns nil."
+        ["GAP-S144"],
+        [:collection]
       ),
       bug_case(
         "core/update-nil-bug-001",
