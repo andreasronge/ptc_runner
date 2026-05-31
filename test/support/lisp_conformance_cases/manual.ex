@@ -1185,13 +1185,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S11"],
         [:collection]
       ),
-      bug_case(
-        "core/nth-nil-bug-001",
+      regression_case(
+        "core/nth-nil-001",
         "clojure.core",
         ["nth"],
         "(nth nil 0)",
-        "GAP-S94",
-        "Clojure nth returns nil for nil input; PTC-Lisp currently raises."
+        ["GAP-S94"],
+        [:collection]
+      ),
+      regression_case(
+        "core/nth-nil-oob-001",
+        "clojure.core",
+        ["nth"],
+        "(nth nil 5)",
+        ["GAP-S94"],
+        [:collection]
       ),
       bug_case(
         "core/get-string-index-bug-001",

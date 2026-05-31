@@ -254,6 +254,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def last(coll) when is_list(coll), do: List.last(coll)
   def last(coll) when is_binary(coll), do: String.at(coll, -1)
 
+  # Clojure's (nth nil idx) => nil for any integer index (GAP-S94); mirrors the
+  # 3-arity nil clause and PTC's lenient out-of-range nth.
+  def nth(nil, idx) when is_integer(idx), do: nil
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
   def nth(coll, idx) when is_binary(coll), do: String.at(coll, idx)
 

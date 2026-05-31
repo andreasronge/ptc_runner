@@ -1498,20 +1498,25 @@ Clojure and the 2-arity.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/nth-nil-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/nth-nil-001` |
 
 ```clojure
 ;; Clojure
 (nth nil 0)   ;=> nil
+(nth nil 5)   ;=> nil
 
-;; PTC-Lisp current behavior
-(nth nil 0)   ;=> type_error
+;; PTC-Lisp (fixed)
+(nth nil 0)   ;=> nil
+(nth nil 5)   ;=> nil
 ```
 
 **Decision:** BUG. `nth` is a supported Clojure-named finite access helper.
 PTC-Lisp already prefers recoverable boundary values in adjacent access cases,
 so nil input should not raise here.
+
+**Fix:** Added a 2-arity `(nth nil idx)` => nil clause (any integer index),
+mirroring the existing 3-arity nil clause and PTC's lenient out-of-range `nth`.
 
 ### GAP-S12: `get` does not support string indexes
 
