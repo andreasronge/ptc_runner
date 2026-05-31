@@ -257,6 +257,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
   def nth(coll, idx) when is_binary(coll), do: String.at(coll, idx)
 
+  # 3-arity `(nth coll idx not-found)`: returns the default when idx is out of
+  # range (including negative) or the collection is nil; the element otherwise.
+  # Maps/sets are not indexed and fall through to a function-clause error,
+  # matching Clojure (and the 2-arity nth).
+  def nth(nil, idx, default) when is_integer(idx), do: default
+
+  def nth(coll, idx, default) when is_list(coll) and is_integer(idx) do
+    if idx >= 0 and idx < length(coll), do: Enum.at(coll, idx), else: default
+  end
+
+  def nth(coll, idx, default) when is_binary(coll) and is_integer(idx) do
+    if idx >= 0 and idx < String.length(coll), do: String.at(coll, idx), else: default
+  end
+
   # rest - always returns list (empty list for empty/single-element collections)
   def rest(nil), do: []
   def rest(coll) when is_list(coll), do: Enum.drop(coll, 1)

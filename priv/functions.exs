@@ -2816,10 +2816,10 @@
     %{
       name: "nth",
       description: "Item at index or nil",
-      binding: :normal,
+      binding: :multi_arity,
       category: :core,
       dispatch: :env,
-      signatures: ["(nth coll idx)"],
+      signatures: ["(nth coll idx)", "(nth coll idx not-found)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,

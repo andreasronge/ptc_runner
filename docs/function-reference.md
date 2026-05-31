@@ -211,7 +211,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `not-empty` | `(not-empty coll)` | `coll` if not empty, else `nil` |
 | `not-every?` | `(not-every? :key coll)` | True if not all have truthy `:key` |
 | `not=` | `(not= x), (not= x y & more)` | Inequality |
-| `nth` | `(nth coll idx)` | Item at index or nil |
+| `nth` | `(nth coll idx), (nth coll idx not-found)` | Item at index or nil |
 | `nthnext` | `(nthnext coll n)` | Drop n items and return seq or nil |
 | `nthrest` | `(nthrest coll n)` | Drop n items |
 | `number?` | `(number? ...)` |  |

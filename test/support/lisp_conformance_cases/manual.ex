@@ -1150,37 +1150,37 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S10",
         "Negative nth indexes currently read from the end; they should not silently return data."
       ),
-      bug_case(
-        "core/nth-default-bug-001",
+      regression_case(
+        "core/nth-default-001",
         "clojure.core",
         ["nth"],
         "(nth [1 2] 5 :x)",
-        "GAP-S11",
-        "The supported audit row omits Clojure's 3-arity nth default form."
+        ["GAP-S11"],
+        [:collection]
       ),
-      bug_case(
-        "core/nth-negative-default-bug-001",
+      regression_case(
+        "core/nth-negative-default-001",
         "clojure.core",
         ["nth"],
         "(nth [1 2] -1 :x)",
-        "GAP-S11",
-        "Clojure's 3-arity nth default form returns the default for negative indexes; PTC-Lisp currently rejects the arity."
+        ["GAP-S11"],
+        [:collection]
       ),
-      bug_case(
-        "core/nth-nil-default-bug-001",
+      regression_case(
+        "core/nth-nil-default-001",
         "clojure.core",
         ["nth"],
         "(nth nil 0 :x)",
-        "GAP-S11",
-        "Clojure's 3-arity nth default form returns the default for nil; PTC-Lisp currently rejects the arity."
+        ["GAP-S11"],
+        [:collection]
       ),
-      bug_case(
-        "core/nth-string-default-bug-001",
+      regression_case(
+        "core/nth-string-default-001",
         "clojure.core",
         ["nth"],
         ~S|(nth "a" 1 :missing)|,
-        "GAP-S11",
-        "Clojure's 3-arity nth default form also applies to strings; PTC-Lisp currently rejects the arity."
+        ["GAP-S11"],
+        [:collection]
       ),
       bug_case(
         "core/nth-nil-bug-001",

@@ -1469,8 +1469,8 @@ last element for a negative index silently returns unrelated data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/nth-default-bug-001`, `core/nth-negative-default-bug-001`, `core/nth-nil-default-bug-001`, `core/nth-string-default-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/nth-default-001`, `core/nth-negative-default-001`, `core/nth-nil-default-001`, `core/nth-string-default-001` |
 
 ```clojure
 ;; Clojure
@@ -1479,15 +1479,19 @@ last element for a negative index silently returns unrelated data.
 (nth nil 0 :x)     ;=> :x
 (nth "a" 1 :missing) ;=> :missing
 
-;; PTC-Lisp current behavior
-(nth [1 2] 5 :x)   ;=> arity error
-(nth [1 2] -1 :x)  ;=> arity error
-(nth nil 0 :x)     ;=> arity error
-(nth "a" 1 :missing) ;=> arity error
+;; PTC-Lisp (fixed)
+(nth [1 2] 5 :x)   ;=> :x
+(nth [1 2] -1 :x)  ;=> :x
+(nth nil 0 :x)     ;=> :x
+(nth "a" 1 :missing) ;=> :missing
 ```
 
-**Decision:** BUG. The audit marks `nth` supported, but a common Clojure arity
-is missing.
+**Fix:** Added the 3-arity `(nth coll idx not-found)` (the `nth` builtin is now
+bound `:multi_arity`). It returns the element when `0 <= idx < count`, otherwise
+the default — including for negative indexes and nil collections (note the
+3-arity uses Clojure's strict bounds, distinct from the 2-arity's read-from-end
+behavior tracked in GAP-S10). Maps/sets remain unindexed and raise, matching
+Clojure and the 2-arity.
 
 ### GAP-S94: `nth` rejects nil input instead of returning nil
 
