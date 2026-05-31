@@ -319,8 +319,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `max-key` | ✅ supported | Returns item with greatest function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first maximum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
 | `memfn` | ❌ not_relevant | Returns function calling Java method | relies on Java interop |
 | `memoize` | ❌ not_relevant | Caches function results by arguments | relies on mutable state for caching |
-| `merge` | ✅ supported | Merges maps | BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected |
-| `merge-with` | ✅ supported | Merges maps with combining function | BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected |
+| `merge` | ✅ supported | Merges maps | BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected |
+| `merge-with` | ✅ supported | Merges maps with combining function | BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected |
 | `meta` | ❌ not_relevant | Returns metadata | relies on metadata support |
 | `methods` | ❌ not_relevant | Returns multimethod implementations | relies on multimethods |
 | `min` | ✅ supported | Returns least number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
