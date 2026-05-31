@@ -382,14 +382,14 @@
     "symbol": "bit-and",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+    "notes": "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
   },
   {
     "status": "supported",
     "symbol": "bit-and-not",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+    "notes": "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
   },
   {
     "status": "supported",
@@ -417,7 +417,7 @@
     "symbol": "bit-or",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+    "notes": "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
   },
   {
     "status": "supported",
@@ -452,7 +452,7 @@
     "symbol": "bit-xor",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+    "notes": "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
   },
   {
     "status": "supported",

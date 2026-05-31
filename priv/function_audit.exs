@@ -332,14 +332,14 @@
       status: :supported,
       description: "Bitwise AND",
       notes:
-        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+        "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-and-not",
       status: :supported,
       description: "Bitwise AND with complement",
       notes:
-        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+        "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-clear",
@@ -366,7 +366,7 @@
       status: :supported,
       description: "Bitwise OR",
       notes:
-        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+        "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{
       name: "bit-set",
@@ -401,7 +401,7 @@
       status: :supported,
       description: "Bitwise exclusive OR",
       notes:
-        "integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising"
+        "integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising"
     },
     %{name: "boolean", status: :supported, description: "Coerces to boolean", notes: ""},
     %{

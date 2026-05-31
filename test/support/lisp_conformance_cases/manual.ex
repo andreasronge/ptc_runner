@@ -3910,37 +3910,37 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S52",
         "Clojure masks large shift counts modulo the JVM word width; PTC-Lisp currently shifts by the full count."
       ),
-      bug_case(
-        "core/bit-and-unary-bug-001",
+      regression_case(
+        "core/bit-and-unary-001",
         "clojure.core",
         ["bit-and"],
         "(bit-and 7)",
-        "GAP-S108",
-        "Clojure rejects unary bit-and; PTC-Lisp currently returns the argument unchanged."
+        ["GAP-S108"],
+        [:numeric]
       ),
-      bug_case(
-        "core/bit-or-unary-bug-001",
+      regression_case(
+        "core/bit-or-unary-001",
         "clojure.core",
         ["bit-or"],
         "(bit-or 7)",
-        "GAP-S108",
-        "Clojure rejects unary bit-or; PTC-Lisp currently returns the argument unchanged."
+        ["GAP-S108"],
+        [:numeric]
       ),
-      bug_case(
-        "core/bit-xor-unary-bug-001",
+      regression_case(
+        "core/bit-xor-unary-001",
         "clojure.core",
         ["bit-xor"],
         "(bit-xor 7)",
-        "GAP-S108",
-        "Clojure rejects unary bit-xor; PTC-Lisp currently returns the argument unchanged."
+        ["GAP-S108"],
+        [:numeric]
       ),
-      bug_case(
-        "core/bit-and-not-unary-bug-001",
+      regression_case(
+        "core/bit-and-not-unary-001",
         "clojure.core",
         ["bit-and-not"],
         "(bit-and-not 7)",
-        "GAP-S108",
-        "Clojure rejects unary bit-and-not; PTC-Lisp currently returns the argument unchanged."
+        ["GAP-S108"],
+        [:numeric]
       ),
       bug_case(
         "core/bit-not-bigint-bug-001",

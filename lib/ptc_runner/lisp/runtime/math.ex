@@ -418,8 +418,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
         :erlang.band(acc, :erlang.bnot(int!(y, "bit-and-not")))
       end)
 
-  def bit_and_not([x]), do: int!(x, "bit-and-not")
-  def bit_and_not([]), do: arity_error("bit-and-not")
+  def bit_and_not([_x]), do: binary_arity_error("bit-and-not", 1)
+  def bit_and_not([]), do: binary_arity_error("bit-and-not", 0)
 
   @doc "Bitwise complement (two's complement) of an integer."
   def bit_not(x), do: :erlang.bnot(int!(x, "bit-not"))
@@ -446,8 +446,10 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def bit_test(x, n),
     do: :erlang.band(:erlang.bsr(int!(x, "bit-test"), shift!(n, "bit-test")), 1) == 1
 
-  defp reduce_bitwise([], _f, name), do: arity_error(name)
-  defp reduce_bitwise([x], _f, name), do: int!(x, name)
+  # Clojure's bit-and/or/xor require at least two arguments — zero- and one-arg
+  # calls are arity errors, not the identity.
+  defp reduce_bitwise([], _f, name), do: binary_arity_error(name, 0)
+  defp reduce_bitwise([_x], _f, name), do: binary_arity_error(name, 1)
 
   defp reduce_bitwise([h | t], f, name),
     do: Enum.reduce(t, int!(h, name), fn x, acc -> f.(acc, int!(x, name)) end)
@@ -474,6 +476,12 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     raise ExecutionError,
       reason: :arity_error,
       message: "#{name} requires at least 1 argument, got 0"
+  end
+
+  defp binary_arity_error(name, got) do
+    raise ExecutionError,
+      reason: :arity_error,
+      message: "#{name} requires at least 2 arguments, got #{got}"
   end
 
   # Comparison (for direct use, not inside where)
