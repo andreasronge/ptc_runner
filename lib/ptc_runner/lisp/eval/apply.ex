@@ -276,13 +276,24 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     # Convert any closures/builtins in args to callable functions
     converted_args = Enum.map(args, fn arg -> closure_to_fun(arg, eval_ctx, do_eval_fn) end)
 
-    with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(converted_args) end)
-  rescue
-    e in ExecutionError ->
-      {:error, execution_error_tuple(e)}
+    try do
+      with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(converted_args) end)
+    rescue
+      FunctionClauseError ->
+        # A bad argument shape inside a collect builtin (e.g. (update-in [1 2]
+        # [] f) routing a vector root through flex_update_in's integer-key
+        # clauses) must surface as a recoverable type error, not leak the
+        # internal module/function name as a raw :runtime_error. Mirrors the
+        # {:normal} and {:multi_arity} handlers so all builtin dispatch shapes
+        # fail consistently.
+        {:error, Helpers.type_error_for_args(fun, converted_args)}
 
-    e in PtcRunner.Lisp.TypeError ->
-      {:error, {:type_error, Exception.message(e), args}}
+      e in ExecutionError ->
+        {:error, execution_error_tuple(e)}
+
+      e in PtcRunner.Lisp.TypeError ->
+        {:error, {:type_error, Exception.message(e), args}}
+    end
   end
 
   # Multi-arity builtins: select function based on argument count
