@@ -68,9 +68,8 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   @doc """
   Analyzes a `when` form. Desugars to `(if cond (do body...) nil)`.
   """
-  def analyze_when([cond_ast, first_body | rest_body], tail?, analyze_fn, wrap_body_fn) do
-    body_asts = [first_body | rest_body]
-
+  # Bodyless `(when cond)` is valid Clojure and returns nil regardless of cond.
+  def analyze_when([cond_ast | body_asts], tail?, analyze_fn, wrap_body_fn) do
     with {:ok, c} <- analyze_fn.(cond_ast, false),
          {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
       {:ok, {:if, c, b, nil}}
@@ -89,9 +88,7 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   Analyzes a `when-not` form. Desugars to `(if cond nil (do body...))`.
   """
   # Desugar (when-not cond body ...) -> (if cond nil (do body ...))
-  def analyze_when_not([cond_ast, first_body | rest_body], tail?, analyze_fn, wrap_body_fn) do
-    body_asts = [first_body | rest_body]
-
+  def analyze_when_not([cond_ast | body_asts], tail?, analyze_fn, wrap_body_fn) do
     with {:ok, c} <- analyze_fn.(cond_ast, false),
          {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
       {:ok, {:if, c, nil, b}}

@@ -544,10 +544,10 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `volatile?` | ❌ not_relevant | Returns true if volatile | relies on mutable state |
 | `vreset!` | ❌ not_relevant | Sets volatile value | relies on mutable state |
 | `vswap!` | ❌ not_relevant | Updates volatile with function | involves mutable state (volatiles) |
-| `when` | ✅ supported | Evaluates body if test true | BUG GAP-S113: bodyless when raises instead of returning nil |
+| `when` | ✅ supported | Evaluates body if test true | Bodyless form returns nil, matching Clojure |
 | `when-first` | ✅ supported | Evaluates body if seq non-empty | BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `when-let` | ✅ supported | Binds if truthy, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
-| `when-not` | ✅ supported | Evaluates body if test false | BUG GAP-S113: bodyless when-not raises instead of returning nil |
+| `when-not` | ✅ supported | Evaluates body if test false | Bodyless form returns nil, matching Clojure |
 | `when-some` | ✅ supported | Binds if not nil, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `while` | ❌ not_relevant | Repeats body while test true | imperative looping construct typically relying on side effects |
 | `with-bindings` | ❌ not_relevant | Executes body with thread-local bindings | relies on thread-local state which is not supported in the BEAM model for PTC-Lisp |

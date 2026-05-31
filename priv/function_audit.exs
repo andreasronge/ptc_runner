@@ -3127,7 +3127,7 @@
       name: "when",
       status: :supported,
       description: "Evaluates body if test true",
-      notes: "BUG GAP-S113: bodyless when raises instead of returning nil"
+      notes: "Bodyless form returns nil, matching Clojure"
     },
     %{
       name: "when-first",
@@ -3147,7 +3147,7 @@
       name: "when-not",
       status: :supported,
       description: "Evaluates body if test false",
-      notes: "BUG GAP-S113: bodyless when-not raises instead of returning nil"
+      notes: "Bodyless form returns nil, matching Clojure"
     },
     %{
       name: "when-some",
