@@ -168,6 +168,19 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
 
       assert message =~ "merge-with requires at least 1 argument"
     end
+
+    test "update-in on a non-associative root surfaces a clean type error, not a host crash" do
+      # (update-in [1 2] [] f) normalizes the empty path to [nil] and tries to
+      # update a vector at the nil key; Clojure raises here. The :collect
+      # dispatch must convert the host FunctionClauseError into a recoverable
+      # :type_error (mirroring the sibling assoc-in) rather than leak the
+      # internal flex_update_in/3 module name as a :runtime_error.
+      assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
+               Lisp.run("(update-in [1 2] [] (fn [x] x))")
+
+      refute message =~ "no function clause"
+      refute message =~ "FlexAccess"
+    end
   end
 
   describe "invalid programs - common LLM mistakes" do
