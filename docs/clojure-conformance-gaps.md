@@ -5088,40 +5088,33 @@ results tie for the selected extremum.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/last-nil-bug-001`, `core/butlast-nil-bug-001`, `core/butlast-empty-bug-001`, `core/butlast-singleton-bug-001`, `core/butlast-empty-string-bug-001`, `core/butlast-singleton-string-bug-001`, `core/take-last-nil-bug-001`, `core/ffirst-nil-bug-001`, `core/fnext-nil-bug-001`, `core/nfirst-nil-bug-001`, `core/nnext-nil-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/last-nil-001`, `core/butlast-nil-001`, `core/butlast-empty-001`, `core/butlast-singleton-001`, `core/butlast-empty-string-001`, `core/butlast-singleton-string-001`, `core/take-last-nil-001`, `core/ffirst-nil-001`, `core/fnext-nil-001`, `core/nfirst-nil-001`, `core/nnext-nil-001` |
 
 ```clojure
 ;; Clojure
-(last nil)     ;=> nil
-(butlast nil)  ;=> nil
-(butlast [])   ;=> nil
-(butlast [1])  ;=> nil
-(butlast "")   ;=> nil
-(butlast "a")  ;=> nil
+(last nil)        ;=> nil
+(butlast [1])     ;=> nil
 (take-last 2 nil) ;=> nil
-(ffirst nil)   ;=> nil
-(fnext nil)    ;=> nil
-(nfirst nil)   ;=> nil
-(nnext nil)    ;=> nil
+(ffirst nil)      ;=> nil
 
-;; PTC-Lisp current behavior
-(last nil)     ;=> type_error
-(butlast nil)  ;=> []
-(butlast [])   ;=> []
-(butlast [1])  ;=> []
-(butlast "")   ;=> []
-(butlast "a")  ;=> []
-(take-last 2 nil) ;=> []
-(ffirst nil)   ;=> type_error
-(fnext nil)    ;=> type_error
-(nfirst nil)   ;=> type_error
-(nnext nil)    ;=> type_error
+;; PTC-Lisp (fixed)
+(last nil)        ;=> nil
+(butlast [1])     ;=> nil
+(take-last 2 nil) ;=> nil
+(ffirst nil)      ;=> nil
 ```
 
 **Decision:** BUG. These are supported Clojure-named sequence helpers on nil
 input. Adjacent helpers such as `first`, `rest`, `next`, and `second` already
 match Clojure's nil behavior.
+
+**Fix:** Added nil clauses (`last`/`ffirst`/`fnext`/`nfirst`/`nnext` on nil =>
+nil, `butlast nil` => nil), and `butlast` now returns nil for any empty result
+(empty/singleton input) via Clojure's empty-seq punning; `take-last nil` => nil.
+Negative `take-last` counts still return `[]`
+([GAP-S32](#gap-s32-negative-counts-in-seq-slicing-helpers-produce-non-clojure-slices),
+tracked separately).
 
 ### GAP-S49: `mapcat` misses multi-collection and string-result behavior
 

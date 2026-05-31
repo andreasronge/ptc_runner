@@ -100,7 +100,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `bound-fn*` | ❌ not_relevant | Returns function applying creation-context bindings | relies on thread-local/dynamic scope bindings |
 | `bound?` | ❌ not_relevant | Returns true if all vars have bound value | relies on dynamic var binding state |
 | `bounded-count` | ❌ not_relevant | Counts up to n elements | designed for lazy sequences |
-| `butlast` | ✅ supported | Returns all but last item | BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `butlast` | ✅ supported | Returns all but last item | nil, empty, and singleton sequential/string inputs return nil (Clojure empty-seq punning). BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `byte` | ❌ not_relevant | Coerces to byte | JVM primitive width coercion |
 | `byte-array` | ❌ not_relevant | Creates byte Java array | Java array creation |
 | `bytes` | ❌ not_relevant | Casts to byte array | Java array casting |
@@ -206,7 +206,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `extenders` | ❌ not_relevant | Returns types extending protocol | relies on protocols |
 | `extends?` | ❌ not_relevant | Returns true if type extends protocol | relies on protocols |
 | `false?` | ✅ supported | Returns true if value is false |  |
-| `ffirst` | ✅ supported | First of first item | BUG GAP-S48: nil input currently raises instead of returning nil |
+| `ffirst` | ✅ supported | First of first item | nil input returns nil, matching Clojure |
 | `file-seq` | ❌ not_relevant | Lazy seq of files in directory tree | relies on lazy sequences and file I/O |
 | `filter` | ✅ supported | Returns items where predicate true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `filterv` | ✅ supported | Returns vector of items where pred true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
@@ -223,7 +223,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `flush` | ❌ not_relevant | Flushes output writer | I/O operation |
 | `fn` | ✅ supported | Defines anonymous function | DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
 | `fn?` | ✅ supported | Returns true if value is function |  |
-| `fnext` | ✅ supported | First of next item | BUG GAP-S48: nil input currently raises instead of returning nil |
+| `fnext` | ✅ supported | First of next item | nil input returns nil, matching Clojure |
 | `fnil` | ✅ supported | Returns function with nil defaults | BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position |
 | `for` | ✅ supported | List comprehension from nested iteration | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `force` | ❌ not_relevant | Forces evaluation of delay | relies on lazy evaluation/delays |
@@ -287,7 +287,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `keys` | ✅ supported | Returns map keys | DIV-38: map views are sorted by key instead of preserving Clojure map iteration order |
 | `keyword` | ✅ supported | Coerces to keyword | BUG GAP-S34: namespace/name arity is unsupported. BUG GAP-S63: keyword invocation matches string keys. BUG GAP-S78: non-string/non-keyword inputs raise instead of returning nil. DIV-13/DIV-34/DIV-35: namespaced, empty, and broad-character keywords are outside the PTC-Lisp data model. |
 | `keyword?` | ✅ supported | Returns true if keyword |  |
-| `last` | ✅ supported | Returns last item | BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
+| `last` | ✅ supported | Returns last item | nil input returns nil, matching Clojure. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `lazy-cat` | ❌ not_relevant | Lazy concatenation of expressions | relies on lazy sequences |
 | `lazy-seq` | ❌ not_relevant | Creates lazy sequence from expression | relies on lazy sequences |
 | `let` | ✅ supported | Local variable bindings | BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion |
@@ -333,9 +333,9 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `neg?` | ✅ supported | Returns true if number negative | DIV-31: returns false for nil/non-numeric inputs instead of raising |
 | `newline` | ❌ not_relevant | Writes newline to output | relies on I/O |
 | `next` | ✅ supported | Returns seq after first item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `nfirst` | ✅ supported | Next of first item | BUG GAP-S48: nil input currently raises instead of returning nil |
+| `nfirst` | ✅ supported | Next of first item | nil input returns nil, matching Clojure |
 | `nil?` | ✅ supported | Returns true if nil |  |
-| `nnext` | ✅ supported | Next of next item | BUG GAP-S48: nil input currently raises instead of returning nil |
+| `nnext` | ✅ supported | Next of next item | nil input returns nil, matching Clojure |
 | `not` | ✅ supported | Logical complement |  |
 | `not-any?` | ✅ supported | Returns true if pred false for all | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `not-empty` | ✅ supported | Returns collection or nil if empty | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
@@ -486,7 +486,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `symbol` | 🔲 candidate | Coerces to symbol | pure data coercion |
 | `symbol?` | ✅ supported | Returns true if symbol |  |
 | `take` | ✅ supported | Returns first n items | BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S32: negative count returns a tail instead of an empty seq; BUG GAP-S79: numeric count coercion rejects floats Clojure accepts |
-| `take-last` | ✅ supported | Returns last n items | BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil |
+| `take-last` | ✅ supported | Returns last n items | nil input returns nil, matching Clojure. BUG GAP-S32: negative count returns an empty vector instead of nil |
 | `take-nth` | ❌ not_relevant | Returns every nth item | returns a lazy sequence |
 | `take-while` | ✅ supported | Takes items while predicate true | BUG GAP-S71: map/vector callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `tap>` | ❌ not_relevant | Sends value to taps | side-effecting I/O mechanism |

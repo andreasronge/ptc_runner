@@ -1885,14 +1885,14 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == [1, 2, 3]
     end
 
-    test "returns empty list for single-element list" do
+    test "returns nil for single-element list (Clojure empty-seq punning)" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(butlast [1])|)
-      assert result == []
+      assert result == nil
     end
 
-    test "returns empty list for nil" do
+    test "returns nil for nil" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(butlast nil)|)
-      assert result == []
+      assert result == nil
     end
 
     test "works on strings (graphemes)" do

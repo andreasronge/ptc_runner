@@ -4873,93 +4873,93 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S47",
         "Clojure max-key returns the last value when all keys tie; PTC-Lisp currently returns the first."
       ),
-      bug_case(
-        "core/last-nil-bug-001",
+      regression_case(
+        "core/last-nil-001",
         "clojure.core",
         ["last"],
         "(last nil)",
-        "GAP-S48",
-        "Clojure last returns nil on nil input; PTC-Lisp currently raises."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/butlast-nil-bug-001",
+      regression_case(
+        "core/butlast-nil-001",
         "clojure.core",
         ["butlast"],
         "(butlast nil)",
-        "GAP-S48",
-        "Clojure butlast returns nil on nil input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/butlast-empty-bug-001",
+      regression_case(
+        "core/butlast-empty-001",
         "clojure.core",
         ["butlast"],
         "(butlast [])",
-        "GAP-S48",
-        "Clojure butlast returns nil on empty input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/butlast-singleton-bug-001",
+      regression_case(
+        "core/butlast-singleton-001",
         "clojure.core",
         ["butlast"],
         "(butlast [1])",
-        "GAP-S48",
-        "Clojure butlast returns nil on singleton input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/butlast-empty-string-bug-001",
+      regression_case(
+        "core/butlast-empty-string-001",
         "clojure.core",
         ["butlast"],
         ~S|(butlast "")|,
-        "GAP-S48",
-        "Clojure butlast returns nil on empty string input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/butlast-singleton-string-bug-001",
+      regression_case(
+        "core/butlast-singleton-string-001",
         "clojure.core",
         ["butlast"],
         ~S|(butlast "a")|,
-        "GAP-S48",
-        "Clojure butlast returns nil on singleton string input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/take-last-nil-bug-001",
+      regression_case(
+        "core/take-last-nil-001",
         "clojure.core",
         ["take-last"],
         "(take-last 2 nil)",
-        "GAP-S48",
-        "Clojure take-last returns nil on nil input; PTC-Lisp currently returns an empty vector."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/ffirst-nil-bug-001",
+      regression_case(
+        "core/ffirst-nil-001",
         "clojure.core",
         ["ffirst"],
         "(ffirst nil)",
-        "GAP-S48",
-        "Clojure ffirst returns nil on nil input; PTC-Lisp currently raises."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/fnext-nil-bug-001",
+      regression_case(
+        "core/fnext-nil-001",
         "clojure.core",
         ["fnext"],
         "(fnext nil)",
-        "GAP-S48",
-        "Clojure fnext returns nil on nil input; PTC-Lisp currently raises."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/nfirst-nil-bug-001",
+      regression_case(
+        "core/nfirst-nil-001",
         "clojure.core",
         ["nfirst"],
         "(nfirst nil)",
-        "GAP-S48",
-        "Clojure nfirst returns nil on nil input; PTC-Lisp currently raises."
+        ["GAP-S48"],
+        [:collection]
       ),
-      bug_case(
-        "core/nnext-nil-bug-001",
+      regression_case(
+        "core/nnext-nil-001",
         "clojure.core",
         ["nnext"],
         "(nnext nil)",
-        "GAP-S48",
-        "Clojure nnext returns nil on nil input; PTC-Lisp currently raises."
+        ["GAP-S48"],
+        [:collection]
       ),
       bug_case(
         "core/mapcat-two-colls-bug-001",

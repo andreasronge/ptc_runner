@@ -872,7 +872,7 @@
     },
     %{
       name: "butlast",
-      description: "All but last (empty list if none)",
+      description: "All but last (nil if none)",
       binding: :normal,
       category: :core,
       dispatch: :env,

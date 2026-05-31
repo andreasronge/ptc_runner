@@ -1816,7 +1816,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `last` | `(last coll)` | Last item or nil |
 | `nth` | `(nth coll idx)` | Item at index or nil |
 | `rest` | `(rest coll)` | All but first (empty list if none) |
-| `butlast` | `(butlast coll)` | All but last (empty list if none) |
+| `butlast` | `(butlast coll)` | All but last (nil if none) |
 | `next` | `(next coll)` | All but first (nil if none) |
 | `ffirst` | `(ffirst coll)` | First of first |
 | `fnext` | `(fnext coll)` | First of next |
@@ -1850,8 +1850,8 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 (rest [1 2 3])        ; => [2 3]
 (rest [])             ; => []
 (butlast [1 2 3 4])   ; => [1 2 3]
-(butlast [1])         ; => []
-(butlast [])          ; => []
+(butlast [1])         ; => nil
+(butlast [])          ; => nil
 (next [1 2 3])        ; => [2 3]
 (next [])             ; => nil
 (next [1])            ; => nil
