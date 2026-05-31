@@ -403,17 +403,17 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `abs` | `(abs x)` | Absolute value |
-| `bit-and` | `(bit-and x & more)` | Bitwise AND of integers |
-| `bit-and-not` | `(bit-and-not x & more)` | Bitwise AND of `x` with the complement of each subsequent argument |
+| `bit-and` | `(bit-and x y & more)` | Bitwise AND of integers |
+| `bit-and-not` | `(bit-and-not x y & more)` | Bitwise AND of `x` with the complement of each subsequent argument |
 | `bit-clear` | `(bit-clear x n)` | Clear bit `n` of `x` (set it to 0) |
 | `bit-flip` | `(bit-flip x n)` | Flip bit `n` of `x` |
 | `bit-not` | `(bit-not x)` | Bitwise complement (two's complement) of an integer |
-| `bit-or` | `(bit-or x & more)` | Bitwise OR of integers |
+| `bit-or` | `(bit-or x y & more)` | Bitwise OR of integers |
 | `bit-set` | `(bit-set x n)` | Set bit `n` of `x` to 1 |
 | `bit-shift-left` | `(bit-shift-left x n)` | Shift `x` left by `n` bits |
 | `bit-shift-right` | `(bit-shift-right x n)` | Arithmetic shift `x` right by `n` bits (sign-extending) |
 | `bit-test` | `(bit-test x n)` | Return true if bit `n` of `x` is set |
-| `bit-xor` | `(bit-xor x & more)` | Bitwise exclusive OR of integers |
+| `bit-xor` | `(bit-xor x y & more)` | Bitwise exclusive OR of integers |
 | `ceil` | `(ceil x)` | Round toward +∞ |
 | `double` | `(double x)` | Type coercion (to float) |
 | `float` | `(float x)` | Alias for double (Clojure compat) |

@@ -2334,8 +2334,8 @@ policy this is a mismatch.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/bit-and-unary-bug-001`, `core/bit-or-unary-bug-001`, `core/bit-xor-unary-bug-001`, `core/bit-and-not-unary-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/bit-and-unary-001`, `core/bit-or-unary-001`, `core/bit-xor-unary-001`, `core/bit-and-not-unary-001` |
 
 ```clojure
 ;; Clojure
@@ -2344,16 +2344,17 @@ policy this is a mismatch.
 (bit-xor 7)   ;=> ArityException
 (bit-and-not 7) ;=> ArityException
 
-;; PTC-Lisp current behavior
-(bit-and 7)   ;=> 7
-(bit-or 7)    ;=> 7
-(bit-xor 7)   ;=> 7
-(bit-and-not 7) ;=> 7
+;; PTC-Lisp (fixed)
+(bit-and 7)   ;=> raises (requires at least 2 arguments)
+(bit-or 7)    ;=> raises
+(bit-xor 7)   ;=> raises
+(bit-and-not 7) ;=> raises
 ```
 
-**Decision:** BUG. These are supported Clojure-named bit helpers. A unary call
-is an invalid Clojure program, and returning the input silently hides the arity
-error as plausible numeric data.
+**Fix:** The unary clause of `reduce_bitwise` (and `bit_and_not`) now raises an
+arity error instead of returning the argument. `bit-and`/`bit-or`/`bit-xor`/
+`bit-and-not` require at least two arguments; a unary call is bad program shape
+(Design Philosophy rule 4). `bit-not` remains correctly unary.
 
 ### GAP-S142: Bit helpers accept BigInt operands Clojure rejects
 

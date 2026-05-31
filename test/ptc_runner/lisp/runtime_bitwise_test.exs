@@ -18,16 +18,16 @@ defmodule PtcRunner.Lisp.RuntimeBitwiseTest do
       assert_lisp("(bit-xor 1 2 4 8)", 15)
     end
 
-    test "single integer argument returns itself" do
-      assert_lisp("(bit-and 42)", 42)
-      assert_lisp("(bit-or 42)", 42)
+    test "single argument is an arity error, requires at least two (GAP-S108)" do
+      assert {:error, %{fail: %{reason: :arity_error}}} = PtcRunner.Lisp.run("(bit-and 42)")
+      assert {:error, %{fail: %{reason: :arity_error}}} = PtcRunner.Lisp.run("(bit-or 42)")
     end
 
-    test "single non-integer argument is still rejected (not silently returned)" do
-      assert {:error, %{fail: %{reason: :type_error, message: msg}}} =
+    test "single non-integer argument is an arity error, checked before type (GAP-S108)" do
+      assert {:error, %{fail: %{reason: :arity_error, message: msg}}} =
                PtcRunner.Lisp.run("(bit-and 2.5)")
 
-      assert msg =~ "bit-and: expected an integer, got number 2.5"
+      assert msg =~ "at least 2 arguments"
     end
 
     test "zero arguments is an arity error" do

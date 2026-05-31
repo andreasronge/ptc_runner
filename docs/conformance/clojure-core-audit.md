@@ -81,17 +81,17 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `bigint` | ❌ not_relevant | Coerces to BigInt | BEAM integers are already arbitrary precision |
 | `biginteger` | ❌ not_relevant | Coerces to BigInteger | JVM-specific BigInteger coercion; BEAM integers are already arbitrary precision |
 | `binding` | ❌ not_relevant | Binds vars to new values for body duration | relies on thread-local var binding mechanism |
-| `bit-and` | ✅ supported | Bitwise AND | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
-| `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-and` | ✅ supported | Bitwise AND | integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-and-not` | ✅ supported | Bitwise AND with complement | integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-clear` | ✅ supported | Clears bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-flip` | ✅ supported | Flips bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-not` | ✅ supported | Bitwise complement | integers only; BUG GAP-S142: BigInt operands are accepted instead of raising |
-| `bit-or` | ✅ supported | Bitwise OR | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-or` | ✅ supported | Bitwise OR | integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-set` | ✅ supported | Sets bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-shift-left` | ✅ supported | Bitwise left shift | integers only; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-shift-right` | ✅ supported | Bitwise right shift | integers only; arithmetic (sign-extending) shift; BUG GAP-S52: negative shift counts are rejected instead of JVM-masked. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `bit-test` | ✅ supported | Tests bit at index | integers only; BUG GAP-S52: negative or >=64 indexes are not JVM-masked correctly. BUG GAP-S142: BigInt operands are accepted instead of raising |
-| `bit-xor` | ✅ supported | Bitwise exclusive OR | integers only; BUG GAP-S108: unary form returns the argument instead of raising. BUG GAP-S142: BigInt operands are accepted instead of raising |
+| `bit-xor` | ✅ supported | Bitwise exclusive OR | integers only; unary forms raise (require at least two arguments), matching Clojure. BUG GAP-S142: BigInt operands are accepted instead of raising |
 | `boolean` | ✅ supported | Coerces to boolean |  |
 | `boolean-array` | ❌ not_relevant | Creates boolean Java array | creates Java array, incompatible with BEAM/non-JVM environments |
 | `boolean?` | ✅ supported | Returns true if value is Boolean | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
