@@ -431,9 +431,11 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
          {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
-      # Consistency check: keywords don't work with a single hash-map in
-      # map/pmap. Only meaningful for the single-collection arity; with
-      # multiple collections a keyword would be a 2-arg lookup-with-default.
+      # Consistency check: a keyword accessor over a SINGLE hash-map is rejected
+      # (in map/pmap the map would coerce to [k v] pairs and the keyword would
+      # see lists, not maps). Only the single-collection arity is ambiguous;
+      # with 2+ collections the keyword is a 2-arg lookup-with-default
+      # (`(:k m default)`), which Callable.call dispatches — see callable_fn.
       single_map_coll? = match?([m] when is_map(m) and not is_struct(m), coll_vals)
 
       if keyword_runtime?(fn_val) and single_map_coll? do
@@ -465,9 +467,17 @@ defmodule PtcRunner.Lisp.Eval do
         deadline_mono = parallel_deadline(eval_ctx2)
         worker_eval_ctx = %{eval_ctx2 | pmap_deadline: deadline_mono}
 
-        # Convert the function value to a callable (may be a tuple for builtins)
-        # The closure captures a read-only snapshot of the environment at creation time
-        callable_fn = value_to_erlang_fn(fn_val, worker_eval_ctx)
+        # Convert the function value to a callable (may be a tuple for builtins).
+        # The closure captures a read-only snapshot of the environment at creation
+        # time. Keyword accessors are kept un-converted: Callable.call dispatches
+        # them at both arity 1 (lookup) and arity 2 (lookup-with-default), matching
+        # `map` and Clojure. value_to_erlang_fn would instead build a strict
+        # arity-1 closure that crashes when multiple collections zip into a 2-arg
+        # call (the single_map_coll? guard above already handles the 1-coll case).
+        callable_fn =
+          if keyword_runtime?(fn_val),
+            do: fn_val,
+            else: value_to_erlang_fn(fn_val, worker_eval_ctx)
 
         # Capture trace context for propagation into worker processes
         trace_ctx = TraceContext.capture()

@@ -16,6 +16,19 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S132 follow-up — `pmap` keyword over multiple collections  ·  committed
+
+- **Classification:** BUG (regression surfaced by the GAP-S132 multi-collection
+  work)
+- **Work size:** A
+- **Spec basis:** Clojure-compat default — a keyword is a 2-arg IFn
+  (`(:k m default)`), and `map` already honors this. The GAP-S132 multi-coll
+  path pre-converted the keyword via `value_to_erlang_fn` into a strict arity-1
+  closure, so `(pmap :k maps defaults)` crashed with a `:pmap_error`. Keep the
+  keyword un-converted so `Callable.call` dispatches arity 1 and 2.
+- **Risk:** local (one `pmap` callable branch; single-map guard preserved).
+- **Codex review:** pending.
+
 ## GAP-S10 — negative `nth` index returns nil (reclassified DIV-26)  ·  committed
 
 - **Classification:** BUG → DIV (folded into DIV-26)

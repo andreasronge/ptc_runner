@@ -128,6 +128,23 @@ defmodule PtcRunner.Lisp.PmapTest do
       assert {:ok, [11, 22], %{}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
+    test "pmap keyword accessor over two collections does a 2-arg lookup-with-default" do
+      env = Env.initial()
+      # (pmap :a [{:a 1}] [99]) => [1]  — key present, default ignored
+      present =
+        {:pmap, {:keyword, :a}, [{:vector, [{:map, [{{:keyword, :a}, 1}]}]}, {:vector, [99]}]}
+
+      assert {:ok, [1], %{}} = Eval.eval(present, %{}, %{}, env, &dummy_tool/2)
+
+      # (pmap :a [{:x 1}] [99]) => [99] — key absent, default from 2nd collection.
+      # Matches `map` and Clojure; previously crashed with a :pmap_error because
+      # the keyword was pre-converted to a strict arity-1 closure.
+      absent =
+        {:pmap, {:keyword, :a}, [{:vector, [{:map, [{{:keyword, :x}, 1}]}]}, {:vector, [99]}]}
+
+      assert {:ok, [99], %{}} = Eval.eval(absent, %{}, %{}, env, &dummy_tool/2)
+    end
+
     test "pmap with closure capturing outer scope" do
       env = Map.merge(Env.initial(), %{multiplier: 10})
       # (pmap (fn [x] (* x multiplier)) [1 2 3])
