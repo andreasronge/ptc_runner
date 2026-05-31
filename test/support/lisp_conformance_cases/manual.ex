@@ -3290,13 +3290,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S143"],
         [:collection]
       ),
-      bug_case(
-        "core/map-multi-string-bug-001",
+      regression_case(
+        "core/map-multi-string-001",
         "clojure.core",
         ["map"],
         ~S|(map vector "ab" [1 2])|,
-        "GAP-S102",
-        "Clojure map treats strings as seqable in multi-collection arity; PTC-Lisp currently rejects strings there."
+        ["GAP-S102"],
+        [:collection]
       ),
       regression_case(
         "core/reverse-nil-001",

@@ -2016,6 +2016,25 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "map multi-collection seqables (GAP-S102)" do
+    test "accepts strings in the multi-collection arity, like map/2 and pmap" do
+      assert {:ok, %Step{return: [["a", 1], ["b", 2]]}} = Lisp.run(~S|(map vector "ab" [1 2])|)
+      assert {:ok, %Step{return: ["ac", "bd"]}} = Lisp.run(~S|(map str "ab" "cd")|)
+    end
+
+    test "coerces a map collection to [k v] pairs, like map/2" do
+      assert {:ok, %Step{return: [[["a", 1], 9]]}} = Lisp.run(~S|(map vector {:a 1} [9])|)
+    end
+
+    test "mapv shares the same multi-collection coercion" do
+      assert {:ok, %Step{return: [["a", 1], ["b", 2]]}} = Lisp.run(~S|(mapv vector "ab" [1 2])|)
+    end
+
+    test "a non-seqable collection still surfaces a clean type_error" do
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(~S|(map vector [1] 5)|)
+    end
+  end
+
   # ============================================================
   # reduce on various collection types
   # ============================================================
