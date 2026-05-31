@@ -2071,21 +2071,30 @@ are also closed. Direct maps/sets still raise a `type_error`, preserving
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/map-multi-string-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/map-multi-string-001` |
 
 ```clojure
 ;; Clojure
 (map vector "ab" [1 2]) ;=> (["a" 1] ["b" 2])
 
-;; PTC-Lisp current behavior
-(map vector "ab" [1 2]) ;=> type_error
+;; PTC-Lisp (fixed)
+(map vector "ab" [1 2]) ;=> [["a" 1] ["b" 2]]
+(map vector {:a 1} [9]) ;=> [[["a" 1] 9]]   ; map coerced to [k v] pairs
 ```
 
 **Decision:** BUG. `map` is a supported Clojure-named sequence helper.
 PTC-Lisp already accepts string input for single-collection `map`; the
 multi-collection arity should treat the same finite string value as seqable
 instead of rejecting it.
+
+**Fix:** `map/3` and `map/4` (and `mapv`, which delegates) now coerce each
+collection through `Collection.Normalize.to_seq/1` (string → graphemes, map →
+`[k v]` pairs, `nil` short-circuits to `[]`) before zipping — the same contract
+as single-collection `map` and as `pmap` (GAP-S132). A non-seqable argument
+raises via `to_seq`, surfaced as a clean `type_error`. (The multi-collection
+arity is still capped at three collections by the builtin registration; 4+
+collections remain an arity error, tracked separately from this seqable gap.)
 
 ### GAP-S22: `get-in` default is returned for an explicitly present nil value
 

@@ -16,6 +16,20 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S102 — multi-collection `map`/`mapv` accept strings/maps (align with pmap)  ·  committed
+
+- **Classification:** BUG
+- **Work size:** A/B
+- **Spec basis:** Clojure-compat default — strings/maps are seqable. `map/2`
+  already coerces them and `pmap` (GAP-S132) does too, but `map/3`/`map/4`
+  guarded `is_list`/`is_binary` per collection, so mixed string+list or a map
+  collection raised. Coerce each collection via `Normalize.to_seq` + `zip_with`,
+  matching `map/2` and `pmap`. Resolves the pmap-vs-map seqable inconsistency.
+- **Risk:** local (map/3, map/4; mapv delegates). nil short-circuit preserved;
+  non-seqables still raise → type_error via the :multi_arity dispatch. The 4+
+  collection arity cap is unchanged (separate registration concern).
+- **Codex review:** pending.
+
 ## GAP-S20 — nil-tolerant seq helpers (take/drop/flatten/distinct/reverse/sort/frequencies)  ·  committed
 
 - **Classification:** BUG

@@ -35,25 +35,23 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
   def map(_f, nil, _coll2), do: []
   def map(_f, _coll1, nil), do: []
 
-  def map(f, coll1, coll2) when is_list(coll1) and is_list(coll2) do
-    Enum.zip_with(coll1, coll2, fn a, b -> Callable.call(f, [a, b]) end)
-  end
-
-  def map(f, coll1, coll2) when is_binary(coll1) and is_binary(coll2) do
-    Enum.zip_with(
-      Normalize.graphemes(coll1),
-      Normalize.graphemes(coll2),
-      fn a, b -> Callable.call(f, [a, b]) end
-    )
+  # Coerce each collection to a seq (string -> graphemes, map -> [k v] pairs)
+  # so mixed seqable types zip element-wise — matching map/2, `pmap`, and
+  # Clojure (GAP-S102). A non-seqable arg raises via to_seq, surfaced as a clean
+  # type_error by the :multi_arity dispatch.
+  def map(f, coll1, coll2) do
+    Enum.zip_with(Normalize.to_seq(coll1), Normalize.to_seq(coll2), fn a, b ->
+      Callable.call(f, [a, b])
+    end)
   end
 
   def map(_f, nil, _c2, _c3), do: []
   def map(_f, _c1, nil, _c3), do: []
   def map(_f, _c1, _c2, nil), do: []
 
-  def map(f, coll1, coll2, coll3)
-      when is_list(coll1) and is_list(coll2) and is_list(coll3) do
-    Enum.zip_with([coll1, coll2, coll3], fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
+  def map(f, coll1, coll2, coll3) do
+    [Normalize.to_seq(coll1), Normalize.to_seq(coll2), Normalize.to_seq(coll3)]
+    |> Enum.zip_with(fn [a, b, c] -> Callable.call(f, [a, b, c]) end)
   end
 
   # ── mapv (delegates to map — identical in PTC-Lisp, no lazy seqs) ──
