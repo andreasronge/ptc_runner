@@ -16,6 +16,19 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S10 — negative `nth` index returns nil (reclassified DIV-26)  ·  committed
+
+- **Classification:** BUG → DIV (folded into DIV-26)
+- **Work size:** A
+- **Spec basis:** the 2-arity `nth` delegated to `Enum.at`, which reads from the
+  end for a negative index and silently returns unrelated data. A negative
+  index is out of range, so it now returns the `nil` signal — the existing
+  DIV-26 out-of-range policy — matching positive out-of-range and the 3-arity
+  default. Remaining nil-vs-raise gap is intentional DIV-26.
+- **Risk:** local (two guarded 2-arity clauses; reclassified the conformance
+  case `core/nth-negative-bug-001` → `core/nth-negative-div-001`).
+- **Codex review:** pending.
+
 ## GAP-S146 — one-collection `merge` / `merge-with`  ·  committed
 
 - **Classification:** BUG

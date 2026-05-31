@@ -1479,20 +1479,24 @@ the spec does not justify a divergence.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/nth-negative-bug-001` |
+| **Status** | **fixed** (reclassified as DIV-26) |
+| **Source** | Manual conformance case `core/nth-negative-div-001` |
 
 ```clojure
 ;; Clojure
 (nth [1 2] -1)   ;=> IndexOutOfBoundsException
 
-;; PTC-Lisp current behavior
-(nth [1 2] -1)   ;=> 2
+;; PTC-Lisp (fixed)
+(nth [1 2] -1)   ;=> nil
 ```
 
-**Decision:** BUG. PTC-Lisp intentionally uses signal values for some
-out-of-range Clojure-named collection access (see `DIV-26`), but returning the
-last element for a negative index silently returns unrelated data.
+**Decision:** BUG, fixed by folding negative indices into the existing
+out-of-range signal-value policy (`DIV-26`). The 2-arity `nth` previously
+delegated to `Enum.at`, which reads from the end for a negative index and
+silently returned unrelated data; it now returns the `nil` signal for any
+negative index, matching positive out-of-range access and the 3-arity `nth`'s
+default. The remaining divergence (returning `nil` rather than raising) is the
+intentional `DIV-26` behavior.
 
 ### GAP-S11: 3-arity `nth` default form is unsupported
 
@@ -1518,10 +1522,10 @@ last element for a negative index silently returns unrelated data.
 
 **Fix:** Added the 3-arity `(nth coll idx not-found)` (the `nth` builtin is now
 bound `:multi_arity`). It returns the element when `0 <= idx < count`, otherwise
-the default — including for negative indexes and nil collections (note the
-3-arity uses Clojure's strict bounds, distinct from the 2-arity's read-from-end
-behavior tracked in GAP-S10). Maps/sets remain unindexed and raise, matching
-Clojure and the 2-arity.
+the default — including for negative indexes and nil collections. The 2-arity
+`nth` is now consistent: a negative or out-of-range index returns the `nil`
+signal (DIV-26, GAP-S10) where the 3-arity returns the supplied default.
+Maps/sets remain unindexed and raise, matching Clojure and the 2-arity.
 
 ### GAP-S94: `nth` rejects nil input instead of returning nil
 
@@ -5224,17 +5228,19 @@ near-zero cost, without introducing a second sequential collection type.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | Manual conformance cases `core/nth-oob-div-001`, `div/subvec-oob-001`, `div/subvec-negative-start-001`, `div/pop-empty-001` |
+| **Source** | Manual conformance cases `core/nth-oob-div-001`, `core/nth-negative-div-001`, `div/subvec-oob-001`, `div/subvec-negative-start-001`, `div/pop-empty-001` |
 
 ```clojure
 ;; Clojure
 (nth [1 2] 5)          ;=> IndexOutOfBoundsException
+(nth [1 2] -1)         ;=> IndexOutOfBoundsException
 (subvec [1 2 3] 0 9)   ;=> IndexOutOfBoundsException
 (subvec [1 2 3] -1)    ;=> IndexOutOfBoundsException
 (pop [])               ;=> IllegalStateException
 
 ;; PTC-Lisp
 (nth [1 2] 5)          ;=> nil
+(nth [1 2] -1)         ;=> nil
 (subvec [1 2 3] 0 9)   ;=> [1 2 3]
 (subvec [1 2 3] -1)    ;=> [1 2 3]
 (pop [])               ;=> nil
