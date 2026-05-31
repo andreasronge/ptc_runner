@@ -515,7 +515,7 @@
     "symbol": "butlast",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    "notes": "nil, empty, and singleton sequential/string inputs return nil (Clojure empty-seq punning). BUG GAP-S130: character literals are treated as one-character strings instead of raising"
   },
   {
     "status": "not_relevant",
@@ -1257,7 +1257,7 @@
     "symbol": "ffirst",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+    "notes": "nil input returns nil, matching Clojure"
   },
   {
     "status": "not_relevant",
@@ -1376,7 +1376,7 @@
     "symbol": "fnext",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+    "notes": "nil input returns nil, matching Clojure"
   },
   {
     "status": "supported",
@@ -1831,7 +1831,7 @@
     "symbol": "last",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+    "notes": "nil input returns nil, matching Clojure. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
   },
   {
     "status": "not_relevant",
@@ -2153,7 +2153,7 @@
     "symbol": "nfirst",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+    "notes": "nil input returns nil, matching Clojure"
   },
   {
     "status": "supported",
@@ -2167,7 +2167,7 @@
     "symbol": "nnext",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S48: nil input currently raises instead of returning nil"
+    "notes": "nil input returns nil, matching Clojure"
   },
   {
     "status": "supported",
@@ -3224,7 +3224,7 @@
     "symbol": "take-last",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil"
+    "notes": "nil input returns nil, matching Clojure. BUG GAP-S32: negative count returns an empty vector instead of nil"
   },
   {
     "status": "not_relevant",

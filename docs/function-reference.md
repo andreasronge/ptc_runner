@@ -120,7 +120,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `avg-by` * | `(avg-by key coll)` | Average field values |
 | `boolean` | `(boolean ...)` |  |
 | `boolean?` | `(boolean? ...)` |  |
-| `butlast` | `(butlast coll)` | All but last (empty list if none) |
+| `butlast` | `(butlast coll)` | All but last (nil if none) |
 | `char?` | `(char? ...)` |  |
 | `coll?` | `(coll? ...)` |  |
 | `combinations` * | `(combinations coll n)` | Generate all n-combinations |

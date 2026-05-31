@@ -452,7 +452,7 @@
       status: :supported,
       description: "Returns all but last item",
       notes:
-        "BUG GAP-S48: nil, empty, and singleton sequential/string inputs currently return an empty vector instead of nil. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+        "nil, empty, and singleton sequential/string inputs return nil (Clojure empty-seq punning). BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "byte",
@@ -1094,7 +1094,7 @@
       name: "ffirst",
       status: :supported,
       description: "First of first item",
-      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+      notes: "nil input returns nil, matching Clojure"
     },
     %{
       name: "file-seq",
@@ -1202,7 +1202,7 @@
       name: "fnext",
       status: :supported,
       description: "First of next item",
-      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+      notes: "nil input returns nil, matching Clojure"
     },
     %{
       name: "fnil",
@@ -1583,7 +1583,7 @@
       status: :supported,
       description: "Returns last item",
       notes:
-        "BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+        "nil input returns nil, matching Clojure. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "lazy-cat",
@@ -1865,14 +1865,14 @@
       name: "nfirst",
       status: :supported,
       description: "Next of first item",
-      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+      notes: "nil input returns nil, matching Clojure"
     },
     %{name: "nil?", status: :supported, description: "Returns true if nil", notes: ""},
     %{
       name: "nnext",
       status: :supported,
       description: "Next of next item",
-      notes: "BUG GAP-S48: nil input currently raises instead of returning nil"
+      notes: "nil input returns nil, matching Clojure"
     },
     %{name: "not", status: :supported, description: "Logical complement", notes: ""},
     %{
@@ -2782,7 +2782,7 @@
       status: :supported,
       description: "Returns last n items",
       notes:
-        "BUG GAP-S32: negative count returns an empty vector instead of nil. BUG GAP-S48: nil input returns an empty vector instead of nil"
+        "nil input returns nil, matching Clojure. BUG GAP-S32: negative count returns an empty vector instead of nil"
     },
     %{
       name: "take-nth",

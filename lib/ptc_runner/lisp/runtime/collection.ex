@@ -251,6 +251,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def second(coll) when is_list(coll), do: Enum.at(coll, 1)
   def second(coll) when is_binary(coll), do: String.at(coll, 1)
 
+  def last(nil), do: nil
   def last(coll) when is_list(coll), do: List.last(coll)
   def last(coll) when is_binary(coll), do: String.at(coll, -1)
 
@@ -280,12 +281,18 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def rest(coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), 1)
 
   # butlast - all but last element (empty list for empty/single-element collections)
-  def butlast(nil), do: []
-  def butlast(coll) when is_list(coll), do: Enum.drop(coll, -1)
-  def butlast(coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), -1)
+  # Clojure's butlast returns nil (not an empty seq) when the result is empty,
+  # i.e. for nil, empty, or single-element input (GAP-S48).
+  def butlast(nil), do: nil
+  def butlast(coll) when is_list(coll), do: empty_seq_to_nil(Enum.drop(coll, -1))
+
+  def butlast(coll) when is_binary(coll),
+    do: empty_seq_to_nil(Enum.drop(Normalize.graphemes(coll), -1))
 
   # take-last - returns last n items (n <= 0 returns [])
-  def take_last(_n, nil), do: []
+  # Clojure's take-last returns nil for nil input (GAP-S48). Non-positive count
+  # keeps returning [] (GAP-S32 is tracked separately).
+  def take_last(_n, nil), do: nil
   def take_last(n, _coll) when n <= 0, do: []
   def take_last(n, coll) when is_list(coll), do: Enum.take(coll, -n)
   def take_last(n, coll) when is_binary(coll), do: Enum.take(Normalize.graphemes(coll), -n)
@@ -327,11 +334,20 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     end
   end
 
-  # Composed accessors for nested collections
+  # Composed accessors for nested collections. nil input returns nil (GAP-S48),
+  # matching Clojure and first/next on nil.
+  def ffirst(nil), do: nil
   def ffirst(coll) when is_list(coll), do: first(first(coll))
+  def fnext(nil), do: nil
   def fnext(coll) when is_list(coll), do: first(next(coll))
+  def nfirst(nil), do: nil
   def nfirst(coll) when is_list(coll), do: next(first(coll))
+  def nnext(nil), do: nil
   def nnext(coll) when is_list(coll), do: next(next(coll))
+
+  # Clojure seq punning: an empty result from a seq-returning helper is nil.
+  defp empty_seq_to_nil([]), do: nil
+  defp empty_seq_to_nil(seq), do: seq
 
   # ============================================================
   # Positional slice
