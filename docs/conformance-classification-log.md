@@ -85,11 +85,11 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
-## GAP-S23 — `select-keys` with nil / string keyseq  ·  PENDING USER DECISION
+## GAP-S23 — `select-keys` with nil / string keyseq  ·  committed (+ DIV-46)
 
 - **Classification:** BUG (nil sub-case) + **DIV (new DIV-46)** (string sub-case).
   Started as **work-size D** (string sub-case classification uncertain) →
-  surfaced to the user for a decision rather than coding.
+  surfaced to the user, who approved "proceed", then coded.
 - **Work size:** B (once the D decision is made).
 - **Spec basis:**
   - Rule 1 / signal-value policy: a nil keyseq is bad *external input*; should
@@ -103,6 +103,8 @@ single source of truth so notes don't get lost in conversation transcripts.
     canonical `Normalize.to_seq/1` coercion is the in-idiom fix.
 - **Risk:** shared (coercion contract of `select_keys/2`; reuses
   `Normalize.to_seq`).
-- **Codex review:** yes (B + introduces DIV-46).
-- **Status:** not coded — awaiting user decision (proceed / adjust / pick
-  another GAP).
+- **Codex review:** yes — clean (caught and fixed a map-keyseq path-leak
+  regression mid-review: maps are not routed through `to_seq`, so their entries
+  stay non-matching `{k,v}` tuples).
+- **Status:** committed (`03548673`). nil → `{}` (BUG fixed); string keyseq →
+  DIV-46; map keyseq → `{}` (pinned by `core/select-keys-map-keyseq-001`).
