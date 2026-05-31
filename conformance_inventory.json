@@ -305,7 +305,7 @@
     "symbol": "assoc-in",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key"
+    "notes": "An empty or nil path associates the value at the nil key, matching Clojure's recursive assoc-in definition"
   },
   {
     "status": "supported",
@@ -697,7 +697,7 @@
     "symbol": "cond",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S112: zero-clause cond raises instead of returning nil"
+    "notes": "The zero-clause form returns nil, matching Clojure"
   },
   {
     "status": "supported",
@@ -725,7 +725,7 @@
     "symbol": "conj",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
+    "notes": "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. The zero-arity form returns an empty vector (Clojure's conj identity). BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
   },
   {
     "status": "not_relevant",
@@ -753,7 +753,7 @@
     "symbol": "contains?",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
+    "notes": "DIV-27 for sequential collections and map entries; returns false for a nil collection (matching Clojure); BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
   },
   {
     "status": "supported",
@@ -1474,7 +1474,7 @@
     "symbol": "get-in",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup; BUG GAP-S144: nil paths return nil instead of the root value"
+    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure"
   },
   {
     "status": "not_relevant",
@@ -3511,7 +3511,7 @@
     "symbol": "update-in",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
+    "notes": "An empty or nil path updates the value at the nil key, matching Clojure's recursive update-in definition; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
   },
   {
     "status": "supported",
@@ -4246,63 +4246,63 @@
     "symbol": ".contains",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
   },
   {
     "status": "supported",
     "symbol": ".indexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".lastIndexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".length",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".substring",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".toLowerCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".toUpperCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
     "symbol": ".startsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
   },
   {
     "status": "supported",
     "symbol": ".endsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J16: Character arguments are accepted instead of raising. BUG GAP-J17: Character receivers are accepted instead of raising"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
   },
   {
     "status": "candidate",
