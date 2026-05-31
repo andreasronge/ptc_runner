@@ -1776,14 +1776,14 @@
       status: :supported,
       description: "Merges maps",
       notes:
-        "BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected"
+        "BUG GAP-S54: zero-arity and single nil forms return an empty map instead of nil; A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected. BUG GAP-S100: direct vector map-entry sources are rejected"
     },
     %{
       name: "merge-with",
       status: :supported,
       description: "Merges maps with combining function",
       notes:
-        "BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. BUG GAP-S146: one-collection non-map forms are rejected instead of returning the collection. BUG GAP-S90: vector targets are rejected"
+        "BUG GAP-S54: no-map and single nil forms return an empty map instead of nil. A single non-map collection is returned unchanged (Clojure semantics). BUG GAP-S90: vector targets are rejected"
     },
     %{
       name: "meta",

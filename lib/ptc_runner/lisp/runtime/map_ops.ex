@@ -282,11 +282,19 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   # Keep the 2-arg version for direct calls
   def dissoc(m, k), do: Map.delete(m, k)
+  # A single truthy argument is returned unchanged — Clojure's (merge x) has
+  # nothing to merge, so it returns x as-is regardless of type (e.g.
+  # (merge "ab") => "ab"). Clojure only proceeds when some arg is truthy, so a
+  # single falsey arg (nil/false) falls through to the reduce and yields
+  # GAP-S54's empty map rather than raising.
+  def merge_variadic([single]) when single not in [nil, false], do: single
   def merge_variadic(args), do: Enum.reduce(args, %{}, &merge(&2, &1))
 
-  def merge(nil, nil), do: Map.merge(%{}, %{})
-  def merge(nil, m), do: Map.merge(%{}, m)
-  def merge(m, nil), do: Map.merge(m, %{})
+  # Falsey args (nil/false) carry no map to merge, so they are skipped — a
+  # single falsey arg yields GAP-S54's empty map rather than raising.
+  def merge(a, b) when a in [nil, false] and b in [nil, false], do: %{}
+  def merge(a, b) when a in [nil, false], do: Map.merge(%{}, b)
+  def merge(a, b) when b in [nil, false], do: Map.merge(a, %{})
   def merge(m1, m2), do: Map.merge(m1, m2)
 
   def select_keys(m, ks) do
@@ -393,10 +401,17 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   def merge_with_variadic([_f]), do: %{}
 
+  # A single truthy collection is returned unchanged (Clojure's
+  # (merge-with f x) => x), so non-map single arguments do not raise. A single
+  # falsey arg (nil/false) falls through and is normalized to the empty map.
+  # Multi-collection non-map arguments are rejected earlier by the :rest_min2
+  # arg-spec, matching Clojure.
+  def merge_with_variadic([_f, single]) when single not in [nil, false], do: single
+
   def merge_with_variadic([f | maps]) do
     maps
     |> Enum.map(fn
-      nil -> %{}
+      falsey when falsey in [nil, false] -> %{}
       m -> m
     end)
     |> Enum.reduce(%{}, fn m, acc ->

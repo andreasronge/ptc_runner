@@ -150,8 +150,14 @@ defmodule PtcRunner.Lisp.Env do
 
   defp wrap_builtin_binding(other), do: other
 
-  defp args_spec(:merge), do: {:rest, :map_or_nil}
-  defp args_spec(:"merge-with"), do: {:min, 1, [:callable], {:rest, :map_or_nil}}
+  # A single collection is returned unchanged (Clojure's one-arg identity,
+  # GAP-S146), so only validate as maps once 2+ collections are supplied.
+  defp args_spec(:merge), do: {:rest_min2, :map_or_nil}
+  # A single collection is returned unchanged (Clojure's one-arg identity,
+  # GAP-S146), so the maps are validated only once 2+ are supplied; a
+  # multi-collection non-map arg then fails this spec with the canonical
+  # "expected map" type error.
+  defp args_spec(:"merge-with"), do: {:min, 1, [:callable], {:rest_min2, :map_or_nil}}
 
   defp args_spec(:get),
     do: {:arity, %{2 => [:associative_or_nil, :any], 3 => [:associative_or_nil, :any, :any]}}

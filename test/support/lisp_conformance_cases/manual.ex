@@ -1414,37 +1414,37 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S54",
         "Clojure merge-with with a single nil map returns nil; PTC-Lisp currently returns an empty map."
       ),
-      bug_case(
-        "core/merge-single-string-bug-001",
+      regression_case(
+        "core/merge-single-string-001",
         "clojure.core",
         ["merge"],
         ~S|(merge "ab")|,
-        "GAP-S146",
-        "Clojure merge with one supplied collection returns that collection unchanged; PTC-Lisp currently rejects strings."
+        ["GAP-S146"],
+        [:collection]
       ),
-      bug_case(
-        "core/merge-single-vector-bug-001",
+      regression_case(
+        "core/merge-single-vector-001",
         "clojure.core",
         ["merge"],
         "(merge [1 2])",
-        "GAP-S146",
-        "Clojure merge with one supplied collection returns that collection unchanged; PTC-Lisp currently rejects vectors."
+        ["GAP-S146"],
+        [:collection]
       ),
-      bug_case(
-        "core/merge-with-single-string-bug-001",
+      regression_case(
+        "core/merge-with-single-string-001",
         "clojure.core",
         ["merge-with"],
         ~S|(merge-with + "ab")|,
-        "GAP-S146",
-        "Clojure merge-with with one supplied collection returns that collection unchanged; PTC-Lisp currently rejects strings."
+        ["GAP-S146"],
+        [:collection]
       ),
-      bug_case(
-        "core/merge-with-single-vector-bug-001",
+      regression_case(
+        "core/merge-with-single-vector-001",
         "clojure.core",
         ["merge-with"],
         "(merge-with + [1 2])",
-        "GAP-S146",
-        "Clojure merge-with with one supplied collection returns that collection unchanged; PTC-Lisp currently rejects vectors."
+        ["GAP-S146"],
+        [:collection]
       ),
       bug_case(
         "core/merge-vector-target-bug-001",

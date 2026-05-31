@@ -73,15 +73,28 @@ defmodule PtcRunner.Lisp.Runtime.Args do
     |> Enum.each(fn {arg, index} -> validate_arg!(name, index, spec, arg, args) end)
   end
 
-  defp validate_shape!(name, {:min, min, fixed_specs, {:rest, rest_spec}}, args) do
+  # Like `{:rest, spec}` but only validates when at least two args are present.
+  # A single argument is exempt — used for variadic helpers whose one-arg form
+  # is an identity that returns the argument unchanged (e.g. merge, GAP-S146).
+  defp validate_shape!(_name, {:rest_min2, _spec}, args) when length(args) < 2, do: :ok
+
+  defp validate_shape!(name, {:rest_min2, spec}, args) do
+    validate_shape!(name, {:rest, spec}, args)
+  end
+
+  defp validate_shape!(name, {:min, min, fixed_specs, {rest_tag, rest_spec}}, args)
+       when rest_tag in [:rest, :rest_min2] do
     if length(args) >= min do
       {fixed, rest} = Enum.split(args, length(fixed_specs))
 
       validate_list!(name, fixed_specs, fixed, args)
 
-      rest
-      |> Enum.with_index(length(fixed_specs) + 1)
-      |> Enum.each(fn {arg, index} -> validate_arg!(name, index, rest_spec, arg, args) end)
+      # `:rest_min2` exempts a single rest arg (the merge-with identity form).
+      unless rest_tag == :rest_min2 and length(rest) < 2 do
+        rest
+        |> Enum.with_index(length(fixed_specs) + 1)
+        |> Enum.each(fn {arg, index} -> validate_arg!(name, index, rest_spec, arg, args) end)
+      end
     else
       :ok
     end

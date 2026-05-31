@@ -2434,8 +2434,8 @@ are supplied explicitly; only the zero-map arity differs.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/merge-single-string-bug-001`, `core/merge-single-vector-bug-001`, `core/merge-with-single-string-bug-001`, `core/merge-with-single-vector-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/merge-single-string-001`, `core/merge-single-vector-001`, `core/merge-with-single-string-001`, `core/merge-with-single-vector-001` |
 
 ```clojure
 ;; Clojure
@@ -2444,18 +2444,20 @@ are supplied explicitly; only the zero-map arity differs.
 (merge-with + "ab") ;=> "ab"
 (merge-with + [1 2]) ;=> [1 2]
 
-;; PTC-Lisp current behavior
-(merge "ab")        ;=> type_error
-(merge [1 2])       ;=> type_error
-(merge-with + "ab") ;=> type_error
-(merge-with + [1 2]) ;=> type_error
+;; PTC-Lisp (fixed)
+(merge "ab")        ;=> "ab"
+(merge [1 2])       ;=> [1 2]
+(merge-with + "ab") ;=> "ab"
+(merge-with + [1 2]) ;=> [1 2]
 ```
 
-**Decision:** BUG. `merge` and `merge-with` are supported Clojure-named
-helpers. With exactly one supplied collection, Clojure returns that value
-unchanged, so finite string and vector inputs do not exercise any lazy or host
-state surface. PTC-Lisp currently validates the single argument as a map before
-applying the one-collection identity behavior.
+**Fix:** `merge_variadic`/`merge_with_variadic` now return a single non-nil
+supplied collection unchanged (Clojure's one-argument identity, regardless of
+type). The `:merge`/`:merge-with` arg-specs use a new count-aware `:rest_min2`
+shape that validates the rest args as maps only once 2+ are supplied, so a
+single non-map is accepted while multi-collection non-map arguments still fail
+validation with the canonical "expected map" error (matching Clojure, which
+also raises). A single nil keeps the existing empty-map behavior (GAP-S54).
 
 ### GAP-S90: `merge`/`merge-with` reject vector targets
 
