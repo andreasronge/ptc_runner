@@ -3790,21 +3790,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S33",
         "Clojure treats a string final apply argument as seqable even with leading args; PTC-Lisp currently raises."
       ),
-      bug_case(
-        "core/apply-nil-function-bug-001",
+      regression_case(
+        "core/apply-nil-function-001",
         "clojure.core",
         ["apply"],
         "(apply nil [1])",
-        "GAP-S109",
-        "Clojure raises when apply's function position is nil; PTC-Lisp currently returns nil."
+        ["GAP-S109"],
+        [:hof]
       ),
-      bug_case(
-        "core/comp-nil-function-bug-001",
+      regression_case(
+        "core/comp-nil-function-001",
         "clojure.core",
         ["comp"],
         "((comp nil) 1)",
-        "GAP-S135",
-        "Clojure raises when a composed function is nil; PTC-Lisp currently returns nil."
+        ["GAP-S135"],
+        [:hof]
       ),
       bug_case(
         "core/bit-shift-left-negative-bug-001",

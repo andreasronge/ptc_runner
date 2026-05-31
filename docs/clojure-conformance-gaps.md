@@ -4098,41 +4098,43 @@ data and does not require laziness or host interop.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/apply-nil-function-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/apply-nil-function-001` |
 
 ```clojure
 ;; Clojure
 (apply nil [1])   ;=> NullPointerException
 
-;; PTC-Lisp current behavior
-(apply nil [1])   ;=> nil
+;; PTC-Lisp (fixed)
+(apply nil [1])   ;=> raises (nil is not callable)
 ```
 
-**Decision:** BUG. `apply` is a supported Clojure-named higher-order helper.
-Nil in function position is an invalid program in Clojure; returning nil
-silently converts a call error into plausible data.
+**Fix:** `Eval.Apply.do_apply_fun` now intercepts a `nil` function before the
+`is_atom/1` keyword-accessor clause (`nil` is an atom, so it was being treated
+as a keyword), returning `{:not_callable, nil}`. Calling nil as a function is
+bad program shape and raises (Design Philosophy rule 4). One change closes both
+this gap and GAP-S135 — `(nil x)`, `(apply nil ...)`, and `((comp nil) x)` all
+flow through this path.
 
 ### GAP-S135: `comp` with nil function position returns nil instead of raising
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/comp-nil-function-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/comp-nil-function-001` |
 
 ```clojure
 ;; Clojure
 ((comp nil) 1)   ;=> NullPointerException
 
-;; PTC-Lisp current behavior
-((comp nil) 1)   ;=> nil
+;; PTC-Lisp (fixed)
+((comp nil) 1)   ;=> raises (nil is not callable)
 ```
 
-**Decision:** BUG. `comp` is a supported Clojure-named higher-order helper.
-A nil composed function is invalid program structure. Adjacent helpers such as
-`map`, `filter`, `partial`, `complement`, and `update` already raise for nil
-function positions, so `comp` should not silently turn this into a nil result.
+**Fix:** Same change as GAP-S109 — `Eval.Apply.do_apply_fun` rejects a `nil`
+function position as `{:not_callable, nil}` rather than treating it as a keyword
+accessor. When the composed function is applied, the `nil` step raises.
 
 ### GAP-S34: 2-arity `keyword` namespace/name form is unsupported
 
