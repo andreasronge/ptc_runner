@@ -4366,8 +4366,8 @@ a new `wrap_body([])` clause analyzes an empty implicit-do body to nil. So
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/let-no-body-bug-001`, `core/loop-no-body-bug-001`, `core/fn-no-body-bug-001`, `core/defn-no-body-bug-001`, `core/when-let-no-body-bug-001`, `core/when-some-no-body-bug-001`, `core/when-first-no-body-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/let-no-body-001`, `core/loop-no-body-001`, `core/fn-no-body-001`, `core/defn-no-body-001`, `core/when-let-no-body-001`, `core/when-some-no-body-001`, `core/when-first-no-body-001` |
 
 ```clojure
 ;; Clojure
@@ -4379,19 +4379,21 @@ a new `wrap_body([])` clause analyzes an empty implicit-do body to nil. So
 (when-some [x false])      ;=> nil
 (when-first [x [1 2]])     ;=> nil
 
-;; PTC-Lisp current behavior
-(let [x 1])                ;=> invalid_arity
-(loop [x 1])               ;=> invalid_arity
-((fn [x]) 1)               ;=> invalid_arity
-(do (defn f [x]) (f 1))    ;=> invalid_arity
-(when-let [x 1])           ;=> invalid_arity
-(when-some [x false])      ;=> invalid_arity
-(when-first [x [1 2]])     ;=> invalid_arity
+;; PTC-Lisp (fixed)
+(let [x 1])                ;=> nil
+(loop [x 1])               ;=> nil
+((fn [x]) 1)               ;=> nil
+(do (defn f [x]) (f 1))    ;=> nil
+(when-let [x 1])           ;=> nil
+(when-some [x false])      ;=> nil
+(when-first [x [1 2]])     ;=> nil
 ```
 
-**Decision:** BUG. These supported binding/function forms have valid finite
-Clojure bodyless variants. Matching nil-returning behavior is more compatible
-and does not require exception semantics.
+**Fix:** The analyzers for `let`, `loop`, `fn`, `defn`, `when-let`,
+`when-some`, and `when-first` now accept zero body expressions (reusing the
+`wrap_body([])` → nil clause from GAP-S113). An empty body evaluates to nil
+while bindings/params are still established; a missing binding vector or
+condition still raises.
 
 ### GAP-S123: `cond->` and `cond->>` reject trailing unmatched tests
 

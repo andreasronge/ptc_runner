@@ -112,10 +112,9 @@ defmodule PtcRunner.Lisp.DefnTest do
       assert msg =~ "defn name must be a symbol"
     end
 
-    test "(defn name [params]) without body returns error" do
+    test "(defn name [params]) without body defines a nil-returning fn (GAP-S114)" do
       raw = {:list, [{:symbol, :defn}, {:symbol, :f}, {:vector, [{:symbol, :x}]}]}
-      assert {:error, {:invalid_arity, :defn, msg}} = Analyze.analyze(raw)
-      assert msg =~ "missing body"
+      assert {:ok, {:def, _name, {:fn, _params, nil}, _meta}} = Analyze.analyze(raw)
     end
 
     test "(defn name) without params and body returns error" do

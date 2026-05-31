@@ -30,37 +30,29 @@ defmodule PtcRunner.Lisp.Analyze.Definitions do
         [
           {:symbol, name},
           {:string, docstring},
-          {:vector, _} = params_ast,
-          first_body | rest_body
+          {:vector, _} = params_ast
+          | body_asts
         ],
         analyze_fn_params_fn,
         wrap_body_fn
       ) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, params} <- analyze_fn_params_fn.(params_ast),
          {:ok, body} <- wrap_body_fn.(body_asts, true, params) do
       {:ok, {:def, name, {:fn, params, body}, %{docstring: docstring}}}
     end
   end
 
-  # (defn name [params] body ...) - without docstring
+  # (defn name [params] body ...) - without docstring. An empty body is valid
+  # Clojure (the function returns nil), so no separate missing-body error.
   def analyze_defn(
-        [{:symbol, name}, {:vector, _} = params_ast, first_body | rest_body],
+        [{:symbol, name}, {:vector, _} = params_ast | body_asts],
         analyze_fn_params_fn,
         wrap_body_fn
       ) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, params} <- analyze_fn_params_fn.(params_ast),
          {:ok, body} <- wrap_body_fn.(body_asts, true, params) do
       {:ok, {:def, name, {:fn, params, body}, %{}}}
     end
-  end
-
-  # Error: (defn name [params]) - missing body
-  def analyze_defn([{:symbol, _name}, {:vector, _params}], _analyze_fn_params_fn, _wrap_body_fn) do
-    {:error, {:invalid_arity, :defn, "expected (defn name [params] body), missing body"}}
   end
 
   # Error: (defn name) - missing params and body

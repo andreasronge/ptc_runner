@@ -170,8 +170,8 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
       assert {:ok, %{return: 2}} = Lisp.run("(when-some [x 1] (def a x) (+ a 1))")
     end
 
-    test "error with missing body" do
-      assert {:error, _} = Lisp.run("(when-some [x 42])")
+    test "bodyless form returns nil (GAP-S114)" do
+      assert {:ok, %{return: nil}} = Lisp.run("(when-some [x 42])")
     end
   end
 
@@ -196,8 +196,8 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
       assert {:ok, %{return: 20}} = Lisp.run("(when-first [x [10]] (def a x) (* a 2))")
     end
 
-    test "error with missing body" do
-      assert {:error, _} = Lisp.run("(when-first [x [1 2 3]])")
+    test "bodyless form returns nil (GAP-S114)" do
+      assert {:ok, %{return: nil}} = Lisp.run("(when-first [x [1 2 3]])")
     end
 
     test "error with multiple bindings" do

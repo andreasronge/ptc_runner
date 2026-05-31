@@ -865,7 +865,7 @@
     "symbol": "defn",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+    "notes": "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
   },
   {
     "status": "not_relevant",
@@ -1362,7 +1362,7 @@
     "symbol": "fn",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+    "notes": "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
   },
   {
     "status": "supported",
@@ -1852,7 +1852,7 @@
     "symbol": "let",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
+    "notes": "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
   },
   {
     "status": "not_relevant",
@@ -1950,7 +1950,7 @@
     "symbol": "loop",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S114: bodyless loop raises instead of returning nil"
+    "notes": "Bodyless form returns nil, matching Clojure"
   },
   {
     "status": "not_relevant",
@@ -3637,14 +3637,14 @@
     "symbol": "when-first",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+    "notes": "BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
   },
   {
     "status": "supported",
     "symbol": "when-let",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
   },
   {
     "status": "supported",
@@ -3658,7 +3658,7 @@
     "symbol": "when-some",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+    "notes": "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
   },
   {
     "status": "not_relevant",
