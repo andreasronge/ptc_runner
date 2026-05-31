@@ -290,12 +290,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     do: empty_seq_to_nil(Enum.drop(Normalize.graphemes(coll), -1))
 
   # take-last - returns last n items (n <= 0 returns [])
-  # Clojure's take-last returns nil for nil input (GAP-S48). Non-positive count
-  # keeps returning [] (GAP-S32 is tracked separately).
+  # Clojure's take-last uses seq punning: nil input or an empty result is nil,
+  # not [] (GAP-S48) — consistent with the butlast sibling. Non-positive count
+  # keeps returning [] (GAP-S32 is tracked separately). The map clause delegates
+  # to the list clause, so empty_seq_to_nil covers maps too.
   def take_last(_n, nil), do: nil
   def take_last(n, _coll) when n <= 0, do: []
-  def take_last(n, coll) when is_list(coll), do: Enum.take(coll, -n)
-  def take_last(n, coll) when is_binary(coll), do: Enum.take(Normalize.graphemes(coll), -n)
+  def take_last(n, coll) when is_list(coll), do: empty_seq_to_nil(Enum.take(coll, -n))
+
+  def take_last(n, coll) when is_binary(coll),
+    do: empty_seq_to_nil(Enum.take(Normalize.graphemes(coll), -n))
 
   def take_last(n, coll) when is_map(coll) and not is_struct(coll),
     do: take_last(n, Normalize.to_seq(coll))

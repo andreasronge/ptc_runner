@@ -5129,19 +5129,21 @@ results tie for the selected extremum.
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | **fixed** |
-| **Source** | Manual conformance cases `core/last-nil-001`, `core/butlast-nil-001`, `core/butlast-empty-001`, `core/butlast-singleton-001`, `core/butlast-empty-string-001`, `core/butlast-singleton-string-001`, `core/take-last-nil-001`, `core/ffirst-nil-001`, `core/fnext-nil-001`, `core/nfirst-nil-001`, `core/nnext-nil-001` |
+| **Source** | Manual conformance cases `core/last-nil-001`, `core/butlast-nil-001`, `core/butlast-empty-001`, `core/butlast-singleton-001`, `core/butlast-empty-string-001`, `core/butlast-singleton-string-001`, `core/take-last-nil-001`, `core/take-last-empty-001`, `core/ffirst-nil-001`, `core/fnext-nil-001`, `core/nfirst-nil-001`, `core/nnext-nil-001` |
 
 ```clojure
 ;; Clojure
 (last nil)        ;=> nil
 (butlast [1])     ;=> nil
 (take-last 2 nil) ;=> nil
+(take-last 2 [])  ;=> nil
 (ffirst nil)      ;=> nil
 
 ;; PTC-Lisp (fixed)
 (last nil)        ;=> nil
 (butlast [1])     ;=> nil
 (take-last 2 nil) ;=> nil
+(take-last 2 [])  ;=> nil
 (ffirst nil)      ;=> nil
 ```
 
@@ -5150,9 +5152,9 @@ input. Adjacent helpers such as `first`, `rest`, `next`, and `second` already
 match Clojure's nil behavior.
 
 **Fix:** Added nil clauses (`last`/`ffirst`/`fnext`/`nfirst`/`nnext` on nil =>
-nil, `butlast nil` => nil), and `butlast` now returns nil for any empty result
-(empty/singleton input) via Clojure's empty-seq punning; `take-last nil` => nil.
-Negative `take-last` counts still return `[]`
+nil, `butlast nil` => nil), and both `butlast` and `take-last` now return nil
+for any empty result (nil input, or an empty/too-short collection) via Clojure's
+empty-seq punning. Non-positive `take-last` counts still return `[]`
 ([GAP-S32](#gap-s32-negative-counts-in-seq-slicing-helpers-produce-non-clojure-slices),
 tracked separately).
 

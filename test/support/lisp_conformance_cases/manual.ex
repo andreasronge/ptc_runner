@@ -4947,6 +4947,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:collection]
       ),
       regression_case(
+        "core/take-last-empty-001",
+        "clojure.core",
+        ["take-last"],
+        "(take-last 2 [])",
+        ["GAP-S48"],
+        [:collection]
+      ),
+      regression_case(
         "core/ffirst-nil-001",
         "clojure.core",
         ["ffirst"],
