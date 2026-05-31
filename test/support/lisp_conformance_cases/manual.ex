@@ -4198,13 +4198,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S72",
         "Clojure case accepts list constants as constant sets; PTC-Lisp currently rejects them as non-constant."
       ),
-      bug_case(
-        "core/cond-zero-clauses-bug-001",
+      regression_case(
+        "core/cond-zero-clauses-001",
         "clojure.core",
         ["cond"],
         "(cond)",
-        "GAP-S112",
-        "Clojure zero-clause cond returns nil; PTC-Lisp currently raises."
+        ["GAP-S112"],
+        [:control_flow]
       ),
       bug_case(
         "core/when-no-body-bug-001",

@@ -4324,19 +4324,20 @@ returning `nil` can mask missing dispatch cases as valid data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/cond-zero-clauses-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/cond-zero-clauses-001` |
 
 ```clojure
 ;; Clojure
 (cond)   ;=> nil
 
-;; PTC-Lisp current behavior
-(cond)   ;=> invalid_cond_form
+;; PTC-Lisp (fixed)
+(cond)   ;=> nil
 ```
 
-**Decision:** BUG. `cond` is marked supported, and Clojure's empty form is a
-small finite expression with a defined nil result.
+**Fix:** Removed the zero-clause error in `Conditionals.analyze_cond`; an empty
+`(cond)` now flows through the general path as an empty pair list with a nil
+default — the same nil a no-match `cond` yields.
 
 ### GAP-S113: Bodyless `when`/`when-not` raise instead of returning nil
 

@@ -98,10 +98,9 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalsTest do
       assert {:ok, {:if, {:var, :x}, 100, nil}} = Analyze.analyze(raw)
     end
 
-    test "cond empty fails" do
+    test "cond with no clauses analyzes to nil (GAP-S112)" do
       raw = {:list, [{:symbol, :cond}]}
-      assert {:error, {:invalid_cond_form, msg}} = Analyze.analyze(raw)
-      assert msg =~ "at least one"
+      assert {:ok, nil} = Analyze.analyze(raw)
     end
 
     test "cond with odd pairs fails" do
