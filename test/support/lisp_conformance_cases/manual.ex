@@ -3258,29 +3258,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S134",
         "Clojure distinct raises on direct map input; PTC-Lisp currently returns map entries."
       ),
-      bug_case(
-        "core/interleave-left-nil-bug-001",
+      regression_case(
+        "core/interleave-left-nil-001",
         "clojure.core",
         ["interleave"],
         "(interleave nil [1])",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20", "GAP-S98"],
+        [:collection]
       ),
-      bug_case(
-        "core/interleave-right-nil-bug-001",
+      regression_case(
+        "core/interleave-right-nil-001",
         "clojure.core",
         ["interleave"],
         "(interleave [1] nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20", "GAP-S98"],
+        [:collection]
       ),
-      bug_case(
-        "core/interleave-string-bug-001",
+      regression_case(
+        "core/interleave-string-001",
         "clojure.core",
         ["interleave"],
         ~S|(interleave "ab" [1 2])|,
-        "GAP-S98",
-        "Clojure interleave treats strings as seqable; PTC-Lisp currently rejects them."
+        ["GAP-S98"],
+        [:collection]
       ),
       regression_case(
         "core/interleave-one-coll-001",

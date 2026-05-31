@@ -159,11 +159,6 @@ defmodule PtcRunner.Lisp.Env do
   # "expected map" type error.
   defp args_spec(:"merge-with"), do: {:min, 1, [:callable], {:rest_min2, :map_or_nil}}
 
-  # interleave is variadic (0/1/n) over lists; non-list args (nil, strings,
-  # maps) are rejected here so GAP-S20/GAP-S98 and the direct-map divergence
-  # keep raising while the arity gap (GAP-S143) is fixed.
-  defp args_spec(:interleave), do: {:rest, :list}
-
   defp args_spec(:get),
     do: {:arity, %{2 => [:associative_or_nil, :any], 3 => [:associative_or_nil, :any, :any]}}
 

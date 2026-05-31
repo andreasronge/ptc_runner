@@ -1973,6 +1973,29 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "interleave (seqable inputs)" do
+    test "interleaves lists element-wise" do
+      assert {:ok, %Step{return: [1, 3, 2, 4]}} = Lisp.run(~S|(interleave [1 2] [3 4])|)
+    end
+
+    test "accepts strings as seqable, like interpose (GAP-S98)" do
+      assert {:ok, %Step{return: ["a", 1, "b", 2]}} = Lisp.run(~S|(interleave "ab" [1 2])|)
+      assert {:ok, %Step{return: ["a", "c", "b", "d"]}} = Lisp.run(~S|(interleave "ab" "cd")|)
+    end
+
+    test "treats nil as an empty seq, like interpose (GAP-S20)" do
+      assert {:ok, %Step{return: []}} = Lisp.run(~S|(interleave nil [1])|)
+      assert {:ok, %Step{return: []}} = Lisp.run(~S|(interleave [1] nil)|)
+    end
+
+    test "still rejects direct maps and sets (DIV-29)" do
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(~S|(interleave {:a 1} [2])|)
+
+      assert {:error, %Step{fail: %{reason: :type_error}}} =
+               Lisp.run(~S|(interleave #{1 2} [3 4])|)
+    end
+  end
+
   # ============================================================
   # reduce on various collection types
   # ============================================================
