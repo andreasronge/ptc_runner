@@ -4222,61 +4222,61 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S113"],
         [:control_flow]
       ),
-      bug_case(
-        "core/let-no-body-bug-001",
+      regression_case(
+        "core/let-no-body-001",
         "clojure.core",
         ["let"],
         "(let [x 1])",
-        "GAP-S114",
-        "Clojure bodyless let returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/loop-no-body-bug-001",
+      regression_case(
+        "core/loop-no-body-001",
         "clojure.core",
         ["loop"],
         "(loop [x 1])",
-        "GAP-S114",
-        "Clojure bodyless loop returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/fn-no-body-bug-001",
+      regression_case(
+        "core/fn-no-body-001",
         "clojure.core",
         ["fn"],
         "((fn [x]) 1)",
-        "GAP-S114",
-        "Clojure bodyless fn returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/defn-no-body-bug-001",
+      regression_case(
+        "core/defn-no-body-001",
         "clojure.core",
         ["defn"],
         "(do (defn f [x]) (f 1))",
-        "GAP-S114",
-        "Clojure bodyless defn creates a function returning nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/when-let-no-body-bug-001",
+      regression_case(
+        "core/when-let-no-body-001",
         "clojure.core",
         ["when-let"],
         "(when-let [x 1])",
-        "GAP-S114",
-        "Clojure bodyless when-let returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/when-some-no-body-bug-001",
+      regression_case(
+        "core/when-some-no-body-001",
         "clojure.core",
         ["when-some"],
         "(when-some [x false])",
-        "GAP-S114",
-        "Clojure bodyless when-some returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
-      bug_case(
-        "core/when-first-no-body-bug-001",
+      regression_case(
+        "core/when-first-no-body-001",
         "clojure.core",
         ["when-first"],
         "(when-first [x [1 2]])",
-        "GAP-S114",
-        "Clojure bodyless when-first returns nil; PTC-Lisp currently raises."
+        ["GAP-S114"],
+        [:control_flow]
       ),
       bug_case(
         "core/if-let-extra-binding-bug-001",

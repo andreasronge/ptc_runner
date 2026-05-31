@@ -760,7 +760,7 @@
       status: :supported,
       description: "Defines named function",
       notes:
-        "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+        "DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
     },
     %{
       name: "defn-",
@@ -1190,7 +1190,7 @@
       status: :supported,
       description: "Defines anonymous function",
       notes:
-        "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
+        "DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion"
     },
     %{
       name: "fn?",
@@ -1602,7 +1602,7 @@
       status: :supported,
       description: "Local variable bindings",
       notes:
-        "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
+        "BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion"
     },
     %{
       name: "letfn",
@@ -1686,7 +1686,7 @@
       name: "loop",
       status: :supported,
       description: "Loop with recur for tail recursion",
-      notes: "BUG GAP-S114: bodyless loop raises instead of returning nil"
+      notes: "Bodyless form returns nil, matching Clojure"
     },
     %{
       name: "macroexpand",
@@ -3134,14 +3134,14 @@
       status: :supported,
       description: "Evaluates body if seq non-empty",
       notes:
-        "BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+        "BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "when-let",
       status: :supported,
       description: "Binds if truthy, evaluates body",
       notes:
-        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "when-not",
@@ -3154,7 +3154,7 @@
       status: :supported,
       description: "Binds if not nil, evaluates body",
       notes:
-        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+        "DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "while",

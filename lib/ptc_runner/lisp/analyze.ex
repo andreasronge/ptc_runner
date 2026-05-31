@@ -512,9 +512,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: let
   # ============================================================
 
-  defp analyze_let([bindings_ast, first_body | rest_body], tail?) do
-    body_asts = [first_body | rest_body]
-
+  defp analyze_let([bindings_ast | body_asts], tail?) do
     with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
       body_asts = mark_shadowed_asts(body_asts, shadowed)
 
@@ -561,9 +559,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Special form: loop
   # ============================================================
 
-  defp analyze_loop([bindings_ast, first_body | rest_body], _tail?) do
-    body_asts = [first_body | rest_body]
-
+  defp analyze_loop([bindings_ast | body_asts], _tail?) do
     with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
       body_asts = mark_shadowed_asts(body_asts, shadowed)
 
@@ -674,10 +670,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   # Named fn: (fn name [params] body ...)
-  defp analyze_fn([{:symbol, name}, params_ast, first_body | rest_body])
+  defp analyze_fn([{:symbol, name}, params_ast | body_asts])
        when is_atom(name) or is_binary(name) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, params} <- analyze_fn_params(params_ast) do
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
@@ -689,9 +683,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # Anonymous fn: (fn [params] body ...)
-  defp analyze_fn([params_ast, first_body | rest_body]) do
-    body_asts = [first_body | rest_body]
-
+  defp analyze_fn([params_ast | body_asts]) do
     with {:ok, params} <- analyze_fn_params(params_ast) do
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)

@@ -145,13 +145,11 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   """
   # Desugar (when-let [x cond] body ...) to (let [x cond] (if x body nil))
   def analyze_when_let(
-        [{:vector, [name_ast, cond_ast]}, first_body | rest_body],
+        [{:vector, [name_ast, cond_ast]} | body_asts],
         tail?,
         analyze_fn,
         wrap_body_fn
       ) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
          {:ok, c} <- analyze_fn.(cond_ast, false),
          {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
@@ -233,14 +231,12 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   Unlike `when-let`, `when-some` only tests for nil — `false` binds successfully.
   """
   def analyze_when_some(
-        [{:vector, [name_ast, cond_ast]}, first_body | rest_body],
+        [{:vector, [name_ast, cond_ast]} | body_asts],
         tail?,
         analyze_fn,
         wrap_body_fn,
         mark_shadow_fn
       ) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
          {:ok, c} <- analyze_fn.(cond_ast, false) do
       body_asts = mark_shadow_fn.(name, body_asts)
@@ -286,14 +282,12 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   first element if the sequence is non-empty.
   """
   def analyze_when_first(
-        [{:vector, [name_ast, coll_ast]}, first_body | rest_body],
+        [{:vector, [name_ast, coll_ast]} | body_asts],
         tail?,
         analyze_fn,
         wrap_body_fn,
         mark_shadow_fn
       ) do
-    body_asts = [first_body | rest_body]
-
     with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
          {:ok, coll} <- analyze_fn.(coll_ast, false) do
       body_asts = mark_shadow_fn.(name, body_asts)

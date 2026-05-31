@@ -150,7 +150,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `defmacro` | ❌ not_relevant | Defines macro | macro system |
 | `defmethod` | ❌ not_relevant | Creates multimethod implementation | multimethods |
 | `defmulti` | ❌ not_relevant | Creates multimethod with dispatch function | multimethods |
-| `defn` | ✅ supported | Defines named function | DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S114: bodyless defn raises instead of returning nil from the function. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
+| `defn` | ✅ supported | Defines named function | DIV-15: multi-arity defn is intentionally unsupported. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
 | `defn-` | ❌ not_relevant | Defines private function | namespacing/metadata |
 | `defonce` | ✅ supported | Defines var only if not already defined | BUG GAP-S141: return value omits the user namespace |
 | `defprotocol` | ❌ not_relevant | Creates protocol with method signatures | protocols |
@@ -221,7 +221,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `float?` | ✅ supported | Returns true if Float | BUG GAP-S127: special float literals return false instead of true |
 | `floats` | ❌ not_relevant | Casts to float array | handles Java arrays |
 | `flush` | ❌ not_relevant | Flushes output writer | I/O operation |
-| `fn` | ✅ supported | Defines anonymous function | DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S114: bodyless fn raises instead of returning nil. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
+| `fn` | ✅ supported | Defines anonymous function | DIV-15: multi-arity fn is intentionally unsupported. BUG GAP-S39: vector destructuring :as patterns are unsupported in params. BUG GAP-S86: map destructuring :syms is unsupported in params. BUG GAP-S87: vector destructuring rejects string inputs in params. BUG GAP-S97: vector rest destructuring binds nil input rest as [] in params. BUG GAP-S118/GAP-S119: parameter destructuring misses associative vector sources and rest key/value coercion |
 | `fn?` | ✅ supported | Returns true if value is function |  |
 | `fnext` | ✅ supported | First of next item | BUG GAP-S48: nil input currently raises instead of returning nil |
 | `fnil` | ✅ supported | Returns function with nil defaults | BUG GAP-S42: two- and three-default arities are unsupported. BUG GAP-S71: keyword/map/set/vector callables are rejected in function position |
@@ -290,7 +290,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `last` | ✅ supported | Returns last item | BUG GAP-S48: nil input currently raises instead of returning nil. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `lazy-cat` | ❌ not_relevant | Lazy concatenation of expressions | relies on lazy sequences |
 | `lazy-seq` | ❌ not_relevant | Creates lazy sequence from expression | relies on lazy sequences |
-| `let` | ✅ supported | Local variable bindings | BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S114: bodyless let raises instead of returning nil. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion |
+| `let` | ✅ supported | Local variable bindings | BUG GAP-S39: vector destructuring :as patterns are unsupported, including after rest bindings. BUG GAP-S86: map destructuring :syms is unsupported. BUG GAP-S87: vector destructuring rejects string inputs. BUG GAP-S97: vector rest destructuring binds nil input rest as []. BUG GAP-S118/GAP-S119: map destructuring rejects associative vector sources and vector rest map destructuring misses key/value coercion |
 | `letfn` | ❌ not_relevant | Binds function names for mutual recursion | mutual recursion binding form is outside PTC-Lisp's small evaluator surface |
 | `line-seq` | ❌ not_relevant | Lazy seq of lines from reader | relies on lazy sequences and reader I/O |
 | `list` | ✅ supported | Alias for vector (PTC-Lisp is vector-first) | implemented as alias for vector |
@@ -304,7 +304,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `long` | ❌ not_relevant | Coerces to long | JVM primitive width coercion; use int for integer coercion |
 | `long-array` | ❌ not_relevant | Creates long Java array | Java interop/primitive array |
 | `longs` | ❌ not_relevant | Casts to long array | Java interop/primitive array |
-| `loop` | ✅ supported | Loop with recur for tail recursion | BUG GAP-S114: bodyless loop raises instead of returning nil |
+| `loop` | ✅ supported | Loop with recur for tail recursion | Bodyless form returns nil, matching Clojure |
 | `macroexpand` | ❌ not_relevant | Recursively expands macro | macro system |
 | `macroexpand-1` | ❌ not_relevant | Expands macro one level | macro system |
 | `make-array` | ❌ not_relevant | Creates Java array | Java interop/array creation |
@@ -545,10 +545,10 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `vreset!` | ❌ not_relevant | Sets volatile value | relies on mutable state |
 | `vswap!` | ❌ not_relevant | Updates volatile with function | involves mutable state (volatiles) |
 | `when` | ✅ supported | Evaluates body if test true | Bodyless form returns nil, matching Clojure |
-| `when-first` | ✅ supported | Evaluates body if seq non-empty | BUG GAP-S114: bodyless when-first raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
-| `when-let` | ✅ supported | Binds if truthy, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-let raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `when-first` | ✅ supported | Evaluates body if seq non-empty | BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `when-let` | ✅ supported | Binds if truthy, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `when-not` | ✅ supported | Evaluates body if test false | Bodyless form returns nil, matching Clojure |
-| `when-some` | ✅ supported | Binds if not nil, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S114: bodyless when-some raises instead of returning nil. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
+| `when-some` | ✅ supported | Binds if not nil, evaluates body | DIV-14: destructuring bindings are intentionally unsupported. BUG GAP-S145: extra binding-vector forms are rejected instead of ignored |
 | `while` | ❌ not_relevant | Repeats body while test true | imperative looping construct typically relying on side effects |
 | `with-bindings` | ❌ not_relevant | Executes body with thread-local bindings | relies on thread-local state which is not supported in the BEAM model for PTC-Lisp |
 | `with-in-str` | ❌ not_relevant | Evaluates body with string as input | relies on I/O streams |

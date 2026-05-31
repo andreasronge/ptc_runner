@@ -92,10 +92,9 @@ defmodule PtcRunner.Lisp.AnalyzeConditionalBindingsTest do
                Analyze.analyze(raw)
     end
 
-    test "error: when-let with wrong arity (missing body)" do
+    test "bodyless when-let analyzes successfully (GAP-S114)" do
       raw = {:list, [{:symbol, :"when-let"}, {:vector, [{:symbol, :x}, 1]}]}
-      assert {:error, {:invalid_arity, :"when-let", msg}} = Analyze.analyze(raw)
-      assert msg =~ "expected"
+      assert {:ok, _} = Analyze.analyze(raw)
     end
 
     test "error: when-let with multiple bindings" do
