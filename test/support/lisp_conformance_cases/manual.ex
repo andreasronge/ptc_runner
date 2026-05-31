@@ -2526,13 +2526,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S68"],
         [:collection]
       ),
-      bug_case(
-        "core/assoc-one-arity-bug-001",
+      regression_case(
+        "core/assoc-one-arity-001",
         "clojure.core",
         ["assoc"],
         "(assoc {})",
-        "GAP-S105",
-        "Clojure rejects one-arity assoc; PTC-Lisp currently returns the collection unchanged."
+        ["GAP-S105"],
+        [:collection]
       ),
       bug_case(
         "core/divide-float-zero-bug-001",

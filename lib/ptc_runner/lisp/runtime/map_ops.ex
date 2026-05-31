@@ -104,18 +104,22 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.assoc_variadic([%{}, :a, 1, :b, 2, :c, 3])
       %{a: 1, b: 2, c: 3}
   """
-  def assoc_variadic([nil | pairs]) when rem(length(pairs), 2) == 0 do
+  # `pairs != []` excludes the one-arity `(assoc m)` form: assoc requires at
+  # least one key/value pair, so a bare collection falls through to the
+  # raising clause below, matching Clojure's ArityException.
+  def assoc_variadic([nil | pairs]) when pairs != [] and rem(length(pairs), 2) == 0 do
     assoc_variadic([%{} | pairs])
   end
 
-  def assoc_variadic([m | pairs]) when is_map(m) and rem(length(pairs), 2) == 0 do
+  def assoc_variadic([m | pairs]) when is_map(m) and pairs != [] and rem(length(pairs), 2) == 0 do
     pairs
     |> Enum.chunk_every(2)
     |> Enum.reduce(m, fn [k, v], acc -> Map.put(acc, k, v) end)
   end
 
   # List support for assoc - Clojure's assoc works on vectors (index == length appends)
-  def assoc_variadic([l | pairs]) when is_list(l) and rem(length(pairs), 2) == 0 do
+  def assoc_variadic([l | pairs])
+      when is_list(l) and pairs != [] and rem(length(pairs), 2) == 0 do
     pairs
     |> Enum.chunk_every(2)
     |> Enum.reduce(l, fn [k, v], acc ->

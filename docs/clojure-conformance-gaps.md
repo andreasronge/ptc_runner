@@ -3489,20 +3489,21 @@ definition: `(assoc-in m [] v)` ≡ `(assoc m nil v)`. Shared with `GAP-S55`
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/assoc-one-arity-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/assoc-one-arity-001` |
 
 ```clojure
 ;; Clojure
 (assoc {})   ;=> ArityException
 
-;; PTC-Lisp current behavior
-(assoc {})   ;=> {}
+;; PTC-Lisp (fixed)
+(assoc {})   ;=> raises (assoc requires key/value pairs)
 ```
 
-**Decision:** BUG. `assoc` is a supported Clojure-named associative update
-helper. A one-arity call is an invalid program in Clojure, and returning the
-input collection silently hides the arity error.
+**Fix:** `assoc_variadic` now requires at least one key/value pair (`pairs != []`
+in the map/list/nil guards); a bare `(assoc m)` falls through to the raising
+clause. A one-arity call is bad program shape, so it raises rather than silently
+returning the unchanged collection (Design Philosophy rule 4).
 
 ### GAP-S67: `group-by` rejects string inputs
 

@@ -68,7 +68,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `as->` | ✅ supported | Binds name to expr, threads through forms | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `aset` | ❌ not_relevant | Sets value in Java array at index | performs mutable operations on Java arrays |
 | `assert` | ❌ not_relevant | Throws AssertionError if expr false | relies on exception handling/throwing |
-| `assoc` | ✅ supported | Returns map/vector with added key-value pairs | BUG GAP-S105: one-arity form returns the collection instead of raising |
+| `assoc` | ✅ supported | Returns map/vector with added key-value pairs | The one-arity form raises (assoc requires key/value pairs), matching Clojure |
 | `assoc!` | ❌ not_relevant | Sets value in transient collection | relies on transient collections (mutability) |
 | `assoc-in` | ✅ supported | Associates value in nested structure | An empty or nil path associates the value at the nil key, matching Clojure's recursive assoc-in definition |
 | `associative?` | ✅ supported | Returns true if coll implements Associative | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
