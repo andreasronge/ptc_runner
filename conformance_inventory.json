@@ -1726,7 +1726,7 @@
     "symbol": "interpose",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
+    "notes": "Strings are seqable (interposed as characters). DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
   },
   {
     "status": "supported",

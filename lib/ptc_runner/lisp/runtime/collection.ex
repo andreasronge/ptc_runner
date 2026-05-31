@@ -536,9 +536,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
       iex> PtcRunner.Lisp.Runtime.Collection.interpose(nil, [1, 2, 3])
       [1, nil, 2, nil, 3]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interpose(",", "ab")
+      ["a", ",", "b"]
   """
   def interpose(_sep, nil), do: []
   def interpose(sep, coll) when is_list(coll), do: Enum.intersperse(coll, sep)
+  # Strings are seqable (GAP-S60). Direct maps/sets stay rejected (DIV-29:
+  # positional ops require an explicit ordered view via seq/entries/keys/vals).
+  def interpose(sep, s) when is_binary(s), do: Enum.intersperse(Normalize.graphemes(s), sep)
 
   # ============================================================
   # Partition

@@ -3337,13 +3337,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S59",
         "Clojure reduce-kv supports empty vectors as indexed associative collections; PTC-Lisp currently requires a map."
       ),
-      bug_case(
-        "core/interpose-string-bug-001",
+      regression_case(
+        "core/interpose-string-001",
         "clojure.core",
         ["interpose"],
         ~S|(interpose "," "ab")|,
-        "GAP-S60",
-        "Clojure interpose treats strings as seqable; PTC-Lisp currently rejects them."
+        ["GAP-S60"],
+        [:collection]
+      ),
+      regression_case(
+        "core/interpose-empty-string-001",
+        "clojure.core",
+        ["interpose"],
+        ~S|(interpose "," "")|,
+        ["GAP-S60"],
+        [:collection]
       ),
       bug_case(
         "core/get-in-default-present-nil-bug-001",
