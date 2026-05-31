@@ -62,6 +62,28 @@ Tracked Clojure divergences live in
 [Clojure Conformance Gaps](clojure-conformance-gaps.md) under
 `DIV-*` entries.
 
+### Classifying a Divergence
+
+A divergence is filed by *area* — `GAP-S*` (semantics), `GAP-F*` (special form),
+`GAP-C*` (core fn), `GAP-J*` (Java method), or as a `DIV-*` entry when it is
+intentional — and given a *disposition*, recorded in
+[Clojure Conformance Gaps](clojure-conformance-gaps.md):
+
+- **BUG** — PTC-Lisp implements the form but is wrong: a silent wrong result, or
+  an error/rejection on a *supported, finite* form that Clojure (and the rules)
+  accept. Gets fixed; a `GAP-*` later judged intentional is renumbered `DIV-*`.
+- **DIV** — an intentional, rule-justified difference, kept as a `DIV-*` entry:
+  signal values where Clojure raises on recoverable *data* (rules 1, 4); eager-only
+  evaluation / no lazy or infinite seqs (rule 2); the Java type model (rule 3); and
+  PTC's value-model, determinism, and no-macros/`eval` choices.
+- **UNSUPPORTED** — a Clojure feature PTC has not implemented (an audit
+  *candidate*, e.g. `clojure.string/capitalize`); the conformance runner skips it
+  rather than running it wrong.
+- **UNKNOWN** — observed, not yet triaged.
+
+Correctly raising on a genuine *program* fault (`(+ 1 nil)`, wrong arity) is not a
+divergence at all — it is the intended behavior (rule 4).
+
 ### Non-Goals
 
 - General-purpose programming
