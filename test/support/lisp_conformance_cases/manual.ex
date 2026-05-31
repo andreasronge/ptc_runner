@@ -1550,21 +1550,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S58",
         "Clojure juxt forwards all call arguments to each function; PTC-Lisp currently supports only one argument."
       ),
-      bug_case(
-        "core/juxt-zero-arity-bug-001",
+      regression_case(
+        "core/juxt-zero-arity-001",
         "clojure.core",
         ["juxt"],
         "(juxt)",
-        "GAP-S110",
-        "Clojure rejects zero-arity juxt; PTC-Lisp currently returns a function."
+        ["GAP-S110"],
+        [:hof]
       ),
-      bug_case(
-        "core/juxt-zero-arity-call-bug-001",
+      regression_case(
+        "core/juxt-zero-arity-call-001",
         "clojure.core",
         ["juxt"],
         "((juxt) 1)",
-        "GAP-S110",
-        "Clojure rejects zero-arity juxt before a result function can be called; PTC-Lisp currently returns an empty vector."
+        ["GAP-S110"],
+        [:hof]
       ),
       bug_case(
         "core/parse-double-whitespace-bug-001",

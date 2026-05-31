@@ -1541,7 +1541,7 @@
       status: :supported,
       description: "Applies multiple functions, collects results",
       notes:
-        "BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position"
+        "BUG GAP-S58: resulting function currently supports only one call argument. Zero-arity juxt raises (requires at least one function), matching Clojure. BUG GAP-S71: map/set/vector callables are rejected in function position"
     },
     %{
       name: "keep",

@@ -280,7 +280,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `iterate` | ❌ not_relevant | Lazy seq of repeated function application | creates lazy sequences |
 | `iteration` | ❌ not_relevant | Reducible wrapper of iterator | wraps Java iterators |
 | `iterator-seq` | ❌ not_relevant | Lazy seq from Java Iterator | creates lazy sequences from Java iterators |
-| `juxt` | ✅ supported | Applies multiple functions, collects results | BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position |
+| `juxt` | ✅ supported | Applies multiple functions, collects results | BUG GAP-S58: resulting function currently supports only one call argument. Zero-arity juxt raises (requires at least one function), matching Clojure. BUG GAP-S71: map/set/vector callables are rejected in function position |
 | `keep` | ✅ supported | Keeps non-nil results of function | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `keep-indexed` | ✅ supported | Keeps non-nil results with index | BUG GAP-S71: map callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `key` | ✅ supported | Returns key of map entry | BUG GAP-S17: currently accepts plain vectors/list pairs as map entries |

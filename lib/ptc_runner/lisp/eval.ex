@@ -405,6 +405,12 @@ defmodule PtcRunner.Lisp.Eval do
   # Function combinator: juxt
   # ============================================================
 
+  # Defense in depth for direct CoreAST eval: juxt requires at least one
+  # function (also rejected at analysis time — see GAP-S110).
+  defp do_eval({:juxt, []}, %EvalContext{}) do
+    {:error, {:invalid_arity, :juxt, "expected (juxt f ...) with at least one function"}}
+  end
+
   defp do_eval({:juxt, func_asts}, %EvalContext{} = eval_ctx) do
     case eval_all(func_asts, eval_ctx) do
       {:ok, fns, eval_ctx2} ->
