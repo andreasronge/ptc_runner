@@ -1246,13 +1246,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S13",
         "Clojure vectors implement IFn; PTC-Lisp currently reports them as non-invokable."
       ),
-      bug_case(
-        "core/contains-nil-bug-001",
+      regression_case(
+        "core/contains-nil-001",
         "clojure.core",
         ["contains?"],
         "(contains? nil :a)",
-        "GAP-S14",
-        "Clojure contains? returns false for nil; PTC-Lisp currently raises."
+        ["GAP-S14"],
+        [:collection]
       ),
       bug_case(
         "core/replace-seq-bug-001",

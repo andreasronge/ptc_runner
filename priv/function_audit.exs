@@ -665,7 +665,7 @@
       status: :supported,
       description: "Returns true if key present in collection",
       notes:
-        "DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
+        "DIV-27 for sequential collections and map entries; returns false for a nil collection (matching Clojure); BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts"
     },
     %{
       name: "count",

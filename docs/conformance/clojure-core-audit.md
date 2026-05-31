@@ -134,7 +134,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `conj!` | ❌ not_relevant | Adds item to transient collection | operates on transient collections (mutable) |
 | `cons` | ✅ supported | Returns seq with item prepended | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `constantly` | ✅ supported | Returns function ignoring args, returning value |  |
-| `contains?` | ✅ supported | Returns true if key present in collection | DIV-27 for sequential collections and map entries; BUG GAP-S14 on nil; BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts |
+| `contains?` | ✅ supported | Returns true if key present in collection | DIV-27 for sequential collections and map entries; returns false for a nil collection (matching Clojure); BUG GAP-S35 on string indexes, including numeric indexes Clojure accepts |
 | `count` | ✅ supported | Returns number of items in collection | DIV-36: string counts use Unicode graphemes instead of JVM UTF-16 code units. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `counted?` | ✅ supported | Returns true if constant-time count | BUG GAP-S70: strings currently return true but Clojure returns false |
 | `create-ns` | ❌ not_relevant | Creates or returns namespace | requires namespace system |
