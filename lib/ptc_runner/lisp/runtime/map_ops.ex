@@ -149,7 +149,13 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
     end
   end
 
-  def assoc_in(m, path, v), do: FlexAccess.flex_put_in(m, path, v)
+  def assoc_in(m, path, v), do: FlexAccess.flex_put_in(m, normalize_in_path(path), v)
+
+  # Clojure's assoc-in/update-in treat an empty or nil path as the single
+  # nil-key path: `(assoc-in m [] v)` == `(assoc m nil v)`, and likewise for a
+  # nil path. Normalizing to `[nil]` reuses the ordinary single-key logic.
+  defp normalize_in_path(path) when path in [nil, []], do: [nil]
+  defp normalize_in_path(path), do: path
 
   @doc """
   Update a value in a map by applying a function.
@@ -221,21 +227,33 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_in_variadic([%{a: %{b: 1}}, [:a, :b], &Kernel.+/2, 5])
       %{a: %{b: 6}}
   """
-  def update_in_variadic([m, path, f]) do
-    FlexAccess.flex_update_in(m, path, fn old_val ->
-      apply_with_arity_check(f, [old_val], "update-in")
-    end)
+  def update_in_variadic([m, path, f]), do: do_update_in(m, path, f, [])
+  def update_in_variadic([m, path, f | extra_args]), do: do_update_in(m, path, f, extra_args)
+
+  def update_in(m, path, f), do: do_update_in(m, path, f, [])
+
+  # Clojure treats an empty/nil path as the single nil-key path:
+  # (update-in m [] f & args) == (assoc m nil (apply f (get m nil) args)).
+  # For a map root, read the old value STRICTLY at the nil key — flexible lookup
+  # would conflate nil with an empty-string key. nil and vector/list roots fall
+  # through to the [nil] flex path, which yields {nil (f nil)} for nil and raises
+  # for a vector (mirroring assoc's nil-index behavior).
+  defp do_update_in(m, path, f, extra_args)
+       when path in [nil, []] and is_map(m) and not is_struct(m) do
+    old_val = Map.get(m, nil)
+    new_val = apply_with_arity_check(f, [old_val | extra_args], "update-in")
+    Map.put(m, nil, new_val)
   end
 
-  def update_in_variadic([m, path, f | extra_args]) do
-    FlexAccess.flex_update_in(m, path, fn old_val ->
+  defp do_update_in(m, path, f, extra_args) when path in [nil, []] do
+    FlexAccess.flex_update_in(m, [nil], fn old_val ->
       apply_with_arity_check(f, [old_val | extra_args], "update-in")
     end)
   end
 
-  def update_in(m, path, f) do
+  defp do_update_in(m, path, f, extra_args) do
     FlexAccess.flex_update_in(m, path, fn old_val ->
-      apply_with_arity_check(f, [old_val], "update-in")
+      apply_with_arity_check(f, [old_val | extra_args], "update-in")
     end)
   end
 

@@ -117,6 +117,15 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
       assert result == %{x: 10}
     end
 
+    test "assoc_in with empty path associates at the nil key (GAP-S68)" do
+      assert Runtime.assoc_in(%{a: 1}, [], 2) == %{nil => 2, a: 1}
+      assert Runtime.assoc_in(%{}, [], 1) == %{nil => 1}
+    end
+
+    test "assoc_in with nil path associates at the nil key (GAP-S68)" do
+      assert Runtime.assoc_in(%{a: 1}, nil, 2) == %{nil => 2, a: 1}
+    end
+
     test "assoc_in with nil data creates from empty map" do
       result = Runtime.assoc_in(nil, [:a, :b], 42)
       assert result == %{a: %{b: 42}}
@@ -180,6 +189,25 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
       assert result == %{x: 15}
     end
 
+    test "update_in with empty/nil path updates the nil key (GAP-S55)" do
+      assert Runtime.update_in(%{a: 1}, [], fn _ -> 2 end) == %{nil => 2, a: 1}
+      assert Runtime.update_in(%{a: 1}, [], &Function.identity/1) == %{nil => nil, a: 1}
+      assert Runtime.update_in(%{a: 1}, nil, &Function.identity/1) == %{nil => nil, a: 1}
+    end
+
+    test "update_in empty path reads the nil key strictly, not an empty-string key (GAP-S55)" do
+      # The nil key is absent, so the updater must receive nil (not the ""-key value).
+      assert Runtime.update_in(%{"" => 1}, [], &Function.identity/1) == %{nil => nil, "" => 1}
+    end
+
+    test "update_in empty path on a nil root yields the nil key; a vector root raises (GAP-S55)" do
+      assert Runtime.update_in(nil, [], &Function.identity/1) == %{nil => nil}
+      # Clojure's (assoc [1 2] nil v) raises; a vector root must not become a map.
+      assert_raise FunctionClauseError, fn ->
+        Runtime.update_in([1, 2], [], &Function.identity/1)
+      end
+    end
+
     test "update_in with deeply nested path on empty map" do
       result =
         Runtime.update_in(%{}, [:a, :b, :c], fn v ->
@@ -231,9 +259,10 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
       assert result == %{x: %{y: %{z: 15}}}
     end
 
-    test "update_in on empty path applies function to entire data" do
-      result = Runtime.update_in(%{a: 1}, [], &Map.put(&1, :b, 2))
-      assert result == %{a: 1, b: 2}
+    test "update_in on empty path updates the nil key with the current nil value (GAP-S55)" do
+      # Clojure: (update-in m [] f) == (assoc m nil (f (get m nil))); (get m nil) is nil.
+      result = Runtime.update_in(%{a: 1}, [], fn old -> {:old, old} end)
+      assert result == %{nil => {:old, nil}, a: 1}
     end
   end
 
