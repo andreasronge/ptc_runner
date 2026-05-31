@@ -253,9 +253,9 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
   end
 
   describe "juxt function combinator" do
-    test "empty juxt" do
+    test "empty juxt is an arity error (GAP-S110)" do
       raw = {:list, [{:symbol, :juxt}]}
-      assert {:ok, {:juxt, []}} = Analyze.analyze(raw)
+      assert {:error, {:invalid_arity, :juxt, _}} = Analyze.analyze(raw)
     end
 
     test "single function juxt" do

@@ -273,11 +273,10 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert result == [1, 3]
     end
 
-    test "empty juxt returns empty vector" do
+    test "empty juxt raises (requires at least one function) (GAP-S110)" do
       source = "((juxt) {:a 1})"
 
-      {:ok, %{return: result, memory: _}} = Lisp.run(source)
-      assert result == []
+      assert {:error, %{fail: %{reason: :invalid_arity}}} = Lisp.run(source)
     end
   end
 

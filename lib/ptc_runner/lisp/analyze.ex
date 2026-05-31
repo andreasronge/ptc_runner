@@ -975,6 +975,12 @@ defmodule PtcRunner.Lisp.Analyze do
   # Function combinator: juxt
   # ============================================================
 
+  # Clojure's juxt requires at least one function; a zero-arity (juxt) is an
+  # arity error rather than a function that always returns [].
+  defp analyze_juxt([], _tail?) do
+    {:error, {:invalid_arity, :juxt, "expected (juxt f ...) with at least one function"}}
+  end
+
   defp analyze_juxt(args, _tail?) do
     with {:ok, fns} <- analyze_list(args) do
       {:ok, {:juxt, fns}}

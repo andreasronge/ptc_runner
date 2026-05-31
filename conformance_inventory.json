@@ -1782,7 +1782,7 @@
     "symbol": "juxt",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S58: resulting function currently supports only one call argument. BUG GAP-S110: zero-arity juxt returns a function instead of raising. BUG GAP-S71: map/set/vector callables are rejected in function position"
+    "notes": "BUG GAP-S58: resulting function currently supports only one call argument. Zero-arity juxt raises (requires at least one function), matching Clojure. BUG GAP-S71: map/set/vector callables are rejected in function position"
   },
   {
     "status": "supported",

@@ -2660,20 +2660,24 @@ already do for multi-argument calls.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/juxt-zero-arity-bug-001`, `core/juxt-zero-arity-call-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/juxt-zero-arity-001`, `core/juxt-zero-arity-call-001` |
 
 ```clojure
 ;; Clojure
 (juxt)   ;=> ArityException
 ((juxt) 1) ;=> ArityException
 
-;; PTC-Lisp current behavior
-(juxt)   ;=> function
-((juxt) 1) ;=> []
+;; PTC-Lisp (fixed)
+(juxt)   ;=> raises (requires at least one function)
+((juxt) 1) ;=> raises (the (juxt) form fails analysis)
 ```
 
-**Decision:** BUG. `juxt` is a supported Clojure-named higher-order helper.
+**Fix:** `analyze_juxt([])` now raises an arity error; `juxt` requires at least
+one function, so a zero-arity `(juxt)` is bad program shape rather than a
+function that always returns `[]` (Design Philosophy rule 4). Because the error
+is raised at analysis time, `((juxt) 1)` also fails (its `(juxt)` operand fails
+to analyze).
 The zero-arity constructor call is an invalid Clojure program, and returning a
 callable silently hides that arity error.
 

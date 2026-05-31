@@ -524,13 +524,12 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
   end
 
   describe "juxt function combinator" do
-    test "empty juxt returns function producing empty vector" do
+    test "empty juxt is an arity error, even via direct eval (GAP-S110)" do
       env = Env.initial()
       juxt_ast = {:juxt, []}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert is_function(fun, 1)
-      assert fun.("anything") == []
+      assert {:error, {:invalid_arity, :juxt, _}} =
+               Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "single keyword juxt" do
