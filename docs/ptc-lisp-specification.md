@@ -2806,7 +2806,7 @@ Typical usage involves filtering valid parses from potentially invalid input:
 | `every-pred` | `(every-pred p1 p2 ...)` | Returns a predicate true when all preds are satisfied (always boolean) |
 | `some-fn` | `(some-fn f1 f2 ...)` | Returns a function that returns the first truthy result from any fn |
 
-The `juxt` combinator creates a function that applies each of its argument functions to the same input and returns a vector containing all results. This is particularly useful for multi-criteria sorting and extracting multiple values at once.
+The `juxt` combinator creates a function that applies each of its argument functions to the same input and returns a vector containing all results. This is particularly useful for multi-criteria sorting and extracting multiple values at once. `juxt` requires at least one function — a zero-argument `(juxt)` is an arity error (GAP-S110), matching Clojure.
 
 ```clojure
 ;; Basic usage: extract multiple values from a map
@@ -2828,10 +2828,6 @@ The `juxt` combinator creates a function that applies each of its argument funct
 ;; Using builtin functions
 ((juxt first last) [1 2 3])
 ; => [1 3]
-
-;; Empty juxt returns empty vector
-((juxt) {:a 1})
-; => []
 ```
 
 **Comparison with explicit function:**
