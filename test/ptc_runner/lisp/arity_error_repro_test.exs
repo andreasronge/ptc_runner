@@ -50,12 +50,6 @@ defmodule PtcRunner.Lisp.ArityErrorReproTest do
       assert step.fail.reason == :arity_error
       assert step.fail.message == "arity error: / requires at least 1 argument, got 0"
     end
-
-    test "conj without args (variadic_nonempty)" do
-      {:error, step} = Lisp.run("(conj)")
-      assert step.fail.reason == :arity_error
-      assert step.fail.message == "arity error: conj requires at least 1 argument, got 0"
-    end
   end
 
   describe "LLM-generated code error scenario" do

@@ -3827,25 +3827,26 @@ behavior.
 entries for map `conj` inputs. Treating arbitrary two-item lists as entries
 silently accepts invalid program structure.
 
-### GAP-S106: Zero-arity `conj` raises instead of returning an empty list
+### GAP-S106: Zero-arity `conj` raises instead of returning an empty vector
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/conj-zero-arity-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/conj-zero-arity-001` |
 
 ```clojure
 ;; Clojure
-(conj)   ;=> ()
+(conj)   ;=> []   (empty vector, conj's identity)
 
-;; PTC-Lisp current behavior
-(conj)   ;=> arity_error
+;; PTC-Lisp (fixed)
+(conj)   ;=> []
 ```
 
-**Decision:** BUG. `conj` is a supported Clojure-named collection helper and
-its zero-arity form is a defined finite Clojure behavior. PTC-Lisp should not
-reject this valid form.
+**Fix:** Bound `conj` as a `:variadic` builtin with identity `[]`, so the
+zero-arity form returns an empty vector (Clojure's `conj` identity) while every
+other arity is unchanged. (The prior gap text said `()`; Clojure's `(conj)` is
+actually the empty vector `[]`.)
 
 ### GAP-S77: `tree-seq` over string roots recurses until heap limit
 

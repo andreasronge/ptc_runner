@@ -639,7 +639,7 @@
       status: :supported,
       description: "Returns collection with items added",
       notes:
-        "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
+        "BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. The zero-arity form returns an empty vector (Clojure's conj identity). BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics"
     },
     %{
       name: "conj!",
