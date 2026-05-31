@@ -1148,6 +1148,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(pmap + [1 2 3] [10 20])",
         ["GAP-S132"],
         [:parallel]
+      ),
+      regression_case(
+        "regression/gap-s132-pmap-keyword-multi-coll-001",
+        "clojure.core",
+        ["pmap"],
+        "(pmap :a [{:a 1} {:a 2}] [10 20])",
+        ["GAP-S132"],
+        [:parallel]
       )
     ]
   end

@@ -3540,18 +3540,20 @@ collection data.
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | **fixed** |
-| **Source** | Manual conformance cases `core/pmap-nil-001`, `core/pmap-string-001`, `core/pmap-multi-coll-001`, `core/pmap-multi-coll-truncate-001` |
+| **Source** | Manual conformance cases `core/pmap-nil-001`, `core/pmap-string-001`, `core/pmap-multi-coll-001`, `core/pmap-multi-coll-truncate-001`, `regression/gap-s132-pmap-keyword-multi-coll-001` |
 
 ```clojure
 ;; Clojure
 (pmap inc nil)          ;=> ()
 (pmap str "ab")         ;=> ("a" "b")
 (pmap + [1 2] [3 4])    ;=> (4 6)
+(pmap :a [{:a 1}] [99]) ;=> (1)
 
 ;; PTC-Lisp (fixed)
 (pmap inc nil)          ;=> ()
 (pmap str "ab")         ;=> ("a" "b")
 (pmap + [1 2] [3 4])    ;=> (4 6)
+(pmap :a [{:a 1}] [99]) ;=> (1)
 ```
 
 **Fix:** `pmap` now shares `map`'s finite seqable contract. The `{:pmap, …}`
@@ -3560,7 +3562,10 @@ through `Collection.Normalize.to_seq/1` (nil → `[]`, string → graphemes,
 map → `[k v]` pairs) and multiple collections are zipped element-wise,
 truncating to the shortest. Bounded parallel safety limits (per-worker heap,
 worker budget, shared deadline) are unchanged. The single-collection keyword
-accessor guard (`(pmap :k single-map)`) is preserved.
+accessor guard (`(pmap :k single-map)`) is preserved. A keyword accessor over
+multiple collections is kept un-converted so it dispatches as the 2-arg
+lookup-with-default (`(pmap :k maps defaults)`) — matching `map` and Clojure —
+instead of crashing on the strict arity-1 closure `value_to_erlang_fn` builds.
 
 ### GAP-S68: `assoc-in` empty or nil path does not update the nil key
 
