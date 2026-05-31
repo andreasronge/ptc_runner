@@ -258,7 +258,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Clojure's (nth nil idx) => nil for any integer index (GAP-S94); mirrors the
   # 3-arity nil clause and PTC's lenient out-of-range nth.
   def nth(nil, idx) when is_integer(idx), do: nil
+  # A negative index is out of range. PTC returns the nil signal (DIV-26)
+  # instead of Enum.at's read-from-the-end wrap — Clojure raises here, and
+  # silently returning the element from the end leaks unrelated data (GAP-S10).
+  # Consistent with the 3-arity nth's default and with positive out-of-range.
+  def nth(coll, idx) when is_list(coll) and is_integer(idx) and idx < 0, do: nil
   def nth(coll, idx) when is_list(coll), do: Enum.at(coll, idx)
+  def nth(coll, idx) when is_binary(coll) and is_integer(idx) and idx < 0, do: nil
   def nth(coll, idx) when is_binary(coll), do: String.at(coll, idx)
 
   # 3-arity `(nth coll idx not-found)`: returns the default when idx is out of

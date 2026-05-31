@@ -1954,6 +1954,25 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "nth (2-arity) out-of-range" do
+    test "returns the element for an in-range index" do
+      assert {:ok, %Step{return: 20}} = Lisp.run(~S|(nth [10 20 30] 1)|)
+      assert {:ok, %Step{return: "b"}} = Lisp.run(~S|(nth "abc" 1)|)
+    end
+
+    test "returns nil for a positive out-of-range index (DIV-26)" do
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(nth [10 20 30] 5)|)
+    end
+
+    test "returns nil for a negative index, not the element from the end (GAP-S10)" do
+      # Clojure raises IndexOutOfBoundsException; PTC treats a negative index as
+      # out of range and returns the nil signal (DIV-26), consistent with the
+      # 3-arity nth's default and with positive out-of-range access.
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(nth [10 20 30] -1)|)
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(nth "abc" -1)|)
+    end
+  end
+
   # ============================================================
   # reduce on various collection types
   # ============================================================

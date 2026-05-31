@@ -171,6 +171,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         nil,
         "Out-of-range collection access returns a signal value instead of raising."
       ),
+      div_case(
+        "core/nth-negative-div-001",
+        "clojure.core",
+        ["nth"],
+        "(nth [1 2] -1)",
+        "DIV-26",
+        nil,
+        "A negative (out-of-range) index returns the nil signal instead of raising (GAP-S10)."
+      ),
       c("core/predicate-001", "clojure.core", ["nil?"], "(nil? nil)", [:smoke]),
       c("core/predicate-002", "clojure.core", ["some?"], "(some? false)", [:truthiness]),
       c("core/predicate-003", "clojure.core", ["number?"], "(number? 1.5)", [:numeric]),
@@ -1145,14 +1154,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
 
   defp core_bug_cases do
     [
-      bug_case(
-        "core/nth-negative-bug-001",
-        "clojure.core",
-        ["nth"],
-        "(nth [1 2] -1)",
-        "GAP-S10",
-        "Negative nth indexes currently read from the end; they should not silently return data."
-      ),
       regression_case(
         "core/nth-default-001",
         "clojure.core",
