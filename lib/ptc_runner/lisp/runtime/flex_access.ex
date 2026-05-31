@@ -178,6 +178,8 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   Flexible nested key access: try both atom and string versions at each level.
   """
   def flex_get_in(data, []), do: data
+  # Clojure treats a nil path like an empty seq for lookup: it returns the root.
+  def flex_get_in(data, nil), do: data
   def flex_get_in(nil, _path), do: nil
 
   def flex_get_in(data, [key | rest]) when is_map(data) do

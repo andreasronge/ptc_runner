@@ -10,6 +10,13 @@ defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
       assert Runtime.flex_get_in(data, []) == data
     end
 
+    test "flex_get_in with nil path returns data, like an empty path (GAP-S144)" do
+      data = %{name: "Alice"}
+      assert Runtime.flex_get_in(data, nil) == data
+      assert Runtime.get_in(%{a: 1}, nil) == %{a: 1}
+      assert Runtime.get_in(%{a: 1}, nil, :default) == %{a: 1}
+    end
+
     test "flex_get_in with single key in atom-keyed map" do
       data = %{user: %{name: "Alice"}}
       assert Runtime.flex_get_in(data, [:user, :name]) == "Alice"
