@@ -843,6 +843,9 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
       {"core/dedupe-001", "dedupe", "(dedupe [1 1 2 1])", [:collection]},
       {"core/flatten-001", "flatten", "(flatten [1 [2 [3]]])", [:collection]},
       {"core/interleave-001", "interleave", "(interleave [1 2] [:a :b])", [:collection]},
+      {"core/interleave-zero-001", "interleave", "(interleave)", [:collection]},
+      {"core/interleave-three-001", "interleave", "(interleave [1 2] [3 4] [5 6])",
+       [:collection]},
       {"core/interpose-001", "interpose", ~S|(interpose "," ["a" "b" "c"])|, [:collection]},
       {"core/partition-001", "partition", "(partition 2 [1 2 3 4])", [:collection]},
       {"core/partition-all-001", "partition-all", "(partition-all 2 [1 2 3])", [:collection]},
@@ -3238,13 +3241,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S98",
         "Clojure interleave treats strings as seqable; PTC-Lisp currently rejects them."
       ),
-      bug_case(
-        "core/interleave-one-coll-bug-001",
+      regression_case(
+        "core/interleave-one-coll-001",
         "clojure.core",
         ["interleave"],
         "(interleave [1 2])",
-        "GAP-S143",
-        "Clojure interleave accepts a single collection and returns its seq; PTC-Lisp currently rejects unary arity."
+        ["GAP-S143"],
+        [:collection]
       ),
       bug_case(
         "core/map-multi-string-bug-001",

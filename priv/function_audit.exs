@@ -1478,7 +1478,7 @@
       status: :supported,
       description: "Interleaves items from collections",
       notes:
-        "BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. BUG GAP-S143: unary arity is rejected instead of returning the source seq. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
+        "Variadic (0/1/n arity) over lists. BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views."
     },
     %{
       name: "intern",

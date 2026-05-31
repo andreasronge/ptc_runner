@@ -1915,7 +1915,7 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
 | `into` | `(into to from)` | Pour from into to |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
-| `interleave` | `(interleave c1 c2)` | Interleave collections |
+| `interleave` | `(interleave c1 c2 ...)` | Interleave collections |
 | `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `zip` | `(zip c1 c2)` | Combine into pairs |
 | `zipmap` | `(zipmap keys vals)` | Create map from keys and values seqs |

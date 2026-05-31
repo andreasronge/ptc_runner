@@ -445,8 +445,32 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.zip_with(c1, c2, fn a, b -> [a, b] end)
   end
 
-  def interleave(c1, c2) when is_list(c1) and is_list(c2) do
-    Enum.zip(c1, c2) |> Enum.flat_map(fn {a, b} -> [a, b] end)
+  @doc """
+  Variadic `interleave` over lists (Clojure's 0/1/n arity).
+
+  Argument list-typing is enforced by the `:interleave` arg-spec, so every
+  element here is a list. Zero args yield `[]`; a single list is returned as
+  its own seq; multiple lists are interleaved, stopping at the shortest.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([])
+      []
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([[1, 2]])
+      [1, 2]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([[1, 2], [3, 4], [5, 6]])
+      [1, 3, 5, 2, 4, 6]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([[1, 2, 3], [4, 5]])
+      [1, 4, 2, 5]
+  """
+  def interleave_variadic([]), do: []
+  def interleave_variadic([single]) when is_list(single), do: single
+
+  def interleave_variadic(colls) when is_list(colls) do
+    colls |> Enum.zip() |> Enum.flat_map(&Tuple.to_list/1)
   end
 
   @doc """

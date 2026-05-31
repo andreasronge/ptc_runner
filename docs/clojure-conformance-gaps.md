@@ -1946,20 +1946,30 @@ neighboring PTC-Lisp sequence helpers such as `map`, `filter`, `partition`,
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/interleave-one-coll-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/interleave-one-coll-001` |
 
 ```clojure
 ;; Clojure
-(interleave [1 2])   ;=> (1 2)
+(interleave)                   ;=> ()
+(interleave [1 2])             ;=> (1 2)
+(interleave [1 2] [3 4] [5 6]) ;=> (1 3 5 2 4 6)
 
-;; PTC-Lisp current behavior
-(interleave [1 2])   ;=> arity_error
+;; PTC-Lisp (fixed)
+(interleave)                   ;=> []
+(interleave [1 2])             ;=> [1 2]
+(interleave [1 2] [3 4] [5 6]) ;=> [1 3 5 2 4 6]
 ```
 
-**Decision:** BUG. `interleave` is marked supported, and unary `interleave`
-is finite, pure Clojure behavior. PTC-Lisp should either match the Clojure
-arity or document a policy reason for rejecting it.
+**Decision:** BUG. `interleave` is marked supported, and Clojure's `interleave`
+is variadic (0/1/n arity), all finite, eager, and pure.
+
+**Fix:** Registered `interleave` as a `:collect` builtin over
+`interleave_variadic/1` (0 args → `[]`, one list → its seq, n lists →
+interleaved, stopping at the shortest). A new `{:rest, :list}` arg-spec keeps
+non-list inputs (nil, strings, maps) raising, so the adjacent open gaps
+GAP-S20, GAP-S98, and the direct-map divergence still reproduce while only the
+arity gap is closed.
 
 ### GAP-S102: Multi-collection `map` rejects string inputs
 
