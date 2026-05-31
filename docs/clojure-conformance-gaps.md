@@ -1861,8 +1861,8 @@ Clojure-compatible predicate behavior.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/take-nil-bug-001`, `core/drop-nil-bug-001`, `core/frequencies-nil-bug-001`, `core/frequencies-map-bug-001`, `core/flatten-nil-bug-001`, `core/distinct-nil-bug-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `core/reverse-nil-bug-001`, `core/sort-nil-input-bug-001` |
+| **Status** | **fixed** (nil input; `frequencies` on a direct *map* tracked separately) |
+| **Source** | Manual conformance cases `core/take-nil-001`, `core/drop-nil-001`, `core/frequencies-nil-001`, `core/frequencies-map-bug-001`, `core/flatten-nil-001`, `core/distinct-nil-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `core/reverse-nil-001`, `core/sort-nil-input-001` |
 
 ```clojure
 ;; Clojure
@@ -1877,17 +1877,17 @@ Clojure-compatible predicate behavior.
 (reverse nil)      ;=> ()
 (sort nil)         ;=> ()
 
-;; PTC-Lisp current behavior
-(take 2 nil)       ;=> type_error
-(drop 2 nil)       ;=> type_error
-(frequencies nil)  ;=> type_error
-(frequencies {:a 1}) ;=> type_error
-(flatten nil)      ;=> type_error
-(distinct nil)     ;=> type_error
-(interleave nil [1]);=> type_error
-(interleave [1] nil);=> type_error
-(reverse nil)      ;=> type_error
-(sort nil)         ;=> type_error
+;; PTC-Lisp (fixed)
+(take 2 nil)       ;=> []
+(drop 2 nil)       ;=> []
+(frequencies nil)  ;=> {}
+(frequencies {:a 1}) ;=> type_error   ; direct map still rejected (see below)
+(flatten nil)      ;=> []
+(distinct nil)     ;=> []
+(interleave nil [1]);=> []
+(interleave [1] nil);=> []
+(reverse nil)      ;=> []
+(sort nil)         ;=> []
 ```
 
 **Decision:** BUG. PTC-Lisp already handles `nil` as empty for adjacent
@@ -1895,11 +1895,15 @@ sequence helpers such as `map`, `filter`, `partition`, `split-at`, `into`, and
 `select-keys`. These functions should not be stricter without a documented
 design reason.
 
-**Partially fixed:** the `interleave` sub-cases (`core/interleave-left-nil-001`,
-`core/interleave-right-nil-001`) were closed alongside
-[GAP-S98](#gap-s98-interleave-rejects-string-inputs). The remaining helpers
-(`take`, `drop`, `frequencies`, `flatten`, `distinct`, `reverse`, `sort`) still
-reject `nil` and keep this gap open.
+**Fix:** Added `nil` clauses so `take`, `drop`, `flatten`, `distinct`,
+`reverse`, `sort` (both arities) return `[]` and `frequencies` returns `{}` for
+`nil` input — matching the already-nil-tolerant `map`/`filter`/`dedupe`/`sort-by`/
+`group-by`. The `interleave` sub-cases were closed alongside
+[GAP-S98](#gap-s98-interleave-rejects-string-inputs). Only `(frequencies
+{direct-map})` remains divergent (`core/frequencies-map-bug-001`): treating a
+direct map as a seq of entries is the separate map-seqable question also tracked
+for `distinct` in [GAP-S134](#gap-s134-distinct-accepts-direct-map-input-clojure-rejects),
+not a `nil` issue.
 
 ### GAP-S134: `distinct` accepts direct map input Clojure rejects
 

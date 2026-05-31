@@ -3170,13 +3170,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S101",
         "Clojure distinct? treats separated repeated NaN values as distinct; PTC-Lisp currently treats them as duplicates."
       ),
-      bug_case(
-        "core/take-nil-bug-001",
+      regression_case(
+        "core/take-nil-001",
         "clojure.core",
         ["take"],
         "(take 2 nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
       bug_case(
         "core/flatten-scalar-bug-001",
@@ -3210,21 +3210,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S81",
         "Clojure flatten returns an empty seq for a map root; PTC-Lisp currently raises."
       ),
-      bug_case(
-        "core/drop-nil-bug-001",
+      regression_case(
+        "core/drop-nil-001",
         "clojure.core",
         ["drop"],
         "(drop 2 nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
-      bug_case(
-        "core/frequencies-nil-bug-001",
+      regression_case(
+        "core/frequencies-nil-001",
         "clojure.core",
         ["frequencies"],
         "(frequencies nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
       bug_case(
         "core/frequencies-map-bug-001",
@@ -3234,21 +3234,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S20",
         "Clojure treats maps as seqable map entries; PTC-Lisp currently raises."
       ),
-      bug_case(
-        "core/flatten-nil-bug-001",
+      regression_case(
+        "core/flatten-nil-001",
         "clojure.core",
         ["flatten"],
         "(flatten nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
-      bug_case(
-        "core/distinct-nil-bug-001",
+      regression_case(
+        "core/distinct-nil-001",
         "clojure.core",
         ["distinct"],
         "(distinct nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
       bug_case(
         "core/distinct-map-bug-001",
@@ -3298,21 +3298,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S102",
         "Clojure map treats strings as seqable in multi-collection arity; PTC-Lisp currently rejects strings there."
       ),
-      bug_case(
-        "core/reverse-nil-bug-001",
+      regression_case(
+        "core/reverse-nil-001",
         "clojure.core",
         ["reverse"],
         "(reverse nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
-      bug_case(
-        "core/sort-nil-input-bug-001",
+      regression_case(
+        "core/sort-nil-input-001",
         "clojure.core",
         ["sort"],
         "(sort nil)",
-        "GAP-S20",
-        "Clojure treats nil as an empty seq; PTC-Lisp currently raises."
+        ["GAP-S20"],
+        [:collection]
       ),
       bug_case(
         "core/reduce-empty-no-init-bug-001",

@@ -16,6 +16,20 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S20 — nil-tolerant seq helpers (take/drop/flatten/distinct/reverse/sort/frequencies)  ·  committed
+
+- **Classification:** BUG
+- **Work size:** B
+- **Spec basis:** Clojure-compat default — `nil` is an empty seq (rule 4:
+  input-data property, not program shape). The adjacent helpers
+  `map`/`filter`/`dedupe`/`sort-by`/`group-by` already treat `nil` as empty, so
+  these were inconsistently strict. Added `nil` clauses (`[]`, or `{}` for
+  `frequencies`).
+- **Risk:** local (one `nil` clause per function; no shared-path change). The
+  `frequencies`/`distinct` direct-*map* sub-cases are a separate map-seqable
+  question (GAP-S134), left open.
+- **Codex review:** pending.
+
 ## GAP-S98 — `interleave` accepts strings / nil (twin of GAP-S60)  ·  committed
 
 - **Classification:** BUG

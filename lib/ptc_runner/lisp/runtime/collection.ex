@@ -170,9 +170,12 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Sort operations
   # ============================================================
 
+  def sort(nil), do: []
   def sort(coll) when is_list(coll), do: Enum.sort(coll)
   def sort(coll) when is_binary(coll), do: Enum.sort(Normalize.graphemes(coll))
   def sort(coll) when is_map(coll) and not is_struct(coll), do: Enum.sort(Normalize.to_seq(coll))
+
+  def sort(_comp, nil), do: []
 
   def sort(comp, coll) when is_list(coll) do
     Enum.sort(coll, wrap_comparator(comp))
@@ -236,6 +239,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     Enum.sort_by(Normalize.to_seq(coll), safe_sort_keyfn(keyfn), wrap_comparator(comp))
   end
 
+  def reverse(nil), do: []
   def reverse(coll) when is_list(coll), do: Enum.reverse(coll)
   def reverse(coll) when is_binary(coll), do: Enum.reverse(Normalize.graphemes(coll))
 
@@ -363,6 +367,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Positional slice
   # ============================================================
 
+  # nil is an empty seq (GAP-S20), like map/filter/dedupe/sort-by/group-by.
+  def take(_n, nil), do: []
   def take(n, coll) when is_list(coll), do: Enum.take(coll, n)
   def take(n, coll) when is_binary(coll), do: Enum.take(Normalize.graphemes(coll), n)
 
@@ -370,6 +376,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll |> Enum.take(n) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
+  def drop(_n, nil), do: []
   def drop(n, coll) when is_list(coll), do: Enum.drop(coll, n)
   def drop(n, coll) when is_binary(coll), do: Enum.drop(Normalize.graphemes(coll), n)
 
@@ -384,6 +391,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Distinct
   # ============================================================
 
+  def distinct(nil), do: []
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
   def distinct(coll) when is_binary(coll), do: Enum.uniq(Normalize.graphemes(coll))
   def distinct(coll) when is_map(coll) and not is_struct(coll), do: Normalize.to_seq(coll)
@@ -468,6 +476,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     raise "type_error: into: invalid map entry: #{inspect(item)}. Expected [key, value] vector."
   end
 
+  def flatten(nil), do: []
   def flatten(coll) when is_list(coll), do: List.flatten(coll)
 
   def zip(c1, c2) when is_list(c1) and is_list(c2) do
@@ -1114,6 +1123,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   def group_by(_key, nil), do: %{}
 
+  def frequencies(nil), do: %{}
   def frequencies(coll) when is_list(coll), do: Enum.frequencies(coll)
   def frequencies(coll) when is_binary(coll), do: Enum.frequencies(Normalize.graphemes(coll))
 

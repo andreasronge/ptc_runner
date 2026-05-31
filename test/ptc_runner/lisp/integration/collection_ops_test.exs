@@ -1996,6 +1996,26 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
+  describe "nil treated as empty seq (GAP-S20)" do
+    test "take/drop/flatten/distinct/reverse/sort on nil return [] like map/filter" do
+      for src <- [
+            "(take 2 nil)",
+            "(drop 2 nil)",
+            "(flatten nil)",
+            "(distinct nil)",
+            "(reverse nil)",
+            "(sort nil)",
+            "(sort > nil)"
+          ] do
+        assert {:ok, %Step{return: []}} = Lisp.run(src), "expected [] for #{src}"
+      end
+    end
+
+    test "frequencies on nil returns an empty map" do
+      assert {:ok, %Step{return: %{}}} = Lisp.run("(frequencies nil)")
+    end
+  end
+
   # ============================================================
   # reduce on various collection types
   # ============================================================
