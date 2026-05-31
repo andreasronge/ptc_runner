@@ -291,7 +291,7 @@
     "symbol": "assoc",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S105: one-arity form returns the collection instead of raising"
+    "notes": "The one-arity form raises (assoc requires key/value pairs), matching Clojure"
   },
   {
     "status": "not_relevant",

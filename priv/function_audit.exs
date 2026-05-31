@@ -251,7 +251,7 @@
       name: "assoc",
       status: :supported,
       description: "Returns map/vector with added key-value pairs",
-      notes: "BUG GAP-S105: one-arity form returns the collection instead of raising"
+      notes: "The one-arity form raises (assoc requires key/value pairs), matching Clojure"
     },
     %{
       name: "assoc!",
@@ -3133,8 +3133,7 @@
       name: "when-first",
       status: :supported,
       description: "Evaluates body if seq non-empty",
-      notes:
-        "BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
+      notes: "BUG GAP-S145: extra binding-vector forms are rejected instead of ignored"
     },
     %{
       name: "when-let",
