@@ -1629,19 +1629,46 @@ fields while preserving the single empty input field.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/replace-seq-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/replace-seq-001` |
 
 ```clojure
 ;; Clojure
-(replace {:a :x} [:a :b])   ;=> [:x :b]
+(replace {:a :x} [:a :b])        ;=> [:x :b]
+(replace [10 20 30] [0 1 2 0])   ;=> [10 20 30 10]
 
-;; PTC-Lisp current behavior
-(replace {:a :x} [:a :b])   ;=> arity error
+;; PTC-Lisp (fixed)
+(replace {:a :x} [:a :b])        ;=> [:x :b]
+(replace [10 20 30] [0 1 2 0])   ;=> [10 20 30 10]
 ```
 
 **Decision:** BUG. The `clojure.core/replace` audit row is marked supported,
-but the implemented `replace` is the 3-arity string function.
+but the implemented `replace` was the 3-arity string function only.
+
+**Fix:** `replace` is now a `:multi_arity` builtin — arity-2 is
+`clojure.core/replace` (`replace_coll/2`: each element looked up in the
+map/vector `smap`, absent elements unchanged), and arity-3 remains the
+`clojure.string/replace` convenience alias. The seq replace uses flexible
+lookup, so PTC's keyword/string key normalization matches keyword elements and
+a vector `smap` resolves elements as 0-based indexes; `coll` is normalized as a
+seq, so any seqable (incl. `nil` → `[]`) is accepted. The 1-arity transducer
+form stays unsupported.
+
+**Known limitation:** PTC collapses `clojure.core/replace` and
+`clojure.string/replace` onto one unqualified `:replace` builtin (no
+namespace-aware dispatch — see the `Math/` note in
+[clojure-conformance-gaps](clojure-conformance-gaps.md)), so the two forms are
+distinguished only by arity (2 → seq replace, 3 → string replace). A consequence
+is that `(clojure.string/replace smap coll)` runs the seq form instead of
+raising on arity; this nonsensical call is not worth a namespace-dispatch
+refactor.
+
+Seq replace also follows PTC's `get` value model: a list-valued element is a
+get-in path rather than an exact key, so vector map keys are not matched
+(`(replace {[:a] :x} [[:a]])` keeps `[:a]`, mirroring `(get {[:a] :x} [:a])` =>
+nil). Special-casing exact vector-key lookup here would make `replace`
+inconsistent with the rest of the flex-access model, so PTC's model takes
+precedence.
 
 ### GAP-S17: `key`/`val` accept plain sequential pairs as map entries
 

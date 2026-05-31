@@ -2391,7 +2391,8 @@
       name: "replace",
       status: :supported,
       description: "Replaces values by map mapping",
-      notes: "BUG GAP-S16: clojure.core sequence replacement form is not implemented"
+      notes:
+        "Arity-2 clojure.core seq replace (smap lookup over any seqable coll); arity-3 is the clojure.string/replace alias. 1-arity transducer form unsupported. Namespace collapse: (clojure.string/replace smap coll) runs the seq form instead of raising on arity."
     },
     %{
       name: "require",

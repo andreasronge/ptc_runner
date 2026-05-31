@@ -509,7 +509,9 @@ defmodule PtcRunner.Lisp.Env do
       {:"trim-newline", {:normal, &Runtime.trim_newline/1}},
       {:triml, {:normal, &Runtime.triml/1}},
       {:trimr, {:normal, &Runtime.trimr/1}},
-      {:replace, {:normal, &Runtime.replace/3}},
+      # Arity-2 is clojure.core/replace (seq replace via a map/vector lookup);
+      # arity-3 is the clojure.string/replace convenience alias.
+      {:replace, {:multi_arity, :replace, {&Runtime.replace/2, &Runtime.replace/3}}},
       {:upcase, {:normal, &Runtime.upcase/1}},
       {:"upper-case", {:normal, &Runtime.upcase/1}},
       {:downcase, {:normal, &Runtime.downcase/1}},

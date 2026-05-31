@@ -260,6 +260,9 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate triml(s), to: RuntimeString
   defdelegate trimr(s), to: RuntimeString
   defdelegate replace(s, pattern, replacement), to: RuntimeString
+  # 2-arity clojure.core/replace; named `replace` so type errors surface the
+  # user-facing name rather than the internal helper.
+  defdelegate replace(smap, coll), to: Collection, as: :replace_coll
   defdelegate upcase(s), to: RuntimeString
   defdelegate downcase(s), to: RuntimeString
   defdelegate starts_with?(s, prefix), to: RuntimeString

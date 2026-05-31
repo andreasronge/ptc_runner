@@ -1257,13 +1257,37 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S14"],
         [:collection]
       ),
-      bug_case(
-        "core/replace-seq-bug-001",
+      regression_case(
+        "core/replace-seq-001",
         "clojure.core",
         ["replace"],
         "(replace {:a :x} [:a :b])",
-        "GAP-S16",
-        "clojure.core/replace is marked supported, but the implemented replace is string-only."
+        ["GAP-S16"],
+        [:collection]
+      ),
+      regression_case(
+        "core/replace-seq-vector-smap-001",
+        "clojure.core",
+        ["replace"],
+        "(replace [10 20 30] [0 1 2 0])",
+        ["GAP-S16"],
+        [:collection]
+      ),
+      regression_case(
+        "core/replace-seq-map-vals-001",
+        "clojure.core",
+        ["replace"],
+        "(replace {2 :two} [1 2 3 2])",
+        ["GAP-S16"],
+        [:collection]
+      ),
+      regression_case(
+        "core/replace-seq-nil-coll-001",
+        "clojure.core",
+        ["replace"],
+        "(replace {} nil)",
+        ["GAP-S16"],
+        [:collection]
       ),
       bug_case(
         "core/key-vector-bug-001",
