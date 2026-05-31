@@ -52,6 +52,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     |> RuntimeCallable.invoke(args, eval_ctx)
   end
 
+  # nil is not callable: (nil x), (apply nil ...), and ((comp nil) x) raise
+  # rather than treating nil as a keyword accessor (GAP-S109, GAP-S135).
+  defp do_apply_fun(nil, _args, %EvalContext{}, _do_eval_fn) do
+    {:error, {:not_callable, nil}}
+  end
+
   # Keyword as function: (:key map) → Map.get(map, :key)
   defp do_apply_fun(k, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_atom(k) do
     apply_keyword(k, args, eval_ctx)

@@ -214,7 +214,7 @@
       status: :supported,
       description: "Applies function to argument sequence",
       notes:
-        "BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. BUG GAP-S109: nil function position returns nil instead of raising. BUG GAP-S13: vector function position is rejected"
+        "BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. A nil function position raises (not callable), matching Clojure. BUG GAP-S13: vector function position is rejected"
     },
     %{
       name: "areduce",
@@ -562,7 +562,7 @@
       status: :supported,
       description: "Composes functions right-to-left",
       notes:
-        "BUG GAP-S71: map/set/vector callables are rejected in composed function position. BUG GAP-S135: nil composed function returns nil instead of raising"
+        "BUG GAP-S71: map/set/vector callables are rejected in composed function position. A nil composed function raises when called (not callable), matching Clojure"
     },
     %{
       name: "comparator",

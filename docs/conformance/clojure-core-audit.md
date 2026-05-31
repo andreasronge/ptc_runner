@@ -62,7 +62,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `ancestors` | ❌ not_relevant | Returns parents of tag via hierarchy | relies on Clojure's global hierarchy/multimethod system |
 | `and` | ✅ supported | Short-circuit logical AND |  |
 | `any?` | 🔲 candidate | Returns true for any argument | pure predicate function |
-| `apply` | ✅ supported | Applies function to argument sequence | BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. BUG GAP-S109: nil function position returns nil instead of raising. BUG GAP-S13: vector function position is rejected |
+| `apply` | ✅ supported | Applies function to argument sequence | BUG GAP-S33: nil and string final arguments currently raise instead of acting seqable. A nil function position raises (not callable), matching Clojure. BUG GAP-S13: vector function position is rejected |
 | `areduce` | ❌ not_relevant | Reduces expression across Java array | relies on Java array interoperability |
 | `array-map` | ✅ supported | Constructs array-map from key-value pairs | alias for hash-map; no separate small-map representation |
 | `as->` | ✅ supported | Binds name to expr, threads through forms | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
@@ -118,7 +118,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `coll?` | ✅ supported | Returns true if implements IPersistentCollection |  |
 | `comment` | ❌ not_relevant | Ignores body, yields nil | REPL/source code construct |
 | `commute` | ❌ not_relevant | Sets ref value via commutative function | mutable state primitive (refs) |
-| `comp` | ✅ supported | Composes functions right-to-left | BUG GAP-S71: map/set/vector callables are rejected in composed function position. BUG GAP-S135: nil composed function returns nil instead of raising |
+| `comp` | ✅ supported | Composes functions right-to-left | BUG GAP-S71: map/set/vector callables are rejected in composed function position. A nil composed function raises when called (not callable), matching Clojure |
 | `comparator` | 🔲 candidate | Returns Comparator from predicate | pure function to create a comparison function |
 | `compare` | ✅ supported | Compares values returning neg/zero/pos | DIV-30: uses PTC's recoverable total term ordering for nil, maps, and mixed values; DIV-33: NaN is unordered and raises |
 | `compare-and-set!` | ❌ not_relevant | Atomically sets atom if current equals old | operates on mutable state (atoms) |
