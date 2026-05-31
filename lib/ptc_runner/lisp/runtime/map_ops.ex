@@ -298,13 +298,25 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   def merge(m1, m2), do: Map.merge(m1, m2)
 
   def select_keys(m, ks) do
-    Enum.reduce(ks, %{}, fn k, acc ->
+    ks
+    |> select_keyseq()
+    |> Enum.reduce(%{}, fn k, acc ->
       case FlexAccess.flex_fetch(m, k) do
         {:ok, val} -> Map.put(acc, k, val)
         :error -> acc
       end
     end)
   end
+
+  # Coerce only the keyseqs that the bare reduce can't iterate: nil -> [] (so a
+  # nil keyseq yields {}, GAP-S23) and a string -> its characters (one-char
+  # strings that flex-match keyword keys, DIV-46). Lists, sets, and maps are
+  # passed straight to Enum.reduce: a map keyseq's entries arrive as {k, v}
+  # TUPLES that never match a scalar key (=> {}, like Clojure). Do NOT route
+  # maps through Normalize.to_seq — that turns entries into [k, v] LISTS, which
+  # flex_fetch would misread as get-in paths and leak nested values.
+  defp select_keyseq(ks) when is_nil(ks) or is_binary(ks), do: Normalize.to_seq(ks)
+  defp select_keyseq(ks), do: ks
 
   def keys(nil), do: nil
   def keys(m), do: m |> Map.keys() |> Enum.sort()

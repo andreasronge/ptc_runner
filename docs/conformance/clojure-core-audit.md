@@ -437,7 +437,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `run!` | ❌ not_relevant | Runs side effects, returns nil | relies on side effects |
 | `satisfies?` | ❌ not_relevant | Returns true if type satisfies protocol | protocol/type system feature |
 | `second` | ✅ supported | Returns second item | DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `select-keys` | ✅ supported | Returns map with only specified keys | BUG GAP-S23: nil and string keyseqs currently raise instead of returning an empty map; BUG GAP-S43: vector inputs currently raise instead of selecting indexes |
+| `select-keys` | ✅ supported | Returns map with only specified keys | nil keyseq returns {} (matches Clojure). DIV-46: a string keyseq seqs to one-character strings that flex-match keyword keys, returning a populated map where Clojure returns {}. BUG GAP-S43: vector inputs currently raise instead of selecting indexes |
 | `send` | ❌ not_relevant | Dispatches action to agent | relies on agent mutable state |
 | `send-off` | ❌ not_relevant | Dispatches blocking action to agent | relies on agent mutable state |
 | `send-via` | ❌ not_relevant | Sends action via executor to agent | relies on agent mutable state |

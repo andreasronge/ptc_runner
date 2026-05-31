@@ -3385,21 +3385,38 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S22",
         "Clojure get-in returns an explicitly present nil vector value; PTC-Lisp returns the default."
       ),
-      bug_case(
-        "core/select-keys-nil-keys-bug-001",
+      regression_case(
+        "core/select-keys-nil-keys-001",
         "clojure.core",
         ["select-keys"],
         "(select-keys {:a 1} nil)",
-        "GAP-S23",
-        "Clojure treats nil keyseq as empty; PTC-Lisp currently raises."
+        ["GAP-S23"],
+        [:collection]
       ),
-      bug_case(
-        "core/select-keys-string-keys-bug-001",
+      div_case(
+        "div/select-keys-string-keyseq-001",
         "clojure.core",
         ["select-keys"],
         ~S|(select-keys {:a 1 :b 2} ":a")|,
-        "GAP-S23",
-        "Clojure treats a string keyseq as seqable characters; PTC-Lisp currently raises."
+        "DIV-46",
+        %{"a" => 1},
+        "PTC seqs the string keyseq to one-character strings; \"a\" flex-matches keyword key :a, so the result is populated. Clojure returns {} because string chars never match keyword keys."
+      ),
+      div_case(
+        "div/select-keys-string-keyseq-002",
+        "clojure.core",
+        ["select-keys"],
+        ~S|(select-keys {:a 1 :b 2} "ab")|,
+        "DIV-46",
+        %{"a" => 1, "b" => 2},
+        "PTC seqs the string keyseq to one-character strings that flex-match keyword keys :a/:b. Clojure returns {} because string chars never match keyword keys."
+      ),
+      c(
+        "core/select-keys-map-keyseq-001",
+        "clojure.core",
+        ["select-keys"],
+        "(select-keys {:a {:x 1}} {:a :x})",
+        [:collection]
       ),
       bug_case(
         "core/update-keys-nil-bug-001",

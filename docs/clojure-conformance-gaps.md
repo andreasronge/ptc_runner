@@ -1071,6 +1071,36 @@ intentionally does not model. Reproducing them would manufacture a
 errors; PTC-Lisp's answers (e.g. the correct positive `abs`) are more useful in
 the agent loop.
 
+### DIV-46: `select-keys` with a string keyseq matches keyword keys
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `div/select-keys-string-keyseq-001`, `div/select-keys-string-keyseq-002` |
+
+```clojure
+;; Clojure
+(select-keys {:a 1 :b 2} ":a") ;=> {}
+(select-keys {:a 1 :b 2} "ab") ;=> {}
+
+;; PTC-Lisp
+(select-keys {:a 1 :b 2} ":a") ;=> {"a" 1}
+(select-keys {:a 1 :b 2} "ab") ;=> {"a" 1, "b" 2}
+```
+
+**Rationale:** A string keyseq is seqable, so it iterates as one-character
+strings. PTC-Lisp has no distinct character type (char ≡ one-character string)
+and stores keyword keys as strings, so `select-keys` (like `get`/`assoc`) looks
+keys up flexibly: the one-char string `"a"` flex-matches keyword key `:a`. The
+result is therefore populated where Clojure — whose chars never equal keywords —
+returns `{}`. This is the same universal behavior as
+`(select-keys {:a 1} ["a"])` => `{"a" 1}`; forcing Clojure's `{}` would require
+strict non-flex lookup in this one function, contradicting PTC-Lisp's value
+model (which takes precedence over Clojure-compat where they conflict). The
+related nil-keyseq protocol-error case was fixed as a BUG under
+[GAP-S23](#gap-s23-select-keys-with-nil-keyseq-raises-instead-of-returning-an-empty-map).
+
 ### GAP-J13: Java `Math/pow` special double results differ
 
 | Field | Value |
@@ -2059,22 +2089,32 @@ default is supplied, and `contains?` can observe the present nil key.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/select-keys-nil-keys-bug-001`, `core/select-keys-string-keys-bug-001` |
+| **Status** | **fixed** (nil); string keyseq reclassified as [DIV-46](#div-46-select-keys-with-a-string-keyseq-matches-keyword-keys) |
+| **Source** | Manual conformance case `core/select-keys-nil-keys-001` |
 
 ```clojure
 ;; Clojure
 (select-keys {:a 1} nil)   ;=> {}
-(select-keys {:a 1 :b 2} ":a") ;=> {}
 
-;; PTC-Lisp current behavior
-(select-keys {:a 1} nil)   ;=> protocol Enumerable error
-(select-keys {:a 1 :b 2} ":a") ;=> protocol Enumerable error
+;; PTC-Lisp (fixed)
+(select-keys {:a 1} nil)   ;=> {}
 ```
 
-**Decision:** BUG. Clojure treats nil as an empty key sequence here, and
-strings are finite seqable key sequences. PTC's signal-value policy also favors
-an empty result over a low-level protocol error.
+**Decision:** BUG (nil keyseq). Clojure treats nil as an empty key sequence;
+PTC's signal-value policy favors an empty result over a low-level protocol
+error.
+
+**Fix:** `select_keys/2` now coerces the keyseq through the canonical
+`Normalize.to_seq/1` (as `zipmap` does), honoring the `:seqable` arg-spec it
+already advertises. nil → `[]` → `{}`, matching Clojure.
+
+**String keyseq → DIV-46 (not a bug).** `(select-keys {:a 1 :b 2} ":a")` returns
+`{"a" 1}` in PTC, not Clojure's `{}`. A string keyseq seqs to one-character
+strings, and PTC (no char type; keyword keys stored as strings) flex-matches
+`"a"` to keyword key `:a` — the same universal behavior as
+`(select-keys {:a 1} ["a"])` => `{"a" 1}`. Forcing `{}` would require strict
+non-flex lookup in this one function, contradicting the value model. See
+[DIV-46](#div-46-select-keys-with-a-string-keyseq-matches-keyword-keys).
 
 ### GAP-S24: `update-keys`/`update-vals` on nil return nil instead of an empty map
 
