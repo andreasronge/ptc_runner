@@ -126,7 +126,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `complement` | ✅ supported | Returns function with opposite truth value | BUG GAP-S71: map/set callables are rejected in predicate position |
 | `completing` | 🔲 candidate | Returns reducing function with completion | pure function for reducing transformations |
 | `concat` | ✅ supported | Returns lazy seq concatenating collections | BUG GAP-S57: string inputs currently raise instead of being treated as seqable |
-| `cond` | ✅ supported | Multi-way conditional | BUG GAP-S112: zero-clause cond raises instead of returning nil |
+| `cond` | ✅ supported | Multi-way conditional | The zero-clause form returns nil, matching Clojure |
 | `cond->` | ✅ supported | Threads through forms where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
 | `cond->>` | ✅ supported | Threads as last arg where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
 | `condp` | ✅ supported | Predicate dispatch against expression | BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising |

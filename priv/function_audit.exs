@@ -611,7 +611,7 @@
       name: "cond",
       status: :supported,
       description: "Multi-way conditional",
-      notes: "BUG GAP-S112: zero-clause cond raises instead of returning nil"
+      notes: "The zero-clause form returns nil, matching Clojure"
     },
     %{
       name: "cond->",

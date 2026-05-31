@@ -335,10 +335,9 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   @doc """
   Analyzes a `cond` form. Desugars to nested `if` expressions.
   """
-  def analyze_cond([], _tail?, _analyze_fn, _wrap_body_fn) do
-    {:error, {:invalid_cond_form, "cond requires at least one test/result pair"}}
-  end
-
+  # Zero-clause `(cond)` returns nil in Clojure. It flows through the general
+  # clause as an empty pair list with a nil default (the same nil a no-match
+  # cond yields), so no empty-form error is raised.
   def analyze_cond(args, tail?, analyze_fn, _wrap_body_fn) do
     with {:ok, pairs, default} <- split_cond_args(args) do
       build_nested_if(pairs, default, tail?, analyze_fn)
