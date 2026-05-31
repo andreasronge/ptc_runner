@@ -2492,7 +2492,7 @@
       status: :supported,
       description: "Returns map with only specified keys",
       notes:
-        "BUG GAP-S23: nil and string keyseqs currently raise instead of returning an empty map; BUG GAP-S43: vector inputs currently raise instead of selecting indexes"
+        "nil keyseq returns {} (matches Clojure). DIV-46: a string keyseq seqs to one-character strings that flex-match keyword keys, returning a populated map where Clojure returns {}. BUG GAP-S43: vector inputs currently raise instead of selecting indexes"
     },
     %{
       name: "send",
