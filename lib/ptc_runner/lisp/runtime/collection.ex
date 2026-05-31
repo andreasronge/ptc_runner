@@ -519,11 +519,16 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   @doc """
-  Variadic `interleave` over lists (Clojure's 0/1/n arity).
+  Variadic `interleave` over seqables (Clojure's 0/1/n arity).
 
-  Argument list-typing is enforced by the `:interleave` arg-spec, so every
-  element here is a list. Zero args yield `[]`; a single list is returned as
-  its own seq; multiple lists are interleaved, stopping at the shortest.
+  Each argument is coerced through `interleave_seq/1`: lists pass through,
+  strings become their graphemes (GAP-S98), and `nil` becomes `[]` (GAP-S20) —
+  matching the `interpose` sibling and Clojure. Direct maps/sets have no clause
+  and raise, surfaced as a `type_error` (DIV-29: positional ops require an
+  explicit ordered view via `seq`/`entries`/`keys`/`vals`).
+
+  Zero args yield `[]`; a single seqable is returned as its own seq; multiple
+  seqables are interleaved, stopping at the shortest.
 
   ## Examples
 
@@ -536,15 +541,25 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
       iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([[1, 2], [3, 4], [5, 6]])
       [1, 3, 5, 2, 4, 6]
 
-      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([[1, 2, 3], [4, 5]])
-      [1, 4, 2, 5]
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic(["ab", [1, 2]])
+      ["a", 1, "b", 2]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.interleave_variadic([nil, [1]])
+      []
   """
   def interleave_variadic([]), do: []
-  def interleave_variadic([single]) when is_list(single), do: single
+  def interleave_variadic([single]), do: interleave_seq(single)
 
   def interleave_variadic(colls) when is_list(colls) do
-    colls |> Enum.zip() |> Enum.flat_map(&Tuple.to_list/1)
+    colls |> Enum.map(&interleave_seq/1) |> Enum.zip() |> Enum.flat_map(&Tuple.to_list/1)
   end
+
+  # Coerce one interleave argument to a seq. Lists pass through, strings become
+  # graphemes (GAP-S98), nil becomes [] (GAP-S20). Direct maps/sets have no
+  # clause and raise -> the :collect dispatch surfaces a type_error (DIV-29).
+  defp interleave_seq(nil), do: []
+  defp interleave_seq(coll) when is_list(coll), do: coll
+  defp interleave_seq(s) when is_binary(s), do: Normalize.graphemes(s)
 
   @doc """
   Returns a list with sep inserted between each element.

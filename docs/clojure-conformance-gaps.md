@@ -1862,7 +1862,7 @@ Clojure-compatible predicate behavior.
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | open |
-| **Source** | Manual conformance cases `core/take-nil-bug-001`, `core/drop-nil-bug-001`, `core/frequencies-nil-bug-001`, `core/frequencies-map-bug-001`, `core/flatten-nil-bug-001`, `core/distinct-nil-bug-001`, `core/interleave-left-nil-bug-001`, `core/interleave-right-nil-bug-001`, `core/reverse-nil-bug-001`, `core/sort-nil-input-bug-001` |
+| **Source** | Manual conformance cases `core/take-nil-bug-001`, `core/drop-nil-bug-001`, `core/frequencies-nil-bug-001`, `core/frequencies-map-bug-001`, `core/flatten-nil-bug-001`, `core/distinct-nil-bug-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `core/reverse-nil-bug-001`, `core/sort-nil-input-bug-001` |
 
 ```clojure
 ;; Clojure
@@ -1894,6 +1894,12 @@ Clojure-compatible predicate behavior.
 sequence helpers such as `map`, `filter`, `partition`, `split-at`, `into`, and
 `select-keys`. These functions should not be stricter without a documented
 design reason.
+
+**Partially fixed:** the `interleave` sub-cases (`core/interleave-left-nil-001`,
+`core/interleave-right-nil-001`) were closed alongside
+[GAP-S98](#gap-s98-interleave-rejects-string-inputs). The remaining helpers
+(`take`, `drop`, `frequencies`, `flatten`, `distinct`, `reverse`, `sort`) still
+reject `nil` and keep this gap open.
 
 ### GAP-S134: `distinct` accepts direct map input Clojure rejects
 
@@ -1997,21 +2003,32 @@ ops require an explicit ordered view via `seq`/`entries`/`keys`/`vals`).
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/interleave-string-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/interleave-string-001`, `core/interleave-left-nil-001`, `core/interleave-right-nil-001`, `div/interleave-map-direct-001` |
 
 ```clojure
 ;; Clojure
 (interleave "ab" [1 2])   ;=> ("a" 1 "b" 2)
 
-;; PTC-Lisp current behavior
-(interleave "ab" [1 2])   ;=> type_error
+;; PTC-Lisp (fixed)
+(interleave "ab" [1 2])   ;=> ["a" 1 "b" 2]
+(interleave "ab" "cd")    ;=> ["a" "c" "b" "d"]
+(interleave nil [1])      ;=> []                ; GAP-S20 sub-case
+(interleave {:a 1} [2])   ;=> type_error        ; DIV-29 (direct maps/sets)
 ```
 
 **Decision:** BUG. `interleave` is a supported Clojure-named sequence helper.
 Strings are finite seqable inputs in Clojure and are already supported by
 neighboring PTC-Lisp sequence helpers such as `map`, `filter`, `partition`,
-`partition-by`, and `split-at`.
+`partition-by`, and `split-at` — and by its closest twin `interpose`
+([GAP-S60](#gap-s60-interpose-rejects-string-inputs)).
+
+**Fix:** Dropped the `{:rest, :list}` arg-spec and coerce each argument through
+`interleave_seq/1` (list → itself, string → graphemes, `nil` → `[]`). This also
+closes the `interleave` sub-cases of [GAP-S20](#gap-s20-some-seq-helpers-reject-nil-instead-of-treating-it-as-an-empty-seq).
+Direct maps/sets have no clause and surface a `type_error`, preserving
+[DIV-29](#div-29-direct-positional-sequence-operations-reject-maps), exactly as
+`interpose` does.
 
 ### GAP-S143: Unary `interleave` is unsupported
 
@@ -2037,11 +2054,13 @@ neighboring PTC-Lisp sequence helpers such as `map`, `filter`, `partition`,
 is variadic (0/1/n arity), all finite, eager, and pure.
 
 **Fix:** Registered `interleave` as a `:collect` builtin over
-`interleave_variadic/1` (0 args → `[]`, one list → its seq, n lists →
-interleaved, stopping at the shortest). A new `{:rest, :list}` arg-spec keeps
-non-list inputs (nil, strings, maps) raising, so the adjacent open gaps
-GAP-S20, GAP-S98, and the direct-map divergence still reproduce while only the
-arity gap is closed.
+`interleave_variadic/1` (0 args → `[]`, one seqable → its seq, n seqables →
+interleaved, stopping at the shortest). Arguments are coerced through
+`interleave_seq/1` (list → itself, string → graphemes, `nil` → `[]`), so
+[GAP-S98](#gap-s98-interleave-rejects-string-inputs) and the `interleave`
+sub-cases of [GAP-S20](#gap-s20-some-seq-helpers-reject-nil-instead-of-treating-it-as-an-empty-seq)
+are also closed. Direct maps/sets still raise a `type_error`, preserving
+[DIV-29](#div-29-direct-positional-sequence-operations-reject-maps).
 
 ### GAP-S102: Multi-collection `map` rejects string inputs
 

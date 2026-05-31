@@ -16,6 +16,20 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S98 — `interleave` accepts strings / nil (twin of GAP-S60)  ·  committed
+
+- **Classification:** BUG
+- **Work size:** A/B
+- **Spec basis:** Clojure-compat default — strings are seqable and `nil` is an
+  empty seq (same basis as GAP-S60 `interpose` and GAP-S20). The earlier
+  GAP-S143 fix deliberately kept a `{:rest, :list}` arg-spec that left this open;
+  this removes it and coerces args via `interleave_seq` (list → itself, string →
+  graphemes, `nil` → `[]`). Direct maps/sets still raise → DIV-29, matching
+  `interpose`. Resolves the interpose/interleave twin inconsistency.
+- **Risk:** local (one function + arg-spec removal; deleted the now-unused
+  `:list` arg type). Also closes the `interleave` sub-cases of GAP-S20.
+- **Codex review:** pending.
+
 ## GAP-S132 follow-up — `pmap` keyword over multiple collections  ·  committed
 
 - **Classification:** BUG (regression surfaced by the GAP-S132 multi-collection
