@@ -989,6 +989,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # Membership
   # ============================================================
 
+  # Clojure: a nil collection contains no keys, so contains? is always false.
+  def contains?(nil, _key), do: false
+
   def contains?(%MapSet{} = set, val), do: MapSet.member?(set, val)
 
   def contains?(coll, key) when is_map(coll) and not is_struct(coll) do

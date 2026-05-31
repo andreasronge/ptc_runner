@@ -1564,19 +1564,20 @@ through `apply` and `ifn?`.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/contains-nil-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case `core/contains-nil-001` |
 
 ```clojure
 ;; Clojure
 (contains? nil :a)   ;=> false
 
-;; PTC-Lisp current behavior
-(contains? nil :a)   ;=> type_error
+;; PTC-Lisp (fixed)
+(contains? nil :a)   ;=> false
 ```
 
-**Decision:** BUG. For a Clojure-named predicate, `false` is the recoverable
-signal value and matches Clojure.
+**Fix:** Added a `contains?(nil, _key)` clause returning `false` — a nil
+collection contains no keys, matching Clojure (and the recoverable signal-value
+convention for Clojure-named predicates).
 
 ### GAP-S15: `clojure.string/split` keeps trailing empty element for empty regex
 
