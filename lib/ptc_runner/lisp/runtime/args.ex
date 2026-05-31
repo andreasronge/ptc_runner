@@ -199,6 +199,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   defp valid?(:map_or_nil, x), do: valid?(:map, x)
   defp valid?(:associative_or_nil, nil), do: true
   defp valid?(:associative_or_nil, x), do: (is_map(x) and not is_struct(x)) or is_list(x)
+  defp valid?(:list, x), do: is_list(x)
   defp valid?(:map_or_list, x), do: valid?(:map, x) or is_list(x)
   defp valid?(:map_or_list_or_nil, nil), do: true
   defp valid?(:map_or_list_or_nil, x), do: valid?(:map_or_list, x)

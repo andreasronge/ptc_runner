@@ -270,7 +270,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `int-array` | ❌ not_relevant | Creates int Java array | relies on Java array/mutability |
 | `int?` | ✅ supported | Returns true if Integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
 | `integer?` | ✅ supported | Returns true if integer |  |
-| `interleave` | ✅ supported | Interleaves items from collections | BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. BUG GAP-S143: unary arity is rejected instead of returning the source seq. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. |
+| `interleave` | ✅ supported | Interleaves items from collections | Variadic (0/1/n arity) over lists. BUG GAP-S20: nil inputs currently raise instead of returning an empty seq. BUG GAP-S98: string inputs currently raise instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. |
 | `intern` | ❌ not_relevant | Creates or returns var in namespace | operates on namespaces |
 | `interpose` | ✅ supported | Inserts separator between items | BUG GAP-S60: string input currently raises instead of being treated as seqable. DIV-29: direct map input raises; use seq/entries/keys/vals for ordered map views. |
 | `into` | ✅ supported | Conjoins items from source into target | BUG GAP-S41: zero/one arities, string sources, and nil targets currently raise instead of following Clojure seq/list behavior |

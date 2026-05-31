@@ -2087,10 +2087,10 @@
     %{
       name: "interleave",
       description: "Interleave collections",
-      binding: :normal,
+      binding: :collect,
       category: :core,
       dispatch: :env,
-      signatures: ["(interleave c1 c2)"],
+      signatures: ["(interleave)", "(interleave coll)", "(interleave c1 c2 ...)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,

@@ -175,7 +175,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `infinite?` | `(infinite? ...)` |  |
 | `int?` | `(int? ...)` |  |
 | `integer?` | `(integer? ...)` |  |
-| `interleave` | `(interleave c1 c2)` | Interleave collections |
+| `interleave` | `(interleave), (interleave coll), (interleave c1 c2 ...)` | Interleave collections |
 | `interpose` | `(interpose sep coll)` | Insert separator between elements |
 | `into` | `(into to from)` | Pour from into to |
 | `keep` | `(keep f coll)` | Non-nil results of (f item). false is kept. |

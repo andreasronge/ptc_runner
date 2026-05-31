@@ -88,7 +88,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate into(to, from), to: Collection
   defdelegate flatten(coll), to: Collection
   defdelegate zip(c1, c2), to: Collection
-  defdelegate interleave(c1, c2), to: Collection
+  defdelegate interleave_variadic(colls), to: Collection
   defdelegate interpose(sep, coll), to: Collection
   defdelegate partition(n, coll), to: Collection
   defdelegate partition(n, step, coll), to: Collection
