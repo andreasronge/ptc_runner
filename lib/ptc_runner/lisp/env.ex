@@ -277,7 +277,7 @@ defmodule PtcRunner.Lisp.Env do
       {:distinct, {:normal, &Runtime.distinct/1}},
       {:concat, {:variadic, &Runtime.concat2/2, []}},
       {:cons, {:normal, &Runtime.cons/2}},
-      {:conj, {:variadic_nonempty, :conj, &Runtime.conj/2}},
+      {:conj, {:variadic, &Runtime.conj/2, []}},
       {:into, {:normal, &Runtime.into/2}},
       {:flatten, {:normal, &Runtime.flatten/1}},
       {:zip, {:normal, &Runtime.zip/2}},

@@ -130,7 +130,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `cond->` | ✅ supported | Threads through forms where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
 | `cond->>` | ✅ supported | Threads as last arg where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
 | `condp` | ✅ supported | Predicate dispatch against expression | BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising |
-| `conj` | ✅ supported | Returns collection with items added | BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. BUG GAP-S106: zero-arity form raises instead of returning an empty list. BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics |
+| `conj` | ✅ supported | Returns collection with items added | BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. The zero-arity form returns an empty vector (Clojure's conj identity). BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics |
 | `conj!` | ❌ not_relevant | Adds item to transient collection | operates on transient collections (mutable) |
 | `cons` | ✅ supported | Returns seq with item prepended | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `constantly` | ✅ supported | Returns function ignoring args, returning value |  |

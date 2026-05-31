@@ -3470,13 +3470,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S137",
         "Clojure requires map-entry values when conjoining into a map; PTC-Lisp currently treats a two-item list as a map entry."
       ),
-      bug_case(
-        "core/conj-zero-arity-bug-001",
+      regression_case(
+        "core/conj-zero-arity-001",
         "clojure.core",
         ["conj"],
         "(conj)",
-        "GAP-S106",
-        "Clojure zero-arity conj returns an empty list; PTC-Lisp currently raises."
+        ["GAP-S106"],
+        [:collection]
       ),
       bug_case(
         "walk/walk-invalid-map-entry-bug-001",

@@ -128,7 +128,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `compare` | `(compare x y)` | Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp. |
 | `complement` | `(complement f)` | Returns a function with the opposite truth value (always boolean) |
 | `concat` | `(concat coll1 coll2 ...)` | Join collections |
-| `conj` | `(conj coll x ...)` | Add elements to collection |
+| `conj` | `(conj), (conj coll x ...)` | Add elements to collection |
 | `cons` | `(cons x seq)` | Prepend item to sequence |
 | `constantly` | `(constantly x)` | Returns a function that always returns `x`, ignoring its arguments |
 | `count` | `(count coll)` | Number of items |

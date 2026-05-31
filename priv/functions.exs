@@ -1018,10 +1018,10 @@
     %{
       name: "conj",
       description: "Add elements to collection",
-      binding: :variadic_nonempty,
+      binding: :variadic,
       category: :core,
       dispatch: :env,
-      signatures: ["(conj coll x ...)"],
+      signatures: ["(conj)", "(conj coll x ...)"],
       since: nil,
       section: "Core",
       ptc_extension?: false,
