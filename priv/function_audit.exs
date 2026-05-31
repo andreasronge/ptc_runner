@@ -264,7 +264,7 @@
       status: :supported,
       description: "Associates value in nested structure",
       notes:
-        "BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key"
+        "An empty or nil path associates the value at the nil key, matching Clojure's recursive assoc-in definition"
     },
     %{
       name: "associative?",
@@ -3026,7 +3026,7 @@
       status: :supported,
       description: "Applies function to nested map value",
       notes:
-        "BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
+        "An empty or nil path updates the value at the nil key, matching Clojure's recursive update-in definition; BUG GAP-S83: vector append at count index raises instead of following assoc semantics"
     },
     %{
       name: "update-keys",

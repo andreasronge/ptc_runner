@@ -1470,29 +1470,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S100",
         "Clojure merge can conjoin a vector map entry source into a map target; PTC-Lisp currently requires every source to be a map."
       ),
-      bug_case(
-        "core/update-in-empty-path-bug-001",
+      regression_case(
+        "core/update-in-empty-path-001",
         "clojure.core",
         ["update-in"],
         "(update-in {:a 1} [] identity)",
-        "GAP-S55",
-        "Clojure update-in with an empty path updates the nil key; PTC-Lisp currently returns the map unchanged."
+        ["GAP-S55"],
+        [:collection]
       ),
-      bug_case(
-        "core/update-in-empty-path-replace-bug-001",
+      regression_case(
+        "core/update-in-empty-path-replace-001",
         "clojure.core",
         ["update-in"],
         "(update-in {:a 1} [] (constantly 2))",
-        "GAP-S55",
-        "Clojure update-in with an empty path updates the nil key; PTC-Lisp currently replaces the whole map."
+        ["GAP-S55"],
+        [:collection]
       ),
-      bug_case(
-        "core/update-in-nil-path-bug-001",
+      regression_case(
+        "core/update-in-nil-path-001",
         "clojure.core",
         ["update-in"],
         "(update-in {:a 1} nil identity)",
-        "GAP-S55",
-        "Clojure update-in with a nil path updates the nil key; PTC-Lisp currently raises."
+        ["GAP-S55"],
+        [:collection]
       ),
       bug_case(
         "core/empty-string-bug-001",
@@ -2502,29 +2502,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S130",
         "Clojure not-any? rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
-        "core/assoc-in-empty-path-bug-001",
+      regression_case(
+        "core/assoc-in-empty-path-001",
         "clojure.core",
         ["assoc-in"],
         "(assoc-in {:a 1} [] 2)",
-        "GAP-S68",
-        "Clojure assoc-in with an empty path updates the nil key; PTC-Lisp currently replaces the whole map."
+        ["GAP-S68"],
+        [:collection]
       ),
-      bug_case(
-        "core/assoc-in-empty-map-empty-path-bug-001",
+      regression_case(
+        "core/assoc-in-empty-map-empty-path-001",
         "clojure.core",
         ["assoc-in"],
         "(assoc-in {} [] 1)",
-        "GAP-S68",
-        "Clojure assoc-in with an empty path updates the nil key even on an empty map; PTC-Lisp currently returns the value."
+        ["GAP-S68"],
+        [:collection]
       ),
-      bug_case(
-        "core/assoc-in-nil-path-bug-001",
+      regression_case(
+        "core/assoc-in-nil-path-001",
         "clojure.core",
         ["assoc-in"],
         "(assoc-in {:a 1} nil 2)",
-        "GAP-S68",
-        "Clojure assoc-in with a nil path updates the nil key; PTC-Lisp currently raises."
+        ["GAP-S68"],
+        [:collection]
       ),
       bug_case(
         "core/assoc-one-arity-bug-001",

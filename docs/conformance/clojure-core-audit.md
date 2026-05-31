@@ -70,7 +70,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `assert` | ❌ not_relevant | Throws AssertionError if expr false | relies on exception handling/throwing |
 | `assoc` | ✅ supported | Returns map/vector with added key-value pairs | BUG GAP-S105: one-arity form returns the collection instead of raising |
 | `assoc!` | ❌ not_relevant | Sets value in transient collection | relies on transient collections (mutability) |
-| `assoc-in` | ✅ supported | Associates value in nested structure | BUG GAP-S68: empty/nil path replaces the whole map or raises instead of updating nil key |
+| `assoc-in` | ✅ supported | Associates value in nested structure | An empty or nil path associates the value at the nil key, matching Clojure's recursive assoc-in definition |
 | `associative?` | ✅ supported | Returns true if coll implements Associative | BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `atom` | ❌ not_relevant | Creates atom with initial value | relies on mutable state |
 | `await` | ❌ not_relevant | Blocks until agent actions complete | relies on agent state |
@@ -527,7 +527,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `unreduced` | 🔲 candidate | Unwraps from reduced | pure transformation used for handling reduced values in reductions |
 | `unsigned-bit-shift-right` | ❌ not_relevant | Unsigned right shift | no defined meaning on BEAM — integers are arbitrary-precision two's-complement with no fixed width to zero-fill from |
 | `update` | ✅ supported | Applies function to map value at key | BUG GAP-S19: nil map root currently raises instead of building a map. BUG GAP-S83: vector append at count index raises instead of following assoc semantics |
-| `update-in` | ✅ supported | Applies function to nested map value | BUG GAP-S55: empty/nil path returns the map unchanged or raises instead of updating nil key; BUG GAP-S83: vector append at count index raises instead of following assoc semantics |
+| `update-in` | ✅ supported | Applies function to nested map value | An empty or nil path updates the value at the nil key, matching Clojure's recursive update-in definition; BUG GAP-S83: vector append at count index raises instead of following assoc semantics |
 | `update-keys` | ✅ supported | Applies function to map keys | BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as key transforms. BUG GAP-S75: vector inputs are rejected |
 | `update-proxy` | ❌ not_relevant | Updates proxy method implementations | relies on Java interop/proxy class system |
 | `update-vals` | ✅ supported | Applies function to map values | BUG GAP-S24: nil map currently returns nil instead of an empty map. BUG GAP-S71: map/set/vector callables are rejected as value transforms. BUG GAP-S75: vector inputs are rejected |

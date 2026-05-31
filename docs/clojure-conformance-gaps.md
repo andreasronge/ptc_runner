@@ -2546,8 +2546,8 @@ plausible but non-Clojure map.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/update-in-empty-path-bug-001`, `core/update-in-empty-path-replace-bug-001`, `core/update-in-nil-path-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/update-in-empty-path-001`, `core/update-in-empty-path-replace-001`, `core/update-in-nil-path-001` |
 
 ```clojure
 ;; Clojure
@@ -2555,15 +2555,16 @@ plausible but non-Clojure map.
 (update-in {:a 1} [] (constantly 2)) ;=> {:a 1, nil 2}
 (update-in {:a 1} nil identity)  ;=> {:a 1, nil nil}
 
-;; PTC-Lisp current behavior
-(update-in {:a 1} [] identity)   ;=> {:a 1}
-(update-in {:a 1} [] (constantly 2)) ;=> 2
-(update-in {:a 1} nil identity)  ;=> runtime_error
+;; PTC-Lisp (fixed)
+(update-in {:a 1} [] identity)   ;=> {:a 1, nil nil}
+(update-in {:a 1} [] (constantly 2)) ;=> {:a 1, nil 2}
+(update-in {:a 1} nil identity)  ;=> {:a 1, nil nil}
 ```
 
-**Decision:** BUG. `update-in` is a supported Clojure-named helper. Empty and
-nil paths are unusual but finite and Clojure-defined; PTC-Lisp currently drops
-or rejects the nil-key update.
+**Fix:** `assoc-in`/`update-in` now normalize an empty or nil path to the
+single nil-key path `[nil]` (in `Runtime.MapOps`), matching Clojure's recursive
+definition: `(update-in m [] f)` ≡ `(assoc m nil (f (get m nil)))`. Shared with
+`GAP-S68` (`assoc-in`).
 
 ### GAP-S56: `empty` on strings returns an empty string instead of nil
 
@@ -3462,8 +3463,8 @@ accessor guard (`(pmap :k single-map)`) is preserved.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/assoc-in-empty-path-bug-001`, `core/assoc-in-empty-map-empty-path-bug-001`, `core/assoc-in-nil-path-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/assoc-in-empty-path-001`, `core/assoc-in-empty-map-empty-path-001`, `core/assoc-in-nil-path-001` |
 
 ```clojure
 ;; Clojure
@@ -3471,16 +3472,16 @@ accessor guard (`(pmap :k single-map)`) is preserved.
 (assoc-in {} [] 1)       ;=> {nil 1}
 (assoc-in {:a 1} nil 2)  ;=> {:a 1, nil 2}
 
-;; PTC-Lisp current behavior
-(assoc-in {:a 1} [] 2)   ;=> 2
-(assoc-in {} [] 1)       ;=> 1
-(assoc-in {:a 1} nil 2)  ;=> type_error
+;; PTC-Lisp (fixed)
+(assoc-in {:a 1} [] 2)   ;=> {:a 1, nil 2}
+(assoc-in {} [] 1)       ;=> {nil 1}
+(assoc-in {:a 1} nil 2)  ;=> {:a 1, nil 2}
 ```
 
-**Decision:** BUG. `assoc-in` is a supported Clojure-named finite map helper.
-An empty or nil path should follow Clojure's recursive definition and associate
-the value at the nil key, matching the adjacent `update-in` path behavior
-tracked in `GAP-S55`.
+**Fix:** `assoc-in`/`update-in` normalize an empty or nil path to the single
+nil-key path `[nil]` (in `Runtime.MapOps`), matching Clojure's recursive
+definition: `(assoc-in m [] v)` ≡ `(assoc m nil v)`. Shared with `GAP-S55`
+(`update-in`).
 
 ### GAP-S105: One-arity `assoc` returns the collection instead of raising
 
