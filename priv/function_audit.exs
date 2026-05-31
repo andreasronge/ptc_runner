@@ -1908,7 +1908,7 @@
       status: :supported,
       description: "Returns item at index",
       notes:
-        "DIV-26 for out-of-range signal values; DIV-36 for string grapheme indexing; the 3-arity (nth coll idx not-found) returns the default for out-of-range/negative/nil, matching Clojure; BUG GAP-S10/GAP-S79/GAP-S94. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
+        "DIV-26 for out-of-range signal values; DIV-36 for string grapheme indexing; nil input returns nil (2-arity) or the default (3-arity), matching Clojure; the 3-arity (nth coll idx not-found) returns the default for out-of-range/negative; BUG GAP-S10/GAP-S79. BUG GAP-S130: character literals are treated as one-character strings instead of raising"
     },
     %{
       name: "nthnext",
