@@ -1913,8 +1913,17 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
 
     test "returns empty list when n is 0" do
+      # Non-positive count keeps returning [] (GAP-S32, tracked separately).
       {:ok, %Step{return: result}} = Lisp.run(~S|(take-last 0 [1 2 3])|)
       assert result == []
+    end
+
+    test "returns nil for an empty collection, like butlast (GAP-S48)" do
+      # Clojure's seq-punning: an empty result is nil, not []. Matches the
+      # butlast sibling fixed in the same GAP-S48 batch.
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(take-last 2 [])|)
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(take-last 1 "")|)
+      assert {:ok, %Step{return: nil}} = Lisp.run(~S|(take-last 2 {})|)
     end
 
     test "works on strings (graphemes)" do
