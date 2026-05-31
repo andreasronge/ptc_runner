@@ -446,6 +446,50 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   @doc """
+  Clojure's `clojure.core/replace` seq form: replace each element of `coll`
+  with its lookup in `smap` (a map or an indexable vector), leaving elements
+  absent from `smap` unchanged.
+
+  `coll` is normalized as a seq, so any seqable (list, vector, string, map,
+  set, or nil) is accepted and an empty/`nil` input yields `[]`. Flexible
+  lookup is used so PTC's keyword/string key normalization matches keyword
+  elements, and a vector `smap` resolves elements as 0-based indexes.
+
+  Lookup follows PTC's `get` value model: a list-valued element is treated as a
+  get-in path, not an exact key, so vector map keys are not matched (consistent
+  with `(get {[:a] :x} [:a])` => nil) — a deliberate divergence from Clojure's
+  exact map-entry lookup.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Collection.replace_coll(%{"a" => :x}, [:a, :b])
+      [:x, :b]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.replace_coll([10, 20, 30], [0, 1, 2, 0])
+      [10, 20, 30, 10]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.replace_coll([10, 20, 30], [5])
+      [5]
+
+      iex> PtcRunner.Lisp.Runtime.Collection.replace_coll(%{}, nil)
+      []
+  """
+  def replace_coll(smap, coll) do
+    case seq(coll) do
+      nil ->
+        []
+
+      elements ->
+        Enum.map(elements, fn e ->
+          case FlexAccess.flex_fetch(smap, e) do
+            {:ok, v} -> v
+            :error -> e
+          end
+        end)
+    end
+  end
+
+  @doc """
   Variadic `interleave` over lists (Clojure's 0/1/n arity).
 
   Argument list-typing is enforced by the `:interleave` arg-spec, so every

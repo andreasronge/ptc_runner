@@ -343,7 +343,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `parse-int` | `(parse-int ...)` |  |
 | `parse-long` | `(parse-long ...)` |  |
 | `pr-str` | `(pr-str ...)` | Readable string representation (strings quoted, nil as "nil", space-separated) |
-| `replace` | `(replace s pattern replacement)` | Replace all occurrences |
+| `replace` | `(replace smap coll), (replace s pattern replacement)` | Seq replace via smap (arity 2) or string replace (arity 3) |
 | `split` | `(split s separator)` | Split string by separator |
 | `split-lines` | `(split-lines s)` | Split string into lines (\n or \r\n) |
 | `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |

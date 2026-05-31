@@ -421,7 +421,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `remove-watch` | ❌ not_relevant | Removes watch from reference | relies on mutable state references |
 | `repeat` | ❌ not_relevant | Returns infinite seq repeating value | returns lazy sequences |
 | `repeatedly` | ❌ not_relevant | Returns seq calling function repeatedly | returns lazy sequences |
-| `replace` | ✅ supported | Replaces values by map mapping | BUG GAP-S16: clojure.core sequence replacement form is not implemented |
+| `replace` | ✅ supported | Replaces values by map mapping | Arity-2 clojure.core seq replace (smap lookup over any seqable coll); arity-3 is the clojure.string/replace alias. 1-arity transducer form unsupported. Namespace collapse: (clojure.string/replace smap coll) runs the seq form instead of raising on arity. |
 | `require` | ❌ not_relevant | Requires namespace | relies on namespace/load system |
 | `requiring-resolve` | ❌ not_relevant | Requires ns and resolves symbol | relies on namespace/load system |
 | `reset!` | ❌ not_relevant | Sets atom value | mutable state (atoms) |
