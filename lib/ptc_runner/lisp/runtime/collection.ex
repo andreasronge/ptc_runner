@@ -394,7 +394,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def distinct(nil), do: []
   def distinct(coll) when is_list(coll), do: Enum.uniq(coll)
   def distinct(coll) when is_binary(coll), do: Enum.uniq(Normalize.graphemes(coll))
-  def distinct(coll) when is_map(coll) and not is_struct(coll), do: Normalize.to_seq(coll)
+  # A direct map has no clause: distinct's result order exposes (unordered) map
+  # traversal, so it requires an explicit ordered view (keys/vals/entries). This
+  # rejects with a clean type_error, matching Clojure (which also raises) and the
+  # DIV-29 map policy (GAP-S134).
 
   # ============================================================
   # Construction
@@ -1126,6 +1129,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def frequencies(nil), do: %{}
   def frequencies(coll) when is_list(coll), do: Enum.frequencies(coll)
   def frequencies(coll) when is_binary(coll), do: Enum.frequencies(Normalize.graphemes(coll))
+  # frequencies is order-INSENSITIVE (it counts), so a direct map is accepted as
+  # its [k v] entries — matching `count` and Clojure (GAP-S20). Contrast the
+  # order-exposing `distinct`, which rejects direct maps (GAP-S134).
+  def frequencies(coll) when is_map(coll) and not is_struct(coll),
+    do: Enum.frequencies(Normalize.to_seq(coll))
 
   # ============================================================
   # Membership

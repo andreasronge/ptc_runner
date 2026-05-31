@@ -16,6 +16,29 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S134 + GAP-S20(freq) — direct-map-as-collection consistency rule  ·  committed
+
+- **Classification:** BUG (both) — `distinct` BUG (too lenient), `frequencies`
+  BUG (too strict); each already filed in opposite directions.
+- **Work size:** A/B
+- **Spec basis:** Codex consult on the most consistent rule for LLM use settled
+  on: *a direct map is data, not an implicit ordered sequence — order-INSENSITIVE
+  consumers accept it; ops whose result exposes/depends on traversal order
+  reject it and require an explicit ordered view (`seq`/`entries`/`keys`/`vals`)*.
+  Applied to the two ops the team already flagged: `frequencies` (counts →
+  order-insensitive) now **accepts** maps like `count` + Clojure (GAP-S20);
+  `distinct` (result order exposes traversal) now **rejects** maps like
+  Clojure + DIV-29 (GAP-S134).
+- **Decision boundary:** declined codex's *broader* version (rejecting
+  `map`/`filter`/`reduce`/`take`/`drop` on maps). Those are whole-collection ops
+  Clojure accepts, DIV-29 scopes itself to *positional* ops, PTC traversal is
+  deterministic, and rejecting them would break the core LLM idiom for no real
+  safety gain. The single-element positional ops (`first`/`last`/`nth`/`reverse`/
+  `interpose`/`interleave`) already reject via DIV-29.
+- **Risk:** local (one clause added to `frequencies`, one removed from
+  `distinct`; `:distinct` added to the unordered-map type-error message).
+- **Codex review:** pending.
+
 ## GAP-S102 — multi-collection `map`/`mapv` accept strings/maps (align with pmap)  ·  committed
 
 - **Classification:** BUG
