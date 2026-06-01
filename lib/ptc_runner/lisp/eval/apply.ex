@@ -174,7 +174,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Special handling for unary minus: (- x) means negation, not (identity - x)
+  # Unary variadic builtins still route through Math for validation and
+  # operator-specific single-argument behavior.
   defp do_apply_fun(
          {:variadic, fun2, _identity},
          [x],
