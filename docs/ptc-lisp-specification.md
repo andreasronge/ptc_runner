@@ -2188,9 +2188,10 @@ The `seq` function converts a collection to a sequence:
 (range 0 10 2)                     ; => [0 2 4 6 8]
 (range 10 0 -2)                    ; => [10 8 6 4 2]
 (range 5 5)                        ; => []
+(take 3 (range 1 5 0))             ; => [1 1 1]
 ```
 
-**Note:** Unlike Clojure, `range` in PTC-Lisp is always finite and **requires at least one argument**. The zero-arity `(range)` which produces an infinite sequence is not supported because PTC-Lisp does not support lazy sequences.
+**Note:** Unlike Clojure, `range` in PTC-Lisp is always finite and **requires at least one argument**. The zero-arity `(range)` which produces an infinite sequence is not supported because PTC-Lisp does not support lazy sequences. A direct zero-step `(range start end 0)` also raises unless it is consumed by bounded `take`.
 
 ### 8.2 Map Operations
 
@@ -2420,7 +2421,7 @@ The `seq` function converts a collection to a sequence:
 - **NaN Propagation**: Any arithmetic operation involving `Double/NaN` returns `Double/NaN`.
 - **Division by Zero**: An **integer** zero divisor — `(/ n 0)` — raises an `arithmetic-error` (Clojure conformance). A **float** zero divisor follows IEEE 754: `(/ n 0.0)` returns `Double/POSITIVE_INFINITY` (if `n > 0`), `Double/NEGATIVE_INFINITY` (if `n < 0`), or `Double/NaN` (if `n = 0`).
 - **Indeterminate Forms**: Operations like `(- Double/POSITIVE_INFINITY Double/POSITIVE_INFINITY)` or `(* Double/POSITIVE_INFINITY 0)` return `Double/NaN`.
-- **Coercion**: Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
+- **Coercion**: Converting `Infinity` to `int` raises an `arithmetic-error`; `(int ##NaN)` returns `0`, matching JVM int coercion.
 
 ```clojure
 (+ 1 2 3)       ; => 6
@@ -2444,6 +2445,7 @@ The `seq` function converts a collection to a sequence:
 (round 3.5)     ; => 4
 (double 5)      ; => 5.0
 (int 3.7)       ; => 3
+(int ##NaN)     ; => 0
 (keyword "foo")  ; => :foo
 (keyword :bar)   ; => :bar
 (keyword nil)    ; => nil
@@ -2460,7 +2462,7 @@ The `seq` function converts a collection to a sequence:
 (int Double/POSITIVE_INFINITY)      ; => ARITHMETIC ERROR
 ```
 
-**Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` or `NaN` to `int` raises an `arithmetic-error`.
+**Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` to `int` raises an `arithmetic-error`; `(int ##NaN)` returns `0`.
 
 **`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Coercion never grows the BEAM atom table: names in the bounded vocabulary become atoms, every other name becomes a runtime keyword struct.
 

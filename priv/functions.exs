@@ -67,7 +67,7 @@
     %{
       name: "-",
       description: "Subtraction",
-      binding: :variadic,
+      binding: :variadic_nonempty,
       category: :core,
       dispatch: :env,
       signatures: ["(- x y ...)"],
@@ -3199,7 +3199,7 @@
       see_also: [],
       clojure_var: "range",
       divergences:
-        "DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md."
+        "DIV-02: zero-arity (range) (infinite lazy seq) is not supported — bounds must be specified. Direct zero-step ranges raise unless consumed by bounded take. PTC-Lisp has no lazy sequences. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "ratio?",

@@ -526,8 +526,11 @@ defmodule PtcRunner.Lisp.Runtime.String do
 
   def parse_long(s) when is_binary(s) do
     case Integer.parse(s) do
-      {n, ""} -> n
-      _ -> nil
+      {n, ""} when n >= -9_223_372_036_854_775_808 and n <= 9_223_372_036_854_775_807 ->
+        n
+
+      _ ->
+        nil
     end
   end
 

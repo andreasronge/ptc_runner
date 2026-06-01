@@ -26,17 +26,17 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `*` | ✅ supported | Multiplies numbers; returns 1 with no args | BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
+| `*` | ✅ supported | Multiplies numbers; returns 1 with no args |  |
 | `*'` | ✅ supported | Multiplies numbers with arbitrary precision | alias for *; BEAM integers are already arbitrary precision |
-| `+` | ✅ supported | Adds numbers; returns 0 with no args | BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
+| `+` | ✅ supported | Adds numbers; returns 0 with no args |  |
 | `+'` | ✅ supported | Adds numbers with arbitrary precision | alias for +; BEAM integers are already arbitrary precision |
-| `-` | ✅ supported | Subtracts numbers or negates single argument | BUG GAP-S28: zero-arity form currently returns 0 instead of raising |
+| `-` | ✅ supported | Subtracts numbers or negates single argument |  |
 | `-'` | ✅ supported | Subtracts numbers with arbitrary precision | alias for -; BEAM integers are already arbitrary precision |
 | `->` | ✅ supported | Threads expression as second argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
 | `->>` | ✅ supported | Threads expression as last argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
 | `.` | ❌ not_relevant | Java member access and method calls | Java interop |
 | `..` | ❌ not_relevant | Chains member access operations | Java interop |
-| `/` | ✅ supported | Divides numbers | BUG GAP-S29: unary form currently returns the argument instead of reciprocal. BUG GAP-S69: floating division by zero returns infinity instead of raising. BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising |
+| `/` | ✅ supported | Divides numbers |  |
 | `<` | ✅ supported | Returns true if numbers monotonically increase | DIV-30: ordering predicates use PTC's recoverable total term ordering |
 | `<=` | ✅ supported | Returns true if numbers non-decreasing | DIV-30: ordering predicates use PTC's recoverable total term ordering |
 | `=` | ✅ supported | Equality comparison | DIV-32: numeric equality is type-independent. BUG GAP-S120: character literals compare equal to one-character strings |
@@ -266,7 +266,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `inst-ms` | ❌ not_relevant | Milliseconds since epoch for instant | covered by existing temporal interop .getTime |
 | `inst?` | ❌ not_relevant | Returns true if instant | Clojure instant predicate; PTC-Lisp temporal interop uses host date structs |
 | `instance?` | ❌ not_relevant | Returns true if instance of class | relies on Java class system |
-| `int` | ✅ supported | Coerces to int | BUG GAP-S62: NaN input raises instead of returning 0. BUG GAP-S111: out-of-range integer inputs return unchanged instead of raising. BUG GAP-S121: character literals raise instead of returning code points |
+| `int` | ✅ supported | Coerces to int |  |
 | `int-array` | ❌ not_relevant | Creates int Java array | relies on Java array/mutability |
 | `int?` | ✅ supported | Returns true if Integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
 | `integer?` | ✅ supported | Returns true if integer |  |
@@ -353,7 +353,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `parents` | ❌ not_relevant | Returns immediate parents of tag | metadata/hierarchy manipulation not supported in PTC-Lisp |
 | `parse-boolean` | ✅ supported | Parses string to boolean | returns true, false, or nil |
 | `parse-double` | ✅ supported | Parses string to double | BUG GAP-S61: surrounding whitespace and Java decimal spellings return nil instead of parsing |
-| `parse-long` | ✅ supported | Parses string to long | BUG GAP-S85: out-of-range long values return arbitrary-precision integers instead of nil |
+| `parse-long` | ✅ supported | Parses string to long |  |
 | `parse-uuid` | ❌ not_relevant | Parses string to UUID | no UUID runtime type; keep UUIDs as strings |
 | `partial` | ✅ supported | Fixes supplied arguments to function | BUG GAP-S71: map/set/vector callables are rejected in function position |
 | `partition` | ✅ supported | Partitions items into groups of n | BUG GAP-S31: nil padding collection currently raises instead of acting empty. BUG GAP-S53: negative partition size raises instead of returning an empty seq. BUG GAP-S79: numeric size/step coercion rejects floats Clojure accepts. |
@@ -388,7 +388,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `rand-nth` | ❌ not_relevant | Returns random item from seq | relies on non-deterministic side effects/state |
 | `random-sample` | ❌ not_relevant | Returns random sample of items | relies on non-deterministic side effects/state |
 | `random-uuid` | ❌ not_relevant | Returns random UUID | relies on non-deterministic side effects |
-| `range` | ✅ supported | Returns sequence of numbers | BUG GAP-S45: zero-step range currently returns an empty vector. BUG GAP-S99: nil and nonnumeric bounds/steps return an empty vector instead of raising |
+| `range` | ✅ supported | Returns sequence of numbers |  |
 | `ratio?` | ✅ supported | Returns true if ratio | always false; ratio literals are unsupported, see DIV-20 |
 | `rational?` | ✅ supported | Returns true if rational number |  |
 | `rationalize` | ❌ not_relevant | Coerces to ratio | ratio values are not supported |

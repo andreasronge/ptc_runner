@@ -1027,7 +1027,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
 
     test "filter with variadic +" do
-      {:ok, %Step{return: result}} = Lisp.run("(filter + [0 1 2 nil])")
+      {:ok, %Step{return: result}} = Lisp.run("(filter + [0 1 2])")
       assert result == [0, 1, 2]
     end
 
@@ -1047,8 +1047,8 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
 
     test "some with variadic builtin" do
-      {:ok, %Step{return: result}} = Lisp.run("(some + [nil nil 1 nil])")
-      assert result == 1
+      {:ok, %Step{return: result}} = Lisp.run("(some + [0 1 nil])")
+      assert result == 0
     end
 
     test "every? with variadic builtin" do

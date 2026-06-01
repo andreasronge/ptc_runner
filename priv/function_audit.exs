@@ -4,7 +4,7 @@
       name: "*",
       status: :supported,
       description: "Multiplies numbers; returns 1 with no args",
-      notes: "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+      notes: ""
     },
     %{
       name: "*'",
@@ -16,7 +16,7 @@
       name: "+",
       status: :supported,
       description: "Adds numbers; returns 0 with no args",
-      notes: "BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+      notes: ""
     },
     %{
       name: "+'",
@@ -28,7 +28,7 @@
       name: "-",
       status: :supported,
       description: "Subtracts numbers or negates single argument",
-      notes: "BUG GAP-S28: zero-arity form currently returns 0 instead of raising"
+      notes: ""
     },
     %{
       name: "-'",
@@ -64,8 +64,7 @@
       name: "/",
       status: :supported,
       description: "Divides numbers",
-      notes:
-        "BUG GAP-S29: unary form currently returns the argument instead of reciprocal. BUG GAP-S69: floating division by zero returns infinity instead of raising. BUG GAP-S104: unary nonnumeric inputs are returned unchanged instead of raising"
+      notes: ""
     },
     %{
       name: "<",
@@ -1457,8 +1456,7 @@
       name: "int",
       status: :supported,
       description: "Coerces to int",
-      notes:
-        "BUG GAP-S62: NaN input raises instead of returning 0. BUG GAP-S111: out-of-range integer inputs return unchanged instead of raising. BUG GAP-S121: character literals raise instead of returning code points"
+      notes: ""
     },
     %{
       name: "int-array",
@@ -1973,8 +1971,7 @@
       name: "parse-long",
       status: :supported,
       description: "Parses string to long",
-      notes:
-        "BUG GAP-S85: out-of-range long values return arbitrary-precision integers instead of nil"
+      notes: ""
     },
     %{
       name: "parse-uuid",
@@ -2185,8 +2182,7 @@
       name: "range",
       status: :supported,
       description: "Returns sequence of numbers",
-      notes:
-        "BUG GAP-S45: zero-step range currently returns an empty vector. BUG GAP-S99: nil and nonnumeric bounds/steps return an empty vector instead of raising"
+      notes: ""
     },
     %{
       name: "ratio?",
