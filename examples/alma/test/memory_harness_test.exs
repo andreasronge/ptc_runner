@@ -73,7 +73,7 @@ defmodule Alma.MemoryHarnessTest do
         """)
 
       # The MetaAgent's step.memory contains both the helper and recall
-      recall_closure = step.memory[:recall]
+      recall_closure = step.memory["recall"]
       assert is_tuple(recall_closure)
 
       # Fix: carry the full namespace so helpers are available
@@ -99,10 +99,10 @@ defmodule Alma.MemoryHarnessTest do
             (defn mem-update []
               (track-location (get data/task "agent_location"))))
           """,
-          memory: %{"location-counts": nil}
+          memory: %{"location-counts" => nil}
         )
 
-      mem_update_closure = step.memory[:"mem-update"]
+      mem_update_closure = step.memory["mem-update"]
       assert is_tuple(mem_update_closure)
 
       design = %{name: "test", mem_update: mem_update_closure, namespace: step.memory}
@@ -117,7 +117,7 @@ defmodule Alma.MemoryHarnessTest do
       # Should update location-counts, but currently crashes because
       # track-location helper is not in scope
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{})
-      assert memory[:"location-counts"] == %{"room_A" => 1}
+      assert memory["location-counts"] == %{"room_A" => 1}
     end
 
     test "full namespace design with helpers survives collection phase" do
@@ -137,13 +137,13 @@ defmodule Alma.MemoryHarnessTest do
             (defn recall []
               (format-stats (or stats {"wins" 0 "total" 0}))))
           """,
-          memory: %{stats: nil}
+          memory: %{"stats" => nil}
         )
 
       design = %{
         name: "test",
-        mem_update: step.memory[:"mem-update"],
-        recall: step.memory[:recall],
+        mem_update: step.memory["mem-update"],
+        recall: step.memory["recall"],
         namespace: step.memory
       }
 
@@ -191,8 +191,8 @@ defmodule Alma.MemoryHarnessTest do
         observation_log: []
       }
 
-      {memory, nil, _log} = MemoryHarness.update(design, episode, %{visits: []})
-      assert memory[:visits] == ["room_A"]
+      {memory, nil, _log} = MemoryHarness.update(design, episode, %{"visits" => []})
+      assert memory["visits"] == ["room_A"]
 
       episode2 = %{
         task: %{"location" => "room_B"},
@@ -202,7 +202,7 @@ defmodule Alma.MemoryHarnessTest do
       }
 
       {memory2, nil, _log} = MemoryHarness.update(design, episode2, memory)
-      assert memory2[:visits] == ["room_A", "room_B"]
+      assert memory2["visits"] == ["room_A", "room_B"]
     end
 
     test "strips injected closure key from returned memory" do
@@ -214,8 +214,8 @@ defmodule Alma.MemoryHarnessTest do
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{})
 
       # The injected :"mem-update" key should not be in returned memory
-      refute Map.has_key?(memory, :"mem-update")
-      assert memory[:x] == 42
+      refute Map.has_key?(memory, "mem-update")
+      assert memory["x"] == 42
     end
 
     test "returns error when closure fails" do
@@ -324,7 +324,7 @@ defmodule Alma.MemoryHarnessTest do
       design = %{name: "test", mem_update: closure}
       episode = %{task: %{}, actions: [], success: true, observation_log: []}
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{}, llm: mock_llm)
-      assert memory[:result] == %{"pairs" => [%{"object" => "flask", "room" => "kitchen"}]}
+      assert memory["result"] == %{"pairs" => [%{"object" => "flask", "room" => "kitchen"}]}
     end
 
     test "with json format falls back to string on invalid JSON" do
@@ -341,7 +341,7 @@ defmodule Alma.MemoryHarnessTest do
       design = %{name: "test", mem_update: closure}
       episode = %{task: %{}, actions: [], success: true, observation_log: []}
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{}, llm: mock_llm)
-      assert memory[:result] == "not valid json at all"
+      assert memory["result"] == "not valid json at all"
     end
   end
 
@@ -358,7 +358,7 @@ defmodule Alma.MemoryHarnessTest do
       design = %{name: "test", mem_update: closure}
       episode = %{task: %{}, actions: [], success: true, observation_log: []}
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{})
-      assert memory[:neighbors] == ["room_B"]
+      assert memory["neighbors"] == ["room_B"]
     end
 
     test "graph state persists in memory across episodes" do
@@ -375,7 +375,7 @@ defmodule Alma.MemoryHarnessTest do
 
       # First episode: add edge A-B
       {memory, nil, _log} = MemoryHarness.update(design, episode, %{})
-      assert memory[:path] == ["room_A", "room_B"]
+      assert memory["path"] == ["room_A", "room_B"]
       assert Map.has_key?(memory, :__graph_store)
 
       # Second episode with a closure that adds B-C and queries A-C path
@@ -390,7 +390,7 @@ defmodule Alma.MemoryHarnessTest do
       design2 = %{name: "test", mem_update: closure2}
       {memory2, nil, _log} = MemoryHarness.update(design2, episode, memory)
       # Path should traverse A->B->C since A-B was persisted from first episode
-      assert memory2[:path] == ["room_A", "room_B", "room_C"]
+      assert memory2["path"] == ["room_A", "room_B", "room_C"]
     end
   end
 
