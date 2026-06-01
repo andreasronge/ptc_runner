@@ -32,6 +32,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     Metrics,
     NativePreview,
     ResponseHandler,
+    Shared,
     ToolNormalizer,
     TurnFeedback
   }
@@ -214,7 +215,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
               false
             ),
           field_descriptions: agent.field_descriptions,
-          messages: build_collected_messages(state_with_tokens, final_messages),
+          messages: Shared.build_collected_messages(state_with_tokens, final_messages),
           prompt: state.expanded_prompt,
           original_prompt: state.original_prompt,
           prints: [],
@@ -238,7 +239,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           step
           | usage: Metrics.build_final_usage(state, duration_ms, 0),
             turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-            messages: build_collected_messages(state, messages),
+            messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt
         }
@@ -336,13 +337,13 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         usage =
           state
           |> Metrics.build_final_usage(duration_ms, 0)
-          |> add_schema_metrics(state.schema)
+          |> Shared.add_schema_metrics(state.schema)
 
         step_with_metrics = %{
           step
           | usage: usage,
             turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-            messages: build_collected_messages(state, messages),
+            messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt
         }
@@ -617,7 +618,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           step
           | usage: Metrics.build_final_usage(state, duration_ms, 0),
             turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-            messages: build_collected_messages(state, messages),
+            messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt,
             tools: state.normalized_tools
@@ -706,7 +707,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         fatal_step
         | usage: Metrics.build_final_usage(state, duration_ms, 0),
           turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-          messages: build_collected_messages(state, state.messages),
+          messages: Shared.build_collected_messages(state, state.messages),
           prompt: state.expanded_prompt,
           original_prompt: state.original_prompt,
           tools: state.normalized_tools
@@ -1159,7 +1160,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   end
 
   defp handle_lisp_success(lisp_step, program, call, agent, state, duration_ms) do
-    case check_memory_limit(lisp_step.memory, agent.memory_limit) do
+    case Shared.check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->
         # Intermediate value — render success and continue. Tier 3b:
         # advance `turn_history` so the program's final expression
@@ -1190,7 +1191,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp handle_lisp_runtime_error(lisp_step, program, call, _agent, state, duration_ms) do
     fail = lisp_step.fail
-    reason_atom = classify_lisp_error(fail)
+    reason_atom = Shared.classify_lisp_error(fail)
     message = fail.message
 
     result_json = PtcToolProtocol.render_error(reason_atom, message)
@@ -1385,32 +1386,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     |> Map.update!(:memory, &(&1 || %{}))
     |> Map.update!(:tool_cache, &(&1 || %{}))
     |> then(&LispOpts.build(agent, &1, exec_context, ptc_lisp_inventory))
-  end
-
-  defp memory_size(memory) when is_map(memory), do: :erlang.external_size(memory)
-
-  defp check_memory_limit(memory, limit) when is_integer(limit) do
-    size = memory_size(memory)
-    if size > limit, do: {:error, :memory_limit_exceeded, size}, else: {:ok, size}
-  end
-
-  defp check_memory_limit(_memory, nil), do: {:ok, 0}
-
-  # Mirrors `Loop.PtcToolCall.classify_lisp_error/1`.
-  defp classify_lisp_error(%{reason: reason})
-       when reason in [:parse_error, :timeout, :memory_limit] do
-    reason
-  end
-
-  defp classify_lisp_error(%{reason: reason}) when is_atom(reason) do
-    reason_str = Atom.to_string(reason)
-
-    cond do
-      String.contains?(reason_str, "parse") -> :parse_error
-      String.contains?(reason_str, "timeout") -> :timeout
-      String.contains?(reason_str, "memory") -> :memory_limit
-      true -> :runtime_error
-    end
   end
 
   defp fail_message_and_preview(fail_args) do
@@ -1731,7 +1706,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   defp coerce_scalar_final(content, return_type, agent, state) do
     trimmed = String.trim(content)
 
-    case parse_for_type(trimmed, return_type) do
+    case Shared.parse_for_type(trimmed, return_type) do
       {:ok, parsed} ->
         coerced = JsonHandler.atomize_value(parsed, return_type)
 
@@ -1749,36 +1724,6 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
       {:error, message} ->
         combined_text_feedback_or_error(message, content, agent, state)
-    end
-  end
-
-  # Mirror of `Loop.PtcToolCall.parse_for_type/2`. `:datetime` accepts
-  # both JSON-quoted ISO-8601 (`"\"2026-05-06T...\""`) and a bare
-  # ISO-8601 string. All other scalar types parse via `Jason.decode/1`.
-  defp parse_for_type(content, :datetime) do
-    case Jason.decode(content) do
-      {:ok, val} ->
-        {:ok, val}
-
-      {:error, _} ->
-        case DateTime.from_iso8601(content) do
-          {:ok, _dt, _offset} -> {:ok, content}
-          {:error, _} -> {:error, "Could not parse datetime from response: #{inspect(content)}"}
-        end
-    end
-  end
-
-  defp parse_for_type(content, {:optional, _inner}) do
-    case Jason.decode(content) do
-      {:ok, val} -> {:ok, val}
-      {:error, _} -> {:error, "Could not parse JSON from response."}
-    end
-  end
-
-  defp parse_for_type(content, _type) do
-    case Jason.decode(content) do
-      {:ok, val} -> {:ok, val}
-      {:error, _} -> {:error, "Could not parse JSON from response."}
     end
   end
 
@@ -1867,7 +1812,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           false
         ),
       field_descriptions: agent.field_descriptions,
-      messages: build_collected_messages(state, final_messages),
+      messages: Shared.build_collected_messages(state, final_messages),
       prompt: state.expanded_prompt,
       original_prompt: state.original_prompt,
       tools: state.normalized_tools,
@@ -2337,7 +2282,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             state.trace_mode,
             true
           ),
-        messages: build_collected_messages(state, final_messages),
+        messages: Shared.build_collected_messages(state, final_messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt
     }
@@ -2352,13 +2297,13 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0, -1)
-      |> add_schema_metrics(state.schema)
+      |> Shared.add_schema_metrics(state.schema)
 
     step_with_metrics = %{
       step
       | usage: usage,
         turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-        messages: build_collected_messages(state, state.messages),
+        messages: Shared.build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
         tools: state.normalized_tools
@@ -2366,25 +2311,4 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     {:error, step_with_metrics}
   end
-
-  # ============================================================
-  # Message Collection
-  # ============================================================
-
-  defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
-
-  defp build_collected_messages(%{collect_messages: true} = state, messages) do
-    system_prompt = state.current_system_prompt || ""
-    [%{role: :system, content: system_prompt} | messages]
-  end
-
-  defp add_schema_metrics(usage, schema) when is_map(schema) do
-    schema_json = Jason.encode!(schema)
-
-    usage
-    |> Map.put(:schema_used, true)
-    |> Map.put(:schema_bytes, byte_size(schema_json))
-  end
-
-  defp add_schema_metrics(usage, _), do: Map.put(usage, :schema_used, false)
 end

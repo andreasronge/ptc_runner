@@ -39,6 +39,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     Metrics,
     ResponseHandler,
     ReturnValidation,
+    Shared,
     State,
     StepAssembler,
     ToolNormalizer,
@@ -351,7 +352,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   end
 
   defp handle_lisp_success(program, native_call, assistant_content, lisp_step, agent, state) do
-    case check_memory_limit(lisp_step.memory, agent.memory_limit) do
+    case Shared.check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->
         continue_with_intermediate(
           program,
@@ -528,7 +529,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
          state
        ) do
     fail = lisp_step.fail
-    reason_atom = classify_lisp_error(fail)
+    reason_atom = Shared.classify_lisp_error(fail)
     message = fail.message
     tool_result_json = PtcToolProtocol.render_error(reason_atom, message)
 
@@ -722,7 +723,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   defp parse_and_complete_direct_final(content, return_type, agent, state) do
     trimmed = String.trim(content)
 
-    case parse_for_type(trimmed, return_type) do
+    case Shared.parse_for_type(trimmed, return_type) do
       {:ok, parsed} ->
         coerced = JsonHandler.atomize_value(parsed, return_type)
 
@@ -740,35 +741,6 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
       {:error, message} ->
         direct_final_feedback_continuation(message, agent, state, content)
-    end
-  end
-
-  # Parse a piece of content into a value of the expected type.
-  # `:datetime` accepts both JSON-quoted ISO-8601 and a bare ISO-8601 string.
-  defp parse_for_type(content, :datetime) do
-    case Jason.decode(content) do
-      {:ok, val} ->
-        {:ok, val}
-
-      {:error, _} ->
-        case DateTime.from_iso8601(content) do
-          {:ok, _dt, _offset} -> {:ok, content}
-          {:error, _} -> {:error, "Could not parse datetime from response: #{inspect(content)}"}
-        end
-    end
-  end
-
-  defp parse_for_type(content, {:optional, _inner}) do
-    case Jason.decode(content) do
-      {:ok, val} -> {:ok, val}
-      {:error, _} -> {:error, "Could not parse JSON from response."}
-    end
-  end
-
-  defp parse_for_type(content, _type) do
-    case Jason.decode(content) do
-      {:ok, val} -> {:ok, val}
-      {:error, _} -> {:error, "Could not parse JSON from response."}
     end
   end
 
@@ -1048,15 +1020,6 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     (history ++ [new_result]) |> Enum.take(-3)
   end
 
-  defp memory_size(memory) when is_map(memory), do: :erlang.external_size(memory)
-
-  defp check_memory_limit(memory, limit) when is_integer(limit) do
-    size = memory_size(memory)
-    if size > limit, do: {:error, :memory_limit_exceeded, size}, else: {:ok, size}
-  end
-
-  defp check_memory_limit(_memory, nil), do: {:ok, 0}
-
   # Delegate to `Loop.emit_pmap_telemetry/2` so `:tool_call` mode emits
   # the same `[:pmap, :start | :stop]` / `[:pcalls, :start | :stop]`
   # events as `:content` mode (R27).
@@ -1105,25 +1068,6 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       "message" => message,
       "feedback" => message
     })
-  end
-
-  # Reached only via Lisp.run/2's `{:error, lisp_step}` branch where
-  # `lisp_step.fail` is always a populated map per `Step.fail()` —
-  # dialyzer narrows the input type accordingly, so no nil clause needed.
-  defp classify_lisp_error(%{reason: reason})
-       when reason in [:parse_error, :timeout, :memory_limit] do
-    reason
-  end
-
-  defp classify_lisp_error(%{reason: reason}) when is_atom(reason) do
-    reason_str = Atom.to_string(reason)
-
-    cond do
-      String.contains?(reason_str, "parse") -> :parse_error
-      String.contains?(reason_str, "timeout") -> :timeout
-      String.contains?(reason_str, "memory") -> :memory_limit
-      true -> :runtime_error
-    end
   end
 
   defp fail_message_and_preview(fail_args) do
