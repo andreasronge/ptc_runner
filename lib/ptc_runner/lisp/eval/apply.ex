@@ -24,7 +24,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
-  alias PtcRunner.Lisp.Runtime.SpecialValues
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
@@ -182,7 +181,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %EvalContext{} = eval_ctx,
          _do_eval_fn
        ) do
-    {:ok, unary_variadic(fun2, x), eval_ctx}
+    {:ok, Math.unary_variadic(fun2, x), eval_ctx}
   rescue
     ArithmeticError ->
       {:error, {:type_error, "expected number, got #{Helpers.describe_type(x)}", x}}
@@ -199,7 +198,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     result =
       case args do
         [] -> identity
-        [x] -> unary_variadic(fun2, x)
+        [x] -> Math.unary_variadic(fun2, x)
         [x, y] -> fun2.(x, y)
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
@@ -232,7 +231,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        when is_function(fun2, 2) do
     result =
       case args do
-        [x] -> unary_variadic_nonempty(name, fun2, x)
+        [x] -> Math.unary_variadic_nonempty(name, fun2, x)
         [x, y] -> fun2.(x, y)
         [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
       end
@@ -438,22 +437,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       {:error, {:arity_mismatch, length(patterns), length(args)}}
     end
   end
-
-  defp unary_variadic(fun2, x) do
-    cond do
-      fun2 == (&Kernel.-/2) or fun2 == (&Math.subtract/2) -> Math.subtract([x])
-      fun2 == (&Math.add/2) -> unary_plus(x)
-      fun2 == (&Math.multiply/2) -> fun2.(x, 1)
-      true -> x
-    end
-  end
-
-  defp unary_plus(x) when is_number(x), do: x
-  defp unary_plus(x), do: if(SpecialValues.special?(x), do: x, else: Math.add(x, 0))
-
-  defp unary_variadic_nonempty(:/, fun2, x), do: fun2.(1, x)
-  defp unary_variadic_nonempty(:-, _fun2, x), do: Math.subtract([x])
-  defp unary_variadic_nonempty(_name, _fun2, x), do: x
 
   @doc """
   Converts Lisp closures to Erlang functions for use with higher-order functions.

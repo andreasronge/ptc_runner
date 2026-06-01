@@ -577,4 +577,23 @@ defmodule PtcRunner.Lisp.Runtime.Math do
         1
     end
   end
+
+  @doc false
+  def unary_variadic(fun2, x) do
+    cond do
+      fun2 == (&__MODULE__.subtract/2) -> subtract([x])
+      fun2 == (&__MODULE__.add/2) -> unary_plus(x)
+      fun2 == (&__MODULE__.multiply/2) -> fun2.(x, 1)
+      true -> x
+    end
+  end
+
+  @doc false
+  def unary_plus(x) when is_number(x), do: x
+  def unary_plus(x), do: if(SpecialValues.special?(x), do: x, else: add(x, 0))
+
+  @doc false
+  def unary_variadic_nonempty(:/, fun2, x), do: fun2.(1, x)
+  def unary_variadic_nonempty(:-, _fun2, x), do: subtract([x])
+  def unary_variadic_nonempty(_name, _fun2, x), do: x
 end
