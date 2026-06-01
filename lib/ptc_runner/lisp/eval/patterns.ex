@@ -23,21 +23,7 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
   def match_pattern({:destructure, {:keys, keys, defaults}}, value)
       when (is_map(value) and not is_struct(value)) or is_nil(value) do
     value = value || %{}
-
-    bindings =
-      Enum.reduce(keys, %{}, fn key, acc ->
-        default = default_for(defaults, key)
-
-        val =
-          case flex_fetch(value, key) do
-            {:ok, v} -> v
-            :error -> default
-          end
-
-        Map.put(acc, key, val)
-      end)
-
-    {:ok, bindings}
+    {:ok, extract_keys(keys, value, defaults)}
   end
 
   def match_pattern({:destructure, {:keys, _keys, _defaults}}, value) do
@@ -48,18 +34,7 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
       when (is_map(value) and not is_struct(value)) or is_nil(value) do
     value = value || %{}
     # First extract keys
-    keys_bindings =
-      Enum.reduce(keys, %{}, fn key, acc ->
-        default = default_for(defaults, key)
-
-        val =
-          case flex_fetch(value, key) do
-            {:ok, v} -> v
-            :error -> default
-          end
-
-        Map.put(acc, key, val)
-      end)
+    keys_bindings = extract_keys(keys, value, defaults)
 
     # Then extract renames
     result =
@@ -94,17 +69,7 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
   def match_pattern({:destructure, {:seq, patterns}}, value)
       when is_list(value) or is_nil(value) do
     value = value || []
-
-    patterns
-    |> Enum.with_index()
-    |> Enum.reduce_while({:ok, %{}}, fn {pattern, i}, {:ok, acc} ->
-      val = Enum.at(value, i)
-
-      case match_pattern(pattern, val) do
-        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
+    match_positional(patterns, value)
   end
 
   def match_pattern({:destructure, {:seq, _}}, value) do
@@ -119,17 +84,7 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
     {leading_values, rest_values} = Enum.split(value, leading_count)
 
     # Match leading patterns
-    leading_result =
-      leading_patterns
-      |> Enum.with_index()
-      |> Enum.reduce_while({:ok, %{}}, fn {pattern, i}, {:ok, acc} ->
-        val = Enum.at(leading_values, i)
-
-        case match_pattern(pattern, val) do
-          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
+    leading_result = match_positional(leading_patterns, leading_values)
 
     # Then match rest pattern against remaining values
     case leading_result do
@@ -199,5 +154,52 @@ defmodule PtcRunner.Lisp.Eval.Patterns do
       {^key, value} -> value
       nil -> nil
     end
+  end
+
+  # Build a `%{key => value}` map by fetching each key from `value` (flexible
+  # string/atom access), falling back to the per-key default when absent.
+  defp extract_keys(keys, value, defaults) do
+    Enum.reduce(keys, %{}, fn key, acc ->
+      val =
+        case flex_fetch(value, key) do
+          {:ok, v} -> v
+          :error -> default_for(defaults, key)
+        end
+
+      Map.put(acc, key, val)
+    end)
+  end
+
+  # Match `patterns` positionally against `values` by index, merging the
+  # resulting bindings. Missing positions match against `nil` (`Enum.at/2`),
+  # so a longer pattern list still binds its trailing vars to nil.
+  defp match_positional(patterns, values) do
+    patterns
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, %{}}, fn {pattern, i}, {:ok, acc} ->
+      case match_pattern(pattern, Enum.at(values, i)) do
+        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  @doc """
+  Match `patterns` against `values` pairwise via `Enum.zip/2`, merging the
+  bindings and halting on the first error.
+
+  Unlike `match_positional/2`, `Enum.zip/2` truncates to the shorter list, so
+  this is for callers (function-arg and `recur` binding) whose arities are
+  already validated to line up. Shared by `Eval.Apply` and `Eval`.
+  """
+  @spec match_zipped([pattern()], [term()]) :: match_result()
+  def match_zipped(patterns, values) do
+    Enum.zip(patterns, values)
+    |> Enum.reduce_while({:ok, %{}}, fn {pattern, value}, {:ok, acc} ->
+      case match_pattern(pattern, value) do
+        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
   end
 end

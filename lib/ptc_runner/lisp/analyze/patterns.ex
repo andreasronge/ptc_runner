@@ -48,11 +48,19 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
     {:error, {:unsupported_pattern, other}}
   end
 
-  defp analyze_pattern_list(elements) do
-    elements
-    |> Enum.reduce_while({:ok, []}, fn elem, {:ok, acc} ->
-      case analyze_pattern(elem) do
-        {:ok, p} -> {:cont, {:ok, [p | acc]}}
+  defp analyze_pattern_list(elements), do: collect_results(elements, &analyze_pattern/1)
+
+  @doc false
+  # Apply `fun` (which returns `{:ok, v} | {:error, _}`) to each element,
+  # collecting the `:ok` values in order, halting on the first `:error`.
+  # Shared by the two pattern-list analyzers (`Analyze` and `Analyze.Patterns`).
+  @spec collect_results(Enumerable.t(), (term() -> {:ok, term()} | {:error, term()})) ::
+          {:ok, [term()]} | {:error, term()}
+  def collect_results(enum, fun) do
+    enum
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case fun.(item) do
+        {:ok, v} -> {:cont, {:ok, [v | acc]}}
         {:error, _} = err -> {:halt, err}
       end
     end)

@@ -735,19 +735,8 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
 
-  defp analyze_list_of_patterns(patterns) do
-    patterns
-    |> Enum.reduce_while({:ok, []}, fn ast, {:ok, acc} ->
-      case analyze_pattern(ast) do
-        {:ok, pattern} -> {:cont, {:ok, [pattern | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, rev} -> {:ok, Enum.reverse(rev)}
-      other -> other
-    end
-  end
+  defp analyze_list_of_patterns(patterns),
+    do: Patterns.collect_results(patterns, &analyze_pattern/1)
 
   # ============================================================
   # Sequential evaluation: do
