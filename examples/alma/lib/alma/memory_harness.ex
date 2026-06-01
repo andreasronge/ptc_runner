@@ -8,6 +8,16 @@ defmodule Alma.MemoryHarness do
   Tools (`store-obs`, `find-similar`, `summarize`, `analyze`, `graph-update`,
   `graph-neighbors`, `graph-path`) are injected into the Lisp runtime for both
   `mem-update` and `recall` closures.
+
+  ## Memory key convention
+
+  Memory keys that round-trip through PTC-Lisp are **strings**. `PtcRunner`
+  externalizes a step's memory with string keys (e.g. `(def visits ...)` lands
+  under `"visits"`, not `:visits`), so the injected closures (`"mem-update"`,
+  `"recall"`) and any values they `def` are read back with string keys.
+  Alma-private bookkeeping keys (`:__vector_store` / `:__graph_store`) stay
+  atoms: they are stripped before each run and re-added afterward, so they never
+  pass through externalization and won't collide with PTC namespace keys.
   """
 
   alias PtcRunner.Lisp
@@ -58,7 +68,7 @@ defmodule Alma.MemoryHarness do
             run_memory =
               namespace
               |> Map.merge(strip_stores(memory))
-              |> Map.put(:recall, closure)
+              |> Map.put("recall", closure)
 
             context =
               %{"task" => task_info}
@@ -132,7 +142,7 @@ defmodule Alma.MemoryHarness do
             run_memory =
               namespace
               |> Map.merge(strip_stores(memory))
-              |> Map.put(:"mem-update", closure)
+              |> Map.put("mem-update", closure)
 
             embed_mode = embed_mode(opts)
 
@@ -141,7 +151,7 @@ defmodule Alma.MemoryHarness do
               {:ok, step, updated_vs, updated_gs, sim_stats} ->
                 updated =
                   step.memory
-                  |> Map.delete(:"mem-update")
+                  |> Map.delete("mem-update")
                   |> Map.put(@vector_store_key, updated_vs)
                   |> Map.put(@graph_store_key, updated_gs)
 

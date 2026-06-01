@@ -54,8 +54,8 @@ defmodule Alma.MetaAgent do
 
     case SubAgent.run(agent, llm: llm, context: %{"parents" => parent_summaries}) do
       {:ok, step} ->
-        mem_update = step.memory[:"mem-update"]
-        recall = step.memory[:recall]
+        mem_update = step.memory["mem-update"]
+        recall = step.memory["recall"]
 
         if is_tuple(mem_update) and is_tuple(recall) do
           design = %{
@@ -81,7 +81,7 @@ defmodule Alma.MetaAgent do
   defp extract_name(step) do
     cond do
       is_map(step.return) and is_binary(step.return["name"]) -> step.return["name"]
-      is_binary(step.memory[:name]) -> step.memory[:name]
+      is_binary(step.memory["name"]) -> step.memory["name"]
       true -> "gen_#{System.unique_integer([:positive])}"
     end
   end
@@ -91,8 +91,8 @@ defmodule Alma.MetaAgent do
       is_map(step.return) and is_binary(step.return["description"]) ->
         step.return["description"]
 
-      is_binary(step.memory[:description]) ->
-        step.memory[:description]
+      is_binary(step.memory["description"]) ->
+        step.memory["description"]
 
       true ->
         ""

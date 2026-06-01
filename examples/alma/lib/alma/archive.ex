@@ -181,8 +181,8 @@ defmodule Alma.Archive do
   defp compile_and_seed(archive, source) do
     case PtcRunner.Lisp.run(source) do
       {:ok, step} ->
-        mem_update = step.memory[:"mem-update"]
-        recall = step.memory[:recall]
+        mem_update = step.memory["mem-update"]
+        recall = step.memory["recall"]
 
         return_val = unwrap_return(step.return)
         name = if is_map(return_val), do: return_val["name"], else: "env_baseline"
