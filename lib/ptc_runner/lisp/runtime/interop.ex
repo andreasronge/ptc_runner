@@ -64,6 +64,19 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     raise "java.util.Date: cannot construct from #{inspect(other)}"
   end
 
+  @doc """
+  Simulates java.lang.Boolean.parseBoolean(String).
+  """
+  def boolean_parse_boolean(nil), do: false
+
+  def boolean_parse_boolean(s) when is_binary(s) do
+    String.downcase(s) == "true"
+  end
+
+  def boolean_parse_boolean(other) do
+    raise "Boolean/parseBoolean: expected string, got #{type_name(other)}"
+  end
+
   defp parse_date_string(s) do
     with {:error, _} <- DateTime.from_iso8601(s),
          {:error, _} <- parse_iso8601_naive(s),

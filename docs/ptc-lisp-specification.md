@@ -2712,7 +2712,7 @@ To iterate over just keys or values, extract them first:
 | `parse-boolean` | Parse `"true"`/`"false"`, returns nil on failure |
 
 String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
-Java-shaped aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, `Double/parseDouble` and `Float/parseFloat` map to `parse-double`, and `Boolean/parseBoolean` maps to `parse-boolean`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics.
+Java-shaped numeric aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, and `Double/parseDouble` and `Float/parseFloat` map to `parse-double`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics. `Boolean/parseBoolean` is a Java-compatible interop builtin: it returns `true` only for case-insensitive `"true"`, returns `false` for nil/null and every other string, and raises for non-string, non-nil inputs.
 
 **Parsing behavior:**
 - Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
@@ -2729,6 +2729,8 @@ Java-shaped aliases are also accepted for LLM compatibility: `Integer/parseInt` 
 (Double/parseDouble "3.14") ; => 3.14
 (Integer/parseInt "42")    ; => 42
 (Boolean/parseBoolean "true") ; => true
+(Boolean/parseBoolean "TRUE") ; => true
+(Boolean/parseBoolean "x") ; => false
 ```
 
 ### 8.10 Regex Functions

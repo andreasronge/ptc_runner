@@ -14,7 +14,7 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Boolean/parseBoolean` | Static | `(Boolean/parseBoolean s)` | Parse "true"/"false" to boolean | Compatibility alias for `(parse-boolean s)`. Invalid or non-string input returns nil instead of Java's false/throwing behavior. |
+| `Boolean/parseBoolean` | Static | `(Boolean/parseBoolean s)` | Parse "true"/"false" to boolean | Matches java.lang.Boolean.parseBoolean: nil/null and every string other than case-insensitive "true" return false; non-string, non-nil inputs raise. |
 
 
 ### java.lang.Double

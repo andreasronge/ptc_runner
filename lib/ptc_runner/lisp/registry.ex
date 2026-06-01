@@ -318,7 +318,7 @@ defmodule PtcRunner.Lisp.Registry do
     |> Enum.any?(&(to_string(&1) == func))
   end
 
-  defp canonical_doc_names("Boolean", "parseBoolean"), do: ["parse-boolean"]
+  defp canonical_doc_names("Boolean", "parseBoolean"), do: ["Boolean/parseBoolean"]
   defp canonical_doc_names("Double", "parseDouble"), do: ["parse-double"]
   defp canonical_doc_names("Float", "parseFloat"), do: ["parse-double"]
   defp canonical_doc_names("Integer", "parseInt"), do: ["parse-long"]

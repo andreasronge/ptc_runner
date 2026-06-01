@@ -503,7 +503,7 @@ that includes Java's accepted leading/trailing whitespace.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | Manual conformance cases `java/boolean-parse-boolean-bug-001`, `java/boolean-parse-boolean-case-bug-001`, `java/boolean-parse-boolean-mixed-case-bug-001`, `java/boolean-parse-boolean-nil-bug-001`, `java/boolean-parse-boolean-empty-bug-001`, `java/boolean-parse-boolean-boolean-bug-001` |
 
 ```clojure
@@ -515,17 +515,19 @@ that includes Java's accepted leading/trailing whitespace.
 (Boolean/parseBoolean "")   ;=> false
 (Boolean/parseBoolean true) ;=> ClassCastException
 
-;; PTC-Lisp current behavior
-(Boolean/parseBoolean "x")  ;=> nil
-(Boolean/parseBoolean "TRUE") ;=> nil
-(Boolean/parseBoolean "TrUe") ;=> nil
-(Boolean/parseBoolean nil)  ;=> nil
-(Boolean/parseBoolean "")   ;=> nil
-(Boolean/parseBoolean true) ;=> nil
+;; PTC-Lisp
+(Boolean/parseBoolean "x")  ;=> false
+(Boolean/parseBoolean "TRUE") ;=> true
+(Boolean/parseBoolean "TrUe") ;=> true
+(Boolean/parseBoolean nil)  ;=> false
+(Boolean/parseBoolean "")   ;=> false
+(Boolean/parseBoolean true) ;=> error
 ```
 
-**Decision:** BUG. `Boolean/parseBoolean` is a Java-shaped class call. Java
-returns `false` for every string other than case-insensitive `"true"`.
+**Fix:** `Boolean/parseBoolean` now uses a Java-shaped interop builtin instead
+of aliasing PTC-Lisp `parse-boolean`. It returns `true` only for
+case-insensitive `"true"`, returns `false` for nil/null and all other strings,
+and raises for non-string, non-nil inputs.
 
 ### GAP-J15: Java integer parse radix overloads are unsupported
 

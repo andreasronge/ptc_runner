@@ -113,6 +113,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
     test "doc/1 resolves fully-qualified Java aliases to canonical entries" do
       assert Registry.doc("Duration/between").name == "Duration/between"
       assert Registry.doc("java.time.Duration/between").name == "Duration/between"
+      assert Registry.doc("Boolean/parseBoolean").name == "Boolean/parseBoolean"
       assert Registry.doc("Double/parseDouble").name == "parse-double"
       assert Registry.doc("Integer/parseInt").name == "parse-long"
     end

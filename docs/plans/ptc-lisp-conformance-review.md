@@ -43,8 +43,9 @@ conformance-review worktree.
   like predicate-first search.
 - `GAP-J01`: Java numeric parse aliases return `nil` on invalid strings instead
   of raising like Java; floating parsers also reject whitespace Java accepts.
-- `GAP-J02`: `Boolean/parseBoolean` returns `nil` for non-true strings and
-  misses Java's case-insensitive true handling.
+- `GAP-J02`: fixed; `Boolean/parseBoolean` now returns Java-compatible boolean
+  results for nil/null and string inputs and raises on non-string, non-nil
+  inputs.
 - `GAP-J03`: `java.util.Date.` numeric constructor treats epoch milliseconds as
   seconds, including negative epoch values.
 - `GAP-J04`: `.getTime` is exposed as `java.time.Instant` compatibility even
