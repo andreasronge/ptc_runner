@@ -6769,6 +6769,31 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         MapSet.new([1]),
         "Computed duplicate set values deduplicate instead of raising."
       ),
+      regression_case(
+        "core/map-literal-dup-key-001",
+        "clojure.core",
+        ["map"],
+        ~S|{:a 1 :a 2}|,
+        ["GAP-S147"],
+        [:edge]
+      ),
+      regression_case(
+        "core/set-literal-dup-elem-001",
+        "clojure.core",
+        ["set"],
+        ~S|#{1 1}|,
+        ["GAP-S147"],
+        [:edge]
+      ),
+      div_case(
+        "div/map-runtime-dup-key-001",
+        "clojure.core",
+        ["map"],
+        ~S|{:a 1 (keyword "a") 9}|,
+        "DIV-06",
+        %{"a" => 9},
+        "Runtime key collision (distinct forms) dedupes last-wins instead of raising."
+      ),
       div_case(
         "div/ns-unsupported-001",
         "clojure.core",

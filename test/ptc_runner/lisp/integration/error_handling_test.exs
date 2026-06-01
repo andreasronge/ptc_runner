@@ -183,6 +183,118 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
     end
   end
 
+  describe "invalid programs - duplicate literal keys" do
+    test "duplicate key in a map literal raises (matches Clojure's read error, rule 4)" do
+      assert {:error, %Step{fail: %{reason: :duplicate_key, message: msg}}} =
+               Lisp.run("{:a 1 :a 2}")
+
+      assert msg =~ "duplicate key"
+    end
+
+    test "duplicate element in a set literal raises" do
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} = Lisp.run(~S|#{1 1}|)
+    end
+
+    test "identical computed key forms also raise (read-time form equality)" do
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|{(keyword "a") 1 (keyword "a") 2}|)
+    end
+
+    test "distinct keys are fine" do
+      assert {:ok, %Step{return: %{"a" => 1, "b" => 2}}} = Lisp.run("{:a 1 :b 2}")
+    end
+
+    test "runtime-computed collision (distinct forms) still dedupes, last-wins (GAP-S147 / DIV-06)" do
+      # distinct key forms that collide only at runtime are NOT a read-time error;
+      # they dedupe to the LAST value (matching hash-map and Clojure's semantics).
+      assert {:ok, %Step{return: %{"a" => 9}}} = Lisp.run(~S|{:a 1 (keyword "a") 9}|)
+    end
+
+    test "keyword/string flex-collisions resolve consistently across constructors (DIV-47)" do
+      # "a" and :a are distinct at construction and only merge at externalization,
+      # so the winner is decided by externalization order, not source-order-last.
+      # The rule isn't last-wins, but it IS identical for {} / hash-map / array-map.
+      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|{"a" 1 :a 9}|)
+      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|(hash-map "a" 1 :a 9)|)
+      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|(array-map "a" 1 :a 9)|)
+    end
+
+    test "hash-map / array-map keep last and never raise (function forms, not literals)" do
+      assert {:ok, %Step{return: %{"a" => 2}}} = Lisp.run("(hash-map :a 1 :a 2)")
+      assert {:ok, %Step{return: %{"a" => 2}}} = Lisp.run("(array-map :a 1 :a 2)")
+    end
+
+    test "regex literals are distinct Patterns, not duplicates (no false positive)" do
+      assert {:ok, %Step{}} = Lisp.run(~S|#{#"a" #"a"}|)
+      assert {:ok, %Step{}} = Lisp.run(~S|{#"a" 1 #"a" 2}|)
+    end
+
+    test "reordered nested collection keys are duplicates (unordered equality)" do
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run("{{:a 1 :b 2} :x {:b 2 :a 1} :y}")
+
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|#{#{1 2} #{2 1}}|)
+
+      # reordered map nested inside a vector key (canonicalization recurses)
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|#{[{:a 1 :b 2}] [{:b 2 :a 1}]}|)
+    end
+
+    test "vectors are ordered: [1 2] and [2 1] are distinct keys" do
+      assert {:ok, %Step{}} = Lisp.run("{[1 2] :x [2 1] :y}")
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} = Lisp.run("{[1 2] :x [1 2] :y}")
+    end
+
+    test "regex literals nested inside collections stay distinct (no false positive)" do
+      assert {:ok, %Step{}} = Lisp.run(~S|#{[#"a"] [#"a"]}|)
+      assert {:ok, %Step{}} = Lisp.run(~S|{[#"a"] 1 [#"a"] 2}|)
+    end
+
+    test "short-fn literals #() are fresh functions, not duplicates (JVM Clojure parity)" do
+      # JVM Clojure gensyms each #() param, so two identical short-fns read as
+      # distinct fn* forms (Babashka diverges, reusing %1). They are never =, so
+      # never a duplicate key — same treatment as regex literals.
+      assert {:ok, %Step{}} = Lisp.run(~S|#{#(+ % 1) #(+ % 1)}|)
+      assert {:ok, %Step{}} = Lisp.run(~S|{#(+ % 1) :x #(+ % 1) :y}|)
+    end
+
+    test "a duplicate literal map INSIDE a #() body still raises (nested analysis intact)" do
+      # the short-fn make_ref short-circuit only affects sibling-key equality; the
+      # body is still analyzed, so an inner map literal dup must still be caught.
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|#{#(get {:a 1 :a 2} %)}|)
+    end
+
+    test "sequential equality: a list form equals a vector form with the same elements" do
+      # (= '(1 2) [1 2]) is true in Clojure, so identical sequential FORMS are a
+      # read-time duplicate ("Set literal contains duplicate key: (1 2)").
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|#{(1 2) [1 2]}|)
+
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|{(+ 1) :x [+ 1] :y}|)
+    end
+
+    test "runtime sequential collision (e.g. (list 1 2) vs [1 2]) dedupes, not read-error (DIV-06)" do
+      # (list 1 2) is a CALL form, distinct from the [1 2] form, so this is a
+      # runtime collision (intentional silent dedupe), not a read-time duplicate.
+      assert {:ok, %Step{}} = Lisp.run(~S|#{[1 2] (list 1 2)}|)
+    end
+
+    test "+0.0 and -0.0 are equal keys" do
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} = Lisp.run(~S|#{0.0 -0.0}|)
+    end
+
+    test "shadowed locals normalize to their source symbol for dup detection" do
+      # Clojure's reader dup check is name-based and predates binding analysis, so
+      # `(and 1)` (call-position symbol → marked shadowed_local) and `[and 1]`
+      # (value-position symbol) are the same form. JVM Clojure: "Duplicate key".
+      assert {:error, %Step{fail: %{reason: :duplicate_key}}} =
+               Lisp.run(~S|(let [and (fn [& xs] xs)] #{(and 1) [and 1]})|)
+    end
+  end
+
   describe "invalid programs - common LLM mistakes" do
     test "using quoted list syntax instead of vector" do
       # PTC-Lisp uses vectors [1 2 3], not quoted lists '(1 2 3)
