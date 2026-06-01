@@ -1111,6 +1111,44 @@ model (which takes precedence over Clojure-compat where they conflict). The
 related nil-keyseq protocol-error case was fixed as a BUG under
 [GAP-S23](#gap-s23-select-keys-with-nil-keyseq-raises-instead-of-returning-an-empty-map).
 
+### DIV-47: Flexible keyword/string key access (KeyNormalizer)
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `div/keyword-call-string-key-001`, `div/get-string-key-flex-001`, `div/contains-string-key-flex-001` |
+
+```clojure
+;; Clojure (keyword and string keys are distinct)
+(:a {"a" 1})            ;=> nil
+(get {"a" 1} :a)        ;=> nil
+(get-in {"a" 1} [:a])   ;=> nil
+(contains? {"a" 1} :a)  ;=> false
+({"a" 1} :a)            ;=> nil
+
+;; PTC-Lisp (keyword <-> string keys flex-match; an exact match still wins)
+(:a {"a" 1})            ;=> 1
+(get {"a" 1} :a)        ;=> 1
+(get-in {"a" 1} [:a])   ;=> 1
+(contains? {"a" 1} :a)  ;=> true
+({"a" 1} :a)            ;=> 1
+(:a {:a 9 "a" 1})       ;=> 9   ; exact keyword key preferred when present
+```
+
+**Rationale:** PTC-Lisp's value model normalizes keyword and string keys
+(`SubAgent.KeyNormalizer`), so all key access — keyword invocation `(:k m)`,
+`get`/`get-in`, `contains?`, and map-as-function `(m :k)` — looks keys up
+flexibly. This is a deliberate ergonomic bridge for the data PTC actually
+processes: tool/JSON results arrive with **string** keys, while LLM-written code
+naturally uses **keyword** access, so `(:field data)` works regardless of which
+the upstream produced. The behavior is universal across the key layer (the
+select-keys instance is [DIV-46](#div-46-select-keys-with-a-string-keyseq-matches-keyword-keys)),
+so it is the value model, not a per-function quirk. Tradeoff (acknowledged): a
+keyword lookup can return a string-keyed value, which can mask a data-shape
+mismatch at a map boundary — guard explicitly when exact-key semantics matter.
+This value model takes precedence over Clojure-compat where they conflict.
+
 ### GAP-J13: Java `Math/pow` special double results differ
 
 | Field | Value |
@@ -3133,21 +3171,29 @@ non-floating.
 | Field | Value |
 |-------|-------|
 | **Priority** | P0 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/keyword-call-string-key-bug-001` |
+| **Status** | **by design (reclassified DIV-47)** |
+| **Source** | Manual conformance case `div/keyword-call-string-key-001` |
 
 ```clojure
 ;; Clojure
 (:a {"a" 1})   ;=> nil
 
-;; PTC-Lisp current behavior
+;; PTC-Lisp
 (:a {"a" 1})   ;=> 1
 ```
 
-**Decision:** BUG. Keyword invocation should perform exact keyword lookup.
-Returning a string-keyed value is a silent wrong result and can hide data-shape
-errors at map boundaries. String-key convenience belongs in explicit helpers
-such as `clojure.walk/keywordize-keys`, not in keyword lookup itself.
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** (see
+[DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)). Keyword
+invocation flex-matching string keys is **not** a lone bug — it is one instance
+of PTC-Lisp's pervasive keyword/string key normalization, identical to
+`get`/`get-in`/`contains?`/map-as-function and already documented for
+`select-keys` in [DIV-46](#div-46-select-keys-with-a-string-keyseq-matches-keyword-keys).
+Filing it a P0 bug while the rest of the key layer flexes was the
+inconsistency; making keyword invocation alone do exact lookup would contradict
+the value model. The acknowledged downside (it can mask a data-shape mismatch)
+is captured in DIV-47; callers needing exact-key semantics must guard
+explicitly. Treat any move away from flex keys as a repo-wide value-model
+decision, not a single-function fix.
 
 ### GAP-S64: Zero-arity `distinct?` returns true instead of raising
 

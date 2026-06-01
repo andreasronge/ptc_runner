@@ -4115,13 +4115,32 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S34",
         "Clojure keyword supports namespace/name arity; PTC-Lisp currently only supports one argument."
       ),
-      bug_case(
-        "core/keyword-call-string-key-bug-001",
+      div_case(
+        "div/keyword-call-string-key-001",
         "clojure.core",
         ["keyword"],
         ~S|(:a {"a" 1})|,
-        "GAP-S63",
-        "Clojure keyword invocation only matches keyword keys; PTC-Lisp currently matches string keys too."
+        "DIV-47",
+        1,
+        "Keyword invocation flex-matches string keys (KeyNormalizer value model)."
+      ),
+      div_case(
+        "div/get-string-key-flex-001",
+        "clojure.core",
+        ["get"],
+        ~S|(get {"a" 1} :a)|,
+        "DIV-47",
+        1,
+        "get flex-matches a keyword query against a string key (value model)."
+      ),
+      div_case(
+        "div/contains-string-key-flex-001",
+        "clojure.core",
+        ["contains?"],
+        ~S|(contains? {"a" 1} :a)|,
+        "DIV-47",
+        true,
+        "contains? flex-matches a keyword query against a string key (value model)."
       ),
       bug_case(
         "core/keyword-non-ident-bug-001",
