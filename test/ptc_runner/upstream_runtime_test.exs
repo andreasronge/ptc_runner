@@ -110,16 +110,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
   test "root runtime can call an MCP stdio upstream" do
     script = write_stdio_fixture!()
 
-    config = %{
-      "upstreams" => %{
-        "fixture" => %{
-          "transport" => "mcp_stdio",
-          "command" => System.find_executable("mix"),
-          "args" => ["run", "--no-start", script],
-          "cd" => File.cwd!()
-        }
-      }
-    }
+    config = stdio_fixture_config(script)
 
     {:ok, runtime} = Runtime.start_link(config: config, catalog_snapshot_mode: :frozen)
 
@@ -144,16 +135,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
   test "run context drains all records from pmap tool calls" do
     script = write_stdio_fixture!()
 
-    config = %{
-      "upstreams" => %{
-        "fixture" => %{
-          "transport" => "mcp_stdio",
-          "command" => System.find_executable("mix"),
-          "args" => ["run", "--no-start", script],
-          "cd" => File.cwd!()
-        }
-      }
-    }
+    config = stdio_fixture_config(script)
 
     {:ok, runtime} = Runtime.start_link(config: config, catalog_snapshot_mode: :frozen)
 
@@ -691,6 +673,24 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     ''')
 
     path
+  end
+
+  defp stdio_fixture_config(script) do
+    # Derive Jason's ebin from the loaded module rather than hard-coding
+    # `_build/test/lib/jason/ebin`, so the spawned `elixir` finds Jason even
+    # under a custom MIX_BUILD_PATH (where deps compile outside `_build/test`).
+    jason_ebin = Jason |> :code.which() |> to_string() |> Path.dirname()
+
+    %{
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_stdio",
+          "command" => System.find_executable("elixir"),
+          "args" => ["-pa", jason_ebin, script],
+          "cd" => File.cwd!()
+        }
+      }
+    }
   end
 
   defp start_mcp_http_fixture(opts \\ []) do
