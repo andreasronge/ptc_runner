@@ -106,6 +106,81 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
+  describe "Clojure arithmetic/range conformance quick wins" do
+    test "zero-arity minus is an arity error" do
+      assert_lisp_error("(-)", :arity_error, "- requires at least 1 argument")
+    end
+
+    test "unary division returns reciprocal and rejects nonnumeric inputs" do
+      assert_lisp("(/ 2)", 0.5)
+      assert_lisp_error("(/ :a)", :type_error, "invalid argument types")
+    end
+
+    test "unary addition and multiplication reject nonnumeric inputs" do
+      assert_lisp_error("(+ [1 2])", :type_error, "expected number")
+      assert_lisp_error("(* :a)", :type_error, "expected number")
+    end
+
+    test "unary addition preserves signed zero while validating input" do
+      assert_lisp("(str (+ -0.0))", "-0.0")
+      assert_lisp("(first (map str (map + [-0.0])))", "-0.0")
+    end
+
+    test "higher-order unary arithmetic rejects nonnumeric inputs as type errors" do
+      assert_lisp_error("(map + [[1 2]])", :type_error, "invalid argument types")
+      assert_lisp_error("(filter + [nil])", :type_error, "invalid argument types")
+    end
+
+    test "parse-long rejects values outside Java long range" do
+      assert_lisp(~S|(parse-long "9223372036854775808")|, nil)
+      assert_lisp(~S|(parse-long "+9223372036854775808")|, nil)
+      assert_lisp(~S|(parse-long "-9223372036854775809")|, nil)
+    end
+
+    test "int follows Java int coercion boundaries" do
+      assert_lisp("(int ##NaN)", 0)
+      assert_lisp(~S|(int \A)|, 65)
+      assert_lisp_error("(int 2147483648)", :arithmetic_error, "integer overflow")
+      assert_lisp_error("(int -2147483649)", :arithmetic_error, "integer overflow")
+    end
+
+    test "bounded take over zero-step range repeats the start value" do
+      assert_lisp("(take 3 (range 1 5 0))", [1, 1, 1])
+      assert_lisp("(take 2 (range 1 5 (identity 0)))", [1, 1])
+    end
+
+    test "bounded zero-step range shortcut preserves left-to-right argument evaluation" do
+      assert_lisp(
+        """
+        (do
+          (def my-range (fn [a b c] [:shadowed]))
+          (take (do (def range my-range) 3)
+                (range 1 5 0)))
+        """,
+        ["shadowed"]
+      )
+    end
+
+    test "zero-step range does not leak an internal marker" do
+      assert_lisp_error(
+        "(range 1 5 0)",
+        :type_error,
+        "zero-step range must be consumed by bounded take"
+      )
+
+      assert_lisp_error(
+        "(first (range 1 5 0))",
+        :type_error,
+        "zero-step range must be consumed by bounded take"
+      )
+    end
+
+    test "range rejects nil and nonnumeric bounds" do
+      assert_lisp_error("(range nil)", :type_error, "range expects numeric bounds")
+      assert_lisp_error(~S|(range "1" 3)|, :type_error, "range expects numeric bounds")
+    end
+  end
+
   describe "pow - exponentiation" do
     test "square" do
       assert_lisp("(pow 2 3)", 8.0)
@@ -193,8 +268,6 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
     end
   end
 
-  # Clojure conformance: `(/ 1 0)` throws ArithmeticException on the JVM,
-  # but `(/ 1.0 0.0)` returns ##Inf per IEEE 754. PTC-Lisp must match.
   describe "/ - division by zero (Clojure conformance)" do
     test "integer / integer raises division by zero" do
       assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ 10 0)")
@@ -211,13 +284,14 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
       assert message =~ "division by zero"
     end
 
-    test "float / float keeps IEEE 754 ##Inf" do
+    test "floating zero divisors keep Clojure primitive double results" do
       assert_lisp("(/ 1.0 0.0)", :infinity)
+      assert_lisp("(/ 1 0.0)", :infinity)
       assert_lisp("(/ -1.0 0.0)", :negative_infinity)
       assert_lisp("(/ 0.0 0.0)", :nan)
     end
 
-    test "mixed-mode / 0 raises (any operand integer with integer 0 divisor)" do
+    test "mixed-mode with integer zero divisor raises" do
       assert {:error, %{fail: %{message: message}}} = PtcRunner.Lisp.run("(/ 1.5 0)")
       assert message =~ "division by zero"
     end

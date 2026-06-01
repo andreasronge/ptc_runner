@@ -84,7 +84,7 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:error, %{fail: %{reason: :arithmetic_error}}} =
                Lisp.run("(int Double/POSITIVE_INFINITY)")
 
-      assert {:error, %{fail: %{reason: :arithmetic_error}}} = Lisp.run("(int Double/NaN)")
+      assert {:ok, %{return: 0}} = Lisp.run("(int Double/NaN)")
     end
   end
 end

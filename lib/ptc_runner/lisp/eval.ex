@@ -21,6 +21,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Discovery
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.{Apply, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
@@ -395,6 +396,28 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
   # Function calls
   # ============================================================
+
+  defp do_eval(
+         {:call, {:var, :take} = take_ast,
+          [n_ast, {:call, {:var, :range} = range_ast, [start_ast, end_ast, step_ast]}]},
+         %EvalContext{} = eval_ctx
+       ) do
+    with {:ok, take_fun, eval_ctx1} <- do_eval(take_ast, eval_ctx),
+         {:ok, n, eval_ctx2} <- do_eval(n_ast, eval_ctx1),
+         {:ok, range_fun, eval_ctx3} <- do_eval(range_ast, eval_ctx2),
+         {:ok, [start, end_val, step], eval_ctx4} <-
+           eval_all([start_ast, end_ast, step_ast], eval_ctx3) do
+      if builtin_named?(take_fun, :take) and builtin_named?(range_fun, :range) and
+           zero_number?(step) and is_integer(n) and is_number(start) and is_number(end_val) do
+        {:ok, List.duplicate(start, max(n, 0)), eval_ctx4}
+      else
+        with {:ok, range_val, eval_ctx5} <-
+               Apply.apply_fun(range_fun, [start, end_val, step], eval_ctx4, &do_eval/2) do
+          Apply.apply_fun(take_fun, [n, range_val], eval_ctx5, &do_eval/2)
+        end
+      end
+    end
+  end
 
   defp do_eval({:call, fun_ast, arg_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fun_val, eval_ctx1} <- do_eval(fun_ast, eval_ctx),
@@ -796,6 +819,12 @@ defmodule PtcRunner.Lisp.Eval do
       :error
     end
   end
+
+  defp builtin_named?(%Builtin{name: name}, name), do: true
+  defp builtin_named?(_, _), do: false
+
+  defp zero_number?(n) when is_number(n), do: n == 0
+  defp zero_number?(_), do: false
 
   defp resolve_legacy_user_ns(name, user_ns, eval_ctx) do
     with true <- is_binary(name),

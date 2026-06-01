@@ -102,8 +102,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   def divide(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> :nan
-      # Clojure conformance: integer 0 divisor raises, regardless of x.
-      # `(/ 1.0 0.0)` keeps IEEE 754 ##Inf; only an integer 0 divisor errors.
+      # Clojure primitive double division keeps IEEE 754 zero-division results.
+      # Integer zero divisors still raise.
       is_integer(y) and y == 0 -> raise ArithmeticError, "division by zero"
       y == 0 -> divide_by_zero(x)
       SpecialValues.infinite?(x) and SpecialValues.infinite?(y) -> :nan
@@ -255,10 +255,21 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   def int(x) do
     case x do
-      :nan -> raise ArithmeticError, "cannot convert NaN to integer"
+      :nan -> 0
       :infinity -> raise ArithmeticError, "cannot convert Infinity to integer"
       :negative_infinity -> raise ArithmeticError, "cannot convert -Infinity to integer"
-      n when is_number(n) -> Kernel.trunc(n)
+      <<cp::utf8>> -> cp
+      n when is_number(n) -> trunc_java_int(n)
+    end
+  end
+
+  defp trunc_java_int(n) do
+    int = Kernel.trunc(n)
+
+    if int < -2_147_483_648 or int > 2_147_483_647 do
+      raise ArithmeticError, "integer overflow"
+    else
+      int
     end
   end
 
