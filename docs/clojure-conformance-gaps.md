@@ -250,7 +250,7 @@ No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
 
 Clojure detects duplicate computed keys at runtime and throws an error. PTC-Lisp silently deduplicates. Without exception handling (`try`/`catch`), a duplicate-key error would crash the entire program with no recovery path. Silent deduplication is more resilient for LLM-generated sandboxed code.
 
-**Rationale:** rule 1 (no try/catch → recover on runtime data instead of an unrecoverable crash). **Classification audit (2026-06-01): confirmed DIV.** Note one out-of-scope sub-case: *literal* duplicate keys written in source (`{:a 1 :a 2}`) are also silently deduped — and inconsistently, a map literal keeps the **first** value (`{"a" 1}`) while `hash-map` keeps the **last** (`{"a" 2}`). A literal duplicate key is a program-shape error (rule 4) that arguably should raise; that source-literal case is a small separate concern, distinct from this *computed*-duplicate-key DIV.
+**Rationale:** rule 1 (no try/catch → recover on runtime data instead of an unrecoverable crash). **Classification audit (2026-06-01): confirmed DIV.** Scope: this DIV covers keys that collide only at **runtime** (distinct source forms whose *values* are equal, e.g. `(let [a 1 b 1] #{a b})`, or `{:a 1 (keyword "a") 9}`) — those silently dedupe, keeping the **last** value (consistent with `hash-map`/`array-map`, see [GAP-S147](#gap-s147-duplicate-literal-keys-in-mapset-literals-are-silently-deduplicated)). *Literal* duplicate keys written in source (structurally-equal key **forms**, e.g. `{:a 1 :a 2}`, `#{1 1}`) are a program-shape error and now **raise** at analyze time — that is the separate (fixed) GAP-S147, not this DIV.
 
 ### DIV-07: No user-defined namespaces
 
@@ -2641,6 +2641,66 @@ shape that validates the rest args as maps only once 2+ are supplied, so a
 single non-map is accepted while multi-collection non-map arguments still fail
 validation with the canonical "expected map" error (matching Clojure, which
 also raises). A single nil keeps the existing empty-map behavior (GAP-S54).
+
+### GAP-S147: Duplicate literal keys in map/set literals are silently deduplicated
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/map-literal-dup-key-001`, `core/set-literal-dup-elem-001`, `div/map-runtime-dup-key-001` |
+
+```clojure
+;; Clojure (reader rejects structurally-equal key forms)
+{:a 1 :a 2}                 ;=> "Duplicate key: :a" (read error)
+#{1 1}                      ;=> "Duplicate key: 1"  (read error)
+
+;; PTC-Lisp (fixed)
+{:a 1 :a 2}                 ;=> duplicate_key error
+#{1 1}                      ;=> duplicate_key error
+(hash-map :a 1 :a 2)        ;=> {:a 2}   (function form, last wins, no error)
+{:a 1 (keyword "a") 9}      ;=> {:a 9}   (runtime collision: dedupe, last wins — DIV-06)
+```
+
+**Decision:** BUG. A map/set literal with two structurally-equal key **forms**
+is a program-shape error (rule 4 — a property of the program, not of input
+data), exactly the case Clojure rejects at read time. PTC-Lisp silently
+deduplicated it — dropping a key/value pair with no signal, which can mask an
+LLM typo at a map boundary — and inconsistently (a map literal kept the *first*
+value while `hash-map`/`array-map` kept the *last*).
+
+**Fix:** `Analyze` now detects structurally-equal key forms in a map literal
+(and element forms in a set literal) and raises a recoverable `:duplicate_key`
+error before evaluation, matching Clojure's reader. This is a static read-time
+check on the key *forms*, so keys that only collide at **runtime** (distinct
+forms, e.g. `{:a 1 (keyword "a") 9}`, or keyword/string flex-collisions per
+[DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)) are not
+affected — they remain the intentional silent dedupe of
+[DIV-06](#div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals).
+The map-literal evaluator was also changed to keep the **last** colliding value
+(was first) for collisions that surface at map *construction* — i.e. distinct
+forms that evaluate to the same key, like `{:a 1 (keyword "a") 9} ;=> {:a 9}` —
+so `{}`, `hash-map`, and `array-map` all agree with Clojure there.
+
+Keyword/string *flex*-collisions ([DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer))
+are a separate case: the keys stay distinct at construction and only merge when
+the map is externalized to string keys, so the winner is decided by
+externalization order, not source order. This is **not** source-order-last, but
+it is consistent across all three constructors — `{"a" 1 :a 9}`,
+`(hash-map "a" 1 :a 9)`, and the `array-map` form all yield `{"a" 1}`. The
+read-time form check and the construction-time last-wins rule are what GAP-S147
+covers; the flex-collision tiebreak is governed by DIV-47.
+
+The read-time check is best-effort *structural* form-equality, not full Clojure
+reader parity: it normalizes nested collection shape (vector ≡ list as ordered
+seqs, map/set element order) and treats `±0.0` as equal, but does not model the
+full numeric tower (`1` vs `1N`) or reader-quote desugaring (`'x` vs
+`(quote x)`). Regex literals (`#"..."`) and short-fn literals (`#(...)`) each
+read as a fresh object — a new `Pattern`, or a `fn*` with freshly-gensym'd
+params under JVM Clojure — so two occurrences are never `=` and are treated as
+distinct (matching JVM Clojure; Babashka diverges by reusing the stable `%1`
+param and flagging `#()` duplicates). The non-modeled numeric/quote cases slip
+past the literal check and fall back to the runtime DIV-06 dedupe.
 
 ### GAP-S90: `merge`/`merge-with` reject vector targets
 

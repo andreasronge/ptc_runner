@@ -182,13 +182,21 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp do_analyze({:map, pairs}, _tail?) do
-    with {:ok, pairs2} <- analyze_pairs(pairs) do
+    # Clojure rejects a map literal with structurally-equal key FORMS at read
+    # time (`{:a 1 :a 2}`, `{(f 1) :x (f 1) :y}`). That is a program-shape error
+    # (rule 4), so PTC raises rather than silently dropping a pair. Keys that
+    # only collide at runtime (distinct forms, e.g. `{:a 1 (keyword "a") 9}`, or
+    # keyword/string flex-collisions) are NOT detectable here and dedupe at eval
+    # (DIV-06 / DIV-47).
+    with :ok <- check_duplicate_forms(Enum.map(pairs, fn {k, _v} -> k end), "key", "map"),
+         {:ok, pairs2} <- analyze_pairs(pairs) do
       {:ok, {:map, pairs2}}
     end
   end
 
   defp do_analyze({:set, elems}, _tail?) do
-    with {:ok, elems2} <- analyze_list(elems) do
+    with :ok <- check_duplicate_forms(elems, "element", "set"),
+         {:ok, elems2} <- analyze_list(elems) do
       {:ok, {:set, elems2}}
     end
   end
@@ -1182,6 +1190,78 @@ defmodule PtcRunner.Lisp.Analyze do
       {:ok, others2 ++ [last2]}
     end
   end
+
+  # Read-time duplicate detection for map/set literals: two key/element FORMS
+  # whose canonical values are equal are a duplicate (matches Clojure's reader;
+  # rule 4 — a program-shape error). Returns the first repeated form. Runtime-only
+  # collisions (distinct forms with equal values) are not detectable here and
+  # dedupe at eval (DIV-06 / DIV-47).
+  defp check_duplicate_forms(forms, label, container) do
+    forms
+    |> Enum.reduce_while(MapSet.new(), fn f, seen ->
+      key = canonical_form(f)
+
+      if MapSet.member?(seen, key),
+        do: {:halt, {:dup, f}},
+        else: {:cont, MapSet.put(seen, key)}
+    end)
+    |> case do
+      {:dup, f} ->
+        {:error,
+         {:duplicate_key, "duplicate #{label} #{format_dup_form(f)} in #{container} literal"}}
+
+      _seen ->
+        :ok
+    end
+  end
+
+  # Canonicalize a key/element form for value equality, recursively, approximating
+  # Clojure's reader equality at any nesting depth:
+  #   - map/set literals are UNORDERED -> sort their contents
+  #     (`{:a 1 :b 2}` ≡ `{:b 2 :a 1}`, `#{1 2}` ≡ `#{2 1}`)
+  #   - vector AND list literals are sequential and compare equal element-wise
+  #     (`(= '(1 2) [1 2])` is true) -> one ordered `:seq` tag, order preserved
+  #     (`[1 2]` ≠ `[2 1]`)
+  #   - `+0.0` and `-0.0` are `=` in Clojure -> normalize to `0.0`
+  #   - regex literals read into a FRESH Pattern each time -> a unique ref, so
+  #     two `#"a"` forms (even nested, e.g. `#{[#"a"] [#"a"]}`) are never equal
+  #
+  # Best-effort STRUCTURAL form-equality, NOT full Clojure reader parity. It does
+  # not unify cross-type numeric equals (`1` vs `1N`), nor reader-quote desugaring
+  # (`'x` reads as `(quote x)` in Clojure but parses to a distinct AST node here).
+  # Such rare cases dedupe at eval rather than raising (acceptable under-approx).
+  #
+  # Regex literals (`#"..."`) and short-fn literals (`#(...)`) each read as a fresh
+  # object — a new `Pattern`, or in JVM Clojure a `fn*` with freshly-gensym'd
+  # params — so two occurrences are never `=` and never collide. `make_ref/0`
+  # guarantees each gets a unique canonical token, matching JVM Clojure (Babashka
+  # diverges by reusing the stable `%1` param and wrongly flagging `#()` dups).
+  defp canonical_form({:regex_literal, _}), do: make_ref()
+  defp canonical_form({:short_fn, _}), do: make_ref()
+  # Shadow-marking (a post-read semantic pass) rewrites call-position symbols to
+  # `:shadowed_local`, but Clojure's reader dup check is name-based and predates
+  # any binding analysis. Normalize back to the source symbol so e.g.
+  # `(let [and ...] #{(and 1) [and 1]})` is still caught as a duplicate.
+  defp canonical_form({:shadowed_local, name}), do: {:symbol, name}
+
+  defp canonical_form({:map, pairs}) do
+    {:map,
+     pairs |> Enum.map(fn {k, v} -> {canonical_form(k), canonical_form(v)} end) |> Enum.sort()}
+  end
+
+  defp canonical_form({:set, elems}) do
+    {:set, elems |> Enum.map(&canonical_form/1) |> Enum.sort()}
+  end
+
+  defp canonical_form({:vector, elems}), do: {:seq, Enum.map(elems, &canonical_form/1)}
+  defp canonical_form({:list, elems}), do: {:seq, Enum.map(elems, &canonical_form/1)}
+  defp canonical_form(n) when is_float(n) and n == 0.0, do: 0.0
+  defp canonical_form(other), do: other
+
+  defp format_dup_form({:keyword, kw}), do: ":#{kw}"
+  defp format_dup_form({:string, s}), do: inspect(s)
+  defp format_dup_form(n) when is_number(n), do: to_string(n)
+  defp format_dup_form(other), do: inspect(other)
 
   defp analyze_pairs(pairs) do
     pairs

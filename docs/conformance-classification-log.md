@@ -16,6 +16,27 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S147 — literal duplicate map/set keys now raise (split from DIV-06)  ·  committed
+
+Resolved the DIV-06 sub-case flagged in the audit. A map/set literal with two
+structurally-equal key/element FORMS (`{:a 1 :a 2}`, `#{1 1}`, `{(f 1) :x (f 1) :y}`)
+is a program-shape error (rule 4) — exactly what Clojure rejects at READ time —
+but PTC silently deduped it (dropping a pair, masking LLM typos) and
+inconsistently (map literal kept first, `hash-map` kept last).
+
+- **Analyze** now detects structurally-equal key/element forms in map/set
+  literals and raises a recoverable `:duplicate_key` error before eval (matches
+  Clojure's reader). Filed/fixed as **GAP-S147** (BUG).
+- Keys that collide only at **runtime** (distinct forms, e.g.
+  `{:a 1 (keyword "a") 9}`, or keyword/string flex-collisions) are NOT a
+  read-time error — they remain the intentional silent dedupe of **DIV-06**
+  (now scoped explicitly to computed collisions).
+- **Eval** map-literal collisions switched first-wins → **last-wins**, so `{}`,
+  `hash-map`, `array-map`, and Clojure all agree.
+- Cases: `core/map-literal-dup-key-001`, `core/set-literal-dup-elem-001`
+  (both error → match Clojure), `div/map-runtime-dup-key-001` (DIV-06,
+  ptc_expected `%{"a" => 9}`). Verified vs Babashka; full lisp suite 0 failures.
+
 ## Conformance-case label cleanup + DIV-06  ·  committed
 
 Follow-up to the classification audit, aligning conformance-case *policies* with

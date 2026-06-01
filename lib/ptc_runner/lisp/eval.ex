@@ -154,8 +154,15 @@ defmodule PtcRunner.Lisp.Eval do
       end)
 
     case result do
-      {:ok, evaluated_pairs, eval_ctx2} -> {:ok, Map.new(evaluated_pairs), eval_ctx2}
-      {:error, _} = err -> err
+      # `evaluated_pairs` is in reverse source order (eval_map_pair prepends).
+      # Reverse before Map.new so a runtime key collision keeps the LAST value
+      # in source order — consistent with `hash-map`/`array-map` and Clojure.
+      # (Structurally-equal literal key forms are already rejected at analyze.)
+      {:ok, evaluated_pairs, eval_ctx2} ->
+        {:ok, Map.new(Enum.reverse(evaluated_pairs)), eval_ctx2}
+
+      {:error, _} = err ->
+        err
     end
   end
 
