@@ -5,18 +5,13 @@ defmodule PtcRunner.Upstream.Transport.McpStdio do
 
   use GenServer
 
+  alias PtcRunner.Upstream.Transport
+  alias PtcRunner.Upstream.Transport.McpResult
+
   @default_timeout 5_000
 
   @spec start_link(String.t(), map()) :: GenServer.on_start()
-  def start_link(name, config) when is_binary(name) and is_map(config) do
-    parent_trap = Process.flag(:trap_exit, true)
-
-    try do
-      GenServer.start_link(__MODULE__, {name, config})
-    after
-      Process.flag(:trap_exit, parent_trap)
-    end
-  end
+  def start_link(name, config), do: Transport.start_trapped(__MODULE__, name, config)
 
   @impl PtcRunner.Upstream.Transport
   def list_tools(%{client_pid: pid}) when is_pid(pid),
@@ -71,7 +66,7 @@ defmodule PtcRunner.Upstream.Transport.McpStdio do
              timeout,
              max_bytes
            ) do
-      {:reply, normalize_call_result(result), state}
+      {:reply, McpResult.normalize(result), state}
     else
       {:error, reason, detail, state} -> {:reply, {:error, reason, detail}, state}
     end
@@ -194,33 +189,6 @@ defmodule PtcRunner.Upstream.Transport.McpStdio do
       end
     end
   end
-
-  defp normalize_call_result(%{"isError" => true} = result),
-    do: {:error, :tool_error, error_text(result)}
-
-  defp normalize_call_result(%{"structuredContent" => value}) when not is_nil(value),
-    do: {:ok, value}
-
-  defp normalize_call_result(result) do
-    case text_content(result) do
-      nil ->
-        {:ok, nil}
-
-      text ->
-        case Jason.decode(text) do
-          {:ok, value} -> {:ok, value}
-          {:error, _} -> {:ok, text}
-        end
-    end
-  end
-
-  defp text_content(%{"content" => [%{"type" => "text", "text" => text} | _]})
-       when is_binary(text), do: text
-
-  defp text_content(_), do: nil
-
-  defp error_text(result),
-    do: text_content(result) || inspect(result, limit: 20, printable_limit: 200)
 
   defp error_message(%{"message" => message}) when is_binary(message), do: message
   defp error_message(error), do: inspect(error, limit: 20, printable_limit: 200)
