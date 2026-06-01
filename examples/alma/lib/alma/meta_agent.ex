@@ -14,6 +14,7 @@ defmodule Alma.MetaAgent do
     environment schema, parent designs, and lineage.
   """
 
+  alias Alma.MemoryHarness
   alias PtcRunner.SubAgent
   alias PtcRunner.Lisp.CoreToSource
 
@@ -79,20 +80,24 @@ defmodule Alma.MetaAgent do
   end
 
   defp extract_name(step) do
+    mem_name = MemoryHarness.mem_get(step.memory, "name")
+
     cond do
       is_map(step.return) and is_binary(step.return["name"]) -> step.return["name"]
-      is_binary(step.memory["name"]) -> step.memory["name"]
+      is_binary(mem_name) -> mem_name
       true -> "gen_#{System.unique_integer([:positive])}"
     end
   end
 
   defp extract_description(step) do
+    mem_desc = MemoryHarness.mem_get(step.memory, "description")
+
     cond do
       is_map(step.return) and is_binary(step.return["description"]) ->
         step.return["description"]
 
-      is_binary(step.memory["description"]) ->
-        step.memory["description"]
+      is_binary(mem_desc) ->
+        mem_desc
 
       true ->
         ""

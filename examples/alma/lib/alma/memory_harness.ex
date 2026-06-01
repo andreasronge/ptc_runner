@@ -28,6 +28,37 @@ defmodule Alma.MemoryHarness do
   @graph_store_key :__graph_store
 
   @doc """
+  Fetches a memory value by its string key, tolerating `PtcRunner`'s mixed key
+  externalization.
+
+  Most names `def`'d in a program come back as **string** keys (`#964`), but a
+  name that shadows a built-in PTC symbol (e.g. `name`) comes back as the
+  **atom** form (`:name`). This checks the string key first, then the
+  pre-existing atom form. `String.to_existing_atom/1` only matches atoms that
+  already exist (builtins do), so this never pollutes the atom table for unknown
+  keys.
+  """
+  @spec mem_get(map(), binary()) :: term()
+  def mem_get(memory, key) when is_map(memory) and is_binary(key) do
+    case Map.fetch(memory, key) do
+      {:ok, value} ->
+        value
+
+      :error ->
+        case safe_existing_atom(key) do
+          nil -> nil
+          atom -> Map.get(memory, atom)
+        end
+    end
+  end
+
+  defp safe_existing_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc """
   Returns a no-op baseline design with no memory.
   """
   def null_design do

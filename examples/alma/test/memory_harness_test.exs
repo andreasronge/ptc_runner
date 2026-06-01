@@ -405,4 +405,34 @@ defmodule Alma.MemoryHarnessTest do
       assert Map.has_key?(schema["recall"], "data/current_observation")
     end
   end
+
+  describe "mem_get/2 (mixed key externalization)" do
+    test "reads a plain string key" do
+      assert MemoryHarness.mem_get(%{"description" => "D"}, "description") == "D"
+    end
+
+    test "falls back to the atom form for builtin-shadowing names" do
+      assert MemoryHarness.mem_get(%{name: "N"}, "name") == "N"
+    end
+
+    test "string key wins over a stale atom key of the same name" do
+      assert MemoryHarness.mem_get(%{:name => "atom", "name" => "string"}, "name") == "string"
+    end
+
+    test "returns nil for an absent key without polluting the atom table" do
+      assert MemoryHarness.mem_get(%{}, "no-such-key-#{System.unique_integer([:positive])}") ==
+               nil
+    end
+
+    test "reproduces the externalization quirk: (def name ...) lands under atom :name" do
+      # `name` shadows a built-in PTC symbol, so PtcRunner externalizes it as the
+      # atom `:name`, unlike ordinary names which become string keys (#964). A
+      # plain `memory["name"]` read misses it; mem_get/2 recovers it.
+      {:ok, step} = PtcRunner.Lisp.run(~S|(def name "Designer") (def description "d")|)
+      assert step.memory["name"] == nil
+      assert MemoryHarness.mem_get(step.memory, "name") == "Designer"
+      # description is NOT a builtin, so it stays a string key
+      assert MemoryHarness.mem_get(step.memory, "description") == "d"
+    end
+  end
 end
