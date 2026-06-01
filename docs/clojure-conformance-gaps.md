@@ -2966,7 +2966,7 @@ should parse.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/parse-long-overflow-bug-001`, `core/parse-long-plus-overflow-bug-001`, `core/parse-long-underflow-bug-001` |
 
 ```clojure
@@ -2975,11 +2975,14 @@ should parse.
 (parse-long "+9223372036854775808") ;=> nil
 (parse-long "-9223372036854775809") ;=> nil
 
-;; PTC-Lisp current behavior
-(parse-long "9223372036854775808") ;=> 9223372036854775808
-(parse-long "+9223372036854775808") ;=> 9223372036854775808
-(parse-long "-9223372036854775809") ;=> -9223372036854775809
+;; PTC-Lisp (fixed)
+(parse-long "9223372036854775808") ;=> nil
+(parse-long "+9223372036854775808") ;=> nil
+(parse-long "-9223372036854775809") ;=> nil
 ```
+
+**Fix:** `parse-long` now returns `nil` when the parsed integer is outside the
+Java long range.
 
 **Decision:** BUG. `parse-long` is a supported Clojure-named parser. Its safe
 signal behavior should match Clojure's nil-on-failure contract for values that
@@ -2991,16 +2994,18 @@ arbitrary precision.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance case `core/int-nan-bug-001` |
 
 ```clojure
 ;; Clojure
 (int ##NaN)   ;=> 0
 
-;; PTC-Lisp current behavior
-(int ##NaN)   ;=> arithmetic error
+;; PTC-Lisp (fixed)
+(int ##NaN)   ;=> 0
 ```
+
+**Fix:** `int` now maps PTC-Lisp's `##NaN` signal value to `0`.
 
 **Decision:** BUG. `int` is a supported Clojure-named numeric coercion helper.
 NaN is a representable PTC-Lisp numeric value, and Clojure/JVM defines this
@@ -3132,7 +3137,7 @@ var representation.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/int-overflow-positive-bug-001`, `core/int-overflow-negative-bug-001` |
 
 ```clojure
@@ -3140,10 +3145,13 @@ var representation.
 (int 2147483648)    ;=> ArithmeticException
 (int -2147483649)   ;=> ArithmeticException
 
-;; PTC-Lisp current behavior
-(int 2147483648)    ;=> 2147483648
-(int -2147483649)   ;=> -2147483649
+;; PTC-Lisp (fixed)
+(int 2147483648)    ;=> arithmetic error
+(int -2147483649)   ;=> arithmetic error
 ```
+
+**Fix:** `int` now truncates finite numeric inputs and raises when the result
+does not fit in a Java int.
 
 **Decision:** BUG. `int` is a supported Clojure-named numeric coercion helper
 whose contract follows JVM primitive int coercion. PTC-Lisp can keep
@@ -3155,7 +3163,7 @@ turn overflow into plausible unchanged data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/int-char-bug-001`, `core/int-newline-char-bug-001`, `core/int-tab-char-bug-001` |
 
 ```clojure
@@ -3164,11 +3172,14 @@ turn overflow into plausible unchanged data.
 (int \newline)  ;=> 10
 (int \tab)      ;=> 9
 
-;; PTC-Lisp current behavior
-(int \A)        ;=> runtime error
-(int \newline)  ;=> runtime error
-(int \tab)      ;=> runtime error
+;; PTC-Lisp (fixed)
+(int \A)        ;=> 65
+(int \newline)  ;=> 10
+(int \tab)      ;=> 9
 ```
+
+**Fix:** `int` now accepts PTC-Lisp character literals and returns their code
+points.
 
 **Decision:** BUG. `int` is a supported Clojure-named coercion helper.
 Character literals are valid Clojure inputs and should coerce to their numeric
@@ -3805,21 +3816,21 @@ helper. Adjacent helpers such as `partition-by`, `frequencies`, `zipmap`,
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **reclassified** (matches Clojure) |
 | **Source** | Manual conformance case `core/divide-float-zero-bug-001` |
 
 ```clojure
 ;; Clojure
-(/ 1.0 0.0)   ;=> ArithmeticException
+(/ 1.0 0.0)   ;=> ##Inf
 
 ;; PTC-Lisp current behavior
 (/ 1.0 0.0)   ;=> ##Inf
 ```
 
-**Decision:** BUG. `/` is a supported Clojure-named numeric operation. Integer
-division by zero already raises in PTC-Lisp, and floating division by zero is
-an invalid program rather than bad external input, so silently returning
-infinity hides a numeric error.
+**Decision:** RECLASSIFY. The backlog entry is outdated for
+primitive double paths: local Clojure verification shows floating zero divisors
+return IEEE 754 results such as `##Inf` and `##NaN`. Integer zero divisors
+remain invalid and continue to raise.
 
 ### GAP-S70: Collection protocol predicates return true for strings
 
@@ -4172,16 +4183,19 @@ and `drop-last` that already match Clojure boundary behavior.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance case `core/minus-zero-arity-bug-001` |
 
 ```clojure
 ;; Clojure
 (-)   ;=> ArityException
 
-;; PTC-Lisp current behavior
-(-)   ;=> 0
+;; PTC-Lisp (fixed)
+(-)   ;=> arity error
 ```
+
+**Fix:** `-` is now bound as a non-empty variadic builtin, so zero-arity calls
+raise instead of returning the additive identity.
 
 **Decision:** BUG. Zero-arity subtraction is an invalid program in Clojure.
 Returning `0` silently changes a programmer fault into plausible data.
@@ -4191,16 +4205,18 @@ Returning `0` silently changes a programmer fault into plausible data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance case `core/divide-unary-bug-001` |
 
 ```clojure
 ;; Clojure
 (/ 2)   ;=> 1/2
 
-;; PTC-Lisp current behavior
-(/ 2)   ;=> 2
+;; PTC-Lisp (fixed)
+(/ 2)   ;=> 0.5
 ```
+
+**Fix:** Unary `/` now divides `1` by its argument.
 
 **Decision:** BUG. This is a Clojure-named arithmetic function on normal finite
 numeric input. Returning the argument is silent wrong data.
@@ -4210,7 +4226,7 @@ numeric input. Returning the argument is silent wrong data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/plus-unary-nonnumeric-bug-001`, `core/plus-unary-keyword-bug-001`, `core/plus-unary-string-bug-001`, `core/multiply-unary-nonnumeric-bug-001`, `core/multiply-unary-keyword-bug-001`, `core/divide-unary-nonnumeric-bug-001` |
 
 ```clojure
@@ -4222,14 +4238,17 @@ numeric input. Returning the argument is silent wrong data.
 (* :a)      ;=> ClassCastException
 (/ :a)      ;=> ClassCastException
 
-;; PTC-Lisp current behavior
-(+ [1 2])   ;=> [1 2]
-(+ :a)      ;=> :a
-(+ "a")     ;=> "a"
-(* [1 2])   ;=> [1 2]
-(* :a)      ;=> :a
-(/ :a)      ;=> :a
+;; PTC-Lisp (fixed)
+(+ [1 2])   ;=> type_error
+(+ :a)      ;=> type_error
+(+ "a")     ;=> type_error
+(* [1 2])   ;=> type_error
+(* :a)      ;=> type_error
+(/ :a)      ;=> type_error
 ```
+
+**Fix:** Unary `+`, `*`, and `/` now exercise the underlying numeric operation
+instead of treating one argument as an unchecked identity case.
 
 **Decision:** BUG. These are supported Clojure-named arithmetic functions.
 Invalid nonnumeric input should not be converted into plausible data by
@@ -5195,16 +5214,20 @@ API boundary.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance case `core/range-zero-step-bug-001` |
 
 ```clojure
 ;; Clojure
 (take 3 (range 1 5 0))   ;=> (1 1 1)
 
-;; PTC-Lisp current behavior
-(take 3 (range 1 5 0))   ;=> []
+;; PTC-Lisp (fixed)
+(take 3 (range 1 5 0))   ;=> [1 1 1]
 ```
+
+**Fix:** The evaluator now recognizes bounded `(take n (range start end 0))`
+directly. Other direct zero-step `range` uses raise because PTC-Lisp does not
+expose lazy infinite sequences.
 
 **Decision:** BUG. PTC-Lisp intentionally excludes unbounded zero-arity
 `range` under `DIV-02`, but this is a bounded use of the supported three-arity
@@ -5215,7 +5238,7 @@ API boundary.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/range-nil-end-bug-001`, `core/range-nil-start-bug-001`, `core/range-nil-stop-bug-001`, `core/range-nil-step-bug-001`, `core/range-string-start-bug-001` |
 
 ```clojure
@@ -5226,13 +5249,16 @@ API boundary.
 (range 1 5 nil)   ;=> NullPointerException
 (range "1" 3)     ;=> ClassCastException
 
-;; PTC-Lisp current behavior
-(range nil)       ;=> []
-(range nil 5)     ;=> []
-(range 1 nil)     ;=> []
-(range 1 5 nil)   ;=> []
-(range "1" 3)     ;=> []
+;; PTC-Lisp (fixed)
+(range nil)       ;=> type_error
+(range nil 5)     ;=> type_error
+(range 1 nil)     ;=> type_error
+(range 1 5 nil)   ;=> type_error
+(range "1" 3)     ;=> type_error
 ```
+
+**Fix:** `range` now raises a type error for nil or nonnumeric bounds and
+steps instead of treating them as empty sequences.
 
 **Decision:** BUG. `range` is a supported Clojure-named numeric sequence
 helper. Nil or nonnumeric bounds/steps are invalid program inputs; silently

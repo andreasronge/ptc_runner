@@ -28,12 +28,11 @@ defmodule PtcRunner.Lisp.Runtime.SpecialValuesTest do
     end
 
     test "division" do
-      # Clojure conformance: integer 0 divisor raises (matches `quot`/`rem`).
-      # Float 0.0 divisor preserves IEEE 754 ##Inf / ##NaN semantics.
+      # Clojure conformance: integer zero divisors raise; floating zero keeps
+      # primitive double IEEE 754 results.
       assert_raise ArithmeticError, "division by zero", fn -> Math.divide(1, 0) end
       assert_raise ArithmeticError, "division by zero", fn -> Math.divide(-1, 0) end
       assert_raise ArithmeticError, "division by zero", fn -> Math.divide(0, 0) end
-
       assert Math.divide(1.0, 0.0) == :infinity
       assert Math.divide(-1.0, 0.0) == :negative_infinity
       assert Math.divide(0.0, 0.0) == :nan

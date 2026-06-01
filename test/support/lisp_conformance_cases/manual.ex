@@ -1719,7 +1719,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S127",
         "Clojure float? returns true for infinite literals; PTC-Lisp currently returns false."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/parse-long-overflow-bug-001",
         "clojure.core",
         ["parse-long"],
@@ -1727,7 +1727,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S85",
         "Clojure parse-long returns nil for values outside the Java long range; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/parse-long-underflow-bug-001",
         "clojure.core",
         ["parse-long"],
@@ -1735,7 +1735,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S85",
         "Clojure parse-long returns nil for values below the Java long range; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/parse-long-plus-overflow-bug-001",
         "clojure.core",
         ["parse-long"],
@@ -1743,7 +1743,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S85",
         "Clojure parse-long returns nil for signed values outside the Java long range; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-nan-bug-001",
         "clojure.core",
         ["int"],
@@ -1751,7 +1751,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S62",
         "Clojure int coercion returns 0 for NaN; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-overflow-positive-bug-001",
         "clojure.core",
         ["int"],
@@ -1759,7 +1759,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S111",
         "Clojure int coercion raises on values outside the Java int range; PTC-Lisp currently returns the arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-overflow-negative-bug-001",
         "clojure.core",
         ["int"],
@@ -1847,7 +1847,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S138",
         "Clojure quot returns zero for an infinite divisor; PTC-Lisp currently returns NaN."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-char-bug-001",
         "clojure.core",
         ["int"],
@@ -1855,7 +1855,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S121",
         "Clojure int coercion returns the code point for a character literal; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-newline-char-bug-001",
         "clojure.core",
         ["int"],
@@ -1863,7 +1863,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S121",
         "Clojure int coercion returns the newline code point for a character literal; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/int-tab-char-bug-001",
         "clojure.core",
         ["int"],
@@ -2627,13 +2627,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S105"],
         [:collection]
       ),
-      bug_case(
+      regression_case(
         "core/divide-float-zero-bug-001",
         "clojure.core",
         ["/"],
         "(/ 1.0 0.0)",
-        "GAP-S69",
-        "Clojure division by zero raises even for floating inputs; PTC-Lisp currently returns infinity."
+        [],
+        [:edge, :numeric]
       ),
       bug_case(
         "core/counted-string-bug-001",
@@ -3612,7 +3612,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S77",
         "Clojure tree-seq over a string root terminates over characters; PTC-Lisp currently recurses until the heap limit."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/minus-zero-arity-bug-001",
         "clojure.core",
         ["-"],
@@ -3620,7 +3620,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S28",
         "Clojure rejects zero-arity subtraction; PTC-Lisp currently returns 0."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/divide-unary-bug-001",
         "clojure.core",
         ["/"],
@@ -3628,7 +3628,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S29",
         "Clojure unary division returns the reciprocal; PTC-Lisp currently returns the argument."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/plus-unary-nonnumeric-bug-001",
         "clojure.core",
         ["+"],
@@ -3636,7 +3636,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S104",
         "Clojure unary + requires a number; PTC-Lisp currently returns nonnumeric inputs unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/plus-unary-keyword-bug-001",
         "clojure.core",
         ["+"],
@@ -3644,7 +3644,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S104",
         "Clojure unary + rejects keyword inputs; PTC-Lisp currently returns them unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/plus-unary-string-bug-001",
         "clojure.core",
         ["+"],
@@ -3652,7 +3652,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S104",
         "Clojure unary + rejects string inputs; PTC-Lisp currently returns them unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/multiply-unary-nonnumeric-bug-001",
         "clojure.core",
         ["*"],
@@ -3660,7 +3660,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S104",
         "Clojure unary * requires a number; PTC-Lisp currently returns nonnumeric inputs unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/multiply-unary-keyword-bug-001",
         "clojure.core",
         ["*"],
@@ -3668,7 +3668,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S104",
         "Clojure unary * rejects keyword inputs; PTC-Lisp currently returns them unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/divide-unary-nonnumeric-bug-001",
         "clojure.core",
         ["/"],
@@ -4871,7 +4871,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         true,
         "Clojure Character values are not strings; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-zero-step-bug-001",
         "clojure.core",
         ["range", "take"],
@@ -4879,7 +4879,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S45",
         "Clojure zero-step range repeats the start value under bounded take; PTC-Lisp currently returns an empty vector."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-nil-end-bug-001",
         "clojure.core",
         ["range"],
@@ -4887,7 +4887,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S99",
         "Clojure raises for nil range bounds; PTC-Lisp currently returns an empty vector."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-nil-start-bug-001",
         "clojure.core",
         ["range"],
@@ -4895,7 +4895,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S99",
         "Clojure raises for nil range bounds; PTC-Lisp currently returns an empty vector."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-nil-stop-bug-001",
         "clojure.core",
         ["range"],
@@ -4903,7 +4903,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S99",
         "Clojure raises for nil range bounds; PTC-Lisp currently returns an empty vector."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-nil-step-bug-001",
         "clojure.core",
         ["range"],
@@ -4911,7 +4911,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S99",
         "Clojure raises for a nil range step; PTC-Lisp currently returns an empty vector."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/range-string-start-bug-001",
         "clojure.core",
         ["range"],
@@ -8048,6 +8048,10 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
       reason: reason,
       tags: [:edge]
     }
+  end
+
+  defp fixed_bug_case(id, namespace, vars, form, gap_id, _reason) do
+    regression_case(id, namespace, vars, form, [gap_id], [:edge])
   end
 
   defp unsupported_case(id, namespace, vars, form, reason, regression_ids \\ []) do

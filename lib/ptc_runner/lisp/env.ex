@@ -376,7 +376,7 @@ defmodule PtcRunner.Lisp.Env do
       # Arithmetic — variadic with identity
       # ============================================================
       {:+, {:variadic, &Runtime.Math.add/2, 0}},
-      {:-, {:variadic, &Runtime.Math.subtract/2, 0}},
+      {:-, {:variadic_nonempty, :-, &Runtime.Math.subtract/2}},
       {:*, {:variadic, &Runtime.Math.multiply/2, 1}},
       {:/, {:variadic_nonempty, :/, &Runtime.Math.divide/2}},
       {:mod, {:normal, &Runtime.mod/2}},

@@ -294,10 +294,10 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       env = Env.initial()
       call_ast = {:call, {:var, :-}, [nil]}
 
-      assert {:error, {:type_error, msg, nil}} =
+      assert {:error, {:type_error, msg, [nil]}} =
                Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
 
-      assert msg =~ "expected number"
+      assert msg =~ "invalid argument types"
       assert msg =~ "nil"
     end
 
