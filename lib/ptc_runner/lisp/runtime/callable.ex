@@ -22,7 +22,6 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
-  alias PtcRunner.Lisp.Runtime.SpecialValues
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.TypeError
 
@@ -83,7 +82,7 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   def call({:variadic, fun2, identity}, args) do
     case args do
       [] -> identity
-      [x] -> unary_variadic(fun2, x)
+      [x] -> Math.unary_variadic(fun2, x)
       [x, y] -> fun2.(x, y)
       [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
     end
@@ -95,7 +94,7 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   def call({:variadic_nonempty, name, fun2}, args) do
     case args do
       [] -> raise ArgumentError, "#{name} requires at least 1 argument"
-      [x] -> unary_variadic_nonempty(name, fun2, x)
+      [x] -> Math.unary_variadic_nonempty(name, fun2, x)
       [x, y] -> fun2.(x, y)
       [h | t] -> Enum.reduce(t, h, fn x, acc -> fun2.(acc, x) end)
     end
@@ -117,22 +116,6 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call({:collect, fun}, args), do: fun.(args)
-
-  defp unary_variadic(fun2, x) do
-    cond do
-      fun2 == (&Math.subtract/2) -> Math.subtract([x])
-      fun2 == (&Math.add/2) -> unary_plus(x)
-      fun2 == (&Math.multiply/2) -> fun2.(x, 1)
-      true -> x
-    end
-  end
-
-  defp unary_plus(x) when is_number(x), do: x
-  defp unary_plus(x), do: if(SpecialValues.special?(x), do: x, else: Math.add(x, 0))
-
-  defp unary_variadic_nonempty(:/, fun2, x), do: fun2.(1, x)
-  defp unary_variadic_nonempty(:-, _fun2, x), do: Math.subtract([x])
-  defp unary_variadic_nonempty(_name, _fun2, x), do: x
 
   defp raise_type_error_or_reraise(fun2, args, stacktrace) do
     if Enum.all?(args, &is_number/1) do
