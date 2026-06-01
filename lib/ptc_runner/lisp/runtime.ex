@@ -373,6 +373,7 @@ defmodule PtcRunner.Lisp.Runtime do
 
   defdelegate java_util_date(), to: Interop
   defdelegate java_util_date(ms), to: Interop
+  defdelegate boolean_parse_boolean(s), to: Interop
   defdelegate dot_get_time(dt), to: Interop
   defdelegate dot_to_epoch_day(date), to: Interop
   defdelegate dot_plus_days(date, days), to: Interop

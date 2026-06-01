@@ -48,10 +48,15 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:ok, %{return: nil}} = Lisp.run(~S|(Double/parseDouble "not-a-number")|)
     end
 
-    test "Java parse aliases use safe parse builtins" do
+    test "Java parse aliases use parse semantics for their target classes" do
       assert {:ok, %{return: true}} = Lisp.run(~S|(Boolean/parseBoolean "true")|)
+      assert {:ok, %{return: true}} = Lisp.run(~S|(Boolean/parseBoolean "TRUE")|)
+      assert {:ok, %{return: true}} = Lisp.run(~S|(Boolean/parseBoolean "TrUe")|)
       assert {:ok, %{return: false}} = Lisp.run(~S|(Boolean/parseBoolean "false")|)
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(Boolean/parseBoolean "yes")|)
+      assert {:ok, %{return: false}} = Lisp.run(~S|(Boolean/parseBoolean "yes")|)
+      assert {:ok, %{return: false}} = Lisp.run(~S|(Boolean/parseBoolean "")|)
+      assert {:ok, %{return: false}} = Lisp.run(~S|(Boolean/parseBoolean nil)|)
+      assert {:error, %{fail: %{reason: :type_error}}} = Lisp.run(~S|(Boolean/parseBoolean true)|)
 
       assert {:ok, %{return: 11.76}} = Lisp.run(~S|(Float/parseFloat "11.760000")|)
       assert {:ok, %{return: nil}} = Lisp.run(~S|(Float/parseFloat "not-a-number")|)

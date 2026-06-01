@@ -5,7 +5,7 @@
       status: :supported,
       description: "Parse string to boolean",
       notes:
-        "BUG GAP-J02: currently aliases parse-boolean, returns nil for non-true/nil inputs, misses Java's case-insensitive true handling, and returns nil instead of raising for non-string inputs."
+        "Fixed GAP-J02: matches java.lang.Boolean.parseBoolean; nil/null and every string other than case-insensitive \"true\" return false, while non-string, non-nil inputs raise."
     },
     %{
       name: "Boolean/valueOf",
