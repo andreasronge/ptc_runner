@@ -5896,7 +5896,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat raises NullPointerException for nil; PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],
@@ -5904,7 +5904,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean returns false for non-true strings, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-case-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],
@@ -5912,7 +5912,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean is case-insensitive for true, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-mixed-case-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],
@@ -5920,7 +5920,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean is case-insensitive for mixed-case true, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-empty-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],
@@ -5928,7 +5928,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean returns false for the empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-nil-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],
@@ -5936,7 +5936,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean returns false for nil; PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/boolean-parse-boolean-boolean-bug-001",
         "java.lang.Boolean",
         ["Boolean/parseBoolean"],

@@ -1317,7 +1317,7 @@ defmodule PtcRunner.Lisp.Analyze do
   #   - `:unknown_member` when `<ns>` is qualified but `<func>` isn't a member
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
   #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
-  defp qualified_namespace_lookup(:Boolean, "parseBoolean"), do: {:ok, :"parse-boolean"}
+  defp qualified_namespace_lookup(:Boolean, "parseBoolean"), do: {:ok, :"Boolean/parseBoolean"}
   defp qualified_namespace_lookup(:Double, "parseDouble"), do: {:ok, :"parse-double"}
   defp qualified_namespace_lookup(:Float, "parseFloat"), do: {:ok, :"parse-double"}
   defp qualified_namespace_lookup(:Integer, "parseInt"), do: {:ok, :"parse-long"}

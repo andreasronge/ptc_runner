@@ -2149,6 +2149,28 @@
       divergences: nil
     },
     %{
+      name: "Boolean/parseBoolean",
+      description:
+        "Java-compatible boolean string parser; returns true only for case-insensitive \"true\"",
+      binding: :normal,
+      category: :interop,
+      dispatch: :env,
+      signatures: ["(Boolean/parseBoolean s)"],
+      since: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      examples: [
+        {~S|(Boolean/parseBoolean "true")|, "true"},
+        {~S|(Boolean/parseBoolean "TRUE")|, "true"},
+        {~S|(Boolean/parseBoolean "x")|, "false"}
+      ],
+      notes:
+        "Matches java.lang.Boolean.parseBoolean: nil/null and every string other than case-insensitive \"true\" return false; non-string, non-nil inputs raise.",
+      see_also: ["parse-boolean"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
       name: "java.util.Date.",
       description:
         "Construct DateTime: no-arg returns current UTC, integer is Unix seconds/ms, string is ISO-8601 (offset optional, treated as UTC if absent) or RFC-2822, existing DateTime/NaiveDateTime/Date passes through",
@@ -2901,8 +2923,7 @@
         {~S|(parse-boolean "true")|, "true"},
         {~S|(parse-boolean "false")|, "false"}
       ],
-      notes:
-        ~S|Returns nil for values other than "true" or "false". Also available as `Boolean/parseBoolean`.|,
+      notes: ~S|Returns nil for values other than "true" or "false".|,
       see_also: ["parse-long", "parse-double"],
       clojure_var: "parse-boolean",
       divergences:
@@ -5297,7 +5318,7 @@
       description: "Parse \"true\"/\"false\" to boolean",
       signatures: ["(Boolean/parseBoolean s)"],
       notes:
-        "Compatibility alias for `(parse-boolean s)`. Invalid or non-string input returns nil instead of Java's false/throwing behavior."
+        "Matches java.lang.Boolean.parseBoolean: nil/null and every string other than case-insensitive \"true\" return false; non-string, non-nil inputs raise."
     },
     %{
       name: "Double/POSITIVE_INFINITY",
