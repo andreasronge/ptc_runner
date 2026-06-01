@@ -2924,7 +2924,7 @@
         {~S|(parse-boolean "false")|, "false"}
       ],
       notes: ~S|Returns nil for values other than "true" or "false".|,
-      see_also: ["parse-long", "parse-double"],
+      see_also: ["parse-long", "parse-double", "Boolean/parseBoolean"],
       clojure_var: "parse-boolean",
       divergences:
         "DIV-18: returns nil on non-string input instead of raising IllegalArgumentException. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
