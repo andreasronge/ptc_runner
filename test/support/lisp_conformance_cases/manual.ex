@@ -5975,13 +5975,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for nanosecond-precision instants; PTC-Lisp currently exposes millisecond getTime on Instant results."
       ),
-      bug_case(
+      unsupported_case(
         "java/instant-to-epoch-milli-unsupported-bug-001",
         "java.time.Instant",
         [".toEpochMilli"],
         ~S|(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z"))|,
-        "GAP-J18",
-        "Java Instant exposes toEpochMilli; PTC-Lisp currently rejects the method while exposing getTime instead."
+        "Java Instant exposes toEpochMilli; PTC-Lisp currently rejects the method while exposing getTime instead.",
+        ["GAP-J18"]
       ),
       bug_case(
         "java/duration-between-date-instant-bug-001",
@@ -6808,67 +6808,60 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         {:error, :runtime_error},
         "PTC-Lisp keywords use a stricter character set than Clojure keywords."
       ),
-      div_case(
+      bug_case(
         "div/if-let-destructuring-001",
         "clojure.core",
         ["if-let"],
         "(if-let [{:keys [a]} {:a 1}] a nil)",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/if-let-vector-destructuring-001",
         "clojure.core",
         ["if-let"],
         "(if-let [[a b] [1 2]] [a b] nil)",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/when-let-destructuring-001",
         "clojure.core",
         ["when-let"],
         "(when-let [[a b] [1 2]] [a b])",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/when-let-map-destructuring-001",
         "clojure.core",
         ["when-let"],
         "(when-let [{:keys [a]} {:a 1}] a)",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/if-some-destructuring-001",
         "clojure.core",
         ["if-some"],
         "(if-some [[a b] [1 2]] [a b] nil)",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/if-some-map-destructuring-001",
         "clojure.core",
         ["if-some"],
         "(if-some [{:keys [a]} {:a nil}] a :none)",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
-      div_case(
+      bug_case(
         "div/when-some-destructuring-001",
         "clojure.core",
         ["when-some"],
         "(when-some [[a b] [1 2]] [a b])",
         "DIV-14",
-        {:error, :invalid_form},
         "Conditional binding forms only support simple symbol bindings; use let for destructuring."
       ),
       div_case(
@@ -7701,22 +7694,20 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "one",
         "PTC-Lisp case dispatch follows its type-independent numeric equality policy."
       ),
-      div_case(
+      bug_case(
         "div/compare-nan-001",
         "clojure.core",
         ["compare"],
         "(compare ##NaN 1)",
         "DIV-33",
-        {:error, :type_error},
         "PTC-Lisp treats NaN as unordered for compare instead of returning an arbitrary ordering."
       ),
-      div_case(
+      bug_case(
         "div/compare-nan-self-001",
         "clojure.core",
         ["compare"],
         "(compare ##NaN ##NaN)",
         "DIV-33",
-        {:error, :type_error},
         "PTC-Lisp treats NaN as unordered even for self-comparison."
       ),
       div_case(

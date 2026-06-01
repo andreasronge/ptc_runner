@@ -16,6 +16,29 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## Conformance-case label cleanup + DIV-06  ·  committed
+
+Follow-up to the classification audit, aligning conformance-case *policies* with
+the reclassified gap statuses.
+
+- **Converted the 10 genuinely-misleading cases** (their policy actively asserted
+  something now false): DIV-14 (7) and DIV-33 (2) `div_case` → `bug_case` (those
+  are now BUGs, so a "diverges = intentional" policy was wrong; all still pass —
+  PTC ≠ Clojure), and GAP-J18 `bug_case` → `unsupported_case` (now skipped, since
+  it is an unimplemented method, not a reproducing bug). Verified via run_case.
+- **DIV-06 confirmed DIV** (not reclassified): computed duplicate keys → silent
+  dedup is rule 1 (recover on runtime data vs unrecoverable crash). Noted one
+  out-of-scope sub-case — *literal* dup keys (`{:a 1 :a 2}`) are also silently
+  deduped, inconsistently (map literal keeps first, `hash-map` keeps last), and
+  arguably should raise (rule 4).
+- **Deferred (intentionally):** the 62 char/value-model `BUG → DIV` cases keep
+  their `bug_case`s. They pass and still correctly flag "PTC diverges from
+  Clojure" — only the intentional-vs-bug nuance lags, and the gap doc is the
+  authoritative classification (already DIV). A scripted bulk conversion proved
+  fragile against the seed set, so it is not worth the corruption risk for a
+  cosmetic label change; convert opportunistically if/when those gaps are next
+  touched.
+
 ## GAP-S63 (P0) → DIV-47 — flexible keyword/string key access  ·  committed
 
 Resolved the deferred P0. `(:a {"a" 1}) => 1` was filed a P0 BUG ("keyword lookup

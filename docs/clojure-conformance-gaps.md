@@ -250,6 +250,8 @@ No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
 
 Clojure detects duplicate computed keys at runtime and throws an error. PTC-Lisp silently deduplicates. Without exception handling (`try`/`catch`), a duplicate-key error would crash the entire program with no recovery path. Silent deduplication is more resilient for LLM-generated sandboxed code.
 
+**Rationale:** rule 1 (no try/catch → recover on runtime data instead of an unrecoverable crash). **Classification audit (2026-06-01): confirmed DIV.** Note one out-of-scope sub-case: *literal* duplicate keys written in source (`{:a 1 :a 2}`) are also silently deduped — and inconsistently, a map literal keeps the **first** value (`{"a" 1}`) while `hash-map` keeps the **last** (`{"a" 2}`). A literal duplicate key is a program-shape error (rule 4) that arguably should raise; that source-literal case is a small separate concern, distinct from this *computed*-duplicate-key DIV.
+
 ### DIV-07: No user-defined namespaces
 
 | Field | Value |
