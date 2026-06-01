@@ -7,6 +7,12 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
   @schema Path.expand("../../mcp_server/test/fixtures/openapi/observatory.openapi.json", __DIR__)
 
+  # The hand-rolled TCP fixtures read requests with a bounded recv timeout. Keep
+  # it well above the client's `call_timeout_ms` (5s) so that under heavy parallel
+  # test load a slow client send never makes the fixture give up mid-request and
+  # crash on the `{:ok, chunk} =` match (which surfaced as a flaky empty step).
+  @fixture_recv_timeout_ms 15_000
+
   test "starts a root runtime from OpenAPI config and exposes discovery" do
     {:ok, runtime} = Runtime.start_link(config: config())
 
@@ -610,7 +616,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     pid =
       spawn_link(fn ->
         {:ok, socket} = :gen_tcp.accept(listen_socket)
-        {:ok, request} = :gen_tcp.recv(socket, 0, 1_000)
+        {:ok, request} = :gen_tcp.recv(socket, 0, @fixture_recv_timeout_ms)
         send(parent, {:http_fixture_request, request})
 
         response = [
@@ -754,7 +760,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     if String.contains?(acc, marker) do
       {:ok, acc}
     else
-      {:ok, chunk} = :gen_tcp.recv(socket, 0, 1_000)
+      {:ok, chunk} = :gen_tcp.recv(socket, 0, @fixture_recv_timeout_ms)
       read_until(socket, marker, acc <> chunk)
     end
   end
@@ -764,7 +770,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
   end
 
   defp read_body(socket, buffered, length) do
-    {:ok, chunk} = :gen_tcp.recv(socket, length - byte_size(buffered), 1_000)
+    {:ok, chunk} = :gen_tcp.recv(socket, length - byte_size(buffered), @fixture_recv_timeout_ms)
     read_body(socket, buffered <> chunk, length)
   end
 
