@@ -11,6 +11,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.{JsonParser, KeyNormalizer, Signature}
   alias PtcRunner.SubAgent.Loop.Metrics
+  alias PtcRunner.SubAgent.Loop.Shared
 
   # ============================================================
   # JSON Response Handling
@@ -311,7 +312,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0)
-      |> add_schema_metrics(state.schema)
+      |> Shared.add_schema_metrics(state.schema)
 
     final_step =
       %Step{
@@ -326,7 +327,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
             false
           ),
         field_descriptions: agent.field_descriptions,
-        messages: build_collected_messages(state, final_messages),
+        messages: Shared.build_collected_messages(state, final_messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,
         prints: [],
@@ -372,7 +373,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
     usage =
       state
       |> Metrics.build_final_usage(duration_ms, 0)
-      |> add_schema_metrics(state.schema)
+      |> Shared.add_schema_metrics(state.schema)
 
     final_step = %{
       error_step
@@ -383,7 +384,7 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
             state.trace_mode,
             true
           ),
-        messages: build_collected_messages(state, final_messages),
+        messages: Shared.build_collected_messages(state, final_messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt
     }
@@ -431,23 +432,4 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   end
 
   # ============================================================
-  # Helpers
-  # ============================================================
-
-  defp add_schema_metrics(usage, schema) when is_map(schema) do
-    schema_json = Jason.encode!(schema)
-
-    usage
-    |> Map.put(:schema_used, true)
-    |> Map.put(:schema_bytes, byte_size(schema_json))
-  end
-
-  defp add_schema_metrics(usage, _), do: Map.put(usage, :schema_used, false)
-
-  defp build_collected_messages(%{collect_messages: false}, _messages), do: nil
-
-  defp build_collected_messages(%{collect_messages: true} = state, messages) do
-    system_prompt = state.current_system_prompt || ""
-    [%{role: :system, content: system_prompt} | messages]
-  end
 end

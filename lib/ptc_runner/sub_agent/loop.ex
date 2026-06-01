@@ -73,6 +73,7 @@ defmodule PtcRunner.SubAgent.Loop do
     PtcToolCall,
     ResponseHandler,
     ReturnValidation,
+    Shared,
     State,
     StepAssembler,
     TextMode,
@@ -1012,7 +1013,7 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Head 5: Normal continuation — check memory limits or continue
   defp handle_successful_execution(code, response, lisp_step, state, agent) do
-    case check_memory_limit(lisp_step.memory, agent.memory_limit) do
+    case Shared.check_memory_limit(lisp_step.memory, agent.memory_limit) do
       {:ok, _size} ->
         handle_normal_continuation(code, response, lisp_step, state, agent)
 
@@ -1285,24 +1286,6 @@ defmodule PtcRunner.SubAgent.Loop do
 
   defp maybe_put_state(state, _key, nil), do: state
   defp maybe_put_state(state, key, value), do: Map.put(state, key, value)
-
-  # Calculate approximate memory size in bytes
-  defp memory_size(memory) when is_map(memory) do
-    :erlang.external_size(memory)
-  end
-
-  # Check if memory exceeds the limit
-  defp check_memory_limit(memory, limit) when is_integer(limit) do
-    size = memory_size(memory)
-
-    if size > limit do
-      {:error, :memory_limit_exceeded, size}
-    else
-      {:ok, size}
-    end
-  end
-
-  defp check_memory_limit(_memory, nil), do: {:ok, 0}
 
   # Calculate mission deadline from timeout in milliseconds
   defp calculate_mission_deadline(nil), do: nil
