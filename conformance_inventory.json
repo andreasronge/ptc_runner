@@ -3847,7 +3847,7 @@
     "symbol": "split-lines",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S51: empty string currently returns [] instead of [\"\"]"
+    "notes": "GAP-S51 fixed: empty string returns [\"\"]"
   },
   {
     "status": "supported",

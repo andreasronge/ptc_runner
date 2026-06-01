@@ -3325,7 +3325,7 @@
       name: "split-lines",
       status: :supported,
       description: "Splits string on \\n or \\r\\n",
-      notes: "BUG GAP-S51: empty string currently returns [] instead of [\"\"]"
+      notes: "GAP-S51 fixed: empty string returns [\"\"]"
     },
     %{
       name: "starts-with?",

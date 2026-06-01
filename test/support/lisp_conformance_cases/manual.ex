@@ -593,13 +593,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S50",
         "Clojure trimr removes trailing EM SPACE; PTC-Lisp currently leaves it unchanged."
       ),
-      bug_case(
+      fixed_bug_case(
         "string/split-lines-empty-bug-001",
         "clojure.string",
         ["split-lines"],
         ~S|(clojure.string/split-lines "")|,
         "GAP-S51",
-        "Clojure split-lines returns one empty string for empty input; PTC-Lisp currently returns an empty vector."
+        "Clojure split-lines returns one empty string for empty input; this guards GAP-S51."
       ),
       c(
         "string/split-lines-001",

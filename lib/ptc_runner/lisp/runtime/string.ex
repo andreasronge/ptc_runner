@@ -135,6 +135,10 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (split-lines "line1\nline2\r\nline3") returns ["line1" "line2" "line3"]
   - Does not return trailing empty lines.
   """
+  def split_lines("") do
+    [""]
+  end
+
   def split_lines(s) when is_binary(s) do
     s
     |> String.split(~r/\r?\n/)
