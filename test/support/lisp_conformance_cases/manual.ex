@@ -414,92 +414,103 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S74",
         "Clojure string/split requires a regex Pattern delimiter; PTC-Lisp currently accepts plain strings."
       ),
-      bug_case(
+      div_case(
         "string/includes-char-hit-bug-001",
         "clojure.string",
         ["includes?"],
         ~S|(clojure.string/includes? "abc" \a)|,
         "GAP-S116",
+        true,
         "Clojure string/includes? rejects Character substrings; PTC-Lisp currently treats them as one-character strings."
       ),
-      bug_case(
+      div_case(
         "string/includes-char-miss-bug-001",
         "clojure.string",
         ["includes?"],
         ~S|(clojure.string/includes? "abc" \z)|,
         "GAP-S116",
+        false,
         "Clojure string/includes? rejects Character substrings even when absent; PTC-Lisp currently returns false."
       ),
-      bug_case(
+      div_case(
         "string/starts-with-char-hit-bug-001",
         "clojure.string",
         ["starts-with?"],
         ~S|(clojure.string/starts-with? "abc" \a)|,
         "GAP-S116",
+        true,
         "Clojure string/starts-with? rejects Character prefixes; PTC-Lisp currently treats them as one-character strings."
       ),
-      bug_case(
+      div_case(
         "string/starts-with-char-miss-bug-001",
         "clojure.string",
         ["starts-with?"],
         ~S|(clojure.string/starts-with? "abc" \b)|,
         "GAP-S116",
+        false,
         "Clojure string/starts-with? rejects Character prefixes even when absent; PTC-Lisp currently returns false."
       ),
-      bug_case(
+      div_case(
         "string/ends-with-char-hit-bug-001",
         "clojure.string",
         ["ends-with?"],
         ~S|(clojure.string/ends-with? "abc" \c)|,
         "GAP-S116",
+        true,
         "Clojure string/ends-with? rejects Character suffixes; PTC-Lisp currently treats them as one-character strings."
       ),
-      bug_case(
+      div_case(
         "string/ends-with-char-miss-bug-001",
         "clojure.string",
         ["ends-with?"],
         ~S|(clojure.string/ends-with? "abc" \b)|,
         "GAP-S116",
+        false,
         "Clojure string/ends-with? rejects Character suffixes even when absent; PTC-Lisp currently returns false."
       ),
-      bug_case(
+      div_case(
         "string/replace-char-match-string-replacement-bug-001",
         "clojure.string",
         ["replace"],
         ~S|(clojure.string/replace "aba" \a "x")|,
         "GAP-S116",
+        "xbx",
         "Clojure string/replace rejects Character match values with string replacements; PTC-Lisp currently replaces them."
       ),
-      bug_case(
+      div_case(
         "string/replace-string-match-char-replacement-bug-001",
         "clojure.string",
         ["replace"],
         ~S|(clojure.string/replace "aba" "a" \x)|,
         "GAP-S116",
+        "xbx",
         "Clojure string/replace rejects Character replacements for string matches; PTC-Lisp currently treats them as strings."
       ),
-      bug_case(
+      div_case(
         "string/split-char-delimiter-bug-001",
         "clojure.string",
         ["split"],
         ~S|(clojure.string/split "a,b" \,)|,
         "GAP-S116",
+        ["a", "b"],
         "Clojure string/split requires a regex Pattern delimiter; PTC-Lisp currently accepts Character delimiters."
       ),
-      bug_case(
+      div_case(
         "string/blank-char-bug-001",
         "clojure.string",
         ["blank?"],
         ~S|(clojure.string/blank? \space)|,
         "GAP-S116",
+        true,
         "Clojure string/blank? rejects Character inputs; PTC-Lisp currently treats them as one-character strings."
       ),
-      bug_case(
+      div_case(
         "string/trim-newline-char-bug-001",
         "clojure.string",
         ["trim-newline"],
         ~S|(clojure.string/trim-newline \newline)|,
         "GAP-S116",
+        "",
         "Clojure string/trim-newline rejects Character inputs; PTC-Lisp currently treats them as one-character strings."
       ),
       bug_case(
@@ -1658,20 +1669,22 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S61",
         "Clojure parse-double accepts Java hexadecimal floating-point syntax; PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      div_case(
         "core/float-infinity-bug-001",
         "clojure.core",
         ["float"],
         "(float ##Inf)",
         "GAP-S122",
+        :infinity,
         "Clojure float coercion rejects positive infinity as out of range; PTC-Lisp currently returns infinity."
       ),
-      bug_case(
+      div_case(
         "core/float-negative-infinity-bug-001",
         "clojure.core",
         ["float"],
         "(float ##-Inf)",
         "GAP-S122",
+        :negative_infinity,
         "Clojure float coercion rejects negative infinity as out of range; PTC-Lisp currently returns negative infinity."
       ),
       bug_case(
@@ -2242,20 +2255,22 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S93",
         "Clojure str on an empty regex pattern returns the source pattern text; PTC-Lisp currently leaks the internal regex tuple representation."
       ),
-      bug_case(
+      div_case(
         "core/pr-str-char-bug-001",
         "clojure.core",
         ["pr-str"],
         ~S|(pr-str \a)|,
         "GAP-S126",
+        "\"a\"",
         "Clojure pr-str prints Character values with character syntax; PTC-Lisp currently prints them as strings."
       ),
-      bug_case(
+      div_case(
         "core/pr-str-newline-char-bug-001",
         "clojure.core",
         ["pr-str"],
         ~S|(pr-str \newline)|,
         "GAP-S126",
+        "\"\\n\"",
         "Clojure pr-str prints named Character values with character syntax; PTC-Lisp currently prints them as strings."
       ),
       bug_case(
@@ -2274,276 +2289,310 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S129",
         "Clojure name rejects named Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/count-char-bug-001",
         "clojure.core",
         ["count"],
         ~S|(count \a)|,
         "GAP-S130",
+        1,
         "Clojure count rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/seq-char-bug-001",
         "clojure.core",
         ["seq"],
         ~S|(seq \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure seq rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/first-char-bug-001",
         "clojure.core",
         ["first"],
         ~S|(first \a)|,
         "GAP-S130",
+        "a",
         "Clojure first rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/nth-char-bug-001",
         "clojure.core",
         ["nth"],
         ~S|(nth \a 0)|,
         "GAP-S130",
+        "a",
         "Clojure nth rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/vec-char-bug-001",
         "clojure.core",
         ["vec"],
         ~S|(vec \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure vec rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/not-empty-char-bug-001",
         "clojure.core",
         ["not-empty"],
         ~S|(not-empty \a)|,
         "GAP-S130",
+        "a",
         "Clojure not-empty rejects Character values; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/map-char-bug-001",
         "clojure.core",
         ["map"],
         ~S|(map identity \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure map rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/filterv-char-bug-001",
         "clojure.core",
         ["filterv"],
         ~S|(filterv identity \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure filterv rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/reduce-char-bug-001",
         "clojure.core",
         ["reduce"],
         ~S|(reduce str \a)|,
         "GAP-S130",
+        "a",
         "Clojure reduce rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/frequencies-char-bug-001",
         "clojure.core",
         ["frequencies"],
         ~S|(frequencies \a)|,
         "GAP-S130",
+        %{"a" => 1},
         "Clojure frequencies rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/partition-all-char-bug-001",
         "clojure.core",
         ["partition-all"],
         ~S|(partition-all 1 \a)|,
         "GAP-S130",
+        [["a"]],
         "Clojure partition-all rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/cons-char-bug-001",
         "clojure.core",
         ["cons"],
         ~S|(cons :x \a)|,
         "GAP-S130",
+        ["x", "a"],
         "Clojure cons rejects Character tail collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/zipmap-char-keys-bug-001",
         "clojure.core",
         ["zipmap"],
         ~S|(zipmap \a [1])|,
         "GAP-S130",
+        %{"a" => 1},
         "Clojure zipmap rejects Character key collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/zipmap-char-vals-bug-001",
         "clojure.core",
         ["zipmap"],
         ~S|(zipmap [:a] \b)|,
         "GAP-S130",
+        %{"a" => "b"},
         "Clojure zipmap rejects Character value collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/dedupe-char-bug-001",
         "clojure.core",
         ["dedupe"],
         ~S|(dedupe \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure dedupe rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/drop-last-char-bug-001",
         "clojure.core",
         ["drop-last"],
         ~S|(drop-last 1 \a)|,
         "GAP-S130",
+        [],
         "Clojure drop-last rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/drop-while-char-bug-001",
         "clojure.core",
         ["drop-while"],
         ~S|(drop-while identity \a)|,
         "GAP-S130",
+        [],
         "Clojure drop-while rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/take-while-char-bug-001",
         "clojure.core",
         ["take-while"],
         ~S|(take-while identity \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure take-while rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/remove-char-bug-001",
         "clojure.core",
         ["remove"],
         ~S|(remove identity \a)|,
         "GAP-S130",
+        [],
         "Clojure remove rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/not-every-char-bug-001",
         "clojure.core",
         ["not-every?"],
         ~S|(not-every? identity \a)|,
         "GAP-S130",
+        false,
         "Clojure not-every? rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/rest-char-bug-001",
         "clojure.core",
         ["rest"],
         ~S|(rest \a)|,
         "GAP-S130",
+        [],
         "Clojure rest rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/next-char-bug-001",
         "clojure.core",
         ["next"],
         ~S|(next \a)|,
         "GAP-S130",
+        nil,
         "Clojure next rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/last-char-bug-001",
         "clojure.core",
         ["last"],
         ~S|(last \a)|,
         "GAP-S130",
+        "a",
         "Clojure last rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/second-char-bug-001",
         "clojure.core",
         ["second"],
         ~S|(second \a)|,
         "GAP-S130",
+        nil,
         "Clojure second rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/butlast-char-bug-001",
         "clojure.core",
         ["butlast"],
         ~S|(butlast \a)|,
         "GAP-S130",
+        nil,
         "Clojure butlast rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/nthnext-char-bug-001",
         "clojure.core",
         ["nthnext"],
         ~S|(nthnext \a 1)|,
         "GAP-S130",
+        nil,
         "Clojure nthnext rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/nthrest-char-bug-001",
         "clojure.core",
         ["nthrest"],
         ~S|(nthrest \a 1)|,
         "GAP-S130",
+        [],
         "Clojure nthrest rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/split-at-char-bug-001",
         "clojure.core",
         ["split-at"],
         ~S|(split-at 1 \a)|,
         "GAP-S130",
+        [["a"], []],
         "Clojure split-at rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/split-with-char-bug-001",
         "clojure.core",
         ["split-with"],
         ~S|(split-with identity \a)|,
         "GAP-S130",
+        [["a"], []],
         "Clojure split-with rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/keep-char-bug-001",
         "clojure.core",
         ["keep"],
         ~S|(keep identity \a)|,
         "GAP-S130",
+        ["a"],
         "Clojure keep rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/keep-indexed-char-bug-001",
         "clojure.core",
         ["keep-indexed"],
         ~S|(keep-indexed vector \a)|,
         "GAP-S130",
+        [[0, "a"]],
         "Clojure keep-indexed rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/every-char-bug-001",
         "clojure.core",
         ["every?"],
         ~S|(every? identity \a)|,
         "GAP-S130",
+        true,
         "Clojure every? rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/some-char-bug-001",
         "clojure.core",
         ["some"],
         ~S|(some identity \a)|,
         "GAP-S130",
+        "a",
         "Clojure some rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/not-any-char-bug-001",
         "clojure.core",
         ["not-any?"],
         ~S|(not-any? identity \a)|,
         "GAP-S130",
+        false,
         "Clojure not-any? rejects Character collections; PTC-Lisp currently treats character literals as one-character strings."
       ),
       regression_case(
@@ -4750,68 +4799,76 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S43",
         "Clojure select-keys can select numeric indexes from vectors; PTC-Lisp currently raises."
       ),
-      bug_case(
+      div_case(
         "core/char-predicate-string-bug-001",
         "clojure.core",
         ["char?"],
         ~S|(char? "a")|,
         "GAP-S44",
+        true,
         "Clojure strings are not Character values; PTC-Lisp currently treats a one-character string as char?."
       ),
-      bug_case(
+      div_case(
         "core/equality-char-string-bug-001",
         "clojure.core",
         ["="],
         ~S|(= \a "a")|,
         "GAP-S120",
+        true,
         "Clojure Character and String values are not equal; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/equality-char-string-multi-bug-001",
         "clojure.core",
         ["="],
         ~S|(= \a "a" \a)|,
         "GAP-S120",
+        true,
         "Clojure multi-arity equality still distinguishes Character and String values; PTC-Lisp currently treats them as equal."
       ),
-      bug_case(
+      div_case(
         "core/not-equality-char-string-bug-001",
         "clojure.core",
         ["not="],
         ~S|(not= \a "a")|,
         "GAP-S120",
+        false,
         "Clojure Character and String values are not equal; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/numeric-equality-char-string-bug-001",
         "clojure.core",
         ["=="],
         ~S|(== \a "a")|,
         "GAP-S120",
+        true,
         "Clojure numeric equality rejects Character/String operands; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/case-char-string-bug-001",
         "clojure.core",
         ["case"],
         ~S|(case \a "a" :string :char)|,
         "GAP-S120",
+        :string,
         "Clojure case dispatch distinguishes Character and String constants; PTC-Lisp currently treats them as equal."
       ),
-      bug_case(
+      div_case(
         "core/seqable-char-bug-001",
         "clojure.core",
         ["seqable?"],
         ~S|(seqable? \a)|,
         "GAP-S125",
+        true,
         "Clojure Character values are not seqable; PTC-Lisp currently treats character literals as one-character strings."
       ),
-      bug_case(
+      div_case(
         "core/string-predicate-char-bug-001",
         "clojure.core",
         ["string?"],
         ~S|(string? \a)|,
         "GAP-S133",
+        true,
         "Clojure Character values are not strings; PTC-Lisp currently treats character literals as one-character strings."
       ),
       bug_case(
@@ -5919,20 +5976,22 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor uses milliseconds for negative epochs too; PTC-Lisp currently treats -1000 as seconds."
       ),
-      bug_case(
+      div_case(
         "java/util-date-is-before-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isBefore"],
         ~S|(.isBefore (java.util.Date. 0) (java.util.Date. 1000))|,
         "GAP-J20",
+        true,
         "Java Date uses .before, not .isBefore; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
-      bug_case(
+      div_case(
         "java/util-date-is-after-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isAfter"],
         ~S|(.isAfter (java.util.Date. 1000) (java.util.Date. 0))|,
         "GAP-J20",
+        true,
         "Java Date uses .after, not .isAfter; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
       bug_case(
