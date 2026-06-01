@@ -31,13 +31,14 @@ the reclassified gap statuses.
   out-of-scope sub-case — *literal* dup keys (`{:a 1 :a 2}`) are also silently
   deduped, inconsistently (map literal keeps first, `hash-map` keeps last), and
   arguably should raise (rule 4).
-- **Deferred (intentionally):** the 62 char/value-model `BUG → DIV` cases keep
-  their `bug_case`s. They pass and still correctly flag "PTC diverges from
-  Clojure" — only the intentional-vs-bug nuance lags, and the gap doc is the
-  authoritative classification (already DIV). A scripted bulk conversion proved
-  fragile against the seed set, so it is not worth the corruption risk for a
-  cosmetic label change; convert opportunistically if/when those gaps are next
-  touched.
+- **Char/value-model `BUG → DIV` cases — now converted (incrementally, 3 verified
+  batches):** all 59 across the 9 gaps (S44, S116, S120, S122, S125, S126, S130,
+  S133, J20) are `div_case`s, `div_id` = the gap id, `ptc_expected` set to PTC's
+  actual return (probed via `run_case`, so each passes by construction). Verified
+  every converted case `:pass`. **Exception:** GAP-S141's 2 cases stay `bug_case`s
+  — PTC returns a var reference (`#'name`) which has no clean Elixir literal for
+  `ptc_expected`; left as-is (passes, flags the divergence). Policy counts now:
+  bug 511 · diverges 211 · unsupported 71; coverage 210/212.
 
 ## GAP-S63 (P0) → DIV-47 — flexible keyword/string key access  ·  committed
 
