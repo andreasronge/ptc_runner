@@ -218,6 +218,8 @@ All collection operations are eager. `(range)` without arguments is not supporte
 | **Priority** | n/a |
 | **Status** | by design |
 
+**Rationale:** Sandbox safety + determinism (rules 1-2). `defmacro`/`macroexpand`/`eval`/`read-string` would allow unbounded, dynamic code generation inside the sandbox; PTC is a fixed, finite evaluator.
+
 No `defmacro`, `macroexpand`, `eval`, `read-string`. LLM safety boundary.
 
 ### DIV-05: No mutable state
@@ -226,6 +228,8 @@ No `defmacro`, `macroexpand`, `eval`, `read-string`. LLM safety boundary.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
+
+**Rationale:** Sandbox safety + transactional retries. Mutable state (atoms/refs) would break the all-or-nothing memory model and deterministic replay; PTC threads state functionally instead.
 
 No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
 
@@ -331,8 +335,10 @@ keyword literals such as `:keys` destructuring.
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **open** |
 | **Source** | Manual conformance cases `div/if-let-destructuring-001`, `div/if-let-vector-destructuring-001`, `div/when-let-destructuring-001`, `div/when-let-map-destructuring-001`, `div/if-some-destructuring-001`, `div/if-some-map-destructuring-001`, `div/when-some-destructuring-001` |
+
+**Reclassified (2026-06-01 classification audit):** DIV → **BUG**. The stated rationale ("simplicity; `let` covers it") is not one of the four design rules; Clojure supports destructuring in `if-let`/`when-let`/`if-some`/`when-some`, and PTC actively *rejects* a supported finite binding form (its destructuring machinery already exists for `let`). Reconcile with sibling **GAP-S145**, already filed BUG.
 
 ```clojure
 ;; Clojure: supports destructuring
@@ -386,7 +392,7 @@ No `:pre`/`:post` condition maps in `defn`. Without exception handling, assertio
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **removed — conformant** |
 
 ```clojure
 ;; Clojure: also disallows this
@@ -605,8 +611,10 @@ not as `java.time.Instant` compatibility.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `java/util-date-is-before-method-bug-001`, `java/util-date-is-after-method-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV**. PTC models `java.util.Date`/`Instant`/`LocalDateTime` as a single DateTime value, so `.isBefore`/`.isAfter` are exposed across them by design (the temporal-value-unification value model), not a Java per-class artifact.
 
 ```clojure
 ;; Java / Clojure
@@ -629,8 +637,10 @@ Java receiver semantics unless explicitly reclassified as PTC extensions.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **unsupported** |
 | **Source** | Manual conformance case `java/instant-to-epoch-milli-unsupported-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **UNSUPPORTED**. `Instant.toEpochMilli` is simply not in PTC's implemented Java-method set (PTC raises `:unsupported_method` listing what it does support) — an unimplemented feature, not a wrong behavior on a supported one.
 
 ```clojure
 ;; Java / Clojure
@@ -2302,8 +2312,10 @@ program structure into plausible data.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `string/includes-char-hit-bug-001`, `string/includes-char-miss-bug-001`, `string/starts-with-char-hit-bug-001`, `string/starts-with-char-miss-bug-001`, `string/ends-with-char-hit-bug-001`, `string/ends-with-char-miss-bug-001`, `string/replace-char-match-string-replacement-bug-001`, `string/replace-string-match-char-replacement-bug-001`, `string/split-char-delimiter-bug-001`, `string/blank-char-bug-001`, `string/trim-newline-char-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -2995,8 +3007,10 @@ PTC-Lisp currently rejects it during analysis.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `core/def-return-var-namespace-bug-001`, `core/defonce-return-var-namespace-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV**. Unqualified var references are a direct consequence of the single flat namespace (see DIV-07: *No user-defined namespaces*).
 
 ```clojure
 ;; Clojure
@@ -3067,8 +3081,10 @@ behavior.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `core/float-infinity-bug-001`, `core/float-negative-infinity-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV**. Clojure's `float` rejection is a single-precision 32-bit range check (it rejects any value outside the 32-bit float range, not infinities specifically); PTC keeps the double value. This is the PTC numeric value model, not a defect.
 
 ```clojure
 ;; Clojure
@@ -3446,8 +3462,10 @@ Clojure-compatible readable form. `str` should not expose Erlang regex internals
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `core/pr-str-char-bug-001`, `core/pr-str-newline-char-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -3491,8 +3509,10 @@ public API.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `core/count-char-bug-001`, `core/seq-char-bug-001`, `core/first-char-bug-001`, `core/nth-char-bug-001`, `core/vec-char-bug-001`, `core/not-empty-char-bug-001`, `core/map-char-bug-001`, `core/filterv-char-bug-001`, `core/reduce-char-bug-001`, `core/frequencies-char-bug-001`, `core/partition-all-char-bug-001`, `core/cons-char-bug-001`, `core/zipmap-char-keys-bug-001`, `core/zipmap-char-vals-bug-001`, `core/dedupe-char-bug-001`, `core/drop-last-char-bug-001`, `core/drop-while-char-bug-001`, `core/take-while-char-bug-001`, `core/remove-char-bug-001`, `core/not-every-char-bug-001`, `core/rest-char-bug-001`, `core/next-char-bug-001`, `core/last-char-bug-001`, `core/second-char-bug-001`, `core/butlast-char-bug-001`, `core/nthnext-char-bug-001`, `core/nthrest-char-bug-001`, `core/split-at-char-bug-001`, `core/split-with-char-bug-001`, `core/keep-char-bug-001`, `core/keep-indexed-char-bug-001`, `core/every-char-bug-001`, `core/some-char-bug-001`, `core/not-any-char-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -4968,8 +4988,10 @@ data. PTC-Lisp already supports vector lookup through `get`, `nth`, and
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance case `core/char-predicate-string-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG -> **DIV**. PTC has no `Character` type — a character literal *is* the one-character string `"a"` (Design Philosophy rule 3 exception; see DIV-35/40/41). `char?`/`string?`/`seqable?`/`=`/`pr-str`/seq and `clojure.string` helpers simply observe that value model, so this is an intentional divergence, not a defect.
 
 ```clojure
 ;; Clojure
@@ -4987,8 +5009,10 @@ Clojure strings are not Character values, even when they contain one character.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance case `core/string-predicate-char-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -5008,8 +5032,10 @@ but that representation should not leak through type predicates.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance cases `core/equality-char-string-bug-001`, `core/equality-char-string-multi-bug-001`, `core/not-equality-char-string-bug-001`, `core/numeric-equality-char-string-bug-001`, `core/case-char-string-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -5038,8 +5064,10 @@ finite data comparisons outside string sequence traversal.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **by design (DIV)** |
 | **Source** | Manual conformance case `core/seqable-char-bug-001` |
+
+**Reclassified (2026-06-01 classification audit):** BUG → **DIV** — char≡one-char-string value model (rule 3 exception; DIV-35/40/41).
 
 ```clojure
 ;; Clojure
@@ -5520,8 +5548,10 @@ distinctions.
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **open** |
 | **Source** | Manual conformance cases `div/compare-nan-001`, `div/compare-nan-self-001` |
+
+**Reclassified (2026-06-01 classification audit):** DIV → **BUG**. No design rule justifies the divergence, so "by design" does not hold — this is a behavioral bug, not an intentional divergence.
 
 ```clojure
 ;; Clojure

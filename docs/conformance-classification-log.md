@@ -16,6 +16,37 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## Classification audit (2026-06-01) — 14 reclassifications  ·  committed (doc-only)
+
+A multi-agent audit of all 170 live classifications (125 open BUG + 45 DIV) against
+the four design rules, each flag adversarially re-verified vs Babashka. Verify
+confirmed 14 and overturned 9 auditor flags. Applied (gap doc Status/Decision only —
+no behavior change, conformance cases unchanged):
+
+- **char ≡ one-char-string value model — 7 BUG → DIV** (the dominant inconsistency;
+  same divergence already filed DIV-35/40/41): GAP-S44, S116, S120, S125, S126, S130,
+  S133. (`int`/`name`/regex char cases — GAP-S121/S129/S131 — correctly stay BUG:
+  Clojure-named fns that should do char-specific work, not value-model predicates.)
+- **Other value-model BUG → DIV (3):** GAP-J20 (temporal-value unification),
+  GAP-S141 (flat namespace, DIV-07), GAP-S122 (single-precision float range).
+- **BUG → UNSUPPORTED (1):** GAP-J18 (`Instant.toEpochMilli` unimplemented, not wrong).
+- **DIV → BUG (2):** DIV-14 (destructuring in `if-let`; rationale not rule-based;
+  cf. GAP-S145), DIV-33 (no rule justification).
+- **DIV removed (1):** DIV-17 (nested `#()` — both Clojure and PTC reject; conformant).
+- **Rationale added** to DIV-04 / DIV-05 (were "by design" with no stated rule).
+
+New status totals: open(BUG) 116 · DIV/by-design 52 · fixed 41 · UNSUPPORTED 1 · removed 1.
+
+**Deferred (NOT applied — need a decision or are out of this batch's scope):**
+- **GAP-S63 (P0)** — keyword flex-matching `(:a {"a" 1}) => 1` is filed BUG but
+  contradicts PTC's pervasive flex-key value model (`get`/`get-in`/`contains?`/
+  map-as-fn all flex-match; DIV-46 documents it). Needs a holistic BUG-vs-DIV call,
+  not a lone P0.
+- **DIV-06** (silent dedup of duplicate map-literal keys, where Clojure throws) — borderline.
+- **Conformance cases** (`manual.ex`) not converted: the 10 now-DIV gaps keep their
+  `bug_case`s and DIV-14/33 keep `div_case`s (they still pass; semantic-label cleanup TODO).
+- **4 entries unaudited** (batch-boundary drop): DIV-23, DIV-24, DIV-36, GAP-S09.
+
 ## GAP-S134 + GAP-S20(freq) — direct-map-as-collection consistency rule  ·  committed
 
 - **Classification:** BUG (both) — `distinct` BUG (too lenient), `frequencies`
