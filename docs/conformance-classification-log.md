@@ -16,6 +16,23 @@ single source of truth so notes don't get lost in conversation transcripts.
 
 ---
 
+## GAP-S63 (P0) → DIV-47 — flexible keyword/string key access  ·  committed
+
+Resolved the deferred P0. `(:a {"a" 1}) => 1` was filed a P0 BUG ("keyword lookup
+should be exact"), but flex keyword↔string key matching is **pervasive and
+intentional** — `get`/`get-in`/`contains?`/map-as-fn all do it (KeyNormalizer),
+and DIV-46's own rationale calls it the value model that "takes precedence over
+Clojure-compat." Filing only keyword-invocation as a bug was the inconsistency.
+
+- Created umbrella **DIV-47** (Flexible keyword/string key access) documenting the
+  whole key layer + the acknowledged tradeoff (can mask a data-shape mismatch).
+- Reclassified **GAP-S63** BUG → DIV (Status: by design, reclassified DIV-47).
+- Converted its `bug_case` → `div_case` and added `div/get-string-key-flex-001`,
+  `div/contains-string-key-flex-001` so DIV-47 is covered.
+- This is the value-model call; moving away from flex keys would be a repo-wide
+  decision, not a single-function fix. (Also audited the 4 boundary-missed
+  entries — DIV-23/24/36 correct DIVs, GAP-S09 correct BUG — no change.)
+
 ## Classification audit (2026-06-01) — 14 reclassifications  ·  committed (doc-only)
 
 A multi-agent audit of all 170 live classifications (125 open BUG + 45 DIV) against
