@@ -1255,49 +1255,26 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  defp do_eval_or([], %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
+  # `(or ...)` evaluates clauses left-to-right, short-circuiting on the first
+  # truthy value and otherwise returning the last evaluated value (nil when
+  # empty). An unbound memory variable is treated as nil/falsy so that
+  # `(or my-memory-var default)` is safe even on the first call.
+  defp do_eval_or(exprs, %EvalContext{} = eval_ctx), do: do_eval_or(exprs, nil, eval_ctx)
 
-  defp do_eval_or([e | rest], %EvalContext{} = eval_ctx) do
+  defp do_eval_or([], last_value, %EvalContext{} = eval_ctx), do: {:ok, last_value, eval_ctx}
+
+  defp do_eval_or([e | rest], _last_value, %EvalContext{} = eval_ctx) do
     case do_eval(e, eval_ctx) do
       {:ok, value, eval_ctx2} ->
         if truthy?(value) do
-          # Short-circuit: return truthy value
           {:ok, value, eval_ctx2}
         else
-          # Continue evaluating, tracking this value as last evaluated
-          do_eval_or_rest(rest, value, eval_ctx2)
+          do_eval_or(rest, value, eval_ctx2)
         end
 
       {:error, {:unbound_var, name}} ->
-        # Unbound memory variable treated as nil/falsy — try next clause.
-        # This makes `(or my-memory-var default)` safe even on the first call.
         Logger.debug("[ptc-lisp] or: #{name} unbound, treating as nil")
-        do_eval_or_rest(rest, nil, eval_ctx)
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp do_eval_or_rest([], last_value, %EvalContext{} = eval_ctx) do
-    {:ok, last_value, eval_ctx}
-  end
-
-  defp do_eval_or_rest([e | rest], _last_value, %EvalContext{} = eval_ctx) do
-    case do_eval(e, eval_ctx) do
-      {:ok, value, eval_ctx2} ->
-        if truthy?(value) do
-          # Short-circuit: return truthy value
-          {:ok, value, eval_ctx2}
-        else
-          # Continue evaluating, tracking this value as last evaluated
-          do_eval_or_rest(rest, value, eval_ctx2)
-        end
-
-      {:error, {:unbound_var, name}} ->
-        # Same treatment as the first clause: unbound memory var = nil/falsy.
-        Logger.debug("[ptc-lisp] or: #{name} unbound, treating as nil")
-        do_eval_or_rest(rest, nil, eval_ctx)
+        do_eval_or(rest, nil, eval_ctx)
 
       {:error, _} = err ->
         err
@@ -1564,15 +1541,7 @@ defmodule PtcRunner.Lisp.Eval do
       end
   end
 
-  defp bind_recur_values(patterns, values) do
-    Enum.zip(patterns, values)
-    |> Enum.reduce_while({:ok, %{}}, fn {p, v}, {:ok, acc} ->
-      case Patterns.match_pattern(p, v) do
-        {:ok, b} -> {:cont, {:ok, Map.merge(acc, b)}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-  end
+  defp bind_recur_values(patterns, values), do: Patterns.match_zipped(patterns, values)
 
   # ============================================================
   # REPL discovery dispatch

@@ -68,7 +68,30 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   # Builtin tuple {:normal, fun} - detect arity from the function
-  def fnil({:normal, fun} = callable, default) when is_function(fun) do
+  def fnil({:normal, fun} = callable, default) when is_function(fun),
+    do: fnil_by_arity(callable, fun, default)
+
+  # Variadic, multi-arity, and collect builtins - all use {:collect, fn} wrapper
+  def fnil({tag, _, _} = callable, default)
+      when tag in [:variadic, :variadic_nonempty, :multi_arity] do
+    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+  end
+
+  def fnil({:collect, _fun} = callable, default) do
+    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+  end
+
+  def fnil(%Builtin{binding: {:normal, fun}} = callable, default) when is_function(fun),
+    do: fnil_by_arity(callable, fun, default)
+
+  def fnil(%Builtin{} = callable, default) do
+    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+  end
+
+  # Build an arity-aware `fnil` wrapper for a `{:normal, fun}`-style builtin
+  # (bare tuple or `%Builtin{}`). Arity 1/2 get direct closures that substitute
+  # nil with `default`; higher arities fall back to a `{:collect, fn}` wrapper.
+  defp fnil_by_arity(callable, fun, default) do
     case :erlang.fun_info(fun, :arity) do
       {:arity, 1} ->
         fn
@@ -86,39 +109,6 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
         # For higher arities, use {:collect, fn} so evaluator passes args as list
         {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
     end
-  end
-
-  # Variadic, multi-arity, and collect builtins - all use {:collect, fn} wrapper
-  def fnil({tag, _, _} = callable, default)
-      when tag in [:variadic, :variadic_nonempty, :multi_arity] do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
-  end
-
-  def fnil({:collect, _fun} = callable, default) do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
-  end
-
-  def fnil(%Builtin{binding: {:normal, fun}} = callable, default) when is_function(fun) do
-    case :erlang.fun_info(fun, :arity) do
-      {:arity, 1} ->
-        fn
-          nil -> Callable.call(callable, [default])
-          arg -> Callable.call(callable, [arg])
-        end
-
-      {:arity, 2} ->
-        fn
-          nil, arg2 -> Callable.call(callable, [default, arg2])
-          arg1, arg2 -> Callable.call(callable, [arg1, arg2])
-        end
-
-      {:arity, _n} ->
-        {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
-    end
-  end
-
-  def fnil(%Builtin{} = callable, default) do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
   end
 
   # Substitute nil first argument with default, safely handling empty lists

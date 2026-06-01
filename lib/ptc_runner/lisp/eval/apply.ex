@@ -1043,14 +1043,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp bind_args({:variadic, leading, rest_pattern}, args) do
     {leading_args, rest_args} = Enum.split(args, length(leading))
 
-    leading_res =
-      Enum.zip(leading, leading_args)
-      |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
-        case Patterns.match_pattern(pattern, arg) do
-          {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
+    leading_res = Patterns.match_zipped(leading, leading_args)
 
     case leading_res do
       {:ok, leading_bindings} ->
@@ -1071,13 +1064,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp bind_args(patterns, args) when is_list(patterns) do
-    Enum.zip(patterns, args)
-    |> Enum.reduce_while({:ok, %{}}, fn {pattern, arg}, {:ok, acc} ->
-      case Patterns.match_pattern(pattern, arg) do
-        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
+    Patterns.match_zipped(patterns, args)
   end
 
   # Format arities list for human-readable error messages
