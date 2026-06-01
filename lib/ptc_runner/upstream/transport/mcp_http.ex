@@ -6,20 +6,15 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
   use GenServer
 
   alias PtcRunner.Upstream.Credentials
+  alias PtcRunner.Upstream.ResponseCap
+  alias PtcRunner.Upstream.Transport
   alias PtcRunner.Upstream.Transport.McpHttp.SseDecoder
+  alias PtcRunner.Upstream.Transport.McpResult
 
   @protocol_version "2025-06-18"
 
   @spec start_link(String.t(), map()) :: GenServer.on_start()
-  def start_link(name, config) when is_binary(name) and is_map(config) do
-    parent_trap = Process.flag(:trap_exit, true)
-
-    try do
-      GenServer.start_link(__MODULE__, {name, config})
-    after
-      Process.flag(:trap_exit, parent_trap)
-    end
-  end
+  def start_link(name, config), do: Transport.start_trapped(__MODULE__, name, config)
 
   @impl PtcRunner.Upstream.Transport
   def list_tools(%{client_pid: pid}) when is_pid(pid),
@@ -56,7 +51,7 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
            timeout,
            max_bytes
          ) do
-      {:ok, result, state} -> {:reply, normalize_call_result(result), state}
+      {:ok, result, state} -> {:reply, McpResult.normalize(result), state}
       {:error, reason, detail, state} -> {:reply, {:error, reason, detail}, state}
     end
   end
@@ -148,7 +143,7 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
         connect_options: [timeout: state.config.connect_timeout_ms],
         retry: false,
         decode_body: false,
-        into: cap_collector(max_bytes)
+        into: ResponseCap.collector(max_bytes)
       ]
 
       do_post(opts, max_bytes, request_id)
@@ -161,7 +156,7 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
         {:ok, %{status: 202, headers: normalize_headers(headers), body: nil}}
 
       {:ok, %{status: status, headers: headers} = resp} when status in 200..299 ->
-        {body, overflow?} = extract_body_state(resp)
+        {body, overflow?} = ResponseCap.extract_body(resp)
         headers = normalize_headers(headers)
 
         cond do
@@ -216,25 +211,6 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
     |> String.contains?("text/event-stream")
   end
 
-  defp normalize_call_result(%{"isError" => true} = result),
-    do: {:error, :tool_error, error_text(result)}
-
-  defp normalize_call_result(%{"structuredContent" => value}) when not is_nil(value),
-    do: {:ok, value}
-
-  defp normalize_call_result(result) do
-    case text_content(result) do
-      nil ->
-        {:ok, nil}
-
-      text ->
-        case Jason.decode(text) do
-          {:ok, value} -> {:ok, value}
-          {:error, _} -> {:ok, text}
-        end
-    end
-  end
-
   defp request_headers(state) do
     session_headers =
       if state.session_id do
@@ -265,14 +241,6 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
     end)
   end
 
-  defp text_content(%{"content" => [%{"type" => "text", "text" => text} | _]})
-       when is_binary(text), do: text
-
-  defp text_content(_), do: nil
-
-  defp error_text(result),
-    do: text_content(result) || inspect(result, limit: 20, printable_limit: 200)
-
   defp error_message(%{"message" => message}) when is_binary(message), do: message
   defp error_message(error), do: inspect(error, limit: 20, printable_limit: 200)
 
@@ -280,40 +248,5 @@ defmodule PtcRunner.Upstream.Transport.McpHttp do
     if Code.ensure_loaded?(Req),
       do: :ok,
       else: {:error, :upstream_unavailable, "req library not loaded"}
-  end
-
-  defp extract_body_state(%{private: private}) do
-    case Map.get(private, :cap_state) do
-      nil -> {"", false}
-      %{chunks: chunks, overflow: overflow?} -> {IO.iodata_to_binary(chunks), overflow?}
-    end
-  end
-
-  defp cap_collector(cap) do
-    fn {:data, data}, {req, resp} ->
-      state =
-        resp.private
-        |> Map.get(:cap_state, %{bytes: 0, chunks: [], overflow: false})
-        |> Map.put(:cap, cap)
-
-      new_size = state.bytes + byte_size(data)
-
-      cond do
-        state.overflow ->
-          {:halt, {req, resp}}
-
-        new_size > cap ->
-          {:halt, {req, put_in(resp.private[:cap_state], %{state | overflow: true})}}
-
-        true ->
-          {:cont,
-           {req,
-            put_in(resp.private[:cap_state], %{
-              state
-              | bytes: new_size,
-                chunks: [state.chunks, data]
-            })}}
-      end
-    end
   end
 end

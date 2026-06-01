@@ -5,6 +5,7 @@ defmodule PtcRunner.Upstream.OpenAPI do
 
   alias PtcRunner.Upstream.Credentials
   alias PtcRunner.Upstream.OpenAPI.Compiler
+  alias PtcRunner.Upstream.ResponseCap
 
   @impl PtcRunner.Upstream.Transport
   def list_tools(%{tools: tools}) when is_list(tools), do: {:ok, tools}
@@ -57,7 +58,7 @@ defmodule PtcRunner.Upstream.OpenAPI do
              receive_timeout: Map.get(config, :request_timeout_ms, 30_000),
              retry: false,
              decode_body: false,
-             into: cap_collector(max_bytes)
+             into: ResponseCap.collector(max_bytes)
            ) do
         {:ok, %{status: status} = resp} when status in 200..299 ->
           decode_schema_response(resp, max_bytes)
@@ -205,12 +206,12 @@ defmodule PtcRunner.Upstream.OpenAPI do
        connect_options: [timeout: Map.get(config, :connect_timeout_ms, 5_000)],
        retry: false,
        decode_body: false,
-       into: cap_collector(max_bytes)
+       into: ResponseCap.collector(max_bytes)
      ], max_bytes}
   end
 
   defp map_response(%{status: status} = resp, max_bytes) when status in 200..299 do
-    {body, overflow?} = extract_body_state(resp)
+    {body, overflow?} = ResponseCap.extract_body(resp)
 
     cond do
       overflow? ->
@@ -243,7 +244,7 @@ defmodule PtcRunner.Upstream.OpenAPI do
   defp map_response(%{status: status}, _), do: {:error, :upstream_error, "http #{status}"}
 
   defp problem_error(reason, resp) do
-    {body, _} = extract_body_state(resp)
+    {body, _} = ResponseCap.extract_body(resp)
     {:error, reason, if(body == "", do: "http #{resp.status}", else: String.slice(body, 0, 500))}
   end
 
@@ -264,46 +265,11 @@ defmodule PtcRunner.Upstream.OpenAPI do
   end
 
   defp decode_schema_response(resp, max_bytes) do
-    {body, overflow?} = extract_body_state(resp)
+    {body, overflow?} = ResponseCap.extract_body(resp)
 
     if overflow?,
       do: {:error, :response_too_large, "schema response exceeded #{max_bytes} bytes"},
       else: decode_schema(body)
-  end
-
-  defp extract_body_state(%{private: private}) do
-    case Map.get(private, :cap_state) do
-      nil -> {"", false}
-      %{chunks: chunks, overflow: overflow?} -> {IO.iodata_to_binary(chunks), overflow?}
-    end
-  end
-
-  defp cap_collector(cap) do
-    fn {:data, data}, {req, resp} ->
-      state =
-        resp.private
-        |> Map.get(:cap_state, %{bytes: 0, chunks: [], overflow: false})
-        |> Map.put(:cap, cap)
-
-      new_size = state.bytes + byte_size(data)
-
-      cond do
-        state.overflow ->
-          {:halt, {req, resp}}
-
-        new_size > cap ->
-          {:halt, {req, put_in(resp.private[:cap_state], %{state | overflow: true})}}
-
-        true ->
-          {:cont,
-           {req,
-            put_in(resp.private[:cap_state], %{
-              state
-              | bytes: new_size,
-                chunks: [state.chunks, data]
-            })}}
-      end
-    end
   end
 
   defp format_file_error(:too_large), do: "schema exceeds byte cap"
