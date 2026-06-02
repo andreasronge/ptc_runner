@@ -349,7 +349,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     - Use Clojure-style forms, not Common Lisp or JavaScript.
     - Use `(let [name value ...] body)`, never `let*` or parenthesized let bindings.
     - Use `(fn [x] body)`, never `lambda`.
-    - String helpers are unqualified: `(split-lines s)`, `(split s delimiter)`, `(trim s)`, `(count s)`, `(subs s start)`, `(join "\\n" coll)`.
+    - String helpers are unqualified: `(split-lines s)`, `(split s #",")`, `(trim s)`, `(count s)`, `(subs s start)`, `(join "\\n" coll)`; use regex delimiters for multi-char splits.
     - JSON helpers are `(json/parse-string s)` and `(json/generate-string v)`, never `json/stringify`.
     - No mutable state, filesystem access, general network access, or general Java interop inside the program.
     - Return human-readable text for the final answer.

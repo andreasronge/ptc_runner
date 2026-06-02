@@ -1514,7 +1514,7 @@ Threads through forms, short-circuiting to `nil` if any intermediate result is `
 
 ## 7. Filtering Predicates
 
-Filtering operations (`filter`, `remove`, `find`, `some`, `every?`, `not-any?`, `not-every?`, `take-while`, `drop-while`) accept any callable as a predicate. The three common shapes are:
+Filtering operations (`filter`, `remove`, `some`, `every?`, `not-any?`, `not-every?`, `take-while`, `drop-while`) accept any callable as a predicate. The three common shapes are:
 
 | Shape | Example | When to use |
 |-------|---------|-------------|
@@ -2662,7 +2662,7 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `mapv` | ✓ | ✓ | Same as `map`, returns vector |
 | `filter` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
 | `remove` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
-| `find` | ✗ | ✓ | Strings: returns first character matching predicate |
+| `find` | ✓ | ✗ | Maps: associative entry lookup. Strings: not associative and signal `:type_error` |
 | `sort` | ✗ | ✓ | Strings: returns sorted list of characters |
 | `sort-by` | ✓ | ✓ | Maps: returns sorted list of `[key value]` pairs. Strings: sorted list of characters |
 | `reverse` | ✗ | ✓ | Strings: returns reversed list of characters |
