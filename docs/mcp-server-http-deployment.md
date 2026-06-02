@@ -72,6 +72,31 @@ The v1 auth model has one static token. All token holders are the same
 owner, so an `MCP-Session-Id` is a bearer capability inside that trust
 boundary. Session ids are random and are never logged raw.
 
+### Token generation
+
+The server requires a minimum of 32 bytes but does not programmatically
+verify entropy quality. Generate tokens with a cryptographically secure
+source:
+
+```bash
+# Recommended — 32 random bytes, base64-encoded (44 characters)
+openssl rand -base64 32
+
+# Alternative
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Do not use low-entropy strings (repeated characters, dictionary words,
+predictable patterns). Entropy quality is the caller's responsibility.
+
+### Redaction
+
+The bearer token is registered with the credential redaction system at
+startup. If the raw token value accidentally appears in a log line or
+trace payload, the redactor replaces it with `[REDACTED]`. This is a
+defense-in-depth measure — the primary protection is that request logs
+and traces use hashed owner identifiers, never the raw token.
+
 ## Observability
 
 HTTP request logs are JSON lines on stderr. Each request log includes an
