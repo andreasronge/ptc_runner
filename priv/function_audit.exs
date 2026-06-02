@@ -1289,7 +1289,7 @@
       status: :supported,
       description: "Returns value at nested key path",
       notes:
-        "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure"
+        "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure"
     },
     %{
       name: "get-method",
