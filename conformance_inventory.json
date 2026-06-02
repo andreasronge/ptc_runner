@@ -46,14 +46,14 @@
     "symbol": "->",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+    "notes": "GAP-S128 fixed: nil thread targets raise as not callable"
   },
   {
     "status": "supported",
     "symbol": "->>",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+    "notes": "GAP-S128 fixed: nil thread targets raise as not callable"
   },
   {
     "status": "not_relevant",
@@ -704,14 +704,14 @@
     "symbol": "cond->",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op"
   },
   {
     "status": "supported",
     "symbol": "cond->>",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+    "notes": "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op"
   },
   {
     "status": "supported",
@@ -3035,14 +3035,14 @@
     "symbol": "some->",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+    "notes": "GAP-S128 fixed: nil thread targets raise once reached"
   },
   {
     "status": "supported",
     "symbol": "some->>",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S128: nil thread form returns nil instead of raising"
+    "notes": "GAP-S128 fixed: nil thread targets raise once reached"
   },
   {
     "status": "supported",

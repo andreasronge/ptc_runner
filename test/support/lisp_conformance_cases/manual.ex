@@ -4495,53 +4495,53 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S123",
         "Clojure cond->> treats a trailing unmatched test as a no-op; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/thread-first-nil-form-bug-001",
         "clojure.core",
         ["->"],
         "(-> 1 nil)",
         "GAP-S128",
-        "Clojure threading through nil raises; PTC-Lisp currently returns nil."
+        "Clojure threading through nil raises; this guards GAP-S128."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/thread-last-nil-form-bug-001",
         "clojure.core",
         ["->>"],
         "(->> 1 nil)",
         "GAP-S128",
-        "Clojure threading through nil raises; PTC-Lisp currently returns nil."
+        "Clojure threading through nil raises; this guards GAP-S128."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/some-thread-nil-form-bug-001",
         "clojure.core",
         ["some->"],
         "(some-> 1 nil)",
         "GAP-S128",
-        "Clojure some-> threading through a nil form raises once the value is non-nil; PTC-Lisp currently returns nil."
+        "Clojure some-> threading through a nil form raises once the value is non-nil; this guards GAP-S128."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/some-thread-last-nil-form-bug-001",
         "clojure.core",
         ["some->>"],
         "(some->> 1 nil)",
         "GAP-S128",
-        "Clojure some->> threading through a nil form raises once the value is non-nil; PTC-Lisp currently returns nil."
+        "Clojure some->> threading through a nil form raises once the value is non-nil; this guards GAP-S128."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/cond-thread-true-nil-form-bug-001",
         "clojure.core",
         ["cond->"],
         "(cond-> 1 true nil)",
         "GAP-S128",
-        "Clojure cond-> threading through a nil form raises when the condition is truthy; PTC-Lisp currently returns nil."
+        "Clojure cond-> threading through a nil form raises when the condition is truthy; this guards GAP-S128."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/cond-thread-last-true-nil-form-bug-001",
         "clojure.core",
         ["cond->>"],
         "(cond->> 1 true nil)",
         "GAP-S128",
-        "Clojure cond->> threading through a nil form raises when the condition is truthy; PTC-Lisp currently returns nil."
+        "Clojure cond->> threading through a nil form raises when the condition is truthy; this guards GAP-S128."
       ),
       bug_case(
         "core/if-let-no-else-bug-001",

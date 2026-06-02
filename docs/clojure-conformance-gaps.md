@@ -4723,7 +4723,7 @@ finite forms during analysis.
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `core/thread-first-nil-form-bug-001`, `core/thread-last-nil-form-bug-001`, `core/some-thread-nil-form-bug-001`, `core/some-thread-last-nil-form-bug-001`, `core/cond-thread-true-nil-form-bug-001`, `core/cond-thread-last-true-nil-form-bug-001` |
 
 ```clojure
@@ -4735,19 +4735,21 @@ finite forms during analysis.
 (cond-> 1 true nil)   ;=> NullPointerException
 (cond->> 1 true nil)  ;=> NullPointerException
 
-;; PTC-Lisp current behavior
-(-> 1 nil)   ;=> nil
-(->> 1 nil)  ;=> nil
-(some-> 1 nil)   ;=> nil
-(some->> 1 nil)  ;=> nil
-(cond-> 1 true nil)   ;=> nil
-(cond->> 1 true nil)  ;=> nil
+;; PTC-Lisp (fixed)
+(-> 1 nil)   ;=> not_callable
+(->> 1 nil)  ;=> not_callable
+(some-> 1 nil)   ;=> not_callable
+(some->> 1 nil)  ;=> not_callable
+(cond-> 1 true nil)   ;=> not_callable
+(cond->> 1 true nil)  ;=> not_callable
 ```
 
-**Decision:** BUG. These are supported Clojure-named threading macros. A nil
-thread target is invalid program structure once the threaded value reaches that
-form; returning nil silently can mask a malformed pipeline as a valid absent
-value.
+**Decision:** BUG, fixed. These are supported Clojure-named threading macros.
+A nil thread target is invalid program structure once the threaded value
+reaches that form. PTC-Lisp now treats the rewritten call target as not
+callable instead of silently returning nil, while `some->`/`some->>` still
+short-circuit when the threaded value itself is nil and `cond->`/`cond->>` still
+skip forms whose tests are falsey.
 
 ### GAP-S115: `if-let`/`if-some` no-else arity is unsupported
 
