@@ -364,7 +364,17 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   - `(.substring s start end)` returns graphemes in `[start, end)`.
 
   Indices are grapheme-based (matches `.indexOf` / `.length` semantics).
+
+  `.substring` is a Java-shaped method, so finite numeric indexes are coerced to
+  the Java `int` parameter by truncating toward zero — `(.substring "abcd" 1.0)`
+  and `(.substring "abcd" 1.9)` both behave like `1`. Non-finite floats (NaN,
+  Infinity) are PTC-Lisp signal atoms rather than `is_float` values, so they fall
+  through to the type-error clauses below.
   """
+  def dot_substring(s, start) when is_binary(s) and is_float(start) do
+    dot_substring(s, trunc(start))
+  end
+
   def dot_substring(s, start) when is_binary(s) and is_integer(start) do
     len = String.length(s)
 
@@ -381,6 +391,12 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
 
   def dot_substring(_s, start) do
     raise ".substring: expected integer start, got #{type_name(start)}"
+  end
+
+  def dot_substring(s, start, stop)
+      when is_binary(s) and (is_float(start) or is_float(stop)) and
+             is_number(start) and is_number(stop) do
+    dot_substring(s, trunc(start), trunc(stop))
   end
 
   def dot_substring(s, start, stop)
@@ -406,7 +422,7 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
     raise ".substring: expected string, got #{type_name(s)}"
   end
 
-  def dot_substring(_s, start, _stop) when not is_integer(start) do
+  def dot_substring(_s, start, _stop) when not is_number(start) do
     raise ".substring: expected integer start, got #{type_name(start)}"
   end
 
