@@ -69,13 +69,13 @@ defmodule PtcRunner.Lisp.ConformanceRunnerTest do
   test "runner passes a known bug only while the mismatch reproduces" do
     case_data = %{
       id: "runner/bug-001",
-      namespace: "clojure.core",
-      vars: ["find"],
-      form: "(find {:a 1} :a)",
-      policy: {:bug, "GAP-S09"}
+      namespace: "clojure.string",
+      vars: ["lower-case"],
+      form: "(clojure.string/lower-case 12)",
+      policy: {:bug, "GAP-S139"}
     }
 
-    assert {:pass, %{classification: :bug, gap_id: "GAP-S09"}} =
+    assert {:pass, %{classification: :bug, gap_id: "GAP-S139"}} =
              LispConformanceRunner.run_case(case_data)
   end
 

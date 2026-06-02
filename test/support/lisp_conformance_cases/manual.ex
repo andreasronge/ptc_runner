@@ -79,77 +79,78 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
       c("core/seq-004", "clojure.core", ["seq"], "(seq [])", [:edge, :collection]),
       c("core/map-001", "clojure.core", ["get"], "(get {:a 1} :a)", [:smoke]),
       c("core/map-002", "clojure.core", ["get"], "(get {:a 1} :b :missing)", [:edge]),
-      bug_case(
-        "core/find-bug-001",
+      regression_case(
+        "core/find-001",
         "clojure.core",
         ["find"],
         "(find {:a 1} :a)",
-        "GAP-S09",
-        "PTC-Lisp implements find as predicate-first search, but Clojure find is map-entry lookup."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-missing-key-bug-001",
+      regression_case(
+        "core/find-missing-key-001",
         "clojure.core",
         ["find"],
         "(find {:a 1} :b)",
-        "GAP-S09",
-        "Clojure find returns nil for missing map keys; PTC-Lisp currently treats the key as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-present-nil-value-bug-001",
+      regression_case(
+        "core/find-present-nil-value-001",
         "clojure.core",
         ["find"],
         "(find {:a nil} :a)",
-        "GAP-S09",
-        "Clojure find returns a map entry for present nil values; PTC-Lisp currently treats the key as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-nil-bug-001",
+      regression_case(
+        "core/find-nil-001",
         "clojure.core",
         ["find"],
         "(find nil :a)",
-        "GAP-S09",
-        "Clojure find returns nil for a nil map; PTC-Lisp currently treats the key as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-vector-index-bug-001",
+      regression_case(
+        "core/find-vector-index-001",
         "clojure.core",
         ["find"],
         "(find [10 20] 1)",
-        "GAP-S09",
-        "Clojure find supports associative vectors by index; PTC-Lisp currently treats the index as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-vector-present-nil-bug-001",
+      regression_case(
+        "core/find-vector-present-nil-001",
         "clojure.core",
         ["find"],
         "(find [nil :b] 0)",
-        "GAP-S09",
-        "Clojure find returns a vector entry even when the indexed value is nil; PTC-Lisp currently treats the index as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-vector-out-of-range-bug-001",
+      regression_case(
+        "core/find-vector-out-of-range-001",
         "clojure.core",
         ["find"],
         "(find [10 20] 2)",
-        "GAP-S09",
-        "Clojure find returns nil for out-of-range vector indexes; PTC-Lisp currently treats the index as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-vector-negative-index-bug-001",
+      regression_case(
+        "core/find-vector-negative-index-001",
         "clojure.core",
         ["find"],
         "(find [nil :b] -1)",
-        "GAP-S09",
-        "Clojure find returns nil for negative vector indexes; PTC-Lisp currently treats the index as a collection argument."
+        ["GAP-S09"],
+        [:edge]
       ),
-      bug_case(
-        "core/find-set-nil-bug-001",
+      div_case(
+        "core/find-set-nil-001",
         "clojure.core",
         ["find"],
         ~S|(find #{nil} nil)|,
-        "GAP-S09",
-        "Clojure find raises for set inputs; PTC-Lisp currently applies predicate-search semantics and returns nil."
+        "DIV-48",
+        {:error, :type_error},
+        "Clojure raises (\"find not supported on type ... PersistentHashSet\") for set inputs; PTC-Lisp returns a recoverable :type_error signal."
       ),
       c("core/map-003", "clojure.core", ["assoc"], "(assoc {:a 1} :b 2)", [:smoke]),
       c("core/map-004", "clojure.core", ["update"], "(update {:a 1} :a inc)", [:smoke]),

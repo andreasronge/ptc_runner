@@ -7,8 +7,10 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
   delegating predicate/collection normalization to `Collection.Normalize`.
   """
 
+  alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
+  alias PtcRunner.Lisp.Runtime.FlexAccess
 
   # ── filter ──────────────────────────────────────────────────────────
 
@@ -42,21 +44,35 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
 
   # ── find ────────────────────────────────────────────────────────────
 
-  # Keyword on string: always nil
-  def find(pred, coll) when is_atom(pred) and is_binary(coll), do: nil
-  def find(%LispKeyword{}, coll) when is_binary(coll), do: nil
+  # Clojure's `(find coll key)` is associative-entry lookup, NOT a
+  # predicate search: it returns the `[key value]` entry when `key` is
+  # present, or nil when absent. Maps look up by key; vectors are
+  # associative by non-negative integer index. `flex_fetch` distinguishes a
+  # present nil value from a missing key, so `(find {:a nil} :a)` yields
+  # `[:a nil]` while `(find {:a 1} :b)` yields nil.
+  def find(nil, _key), do: nil
 
-  def find(pred, coll) when is_map(coll) and not is_struct(coll) do
-    pred_fn = Normalize.normalize_pred(pred, :truthy)
-
-    case Enum.find(coll, fn {k, v} -> pred_fn.([k, v]) end) do
-      {k, v} -> [k, v]
-      nil -> nil
+  def find(coll, key) when is_map(coll) and not is_struct(coll) do
+    case FlexAccess.flex_fetch(coll, key) do
+      {:ok, value} -> [key, value]
+      :error -> nil
     end
   end
 
-  def find(pred, coll) do
-    Enum.find(Normalize.to_seq(coll), Normalize.normalize_pred(pred, :truthy))
+  def find(coll, key) when is_list(coll) do
+    case FlexAccess.flex_fetch(coll, key) do
+      {:ok, value} -> [key, value]
+      :error -> nil
+    end
+  end
+
+  # Sets and other non-associative collections (strings, etc.) raise in
+  # Clojure ("find not supported on type ..."). Under the PTC value-model
+  # policy this surfaces as a recoverable :type_error signal instead of an
+  # uncatchable crash (DIV-48).
+  def find(coll, _key) do
+    raise "type_error: find: #{Helpers.describe_type(coll)} is not associative; " <>
+            "find supports maps and vectors only"
   end
 
   # ── some ────────────────────────────────────────────────────────────

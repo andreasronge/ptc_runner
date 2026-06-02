@@ -1153,6 +1153,31 @@ keyword lookup can return a string-keyed value, which can mask a data-shape
 mismatch at a map boundary — guard explicitly when exact-key semantics matter.
 This value model takes precedence over Clojure-compat where they conflict.
 
+### DIV-48: `find` on a non-associative collection returns a `:type_error` signal
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance case `core/find-set-nil-001` |
+
+```clojure
+;; Clojure (sets are not associative)
+(find #{nil} nil) ;=> IllegalArgumentException: find not supported on type ... PersistentHashSet
+
+;; PTC-Lisp
+(find #{nil} nil) ;=> :type_error signal
+```
+
+**Rationale:** Clojure's `find` is associative-entry lookup; it supports maps
+and vectors but **raises** on sets, strings, and other non-associative
+collections. Under the PTC value-model policy, a Clojure-named function that
+would raise on finite in-domain data instead returns a recoverable
+`:type_error` signal so the sandbox cannot be crashed by an uncatchable
+exception. Map and vector `find` match Clojure exactly (see
+[GAP-S09](#gap-s09-find-uses-predicate-search-semantics-instead-of-clojure-map-lookup));
+only the raising case diverges.
+
 ### GAP-J13: Java `Math/pow` special double results differ
 
 | Field | Value |
@@ -1490,8 +1515,8 @@ Clojure throws on float arguments. PTC-Lisp accepts whole-number floats (returns
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/find-bug-001`, `core/find-missing-key-bug-001`, `core/find-present-nil-value-bug-001`, `core/find-nil-bug-001`, `core/find-vector-index-bug-001`, `core/find-vector-present-nil-bug-001`, `core/find-vector-out-of-range-bug-001`, `core/find-vector-negative-index-bug-001`, `core/find-set-nil-bug-001` |
+| **Status** | **fixed** (set inputs reclassified as DIV-48) |
+| **Source** | Manual conformance cases `core/find-001`, `core/find-missing-key-001`, `core/find-present-nil-value-001`, `core/find-nil-001`, `core/find-vector-index-001`, `core/find-vector-present-nil-001`, `core/find-vector-out-of-range-001`, `core/find-vector-negative-index-001`, `core/find-set-nil-001` |
 
 ```clojure
 ;; Clojure
@@ -1505,26 +1530,36 @@ Clojure throws on float arguments. PTC-Lisp accepts whole-number floats (returns
 (find [nil :b] -1) ;=> nil
 (find #{nil} nil)  ;=> IllegalArgumentException
 
-;; PTC-Lisp current behavior
-(find {:a 1} :a)   ;=> type_error
-(find {:a 1} :b)   ;=> type_error
-(find {:a nil} :a) ;=> type_error
-(find nil :a)      ;=> type_error
-(find [10 20] 1)   ;=> type_error
-(find [nil :b] 0)  ;=> type_error
-(find [10 20] 2)   ;=> type_error
-(find [nil :b] -1) ;=> type_error
-(find #{nil} nil)  ;=> nil
-(find :a {:a 1})   ;=> nil
+;; PTC-Lisp (fixed)
+(find {:a 1} :a)   ;=> [:a 1]
+(find {:a 1} :b)   ;=> nil
+(find {:a nil} :a) ;=> [:a nil]
+(find nil :a)      ;=> nil
+(find [10 20] 1)   ;=> [1 20]
+(find [nil :b] 0)  ;=> [0 nil]
+(find [10 20] 2)   ;=> nil
+(find [nil :b] -1) ;=> nil
+(find #{nil} nil)  ;=> :type_error signal (DIV-48)
 ```
 
-The PTC-Lisp function registry marks `find` as `clojure.core/find`, but the
-implementation signature is `(find pred coll)` and behaves like a predicate
-search. Clojure's `find` is `(find map key)` and returns a map/vector entry
-or `nil`.
+The PTC-Lisp function registry marks `find` as `clojure.core/find`, but the old
+implementation signature was `(find pred coll)` and behaved like a predicate
+search — so the runtime's `(find coll key)` call order made it treat the key as
+a collection and raise a `type_error`. Clojure's `find` is `(find coll key)`
+associative-entry lookup that returns a `[key value]` entry or `nil`.
 
-**Decision:** BUG. This is a Clojure-named function on normal finite data, and
-the spec does not justify a divergence.
+**Decision:** BUG for maps/vectors (Clojure-named function on normal finite
+data). Set inputs, where Clojure raises, are reclassified as DIV-48 under the
+PTC value-model policy (recoverable signal instead of an uncatchable crash).
+
+**Fix:** Rewrote `find/2` in
+`lib/ptc_runner/lisp/runtime/collection/select.ex` to do associative lookup via
+`FlexAccess.flex_fetch`. Maps look up by key and vectors by non-negative
+integer index; `flex_fetch` distinguishes a present `nil` value (`(find {:a
+nil} :a)` ⇒ `[:a nil]`) from a missing key (`⇒ nil`). Out-of-range and negative
+vector indices, and a `nil` collection, return `nil`. Non-associative
+collections (sets, strings) raise a recoverable `type_error` (DIV-48) instead
+of a crash.
 
 ### GAP-S10: `nth` with a negative index reads from the end
 

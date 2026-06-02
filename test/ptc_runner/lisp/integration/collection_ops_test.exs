@@ -259,15 +259,6 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert hd(result).active == false
     end
 
-    test "find with keyword as predicate" do
-      items = [%{special: false}, %{special: true}]
-
-      {:ok, %Step{return: result}} =
-        Lisp.run("(find :special data/items)", context: %{items: items})
-
-      assert result == %{special: true}
-    end
-
     test "take-while with keyword as predicate" do
       items = [%{active: true}, %{active: true}, %{active: false}, %{active: true}]
 
@@ -1295,48 +1286,50 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
     end
   end
 
-  describe "find with non-list collections" do
-    test "keyword predicate on set collection" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a #{{:b 2} {:a 1}})|)
-      assert result == %{"a" => 1}
-    end
-
-    test "function predicate on set collection" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find even? #{1 2 3})|)
-      assert result == 2
-    end
-
-    test "MapSet predicate on set collection" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{2 4} #{1 2 3})|)
-      assert result == 2
-    end
-
-    test "MapSet predicate on string" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{"b" "c"} "abc")|)
-      assert result == "b"
-    end
-
-    test "function predicate on map collection" do
-      {:ok, %Step{return: result}} =
-        Lisp.run(~S|(find (fn [[k v]] (> v 1)) {:a 1 :b 2})|)
-
+  describe "find is associative-entry lookup (Clojure (find coll key))" do
+    test "map: present key returns [key value] entry" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find {:a 1 :b 2} :b)|)
       assert result == ["b", 2]
     end
 
-    test "keyword predicate on map collection" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a {:a 1 :b 2})|)
-      # keyword on [k,v] pairs returns nil, so find returns nil
+    test "map: missing key returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find {:a 1 :b 2} :z)|)
       assert result == nil
     end
 
-    test "MapSet predicate on map collection" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find #{[:a 1]} {:a 1 :b 2})|)
-      assert result == ["a", 1]
+    test "map: present nil value returns an entry, not nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find {:a nil} :a)|)
+      assert result == ["a", nil]
     end
 
-    test "keyword predicate on string returns nil" do
-      {:ok, %Step{return: result}} = Lisp.run(~S|(find :a "abc")|)
+    test "nil collection returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find nil :a)|)
       assert result == nil
+    end
+
+    test "vector: in-range index returns [index value] entry" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find [10 20 30] 2)|)
+      assert result == [2, 30]
+    end
+
+    test "vector: out-of-range index returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find [10 20] 5)|)
+      assert result == nil
+    end
+
+    test "vector: negative index returns nil" do
+      {:ok, %Step{return: result}} = Lisp.run(~S|(find [10 20] -1)|)
+      assert result == nil
+    end
+
+    # DIV-48: Clojure raises on non-associative collections (sets, strings);
+    # PTC-Lisp surfaces a recoverable :type_error signal instead.
+    test "set input surfaces a clean type_error (DIV-48)" do
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(~S|(find #{1 2 3} 1)|)
+    end
+
+    test "string input surfaces a clean type_error (DIV-48)" do
+      assert {:error, %Step{fail: %{reason: :type_error}}} = Lisp.run(~S|(find "abc" 0)|)
     end
   end
 

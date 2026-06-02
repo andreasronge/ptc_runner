@@ -1118,7 +1118,7 @@
       status: :supported,
       description: "Returns map entry for key or nil",
       notes:
-        "BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup"
+        "DIV-48: non-associative collections (sets, strings) return a recoverable :type_error signal where Clojure raises"
     },
     %{
       name: "find-keyword",
