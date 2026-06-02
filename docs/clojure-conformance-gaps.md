@@ -2398,25 +2398,46 @@ not implemented.
 replacement. Clojure follows Java replacement-string group reference semantics
 for regex matches, including rejecting malformed dollar references.
 
-### GAP-S74: `clojure.string/split` accepts plain string delimiters
+### ~~GAP-S74~~: Reclassified as DIV-50
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `string/split-string-delimiter-bug-001` |
+| **Status** | **by design (DIV)** |
+| **Source** | Manual conformance case `string/split-string-delimiter-001` |
+
+Reclassified (2026-06-02) as **DIV-50** — see below. Clojure raises on a
+plain-string delimiter, so under the value-model policy PTC-Lisp returns a
+recoverable `:type_error` signal rather than raising.
+
+### DIV-50: `clojure.string/split` signals on multi-character plain-string delimiters
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | **by design (DIV)** |
+| **Source** | Manual conformance case `string/split-string-delimiter-001` |
 
 ```clojure
 ;; Clojure
-(clojure.string/split "a.b.c" ".")   ;=> ClassCastException
+(clojure.string/split "a..b..c" "..")   ;=> ClassCastException
 
 ;; PTC-Lisp current behavior
-(clojure.string/split "a.b.c" ".")   ;=> ["a" "b" "c"]
+(clojure.string/split "a..b..c" "..")   ;=> :type_error signal value
 ```
 
-**Decision:** BUG. The supported Clojure-named `split` function requires a
-regex pattern delimiter. Accepting a plain string silently changes invalid
-program structure into plausible data.
+**Decision:** DIV. The supported Clojure-named `split` function requires a
+regex `Pattern` delimiter and raises a `ClassCastException` for any plain
+string. Under the char≡one-character-string value model (DIV-47 / GAP-S116) a
+single-character delimiter is indistinguishable from a char literal at runtime,
+so it stays a working split. A plain string of **two or more** characters
+cannot be a char literal, so it is an invalid program Clojure rejects.
+
+**Fix:** Because Clojure raises on finite in-domain data, PTC-Lisp does not
+silently split on a multi-character plain string — there is no `try`/`catch`,
+so it surfaces a recoverable `:type_error` signal value instead. Regex
+delimiters (single- or multi-character), the empty-string delimiter (graphemes),
+and single-character delimiters (char-equivalent) continue to work unchanged.
 
 ### GAP-S116: `clojure.string` helpers accept character arguments Clojure rejects
 

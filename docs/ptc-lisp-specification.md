@@ -2302,7 +2302,7 @@ The `seq` function converts a collection to a sequence:
 | `pr-str` | `(pr-str ...)` | Readable string representation (strings quoted, nil as "nil", space-separated) |
 | `subs` | `(subs s start)` | Substring from index to end |
 | `subs` | `(subs s start end)` | Substring from start to end |
-| `split` | `(split s separator)` | Split string by separator |
+| `split` | `(split s re-or-char)` | Split string on a regex; single-char string ok, multi-char string signals `:type_error` |
 | `split-lines` | `(split-lines s)` | Split string into lines (\n or \r\n) |
 | `join` | `(join separator coll)` | Join collection elements with separator |
 | `join` | `(join coll)` | Join collection elements (no separator) |
@@ -2350,9 +2350,10 @@ The `seq` function converts a collection to a sequence:
 - `(pr-str "hello")` → `"\"hello\""` (string gets quoted)
 - `(pr-str nil)` → `"nil"` (nil as readable literal)
 - `(pr-str 1 "a")` → `"1 \"a\""` (space-separated, strings quoted)
-- `(split "a,b,c" ",")` → `["a" "b" "c"]` (split by separator)
+- `(split "a,b,c" ",")` → `["a" "b" "c"]` (single-char string delimiter)
 - `(split "hello" "")` → `["h" "e" "l" "l" "o"]` (split into characters)
 - `(split "a,,b" ",")` → `["a" "" "b"]` (preserves empty elements)
+- `(split "a--b--c" #"--")` → `["a" "b" "c"]` (multi-char delimiters need a regex)
 - `(split-lines "a\nb\r\nc")` → `["a" "b" "c"]` (split by line endings)
 - `(split-lines "a\n\n\n")` → `["a"]` (discards trailing empty lines)
 - `(join ", " ["a" "b" "c"])` → `"a, b, c"` (join with separator)
@@ -2796,7 +2797,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 (extract-int "x=(\\d+) y=(\\d+)" "x=10 y=20" 2 0) ; => 20 (group 2 with default)
 ```
 
-**Note:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values. For simple delimiter splitting, prefer `(split s "delimiter")` or `(split-lines s)` for newlines.
+**Note:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values. `split` follows Clojure: the delimiter is a regex. A single-character string delimiter is accepted (chars are one-character strings), but a multi-character string delimiter signals a `:type_error` — use a regex literal for those, e.g. `(split s #"---\n")`. For splitting on newlines, prefer `(split-lines s)`.
 
 **Safety Constraints:**
 - **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.
