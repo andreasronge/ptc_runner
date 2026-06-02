@@ -54,9 +54,10 @@ jobs:
   perf:       { ... }                      # §5F
   llm-smoke:  { continue-on-error: true,   # §5D — never blocks
                 if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_llm }} }
+  stats:      { continue-on-error: true }   # §5G — code/test stats, never blocks
   release-report:
     if: always()
-    needs: [test, soak, integrity, docs, perf, llm-smoke]
+    needs: [test, soak, integrity, docs, perf, llm-smoke, stats]
     continue-on-error: true                # §5E — reporting only
   publish:
     needs: [test, soak, integrity, docs, perf] # gates; NOT llm-smoke
@@ -96,6 +97,7 @@ env:
 | Release integrity (version/changelog/package/schema/spec) | **yes** | 1 |
 | Documentation (ExDoc warnings, relative links, gen-doc drift) | **yes** | 1 |
 | Real-LLM smoke | **NO — never fails** (stats only) | 1 |
+| Code & test stats | **NO — never fails** (informational) | 1 |
 | Release report | **NO — never fails** (summary only) | 1 |
 | External-URL links (docs) | **no** (informational) | 1 |
 | Performance (deterministic eval reductions) | **yes** | 2 |
@@ -241,6 +243,27 @@ Also: enabling `reduction_time` in `bench/lisp_throughput.exs` only helps the in
 scenarios; wall-clock stays informational (hosted-runner noise ±20–50%). Wall-clock
 trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope for a gate.
 
+### 5G. Code & test stats — `stats` job (informational, never fails)
+
+Non-gating snapshot of repository size, growth, and a small health radar,
+appended to the release report. Implemented by `scripts/release-stats.sh`
+(locally runnable: `scripts/release-stats.sh [out.md]`).
+
+- **Checkout:** `fetch-depth: 0` — full history + tags are required for the
+  growth section (diffs against the previous release tag).
+- **No Elixir setup:** pure `git`/`awk`; the job is seconds-cheap.
+- **Baseline selection:** if a `v*` tag points at HEAD (a real release), the
+  baseline is the tag *before* it; otherwise (manual dispatch on `main`) it is
+  the latest `v*` tag. Degrades to "growth skipped" when no tag exists.
+- **Reported:** lib/test/mcp_server LOC, file & module counts, test-case count,
+  **test:code ratio**; growth deltas since the previous tag (lib/test LOC, test
+  cases, modules, commits, overall `--shortstat`); health (`@spec` coverage,
+  TODO/FIXME count, largest lib file, dependency count).
+- **Output:** `## stats` fragment to `tmp/release-report/stats.md` (auto-merged
+  by `release-report` via the `release-fragment-*` pattern) and to
+  `$GITHUB_STEP_SUMMARY`. Portability: uses `[[:space:]]` (not `\s`) so counts
+  match under `git grep -E` and BSD/GNU `awk`.
+
 ## 6. Failure semantics (summary)
 
 - **Red** iff: `mix test` fails, a soak assertion fails, `mix bench.check` detects
@@ -255,8 +278,10 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
 ## 7. New / changed files (implementation checklist)
 
 - `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
-  `integrity`, `docs`, `llm-smoke`, `release-report`, `publish` (`needs` gates only;
-  publish guarded by `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
+  `integrity`, `docs`, `perf`, `llm-smoke`, `stats`, `release-report`, `publish`
+  (`needs` gates only; publish guarded by
+  `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
+- `scripts/release-stats.sh` (new) — emits the `## stats` report fragment (§5G).
 - `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
   optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
 - `.lycheeignore` (new) — volatile external hosts.
