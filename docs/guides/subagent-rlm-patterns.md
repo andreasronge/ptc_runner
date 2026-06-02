@@ -212,8 +212,8 @@ For dynamic chunking where the LLM decides how to split:
 #### By Delimiter
 
 ```clojure
-(let [sections (split data/corpus "---\n")  ; Split on delimiter
-      chunks (partition 5 sections)]         ; Group 5 sections per chunk
+(let [sections (split data/corpus #"---\n")  ; Split on a regex delimiter
+      chunks (partition 5 sections)]          ; Group 5 sections per chunk
   ...)
 ```
 

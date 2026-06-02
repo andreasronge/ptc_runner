@@ -3743,19 +3743,22 @@
     },
     %{
       name: "split",
-      description: "Split string by separator",
+      description:
+        "Split string on a regex delimiter; a single-character string delimiter is accepted, a multi-character string delimiter signals :type_error (use a regex literal like #\"--\")",
       binding: :normal,
       category: :string,
       dispatch: :env,
-      signatures: ["(split s separator)"],
+      signatures: ["(split s re-or-char)"],
       since: nil,
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
+      notes:
+        "Clojure requires a regex Pattern delimiter. A single-character string is accepted (chars are one-character strings); a multi-character string delimiter is rejected with a :type_error signal — use a regex, e.g. (split s #\"---\\n\").",
       see_also: [],
       clojure_var: "split",
-      divergences: nil
+      divergences:
+        "DIV-50: Clojure requires a regex Pattern delimiter and raises on any plain string; PTC-Lisp accepts a single-character string (char≡one-character-string) but signals a recoverable :type_error for a multi-character string delimiter instead of silently splitting."
     },
     %{
       name: "split-at",
