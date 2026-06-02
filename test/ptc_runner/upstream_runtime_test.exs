@@ -312,6 +312,46 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "run_lisp preserves the HTTP error reason for a non-2xx OpenAPI response with an oversized body" do
+    # A 422 whose error body exceeds the byte cap must still surface the real
+    # status-derived reason (:tool_error), NOT collapse to :response_too_large.
+    # The byte cap only fails 2xx success payloads loudly; for errors the actual
+    # failure reason is the actionable signal and must not be masked. Memory is
+    # still bounded by the streaming cap regardless of status.
+    big_error = %{"error" => String.duplicate("x", 5_000)}
+    {:ok, server} = start_http_fixture(big_error, status: "422 Unprocessable Entity")
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config:
+          config(
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            operations: ["list_traces"]
+          )
+      )
+
+    program =
+      ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme"}})|
+
+    try do
+      {{:ok, step}, records} =
+        Runtime.run_lisp_with_records(runtime, program, max_response_bytes: 64)
+
+      assert step.return.ok == false
+      assert step.return.reason == :tool_error
+
+      assert [%{"status" => "error", "reason" => "tool_error"}] = records
+
+      # Prove the request actually reached the upstream, so :tool_error comes
+      # from mapping the 422 response, not from a pre-request failure.
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) =~ "GET /api/v1/traces?"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "run_lisp apropos surfaces upstream tools from the live catalog, ranked above local builtins" do
     # apropos is how the LLM finds upstream tools; a regression leaves them
     # callable but invisible. The upstream tool must out-rank local builtins for
@@ -1001,9 +1041,10 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     ])
   end
 
-  defp start_http_fixture(response_body) do
+  defp start_http_fixture(response_body, opts \\ []) do
     parent = self()
     response_json = Jason.encode!(response_body)
+    status_line = Keyword.get(opts, :status, "200 OK")
 
     {:ok, listen_socket} =
       :gen_tcp.listen(0, [
@@ -1023,7 +1064,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
         send(parent, {:http_fixture_request, request})
 
         response = [
-          "HTTP/1.1 200 OK\r\n",
+          "HTTP/1.1 #{status_line}\r\n",
           "content-type: application/json\r\n",
           "content-length: #{byte_size(response_json)}\r\n",
           "connection: close\r\n",
