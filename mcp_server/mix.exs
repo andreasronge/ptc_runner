@@ -15,6 +15,18 @@ defmodule PtcRunnerMcp.MixProject do
       releases: releases(),
       description: "MCP server exposing PtcRunner's PTC-Lisp sandbox over stdio JSON-RPC.",
       source_url: @source_url,
+      test_coverage: [
+        summary: [threshold: 0],
+        # Exclude non-production code so the coverage number reflects the
+        # server's own logic: CLI Mix tasks and test-only helpers. Production
+        # modules are never ignored, even at 0%, so real gaps stay visible.
+        ignore_modules: [
+          ~r/^Mix\.Tasks\./,
+          ~r/^PtcRunnerMcp\.TestSupport\./,
+          ~r/^PtcRunnerMcp\.Test\./,
+          PtcRunnerMcp.McpTestHelpers
+        ]
+      ],
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/project.plt"},
