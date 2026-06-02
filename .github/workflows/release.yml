@@ -306,6 +306,45 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  perf:
+    runs-on: ubuntu-latest
+    name: Performance gate
+    timeout-minutes: 10
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Check eval performance baseline
+        id: bench
+        run: mix bench.check
+
+      - name: Write report fragment
+        if: always()
+        run: |
+          mkdir -p tmp/release-report
+          {
+            echo "## perf"
+            echo ""
+            echo "| Command | Outcome |"
+            echo "|---|---|"
+            echo "| \`MIX_ENV=test mix bench.check\` | ${{ steps.bench.outcome }} |"
+          } > tmp/release-report/perf.md
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-perf
+          path: tmp/release-report/perf.md
+          if-no-files-found: warn
+          retention-days: 30
+
   llm-smoke:
     runs-on: ubuntu-latest
     name: Real-LLM smoke
@@ -406,7 +445,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Release report
     if: always()
-    needs: [test, soak, integrity, docs, llm-smoke]
+    needs: [test, soak, integrity, docs, perf, llm-smoke]
     continue-on-error: true
 
     steps:
@@ -430,18 +469,20 @@ jobs:
           if [ "${{ needs.test.result }}" = "success" ] &&
              [ "${{ needs.soak.result }}" = "success" ] &&
              [ "${{ needs.integrity.result }}" = "success" ] &&
-             [ "${{ needs.docs.result }}" = "success" ]; then
+             [ "${{ needs.docs.result }}" = "success" ] &&
+             [ "${{ needs.perf.result }}" = "success" ]; then
             VERDICT="READY TO PUBLISH"
             FAILED="none"
           else
             VERDICT="BLOCKED"
             FAILED=""
-            for job in test soak integrity docs; do
+            for job in test soak integrity docs perf; do
               case "$job" in
                 test) result="${{ needs.test.result }}" ;;
                 soak) result="${{ needs.soak.result }}" ;;
                 integrity) result="${{ needs.integrity.result }}" ;;
                 docs) result="${{ needs.docs.result }}" ;;
+                perf) result="${{ needs.perf.result }}" ;;
               esac
               if [ "$result" != "success" ]; then
                 FAILED="${FAILED}${FAILED:+, }$job ($result)"
@@ -476,6 +517,7 @@ jobs:
             echo "| soak | ${{ needs.soak.result }} | yes |"
             echo "| integrity | ${{ needs.integrity.result }} | yes |"
             echo "| docs | ${{ needs.docs.result }} | yes |"
+            echo "| perf | ${{ needs.perf.result }} | yes |"
             echo "| llm-smoke | ${{ needs['llm-smoke'].result }} | no |"
             echo ""
             echo "## Artifacts"
@@ -506,7 +548,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     name: Publish to Hex.pm
-    needs: [test, soak, integrity, docs]
+    needs: [test, soak, integrity, docs, perf]
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
 
     steps:

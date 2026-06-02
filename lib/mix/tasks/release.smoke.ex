@@ -71,6 +71,7 @@ defmodule Mix.Tasks.Release.Smoke do
     end)
 
     run!("mix", ["ptc.validate_spec"])
+    run!("mix", ["bench.check"])
     run!("mix", ["docs", "--warnings-as-errors"], env: [{"MIX_ENV", "dev"}])
 
     assert_no_new_diff!(["docs/", "conformance_inventory.json"], fn ->

@@ -11,6 +11,7 @@ many concurrent multi-turn sessions).
 
 | Script | What it measures | Tool |
 |---|---|---|
+| `mix bench.check` | Deterministic release gate for sandbox child eval reductions vs committed baseline | custom Mix task |
 | `lisp_throughput.exs` | Per-program latency: parse / analyze / full run; per-archetype; latency under `parallel:` load | Benchee |
 | `lisp_profile.exs` | Function-level call_time + call_count, aggregated across the per-run sandbox processes | OTP `:tprof` |
 | `lisp_concurrency.exs` | Aggregate throughput vs concurrency; scheduler microstate; GC pressure | `:msacc` + `:erlang.statistics` |
@@ -18,6 +19,7 @@ many concurrent multi-turn sessions).
 ## Running
 
 ```bash
+mix bench.check
 mix run bench/lisp_throughput.exs
 mix run bench/lisp_profile.exs              # PROFILE_ITERS env var (default 3000)
 mix run bench/lisp_concurrency.exs
@@ -33,3 +35,6 @@ path; the scripts re-add them so `:tprof` / `:msacc` load.
   `lisp_concurrency.exs` (fixed work, wall-clock) for aggregate numbers.
 - Each `Lisp.run/2` spawns its own sandbox process, so `:tprof` is run
   with `report: :total` to aggregate across them.
+- `mix bench.check` gates child-process eval reductions. Child memory and
+  wall-clock timings stay informational; memory regressions are covered by the
+  release soak tests, and hosted runner timing noise is too large for a gate.

@@ -17,7 +17,7 @@ Run the heavyweight release-readiness checks that the PR gate (`test.yml`) does 
 4. **Real-LLM smoke** — the agentic loop works against a live model (stats only).
 5. **Release report** — one markdown result showing what ran, what passed/failed,
    and where artifacts/logs are.
-6. **Performance** — *deferred (Phase 2)*, see §5F for why and the redesign.
+6. **Performance** — child eval reductions versus a committed baseline.
 
 ## 2. Trigger policy (hard requirement)
 
@@ -51,15 +51,15 @@ jobs:
   soak:       { ... }                      # §5A
   integrity:  { ... }                      # §5B
   docs:       { ... }                      # §5C
+  perf:       { ... }                      # §5F
   llm-smoke:  { continue-on-error: true,   # §5D — never blocks
                 if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_llm }} }
   release-report:
     if: always()
-    needs: [test, soak, integrity, docs, llm-smoke]
+    needs: [test, soak, integrity, docs, perf, llm-smoke]
     continue-on-error: true                # §5E — reporting only
-  # perf:     deferred — §5F (add to `needs` once it gates a real metric)
   publish:
-    needs: [test, soak, integrity, docs]   # gates; NOT llm-smoke
+    needs: [test, soak, integrity, docs, perf] # gates; NOT llm-smoke
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps: [hex.build, hex.publish, hex.publish docs]
 ```
@@ -98,7 +98,7 @@ env:
 | Real-LLM smoke | **NO — never fails** (stats only) | 1 |
 | Release report | **NO — never fails** (summary only) | 1 |
 | External-URL links (docs) | **no** (informational) | 1 |
-| Performance (deterministic eval reductions) | **yes** | **2** (redesign first) |
+| Performance (deterministic eval reductions) | **yes** | 2 |
 
 The real-LLM job is non-blocking **by construction**: every LLM command is wrapped
 (`|| true`) and the job is `continue-on-error: true`; `publish` does not `needs:` it.
@@ -211,15 +211,15 @@ The report should include:
   note that these results are non-gating.
 - artifact links/names for demo reports, lychee output if available, package unpack output,
   and the release report itself.
-- final gate verdict: `READY TO PUBLISH` only when `test`, `soak`, `integrity`, and `docs`
-  all succeeded; otherwise `BLOCKED`, with the failed job names.
+- final gate verdict: `READY TO PUBLISH` only when `test`, `soak`, `integrity`, `docs`,
+  and `perf` all succeeded; otherwise `BLOCKED`, with the failed job names.
 
 This job must never gate publishing. `publish` continues to depend directly on
-`test`, `soak`, `integrity`, and `docs`; the report job is for auditability and
+`test`, `soak`, `integrity`, `docs`, and `perf`; the report job is for auditability and
 operator handoff only. If a gating job fails, `release-report` still runs and
 records the failure.
 
-### 5F. Performance — `perf` job (**deferred to Phase 2; redesign required**)
+### 5F. Performance — `perf` job (gate, Phase 2)
 
 > Review correction: the original "gate on Benchee reductions for `full Lisp.run/2`"
 > is **invalid**. `Lisp.run/2` runs the evaluator in a **spawned child process**
@@ -228,18 +228,12 @@ records the failure.
 > capture parse+analyze + spawn/marshalling and **miss the entire eval**. A Benchee
 > baseline over the full run gives false confidence.
 
-Two metric paths (decide before building — see §8):
-
-- **Interim (cheap, valid now):** gate Benchee **reductions on `parse` and
-  `analyze` only** — those run synchronously in the benchmark process. Honest but
-  partial (parse+analyze ≈ ~13% of full-run time; eval is uncovered).
-- **Full path (correct gate):** the sandbox already self-measures the child —
-  `get_process_memory()` at `sandbox.ex:149`, returned as `memory_bytes`/`eval_memory`.
-  Add one line capturing `:erlang.process_info(self(), :reductions)` in that same child
-  block, return it, and gate a small custom harness (`mix bench.check`) on **child eval
-  reductions + child memory** vs a committed baseline (`bench/baselines/*.json`),
-  threshold e.g. **+7%**. This is deterministic (CPU-noise-independent) and measures the
-  real path.
+Implemented path: the sandbox self-measures child eval reductions alongside child
+memory. `mix bench.check` gates representative programs on eval reductions
+against `bench/baselines/lisp_eval.json` with a default **+7%** threshold. Child
+memory is reported but not gated here; memory regressions are covered by soak
+tests because per-process heap size is too noisy for a narrow performance
+threshold.
 
 Also: enabling `reduction_time` in `bench/lisp_throughput.exs` only helps the in-process
 scenarios; wall-clock stays informational (hosted-runner noise ±20–50%). Wall-clock
@@ -247,9 +241,10 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
 
 ## 6. Failure semantics (summary)
 
-- **Red** iff: `mix test` fails, a soak assertion fails, version/changelog mismatch,
+- **Red** iff: `mix test` fails, a soak assertion fails, `mix bench.check` detects
+  an eval-reduction regression, version/changelog mismatch,
   package omits expected `priv/*`, schema/spec drift, an ExDoc warning, a broken
-  **relative** doc link, or gen-doc drift. (Phase 2 adds: eval-reduction regression.)
+  **relative** doc link, or gen-doc drift.
 - **Green** for: any LLM behavior (wrong answers, model/API errors, outages) and dead
   **external** URLs.
 - A release report is emitted for both green and red runs. Report generation itself is
@@ -264,25 +259,21 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
   optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
 - `.lycheeignore` (new) — volatile external hosts.
 - `CHANGELOG.md` — ensure a `## [<version>]` section exists per release (now gated).
-- **Phase 2:** `lib/ptc_runner/sandbox.ex` (capture child reductions), `bench/lisp_throughput.exs`
-  (`reduction_time` for in-process scenarios), `lib/mix/tasks/bench.check.ex` (new),
-  `bench/baselines/*.json` (new).
+- **Phase 2:** `lib/ptc_runner/sandbox.ex` (capture child reductions),
+  `lib/mix/tasks/bench.check.ex`, `bench/baselines/*.json`.
 - `docs/RELEASING.md` — root release checklist mirroring `mcp_server/RELEASING.md`.
 - No model/registry change. No new runtime deps (`:recon`/`:benchee` already present);
   docs job adds the lychee action only.
 
 ## 8. Open decisions for the implementer
 
-1. **Perf metric path** — interim parse/analyze gate, full child-reduction
-   instrumentation, or skip the perf gate for the first release? (Recommend: ship Phase 1
-   without perf; build the child-instrumentation version next.)
-2. **`mcp-v*` tags** — should this workflow also run on the mcp_server release tag, or
+1. **`mcp-v*` tags** — should this workflow also run on the mcp_server release tag, or
    only `v*`?
-3. **Perf threshold %** — start +7% on child eval reductions; tune after one baseline.
-4. **mcp_server real-agentic smoke** — Phase 3: drive the *released* mcp binary with a
+2. **Perf threshold %** — start +7% on child eval reductions; tune after several releases.
+3. **mcp_server real-agentic smoke** — Phase 3: drive the *released* mcp binary with a
    real LLM via `mcp_server/bench/agentic_real_eval.exs` inside the `RELEASING.md` artifact
    smoke (currently protocol-only: `(+ 1 2)` ⇒ `user=> 3`).
-5. e2e duration on gemini-3.1-flash-lite — measure once; tune `timeout-minutes`.
+4. e2e duration on gemini-3.1-flash-lite — measure once; tune `timeout-minutes`.
 
 ## 9. Phasing (suggested)
 
@@ -292,7 +283,7 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
   `llm-smoke` (demo + e2e on gemini-3.1-flash-lite, stats-only), plus a non-gating
   `release-report` artifact/step summary.
 - **Phase 2:** the perf gate — sandbox child-reduction instrumentation + `mix bench.check`
-  + committed baseline. (Do **not** ship a Benchee-full-run gate.)
+  + committed baseline. (Implemented; do **not** replace with a Benchee-full-run gate.)
 - **Phase 3 (optional):** mcp_server real-agentic smoke through the released binary;
   wall-clock trend dashboard; promote `private/mcpproxy/` HTTP benches into the toolchain.
 

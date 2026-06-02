@@ -5,7 +5,9 @@ defmodule PtcRunner.LispTest do
 
   describe "basic execution" do
     test "evaluates simple expression" do
-      assert {:ok, %{return: 3, memory: %{}}} = Lisp.run("(+ 1 2)")
+      assert {:ok, %{return: 3, memory: %{}} = step} = Lisp.run("(+ 1 2)")
+      assert is_integer(step.usage.eval_reductions)
+      assert step.usage.eval_reductions > 0
     end
 
     test "propagates parser errors" do

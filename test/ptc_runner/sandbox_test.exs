@@ -106,6 +106,16 @@ defmodule PtcRunner.SandboxTest do
       assert metrics.memory_bytes >= 0
     end
 
+    test "metrics include eval_reductions from the sandbox child" do
+      context = PtcRunner.Context.new()
+
+      {:ok, _result, metrics, _memory} =
+        PtcRunner.Sandbox.execute(2, context, eval_opts())
+
+      assert is_integer(metrics.eval_reductions)
+      assert metrics.eval_reductions > 0
+    end
+
     test "metrics are accurate for simple operations" do
       context = PtcRunner.Context.new()
 
