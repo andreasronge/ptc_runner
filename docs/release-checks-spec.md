@@ -1,9 +1,10 @@
 # Release Checks — Spec
 
 > Design spec for bundled release-readiness checks in GitHub Actions.
-> Status: **spec only — not yet implemented**. Implement in a later session.
+> Status: **Phase 1 implemented**. Keep this document as design rationale and
+> future-work notes; use `docs/RELEASING.md` for the operational checklist.
 > Revised 2026-06-02 after review (workflow topology + perf-metric corrections).
-> Extends `mcp_server/RELEASING.md`; the root project currently has no release checklist.
+> Extends `docs/RELEASING.md` and `mcp_server/RELEASING.md`.
 
 ## 1. Goal
 
@@ -14,7 +15,9 @@ Run the heavyweight release-readiness checks that the PR gate (`test.yml`) does 
    `priv/*`, no schema/spec drift.
 3. **Documentation** — no ExDoc warnings, no broken links, no generated-doc drift.
 4. **Real-LLM smoke** — the agentic loop works against a live model (stats only).
-5. **Performance** — *deferred (Phase 2)*, see §5E for why and the redesign.
+5. **Release report** — one markdown result showing what ran, what passed/failed,
+   and where artifacts/logs are.
+6. **Performance** — *deferred (Phase 2)*, see §5F for why and the redesign.
 
 ## 2. Trigger policy (hard requirement)
 
@@ -39,8 +42,8 @@ on:
 > `release.yml` (restructured from the current single-job version).
 
 All check jobs live in `release.yml`. The `publish` job `needs:` the **gating**
-jobs only and is guarded by the tag ref so manual dispatch runs checks **without**
-publishing:
+jobs only and is guarded by both event type and tag ref so manual dispatch runs
+checks **without** publishing:
 
 ```yaml
 jobs:
@@ -49,17 +52,31 @@ jobs:
   integrity:  { ... }                      # §5B
   docs:       { ... }                      # §5C
   llm-smoke:  { continue-on-error: true,   # §5D — never blocks
-                if: ${{ !inputs.skip_llm }} }
-  # perf:     deferred — §5E (add to `needs` once it gates a real metric)
+                if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_llm }} }
+  release-report:
+    if: always()
+    needs: [test, soak, integrity, docs, llm-smoke]
+    continue-on-error: true                # §5E — reporting only
+  # perf:     deferred — §5F (add to `needs` once it gates a real metric)
   publish:
     needs: [test, soak, integrity, docs]   # gates; NOT llm-smoke
-    if: startsWith(github.ref, 'refs/tags/v')   # skip on workflow_dispatch
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps: [hex.build, hex.publish, hex.publish docs]
 ```
 
 This gates the Hex publish on soak/integrity/docs/test, keeps the LLM smoke as
-pure signal, runs checks-without-publish on manual dispatch, and avoids any
+pure signal, runs checks-without-publish on manual dispatch (even if the manual
+run targets a `v*` tag), emits a report regardless of pass/fail, and avoids any
 double-trigger.
+
+`inputs.*` is only defined for `workflow_dispatch`/reusable workflows, so use
+event guards before reading boolean inputs at job level. For shell defaults used
+by jobs that also run on tag push, prefer a resolved env var such as:
+
+```yaml
+env:
+  LLM_RUNS: ${{ github.event.inputs.llm_runs || '1' }}
+```
 
 ### Shared setup gotchas (verified)
 - All jobs reuse `./.github/actions/setup-elixir` (Elixir 1.19.3 / OTP 28.1; caches
@@ -79,6 +96,7 @@ double-trigger.
 | Release integrity (version/changelog/package/schema/spec) | **yes** | 1 |
 | Documentation (ExDoc warnings, relative links, gen-doc drift) | **yes** | 1 |
 | Real-LLM smoke | **NO — never fails** (stats only) | 1 |
+| Release report | **NO — never fails** (summary only) | 1 |
 | External-URL links (docs) | **no** (informational) | 1 |
 | Performance (deterministic eval reductions) | **yes** | **2** (redesign first) |
 
@@ -93,12 +111,12 @@ The real-LLM job is non-blocking **by construction**: every LLM command is wrapp
   sweet spot — real signal, below the 1 s/eval sandbox-timeout contention cliff per
   `private/Plans/pre-push-perf.md`). Covers `atom_leak`, `closure_capture`, `tracer`
   (`test/soak/`). `:recon` is already a `:test` dep (`mix.exs:78`).
-- mcp_server: needs its own `cd mcp_server && mix deps.get` first. **Do NOT use
-  `--only soak`** — that also selects `mcp_stdio_soak_test.exs` (only skipped when the
-  release binary is absent; if the binary is cached it runs). List explicit files:
+- mcp_server: needs its own `cd mcp_server && mix deps.get` first. Use
+  `--only soak` with the explicit file list; ExUnit excludes `:soak` by default, and
+  the file list keeps `mcp_stdio_soak_test.exs` out of the gate:
   ```
   cd mcp_server && mix deps.get
-  PTC_SOAK_ITERATIONS=3000 mix test \
+  PTC_SOAK_ITERATIONS=3000 mix test --only soak \
     test/soak/session_churn_soak_test.exs \
     test/soak/many_turns_soak_test.exs \
     test/soak/http_mcp_soak_test.exs
@@ -112,10 +130,10 @@ The real-LLM job is non-blocking **by construction**: every LLM command is wrapp
 - **Version/tag match** — already in `release.yml:20` (tag `v$X` == `mix.exs` version); keep it.
 - **Changelog gate** — require `CHANGELOG.md` to contain a `## [<version>]` heading for
   the tag version (fail if missing).
-- **Package contents** (the high-value footgun check) — `mix hex.build`, unpack the
-  tarball, and **assert the bundled `files:` include** `priv/prompts/`, `priv/spec/`,
-  `priv/ptc_schema.json`, the generated references, and docs. Catches a `priv/*`
-  omission before it ships to Hex.
+- **Package contents** (the high-value footgun check) — `mix hex.build --unpack`, then
+  **assert the bundled `files:` include**
+  `priv/prompts/`, `priv/spec/`, `priv/ptc_schema.json`, the generated references,
+  and docs. Catches a `priv/*` omission before it ships to Hex.
 - **Schema drift** — `mix schema.gen && git diff --exit-code -- priv/ptc_schema.json`.
 - **Spec checksums** — `mix ptc.validate_spec` (already treated as important by
   `mix precommit`).
@@ -144,18 +162,22 @@ The real-LLM job is non-blocking **by construction**: every LLM command is wrapp
   (`lib/ptc_runner/llm/default_registry.ex:86`; matches the current OpenRouter listing
   `google/gemini-3.1-flash-lite`). No registry change.
 - **Env:** `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}` (same secret
-  `benchmark.yml` uses), `LLM_DEFAULT_PROVIDER: openrouter`, `PTC_TEST_MODEL: gemini-flash-lite`.
+  `benchmark.yml` uses), `LLM_DEFAULT_PROVIDER: openrouter`,
+  `PTC_TEST_MODEL: gemini-flash-lite`, `LLM_RUNS: ${{ github.event.inputs.llm_runs || '1' }}`.
 - **`continue-on-error: true`** + every command wrapped `|| true`; `publish` does not
   `needs:` it.
 - **Both surfaces:**
   1. Demo benchmarks (reuse the maintained `benchmark.yml` path):
      ```
      cd demo
-     mix lisp --test --runs=${{ inputs.llm_runs || 1 }} --model=openrouter:google/gemini-3.1-flash-lite --report=tmp/lisp.md || true
-     mix json --test --runs=${{ inputs.llm_runs || 1 }} --model=openrouter:google/gemini-3.1-flash-lite --report=tmp/json.md || true
+     mix lisp --test --runs="${LLM_RUNS}" --model=openrouter:google/gemini-3.1-flash-lite --report=tmp/lisp.md || true
      ```
      Parse `summary.passed/total`, pass-rate %, `stats.total_tokens`
-     (`demo/lib/ptc_demo/lisp_test_runner.ex`).
+     (`demo/lib/ptc_demo/lisp_test_runner.ex`). Relative report paths are resolved
+     under `demo/reports/`, so the example above writes
+     `demo/reports/tmp/lisp.md`, `demo/reports/tmp/lisp.json`,
+     `demo/reports/tmp/json.md`, and `demo/reports/tmp/json.json`; upload
+     `demo/reports/tmp/` as the artifact path.
   2. e2e (root, real model):
      ```
      PTC_TEST_MODEL=gemini-flash-lite mix test --include e2e || true
@@ -168,7 +190,36 @@ The real-LLM job is non-blocking **by construction**: every LLM command is wrapp
 - `timeout-minutes: 25` (full `:e2e` is multi-turn across many files). Cost: pennies at
   release/manual cadence.
 
-### 5E. Performance — `perf` job (**deferred to Phase 2; redesign required**)
+### 5E. Release report — `release-report` job (summary only, Phase 1)
+
+Every run should leave a concise release-readiness record, not just raw job logs.
+Each check job writes a small markdown fragment under `tmp/release-report/` and
+uploads it as an artifact with `if: always()`. The final `release-report` job
+uses `if: always()`, downloads those fragments, and writes:
+
+- `$GITHUB_STEP_SUMMARY` — human-readable table visible from the workflow run.
+- `tmp/release-checks.md` — uploaded as a `release-checks-report` artifact.
+
+The report should include:
+
+- repo, commit SHA, ref/tag, workflow run URL, actor, UTC timestamp, Elixir/OTP versions.
+- release version and changelog heading result.
+- package integrity result, including the unpacked package path and checked bundled files.
+- test command list and outcome for `mix test`, root soak, MCP soak, docs, schema/spec drift,
+  ExDoc, lychee offline, and external-link informational pass.
+- LLM smoke model, run count, demo pass rates, token/cost stats, e2e pass/fail counts, and
+  note that these results are non-gating.
+- artifact links/names for demo reports, lychee output if available, package unpack output,
+  and the release report itself.
+- final gate verdict: `READY TO PUBLISH` only when `test`, `soak`, `integrity`, and `docs`
+  all succeeded; otherwise `BLOCKED`, with the failed job names.
+
+This job must never gate publishing. `publish` continues to depend directly on
+`test`, `soak`, `integrity`, and `docs`; the report job is for auditability and
+operator handoff only. If a gating job fails, `release-report` still runs and
+records the failure.
+
+### 5F. Performance — `perf` job (**deferred to Phase 2; redesign required**)
 
 > Review correction: the original "gate on Benchee reductions for `full Lisp.run/2`"
 > is **invalid**. `Lisp.run/2` runs the evaluator in a **spawned child process**
@@ -201,11 +252,14 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
   **relative** doc link, or gen-doc drift. (Phase 2 adds: eval-reduction regression.)
 - **Green** for: any LLM behavior (wrong answers, model/API errors, outages) and dead
   **external** URLs.
+- A release report is emitted for both green and red runs. Report generation itself is
+  non-gating.
 
 ## 7. New / changed files (implementation checklist)
 
 - `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
-  `integrity`, `docs`, `llm-smoke`, `publish` (`needs` gates only; `if:` tag-guarded).
+  `integrity`, `docs`, `llm-smoke`, `release-report`, `publish` (`needs` gates only;
+  publish guarded by `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
 - `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
   optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
 - `.lycheeignore` (new) — volatile external hosts.
@@ -213,7 +267,7 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
 - **Phase 2:** `lib/ptc_runner/sandbox.ex` (capture child reductions), `bench/lisp_throughput.exs`
   (`reduction_time` for in-process scenarios), `lib/mix/tasks/bench.check.ex` (new),
   `bench/baselines/*.json` (new).
-- `docs/RELEASING.md` (optional) — root release checklist mirroring `mcp_server/RELEASING.md`.
+- `docs/RELEASING.md` — root release checklist mirroring `mcp_server/RELEASING.md`.
 - No model/registry change. No new runtime deps (`:recon`/`:benchee` already present);
   docs job adds the lychee action only.
 
@@ -235,7 +289,8 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
 - **Phase 1 (small, high value, low ambiguity):** restructure `release.yml` with
   `test` + `soak` + `integrity` (version/changelog/package/schema/spec) + `docs`
   (ExDoc/lychee-offline/gen-doc drift) gating the publish, plus non-blocking
-  `llm-smoke` (demo + e2e on gemini-3.1-flash-lite, stats-only).
+  `llm-smoke` (demo + e2e on gemini-3.1-flash-lite, stats-only), plus a non-gating
+  `release-report` artifact/step summary.
 - **Phase 2:** the perf gate — sandbox child-reduction instrumentation + `mix bench.check`
   + committed baseline. (Do **not** ship a Benchee-full-run gate.)
 - **Phase 3 (optional):** mcp_server real-agentic smoke through the released binary;
@@ -250,5 +305,23 @@ trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope
   summary in the job summary.
 - The workflow never runs on a PR or on a schedule; `workflow_dispatch` runs the checks
   **without** publishing (publish skipped off-tag), honoring `skip_llm`.
+- Every run emits a `release-checks-report` artifact and `$GITHUB_STEP_SUMMARY`
+  documenting commands, outcomes, gating verdict, LLM stats, and relevant artifact names.
 - (Phase 2) A seeded eval slowdown that inflates child reductions beyond threshold fails
   the `perf` job.
+
+## 11. Post-merge smoke test
+
+Run this after the workflow change has been merged to `main`. GitHub only exposes
+`workflow_dispatch` for workflow files present on the default branch, so a branch-only
+workflow edit is not enough to smoke it from the Actions UI.
+
+1. Manually trigger `release.yml` from the Actions tab on `main` with `skip_llm: true`.
+   This is the cheap deterministic smoke. Confirm `test`, `soak`, `integrity`, and
+   `docs` run; `publish` is skipped; and `release-report` uploads the
+   `release-checks-report` artifact.
+2. Manually trigger it again with `skip_llm: false` and `llm_runs: 1`. Confirm the
+   LLM job produces stats/artifacts, stays non-gating, and the release report records
+   the LLM results as informational.
+3. Optional safety check: manually dispatch on a `v*` tag ref and confirm `publish`
+   still skips because publish requires `github.event_name == 'push'`.

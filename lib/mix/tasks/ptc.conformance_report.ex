@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
     if "--write-inventory" in args do
       File.write!(
         "conformance_inventory.json",
-        Jason.encode!(ordered_inventory(inventory), pretty: true)
+        Jason.encode!(ordered_inventory(inventory), pretty: true) <> "\n"
       )
 
       Mix.shell().info("Wrote conformance_inventory.json")

@@ -71,10 +71,10 @@ defmodule PtcRunner.Upstream.Runtime do
     end
   end
 
-  @spec run_context(struct() | pid(), keyword()) :: {:ok, RunContext.t()} | {:error, term()}
+  @spec run_context(struct() | pid(), keyword()) :: {:ok, struct()} | {:error, term()}
   def run_context(runtime, opts \\ []), do: RunContext.new(runtime, opts)
 
-  @spec with_run_context(struct() | pid(), keyword(), (RunContext.t() -> term())) ::
+  @spec with_run_context(struct() | pid(), keyword(), (struct() -> term())) ::
           {term(), [map()]}
   def with_run_context(runtime, opts, fun) when is_function(fun, 1) do
     {:ok, context} = run_context(runtime, opts)

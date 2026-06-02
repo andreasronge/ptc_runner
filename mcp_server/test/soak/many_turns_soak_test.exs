@@ -41,8 +41,16 @@ defmodule PtcRunnerMcp.ManyTurnsSoakTest do
   @moduletag timeout: :infinity
 
   setup do
-    SoakHelpers.setup_sessions()
-    {:ok, iters: MemorySoak.iteration_count()}
+    iters = MemorySoak.iteration_count()
+
+    SoakHelpers.setup_sessions(%{
+      enabled: true,
+      max_session_bindings: iters + 100,
+      max_session_memory_bytes: 64 * 1024 * 1024,
+      max_session_binding_bytes: 16 * 1024 * 1024
+    })
+
+    {:ok, iters: iters}
   end
 
   test "stateless turns don't grow the session GenServer", %{iters: iters} do
