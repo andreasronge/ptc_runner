@@ -20,10 +20,10 @@ defmodule PtcRunner.SubAgent.Compiler do
   See `PtcRunner.SubAgent.compile/2` for the public API.
   """
 
-  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.CompiledAgent
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.ToolNormalizer
+  alias PtcRunner.SubAgent.Runner
   alias PtcRunner.SubAgent.{SubAgentTool, Telemetry}
 
   @doc """
@@ -113,7 +113,7 @@ defmodule PtcRunner.SubAgent.Compiler do
         else: agent
 
     # Run the agent once to derive the PTC-Lisp program
-    case SubAgent.run(agent, Keyword.put(opts, :context, sample)) do
+    case Runner.run(agent, Keyword.put(opts, :context, sample)) do
       {:ok, step} ->
         # Extract the final program from the turns
         source = extract_final_program(step.turns)
