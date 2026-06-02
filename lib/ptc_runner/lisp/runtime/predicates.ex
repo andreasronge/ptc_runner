@@ -325,7 +325,13 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def ifn?(x) when is_atom(x) and not is_nil(x) and not is_boolean(x), do: type_of(x) != :number
   def ifn?(x), do: type_of(x) == :function
 
-  # map-entry? - no distinct MapEntry type on BEAM
+  # map-entry? - DIV-49. PTC-Lisp has no distinct MapEntry type: a map seq
+  # entry like `(first (seq {:a 1}))` is the *same* 2-element vector value as
+  # the literal `[:a 1]`, so the two are indistinguishable on the BEAM. Clojure
+  # answers `true` for the former and `false` for the latter; PTC-Lisp cannot
+  # honor both at once. We return a stable `false` for every value, which keeps
+  # the literal-vector case (`(map-entry? [:a 1])`) matching Clojure and never
+  # misreports an arbitrary 2-vector as a JVM map entry.
   def map_entry?(_), do: false
 
   # distinct? - variadic: true if all args are unique

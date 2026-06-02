@@ -1719,7 +1719,8 @@
       name: "map-entry?",
       status: :supported,
       description: "Returns true if map entry",
-      notes: "BUG GAP-S136: explicit seq map entries are not recognized as map entries"
+      notes:
+        "DIV-49: returns false for every value because PTC-Lisp has no distinct MapEntry type (a map seq entry is the same 2-element vector value as a literal vector)"
     },
     %{
       name: "map-indexed",
