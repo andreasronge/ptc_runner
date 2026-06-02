@@ -1,209 +1,254 @@
 # Release Checks — Spec
 
-> Design spec for a bundled **release-checks** GitHub Actions workflow.
+> Design spec for bundled release-readiness checks in GitHub Actions.
 > Status: **spec only — not yet implemented**. Implement in a later session.
-> Owner: release tooling. Tracking: extends `mcp_server/RELEASING.md`; the root
-> project currently has no release checklist (gap identified 2026-06-02).
+> Revised 2026-06-02 after review (workflow topology + perf-metric corrections).
+> Extends `mcp_server/RELEASING.md`; the root project currently has no release checklist.
 
 ## 1. Goal
 
-One workflow that runs the heavyweight release-readiness checks that the normal
-PR gate (`test.yml`) and `release.yml` do **not** run today:
+Run the heavyweight release-readiness checks that the PR gate (`test.yml`) does not:
 
 1. **Memory soak** — no new leaks (atoms / refc-binaries / processes).
-2. **Performance** — no new bottlenecks (deterministic reductions/allocations).
+2. **Release integrity** — version/changelog match, Hex package actually bundles
+   `priv/*`, no schema/spec drift.
 3. **Documentation** — no ExDoc warnings, no broken links, no generated-doc drift.
-4. **Real-LLM smoke** — the agentic loop actually works against a live model.
+4. **Real-LLM smoke** — the agentic loop works against a live model (stats only).
+5. **Performance** — *deferred (Phase 2)*, see §5E for why and the redesign.
 
 ## 2. Trigger policy (hard requirement)
 
-Run **only** on a release tag push **or** manual dispatch. **Never** on `push`
-to a branch, on `pull_request`, or on a schedule.
+Run **only** on a release tag push **or** manual dispatch. **Never** on a branch
+`push`, on `pull_request`, or on a schedule.
 
 ```yaml
 on:
   push:
-    tags: ['v*']        # root library release. Add 'mcp-v*' if mcp_server release should run it too.
+    tags: ['v*']        # root library release. (Decision: also 'mcp-v*'? — see §8)
   workflow_dispatch:
     inputs:
-      llm_runs:   { description: 'demo --runs per suite', type: string, default: '1' }
-      skip_llm:   { description: 'skip the real-LLM smoke', type: boolean, default: false }
+      llm_runs: { description: 'demo --runs per suite', type: string, default: '1' }
+      skip_llm: { description: 'skip the real-LLM smoke', type: boolean, default: false }
 ```
 
-## 3. Gating policy (hard requirement)
+## 3. Architecture — ONE workflow (corrected)
 
-| Check | Fails the workflow? | Notes |
+> Review correction: do **not** use a reusable workflow. A caller can only
+> `needs:` the single job that `uses:` a reusable workflow (not its inner jobs),
+> and a shared tag trigger double-runs the checks. Put everything in one
+> `release.yml` (restructured from the current single-job version).
+
+All check jobs live in `release.yml`. The `publish` job `needs:` the **gating**
+jobs only and is guarded by the tag ref so manual dispatch runs checks **without**
+publishing:
+
+```yaml
+jobs:
+  test:       { ... }                      # existing `mix test` (default tags)
+  soak:       { ... }                      # §5A
+  integrity:  { ... }                      # §5B
+  docs:       { ... }                      # §5C
+  llm-smoke:  { continue-on-error: true,   # §5D — never blocks
+                if: ${{ !inputs.skip_llm }} }
+  # perf:     deferred — §5E (add to `needs` once it gates a real metric)
+  publish:
+    needs: [test, soak, integrity, docs]   # gates; NOT llm-smoke
+    if: startsWith(github.ref, 'refs/tags/v')   # skip on workflow_dispatch
+    steps: [hex.build, hex.publish, hex.publish docs]
+```
+
+This gates the Hex publish on soak/integrity/docs/test, keeps the LLM smoke as
+pure signal, runs checks-without-publish on manual dispatch, and avoids any
+double-trigger.
+
+### Shared setup gotchas (verified)
+- All jobs reuse `./.github/actions/setup-elixir` (Elixir 1.19.3 / OTP 28.1; caches
+  `deps`, `_build`, `demo/deps`, PLT). **It does NOT touch `mcp_server`**
+  (`action.yml:21,33` cache/fetch root + demo only) — any MCP job must add
+  `working-directory: mcp_server` + `mix deps.get` (and ideally cache `mcp_server/deps`).
+- The action **always installs Babashka** (`action.yml:50`, `mix ptc.install_babashka`
+  unless cached). These checks don't need `bb`; it's harmless on a cache-hit. Optional
+  polish: add a `skip-babashka` input to the action.
+
+## 4. Gating policy (hard requirement)
+
+| Check | Fails the workflow? | Phase |
 |-------|--------------------|-------|
-| Memory soak | **yes** (gate) | a leak must block a release |
-| Performance | **yes** (gate) | only on *deterministic* metrics (reductions/allocations), never wall-clock |
-| Documentation | **yes** (gate) | ExDoc warnings + broken **relative** links + gen-doc drift |
-| Real-LLM smoke | **NO — never fails** | stats only; emits a summary, always exits 0 |
-| External-URL links (docs) | **no** (informational) | external URLs flake; report but don't gate |
+| `test` (`mix test`, default tags) | **yes** | 1 |
+| Memory soak | **yes** | 1 |
+| Release integrity (version/changelog/package/schema/spec) | **yes** | 1 |
+| Documentation (ExDoc warnings, relative links, gen-doc drift) | **yes** | 1 |
+| Real-LLM smoke | **NO — never fails** (stats only) | 1 |
+| External-URL links (docs) | **no** (informational) | 1 |
+| Performance (deterministic eval reductions) | **yes** | **2** (redesign first) |
 
-The real-LLM job must be **non-blocking by construction**: every LLM command is
-wrapped so a model error, a wrong answer, a 429, or an OpenRouter outage produces
-**stats**, not a red build. The publish job (`release.yml`) must **not** list the
-LLM job in `needs:`.
-
-## 4. Architecture
-
-Implement as a **reusable workflow** so it both gates the real publish and runs on
-demand:
-
-- `release-checks.yml` — `on: [workflow_call, workflow_dispatch, push(tags)]`, holds
-  all four jobs. The three gating jobs run to completion and fail the run on a real
-  regression; the LLM job always succeeds.
-- `release.yml` (existing Hex publish) — add `uses: ./.github/workflows/release-checks.yml`
-  as a prerequisite and make the `publish` job `needs: [soak, perf, docs]` (the gating
-  jobs), **not** the LLM job. This makes soak/perf/docs actually block the Hex publish
-  while keeping the LLM smoke informational.
-
-All jobs reuse the existing `./.github/actions/setup-elixir` composite (Elixir 1.19.3 /
-OTP 28.1, deps + `_build` + PLT cache). `bb` is **not** needed (no `:clojure` tests here).
-
-```
-release tag  ──► release-checks.yml ──► [soak]  [perf]  [docs]  [llm-smoke]
-                                          gate    gate    gate    stats-only
-release.yml publish  needs: [soak, perf, docs]   ───────────────► hex.publish
-                     (does NOT need llm-smoke)
-```
+The real-LLM job is non-blocking **by construction**: every LLM command is wrapped
+(`|| true`) and the job is `continue-on-error: true`; `publish` does not `needs:` it.
 
 ## 5. Per-check specs
 
-### 5A. Memory soak — `soak` job (gate)
+### 5A. Memory soak — `soak` job (gate, Phase 1)
 
-- Command: `mix test --only soak` with `MIX_ENV=test`, `PTC_SOAK_ITERATIONS=3000`
-  (3–5k is the CI sweet spot: real signal, but below the 1 s/eval sandbox timeout's
-  contention cliff — see `private/Plans/pre-push-perf.md`).
-- Covers (already implemented, see `test/soak/` + `test/support/memory_soak.ex`):
-  `atom_leak_soak`, `closure_capture_soak`, `tracer_soak` — hard `assert_*` thresholds.
-- `:recon` is already a `:test` dep (`mix.exs:78`), so `bin_leak` diagnostics work in CI.
-- **mcp_server soak** (`mcp_server/test/soak/`): include `session_churn`, `many_turns`,
-  `http_mcp` (`cd mcp_server && PTC_SOAK_ITERATIONS=3000 mix test --only soak`).
-  **Exclude `mcp_stdio_soak`** from the gate (needs `MIX_ENV=prod mix release` first and
-  has a known `:epipe` flake on this stack — run it `continue-on-error` in a separate
-  step if wanted).
-- `timeout-minutes: 20`. Gate: job fails ⇒ workflow fails.
+- Root: `MIX_ENV=test PTC_SOAK_ITERATIONS=3000 mix test --only soak` (3–5k is the CI
+  sweet spot — real signal, below the 1 s/eval sandbox-timeout contention cliff per
+  `private/Plans/pre-push-perf.md`). Covers `atom_leak`, `closure_capture`, `tracer`
+  (`test/soak/`). `:recon` is already a `:test` dep (`mix.exs:78`).
+- mcp_server: needs its own `cd mcp_server && mix deps.get` first. **Do NOT use
+  `--only soak`** — that also selects `mcp_stdio_soak_test.exs` (only skipped when the
+  release binary is absent; if the binary is cached it runs). List explicit files:
+  ```
+  cd mcp_server && mix deps.get
+  PTC_SOAK_ITERATIONS=3000 mix test \
+    test/soak/session_churn_soak_test.exs \
+    test/soak/many_turns_soak_test.exs \
+    test/soak/http_mcp_soak_test.exs
+  ```
+  `mcp_stdio_soak` (needs `MIX_ENV=prod mix release` + has a known `:epipe` flake) is
+  out of the gate; run it `continue-on-error` in a separate step if wanted.
+- `timeout-minutes: 20`.
 
-### 5B. Performance — `perf` job (gate; **Phase 2**, most involved)
+### 5B. Release integrity — `integrity` job (gate, Phase 1)
 
-Hosted runners are too noisy for wall-clock gating (±20–50%). Gate on **deterministic**
-metrics only:
-
-- Enable `reduction_time` in `bench/lisp_throughput.exs` Benchee config (currently
-  `memory_time: 1`, no reductions) so we measure **reductions + memory bytes** per
-  scenario — both CPU-noise-independent.
-- New mix task **`mix bench.check`**: runs the bench, loads a committed baseline
-  (`bench/baselines/lisp_throughput.json`, Benchee `save:`/`load:`), and **fails** if
-  reductions or memory for `full Lisp.run/2` (and key archetypes) regress beyond a
-  threshold (e.g. **+7%**). Wall-clock is recorded but **informational**.
-- Baseline lifecycle: regenerate the baseline JSON when an intentional perf change
-  lands (document the command in the task's `@moduledoc`); commit it.
-- `timeout-minutes: 15`. Gate: reductions/allocations regression ⇒ fail.
-- **Out of scope:** stable absolute wall-clock (would need a self-hosted/pinned runner);
-  optional `github-action-benchmark` gh-pages trend dashboard for wall-clock history.
-
-### 5C. Documentation — `docs` job (gate)
-
-Three sub-checks; the first two gate, external URLs are informational:
-
-1. **ExDoc warnings** — `MIX_ENV=dev mix docs` and fail on warnings (broken `m:Module` /
-   `` `Mod.fun/arity` `` refs, broken `extras` links). Use `mix docs --warnings-as-errors`
-   if the pinned ExDoc `~> 0.31` supports it; otherwise capture output and fail if it
-   contains `warning:`. *(verify the flag at impl)*
-2. **Generated-doc drift** — `mix ptc.gen_docs && mix ptc.conformance_report --write-inventory`
-   then `git diff --exit-code -- docs/ conformance_inventory.json`. Fails if generated
-   docs (function-reference.md, `docs/conformance/*.md`, inventory) are stale vs source
-   (`priv/functions.exs`, audit files). *(This is exactly the drift the 2026-06-02
-   conformance batch had to fix by hand.)*
-3. **Broken links** — add **lychee** (`lycheeverse/lychee-action`) over `**/*.md`
-   (README, `docs/`, `mcp_server/*.md`):
-   - **`--offline` relative-link pass = GATE** (deterministic: dead `docs/...` / `[[name]]`
-     / section-anchor links).
-   - online external-URL pass = **separate, informational** step (`fail: false`), with a
-     `.lycheeignore` for known-volatile hosts.
+- **Version/tag match** — already in `release.yml:20` (tag `v$X` == `mix.exs` version); keep it.
+- **Changelog gate** — require `CHANGELOG.md` to contain a `## [<version>]` heading for
+  the tag version (fail if missing).
+- **Package contents** (the high-value footgun check) — `mix hex.build`, unpack the
+  tarball, and **assert the bundled `files:` include** `priv/prompts/`, `priv/spec/`,
+  `priv/ptc_schema.json`, the generated references, and docs. Catches a `priv/*`
+  omission before it ships to Hex.
+- **Schema drift** — `mix schema.gen && git diff --exit-code -- priv/ptc_schema.json`.
+- **Spec checksums** — `mix ptc.validate_spec` (already treated as important by
+  `mix precommit`).
 - `timeout-minutes: 10`.
 
-### 5D. Real-LLM smoke — `llm-smoke` job (**never fails**, stats only)
+### 5C. Documentation — `docs` job (gate, Phase 1)
+
+1. **ExDoc warnings** — `MIX_ENV=dev mix docs --warnings-as-errors` (flag **confirmed**
+   present in the pinned ExDoc `~> 0.31`). Catches broken `m:Module` / `` `Mod.fun/arity` ``
+   / `extras` refs.
+2. **Generated-doc drift** — `mix ptc.gen_docs && mix ptc.conformance_report --write-inventory`
+   then `git diff --exit-code -- docs/ conformance_inventory.json`. (Exactly the drift the
+   2026-06-02 conformance batch had to fix by hand.)
+3. **Broken links (lychee, scoped globs — not `**/*.md`)** — run
+   `lycheeverse/lychee-action` over explicit paths only (`README.md`, `docs/**/*.md`,
+   `mcp_server/*.md`) to avoid `deps/`, `tmp/`, and generated trees:
+   - **`--offline` relative-link pass = GATE** (deterministic dead `docs/...` / `[[name]]`
+     / anchor links).
+   - online external-URL pass = **separate, informational** step (`fail: false`) +
+     `.lycheeignore` for volatile hosts.
+- `timeout-minutes: 10`.
+
+### 5D. Real-LLM smoke — `llm-smoke` job (**never fails**, stats only, Phase 1)
 
 - **Model:** `gemini-flash-lite` alias ⇒ `openrouter:google/gemini-3.1-flash-lite`
-  (already in `lib/ptc_runner/llm/default_registry.ex:86`). No registry change needed.
-- **Env:** `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}` (the same secret
-  `benchmark.yml` already uses), `LLM_DEFAULT_PROVIDER: openrouter`,
-  `PTC_TEST_MODEL: gemini-flash-lite`.
-- **Job-level `continue-on-error: true`** AND every command wrapped (`|| true`) so the
-  job is always green. Publish does **not** `need` this job.
-- **Runs both surfaces the user asked for:**
-  1. **Demo benchmarks** (reuse the maintained `benchmark.yml` path):
+  (`lib/ptc_runner/llm/default_registry.ex:86`; matches the current OpenRouter listing
+  `google/gemini-3.1-flash-lite`). No registry change.
+- **Env:** `OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}` (same secret
+  `benchmark.yml` uses), `LLM_DEFAULT_PROVIDER: openrouter`, `PTC_TEST_MODEL: gemini-flash-lite`.
+- **`continue-on-error: true`** + every command wrapped `|| true`; `publish` does not
+  `needs:` it.
+- **Both surfaces:**
+  1. Demo benchmarks (reuse the maintained `benchmark.yml` path):
      ```
      cd demo
      mix lisp --test --runs=${{ inputs.llm_runs || 1 }} --model=openrouter:google/gemini-3.1-flash-lite --report=tmp/lisp.md || true
      mix json --test --runs=${{ inputs.llm_runs || 1 }} --model=openrouter:google/gemini-3.1-flash-lite --report=tmp/json.md || true
      ```
      Parse `summary.passed/total`, pass-rate %, `stats.total_tokens`
-     (see `demo/lib/ptc_demo/lisp_test_runner.ex`).
-  2. **e2e tests** (root, real model):
+     (`demo/lib/ptc_demo/lisp_test_runner.ex`).
+  2. e2e (root, real model):
      ```
-     PTC_TEST_MODEL=gemini-flash-lite mix test --include e2e --formatter ... || true
+     PTC_TEST_MODEL=gemini-flash-lite mix test --include e2e || true
      ```
-     e2e tests are assertions, so with a cheap model some may fail — that's expected and
-     **not** a build failure. Capture `N tests, M failures` + per-file results.
-- **Output:** write a stats block to `$GITHUB_STEP_SUMMARY`: demo pass-rates + token
-  cost, e2e passed/total + which failed, total wall time, model id. Upload the demo
-  report markdown as an artifact.
-- `timeout-minutes: 25` (the full `:e2e` suite is multi-turn agentic across many files;
-  bound it). Cost: gemini-3.1-flash-lite is cheap; one pass ≈ cents. Release/manual
-  cadence keeps spend negligible.
-- **Implementer note:** confirm how to surface ExUnit pass/fail counts even on failure
-  (JUnit/`--formatter`, or parse the summary line). Optionally scope the heaviest e2e
-  files behind a separate non-gating step if 25 min is tight.
+     e2e tests are assertions — a cheap model will miss some; that is **stats, not a
+     failure**. Capture `N tests, M failures` + per-file results (use a JUnit/`--formatter`
+     so counts survive a non-zero exit).
+- **Output:** stats block to `$GITHUB_STEP_SUMMARY` (demo pass-rates + token cost, e2e
+  passed/total + which failed, wall time, model id); upload demo reports as artifacts.
+- `timeout-minutes: 25` (full `:e2e` is multi-turn across many files). Cost: pennies at
+  release/manual cadence.
+
+### 5E. Performance — `perf` job (**deferred to Phase 2; redesign required**)
+
+> Review correction: the original "gate on Benchee reductions for `full Lisp.run/2`"
+> is **invalid**. `Lisp.run/2` runs the evaluator in a **spawned child process**
+> (`sandbox.ex:141`: `Process.spawn(fn -> eval_fn.(ast, context) ... end)`), and
+> Benchee only counts reductions/memory of the *benchmark* process — so it would
+> capture parse+analyze + spawn/marshalling and **miss the entire eval**. A Benchee
+> baseline over the full run gives false confidence.
+
+Two metric paths (decide before building — see §8):
+
+- **Interim (cheap, valid now):** gate Benchee **reductions on `parse` and
+  `analyze` only** — those run synchronously in the benchmark process. Honest but
+  partial (parse+analyze ≈ ~13% of full-run time; eval is uncovered).
+- **Full path (correct gate):** the sandbox already self-measures the child —
+  `get_process_memory()` at `sandbox.ex:149`, returned as `memory_bytes`/`eval_memory`.
+  Add one line capturing `:erlang.process_info(self(), :reductions)` in that same child
+  block, return it, and gate a small custom harness (`mix bench.check`) on **child eval
+  reductions + child memory** vs a committed baseline (`bench/baselines/*.json`),
+  threshold e.g. **+7%**. This is deterministic (CPU-noise-independent) and measures the
+  real path.
+
+Also: enabling `reduction_time` in `bench/lisp_throughput.exs` only helps the in-process
+scenarios; wall-clock stays informational (hosted-runner noise ±20–50%). Wall-clock
+trend dashboard (`github-action-benchmark` / gh-pages) is optional, out of scope for a gate.
 
 ## 6. Failure semantics (summary)
 
-- Workflow is **red** iff: a soak assertion fails, a perf reduction/alloc regression
-  exceeds threshold, ExDoc warns, a relative doc link is broken, or generated docs drift.
-- Workflow stays **green** for: any LLM behavior (wrong answers, model/API errors,
-  outages), and dead external URLs.
+- **Red** iff: `mix test` fails, a soak assertion fails, version/changelog mismatch,
+  package omits expected `priv/*`, schema/spec drift, an ExDoc warning, a broken
+  **relative** doc link, or gen-doc drift. (Phase 2 adds: eval-reduction regression.)
+- **Green** for: any LLM behavior (wrong answers, model/API errors, outages) and dead
+  **external** URLs.
 
 ## 7. New / changed files (implementation checklist)
 
-- `.github/workflows/release-checks.yml` (new) — the 4-job reusable workflow.
-- `.github/workflows/release.yml` (edit) — `publish` `needs: [soak, perf, docs]` via
-  `workflow_call`.
-- `bench/lisp_throughput.exs` (edit) — add `reduction_time: 1`.
-- `lib/mix/tasks/bench.check.ex` (new) — baseline compare + threshold (Phase 2).
-- `bench/baselines/lisp_throughput.json` (new) — committed deterministic baseline (Phase 2).
-- `.lycheeignore` (new) — known-volatile external hosts.
-- `docs/RELEASING.md` (new, optional) — root-project release checklist mirroring
-  `mcp_server/RELEASING.md`, referencing this workflow.
-- No model/registry change (alias already exists). No new dep for soak/perf
-  (`:recon`, `:benchee` already in `:test`/`:dev`). Docs job needs the lychee action only.
+- `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
+  `integrity`, `docs`, `llm-smoke`, `publish` (`needs` gates only; `if:` tag-guarded).
+- `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
+  optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
+- `.lycheeignore` (new) — volatile external hosts.
+- `CHANGELOG.md` — ensure a `## [<version>]` section exists per release (now gated).
+- **Phase 2:** `lib/ptc_runner/sandbox.ex` (capture child reductions), `bench/lisp_throughput.exs`
+  (`reduction_time` for in-process scenarios), `lib/mix/tasks/bench.check.ex` (new),
+  `bench/baselines/*.json` (new).
+- `docs/RELEASING.md` (optional) — root release checklist mirroring `mcp_server/RELEASING.md`.
+- No model/registry change. No new runtime deps (`:recon`/`:benchee` already present);
+  docs job adds the lychee action only.
 
-## 8. Open questions / verify at implementation
+## 8. Open decisions for the implementer
 
-1. ExDoc `~> 0.31`: confirm `mix docs --warnings-as-errors` exists; else grep output.
-2. Perf threshold %: start at +7% on reductions for `full Lisp.run/2`; tune after one
-   real baseline.
-3. Should the LLM smoke also drive the **released mcp_server binary** (highest-fidelity)?
-   `mcp_server/bench/agentic_real_eval.exs` + `lisp_eval_real_client_eval.exs` already do
-   real-LLM turns through the server — could be a Phase 3 step inside the mcp `RELEASING.md`
-   artifact smoke (currently protocol-only: `(+ 1 2)` ⇒ `user=> 3`).
-4. Confirm whether `mcp-v*` tags should also trigger this workflow (mcp release) or only `v*`.
-5. e2e suite duration on gemini-flash-lite — measure once; adjust `timeout-minutes`.
+1. **Perf metric path** — interim parse/analyze gate, full child-reduction
+   instrumentation, or skip the perf gate for the first release? (Recommend: ship Phase 1
+   without perf; build the child-instrumentation version next.)
+2. **`mcp-v*` tags** — should this workflow also run on the mcp_server release tag, or
+   only `v*`?
+3. **Perf threshold %** — start +7% on child eval reductions; tune after one baseline.
+4. **mcp_server real-agentic smoke** — Phase 3: drive the *released* mcp binary with a
+   real LLM via `mcp_server/bench/agentic_real_eval.exs` inside the `RELEASING.md` artifact
+   smoke (currently protocol-only: `(+ 1 2)` ⇒ `user=> 3`).
+5. e2e duration on gemini-3.1-flash-lite — measure once; tune `timeout-minutes`.
 
 ## 9. Phasing (suggested)
 
-- **Phase 1 (small, high value):** `soak` gate + `docs` gate (ExDoc + lychee offline +
-  gen-doc drift) + `llm-smoke` (demo + e2e, stats-only). Wire `release.yml needs`.
-- **Phase 2:** `perf` gate (`reduction_time` + `mix bench.check` + baseline).
-- **Phase 3 (optional):** mcp_server real-agentic smoke; wall-clock trend dashboard;
-  promote `private/mcpproxy/` HTTP benches into the tracked toolchain.
+- **Phase 1 (small, high value, low ambiguity):** restructure `release.yml` with
+  `test` + `soak` + `integrity` (version/changelog/package/schema/spec) + `docs`
+  (ExDoc/lychee-offline/gen-doc drift) gating the publish, plus non-blocking
+  `llm-smoke` (demo + e2e on gemini-3.1-flash-lite, stats-only).
+- **Phase 2:** the perf gate — sandbox child-reduction instrumentation + `mix bench.check`
+  + committed baseline. (Do **not** ship a Benchee-full-run gate.)
+- **Phase 3 (optional):** mcp_server real-agentic smoke through the released binary;
+  wall-clock trend dashboard; promote `private/mcpproxy/` HTTP benches into the toolchain.
 
 ## 10. Acceptance criteria
 
-- Pushing a `v*` tag runs all four jobs; a seeded leak / perf regression / broken
-  relative link / ExDoc warning / gen-doc drift turns the run red and blocks publish.
-- A wrong LLM answer or a simulated OpenRouter 429 leaves the run green, with a stats
-  summary visible in the job summary.
-- The workflow never runs on a PR or on a schedule.
-- Manual `workflow_dispatch` runs the same checks on demand (with `skip_llm` honored).
+- Pushing a `v*` tag runs the gating jobs; a seeded leak / version-or-changelog mismatch /
+  missing `priv/*` in the package / schema or spec drift / broken relative link / ExDoc
+  warning / gen-doc drift turns the run red and **blocks publish**.
+- A wrong LLM answer or a simulated OpenRouter 429 leaves the run **green**, with a stats
+  summary in the job summary.
+- The workflow never runs on a PR or on a schedule; `workflow_dispatch` runs the checks
+  **without** publishing (publish skipped off-tag), honoring `skip_llm`.
+- (Phase 2) A seeded eval slowdown that inflates child reductions beyond threshold fails
+  the `perf` job.
