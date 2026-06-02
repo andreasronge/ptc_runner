@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.Agentic do
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop.StepAssembler
-  alias PtcRunner.Upstream.{Result, RunContext, Runtime}
+  alias PtcRunner.Upstream.{Eval, Result, Runtime}
 
   alias PtcRunnerMcp.{
     AgenticConfig,
@@ -165,11 +165,11 @@ defmodule PtcRunnerMcp.Agentic do
   defp run_subagent(agent, llm, validated, request_id, ledger) do
     if RootUpstreamRuntime.configured?() do
       {result, _records} =
-        Runtime.with_run_context(
+        Eval.with_run_context(
           RootUpstreamRuntime.runtime(),
           root_context_opts(),
           fn context ->
-            eval_opts = RunContext.eval_options(context)
+            eval_opts = Eval.eval_options(context)
             root_agent = %{agent | tools: root_tools_with_ledger(eval_opts[:tools], ledger)}
 
             SubAgent.run(root_agent,
