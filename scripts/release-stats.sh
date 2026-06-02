@@ -81,6 +81,20 @@ SPEC_COV=$(awk -v s="$SPECS" -v d="$PUB_DEFS" 'BEGIN { printf (d>0 ? "%.0f%%" : 
 LARGEST=$(git ls-files -- lib | grep -E '\.ex$' | tr '\n' '\0' \
   | xargs -0 wc -l 2>/dev/null | awk '$2 != "total"' | sort -rn | head -1 \
   | awk '{ n=$1; $1=""; sub(/^ /,""); printf "%s (%s)", $0, n }')
+SPEC_COV_NUM=$(awk -v s="$SPECS" -v d="$PUB_DEFS" 'BEGIN { printf (d>0 ? "%.0f" : "0"), 100*s/d }')
+
+# ---- T2: growth (computed up front so both Markdown and JSON can use it) ----
+
+if [ -n "$BASE" ]; then
+  DLIB=$(net_delta "$BASE" HEAD lib ex)
+  DTEST=$(net_delta "$BASE" HEAD test exs)
+  PREV_CASES=$(grep_count "$BASE" '^[[:space:]]*(test|property) ' test)
+  PREV_MODULES=$(grep_count "$BASE" '^[[:space:]]*defmodule ' lib)
+  DCASES=$((TEST_CASES - PREV_CASES))
+  DMODULES=$((MODULES - PREV_MODULES))
+  COMMITS=$(git rev-list --count "${BASE}..HEAD" 2>/dev/null || echo 0)
+  SHORTSTAT=$(git diff --shortstat "$BASE" HEAD 2>/dev/null | sed 's/^ *//')
+fi
 
 # ---- emit ------------------------------------------------------------------
 
@@ -102,20 +116,14 @@ emit() {
   echo "### Growth"
   echo ""
   if [ -n "$BASE" ]; then
-    DLIB=$(net_delta "$BASE" HEAD lib ex)
-    DTEST=$(net_delta "$BASE" HEAD test exs)
-    PREV_CASES=$(grep_count "$BASE" '^[[:space:]]*(test|property) ' test)
-    PREV_MODULES=$(grep_count "$BASE" '^[[:space:]]*defmodule ' lib)
-    COMMITS=$(git rev-list --count "${BASE}..HEAD" 2>/dev/null || echo "?")
-    SHORTSTAT=$(git diff --shortstat "$BASE" HEAD 2>/dev/null | sed 's/^ *//')
     echo "Since \`$BASE\`:"
     echo ""
     echo "| Metric | Δ |"
     echo "|---|--:|"
     echo "| lib LOC | $(signed "$DLIB") |"
     echo "| test LOC | $(signed "$DTEST") |"
-    echo "| test cases | $(signed "$((TEST_CASES - PREV_CASES))") |"
-    echo "| modules | $(signed "$((MODULES - PREV_MODULES))") |"
+    echo "| test cases | $(signed "$DCASES") |"
+    echo "| modules | $(signed "$DMODULES") |"
     echo "| commits | $(commafy "$COMMITS") |"
     echo ""
     echo "- Overall diff: ${SHORTSTAT:-no changes}"
@@ -134,8 +142,25 @@ emit() {
   echo "| Dependencies (mix.exs) | ${DEPS:-?} |"
 }
 
-OUT=$(emit)
-printf '%s\n' "$OUT"
-if [ "${1:-}" != "" ]; then
-  printf '%s\n' "$OUT" > "$1"
-fi
+# Machine-readable sibling for cross-release comparison (no thousands commas).
+emit_json() {
+  local growth='null'
+  if [ -n "$BASE" ]; then
+    growth=$(printf '{"baseline":"%s","lib_loc":%d,"test_loc":%d,"test_cases":%d,"modules":%d,"commits":%d}' \
+      "$BASE" "$DLIB" "$DTEST" "$DCASES" "$DMODULES" "${COMMITS:-0}")
+  fi
+  printf '{'
+  printf '"ref":"%s",' "$HEAD_LABEL"
+  printf '"lib_loc":%d,"lib_files":%d,"test_loc":%d,"test_files":%d,' "$LIB_LOC" "$LIB_FILES" "$TEST_LOC" "$TEST_FILES"
+  printf '"mcp_lib_loc":%d,"modules":%d,"test_cases":%d,"describe_blocks":%d,' "$MCP_LIB_LOC" "$MODULES" "$TEST_CASES" "$DESCRIBES"
+  printf '"test_code_ratio":%s,' "$RATIO"
+  printf '"public_defs":%d,"specs":%d,"spec_coverage_pct":%d,' "$PUB_DEFS" "$SPECS" "$SPEC_COV_NUM"
+  printf '"todos":%d,"deps":%d,' "$TODOS" "${DEPS:-0}"
+  printf '"growth":%s' "$growth"
+  printf '}\n'
+}
+
+MD=$(emit)
+printf '%s\n' "$MD"
+[ "${1:-}" != "" ] && printf '%s\n' "$MD" > "$1"   # Markdown fragment
+[ "${2:-}" != "" ] && emit_json > "$2"             # JSON sibling

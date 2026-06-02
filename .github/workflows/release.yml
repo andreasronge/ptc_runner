@@ -459,8 +459,8 @@ jobs:
       - name: Compute release stats
         id: stats
         run: |
-          mkdir -p tmp/release-report
-          scripts/release-stats.sh tmp/release-report/stats.md
+          mkdir -p tmp/release-report tmp/metrics
+          scripts/release-stats.sh tmp/release-report/stats.md tmp/metrics/stats.json
           {
             echo "<!-- stats fragment also added to the release report -->"
             cat tmp/release-report/stats.md
@@ -472,6 +472,15 @@ jobs:
         with:
           name: release-fragment-stats
           path: tmp/release-report/stats.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload metrics JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metrics-stats
+          path: tmp/metrics/stats.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -493,12 +502,12 @@ jobs:
       - name: Run tests with coverage
         id: cover
         run: |
-          mkdir -p tmp/release-report
+          mkdir -p tmp/release-report tmp/metrics
           # Non-gating: capture the cover summary even if some tests fail.
           set +e
           mix test --cover 2>&1 | tee tmp/cover.txt
           set -e
-          scripts/coverage-stats.sh tmp/cover.txt tmp/release-report/coverage.md
+          scripts/coverage-stats.sh tmp/cover.txt tmp/release-report/coverage.md tmp/metrics/coverage.json
           cat tmp/release-report/coverage.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report fragment
@@ -507,6 +516,15 @@ jobs:
         with:
           name: release-fragment-coverage
           path: tmp/release-report/coverage.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload metrics JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metrics-coverage
+          path: tmp/metrics/coverage.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -594,9 +612,11 @@ jobs:
             echo "## Artifacts"
             echo ""
             echo "- \`release-fragment-*\`"
+            echo "- \`release-metrics-*\` (machine-readable stats/coverage JSON)"
             echo "- \`release-hex-unpack\`"
             echo "- \`release-llm-smoke-reports\` when the LLM smoke job ran"
             echo "- \`release-checks-report\`"
+            echo "- On a tag push: a GitHub Release with these notes + \`release-metrics.json\` attached"
             echo ""
           } > tmp/release-checks.md
 
@@ -641,3 +661,92 @@ jobs:
         run: mix hex.publish docs --yes
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+
+  github-release:
+    runs-on: ubuntu-latest
+    name: Publish GitHub Release
+    # ONLY on a real tag push — never on workflow_dispatch — and only when every
+    # gate passed (same publish conditions as Hex). `always()` lets the
+    # non-gating stats/coverage/report jobs fail without skipping this job; the
+    # explicit gate checks below still hold the line.
+    needs: [test, soak, integrity, docs, perf, release-report, stats, coverage]
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.test.result == 'success' &&
+      needs.soak.result == 'success' &&
+      needs.integrity.result == 'success' &&
+      needs.docs.result == 'success' &&
+      needs.perf.result == 'success'
+    permissions:
+      contents: write   # create the GitHub Release for this tag
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download release report
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: release-checks-report
+          path: tmp/dl/report
+
+      - name: Download metric JSONs
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: release-metrics-*
+          path: tmp/dl/metrics
+          merge-multiple: true
+
+      - name: Assemble release-metrics.json
+        run: |
+          mkdir -p tmp/out
+          VERSION=$(grep 'version:' mix.exs | head -n 1 | sed 's/.*"\(.*\)".*/\1/')
+          GENERATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          read_json() { [ -s "$1" ] && cat "$1" || echo null; }
+          STATS=$(read_json tmp/dl/metrics/stats.json)
+          COVERAGE=$(read_json tmp/dl/metrics/coverage.json)
+          jq -n \
+            --arg version "$VERSION" --arg tag "$GITHUB_REF_NAME" \
+            --arg commit "$GITHUB_SHA" --arg generated "$GENERATED" \
+            --argjson stats "$STATS" --argjson coverage "$COVERAGE" \
+            '{version:$version, tag:$tag, commit:$commit, generated:$generated, stats:$stats, coverage:$coverage}' \
+            > tmp/out/release-metrics.json
+          echo "::group::release-metrics.json"; cat tmp/out/release-metrics.json; echo "::endgroup::"
+
+      - name: Compose release notes
+        run: |
+          mkdir -p tmp/out
+          VERSION=$(grep 'version:' mix.exs | head -n 1 | sed 's/.*"\(.*\)".*/\1/')
+          # CHANGELOG section for this version (its heading up to the next "## [").
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { f=1; print; next }
+            f && /^## \[/ { f=0 }
+            f { print }
+          ' CHANGELOG.md > tmp/out/changelog.md
+          {
+            if [ -s tmp/out/changelog.md ]; then cat tmp/out/changelog.md; else echo "Release ${GITHUB_REF_NAME}."; fi
+            echo
+            echo "---"
+            echo
+            if [ -s tmp/dl/report/release-checks.md ]; then cat tmp/dl/report/release-checks.md; fi
+          } > tmp/out/notes.md
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME exists — updating notes and asset."
+            gh release edit "$GITHUB_REF_NAME" --notes-file tmp/out/notes.md
+            gh release upload "$GITHUB_REF_NAME" tmp/out/release-metrics.json --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file tmp/out/notes.md \
+              tmp/out/release-metrics.json
+          fi
