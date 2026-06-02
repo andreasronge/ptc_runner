@@ -142,10 +142,11 @@ defmodule PtcRunner.Lisp do
   ## Return Value
 
   On success, returns:
-  - `{:ok, Step.t()}` with:
-    - `step.return`: The value returned to the caller
-    - `step.memory`: Complete memory state after execution
-    - `step.usage`: Execution metrics (duration_ms, memory_bytes)
+   - `{:ok, Step.t()}` with:
+     - `step.return`: The value returned to the caller
+     - `step.memory`: Complete memory state after execution
+     - `step.usage`: Execution metrics (`duration_ms`, `memory_bytes`,
+       `eval_reductions`)
 
   On error, returns:
   - `{:error, Step.t()}` with:
