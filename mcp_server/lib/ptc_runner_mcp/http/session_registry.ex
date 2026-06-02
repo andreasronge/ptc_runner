@@ -3,8 +3,8 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
 
   use GenServer
 
+  alias PtcRunnerMcp.{Credentials, Log, Sessions}
   alias PtcRunnerMcp.Http.{Session, Telemetry}
-  alias PtcRunnerMcp.{Log, Sessions}
   alias PtcRunnerMcp.Sessions.Owner, as: PtcOwner
 
   defstruct sessions: %{},
@@ -25,6 +25,7 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
   def init(opts) do
     Process.flag(:trap_exit, true)
     config = Keyword.fetch!(opts, :config)
+    register_auth_token_redaction(config)
     ref = Process.send_after(self(), :cleanup, @cleanup_interval_ms)
     {:ok, %__MODULE__{config: config, cleanup_ref: ref}}
   end
@@ -317,4 +318,11 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
   end
 
   defp session_age_ms(_meta), do: 0
+
+  defp register_auth_token_redaction(%{auth_token: token})
+       when is_binary(token) and byte_size(token) > 0 do
+    Credentials.register_redaction_secrets([token])
+  end
+
+  defp register_auth_token_redaction(_config), do: :ok
 end
