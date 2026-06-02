@@ -175,5 +175,13 @@ defmodule PtcRunner.LLMTest do
         PtcRunner.LLM.adapter!()
       end
     end
+
+    test "raises with actionable message when configured adapter cannot be loaded" do
+      Application.put_env(:ptc_runner, :llm_adapter, NonExistent.Adapter)
+
+      assert_raise RuntimeError, ~r/req_llm/, fn ->
+        PtcRunner.LLM.adapter!()
+      end
+    end
   end
 end

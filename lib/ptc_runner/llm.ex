@@ -254,8 +254,9 @@ defmodule PtcRunner.LLM do
           do: mod,
           else:
             raise(
-              "Configured LLM adapter #{inspect(mod)} could not be loaded. " <>
-                "Check that the module exists and is compiled."
+              "LLM adapter #{inspect(mod)} could not be loaded. " <>
+                "If you intended to use the built-in adapter, add {:req_llm, \"~> 1.8\"} to your deps; " <>
+                "otherwise verify that #{inspect(mod)} exists and is compiled, or set config :ptc_runner, :llm_adapter to a valid module."
             )
     end
   end
