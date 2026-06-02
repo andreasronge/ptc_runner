@@ -60,6 +60,15 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     test "error on odd number of forms" do
       assert {:error, _} = Lisp.run("(cond-> 1 true)")
     end
+
+    test "truthy nil step raises instead of returning nil" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(cond-> 1 true nil)")
+    end
+
+    test "falsey nil step remains skipped" do
+      assert {:ok, %{return: 1}} = Lisp.run("(cond-> 1 false nil)")
+    end
   end
 
   describe "cond->>" do
@@ -70,6 +79,11 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     test "applies steps conditionally" do
       assert {:ok, %{return: [2, 3, 4]}} =
                Lisp.run("(cond->> [1 2 3] true (map inc) false (filter odd?))")
+    end
+
+    test "truthy nil step raises instead of returning nil" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(cond->> 1 true nil)")
     end
   end
 
@@ -102,6 +116,15 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     test "threads as first argument" do
       assert {:ok, %{return: 5}} = Lisp.run("(some-> 10 (- 5))")
     end
+
+    test "nil step raises after non-nil value" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(some-> 1 nil)")
+    end
+
+    test "nil step is not reached after nil value" do
+      assert {:ok, %{return: nil}} = Lisp.run("(some-> nil nil)")
+    end
   end
 
   describe "some->>" do
@@ -115,6 +138,11 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
 
     test "threads through non-nil" do
       assert {:ok, %{return: [2, 3, 4]}} = Lisp.run("(some->> [1 2 3] (map inc))")
+    end
+
+    test "nil step raises after non-nil value" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(some->> 1 nil)")
     end
   end
 

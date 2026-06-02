@@ -32,8 +32,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `+'` | ✅ supported | Adds numbers with arbitrary precision | alias for +; BEAM integers are already arbitrary precision |
 | `-` | ✅ supported | Subtracts numbers or negates single argument |  |
 | `-'` | ✅ supported | Subtracts numbers with arbitrary precision | alias for -; BEAM integers are already arbitrary precision |
-| `->` | ✅ supported | Threads expression as second argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
-| `->>` | ✅ supported | Threads expression as last argument through forms | BUG GAP-S128: nil thread form returns nil instead of raising |
+| `->` | ✅ supported | Threads expression as second argument through forms | GAP-S128 fixed: nil thread targets raise as not callable |
+| `->>` | ✅ supported | Threads expression as last argument through forms | GAP-S128 fixed: nil thread targets raise as not callable |
 | `.` | ❌ not_relevant | Java member access and method calls | Java interop |
 | `..` | ❌ not_relevant | Chains member access operations | Java interop |
 | `/` | ✅ supported | Divides numbers |  |
@@ -127,8 +127,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `completing` | 🔲 candidate | Returns reducing function with completion | pure function for reducing transformations |
 | `concat` | ✅ supported | Returns lazy seq concatenating collections | BUG GAP-S57: string inputs currently raise instead of being treated as seqable |
 | `cond` | ✅ supported | Multi-way conditional | The zero-clause form returns nil, matching Clojure |
-| `cond->` | ✅ supported | Threads through forms where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
-| `cond->>` | ✅ supported | Threads as last arg where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising |
+| `cond->` | ✅ supported | Threads through forms where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op |
+| `cond->>` | ✅ supported | Threads as last arg where tests true | BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op |
 | `condp` | ✅ supported | Predicate dispatch against expression | BUG GAP-S38: :>> result-function clauses are unsupported. BUG GAP-S103: no-match/no-default form currently returns nil instead of raising |
 | `conj` | ✅ supported | Returns collection with items added | BUG GAP-S76: conjoining a map into a map currently raises instead of merging entries. The zero-arity form returns an empty vector (Clojure's conj identity). BUG GAP-S137: list pairs are treated as map entries instead of raising. DIV-25: nil/list targets use vector append semantics |
 | `conj!` | ❌ not_relevant | Adds item to transient collection | operates on transient collections (mutable) |
@@ -459,8 +459,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `simple-symbol?` | ❌ not_relevant | Returns true if symbol has no ns | symbols are not supported as runtime values |
 | `slurp` | ❌ not_relevant | Reads entire contents of file/URL | involves file/network I/O |
 | `some` | ✅ supported | Returns first truthy result or nil | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `some->` | ✅ supported | Threads through forms while non-nil | BUG GAP-S128: nil thread form returns nil instead of raising |
-| `some->>` | ✅ supported | Threads as last arg while non-nil | BUG GAP-S128: nil thread form returns nil instead of raising |
+| `some->` | ✅ supported | Threads through forms while non-nil | GAP-S128 fixed: nil thread targets raise once reached |
+| `some->>` | ✅ supported | Threads as last arg while non-nil | GAP-S128 fixed: nil thread targets raise once reached |
 | `some-fn` | ✅ supported | Returns pred true if any fn truthy | BUG GAP-S71: map/set/vector callables are rejected in predicate position |
 | `some?` | ✅ supported | Returns true if not nil |  |
 | `sort` | ✅ supported | Returns sorted sequence | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values; BUG GAP-S20: nil input currently raises instead of returning an empty seq; BUG GAP-S46: nil comparator currently raises instead of using default compare; BUG GAP-S107: boolean comparator functions are not honored with Clojure ordering semantics |

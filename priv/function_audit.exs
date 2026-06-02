@@ -40,13 +40,13 @@
       name: "->",
       status: :supported,
       description: "Threads expression as second argument through forms",
-      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
+      notes: "GAP-S128 fixed: nil thread targets raise as not callable"
     },
     %{
       name: "->>",
       status: :supported,
       description: "Threads expression as last argument through forms",
-      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
+      notes: "GAP-S128 fixed: nil thread targets raise as not callable"
     },
     %{
       name: ".",
@@ -616,15 +616,13 @@
       name: "cond->",
       status: :supported,
       description: "Threads through forms where tests true",
-      notes:
-        "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+      notes: "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op"
     },
     %{
       name: "cond->>",
       status: :supported,
       description: "Threads as last arg where tests true",
-      notes:
-        "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op. BUG GAP-S128: truthy nil thread form returns nil instead of raising"
+      notes: "BUG GAP-S123: trailing unmatched test raises instead of acting as a no-op"
     },
     %{
       name: "condp",
@@ -2617,13 +2615,13 @@
       name: "some->",
       status: :supported,
       description: "Threads through forms while non-nil",
-      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
+      notes: "GAP-S128 fixed: nil thread targets raise once reached"
     },
     %{
       name: "some->>",
       status: :supported,
       description: "Threads as last arg while non-nil",
-      notes: "BUG GAP-S128: nil thread form returns nil instead of raising"
+      notes: "GAP-S128 fixed: nil thread targets raise once reached"
     },
     %{
       name: "some-fn",
