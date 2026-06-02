@@ -8,7 +8,7 @@ defmodule PtcRunner.AtomLeakSoakTest do
   This is the regression test for [#953](https://github.com/andreasronge/ptc_runner/issues/953).
 
   PTC-Lisp used to intern every var, symbol, and keyword name via
-  `String.to_atom/1` (see `lib/ptc_runner/lisp/parser_helpers.ex`,
+  `String.to_atom/1` (see `lib/ptc_runner/lisp/fast_parser.ex`,
   `lib/ptc_runner/lisp/ast.ex`). The parser now keeps only the bounded
   `SourceAtoms` vocabulary as atoms and leaves unbounded source names
   as binaries, so the steady-state atom growth rate should stay at
