@@ -210,7 +210,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `file-seq` | ❌ not_relevant | Lazy seq of files in directory tree | relies on lazy sequences and file I/O |
 | `filter` | ✅ supported | Returns items where predicate true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
 | `filterv` | ✅ supported | Returns vector of items where pred true | BUG GAP-S71: map callables are rejected in predicate position. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `find` | ✅ supported | Returns map entry for key or nil | BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup |
+| `find` | ✅ supported | Returns map entry for key or nil | DIV-48: non-associative collections (sets, strings) return a recoverable :type_error signal where Clojure raises |
 | `find-keyword` | ❌ not_relevant | Returns keyword with ns and name | relies on namespaces |
 | `find-ns` | ❌ not_relevant | Returns namespace or nil | relies on namespace system |
 | `find-var` | ❌ not_relevant | Returns var or nil | relies on vars/namespace system |
@@ -237,7 +237,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `future?` | ❌ not_relevant | Returns true if value is future | concurrency primitive |
 | `gensym` | ❌ not_relevant | Returns unique symbol | macro system utility |
 | `get` | ✅ supported | Returns value for key or nil | BUG GAP-S12: string indexes and non-index keys currently raise. BUG GAP-S36: set lookup currently raises instead of returning value/default, including nil members |
-| `get-in` | ✅ supported | Returns value at nested key path | BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure |
+| `get-in` | ✅ supported | Returns value at nested key path | BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure |
 | `get-method` | ❌ not_relevant | Returns multimethod implementation | multimethods not supported |
 | `get-proxy-class` | ❌ not_relevant | Returns proxy class | Java interop |
 | `get-thread-bindings` | ❌ not_relevant | Returns thread-local bindings | concurrency primitive / thread locals |
@@ -310,7 +310,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `make-array` | ❌ not_relevant | Creates Java array | Java interop/array creation |
 | `make-hierarchy` | ❌ not_relevant | Returns empty hierarchy | relies on multimethods system |
 | `map` | ✅ supported | Applies function to each item | BUG GAP-S71: map/vector callables are rejected in function position. BUG GAP-S102: multi-collection arity rejects string inputs. BUG GAP-S130: character literals are treated as one-character strings instead of raising |
-| `map-entry?` | ✅ supported | Returns true if map entry | BUG GAP-S136: explicit seq map entries are not recognized as map entries |
+| `map-entry?` | ✅ supported | Returns true if map entry | DIV-49: returns false for every value because PTC-Lisp has no distinct MapEntry type (a map seq entry is the same 2-element vector value as a literal vector) |
 | `map-indexed` | ✅ supported | Applies function with index to items | BUG GAP-S71: map callables are rejected in function position |
 | `map?` | ✅ supported | Returns true if map |  |
 | `mapcat` | ✅ supported | Maps then concatenates results | BUG GAP-S49: multiple input collections, nil results, and string results currently raise. BUG GAP-S71: map callables are rejected in function position |
