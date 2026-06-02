@@ -40,7 +40,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `replace-first` | 🔲 candidate | Replaces first instance of match in s | pure string transformation |
 | `reverse` | 🔲 candidate | Returns s with characters reversed | pure string transformation |
 | `split` | ✅ supported | Splits string on regex | BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S74: plain string delimiter is accepted even though Clojure requires a regex; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising |
-| `split-lines` | ✅ supported | Splits string on \n or \r\n | BUG GAP-S51: empty string currently returns [] instead of [""] |
+| `split-lines` | ✅ supported | Splits string on \n or \r\n | GAP-S51 fixed: empty string returns [""] |
 | `starts-with?` | ✅ supported | True if s starts with substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
 | `trim` | ✅ supported | Removes whitespace from both ends of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
 | `trim-newline` | ✅ supported | Removes all trailing newline or return characters | BUG GAP-S116: character inputs are accepted instead of raising |

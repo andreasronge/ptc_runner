@@ -2458,19 +2458,20 @@ space is not removed by these helpers but EM SPACE is considered whitespace.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | Manual conformance case `string/split-lines-empty-bug-001` |
 
 ```clojure
 ;; Clojure
 (clojure.string/split-lines "")   ;=> [""]
 
-;; PTC-Lisp current behavior
-(clojure.string/split-lines "")   ;=> []
+;; PTC-Lisp
+(clojure.string/split-lines "")   ;=> [""]
 ```
 
-**Decision:** BUG. This is a supported Clojure-named string helper on finite
-input, and returning an empty collection loses the single empty line.
+**Fix:** Added an explicit empty-input case so `(clojure.string/split-lines "")`
+returns the single empty line while preserving the existing non-empty line-split
+behavior, including trimming trailing empty lines.
 
 ### GAP-S52: Bit shift/test helpers do not apply JVM index masking
 

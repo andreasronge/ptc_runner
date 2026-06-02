@@ -26,7 +26,7 @@ defmodule PtcRunner.Lisp.Runtime.StringSplitLinesTest do
     end
 
     test "handles empty string" do
-      assert Runtime.split_lines("") == []
+      assert Runtime.split_lines("") == [""]
     end
 
     test "handles input with only newlines" do
