@@ -245,17 +245,19 @@ defmodule PtcRunner.LLM do
   """
   @spec adapter!() :: module()
   def adapter! do
-    Application.get_env(:ptc_runner, :llm_adapter) ||
-      if Code.ensure_loaded?(PtcRunner.LLM.ReqLLMAdapter) do
-        PtcRunner.LLM.ReqLLMAdapter
-      else
-        raise """
-        No LLM adapter configured.
+    case Application.get_env(:ptc_runner, :llm_adapter) do
+      nil -> raise_no_adapter()
+      mod -> if Code.ensure_loaded?(mod), do: mod, else: raise_no_adapter()
+    end
+  end
 
-        Either:
-        1. Add {:req_llm, "~> 1.8"} to your deps for the built-in adapter
-        2. Set config :ptc_runner, :llm_adapter, YourAdapter
-        """
-      end
+  defp raise_no_adapter do
+    raise """
+    No LLM adapter configured.
+
+    Either:
+    1. Add {:req_llm, "~> 1.8"} to your deps for the built-in adapter
+    2. Set config :ptc_runner, :llm_adapter, YourAdapter
+    """
   end
 end

@@ -145,6 +145,6 @@ defmodule PtcRunner.LLM.Registry do
   def validate(model_string), do: impl().validate(model_string)
 
   defp impl do
-    Application.get_env(:ptc_runner, :model_registry, PtcRunner.LLM.DefaultRegistry)
+    Application.get_env(:ptc_runner, :model_registry)
   end
 end

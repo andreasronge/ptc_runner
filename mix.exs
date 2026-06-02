@@ -38,7 +38,11 @@ defmodule PtcRunner.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      env: [
+        model_registry: PtcRunner.LLM.DefaultRegistry,
+        llm_adapter: PtcRunner.LLM.ReqLLMAdapter
+      ]
     ]
   end
 
