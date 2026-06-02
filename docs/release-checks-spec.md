@@ -64,6 +64,11 @@ jobs:
     needs: [test, soak, integrity, docs, perf] # gates; NOT llm-smoke
     if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps: [hex.build, hex.publish, hex.publish docs]
+  github-release:                              # §5I — tag push ONLY, gates green
+    needs: [test, soak, integrity, docs, perf, release-report, stats, coverage]
+    if: always() && push && refs/tags/v && all five gates == success
+    steps: [download report+metrics, assemble release-metrics.json,
+            compose notes (changelog + report), gh release create]
 ```
 
 This gates the Hex publish on soak/integrity/docs/test, keeps the LLM smoke as
@@ -288,6 +293,33 @@ timeout; the trade-off is one extra suite run.
   below a threshold by parsing the total — `summary: [threshold: N]` alone does
   not change the exit code.
 
+### 5I. GitHub Release — `github-release` job (tag push only)
+
+Publishes a permanent, per-version GitHub Release so releases are comparable
+over time. Actions artifacts (step summaries, `release-*` artifacts) are
+ephemeral and not addressable per tag; a Release page and its attached asset are
+durable and enable GitHub's `compare/vA...vB` view.
+
+- **Trigger guard (important):** runs **only** on a real tag push
+  (`github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`) and
+  **never on `workflow_dispatch`** — manual check runs must not publish a
+  Release. The `if` also requires all five gates (`test`, `soak`, `integrity`,
+  `docs`, `perf`) to be `success`; `always()` is used only so the non-gating
+  `release-report`/`stats`/`coverage` jobs may fail without skipping it.
+- **Comparable asset:** `scripts/release-stats.sh` and `scripts/coverage-stats.sh`
+  now also emit JSON siblings (uploaded as `release-metrics-*`). The job merges
+  them with `jq` into a single **`release-metrics.json`** (version, tag, commit,
+  generated-at, `stats`, `coverage`) attached to the Release. Comparing two
+  releases = diffing their `release-metrics.json`.
+- **Notes:** the `CHANGELOG.md` section for the version (heading → next `## [`)
+  followed by the full release-checks report.
+- **Idempotent:** re-runs `gh release edit` + `gh release upload --clobber` when
+  the Release already exists.
+- **Permissions:** `contents: write` at job level (top-level default stays
+  `contents: read`).
+- **Follow-up:** an in-repo `docs/metrics.md` ledger and/or a Codecov badge are
+  natural next steps for at-a-glance trends; out of scope here.
+
 ## 6. Failure semantics (summary)
 
 - **Red** iff: `mix test` fails, a soak assertion fails, `mix bench.check` detects
@@ -303,11 +335,13 @@ timeout; the trade-off is one extra suite run.
 
 - `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
   `integrity`, `docs`, `perf`, `llm-smoke`, `stats`, `coverage`,
-  `release-report`, `publish` (`needs` gates only; publish guarded by
+  `release-report`, `publish`, `github-release` (`needs` gates only; publish and
+  github-release guarded by
   `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
-- `scripts/release-stats.sh` (new) — emits the `## stats` report fragment (§5G).
+- `scripts/release-stats.sh` (new) — emits the `## stats` report fragment plus a
+  JSON sibling (§5G, §5I).
 - `scripts/coverage-stats.sh` (new) — parses `mix test --cover` into the
-  `## coverage` report fragment (§5H).
+  `## coverage` report fragment plus a JSON sibling (§5H, §5I).
 - `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
   optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
 - `.lycheeignore` (new) — volatile external hosts.

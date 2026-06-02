@@ -7,7 +7,7 @@
 # fragment for the release report.
 #
 #   mix test --cover 2>&1 | tee cover.txt
-#   scripts/coverage-stats.sh cover.txt [out.md]
+#   scripts/coverage-stats.sh cover.txt [out.md] [out.json]
 #
 # Reads stdin when no input file is given. Always exits 0 — coverage is
 # informational and must never fail its (continue-on-error) job.
@@ -16,6 +16,7 @@ set -uo pipefail
 
 IN="${1:-/dev/stdin}"
 OUT="${2:-}"
+OUT_JSON="${3:-}"
 
 # Parse the summary table. Fields are pipe-delimited: "| <pct>% | <Module> |".
 read -r TOTAL MODULES LT50 ZERO < <(
@@ -54,7 +55,15 @@ emit() {
   echo "| Modules at 0% | ${ZERO} |"
 }
 
+emit_json() {
+  local total="null"
+  [ "$TOTAL" != "n/a" ] && total=$(awk -v t="$TOTAL" 'BEGIN { printf "%.1f", t }')
+  printf '{"total_pct":%s,"modules_measured":%d,"modules_lt50":%d,"modules_zero":%d}\n' \
+    "$total" "$MODULES" "$LT50" "$ZERO"
+}
+
 RESULT=$(emit)
 printf '%s\n' "$RESULT"
-[ -n "$OUT" ] && printf '%s\n' "$RESULT" > "$OUT"
+[ -n "$OUT" ]      && printf '%s\n' "$RESULT" > "$OUT"
+[ -n "$OUT_JSON" ] && emit_json > "$OUT_JSON"
 exit 0
