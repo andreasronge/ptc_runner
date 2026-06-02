@@ -23,7 +23,7 @@ defmodule PtcRunnerMcp.Tools do
   """
 
   alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.Upstream.{Result, RunContext, Runtime}
+  alias PtcRunner.Upstream.{Eval, Result, RunContext}
 
   alias PtcRunnerMcp.{
     Agentic,
@@ -707,7 +707,7 @@ defmodule PtcRunnerMcp.Tools do
     runtime = RootUpstreamRuntime.runtime()
 
     {:ok, run_context} =
-      Runtime.run_context(runtime,
+      Eval.run_context(runtime,
         max_tool_calls: Limits.max_upstream_calls_per_program(),
         max_catalog_ops: CatalogConfig.get().max_catalog_ops_per_program,
         call_timeout_ms: Limits.upstream_call_timeout_ms(),
@@ -716,7 +716,7 @@ defmodule PtcRunnerMcp.Tools do
       )
 
     try do
-      eval_opts = RunContext.eval_options(run_context)
+      eval_opts = Eval.eval_options(run_context)
 
       sandbox_result =
         Sandbox.execute(
