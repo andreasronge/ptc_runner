@@ -1,0 +1,73 @@
+name: Claude Issue Enqueue
+
+# Lightweight front door for "@claude implement this issue" requests.
+#
+# It does NO implementation work. It only validates the request and adds the
+# `impl:queued` label, which is a DURABLE queue entry. The serialized runner
+# (claude-issue.yml) drains that queue one issue at a time, so two
+# implementation runs can never overlap and no request is ever silently
+# dropped by GitHub's "one pending run per concurrency group" limit.
+#
+# Because enqueueing is cheap and idempotent, this workflow does NOT share the
+# claude-impl concurrency group — it must never be evicted.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  enqueue:
+    # Trigger on @claude mentions in issue comments (not PRs).
+    # Security: requires ready-for-implementation label OR repo owner.
+    if: |
+      !github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      (
+        github.actor == 'andreasronge' ||
+        contains(toJSON(github.event.issue.labels), 'ready-for-implementation')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    # Per-issue lock only: collapses duplicate @claude comments on the SAME
+    # issue, but never blocks a different issue from being enqueued.
+    concurrency:
+      group: claude-enqueue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      issues: write
+
+    env:
+      # Use the PAT so that adding `impl:queued` emits a `labeled` event that
+      # actually triggers the runner. Labels added with the default GITHUB_TOKEN
+      # do not trigger downstream workflows.
+      GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+
+    steps:
+      - name: Enqueue for implementation
+        run: |
+          set -euo pipefail
+
+          if [ -z "${{ secrets.PAT_WORKFLOW_TRIGGER }}" ]; then
+            echo "::warning::PAT_WORKFLOW_TRIGGER not set — label event may not trigger the runner; schedule backstop will pick it up."
+          fi
+
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '[.labels[].name] | join(" ")')
+
+          if echo "$LABELS" | grep -qw "impl:running"; then
+            echo "Issue #$ISSUE_NUMBER is already being implemented (impl:running). Not re-enqueuing."
+            exit 0
+          fi
+
+          if echo "$LABELS" | grep -qw "impl:queued"; then
+            echo "Issue #$ISSUE_NUMBER is already queued (impl:queued). No-op."
+            exit 0
+          fi
+
+          # Stamp enqueue time so the runner can drain in FIFO order.
+          STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh issue edit "$ISSUE_NUMBER" --add-label "impl:queued"
+          gh issue comment "$ISSUE_NUMBER" --body "⏳ Queued for implementation at ${STAMP} (enqueued by @${{ github.actor }}). The serialized runner processes one issue at a time to avoid conflicting changes; this issue will be picked up automatically."
+          echo "Enqueued issue #$ISSUE_NUMBER at ${STAMP}."

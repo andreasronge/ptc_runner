@@ -13,8 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # Per-PR lock: operates on the PR's own branch, so different PRs are
+    # independent and must not block one another or the issue runner.
     concurrency:
-      group: claude-automation
+      group: claude-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
 
     permissions:

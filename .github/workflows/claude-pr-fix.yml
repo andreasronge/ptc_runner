@@ -27,8 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # Per-PR lock: serializes fixes on the SAME PR, but lets different PRs run
+    # in parallel. PR fixes push to the PR's own branch, not main, so they
+    # cannot merge-conflict with each other or with the issue runner.
     concurrency:
-      group: claude-automation
+      group: claude-pr-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
 
     permissions:
