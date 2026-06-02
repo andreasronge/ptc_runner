@@ -1282,7 +1282,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # a plain map access at runtime, and so the qualified atoms are guaranteed
   # interned before any user input reaches the analyzer (avoids the
   # `String.to_existing_atom/1` race where the analyzer module loads before
-  # Env's `builtin_bindings/0` runs).
+  # `Env.initial/0` (which consumes `Runtime.Builtins.bindings/0`) runs).
   @qualified_namespaces [:json, :Duration]
 
   @qualified_namespace_tables (for ns <- @qualified_namespaces, into: %{} do
