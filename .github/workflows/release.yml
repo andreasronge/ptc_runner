@@ -442,11 +442,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  stats:
+    runs-on: ubuntu-latest
+    name: Code & test stats
+    timeout-minutes: 5
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags so release-stats.sh can diff against the
+          # previous release tag for the growth section.
+          fetch-depth: 0
+
+      - name: Compute release stats
+        id: stats
+        run: |
+          mkdir -p tmp/release-report
+          scripts/release-stats.sh tmp/release-report/stats.md
+          {
+            echo "<!-- stats fragment also added to the release report -->"
+            cat tmp/release-report/stats.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-stats
+          path: tmp/release-report/stats.md
+          if-no-files-found: warn
+          retention-days: 30
+
   release-report:
     runs-on: ubuntu-latest
     name: Release report
     if: always()
-    needs: [test, soak, integrity, docs, perf, llm-smoke]
+    needs: [test, soak, integrity, docs, perf, llm-smoke, stats]
     continue-on-error: true
 
     steps:
@@ -520,6 +553,7 @@ jobs:
             echo "| docs | ${{ needs.docs.result }} | yes |"
             echo "| perf | ${{ needs.perf.result }} | yes |"
             echo "| llm-smoke | ${{ needs['llm-smoke'].result }} | no |"
+            echo "| stats | ${{ needs.stats.result }} | no |"
             echo ""
             echo "## Artifacts"
             echo ""
