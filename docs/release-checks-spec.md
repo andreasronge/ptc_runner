@@ -55,9 +55,10 @@ jobs:
   llm-smoke:  { continue-on-error: true,   # §5D — never blocks
                 if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_llm }} }
   stats:      { continue-on-error: true }   # §5G — code/test stats, never blocks
+  coverage:   { continue-on-error: true }   # §5H — mix test --cover, never blocks
   release-report:
     if: always()
-    needs: [test, soak, integrity, docs, perf, llm-smoke, stats]
+    needs: [test, soak, integrity, docs, perf, llm-smoke, stats, coverage]
     continue-on-error: true                # §5E — reporting only
   publish:
     needs: [test, soak, integrity, docs, perf] # gates; NOT llm-smoke
@@ -98,6 +99,7 @@ env:
 | Documentation (ExDoc warnings, relative links, gen-doc drift) | **yes** | 1 |
 | Real-LLM smoke | **NO — never fails** (stats only) | 1 |
 | Code & test stats | **NO — never fails** (informational) | 1 |
+| Test coverage (`mix test --cover`) | **NO — never fails** (informational) | 1 |
 | Release report | **NO — never fails** (summary only) | 1 |
 | External-URL links (docs) | **no** (informational) | 1 |
 | Performance (deterministic eval reductions) | **yes** | 2 |
@@ -264,6 +266,28 @@ appended to the release report. Implemented by `scripts/release-stats.sh`
   `$GITHUB_STEP_SUMMARY`. Portability: uses `[[:space:]]` (not `\s`) so counts
   match under `git grep -E` and BSD/GNU `awk`.
 
+### 5H. Test coverage — `coverage` job (informational, never fails)
+
+Non-gating line-coverage snapshot using the **built-in** tool (no new
+dependency; `mix.exs` already configures `test_coverage` with `ignore_modules`
+for Mix tasks and test support). A separate job rather than piggybacking on the
+`test` gate so `:cover` instrumentation overhead never threatens the gate's
+timeout; the trade-off is one extra suite run.
+
+- **Command:** `mix test --cover` (root app), captured with `set +e` so the
+  coverage summary is parsed even when some tests fail.
+- **Parser:** `scripts/coverage-stats.sh` reads the summary table (`| <pct>% |
+  Module |` rows + the `Total` line) and emits a `## coverage` fragment.
+- **Reported:** total line coverage %, modules measured, modules < 50%, modules
+  at 0% (the gap signal — a single % hides large untested clusters).
+- **Output:** `tmp/release-report/coverage.md` (auto-merged by `release-report`)
+  and `$GITHUB_STEP_SUMMARY`. Scope is the root library; `mcp_server` coverage
+  is out of scope here. Trend-vs-previous-release is a deliberate follow-up (it
+  needs a committed baseline %).
+- **Soft gate (future):** flip to failing the (still non-publish-blocking) job
+  below a threshold by parsing the total — `summary: [threshold: N]` alone does
+  not change the exit code.
+
 ## 6. Failure semantics (summary)
 
 - **Red** iff: `mix test` fails, a soak assertion fails, `mix bench.check` detects
@@ -278,10 +302,12 @@ appended to the release report. Implemented by `scripts/release-stats.sh`
 ## 7. New / changed files (implementation checklist)
 
 - `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
-  `integrity`, `docs`, `perf`, `llm-smoke`, `stats`, `release-report`, `publish`
-  (`needs` gates only; publish guarded by
+  `integrity`, `docs`, `perf`, `llm-smoke`, `stats`, `coverage`,
+  `release-report`, `publish` (`needs` gates only; publish guarded by
   `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
 - `scripts/release-stats.sh` (new) — emits the `## stats` report fragment (§5G).
+- `scripts/coverage-stats.sh` (new) — parses `mix test --cover` into the
+  `## coverage` report fragment (§5H).
 - `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
   optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
 - `.lycheeignore` (new) — volatile external hosts.
