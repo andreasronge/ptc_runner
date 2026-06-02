@@ -158,17 +158,28 @@ defmodule Mix.Tasks.Release.Smoke do
 
   defp assert_no_new_diff!(paths, fun) do
     before = git_diff(paths)
+    before_status = git_status(paths)
     fun.()
     after_diff = git_diff(paths)
+    after_status = git_status(paths)
 
     assert!(
-      before == after_diff,
+      before == after_diff and before_status == after_status,
       "generated-file drift changed for #{Enum.join(paths, ", ")}"
     )
   end
 
   defp git_diff(paths) do
     args = ["diff", "--" | paths]
+
+    case System.cmd("git", args) do
+      {output, 0} -> output
+      {output, status} -> Mix.raise("git #{Enum.join(args, " ")} failed: #{status}\n#{output}")
+    end
+  end
+
+  defp git_status(paths) do
+    args = ["status", "--porcelain", "--" | paths]
 
     case System.cmd("git", args) do
       {output, 0} -> output

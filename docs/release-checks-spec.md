@@ -145,8 +145,10 @@ The real-LLM job is non-blocking **by construction**: every LLM command is wrapp
    present in the pinned ExDoc `~> 0.31`). Catches broken `m:Module` / `` `Mod.fun/arity` ``
    / `extras` refs.
 2. **Generated-doc drift** — `mix ptc.gen_docs && mix ptc.conformance_report --write-inventory`
-   then `git diff --exit-code -- docs/ conformance_inventory.json`. (Exactly the drift the
-   2026-06-02 conformance batch had to fix by hand.)
+   then `git diff --exit-code -- docs/ conformance_inventory.json` plus
+   `git status --porcelain -- docs/ conformance_inventory.json` so newly generated,
+   untracked files fail too. (Exactly the drift the 2026-06-02 conformance batch had
+   to fix by hand.)
 3. **Broken links (lychee, scoped globs — not `**/*.md`)** — run
    `lycheeverse/lychee-action` over explicit paths only (`README.md`, `docs/**/*.md`,
    `mcp_server/*.md`) to avoid `deps/`, `tmp/`, and generated trees:
