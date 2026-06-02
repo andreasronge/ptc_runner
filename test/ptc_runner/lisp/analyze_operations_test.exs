@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Analyze
 
   describe "threading desugars to nested calls" do
@@ -63,6 +64,16 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
       raw = {:list, [{:symbol, :->}]}
       assert {:error, {:invalid_thread_form, :->, msg}} = Analyze.analyze(raw)
       assert msg =~ "at least one"
+    end
+
+    test "thread-first nil step raises instead of returning nil" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(-> 1 nil)")
+    end
+
+    test "thread-last nil step raises instead of returning nil" do
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+               Lisp.run("(->> 1 nil)")
     end
   end
 
