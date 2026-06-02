@@ -75,14 +75,6 @@ defmodule PtcRunner.Lisp.VectorKeyTest do
                  end
   end
 
-  test "find with vector path errors" do
-    assert_raise RuntimeError,
-                 ~r/expected predicate, got vector \[:status\] - use :status instead/,
-                 fn ->
-                   Runtime.find([:status], [%{status: true}])
-                 end
-  end
-
   test "mapv with vector path errors" do
     assert_raise RuntimeError,
                  ~r/expected function or key, got vector \[:status\] - use :status instead/,

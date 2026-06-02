@@ -1650,17 +1650,31 @@ This eliminates the need to manually convert JSON responses to atom-keyed maps b
 | `keep` | `(keep f coll)` | Non-nil results of (f item). false is kept. |
 | `keep-indexed` | `(keep-indexed f coll)` | Non-nil results of (f index item). false is kept. |
 | `dedupe` | `(dedupe coll)` | Remove consecutive duplicates |
-| `find` | `(find pred coll)` | First item where pred is truthy, or nil |
 
 ```clojure
 ;; Using a keyword directly (concise, checks truthiness)
 (filter :active users)
 (remove :deleted items)
-(find :special items)
 
 ;; Using an anonymous fn for richer comparisons
 (filter (fn [u] (> (:age u) 18)) users)
-(find   (fn [u] (= (:id u) 42)) users)
+;; "First match" is (first (filter ...)) — find is map/vector lookup, not search
+(first (filter (fn [u] (= (:id u) 42)) users))
+```
+
+`find` is **not** a predicate search: it is associative lookup. `(find coll
+key)` returns the `[key value]` entry for `key` in a map, or the `[index
+value]` entry for a non-negative integer index in a vector, or `nil` when
+absent — mirroring Clojure. It distinguishes a present `nil` value from a
+missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
+`nil`. Non-associative inputs (sets, strings) return a `:type_error` signal
+(DIV-48).
+
+```clojure
+(find {:a 1 :b 2} :b) ;=> [:b 2]
+(find {:a 1} :z)      ;=> nil
+(find [10 20 30] 2)   ;=> [2 30]
+(find [10 20] 5)      ;=> nil
 ```
 
 **Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
@@ -3540,7 +3554,7 @@ Join orders with user information:
   (->> orders
        (filter (fn [o] (> (:total o) 100)))
        (mapv (fn [order]
-               (let [user (find (fn [u] (= (:id u) (:user-id order))) users)]
+               (let [user (first (filter (fn [u] (= (:id u) (:user-id order))) users))]
                  (merge order (select-keys user [:name :email])))))))
 ```
 
