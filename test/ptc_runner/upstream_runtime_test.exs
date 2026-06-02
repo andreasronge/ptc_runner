@@ -2,6 +2,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Upstream.Credentials
+  alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.RunContext
   alias PtcRunner.Upstream.Runtime
 
@@ -19,13 +20,13 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     try do
       assert [%{"name" => "observatory", "tool_count" => 2}] = Runtime.catalog_snapshot(runtime)
 
-      assert {:ok, step} = Runtime.run_lisp(runtime, "(tool/servers)")
+      assert {:ok, step} = Eval.run_lisp(runtime, "(tool/servers)")
       assert [%{"name" => "observatory", "tool_count" => 2}] = step.return
 
-      assert {:ok, dir_step} = Runtime.run_lisp(runtime, "(dir 'observatory)")
+      assert {:ok, dir_step} = Eval.run_lisp(runtime, "(dir 'observatory)")
       assert Enum.any?(dir_step.return, &String.contains?(&1, "observatory/list-traces"))
 
-      assert {:ok, doc_step} = Runtime.run_lisp(runtime, "(doc 'observatory/list-traces)")
+      assert {:ok, doc_step} = Eval.run_lisp(runtime, "(doc 'observatory/list-traces)")
       assert doc_step.return =~ "observatory/list-traces"
     after
       Runtime.stop(runtime)
@@ -39,10 +40,10 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       {{:ok, first}, first_records} =
-        Runtime.run_lisp_with_records(runtime, program, max_tool_calls: 0)
+        Eval.run_lisp_with_records(runtime, program, max_tool_calls: 0)
 
       {{:ok, second}, second_records} =
-        Runtime.run_lisp_with_records(runtime, program, max_tool_calls: 0)
+        Eval.run_lisp_with_records(runtime, program, max_tool_calls: 0)
 
       assert first.return == %{ok: false, reason: :cap_exhausted, message: "cap_exhausted"}
       assert second.return == first.return
@@ -63,7 +64,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       {{:ok, step}, records} =
-        Runtime.run_lisp_with_records(runtime, program, max_tool_calls: 0)
+        Eval.run_lisp_with_records(runtime, program, max_tool_calls: 0)
 
       assert step.return == %{ok: false, reason: :cap_exhausted, message: "cap_exhausted"}
       assert [%{"server" => "observatory", "tool" => "list-traces"}] = records
@@ -87,7 +88,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme" :limit 1}})|
 
     try do
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -128,7 +129,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:trace_id "org/42" :org_id "acme"}})|
 
     try do
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -166,7 +167,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "get-trace-cost" :args {:trace_id "org/42"}})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return.ok == true
 
@@ -197,7 +198,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "list-trace-steps" :args {:trace_id "trace-42" :summary true}})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return.ok == true
 
@@ -219,7 +220,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "list-trace-steps" :args {:trace_id "t1" :summary []}})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return.ok == false
       assert step.return.reason == :upstream_error
@@ -243,7 +244,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:trace_id "org/42" :org_id "acme"}})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return.ok == true
 
@@ -264,7 +265,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:org_id "acme"}})|
 
     try do
-      {{:error, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:error, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.fail.reason == :runtime_error
       assert step.fail.message =~ "missing required args trace_id"
@@ -295,7 +296,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       {{:ok, step}, records} =
-        Runtime.run_lisp_with_records(runtime, program, max_response_bytes: 64)
+        Eval.run_lisp_with_records(runtime, program, max_response_bytes: 64)
 
       assert step.return.ok == false
       assert step.return.reason == :response_too_large
@@ -336,7 +337,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       {{:ok, step}, records} =
-        Runtime.run_lisp_with_records(runtime, program, max_response_bytes: 64)
+        Eval.run_lisp_with_records(runtime, program, max_response_bytes: 64)
 
       assert step.return.ok == false
       assert step.return.reason == :tool_error
@@ -361,7 +362,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     program = ~S|(apropos "list-traces" {:limit 1})|
 
     try do
-      {:ok, step} = Runtime.run_lisp(runtime, program)
+      {:ok, step} = Eval.run_lisp(runtime, program)
 
       # limit 1 -> the single top hit must be the upstream tool, not a local
       # builtin. Match the ref prefix only, so the description text isn't brittle.
@@ -383,7 +384,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert [%{"name" => "fixture", "tool_count" => 1}] = Runtime.catalog_snapshot(runtime)
 
       program = ~S|(tool/call 'fixture/echo {:message "hello"})|
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -408,7 +409,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       ~S|(pmap (fn [message] (tool/call 'fixture/echo {:message message})) ["a" "b" "c" "d"])|
 
     try do
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert Enum.map(step.return, &get_in(&1, [:value, "echo", "message"])) == [
                "a",
@@ -448,7 +449,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert [%{"name" => "fixture", "tool_count" => 1}] = Runtime.catalog_snapshot(runtime)
 
       program = ~S|(tool/call 'fixture/echo {:message "hello"})|
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -489,7 +490,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       program = ~S|(tool/call 'fixture/echo {:message "hello"})|
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -581,7 +582,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     program = ~S|(tool/call 'fixture/echo {:message "hello"})|
 
     try do
-      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{ok: false, reason: :tool_error, message: "denied [REDACTED]"}
 
@@ -629,7 +630,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     program = ~S|(tool/call 'fixture/echo {:message "hello"})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{
                ok: true,
@@ -678,7 +679,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     program = ~S|(tool/call 'fixture/echo {:message "hello"})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return.ok == true
       assert get_in(step.return.value, ["echo", "message"]) == "hello"
@@ -716,7 +717,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     program = ~S|(tool/call 'fixture/echo {:message "hello"})|
 
     try do
-      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+      {{:ok, step}, _records} = Eval.run_lisp_with_records(runtime, program)
 
       assert step.return == %{ok: false, reason: :tool_error, message: "boom"}
       refute inspect(step.return) =~ "should-not-win"
@@ -843,7 +844,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     {:ok, runtime} = Runtime.start_link(config: config())
 
     try do
-      {:ok, context} = Runtime.run_context(runtime)
+      {:ok, context} = Eval.run_context(runtime)
 
       assert :ok = RunContext.close(context)
       refute Process.alive?(context.collector.pid)
@@ -859,7 +860,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       assert_raise RuntimeError, "boom", fn ->
-        Runtime.with_run_context(runtime, [], fn context ->
+        Eval.with_run_context(runtime, [], fn context ->
           send(parent, {:collector, context.collector.pid})
           raise "boom"
         end)
@@ -934,16 +935,16 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       refute catalog_text =~ secret
       assert catalog_text =~ "[REDACTED]"
 
-      assert {:ok, servers_step} = Runtime.run_lisp(runtime, "(tool/servers)")
+      assert {:ok, servers_step} = Eval.run_lisp(runtime, "(tool/servers)")
       refute inspect(servers_step.return) =~ secret
 
-      assert {:ok, dir_step} = Runtime.run_lisp(runtime, "(dir 'observatory)")
+      assert {:ok, dir_step} = Eval.run_lisp(runtime, "(dir 'observatory)")
       refute inspect(dir_step.return) =~ secret
 
-      assert {:ok, doc_step} = Runtime.run_lisp(runtime, "(doc 'observatory/list-traces)")
+      assert {:ok, doc_step} = Eval.run_lisp(runtime, "(doc 'observatory/list-traces)")
       refute doc_step.return =~ secret
 
-      assert {:ok, meta_step} = Runtime.run_lisp(runtime, "(meta 'observatory/list-traces)")
+      assert {:ok, meta_step} = Eval.run_lisp(runtime, "(meta 'observatory/list-traces)")
       refute inspect(meta_step.return) =~ secret
     after
       Runtime.stop(runtime)
@@ -955,7 +956,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       assert {:ok, step} =
-               Runtime.run_lisp(runtime, "(dir 'observatory)", max_catalog_result_bytes: 10)
+               Eval.run_lisp(runtime, "(dir 'observatory)", max_catalog_result_bytes: 10)
 
       assert step.return == nil
 

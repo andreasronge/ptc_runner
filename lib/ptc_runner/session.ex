@@ -27,7 +27,7 @@ defmodule PtcRunner.Session do
   """
 
   alias PtcRunner.Step
-  alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
+  alias PtcRunner.Upstream.Eval, as: UpstreamEval
 
   @default_history_depth 3
 
@@ -142,6 +142,6 @@ defmodule PtcRunner.Session do
   end
 
   defp run_lisp(%__MODULE__{upstream_runtime: runtime}, source, opts) do
-    UpstreamRuntime.run_lisp(runtime, source, opts)
+    UpstreamEval.run_lisp(runtime, source, opts)
   end
 end
