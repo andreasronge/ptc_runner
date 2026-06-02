@@ -1597,6 +1597,13 @@ vector indices, and a `nil` collection, return `nil`. Non-associative
 collections (sets, strings) raise a recoverable `type_error` (DIV-48) instead
 of a crash.
 
+A list/vector *key* follows the flex-access value model and is treated as a
+get-in path rather than an exact key (`(find {[:a] 1} [:a])` ⇒ `nil`, matching
+`(get {[:a] 1} [:a])`), so `find` stays consistent with `get`/`contains?`/seq
+`replace`. Clojure would match the literal vector key; per [DIV-47] and the seq
+`replace` known-limitation, special-casing exact vector-key lookup in `find`
+alone would break flex-access consistency, so the value model takes precedence.
+
 ### GAP-S10: `nth` with a negative index reads from the end
 
 | Field | Value |
