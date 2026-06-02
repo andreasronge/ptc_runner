@@ -51,6 +51,9 @@ jobs:
 
     env:
       MIX_ENV: test
+      # The "Pick next queued issue" step runs before checkout, so gh can't
+      # infer the repo from a local .git — GH_REPO targets it explicitly.
+      GH_REPO: ${{ github.repository }}
 
     steps:
       - name: Check PAT availability
