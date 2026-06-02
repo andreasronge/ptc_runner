@@ -407,13 +407,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S139",
         "Clojure stringifies numeric replace receivers; PTC-Lisp currently raises a type error."
       ),
-      bug_case(
-        "string/split-string-delimiter-bug-001",
+      div_case(
+        "string/split-string-delimiter-001",
         "clojure.string",
         ["split"],
-        ~S|(clojure.string/split "a.b.c" ".")|,
-        "GAP-S74",
-        "Clojure string/split requires a regex Pattern delimiter; PTC-Lisp currently accepts plain strings."
+        ~S|(clojure.string/split "a..b..c" "..")|,
+        "DIV-50",
+        {:error, :type_error},
+        "Clojure string/split requires a regex Pattern delimiter and raises on a plain string; PTC-Lisp returns a recoverable :type_error signal for a multi-character plain-string delimiter (a single-character delimiter stays a char-equivalent split under DIV-47/GAP-S116)."
       ),
       div_case(
         "string/includes-char-hit-bug-001",

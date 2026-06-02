@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   Provides string concatenation, substring, join, split, and parsing functions.
   """
 
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Interop.Duration
@@ -119,6 +120,15 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (split "a,b,c" ",") returns ["a" "b" "c"]
   - (split "hello" "") returns ["h" "e" "l" "l" "o"]
   - (split "a,,b" ",") returns ["a" "" "b"]
+
+  Clojure's `split` requires a regex `Pattern` delimiter and raises a
+  ClassCastException for any plain-string delimiter. PTC-Lisp accepts a regex
+  delimiter and — under the char≡one-character-string value model (DIV-47,
+  GAP-S116) — a single-character delimiter, since a char literal is
+  indistinguishable from a one-character string at runtime. A delimiter that is
+  a plain string of two or more characters cannot be a char literal, so it is an
+  invalid program Clojure rejects; PTC-Lisp surfaces a recoverable `:type_error`
+  signal rather than silently splitting on it (DIV-50, GAP-S74).
   """
   def split(s, "") when is_binary(s), do: String.graphemes(s)
 
@@ -127,7 +137,14 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   def split(s, separator) when is_binary(s) and is_binary(separator) do
-    String.split(s, separator)
+    if String.length(separator) == 1 do
+      String.split(s, separator)
+    else
+      raise ExecutionError,
+        reason: :type_error,
+        message:
+          "split: delimiter must be a regex pattern, got plain string #{inspect(separator)}"
+    end
   end
 
   @doc """
