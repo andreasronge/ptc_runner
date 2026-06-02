@@ -505,6 +505,19 @@ defmodule PtcRunner.Lisp.RuntimeInteropTest do
       assert step.fail.message =~ ".substring: expected string"
     end
 
+    test "error on non-numeric start" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abc" "bad")|)
+      assert step.fail.message =~ ".substring: expected numeric start, got string"
+    end
+
+    test "error on non-numeric two-arg indexes" do
+      assert {:error, step} = Lisp.run(~s|(.substring "abc" "bad" 2)|)
+      assert step.fail.message =~ ".substring: expected numeric start, got string"
+
+      assert {:error, step} = Lisp.run(~s|(.substring "abc" 0 "bad")|)
+      assert step.fail.message =~ ".substring: expected numeric stop, got string"
+    end
+
     # Bounds-checking regression tests (Java StringIndexOutOfBoundsException semantics).
     # The .indexOf -> .substring chain is the canonical Java idiom; .indexOf returns
     # -1 on miss. Without bounds checking, (.substring s -1) silently returns the

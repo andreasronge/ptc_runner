@@ -390,7 +390,7 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   def dot_substring(_s, start) do
-    raise ".substring: expected integer start, got #{type_name(start)}"
+    raise ".substring: expected numeric start, got #{type_name(start)}"
   end
 
   def dot_substring(s, start, stop)
@@ -423,11 +423,11 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   def dot_substring(_s, start, _stop) when not is_number(start) do
-    raise ".substring: expected integer start, got #{type_name(start)}"
+    raise ".substring: expected numeric start, got #{type_name(start)}"
   end
 
   def dot_substring(_s, _start, stop) do
-    raise ".substring: expected integer end, got #{type_name(stop)}"
+    raise ".substring: expected numeric stop, got #{type_name(stop)}"
   end
 
   @doc """
