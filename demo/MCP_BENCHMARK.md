@@ -87,9 +87,9 @@ stdio code path adds over the deterministic-compute primitive.
 ## OS-process startup
 
 A separate one-shot probe pipes a single `initialize` frame to the
-released binary at:
+released binary, for example:
 
-    /Users/andreasronge/projects/ptc_runner/.claude/worktrees/agent-a9e9b1bddf86bae48/mcp_server/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp
+    mcp_server/_build/prod/rel/ptc_runner_mcp/bin/ptc_runner_mcp
 
 via `printf '...' | <release> start`, and times the round-trip
 until the handshake reply is parsed.
@@ -120,4 +120,3 @@ is what the `mcp` row in the results table reports.
   bookkeeping on every call.
 - The benchmark runs in `:dev`, not `:prod`. Hot-path timings will be
   slightly faster under `:prod` due to compiler optimizations.
-
