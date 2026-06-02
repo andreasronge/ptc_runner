@@ -558,6 +558,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # Build messages: pressure-triggered compaction trims older turns when
     # the threshold is reached; otherwise the raw accumulated history is sent.
     {messages, compaction_stats} = build_llm_messages(agent, state)
+    messages = maybe_inject_mission_log_in_messages(agent, state.journal, messages)
 
     state = maybe_put_state(state, :compaction_stats, compaction_stats)
 
@@ -1170,8 +1171,9 @@ defmodule PtcRunner.SubAgent.Loop do
         base
       end
 
-    # Only append mission log when journaling is enabled on the agent
-    if agent.journaling do
+    mission_log_in = Keyword.get(agent.format_options, :mission_log_in, :system_prompt)
+
+    if agent.journaling and mission_log_in == :system_prompt do
       case journal do
         %{} = j when map_size(j) > 0 ->
           mission_log = SystemPrompt.render_mission_log(journal)
@@ -1182,6 +1184,33 @@ defmodule PtcRunner.SubAgent.Loop do
       end
     else
       base
+    end
+  end
+
+  # When mission_log_in: :user_message, prepend the rendered mission log to
+  # the first user message in the message list. Called each turn so the log
+  # reflects the current journal without polluting state.messages.
+  defp maybe_inject_mission_log_in_messages(agent, journal, messages) do
+    mission_log_in = Keyword.get(agent.format_options, :mission_log_in, :system_prompt)
+
+    with true <- agent.journaling,
+         :user_message <- mission_log_in,
+         %{} = j when map_size(j) > 0 <- journal do
+      mission_log = SystemPrompt.render_mission_log(journal)
+      inject_into_first_user_message(messages, mission_log)
+    else
+      _ -> messages
+    end
+  end
+
+  defp inject_into_first_user_message(messages, prefix) do
+    case Enum.split_while(messages, &(&1.role != :user)) do
+      {before, [first_user | rest]} ->
+        updated = %{first_user | content: prefix <> "\n\n" <> first_user.content}
+        before ++ [updated | rest]
+
+      _ ->
+        messages
     end
   end
 

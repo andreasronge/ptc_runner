@@ -129,6 +129,7 @@ Large results are automatically truncated at different stages to manage context 
 | `result_limit` | 50 | Inspect `:limit` for final result formatting |
 | `result_max_chars` | 500 | Max chars in final result string |
 | `max_print_length` | 2000 | Max chars per `println` call |
+| `mission_log_in` | `:system_prompt` | Where to inject the mission log: `:system_prompt` or `:user_message` (use `:user_message` to keep the system prompt static for prompt caching) |
 
 Configure via `format_options`:
 
@@ -141,6 +142,8 @@ SubAgent.new(
   ]
 )
 ```
+
+To enable prompt caching with providers that cache the system prompt, set `mission_log_in: :user_message` — this keeps the system prompt static across turns while the mission log updates in the first user message.
 
 When data is truncated in turn feedback, the system appends:
 > *"... (truncated)"*
