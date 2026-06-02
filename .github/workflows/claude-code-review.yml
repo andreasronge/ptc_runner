@@ -24,9 +24,11 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Read-only review: per-PR group so reviews never block the impl lock and
+    # a newer push supersedes an in-flight review of the same PR.
     concurrency:
-      group: claude-automation
-      cancel-in-progress: false
+      group: claude-review-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write  # Need write to add labels

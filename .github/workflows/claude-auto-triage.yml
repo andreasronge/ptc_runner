@@ -13,8 +13,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Read-only triage: keyed to the triggering review run so it never blocks
+    # the impl lock.
     concurrency:
-      group: claude-automation
+      group: claude-review-triage-${{ github.event.workflow_run.id }}
       cancel-in-progress: false
 
     permissions:

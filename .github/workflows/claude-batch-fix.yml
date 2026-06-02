@@ -98,8 +98,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Shares the global implementation lock with the issue runner so two
+    # main-mutating automations never open conflicting branches/PRs at once.
     concurrency:
-      group: claude-automation
+      group: claude-impl
       cancel-in-progress: false
 
     permissions:

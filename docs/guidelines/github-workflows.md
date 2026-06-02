@@ -6,7 +6,10 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 
 1. **Trust Claude to be smart** - Keep workflow YAML simple, let Claude figure out context
 2. **Epic as source of truth** - All project state lives in the epic issue
-3. **Single concurrency group** - One Claude operation at a time, no race conditions
+3. **Serialized implementation, durable queue** - Main-mutating work runs one
+   at a time via the `claude-impl` lock; requests are queued in labels so none
+   are ever silently dropped. Read-only workflows run in their own per-event
+   groups and never block implementation.
 4. **Dependencies checked at runtime** - Claude reads "Blocked by:" and refuses if blockers open
 5. **Never lose work silently** - Always leave a trail (status comments, branches, PRs)
 6. **Fresh context breaks bias** - Second opinion reviews catch issues original implementer missed
@@ -19,7 +22,8 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 | `claude-code-review.yml` | PR events, `claude-review` label | Review PR code, detect protected file changes |
 | `claude-auto-triage.yml` | After code-review completes | Triage review findings |
 | `claude-issue-review.yml` | `needs-review` label | Review issue, add `ready-for-implementation` |
-| `claude-issue.yml` | `@claude` + `ready-for-implementation` | Implement issues with mandatory status |
+| `claude-issue-enqueue.yml` | `@claude` + `ready-for-implementation` | Validate request, add `impl:queued` (durable queue entry) |
+| `claude-issue.yml` | `impl:queued` label / schedule / dispatch | **Serialized runner**: drains the queue one issue at a time, implements with mandatory status |
 | `claude-pr-fix.yml` | `@claude` on PR | Fix PR issues (max 3 attempts) |
 | `claude-second-opinion.yml` | `needs-second-opinion` label | Fresh context review after failed fixes |
 | `claude-epic-start.yml` | `status:active` on epic | Start epic by triggering first unblocked issue |
@@ -271,7 +275,7 @@ When implementation discovers prerequisite work:
 - Gets the list of stuck issues from detection
 - Reads `docs/guidelines/github-workflows.md` to understand the system
 - Figures out what's wrong and fixes it (add labels, fix issue bodies, re-trigger)
-- Uses `claude-automation` concurrency group
+- Uses the `claude-impl` concurrency group (serialized with the issue runner)
 
 **Orphan recovery (parallel, no Claude):**
 - Detects `claude/*` branches without PRs → creates draft PRs
@@ -363,6 +367,12 @@ automation will NOT proceed because `needs-human-review` has higher priority.
 | `claude-review` | Triggers PR review |
 | `claude-approved` | Security gate for PR fixes (non-maintainer) |
 
+### Implementation Queue Labels
+| Label | Purpose |
+|-------|---------|
+| `impl:queued` | Durable queue entry — issue is waiting for the serialized runner. Added by `claude-issue-enqueue.yml`. |
+| `impl:running` | The runner has claimed this issue and is implementing it. Prevents double-processing; removed when the run finishes (even on failure). |
+
 ### Epic Labels
 | Label | Purpose |
 |-------|---------|
@@ -393,18 +403,55 @@ automation will NOT proceed because `needs-human-review` has higher priority.
 
 ## Concurrency Control
 
-All Claude workflows share one concurrency group:
+> **Why not one shared group?** A single global `claude-automation` group was
+> the original design, but it has a fatal flaw: a GitHub concurrency group
+> holds at most **one running + one pending** run. When several workflows fire
+> at once, the newest waiting request **evicts and cancels** the older pending
+> one. Read-only reviews competing in the same group could starve an
+> implementation run, and a burst of `@claude` requests could silently drop all
+> but two. (This stranded issue #1039.) The current design replaces the single
+> group with a durable queue plus purpose-scoped groups.
 
-```yaml
-concurrency:
-  group: claude-automation
-  cancel-in-progress: false
-```
+### Durable implementation queue
+
+Issue implementation is split into an **enqueue** front door and a
+**serialized runner**:
+
+- `claude-issue-enqueue.yml` (per-issue group `claude-enqueue-<n>`, never
+  blocked) validates the `@claude` request and adds the **`impl:queued`**
+  label. The label *is* the queue entry — durable state that survives even if
+  GitHub drops a pending run.
+- `claude-issue.yml` is the runner. It holds the global `claude-impl` lock,
+  picks the oldest `impl:queued` issue, flips it to `impl:running`, implements
+  it, then releases the label and re-dispatches itself if the queue is
+  non-empty. Triggers: the `labeled` event (fast path), a `*/10` schedule
+  (backstop so the queue can never stall), and `workflow_dispatch`.
+
+This guarantees **both** invariants the single group could not:
+- **Never parallel** — `claude-impl` (size 1) lets only one main-mutating run
+  execute at a time.
+- **Never dropped** — requests live in labels, not in GitHub's single pending
+  slot, so a burst is drained in order rather than cancelled.
+
+### Concurrency groups by purpose
+
+| Group | Workflows | `cancel-in-progress` | Rationale |
+|-------|-----------|----------------------|-----------|
+| `claude-impl` | `claude-issue.yml` (runner), `claude-batch-fix.yml`, `claude-stale-check.yml` | `false` | All branch off `main` / open PRs → strictly serialized so they never produce conflicting changes. |
+| `claude-enqueue-<issue>` | `claude-issue-enqueue.yml` | `false` | Cheap, idempotent; per-issue so it's never evicted and only collapses duplicate `@claude` comments on the same issue. |
+| `claude-pr-<pr>` | `claude-pr-fix.yml`, `claude-second-opinion.yml` | `false` | Push to a PR's *own* branch, not `main`; serialized per-PR but parallel across different PRs. |
+| `claude-review-pr-<pr>` | `claude-code-review.yml` | `true` | Read-only; a newer push supersedes an in-flight review. |
+| `claude-review-triage-<runid>` | `claude-auto-triage.yml` | `false` | Read-only; keyed to the triggering review run. |
+| `claude-review-issue-<issue>` | `claude-issue-review.yml` | `false` | Read-only; per-issue. |
+| `claude-epic-<issue>` | `claude-epic-update.yml` | `false` | Edits the epic issue, not `main`; per-trigger. |
+
+Read-only workflows are deliberately **outside** `claude-impl` so they can
+never block or evict implementation work.
 
 This ensures:
-- Only one Claude operation runs at a time
-- No race conditions on issues/PRs
-- Jobs queue instead of being cancelled
+- Only one main-mutating Claude operation runs at a time (`claude-impl`)
+- No race conditions on `main`; no conflicting branches/PRs
+- Implementation requests queue durably in labels instead of being cancelled
 
 ## Security Gates
 
@@ -462,9 +509,28 @@ done
 gh pr create --head "claude/123-feature" --draft --title "[Draft] Recovered #123"
 ```
 
-### Clear Concurrency Queue
+### Inspect / Drain the Implementation Queue
 
-If jobs are stuck:
+The implementation queue lives in labels, not in GitHub's pending-run slot:
+
+```bash
+# What's waiting and what's in flight
+gh issue list --label "impl:queued"  --state open
+gh issue list --label "impl:running" --state open
+
+# Manually kick the runner (e.g. if the schedule backstop hasn't fired yet)
+gh workflow run claude-issue.yml
+```
+
+If a run crashed and left an issue stuck as `impl:running` (the runner clears
+this even on failure, so this is rare), free it manually:
+
+```bash
+gh issue edit ISSUE_NUMBER --remove-label "impl:running" --add-label "impl:queued"
+gh workflow run claude-issue.yml
+```
+
+If jobs are stuck running:
 ```bash
 # Cancel running workflows
 gh run list --workflow=claude-issue.yml --status in_progress --json databaseId \

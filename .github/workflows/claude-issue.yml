@@ -1,25 +1,46 @@
 name: Claude Issue Implementation
 
+# Serialized, durable runner for issue implementation.
+#
+# Requests are enqueued by claude-issue-enqueue.yml, which adds the
+# `impl:queued` label (a durable queue entry). This runner drains that queue
+# ONE issue at a time:
+#
+#   * concurrency group `claude-impl` (cancel-in-progress: false) guarantees
+#     no two implementation runs — across this runner, claude-batch-fix, and
+#     claude-stale-check — ever execute at the same time, preventing
+#     conflicting branches/PRs against main.
+#   * The queue lives in labels, not in GitHub's pending-run slot, so nothing
+#     is ever silently dropped when many requests arrive at once (the failure
+#     that stranded issue #1039).
+#
+# Draining is driven by three triggers: the `labeled` event (fast path),
+# a periodic `schedule` (backstop so the queue can never stall), and
+# `workflow_dispatch` (self re-dispatch after each item + manual kick).
+
 on:
-  issue_comment:
-    types: [created]
+  issues:
+    types: [labeled]
+  schedule:
+    # Backstop: drain anything left in the queue even if a labeled/dispatch
+    # event was lost or evicted. Cheap no-op when the queue is empty.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
 
 jobs:
   claude:
-    # Trigger on @claude mentions in issue comments (not PRs)
-    # Security: requires ready-for-implementation label OR repo owner
+    # Only react to the queue label (or schedule / manual / self re-dispatch).
+    # Authorization is enforced at enqueue time; by the time `impl:queued`
+    # exists the request is already vetted.
     if: |
-      !github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@claude') &&
-      (
-        github.actor == 'andreasronge' ||
-        contains(toJSON(github.event.issue.labels), 'ready-for-implementation')
-      )
+      github.event_name != 'issues' || github.event.label.name == 'impl:queued'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # The single global implementation lock. Shared with claude-batch-fix and
+    # claude-stale-check so main-mutating automation is strictly serialized.
     concurrency:
-      group: claude-automation
+      group: claude-impl
       cancel-in-progress: false
 
     permissions:
@@ -30,7 +51,6 @@ jobs:
 
     env:
       MIX_ENV: test
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
 
     steps:
       - name: Check PAT availability
@@ -39,26 +59,64 @@ jobs:
             echo "::warning::PAT_WORKFLOW_TRIGGER secret not set - PRs won't trigger CI automatically"
           fi
 
+      # Claim the oldest queued issue. Flips impl:queued -> impl:running so a
+      # concurrent enqueue can't double-process it. Exits cleanly (has_work=false)
+      # when the queue is empty, which makes schedule/spurious triggers no-ops.
+      - name: Pick next queued issue
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          set -euo pipefail
+
+          # FIFO-ish: oldest by issue number among queued, not-yet-running issues.
+          NEXT=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "impl:queued" \
+            --state open \
+            --json number,labels \
+            --jq '[ .[] | select([.labels[].name] | index("impl:running") | not) ]
+                  | sort_by(.number) | .[0].number // empty')
+
+          if [ -z "${NEXT:-}" ]; then
+            echo "Queue empty — nothing to implement."
+            echo "has_work=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Claiming issue #$NEXT"
+          gh issue edit "$NEXT" --add-label "impl:running" --remove-label "impl:queued"
+
+          echo "has_work=true" >> "$GITHUB_OUTPUT"
+          echo "issue=$NEXT" >> "$GITHUB_OUTPUT"
+          # Expose to all later steps as $ISSUE_NUMBER / env.ISSUE_NUMBER.
+          echo "ISSUE_NUMBER=$NEXT" >> "$GITHUB_ENV"
+
       - name: Checkout repository
+        if: steps.pick.outputs.has_work == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Install git pre-commit hook
+        if: steps.pick.outputs.has_work == 'true'
         run: |
           cp scripts/pre-commit .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
 
       - name: Setup Elixir environment
+        if: steps.pick.outputs.has_work == 'true'
         uses: ./.github/actions/setup-elixir
 
       - name: Setup Claude Code
         id: setup-claude
+        if: steps.pick.outputs.has_work == 'true'
         uses: ./.github/actions/setup-claude-code
 
       - name: Run tests and capture failures
         id: test-feedback
+        if: steps.pick.outputs.has_work == 'true'
         continue-on-error: true
         run: |
           echo "Running tests to capture any failures..."
@@ -114,6 +172,7 @@ jobs:
 
       - name: Run Claude Code
         id: claude
+        if: steps.pick.outputs.has_work == 'true'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
@@ -127,19 +186,19 @@ jobs:
           path_to_claude_code_executable: ${{ steps.setup-claude.outputs.executable-path }}
 
           prompt: |
-            Implement issue #${{ github.event.issue.number }}.
+            Implement issue #${{ steps.pick.outputs.issue }}.
 
             ## Step 1: Read Issue and Check Dependencies
 
             ```bash
-            gh issue view ${{ github.event.issue.number }} --comments
+            gh issue view ${{ steps.pick.outputs.issue }} --comments
             ```
 
             **Check for "Blocked by:" in the issue body.** If blocking issues exist:
             1. Check if each blocking issue is closed: `gh issue view BLOCKER_NUMBER --json state`
             2. If ANY blocker is still open:
                - Post status comment (see Step 5) with result: BLOCKED
-               - Remove label: `gh issue edit ${{ github.event.issue.number }} --remove-label "ready-for-implementation"`
+               - Remove label: `gh issue edit ${{ steps.pick.outputs.issue }} --remove-label "ready-for-implementation"`
                - Stop here - do not implement
 
             ## Step 2: Get Epic Context (if part of an epic)
@@ -178,7 +237,7 @@ jobs:
 
             Before creating a new PR, check if one already exists:
             ```bash
-            EXISTING_PR=$(gh pr list --head "claude/${{ github.event.issue.number }}-" --state open --json number,url --jq '.[0]')
+            EXISTING_PR=$(gh pr list --head "claude/${{ steps.pick.outputs.issue }}-" --state open --json number,url --jq '.[0]')
             ```
             If a PR exists:
             - Update the existing PR instead of creating a new one
@@ -201,8 +260,8 @@ jobs:
             **Guidelines:**
             - Keep it simple - only implement what's requested
             - Run `mix precommit` before committing - NEVER use `--no-verify`
-            - Create PR with "Closes #${{ github.event.issue.number }}" in body
-            - Use branch naming: `claude/${{ github.event.issue.number }}-short-description`
+            - Create PR with "Closes #${{ steps.pick.outputs.issue }}" in body
+            - Use branch naming: `claude/${{ steps.pick.outputs.issue }}-short-description`
 
             **Protected files - changes require justification:**
             - `docs/specs/*.md` - Specifications (source of truth)
@@ -228,7 +287,7 @@ jobs:
 
             Description of what needs to be fixed/cleaned up.
 
-            Found during implementation of #${{ github.event.issue.number }}."
+            Found during implementation of #${{ steps.pick.outputs.issue }}."
             ```
 
             **Step 3: Reference issue in code (REQUIRED)**
@@ -251,7 +310,7 @@ jobs:
             First, get the current issue body, then append/update the automation state section:
             ```bash
             # Get current body and update automation state
-            CURRENT_BODY=$(gh issue view ${{ github.event.issue.number }} --json body --jq '.body')
+            CURRENT_BODY=$(gh issue view ${{ steps.pick.outputs.issue }} --json body --jq '.body')
 
             # Remove old automation state if present
             CLEAN_BODY=$(echo "$CURRENT_BODY" | sed '/^## Automation State/,/^## /{ /^## Automation State/d; /^## /!d; }' | sed '/<!-- automation-state:/d')
@@ -261,13 +320,13 @@ jobs:
             $CLEAN_BODY
 
             ## Automation State
-            <!-- automation-state: {"status":"[SUCCESS|INCOMPLETE|BLOCKED]","pr":null,"branch":"claude/${{ github.event.issue.number }}-xxx","attempts":1} -->
+            <!-- automation-state: {"status":"[SUCCESS|INCOMPLETE|BLOCKED]","pr":null,"branch":"claude/${{ steps.pick.outputs.issue }}-xxx","attempts":1} -->
 
             | Field | Value |
             |-------|-------|
             | Status | `[SUCCESS\|INCOMPLETE\|BLOCKED]` |
             | PR | #NNN or None |
-            | Branch | `claude/${{ github.event.issue.number }}-xxx` |
+            | Branch | `claude/${{ steps.pick.outputs.issue }}-xxx` |
             | Attempts | 1 |
 
             **Details:** [What was done, what remains, blockers discovered]
@@ -275,7 +334,7 @@ jobs:
             **Next Steps:** [If not SUCCESS: what needs to happen]
             ISSUE_EOF
 
-            gh issue edit ${{ github.event.issue.number }} --body-file /tmp/issue-body.md
+            gh issue edit ${{ steps.pick.outputs.issue }} --body-file /tmp/issue-body.md
             ```
 
             **Status meanings:**
@@ -290,7 +349,7 @@ jobs:
 
       # Verify status was updated in issue body
       - name: Verify implementation status
-        if: always()
+        if: always() && steps.pick.outputs.has_work == 'true'
         id: verify-status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -313,7 +372,7 @@ jobs:
 
       # Post fallback status if Claude didn't update issue body
       - name: Post fallback status
-        if: always() && steps.verify-status.outputs.status_posted == 'false'
+        if: always() && steps.pick.outputs.has_work == 'true' && steps.verify-status.outputs.status_posted == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -359,7 +418,7 @@ jobs:
 
       # Safety net: push any unpushed commits and remove workflow files
       - name: Push unpushed commits
-        if: always()
+        if: always() && steps.pick.outputs.has_work == 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
@@ -400,7 +459,7 @@ jobs:
           fi
 
       - name: Create PR if branch was pushed but no PR exists
-        if: always()
+        if: always() && steps.pick.outputs.has_work == 'true'
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
@@ -431,4 +490,29 @@ jobs:
           )" || echo "::warning::Could not create PR"
           else
             echo "PR #$EXISTING_PR already exists for branch $CURRENT_BRANCH"
+          fi
+
+      # Release the claim and keep the queue draining. Runs even on failure so a
+      # crashed item never stays stuck as impl:running. Re-dispatch is a fast
+      # path; the */10 schedule is the guaranteed backstop.
+      - name: Release claim and drain next
+        if: always() && steps.pick.outputs.has_work == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          set -euo pipefail
+
+          gh issue edit "$ISSUE_NUMBER" --remove-label "impl:running" 2>/dev/null || true
+
+          REMAINING=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "impl:queued" --state open \
+            --json number --jq 'length')
+
+          echo "Released issue #$ISSUE_NUMBER. Queue depth now: ${REMAINING:-0}."
+
+          if [ "${REMAINING:-0}" -gt 0 ]; then
+            echo "Re-dispatching runner to drain next queued issue..."
+            gh workflow run claude-issue.yml --repo "${{ github.repository }}" \
+              || echo "::warning::Self re-dispatch failed; the */10 schedule will drain the queue."
           fi

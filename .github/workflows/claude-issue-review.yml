@@ -13,8 +13,10 @@ jobs:
       !contains(github.event.issue.labels.*.name, 'quick-fix')
     runs-on: ubuntu-latest
 
+    # Read-only review (posts a comment): per-issue group so it never blocks
+    # the impl lock.
     concurrency:
-      group: claude-automation
+      group: claude-review-issue-${{ github.event.issue.number }}
       cancel-in-progress: false
 
     permissions:

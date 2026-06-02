@@ -13,8 +13,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Epic bookkeeping (edits the epic issue, not main): per-epic-trigger group
+    # so it never blocks the impl lock.
     concurrency:
-      group: claude-automation
+      group: claude-epic-${{ github.event.issue.number }}
       cancel-in-progress: false
 
     permissions:
