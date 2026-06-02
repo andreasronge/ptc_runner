@@ -50,6 +50,14 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Select do
   # associative by non-negative integer index. `flex_fetch` distinguishes a
   # present nil value from a missing key, so `(find {:a nil} :a)` yields
   # `[:a nil]` while `(find {:a 1} :b)` yields nil.
+  #
+  # A list/vector key follows PTC's flex-access value model: it is treated as
+  # a get-in path, not an exact key, so `find` is consistent with `get`,
+  # `contains?`, and seq `replace` (e.g. `(find {[:a] 1} [:a])` is nil, like
+  # `(get {[:a] 1} [:a])`). Clojure would match the literal vector key here;
+  # special-casing exact vector-key lookup in `find` alone would diverge from
+  # the flex-access model, which takes precedence (see DIV-47 and the seq
+  # `replace` known-limitation note in clojure-conformance-gaps).
   def find(nil, _key), do: nil
 
   def find(coll, key) when is_map(coll) and not is_struct(coll) do
