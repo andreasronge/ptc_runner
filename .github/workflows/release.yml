@@ -475,11 +475,46 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  coverage:
+    runs-on: ubuntu-latest
+    name: Test coverage
+    timeout-minutes: 25
+    continue-on-error: true
+    env:
+      MIX_ENV: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Run tests with coverage
+        id: cover
+        run: |
+          mkdir -p tmp/release-report
+          # Non-gating: capture the cover summary even if some tests fail.
+          set +e
+          mix test --cover 2>&1 | tee tmp/cover.txt
+          set -e
+          scripts/coverage-stats.sh tmp/cover.txt tmp/release-report/coverage.md
+          cat tmp/release-report/coverage.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-coverage
+          path: tmp/release-report/coverage.md
+          if-no-files-found: warn
+          retention-days: 30
+
   release-report:
     runs-on: ubuntu-latest
     name: Release report
     if: always()
-    needs: [test, soak, integrity, docs, perf, llm-smoke, stats]
+    needs: [test, soak, integrity, docs, perf, llm-smoke, stats, coverage]
     continue-on-error: true
 
     steps:
@@ -554,6 +589,7 @@ jobs:
             echo "| perf | ${{ needs.perf.result }} | yes |"
             echo "| llm-smoke | ${{ needs['llm-smoke'].result }} | no |"
             echo "| stats | ${{ needs.stats.result }} | no |"
+            echo "| coverage | ${{ needs.coverage.result }} | no |"
             echo ""
             echo "## Artifacts"
             echo ""
