@@ -160,10 +160,28 @@ defmodule PtcRunner.LLMTest do
       assert PtcRunner.LLM.adapter!() == MockAdapter
     end
 
-    test "falls back to ReqLLMAdapter when no config" do
-      Application.delete_env(:ptc_runner, :llm_adapter)
+    test "resolves to the packaged ReqLLMAdapter default" do
+      # mix.exs ships :llm_adapter => ReqLLMAdapter; the setup overrides it with
+      # MockAdapter, so restore the packaged default for this assertion.
+      Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.LLM.ReqLLMAdapter)
       # ReqLLM is available in test env (via optional req_llm dep)
       assert PtcRunner.LLM.adapter!() == PtcRunner.LLM.ReqLLMAdapter
+    end
+
+    test "raises when no adapter is configured" do
+      Application.delete_env(:ptc_runner, :llm_adapter)
+
+      assert_raise RuntimeError, ~r/No LLM adapter configured/, fn ->
+        PtcRunner.LLM.adapter!()
+      end
+    end
+
+    test "raises with actionable message when configured adapter cannot be loaded" do
+      Application.put_env(:ptc_runner, :llm_adapter, NonExistent.Adapter)
+
+      assert_raise RuntimeError, ~r/req_llm/, fn ->
+        PtcRunner.LLM.adapter!()
+      end
     end
   end
 end
