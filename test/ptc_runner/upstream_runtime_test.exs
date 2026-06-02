@@ -113,6 +113,166 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "run_lisp executes an OpenAPI tool with a path parameter, encoding the value into the path" do
+    {:ok, server} =
+      start_http_fixture(%{"id" => "org/42", "org_id" => "acme", "status" => "ok"})
+
+    {:ok, runtime} =
+      Runtime.start_link(config: config(base_url: server.base_url, allow_insecure_http: true))
+
+    # `get-trace` maps to GET /api/v1/traces/{trace_id} with `org_id` as a query
+    # arg. The slash in the trace id must be percent-encoded into a single path
+    # segment, never leak into the query, and never appear as a literal
+    # `{trace_id}` placeholder.
+    program =
+      ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:trace_id "org/42" :org_id "acme"}})|
+
+    try do
+      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return == %{
+               ok: true,
+               value: %{"id" => "org/42", "org_id" => "acme", "status" => "ok"},
+               value_kind: :json
+             }
+
+      assert [%{"server" => "observatory", "tool" => "get-trace", "status" => "ok"}] = records
+
+      # Assert the exact request line: a substring match could miss extra/garbled
+      # query params or a literal `{trace_id}` segment.
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) == "GET /api/v1/traces/org%2F42?org_id=acme HTTP/1.1"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp executes a path-only OpenAPI tool with no query string" do
+    {:ok, server} = start_http_fixture(%{"trace_id" => "org/42", "cost_usd" => 1.5})
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config:
+          config(
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            operations: ["get_trace_cost"]
+          )
+      )
+
+    # `get-trace-cost` has only a path param, so the URL must carry no `?` and no
+    # query string at all (build_url's `encode_query([]) -> nil`).
+    program =
+      ~S|(tool/call {:server "observatory" :tool "get-trace-cost" :args {:trace_id "org/42"}})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return.ok == true
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) == "GET /api/v1/traces/org%2F42/cost HTTP/1.1"
+      refute request =~ "?"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp encodes a boolean query parameter on a path-parameterized OpenAPI tool" do
+    {:ok, server} = start_http_fixture(%{"steps" => []})
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config:
+          config(
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            operations: ["list_trace_steps"]
+          )
+      )
+
+    # `list-trace-steps` mixes a path param (`trace_id`) with a boolean query
+    # param (`summary`); the boolean must serialize as `summary=true`.
+    program =
+      ~S|(tool/call {:server "observatory" :tool "list-trace-steps" :args {:trace_id "trace-42" :summary true}})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return.ok == true
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) == "GET /api/v1/traces/trace-42/steps?summary=true HTTP/1.1"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp rejects a non-scalar OpenAPI query argument with a clear error" do
+    {:ok, runtime} =
+      Runtime.start_link(config: config(operations: ["list_trace_steps"]))
+
+    # OpenAPI v1 only supports scalar query values. A list-valued `summary` must
+    # be rejected with an actionable :upstream_error rather than silently dropped
+    # or crashing the runtime.
+    program =
+      ~S|(tool/call {:server "observatory" :tool "list-trace-steps" :args {:trace_id "t1" :summary []}})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return.ok == false
+      assert step.return.reason == :upstream_error
+      assert step.return.message =~ "unsupported query arg 'summary'"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp joins an OpenAPI base_url path prefix ahead of the operation path" do
+    {:ok, server} = start_http_fixture(%{"id" => "org/42"})
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config: config(base_url: server.base_url <> "/proxy", allow_insecure_http: true)
+      )
+
+    # A base_url with its own path prefix must be joined before the operation
+    # path, without dropping or doubling the `/`.
+    program =
+      ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:trace_id "org/42" :org_id "acme"}})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return.ok == true
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) == "GET /proxy/api/v1/traces/org%2F42?org_id=acme HTTP/1.1"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp rejects an OpenAPI call missing a required path parameter" do
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    # `trace_id` is a required path param in the compiled schema, so omitting it
+    # is rejected at arg validation (before OpenAPI.call/build_url is reached),
+    # which keeps a malformed `{trace_id}` URL from ever being constructed.
+    program =
+      ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:org_id "acme"}})|
+
+    try do
+      {{:error, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.fail.reason == :runtime_error
+      assert step.fail.message =~ "missing required args trace_id"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "root runtime can call an MCP stdio upstream" do
     script = write_stdio_fixture!()
 
@@ -570,6 +730,9 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  # First line of a raw HTTP request (e.g. "GET /path?q=1 HTTP/1.1").
+  defp request_line(request), do: request |> String.split("\r\n", parts: 2) |> List.first()
+
   defp config(opts \\ []) do
     %{
       "upstreams" => %{
@@ -577,7 +740,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
           "transport" => "openapi",
           "base_url" => Keyword.get(opts, :base_url, "https://observatory.example"),
           "schema_file" => @schema,
-          "include_operations" => ["list_traces", "get_trace"],
+          "include_operations" => Keyword.get(opts, :operations, ["list_traces", "get_trace"]),
           "allow_insecure_http" => Keyword.get(opts, :allow_insecure_http, false)
         }
       }
