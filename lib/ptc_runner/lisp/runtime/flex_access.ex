@@ -162,13 +162,10 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
 
   def flex_fetch(map, key) when is_map(map) and not is_struct(map), do: Map.fetch(map, key)
 
-  # List index support - single traversal using sentinel
-  def flex_fetch(list, key) when is_list(list) and is_integer(key) and key >= 0 do
-    case Enum.at(list, key, :__flex_not_found__) do
-      :__flex_not_found__ -> :error
-      value -> {:ok, value}
-    end
-  end
+  # List index support - Enum.fetch/2 distinguishes a present element (even a
+  # present nil) from an out-of-bounds index without a colliding sentinel.
+  def flex_fetch(list, key) when is_list(list) and is_integer(key) and key >= 0,
+    do: Enum.fetch(list, key)
 
   def flex_fetch(list, _key) when is_list(list), do: :error
 
@@ -201,6 +198,8 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   Returns {:ok, value} if found, :error if missing.
   """
   def flex_fetch_in(data, []), do: {:ok, data}
+  # Clojure treats a nil path like an empty seq: the root value is "present".
+  def flex_fetch_in(data, nil), do: {:ok, data}
   def flex_fetch_in(nil, _path), do: :error
 
   def flex_fetch_in(data, [key | rest]) when is_map(data) do
@@ -210,11 +209,12 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
     end
   end
 
-  # List index support - single traversal using sentinel
+  # List index support - Enum.fetch/2 distinguishes a present element (even a
+  # present nil) from an out-of-bounds index without a colliding sentinel.
   def flex_fetch_in(data, [key | rest]) when is_list(data) and is_integer(key) and key >= 0 do
-    case Enum.at(data, key, :__flex_not_found__) do
-      :__flex_not_found__ -> :error
-      value -> flex_fetch_in(value, rest)
+    case Enum.fetch(data, key) do
+      {:ok, value} -> flex_fetch_in(value, rest)
+      :error -> :error
     end
   end
 

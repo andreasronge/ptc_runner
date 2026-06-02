@@ -2160,8 +2160,8 @@ collections remain an arity error, tracked separately from this seqable gap.)
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `core/get-in-default-present-nil-bug-001`, `core/get-in-default-nested-present-nil-bug-001`, `core/get-in-default-vector-present-nil-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `core/get-in-default-present-nil-001`, `core/get-in-default-nested-present-nil-001`, `core/get-in-default-vector-present-nil-001` |
 
 ```clojure
 ;; Clojure
@@ -2169,15 +2169,23 @@ collections remain an arity error, tracked separately from this seqable gap.)
 (get-in {:a {:b nil}} [:a :b] :missing) ;=> nil
 (get-in [nil :b] [0] :missing)    ;=> nil
 
-;; PTC-Lisp current behavior
-(get-in {:a nil} [:a] :missing)   ;=> :missing
-(get-in {:a {:b nil}} [:a :b] :missing) ;=> :missing
-(get-in [nil :b] [0] :missing)    ;=> :missing
+;; PTC-Lisp (fixed)
+(get-in {:a nil} [:a] :missing)   ;=> nil
+(get-in {:a {:b nil}} [:a :b] :missing) ;=> nil
+(get-in [nil :b] [0] :missing)    ;=> nil
 ```
 
 **Decision:** BUG. This is a Clojure-named helper on normal finite data.
 `get` already distinguishes a present nil value from a missing key when a
 default is supplied, and `contains?` can observe the present nil key.
+
+**Fix:** `MapOps.get_in/3` now resolves the path with `FlexAccess.flex_fetch_in/2`
+(which returns `{:ok, value} | :error`) instead of `flex_get_in/2` (which
+collapses a present nil and a missing key both to nil). The default is now
+applied only on `:error` — a missing path — so an explicitly present nil at the
+end of the path is returned as nil. A path that bottoms out on nil before it is
+fully consumed (e.g. `(get-in {:a nil} [:a :b] :missing) ;=> :missing`) still
+yields the default, since the deeper key is genuinely absent — matching Clojure.
 
 ### GAP-S23: `select-keys` with nil keyseq raises instead of returning an empty map
 

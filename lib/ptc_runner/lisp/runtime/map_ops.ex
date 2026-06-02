@@ -75,17 +75,20 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   def get_in(m, path) when is_map(m) and not is_struct(m), do: FlexAccess.flex_get_in(m, path)
   def get_in(l, path) when is_list(l), do: FlexAccess.flex_get_in(l, path)
 
+  # Use flex_fetch_in (not flex_get_in) so a present key whose value is nil is
+  # returned as nil rather than replaced by the default — matching Clojure, where
+  # the default applies only to a missing path, never to an explicitly-present nil.
   def get_in(m, path, default) when is_map(m) and not is_struct(m) do
-    case FlexAccess.flex_get_in(m, path) do
-      nil -> default
-      val -> val
+    case FlexAccess.flex_fetch_in(m, path) do
+      {:ok, val} -> val
+      :error -> default
     end
   end
 
   def get_in(l, path, default) when is_list(l) do
-    case FlexAccess.flex_get_in(l, path) do
-      nil -> default
-      val -> val
+    case FlexAccess.flex_fetch_in(l, path) do
+      {:ok, val} -> val
+      :error -> default
     end
   end
 

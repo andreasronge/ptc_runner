@@ -3419,29 +3419,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-S60"],
         [:collection]
       ),
-      bug_case(
-        "core/get-in-default-present-nil-bug-001",
+      regression_case(
+        "core/get-in-default-present-nil-001",
         "clojure.core",
         ["get-in"],
         "(get-in {:a nil} [:a] :missing)",
-        "GAP-S22",
-        "Clojure get-in returns an explicitly present nil value; PTC-Lisp returns the default."
+        ["GAP-S22"],
+        [:edge]
       ),
-      bug_case(
-        "core/get-in-default-nested-present-nil-bug-001",
+      regression_case(
+        "core/get-in-default-nested-present-nil-001",
         "clojure.core",
         ["get-in"],
         "(get-in {:a {:b nil}} [:a :b] :missing)",
-        "GAP-S22",
-        "Clojure get-in returns an explicitly present nested nil value; PTC-Lisp returns the default."
+        ["GAP-S22"],
+        [:edge]
       ),
-      bug_case(
-        "core/get-in-default-vector-present-nil-bug-001",
+      regression_case(
+        "core/get-in-default-vector-present-nil-001",
         "clojure.core",
         ["get-in"],
         "(get-in [nil :b] [0] :missing)",
-        "GAP-S22",
-        "Clojure get-in returns an explicitly present nil vector value; PTC-Lisp returns the default."
+        ["GAP-S22"],
+        [:edge]
       ),
       regression_case(
         "core/select-keys-nil-keys-001",
