@@ -6343,21 +6343,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J09",
         "Java String.substring indexes UTF-16 code units; PTC-Lisp currently indexes graphemes."
       ),
-      bug_case(
-        "java/string-substring-float-start-bug-001",
+      regression_case(
+        "java/string-substring-float-start-001",
         "java.lang.String",
         [".substring"],
         ~S|(.substring "abcd" 1.0)|,
-        "GAP-J14",
-        "Clojure Java interop coerces finite numeric start indexes for String.substring; PTC-Lisp currently rejects floats."
+        ["GAP-J14"],
+        [:edge]
       ),
-      bug_case(
-        "java/string-substring-float-start-end-bug-001",
+      regression_case(
+        "java/string-substring-float-start-end-001",
         "java.lang.String",
         [".substring"],
         ~S|(.substring "abcd" 1.0 3.0)|,
-        "GAP-J14",
-        "Clojure Java interop coerces finite numeric start/end indexes for String.substring; PTC-Lisp currently rejects floats."
+        ["GAP-J14"],
+        [:edge]
       ),
       bug_case(
         "java/string-index-of-utf16-bug-001",

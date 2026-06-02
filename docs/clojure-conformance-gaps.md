@@ -953,8 +953,8 @@ should win here.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/string-substring-float-start-bug-001`, `java/string-substring-float-start-end-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases `java/string-substring-float-start-001`, `java/string-substring-float-start-end-001` |
 
 ```clojure
 ;; Java / Clojure
@@ -962,14 +962,21 @@ should win here.
 (.substring "abcd" 1.0 3.0) ;=> "bc"
 
 ;; PTC-Lisp current behavior
-(.substring "abcd" 1.0)     ;=> type_error
-(.substring "abcd" 1.0 3.0) ;=> type_error
+(.substring "abcd" 1.0)     ;=> "bcd"
+(.substring "abcd" 1.0 3.0) ;=> "bc"
 ```
 
 **Decision:** BUG. `.substring` is exposed as a Java-shaped method, and
 Clojure's Java interop coerces finite numeric index arguments for Java `int`
 parameters. This is separate from PTC-Lisp's intentional grapheme indexing
 policy for Clojure-named string helpers such as `subs`.
+
+**Fix:** `dot_substring/2` and `dot_substring/3` now coerce finite float indexes
+to the Java `int` parameter by truncating toward zero, then delegate to the
+existing integer logic — `(.substring "abcd" 1.9)` behaves like `1`, matching
+Babashka and the JVM. Non-finite floats (NaN, Infinity) are PTC-Lisp signal
+atoms (`:nan` / `:infinity`), not `is_float` values, so they keep raising a
+recoverable type error rather than entering the coercion path.
 
 ### ~~GAP-J07~~: Reclassified as DIV-44 (intentional divergence)
 
