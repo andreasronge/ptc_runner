@@ -5,7 +5,7 @@ defmodule PtcRunner.Upstream.Runtime do
 
   use GenServer
 
-  alias PtcRunner.Upstream.{Catalog, Config, Credentials, OpenAPI, RunContext}
+  alias PtcRunner.Upstream.{Catalog, Config, Credentials, OpenAPI}
   alias PtcRunner.Upstream.Transport.McpHttp
   alias PtcRunner.Upstream.Transport.McpStdio
 
@@ -69,79 +69,6 @@ defmodule PtcRunner.Upstream.Runtime do
       nil -> :ok
       pid -> stop(pid)
     end
-  end
-
-  @spec run_context(struct() | pid(), keyword()) :: {:ok, struct()} | {:error, term()}
-  def run_context(runtime, opts \\ []), do: RunContext.new(runtime, opts)
-
-  @spec with_run_context(struct() | pid(), keyword(), (struct() -> term())) ::
-          {term(), [map()]}
-  def with_run_context(runtime, opts, fun) when is_function(fun, 1) do
-    {:ok, context} = run_context(runtime, opts)
-
-    try do
-      result = fun.(context)
-      records = RunContext.drain_calls(context)
-      {result, records}
-    after
-      RunContext.close(context)
-    end
-  end
-
-  @spec run_lisp(struct() | pid(), String.t(), keyword()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
-  def run_lisp(runtime, program, opts \\ []) do
-    context_opts =
-      Keyword.take(opts, [
-        :max_tool_calls,
-        :max_catalog_ops,
-        :call_timeout_ms,
-        :max_response_bytes,
-        :max_catalog_result_bytes
-      ])
-
-    lisp_opts =
-      Keyword.drop(opts, [
-        :max_tool_calls,
-        :max_catalog_ops,
-        :call_timeout_ms,
-        :max_response_bytes,
-        :max_catalog_result_bytes
-      ])
-
-    {result, _records} =
-      with_run_context(runtime, context_opts, fn context ->
-        PtcRunner.Lisp.run(program, Keyword.merge(lisp_opts, RunContext.eval_options(context)))
-      end)
-
-    result
-  end
-
-  @doc false
-  @spec run_lisp_with_records(struct() | pid(), String.t(), keyword()) ::
-          {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
-  def run_lisp_with_records(runtime, program, opts \\ []) do
-    context_opts =
-      Keyword.take(opts, [
-        :max_tool_calls,
-        :max_catalog_ops,
-        :call_timeout_ms,
-        :max_response_bytes,
-        :max_catalog_result_bytes
-      ])
-
-    lisp_opts =
-      Keyword.drop(opts, [
-        :max_tool_calls,
-        :max_catalog_ops,
-        :call_timeout_ms,
-        :max_response_bytes,
-        :max_catalog_result_bytes
-      ])
-
-    with_run_context(runtime, context_opts, fn context ->
-      PtcRunner.Lisp.run(program, Keyword.merge(lisp_opts, RunContext.eval_options(context)))
-    end)
   end
 
   @spec defaults(struct() | pid()) :: map()

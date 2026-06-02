@@ -9,7 +9,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   import Kernel, except: [inspect: 1]
 
-  alias PtcRunner.Upstream.{RunContext, Runtime}
+  alias PtcRunner.Upstream.{Eval, RunContext}
 
   alias PtcRunnerMcp.{
     CatalogConfig,
@@ -712,7 +712,7 @@ defmodule PtcRunnerMcp.Sessions do
     catalog_config = CatalogConfig.get()
 
     {:ok, context} =
-      Runtime.run_context(RootUpstreamRuntime.runtime(),
+      Eval.run_context(RootUpstreamRuntime.runtime(),
         max_tool_calls: Limits.max_upstream_calls_per_program(),
         max_catalog_ops: catalog_config.max_catalog_ops_per_program,
         call_timeout_ms: Limits.upstream_call_timeout_ms(),
@@ -720,7 +720,7 @@ defmodule PtcRunnerMcp.Sessions do
         max_catalog_result_bytes: catalog_config.max_catalog_result_bytes
       )
 
-    eval_opts = RunContext.eval_options(context)
+    eval_opts = Eval.eval_options(context)
 
     run_opts =
       opts

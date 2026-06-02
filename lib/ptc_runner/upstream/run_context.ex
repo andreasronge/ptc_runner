@@ -1,7 +1,7 @@
 defmodule PtcRunner.Upstream.RunContext do
   @moduledoc false
 
-  alias PtcRunner.Upstream.{CallTool, Collector, Discovery, Runtime}
+  alias PtcRunner.Upstream.{Collector, Runtime}
 
   @type t :: %__MODULE__{}
 
@@ -25,14 +25,6 @@ defmodule PtcRunner.Upstream.RunContext do
          limits: limits(runtime, opts)
        }}
     end
-  end
-
-  @spec eval_options(struct()) :: keyword()
-  def eval_options(%__MODULE__{} = context) do
-    [
-      tools: CallTool.build(context),
-      discovery_exec: Discovery.build(context)
-    ]
   end
 
   @spec drain_calls(struct()) :: [map()]

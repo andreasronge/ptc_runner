@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.SubAgent.Loop.ResponseHandler
-  alias PtcRunner.Upstream.RunContext, as: UpstreamRunContext
+  alias PtcRunner.Upstream.Eval, as: UpstreamEval
   alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
 
   @switches [
@@ -318,7 +318,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp run_lisp(source, opts, nil), do: PtcRunner.Lisp.run(source, opts)
 
   defp run_lisp(source, opts, runtime) do
-    UpstreamRuntime.run_lisp(runtime, source, opts)
+    UpstreamEval.run_lisp(runtime, source, opts)
   end
 
   defp with_upstream_runtime(opts, fun) do
@@ -400,8 +400,8 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp discovery_once(runtime, operation, args) do
     {result, _records} =
-      UpstreamRuntime.with_run_context(runtime, [], fn context ->
-        exec = UpstreamRunContext.eval_options(context)[:discovery_exec]
+      UpstreamEval.with_run_context(runtime, [], fn context ->
+        exec = UpstreamEval.eval_options(context)[:discovery_exec]
         exec.(operation, args)
       end)
 
