@@ -155,7 +155,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `ffirst` | `(ffirst coll)` | First of first |
 | `filter` | `(filter pred coll)` | Keep items where pred is truthy |
 | `filterv` | `(filterv pred coll)` | Same as filter (vectors are the default) |
-| `find` | `(find pred coll)` | First item where pred is truthy, or nil |
+| `find` | `(find coll key)` | Returns the [key value] entry for a key in a map (or [index value] for a vector index), else nil |
 | `first` | `(first coll)` | First item or nil |
 | `flatten` | `(flatten coll)` | Flatten nested collections |
 | `float?` | `(float? ...)` |  |
@@ -276,6 +276,10 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `zipmap` | `(zipmap keys vals)` | Create map from keys and values seqs |
 
 ```clojure
+(find {:a 1 :b 2} :b)
+;; => [:b 2]
+(find [10 20 30] 2)
+;; => [2 30]
 (hash-map)
 ;; => %{}
 (hash-map :a 1 :b 2)
@@ -344,7 +348,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `parse-long` | `(parse-long ...)` |  |
 | `pr-str` | `(pr-str ...)` | Readable string representation (strings quoted, nil as "nil", space-separated) |
 | `replace` | `(replace smap coll), (replace s pattern replacement)` | Seq replace via smap (arity 2) or string replace (arity 3) |
-| `split` | `(split s separator)` | Split string by separator |
+| `split` | `(split s re-or-char)` | Split string on a regex delimiter; a single-character string delimiter is accepted, a multi-character string delimiter signals :type_error (use a regex literal like #"--") |
 | `split-lines` | `(split-lines s)` | Split string into lines (\n or \r\n) |
 | `starts-with?` | `(starts-with? s prefix)` | Check if string starts with prefix |
 | `str` | `(str ...)` | Convert and concatenate to string |
