@@ -246,8 +246,17 @@ defmodule PtcRunner.LLM do
   @spec adapter!() :: module()
   def adapter! do
     case Application.get_env(:ptc_runner, :llm_adapter) do
-      nil -> raise_no_adapter()
-      mod -> if Code.ensure_loaded?(mod), do: mod, else: raise_no_adapter()
+      nil ->
+        raise_no_adapter()
+
+      mod ->
+        if Code.ensure_loaded?(mod),
+          do: mod,
+          else:
+            raise(
+              "Configured LLM adapter #{inspect(mod)} could not be loaded. " <>
+                "Check that the module exists and is compiled."
+            )
     end
   end
 
