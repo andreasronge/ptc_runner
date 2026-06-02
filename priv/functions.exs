@@ -1694,7 +1694,7 @@
       since: nil,
       section: "Core",
       ptc_extension?: false,
-      examples: ["(find {:a 1 :b 2} :b) ;=> [:b 2]", "(find [10 20 30] 2) ;=> [2 30]"],
+      examples: [{"(find {:a 1 :b 2} :b)", "[:b 2]"}, {"(find [10 20 30] 2)", "[2 30]"}],
       notes:
         "Associative lookup, not a predicate search. Distinguishes a present nil value from a missing key: (find {:a nil} :a) => [:a nil]. Out-of-range/negative vector indices and a nil collection return nil.",
       see_also: ["get", "contains?"],

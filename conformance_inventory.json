@@ -1285,7 +1285,7 @@
     "symbol": "find",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S09: currently implements predicate-search semantics instead of associative lookup"
+    "notes": "DIV-48: non-associative collections (sets, strings) return a recoverable :type_error signal where Clojure raises"
   },
   {
     "status": "not_relevant",
@@ -1474,7 +1474,7 @@
     "symbol": "get-in",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S22: default is returned for explicitly present nil values in maps/vectors; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure"
+    "notes": "BUG GAP-S19: nil map root currently raises instead of returning nil/default; BUG GAP-S12: string indexes currently raise; BUG GAP-S36: set roots currently raise instead of using set lookup. A nil path returns the root value, matching Clojure"
   },
   {
     "status": "not_relevant",
@@ -1992,7 +1992,7 @@
     "symbol": "map-entry?",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S136: explicit seq map entries are not recognized as map entries"
+    "notes": "DIV-49: returns false for every value because PTC-Lisp has no distinct MapEntry type (a map seq entry is the same 2-element vector value as a literal vector)"
   },
   {
     "status": "supported",
@@ -3840,7 +3840,7 @@
     "symbol": "split",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S74: plain string delimiter is accepted even though Clojure requires a regex; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising"
+    "notes": "BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising"
   },
   {
     "status": "supported",
@@ -4050,7 +4050,7 @@
     "symbol": "Boolean/parseBoolean",
     "namespace": "java.lang.Boolean",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J02: currently aliases parse-boolean, returns nil for non-true/nil inputs, misses Java's case-insensitive true handling, and returns nil instead of raising for non-string inputs."
+    "notes": "Fixed GAP-J02: matches java.lang.Boolean.parseBoolean; nil/null and every string other than case-insensitive \"true\" return false, while non-string, non-nil inputs raise."
   },
   {
     "status": "candidate",
@@ -4274,7 +4274,7 @@
     "symbol": ".substring",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. BUG GAP-J14: finite numeric indexes such as floats are rejected instead of coerced. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
   },
   {
     "status": "supported",
