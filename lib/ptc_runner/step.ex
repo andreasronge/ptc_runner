@@ -223,9 +223,10 @@ defmodule PtcRunner.Step do
   Execution metrics.
 
   Fields:
-  - `duration_ms`: Total execution time
-  - `memory_bytes`: Peak memory usage
-  - `turns`: Number of LLM turns used (SubAgent only, optional)
+   - `duration_ms`: Total execution time
+   - `memory_bytes`: Peak memory usage
+   - `eval_reductions`: BEAM reductions used by the sandbox child eval path
+   - `turns`: Number of LLM turns used (SubAgent only, optional)
   - `input_tokens`: Total input tokens (SubAgent only, optional)
   - `output_tokens`: Total output tokens (SubAgent only, optional)
   - `total_tokens`: Input + output tokens (SubAgent only, optional)
@@ -236,6 +237,7 @@ defmodule PtcRunner.Step do
   @type usage :: %{
           required(:duration_ms) => non_neg_integer(),
           required(:memory_bytes) => non_neg_integer(),
+          optional(:eval_reductions) => non_neg_integer(),
           optional(:turns) => pos_integer(),
           optional(:input_tokens) => non_neg_integer(),
           optional(:output_tokens) => non_neg_integer(),

@@ -66,7 +66,8 @@ defmodule PtcRunner.Sandbox do
   """
   @type metrics :: %{
           duration_ms: integer(),
-          memory_bytes: integer()
+          memory_bytes: integer(),
+          eval_reductions: non_neg_integer()
         }
 
   @typedoc """
@@ -145,9 +146,11 @@ defmodule PtcRunner.Sandbox do
 
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
+          start_reductions = process_reductions()
           result = eval_fn.(ast, context)
+          eval_reductions = process_reductions() - start_reductions
           memory = get_process_memory()
-          send(parent, {:result, self(), result, memory})
+          send(parent, {:result, self(), result, memory, eval_reductions})
         end,
         spawn_opts
       )
@@ -155,21 +158,26 @@ defmodule PtcRunner.Sandbox do
     try do
       # Wait for result with timeout
       receive do
-        {:result, ^pid, result, memory} ->
+        {:result, ^pid, result, memory, eval_reductions} ->
           end_time = System.monotonic_time(:millisecond)
           duration = end_time - start_time
+
+          metrics = %{
+            duration_ms: duration,
+            memory_bytes: memory,
+            eval_reductions: eval_reductions
+          }
 
           Process.demonitor(ref, [:flush])
 
           case result do
             {:ok, value, eval_memory} ->
-              {:ok, value, %{duration_ms: duration, memory_bytes: memory}, eval_memory}
+              {:ok, value, metrics, eval_memory}
 
             {:error, reason, eval_ctx} ->
               # Error with eval_ctx (e.g., from tool execution error with recorded tool_calls)
               # Return as a 4-tuple success with error tagged in the value
-              {:ok, {:error_with_ctx, reason}, %{duration_ms: duration, memory_bytes: memory},
-               eval_ctx}
+              {:ok, {:error_with_ctx, reason}, metrics, eval_ctx}
 
             {:error, reason} ->
               {:error, reason}
@@ -192,7 +200,7 @@ defmodule PtcRunner.Sandbox do
           Process.exit(pid, :kill)
 
           receive do
-            {:result, ^pid, _result, _memory} -> :ok
+            {:result, ^pid, _result, _memory, _eval_reductions} -> :ok
           after
             0 -> :ok
           end
@@ -300,6 +308,13 @@ defmodule PtcRunner.Sandbox do
   defp get_process_memory do
     case Process.info(self(), :memory) do
       {:memory, bytes} -> bytes
+      nil -> 0
+    end
+  end
+
+  defp process_reductions do
+    case Process.info(self(), :reductions) do
+      {:reductions, reductions} -> reductions
       nil -> 0
     end
   end

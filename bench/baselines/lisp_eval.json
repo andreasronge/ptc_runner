@@ -1,0 +1,45 @@
+{
+  "elixir": "1.19.3",
+  "otp": "28",
+  "samples": 7,
+  "scenarios": [
+    {
+      "duration_ms": 0,
+      "eval_reductions": 706,
+      "memory_bytes": 6928,
+      "name": "arithmetic",
+      "program": "(+ 1 (* 2 3) (- 10 4) (* (+ 1 1) 5))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 8845,
+      "memory_bytes": 27168,
+      "name": "collection_hofs",
+      "program": "(reduce + 0 (map (fn [x] (* x x)) (filter odd? (range 0 40))))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 812,
+      "memory_bytes": 8968,
+      "name": "map_string",
+      "program": "(let [m {:a \"alpha\" :b \"beta\" :c \"gamma\"}] (clojure.string/join \",\" (map clojure.string/upper-case [(:a m) (:b m) (:c m)])))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 2765,
+      "memory_bytes": 8936,
+      "name": "closure_apply",
+      "program": "(let [mk (fn [x] (fn [y] (+ x y)))] (reduce + 0 (map (mk 10) [1 2 3 4 5])))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 2129,
+      "memory_bytes": 13752,
+      "name": "context_filter",
+      "program": "(->> data/orders (filter #(> (:total %) 20)) (map :total) (reduce + 0))"
+    }
+  ],
+  "threshold": 1.07,
+  "version": 1,
+  "warmup": 20
+}

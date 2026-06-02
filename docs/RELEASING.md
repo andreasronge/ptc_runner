@@ -24,8 +24,8 @@ mix release.smoke
 
 `mix release.smoke` does not publish anything. It runs the deterministic root
 release checks, root and MCP soak tests, verifies generated artifacts and Hex
-package contents, builds the sibling `mcp_server` release, and smoke-tests the
-MCP release binary.
+package contents, checks the deterministic performance baseline, builds the
+sibling `mcp_server` release, and smoke-tests the MCP release binary.
 
 Set `PTC_SOAK_ITERATIONS` only when intentionally shortening or lengthening the
 soak pass:
@@ -55,6 +55,7 @@ Confirm these jobs pass:
 - `soak`
 - `integrity`
 - `docs`
+- `perf`
 
 Confirm `publish` is skipped on manual dispatch and that the
 `release-checks-report` artifact was uploaded.
@@ -81,6 +82,7 @@ runs only for tag pushes whose ref starts with `refs/tags/v`, and it depends on:
 - `soak`
 - `integrity`
 - `docs`
+- `perf`
 
 The publish job runs:
 
