@@ -175,7 +175,8 @@ defmodule PtcRunnerMcp.Http.Config do
     {:error, "HTTP auth token must be at least #{@token_min_bytes} characters"}
   end
 
-  defp validate_auth(%{auth_disabled: true, allow_unsafe_network: true}), do: :ok
+  defp validate_auth(%{auth_disabled: true, allow_unsafe_network: true}),
+    do: {:error, "--http-disable-auth cannot be combined with --http-allow-unsafe-network"}
 
   defp validate_auth(%{auth_disabled: true, host: host}) when is_binary(host),
     do: auth_disabled_loopback(host)
@@ -195,7 +196,7 @@ defmodule PtcRunnerMcp.Http.Config do
       Log.log(:warn, "http_auth_disabled_loopback")
       :ok
     else
-      {:error, "non-loopback unauthenticated HTTP requires --http-allow-unsafe-network"}
+      {:error, "--http-disable-auth is only permitted on loopback binds"}
     end
   end
 

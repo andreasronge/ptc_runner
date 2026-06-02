@@ -33,17 +33,49 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     assert message =~ "at least 32"
   end
 
-  test "requires auth for non-loopback binds unless explicitly unsafe" do
+  test "requires auth for non-loopback binds" do
     assert {:error, message} = Config.resolve(%{http: true, http_host: "0.0.0.0"})
     assert message =~ "required"
+  end
 
-    assert {:ok, cfg} =
+  test "rejects disable-auth on non-loopback even with allow-unsafe-network" do
+    assert {:error, message} =
              Config.resolve(%{
                http: true,
                http_host: "0.0.0.0",
                http_disable_auth: true,
                http_allow_unsafe_network: true
              })
+
+    assert message =~ "cannot be combined"
+  end
+
+  test "rejects disable-auth with allow-unsafe-network on loopback" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_host: "127.0.0.1",
+               http_disable_auth: true,
+               http_allow_unsafe_network: true
+             })
+
+    assert message =~ "cannot be combined"
+  end
+
+  test "rejects disable-auth on non-loopback without allow-unsafe-network" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_host: "0.0.0.0",
+               http_disable_auth: true
+             })
+
+    assert message =~ "only permitted on loopback"
+  end
+
+  test "allows disable-auth on loopback without allow-unsafe-network" do
+    assert {:ok, cfg} =
+             Config.resolve(%{http: true, http_host: "127.0.0.1", http_disable_auth: true})
 
     assert cfg.auth_disabled
   end

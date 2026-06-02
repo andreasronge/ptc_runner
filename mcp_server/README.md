@@ -315,8 +315,7 @@ Defaults:
 - liveness: `GET /health`
 - readiness: `GET /ready`
 
-For non-loopback binds, auth is required unless you explicitly opt into
-unsafe networking. Use
+Non-loopback binds always require a bearer token. Use
 [`docs/mcp-server-http-deployment.md`](../docs/mcp-server-http-deployment.md)
 as the deployment runbook.
 
