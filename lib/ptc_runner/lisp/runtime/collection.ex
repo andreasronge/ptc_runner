@@ -31,7 +31,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   defdelegate filter(pred, coll), to: Select
   defdelegate remove(pred, coll), to: Select
-  defdelegate find(pred, coll), to: Select
+  defdelegate find(coll, key), to: Select
   defdelegate some(pred, coll), to: Select
   defdelegate every?(pred, coll), to: Select
   defdelegate not_any?(pred, coll), to: Select
