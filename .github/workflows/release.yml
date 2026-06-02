@@ -4,11 +4,30 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      llm_runs:
+        description: 'demo --runs per suite'
+        type: string
+        default: '1'
+      skip_llm:
+        description: 'skip the real-LLM smoke'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  HEX_SPONSOR: false
 
 jobs:
-  publish:
+  test:
     runs-on: ubuntu-latest
-    name: Publish to Hex.pm
+    name: Default tests
+    timeout-minutes: 15
+    env:
+      MIX_ENV: test
 
     steps:
       - name: Checkout repository
@@ -17,21 +36,485 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
-      - name: Verify version matches tag
+      - name: Run default test suite
+        id: root_test
+        run: mix test
+
+      - name: Write report fragment
+        if: always()
         run: |
-          TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          MIX_VERSION=$(grep 'version:' mix.exs | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          mkdir -p tmp/release-report
+          {
+            echo "## test"
+            echo ""
+            echo "| Command | Outcome |"
+            echo "|---|---|"
+            echo "| \`MIX_ENV=test mix test\` | ${{ steps.root_test.outcome }} |"
+          } > tmp/release-report/test.md
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-test
+          path: tmp/release-report/test.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  soak:
+    runs-on: ubuntu-latest
+    name: Memory soak
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+      PTC_SOAK_ITERATIONS: 3000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Run root soak tests
+        id: root_soak
+        run: mix test --only soak
+
+      - name: Install mcp_server dependencies
+        id: mcp_deps
+        working-directory: mcp_server
+        run: mix deps.get
+
+      - name: Run mcp_server soak tests
+        id: mcp_soak
+        working-directory: mcp_server
+        run: |
+          mix test \
+            --only soak \
+            test/soak/session_churn_soak_test.exs \
+            test/soak/many_turns_soak_test.exs \
+            test/soak/http_mcp_soak_test.exs
+
+      - name: Write report fragment
+        if: always()
+        run: |
+          mkdir -p tmp/release-report
+          {
+            echo "## soak"
+            echo ""
+            echo "| Command | Outcome |"
+            echo "|---|---|"
+            echo "| \`PTC_SOAK_ITERATIONS=3000 MIX_ENV=test mix test --only soak\` | ${{ steps.root_soak.outcome }} |"
+            echo "| \`cd mcp_server && mix deps.get\` | ${{ steps.mcp_deps.outcome }} |"
+            echo "| \`cd mcp_server && PTC_SOAK_ITERATIONS=3000 mix test --only soak test/soak/session_churn_soak_test.exs test/soak/many_turns_soak_test.exs test/soak/http_mcp_soak_test.exs\` | ${{ steps.mcp_soak.outcome }} |"
+          } > tmp/release-report/soak.md
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-soak
+          path: tmp/release-report/soak.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  integrity:
+    runs-on: ubuntu-latest
+    name: Release integrity
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Verify version and changelog
+        id: version_changelog
+        run: |
+          MIX_VERSION=$(mix run -e 'Mix.Project.config()[:version] |> IO.write()')
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME:-}" != "" ]; then
+            TAG_VERSION=${GITHUB_REF_NAME#v}
+          else
+            TAG_VERSION="$MIX_VERSION"
+          fi
+
+          echo "$MIX_VERSION" > tmp-release-version
+          echo "Release version: $MIX_VERSION"
           echo "Tag version: $TAG_VERSION"
-          echo "Mix version: $MIX_VERSION"
+
           if [ "$TAG_VERSION" != "$MIX_VERSION" ]; then
-            echo "::error::Tag v$TAG_VERSION doesn't match mix.exs version $MIX_VERSION"
+            echo "::error::Tag v$TAG_VERSION does not match mix.exs version $MIX_VERSION"
             exit 1
           fi
 
-      - name: Run tests
-        run: mix test
+          if ! grep -Eq "^## \\[$MIX_VERSION\\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing a ## [$MIX_VERSION] heading"
+            exit 1
+          fi
+
+      - name: Verify Hex package contents
+        id: package
+        run: |
+          rm -rf tmp/hex-unpack
+          mkdir -p tmp/hex-unpack
+          mix hex.build --unpack --output tmp/hex-unpack
+
+          PACKAGE_DIR=tmp/hex-unpack
+          if [ ! -d "$PACKAGE_DIR/lib" ]; then
+            echo "::error::mix hex.build --unpack did not create the expected unpacked package tree"
+            exit 1
+          fi
+
+          echo "$PACKAGE_DIR" > tmp/package-unpack-path
+          echo "Unpacked package: $PACKAGE_DIR"
+
+          required_paths=(
+            "priv/prompts"
+            "priv/spec"
+            "priv/ptc_schema.json"
+            "docs"
+            "docs/function-reference.md"
+            "docs/java-interop.md"
+            "docs/conformance/index.md"
+            "README.md"
+            "CHANGELOG.md"
+          )
+
+          missing=0
+          for path in "${required_paths[@]}"; do
+            if [ ! -e "$PACKAGE_DIR/$path" ]; then
+              echo "::error::Package is missing $path"
+              missing=1
+            fi
+          done
+
+          exit "$missing"
+
+      - name: Check schema drift
+        id: schema
+        run: |
+          mix schema.gen
+          git diff --exit-code -- priv/ptc_schema.json
+
+      - name: Validate spec checksums
+        id: spec
+        run: mix ptc.validate_spec
+
+      - name: Write report fragment
+        if: always()
+        run: |
+          mkdir -p tmp/release-report
+          VERSION=$(cat tmp-release-version 2>/dev/null || echo unknown)
+          PACKAGE_DIR=$(cat tmp/package-unpack-path 2>/dev/null || echo unknown)
+          {
+            echo "## integrity"
+            echo ""
+            echo "- Release version: \`$VERSION\`"
+            echo "- Unpacked package: \`$PACKAGE_DIR\`"
+            echo ""
+            echo "| Check | Outcome |"
+            echo "|---|---|"
+            echo "| Version/tag and changelog heading | ${{ steps.version_changelog.outcome }} |"
+            echo "| Hex package bundled files | ${{ steps.package.outcome }} |"
+            echo "| Schema drift | ${{ steps.schema.outcome }} |"
+            echo "| Spec checksums | ${{ steps.spec.outcome }} |"
+          } > tmp/release-report/integrity.md
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-integrity
+          path: tmp/release-report/integrity.md
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload unpacked package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-hex-unpack
+          path: tmp/hex-unpack/
+          if-no-files-found: warn
+          retention-days: 30
+
+  docs:
+    runs-on: ubuntu-latest
+    name: Documentation checks
+    timeout-minutes: 10
+    env:
+      MIX_ENV: dev
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Build docs with warnings as errors
+        id: exdoc
+        run: mix docs --warnings-as-errors
+
+      - name: Check generated-doc drift
+        id: generated
+        run: |
+          mix ptc.gen_docs
+          mix ptc.conformance_report --write-inventory
+          git diff --exit-code -- docs/ conformance_inventory.json
+
+      - name: Check relative links
+        id: lychee_offline
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress README.md 'docs/**/*.md' 'mcp_server/*.md'
+          fail: true
+
+      - name: Check external links
+        id: lychee_online
+        continue-on-error: true
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress README.md 'docs/**/*.md' 'mcp_server/*.md'
+          fail: false
         env:
-          MIX_ENV: test
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Write report fragment
+        if: always()
+        run: |
+          mkdir -p tmp/release-report
+          {
+            echo "## docs"
+            echo ""
+            echo "| Check | Outcome |"
+            echo "|---|---|"
+            echo "| \`MIX_ENV=dev mix docs --warnings-as-errors\` | ${{ steps.exdoc.outcome }} |"
+            echo "| Generated-doc drift | ${{ steps.generated.outcome }} |"
+            echo "| Lychee offline relative-link gate | ${{ steps.lychee_offline.outcome }} |"
+            echo "| Lychee online external-link info | ${{ steps.lychee_online.outcome }} |"
+          } > tmp/release-report/docs.md
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-docs
+          path: tmp/release-report/docs.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  llm-smoke:
+    runs-on: ubuntu-latest
+    name: Real-LLM smoke
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.skip_llm != true }}
+    continue-on-error: true
+    timeout-minutes: 25
+    env:
+      MIX_ENV: test
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      LLM_DEFAULT_PROVIDER: openrouter
+      PTC_TEST_MODEL: gemini-flash-lite
+      LLM_RUNS: ${{ github.event.inputs.llm_runs || '1' }}
+      RELEASE_SMOKE_MODEL: openrouter:google/gemini-3.1-flash-lite
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Install demo dependencies
+        working-directory: demo
+        run: mix deps.get
+
+      - name: Run demo benchmark smoke
+        id: demo
+        working-directory: demo
+        run: |
+          mkdir -p reports/tmp
+          mix lisp --test --runs="${LLM_RUNS}" --model="${RELEASE_SMOKE_MODEL}" --report=tmp/lisp.md || true
+
+      - name: Run root e2e smoke
+        id: e2e
+        run: |
+          mkdir -p tmp/llm-smoke
+          set +e
+          mix test --include e2e 2>&1 | tee tmp/llm-smoke/e2e.log
+          status=${PIPESTATUS[0]}
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Summarize LLM smoke
+        if: always()
+        run: |
+          mkdir -p tmp/release-report tmp/llm-smoke
+          {
+            echo "## llm-smoke"
+            echo ""
+            echo "- Model: \`${RELEASE_SMOKE_MODEL}\`"
+            echo "- Runs per demo suite: \`${LLM_RUNS}\`"
+            echo "- Gating: non-gating stats only"
+            echo ""
+            echo "| Surface | Passed | Total | Pass rate | Total tokens | Cost |"
+            echo "|---|---:|---:|---:|---:|---:|"
+            found_demo_report=0
+            for report in demo/reports/tmp/*.json; do
+              [ -f "$report" ] || continue
+              found_demo_report=1
+              dsl=$(jq -r '.dsl // "unknown"' "$report")
+              passed=$(jq -r '.metrics.passed // 0' "$report")
+              total=$(jq -r '.metrics.total // 0' "$report")
+              rate=$(jq -r '.metrics.pass_rate // 0' "$report")
+              tokens=$(jq -r '.stats.total_tokens // 0' "$report")
+              cost=$(jq -r '.stats.total_cost // 0' "$report")
+              echo "| demo $dsl | $passed | $total | ${rate}% | $tokens | $cost |"
+            done
+            if [ "$found_demo_report" = "0" ]; then
+              echo "| demo reports | see logs |  |  |  |  |"
+            fi
+            if [ -f tmp/llm-smoke/e2e.log ]; then
+              summary=$(grep -E '[0-9]+ tests?, [0-9]+ failures?' tmp/llm-smoke/e2e.log | tail -n 1 || true)
+              echo "| root e2e | ${summary:-see e2e.log} |  |  |  |  |"
+            fi
+          } | tee tmp/release-report/llm-smoke.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload LLM reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-llm-smoke-reports
+          path: |
+            demo/reports/tmp/
+            tmp/llm-smoke/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload report fragment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-fragment-llm-smoke
+          path: tmp/release-report/llm-smoke.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  release-report:
+    runs-on: ubuntu-latest
+    name: Release report
+    if: always()
+    needs: [test, soak, integrity, docs, llm-smoke]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download report fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-fragment-*
+          path: tmp/release-report/fragments
+          merge-multiple: true
+
+      - name: Build release report
+        run: |
+          mkdir -p tmp
+          VERSION=$(grep 'version:' mix.exs | head -n 1 | sed 's/.*"\(.*\)".*/\1/' || echo unknown)
+          GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          if [ "${{ needs.test.result }}" = "success" ] &&
+             [ "${{ needs.soak.result }}" = "success" ] &&
+             [ "${{ needs.integrity.result }}" = "success" ] &&
+             [ "${{ needs.docs.result }}" = "success" ]; then
+            VERDICT="READY TO PUBLISH"
+            FAILED="none"
+          else
+            VERDICT="BLOCKED"
+            FAILED=""
+            for job in test soak integrity docs; do
+              case "$job" in
+                test) result="${{ needs.test.result }}" ;;
+                soak) result="${{ needs.soak.result }}" ;;
+                integrity) result="${{ needs.integrity.result }}" ;;
+                docs) result="${{ needs.docs.result }}" ;;
+              esac
+              if [ "$result" != "success" ]; then
+                FAILED="${FAILED}${FAILED:+, }$job ($result)"
+              fi
+            done
+          fi
+
+          {
+            echo "# Release Checks Report"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Repo | \`${GITHUB_REPOSITORY}\` |"
+            echo "| Commit | \`${GITHUB_SHA}\` |"
+            echo "| Ref | \`${GITHUB_REF}\` |"
+            echo "| Version | \`${VERSION}\` |"
+            echo "| Actor | \`${GITHUB_ACTOR}\` |"
+            echo "| Generated | \`${GENERATED_AT}\` |"
+            echo "| Workflow run | ${RUN_URL} |"
+            echo ""
+            echo "## Gate Verdict"
+            echo ""
+            echo "**${VERDICT}**"
+            echo ""
+            echo "Failed gating jobs: ${FAILED}"
+            echo ""
+            echo "## Job Results"
+            echo ""
+            echo "| Job | Result | Gates publish? |"
+            echo "|---|---|---|"
+            echo "| test | ${{ needs.test.result }} | yes |"
+            echo "| soak | ${{ needs.soak.result }} | yes |"
+            echo "| integrity | ${{ needs.integrity.result }} | yes |"
+            echo "| docs | ${{ needs.docs.result }} | yes |"
+            echo "| llm-smoke | ${{ needs['llm-smoke'].result }} | no |"
+            echo ""
+            echo "## Artifacts"
+            echo ""
+            echo "- \`release-fragment-*\`"
+            echo "- \`release-hex-unpack\`"
+            echo "- \`release-llm-smoke-reports\` when the LLM smoke job ran"
+            echo "- \`release-checks-report\`"
+            echo ""
+          } > tmp/release-checks.md
+
+          for fragment in tmp/release-report/fragments/*.md; do
+            [ -f "$fragment" ] || continue
+            echo "" >> tmp/release-checks.md
+            cat "$fragment" >> tmp/release-checks.md
+          done
+
+          cat tmp/release-checks.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checks-report
+          path: tmp/release-checks.md
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    runs-on: ubuntu-latest
+    name: Publish to Hex.pm
+    needs: [test, soak, integrity, docs]
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
 
       - name: Build package
         run: mix hex.build
