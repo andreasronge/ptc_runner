@@ -503,11 +503,18 @@ jobs:
         id: cover
         run: |
           mkdir -p tmp/release-report tmp/metrics
-          # Non-gating: capture the cover summary even if some tests fail.
+          # Non-gating: capture each project's cover summary even if some tests
+          # fail. ptc_runner and the ptc_runner_mcp server are separate Mix
+          # projects, each measured in isolation (Mix only instruments the
+          # current project's own modules), so they are reported as separate
+          # rows in one combined fragment.
           set +e
           mix test --cover 2>&1 | tee tmp/cover.txt
+          ( cd mcp_server && mix deps.get && mix test --cover ) 2>&1 | tee tmp/cover-mcp.txt
           set -e
-          scripts/coverage-stats.sh tmp/cover.txt tmp/release-report/coverage.md tmp/metrics/coverage.json
+          scripts/coverage-stats.sh tmp/release-report/coverage.md tmp/metrics/coverage.json \
+            "ptc_runner (library)" tmp/cover.txt \
+            "ptc_runner_mcp (server)" tmp/cover-mcp.txt
           cat tmp/release-report/coverage.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report fragment
