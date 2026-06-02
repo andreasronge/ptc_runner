@@ -273,6 +273,65 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "run_lisp caps an oversized OpenAPI response as a recoverable response_too_large fault" do
+    # Body far exceeds the per-run byte cap; the runtime must surface a
+    # recoverable tool result instead of buffering the whole payload (memory
+    # safety) or crashing the run.
+    big_body = %{"traces" => Enum.map(1..50, &%{"id" => "trace-#{&1}", "org_id" => "acme"})}
+    {:ok, server} = start_http_fixture(big_body)
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config:
+          config(
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            operations: ["list_traces"]
+          )
+      )
+
+    program =
+      ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme"}})|
+
+    try do
+      {{:ok, step}, records} =
+        Runtime.run_lisp_with_records(runtime, program, max_response_bytes: 64)
+
+      assert step.return.ok == false
+      assert step.return.reason == :response_too_large
+
+      assert [%{"status" => "error", "reason" => "response_too_large", "oversize" => true}] =
+               records
+
+      # The cap must apply to the *response*: prove the GET was actually sent,
+      # so a regression that short-circuits before Req.request can't pass.
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request_line(request) =~ "GET /api/v1/traces?"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "run_lisp apropos surfaces upstream tools from the live catalog, ranked above local builtins" do
+    # apropos is how the LLM finds upstream tools; a regression leaves them
+    # callable but invisible. The upstream tool must out-rank local builtins for
+    # a query matching its name. Uses the local schema file, so no network.
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    program = ~S|(apropos "list-traces" {:limit 1})|
+
+    try do
+      {:ok, step} = Runtime.run_lisp(runtime, program)
+
+      # limit 1 -> the single top hit must be the upstream tool, not a local
+      # builtin. Match the ref prefix only, so the description text isn't brittle.
+      assert ["observatory/list-traces" <> _] = step.return
+      assert [%{operation: :apropos, outcome: :ok, reason: nil}] = step.catalog_ops
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "root runtime can call an MCP stdio upstream" do
     script = write_stdio_fixture!()
 
