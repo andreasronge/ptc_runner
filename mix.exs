@@ -90,6 +90,7 @@ defmodule PtcRunner.MixProject do
       precommit: [
         "format --check-formatted",
         "compile --warnings-as-errors",
+        "xref graph --format cycles --label compile-connected --fail-above 0",
         "credo --strict",
         "schema.gen",
         "ptc.validate_spec",
