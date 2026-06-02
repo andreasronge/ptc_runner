@@ -151,6 +151,7 @@ defmodule PtcRunner.SubAgent.Definition do
   - `result_limit` - Inspect `:limit` for final result (default: 50)
   - `result_max_chars` - Final string truncation (default: 500)
   - `max_print_length` - Max chars per `println` call (default: 2000)
+  - `mission_log_in` - Where to inject the mission log: `:system_prompt` (default) or `:user_message`
   """
   @type format_options :: [
           feedback_limit: pos_integer(),
@@ -158,7 +159,8 @@ defmodule PtcRunner.SubAgent.Definition do
           history_max_bytes: pos_integer(),
           result_limit: pos_integer(),
           result_max_chars: pos_integer(),
-          max_print_length: pos_integer()
+          max_print_length: pos_integer(),
+          mission_log_in: :system_prompt | :user_message
         ]
 
   @typedoc """
