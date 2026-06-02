@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   by extracting placeholders (%, %1, %2, %&, etc.) and generating parameters.
   """
 
-  alias PtcRunner.Lisp.Analyze
+  alias PtcRunner.Lisp.Analyze.Placeholder
   alias PtcRunner.Lisp.SourceAtoms
 
   @max_short_fn_arity 20
@@ -39,7 +39,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
           # Literals like #(42) are kept as-is (will error at runtime like Clojure)
           case single_form do
             {:symbol, name} ->
-              if Analyze.placeholder?(name), do: single_form, else: {:list, [single_form]}
+              if Placeholder.placeholder?(name), do: single_form, else: {:list, [single_form]}
 
             _ ->
               single_form
@@ -91,7 +91,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
 
   # Recursively find all placeholder symbols in an AST node
   defp find_all_placeholders({:symbol, name}) do
-    if Analyze.placeholder?(name) do
+    if Placeholder.placeholder?(name) do
       [name]
     else
       []
@@ -204,7 +204,7 @@ defmodule PtcRunner.Lisp.Analyze.ShortFn do
   defp transform_body({:symbol, name}, _placeholders) when is_atom(name) or is_binary(name) do
     name_str = to_string(name)
 
-    case Analyze.placeholder?(name) do
+    case Placeholder.placeholder?(name) do
       true ->
         param_name = placeholder_to_param(name_str)
         {:symbol, param_name}

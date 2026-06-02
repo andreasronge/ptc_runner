@@ -14,6 +14,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Analyze.Definitions
   alias PtcRunner.Lisp.Analyze.Iteration
   alias PtcRunner.Lisp.Analyze.Patterns
+  alias PtcRunner.Lisp.Analyze.Placeholder
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
@@ -232,7 +233,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp do_analyze({:symbol, name}, _tail?) do
-    if placeholder?(name) do
+    if Placeholder.placeholder?(name) do
       {:error, {:invalid_placeholder, name}}
     else
       {:ok, {:var, name}}
@@ -1417,16 +1418,6 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
   # Placeholder detection
   # ============================================================
-
-  # Check if a symbol name is a placeholder (%, %1, %2, etc.)
-  @doc false
-  def placeholder?(name) do
-    case to_string(name) do
-      "%" -> true
-      "%" <> rest -> String.match?(rest, ~r/^(\d+|&)$/)
-      _ -> false
-    end
-  end
 
   # ============================================================
   # Local shadowing of special form names (GAP-S06)
