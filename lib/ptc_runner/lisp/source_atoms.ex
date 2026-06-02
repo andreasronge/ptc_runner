@@ -17,8 +17,12 @@ defmodule PtcRunner.Lisp.SourceAtoms do
 
   ## What's in the table
 
-    1. Every key of `PtcRunner.Lisp.Env.initial/0` — all builtin
-       functions (`map`, `filter`, `+`, `str`, etc.).
+    1. Every env-dispatched builtin name from
+       `PtcRunner.Lisp.BuiltinNames.env_names/0` — all builtin
+       functions (`map`, `filter`, `+`, `str`, etc.). These equal the
+       keys of `PtcRunner.Lisp.Env.initial/0` but are derived from the
+       compile-time registry so `SourceAtoms` stays out of the Lisp
+       runtime cycle (issue #1051).
     2. Analyzer special forms — `let`, `fn`, `def`, `if`, `case`, etc.
        Only forms that the analyzer currently dispatches on. No
        aspirational Clojure entries.
@@ -45,7 +49,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   Read cost after first call is one `:persistent_term.get/1` (no copy).
   """
 
-  alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.BuiltinNames
 
   @doc """
   Returns the atom for `name` if it's in the bounded vocabulary,
@@ -78,7 +82,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   end
 
   # ============================================================
-  # Bounded vocabulary (in addition to Env.initial keys)
+  # Bounded vocabulary (in addition to BuiltinNames.env_names)
   # ============================================================
 
   # Special forms that the analyzer dispatches via atom-literal
@@ -151,9 +155,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # here, but included for documentation completeness.
 
   defp build_table do
-    builtins =
-      Env.initial()
-      |> Map.keys()
+    builtins = BuiltinNames.env_names()
 
     explicit =
       @special_forms ++

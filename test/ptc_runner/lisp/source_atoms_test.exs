@@ -16,6 +16,8 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.BuiltinNames
+  alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.SourceAtoms
 
   describe "intern/1" do
@@ -182,10 +184,26 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
                "(#953) would break dispatch unless they're added."
     end
 
-    test "table is non-trivially populated from Env.initial" do
+    test "table is non-trivially populated from BuiltinNames" do
       # Sanity: the builtin vocabulary should contribute hundreds of
       # entries. If this drops to <100 someone broke `build_table/0`.
       assert map_size(SourceAtoms.table()) > 100
+    end
+  end
+
+  describe "BuiltinNames drift guard" do
+    test "leaf env_names equals Env.initial keys" do
+      # `SourceAtoms` derives builtin names from the compile-time
+      # registry via `BuiltinNames` instead of `Env.initial/0` (issue
+      # #1051). If a builtin is added to one source but not the other,
+      # this fails so the bounded vocabulary can't silently drift.
+      leaf = MapSet.new(BuiltinNames.env_names())
+      env = MapSet.new(Map.keys(Env.initial()))
+
+      assert leaf == env,
+             "BuiltinNames.env_names/0 drifted from Env.initial/0 keys.\n" <>
+               "Only in BuiltinNames: #{inspect(MapSet.to_list(MapSet.difference(leaf, env)))}\n" <>
+               "Only in Env.initial: #{inspect(MapSet.to_list(MapSet.difference(env, leaf)))}"
     end
   end
 end
