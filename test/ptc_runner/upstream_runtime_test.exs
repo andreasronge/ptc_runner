@@ -445,6 +445,187 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "root MCP HTTP transport surfaces isError tool results and redacts secrets in the message" do
+    {:ok, server} =
+      start_mcp_http_fixture(
+        tool_call_response: fn socket, id, _args ->
+          # A real MCP server signals tool-level failure with a successful
+          # JSON-RPC envelope carrying isError: true. The error text echoes the
+          # auth secret, which must be redacted before reaching the program.
+          json_response(socket, id, %{
+            "isError" => true,
+            "content" => [%{"type" => "text", "text" => "denied mcp-secret"}]
+          })
+        end
+      )
+
+    config = %{
+      "credentials" => %{
+        "fixture-token" => %{
+          "source" => "literal",
+          "value" => "mcp-secret",
+          "scheme_hint" => "bearer"
+        }
+      },
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true,
+          "allow_insecure_auth" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "fixture-token"}]
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+    program = ~S|(tool/call 'fixture/echo {:message "hello"})|
+
+    try do
+      {{:ok, step}, records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return == %{ok: false, reason: :tool_error, message: "denied [REDACTED]"}
+
+      # The diagnostics record is a separate redaction surface from step.return;
+      # assert the secret is scrubbed there too, not just in the program value.
+      assert [
+               %{
+                 "server" => "fixture",
+                 "tool" => "echo",
+                 "status" => "error",
+                 "reason" => "tool_error",
+                 "error" => "denied [REDACTED]"
+               }
+             ] = records
+
+      refute inspect(records) =~ "mcp-secret"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "root MCP HTTP transport JSON-decodes a text-only content block into structured data" do
+    {:ok, server} =
+      start_mcp_http_fixture(
+        tool_call_response: fn socket, id, _args ->
+          # No structuredContent: the only payload is a JSON string inside a text
+          # content block. It must be decoded into usable data, not left opaque.
+          json_response(socket, id, %{
+            "content" => [%{"type" => "text", "text" => ~s({"echo":{"message":"hello"}})}]
+          })
+        end
+      )
+
+    config = %{
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+    program = ~S|(tool/call 'fixture/echo {:message "hello"})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return == %{
+               ok: true,
+               value: %{"echo" => %{"message" => "hello"}},
+               value_kind: :json
+             }
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "root MCP HTTP transport selects the matching id from a batched SSE stream" do
+    {:ok, server} =
+      start_mcp_http_fixture(
+        tool_call_response: fn socket, id, _args ->
+          # SSE can interleave responses/notifications for other request ids.
+          # Wrong ids share the real id's integer type, and the real message sits
+          # in the MIDDLE of the batched array, so neither "take first/last
+          # element" nor "take first integer id" passes — only true correlation
+          # on the request id selects it.
+          wrong_before = sse_envelope(id + 10, "wrong-before")
+          wrong_after = sse_envelope(id + 20, "wrong-after")
+          right = sse_envelope(id, "hello")
+
+          body =
+            "data: " <>
+              Jason.encode!(wrong_before) <>
+              "\n\n" <>
+              "data: " <> Jason.encode!([wrong_before, right, wrong_after]) <> "\n\n"
+
+          raw_sse_response(socket, body)
+        end
+      )
+
+    config = %{
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+    program = ~S|(tool/call 'fixture/echo {:message "hello"})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return.ok == true
+      assert get_in(step.return.value, ["echo", "message"]) == "hello"
+      refute inspect(step.return.value) =~ "wrong"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "root MCP HTTP transport prefers isError over a present structuredContent" do
+    {:ok, server} =
+      start_mcp_http_fixture(
+        tool_call_response: fn socket, id, _args ->
+          # isError must win even when structuredContent is also present, so a
+          # failing call is never reported as a success carrying stale data.
+          json_response(socket, id, %{
+            "isError" => true,
+            "structuredContent" => %{"echo" => %{"message" => "should-not-win"}},
+            "content" => [%{"type" => "text", "text" => "boom"}]
+          })
+        end
+      )
+
+    config = %{
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+    program = ~S|(tool/call 'fixture/echo {:message "hello"})|
+
+    try do
+      {{:ok, step}, _records} = Runtime.run_lisp_with_records(runtime, program)
+
+      assert step.return == %{ok: false, reason: :tool_error, message: "boom"}
+      refute inspect(step.return) =~ "should-not-win"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "root credential emitters support bearer, basic, and custom headers" do
     {:ok, credentials} =
       Credentials.new(%{
@@ -968,10 +1149,16 @@ defmodule PtcRunner.UpstreamRuntimeTest do
   defp send_mcp_http_response(socket, %{"id" => id, "method" => "tools/call"} = frame, opts) do
     args = get_in(frame, ["params", "arguments"]) || %{}
 
-    if Keyword.get(opts, :sse?, false) do
-      sse_response(socket, id, %{"structuredContent" => %{"echo" => args}})
-    else
-      json_response(socket, id, %{"structuredContent" => %{"echo" => args}})
+    case Keyword.get(opts, :tool_call_response) do
+      fun when is_function(fun, 3) ->
+        fun.(socket, id, args)
+
+      nil ->
+        if Keyword.get(opts, :sse?, false) do
+          sse_response(socket, id, %{"structuredContent" => %{"echo" => args}})
+        else
+          json_response(socket, id, %{"structuredContent" => %{"echo" => args}})
+        end
     end
   end
 
@@ -999,14 +1186,29 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     event =
       "data: " <> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}) <> "\n\n"
 
+    raw_sse_response(socket, event)
+  end
+
+  # A JSON-RPC tools/call success envelope tagged with `id`, echoing `message`.
+  defp sse_envelope(id, message) do
+    %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "result" => %{"structuredContent" => %{"echo" => %{"message" => message}}}
+    }
+  end
+
+  # Send an already-encoded SSE body verbatim, so tests can craft multi-event
+  # streams (e.g. wrong-id events, batched arrays) to exercise id correlation.
+  defp raw_sse_response(socket, body) do
     :ok =
       :gen_tcp.send(socket, [
         "HTTP/1.1 200 OK\r\n",
         "content-type: text/event-stream\r\n",
-        "content-length: #{byte_size(event)}\r\n",
+        "content-length: #{byte_size(body)}\r\n",
         "connection: close\r\n",
         "\r\n",
-        event
+        body
       ])
   end
 end
