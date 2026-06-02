@@ -1185,6 +1185,35 @@ exception. Map and vector `find` match Clojure exactly (see
 [GAP-S09](#gap-s09-find-uses-predicate-search-semantics-instead-of-clojure-map-lookup));
 only the raising case diverges.
 
+### DIV-49: `map-entry?` is always false (no distinct MapEntry type)
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `core/map-entry-predicate-001`, `core/map-entry-predicate-seq-map-001` |
+
+```clojure
+;; Clojure (a map seq entry is a distinct clojure.lang.MapEntry type)
+(map-entry? [:a 1])                ;=> false
+(map-entry? (first (seq {:a 1})))  ;=> true
+
+;; PTC-Lisp (both forms are the same 2-element vector value)
+(map-entry? [:a 1])                ;=> false
+(map-entry? (first (seq {:a 1})))  ;=> false
+```
+
+**Fix:** Reclassified from GAP-S136. PTC-Lisp has no distinct MapEntry type:
+`(first (seq {:a 1}))` produces the identical 2-element vector value as the
+literal `[:a 1]` (`(= [:a 1] (first (seq {:a 1})))` is `true`; `key`/`val`
+accept any 2-element vector, including literals). Since the two forms are the
+same BEAM term, `map-entry?` cannot return `true` for one and `false` for the
+other. We return a stable `false` for every input, which keeps the
+literal-vector case matching Clojure and never misreports an arbitrary 2-vector
+as a JVM map entry. This is the same root cause as DIV-27 (`contains?` treats
+map-entry views as plain vectors). `map-entry?` returns a normal recoverable
+value here — it does not raise — so this is a deliberate divergence, not a bug.
+
 ### GAP-J13: Java `Math/pow` special double results differ
 
 | Field | Value |
@@ -1829,25 +1858,15 @@ precedence.
 should not silently treat arbitrary two-element vectors as JVM map entries
 under Clojure compatibility.
 
-### GAP-S136: `map-entry?` does not recognize explicit map seq entries
+### ~~GAP-S136~~: Reclassified as DIV-49
 
-| Field | Value |
-|-------|-------|
-| **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance case `core/map-entry-predicate-seq-map-bug-001` |
-
-```clojure
-;; Clojure
-(map-entry? (first (seq {:a 1})))   ;=> true
-
-;; PTC-Lisp current behavior
-(map-entry? (first (seq {:a 1})))   ;=> false
-```
-
-**Decision:** BUG. PTC-Lisp has a distinct explicit seq map-entry view that
-`key` and `val` already understand, but `map-entry?` does not recognize the
-same values as map entries.
+Originally filed as a bug claiming PTC-Lisp had a distinct seq map-entry view
+that `map-entry?` failed to recognize. That premise is false: PTC-Lisp has **no**
+distinct MapEntry type. `(first (seq {:a 1}))` evaluates to the *same* 2-element
+vector value as the literal `[:a 1]` (`(= [:a 1] (first (seq {:a 1})))` is
+`true`, and `key`/`val` operate on any 2-element vector, including literals).
+Because the two forms are the identical BEAM term, `map-entry?` cannot answer
+`true` for one and `false` for the other. Reclassified as DIV-49 — see below.
 
 ### GAP-S18: `doseq` body `def` side effects do not update the outer var
 

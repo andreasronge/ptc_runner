@@ -1350,13 +1350,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S17",
         "Clojure val requires a map entry; PTC-Lisp list is a vector alias and currently accepts a list pair."
       ),
-      bug_case(
-        "core/map-entry-predicate-seq-map-bug-001",
+      div_case(
+        "core/map-entry-predicate-seq-map-001",
         "clojure.core",
         ["map-entry?"],
         "(map-entry? (first (seq {:a 1})))",
-        "GAP-S136",
-        "Clojure map-entry? recognizes map entries from explicit seq map views; PTC-Lisp currently returns false."
+        "DIV-49",
+        false,
+        "PTC-Lisp has no distinct MapEntry type: a map seq entry is the same 2-element vector value as a literal vector, so map-entry? returns false for both (Clojure distinguishes them by type)."
       ),
       bug_case(
         "core/doseq-def-side-effect-bug-001",
