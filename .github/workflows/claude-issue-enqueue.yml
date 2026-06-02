@@ -43,6 +43,9 @@ jobs:
       # actually triggers the runner. Labels added with the default GITHUB_TOKEN
       # do not trigger downstream workflows.
       GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+      # This job has no checkout, so gh can't infer the repo from a local
+      # .git — GH_REPO targets it explicitly.
+      GH_REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
 
     steps:
