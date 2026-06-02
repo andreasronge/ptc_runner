@@ -18,7 +18,12 @@ defmodule PtcRunner.MixProject do
       docs: docs(),
       package: package(),
       test_coverage: [
-        ignore_modules: [PtcRunner.TestSupport.TestLLM]
+        summary: [threshold: 0],
+        ignore_modules: [
+          ~r/^Mix\.Tasks\./,
+          ~r/^PtcRunner\.TestSupport\./,
+          PtcRunner.TypeExtractorFixtures
+        ]
       ],
       dialyzer: [
         plt_core_path: "priv/plts",
@@ -39,7 +44,7 @@ defmodule PtcRunner.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test, prepush: :test]
+      preferred_envs: [precommit: :test, prepush: :test, coverage: :test]
     ]
   end
 
@@ -97,6 +102,9 @@ defmodule PtcRunner.MixProject do
       prepush: [
         "dialyzer",
         "deps.unlock --check-unused"
+      ],
+      coverage: [
+        "test --cover"
       ],
       "schema.gen": [
         "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
