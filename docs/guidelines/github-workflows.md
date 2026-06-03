@@ -447,7 +447,7 @@ This guarantees **both** invariants the single group could not:
 
 | Group | Workflows | `cancel-in-progress` | Rationale |
 |-------|-----------|----------------------|-----------|
-| `claude-impl` | `claude-issue.yml` (runner), `claude-batch-fix.yml`, `claude-stale-check.yml` | `false` | All branch off `main` / open PRs → strictly serialized so they never produce conflicting changes. |
+| `claude-impl` | `claude-issue.yml` (runner), `claude-batch-fix.yml`, `claude-stale-check.yml` | `false` | All branch off `main` / open PRs → strictly serialized while jobs run. Batch fix skips when an open `batch-fix/*` PR already exists, including after queued runs acquire the lock. |
 | `claude-enqueue-<issue>` | `claude-issue-enqueue.yml` | `false` | Cheap, idempotent; per-issue so it's never evicted and only collapses duplicate `@claude` comments on the same issue. |
 | `claude-pr-<pr>` | `claude-pr-fix.yml`, `claude-second-opinion.yml` | `false` | Push to a PR's *own* branch, not `main`; serialized per-PR but parallel across different PRs. |
 | `claude-review-pr-<pr>` | `claude-code-review.yml` | `true` | Read-only; a newer push supersedes an in-flight review. |
@@ -460,7 +460,10 @@ never block or evict implementation work.
 
 This ensures:
 - Only one main-mutating Claude operation runs at a time (`claude-impl`)
-- No race conditions on `main`; no conflicting branches/PRs
+- Batch-fix automation opens at most one batch PR at a time; later runs skip
+  while an existing `batch-fix/*` PR is open
+- No concurrent race conditions on `main`; reduced risk of conflicting
+  branches/PRs
 - Implementation requests queue durably in labels instead of being cancelled
 
 ## Security Gates
