@@ -1,10 +1,11 @@
-# Release Checks — Spec
+# Release Checks — Design Record
 
-> Design spec for bundled release-readiness checks in GitHub Actions.
-> Status: **Phase 1 implemented**. Keep this document as design rationale and
-> future-work notes; use `docs/RELEASING.md` for the operational checklist.
-> Revised 2026-06-02 after review (workflow topology + perf-metric corrections).
-> Extends `docs/RELEASING.md` and `mcp_server/RELEASING.md`.
+> Design record for bundled release-readiness checks in GitHub Actions.
+> This is **not** the release checklist. Use `docs/RELEASING.md` for the root
+> release procedure and `.github/workflows/release.yml` for implemented CI
+> behavior. If this document disagrees with either one, the checklist and
+> workflow win.
+> Revised 2026-06-03 to remove stale planning notes and align current behavior.
 
 ## 1. Goal
 
@@ -27,7 +28,7 @@ Run **only** on a release tag push **or** manual dispatch. **Never** on a branch
 ```yaml
 on:
   push:
-    tags: ['v*']        # root library release. (Decision: also 'mcp-v*'? — see §8)
+    tags: ['v*']        # root library release only. mcp_server uses mcp-v* elsewhere.
   workflow_dispatch:
     inputs:
       llm_runs: { description: 'demo --runs per suite', type: string, default: '1' }
@@ -279,16 +280,17 @@ for Mix tasks and test support). A separate job rather than piggybacking on the
 `test` gate so `:cover` instrumentation overhead never threatens the gate's
 timeout; the trade-off is one extra suite run.
 
-- **Command:** `mix test --cover` (root app), captured with `set +e` so the
-  coverage summary is parsed even when some tests fail.
+- **Command:** `mix test --cover` for the root app and `mix test --cover` in
+  `mcp_server/`, captured with `set +e` so coverage summaries are parsed even
+  when some tests fail.
 - **Parser:** `scripts/coverage-stats.sh` reads the summary table (`| <pct>% |
   Module |` rows + the `Total` line) and emits a `## coverage` fragment.
 - **Reported:** total line coverage %, modules measured, modules < 50%, modules
-  at 0% (the gap signal — a single % hides large untested clusters).
+  at 0% (the gap signal — a single % hides large untested clusters), with root
+  and MCP server shown as separate projects.
 - **Output:** `tmp/release-report/coverage.md` (auto-merged by `release-report`)
-  and `$GITHUB_STEP_SUMMARY`. Scope is the root library; `mcp_server` coverage
-  is out of scope here. Trend-vs-previous-release is a deliberate follow-up (it
-  needs a committed baseline %).
+  and `$GITHUB_STEP_SUMMARY`. Trend-vs-previous-release is a deliberate
+  follow-up (it needs a committed baseline %).
 - **Soft gate (future):** flip to failing the (still non-publish-blocking) job
   below a threshold by parsing the total — `summary: [threshold: N]` alone does
   not change the exit code.
@@ -331,50 +333,24 @@ durable and enable GitHub's `compare/vA...vB` view.
 - A release report is emitted for both green and red runs. Report generation itself is
   non-gating.
 
-## 7. New / changed files (implementation checklist)
+## 7. Historical Decisions And Non-Goals
 
-- `.github/workflows/release.yml` (**restructure**) — multi-job: `test`, `soak`,
-  `integrity`, `docs`, `perf`, `llm-smoke`, `stats`, `coverage`,
-  `release-report`, `publish`, `github-release` (`needs` gates only; publish and
-  github-release guarded by
-  `github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`).
-- `scripts/release-stats.sh` (new) — emits the `## stats` report fragment plus a
-  JSON sibling (§5G, §5I).
-- `scripts/coverage-stats.sh` (new) — parses `mix test --cover` into the
-  `## coverage` report fragment plus a JSON sibling (§5H, §5I).
-- `.github/actions/setup-elixir/action.yml` (optional) — add `skip-babashka` input;
-  optionally cache/fetch `mcp_server/deps` (or do `mix deps.get` in the soak job).
-- `.lycheeignore` (new) — volatile external hosts.
-- `CHANGELOG.md` — ensure a `## [<version>]` section exists per release (now gated).
-- **Phase 2:** `lib/ptc_runner/sandbox.ex` (capture child reductions),
-  `lib/mix/tasks/bench.check.ex`, `bench/baselines/*.json`.
-- `docs/RELEASING.md` — root release checklist mirroring `mcp_server/RELEASING.md`.
-- No model/registry change. No new runtime deps (`:recon`/`:benchee` already present);
-  docs job adds the lychee action only.
+- Root releases use only `v*` tags. The sibling MCP server has its own release
+  path and `mcp-v*` tag namespace; do not route those tags through the root
+  publish workflow.
+- The perf gate uses sandbox child-reduction measurements via `mix bench.check`.
+  Do not replace it with Benchee measurements around full `Lisp.run/2`; those
+  miss child-process eval reductions.
+- Real-LLM smoke stays informational. Wrong model answers, model outages, and
+  provider rate limits must be visible in the report but must not block Hex
+  publishing.
+- Coverage and stats stay informational. They are useful release context, not
+  publish gates.
+- A future MCP-server real-agentic smoke may drive the released MCP binary with
+  a live model, but it should follow the MCP server release process rather than
+  changing the root tag namespace.
 
-## 8. Open decisions for the implementer
-
-1. **`mcp-v*` tags** — should this workflow also run on the mcp_server release tag, or
-   only `v*`?
-2. **Perf threshold %** — start +7% on child eval reductions; tune after several releases.
-3. **mcp_server real-agentic smoke** — Phase 3: drive the *released* mcp binary with a
-   real LLM via `mcp_server/bench/agentic_real_eval.exs` inside the `RELEASING.md` artifact
-   smoke (currently protocol-only: `(+ 1 2)` ⇒ `user=> 3`).
-4. e2e duration on gemini-3.1-flash-lite — measure once; tune `timeout-minutes`.
-
-## 9. Phasing (suggested)
-
-- **Phase 1 (small, high value, low ambiguity):** restructure `release.yml` with
-  `test` + `soak` + `integrity` (version/changelog/package/schema/spec) + `docs`
-  (ExDoc/lychee-offline/gen-doc drift) gating the publish, plus non-blocking
-  `llm-smoke` (demo + e2e on gemini-3.1-flash-lite, stats-only), plus a non-gating
-  `release-report` artifact/step summary.
-- **Phase 2:** the perf gate — sandbox child-reduction instrumentation + `mix bench.check`
-  + committed baseline. (Implemented; do **not** replace with a Benchee-full-run gate.)
-- **Phase 3 (optional):** mcp_server real-agentic smoke through the released binary;
-  wall-clock trend dashboard; promote `private/mcpproxy/` HTTP benches into the toolchain.
-
-## 10. Acceptance criteria
+## 8. Acceptance Criteria
 
 - Pushing a `v*` tag runs the gating jobs; a seeded leak / version-or-changelog mismatch /
   missing `priv/*` in the package / schema or spec drift / broken relative link / ExDoc
@@ -387,19 +363,3 @@ durable and enable GitHub's `compare/vA...vB` view.
   documenting commands, outcomes, gating verdict, LLM stats, and relevant artifact names.
 - (Phase 2) A seeded eval slowdown that inflates child reductions beyond threshold fails
   the `perf` job.
-
-## 11. Post-merge smoke test
-
-Run this after the workflow change has been merged to `main`. GitHub only exposes
-`workflow_dispatch` for workflow files present on the default branch, so a branch-only
-workflow edit is not enough to smoke it from the Actions UI.
-
-1. Manually trigger `release.yml` from the Actions tab on `main` with `skip_llm: true`.
-   This is the cheap deterministic smoke. Confirm `test`, `soak`, `integrity`, and
-   `docs` run; `publish` is skipped; and `release-report` uploads the
-   `release-checks-report` artifact.
-2. Manually trigger it again with `skip_llm: false` and `llm_runs: 1`. Confirm the
-   LLM job produces stats/artifacts, stays non-gating, and the release report records
-   the LLM results as informational.
-3. Optional safety check: manually dispatch on a `v*` tag ref and confirm `publish`
-   still skips because publish requires `github.event_name == 'push'`.

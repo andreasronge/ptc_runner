@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-06-03
+
+### Breaking Changes
+
+- Renamed the upstream tool Lisp surface from the MCP-specific
+  `(tool/mcp-call ...)` and `(mcp/servers)` forms to transport-neutral
+  `(tool/call ...)` and `(tool/servers)`.
+- Tightened upstream configuration transport names. Use `"openapi"`,
+  `"mcp_stdio"`, or `"mcp_http"`; older ambiguous names such as `"stdio"` and
+  `"http"` are rejected.
+- Corrected several PTC-Lisp edge-case semantics for Clojure conformance,
+  including `find` as associative lookup, `range` type errors, negative `nth`,
+  duplicate literal map/set keys, and arity handling for `assoc`, `juxt`, and
+  bitwise helpers.
+
+### Added
+
+- Added the root upstream runtime for embedded Elixir callers and `mix ptc.repl`,
+  allowing PTC-Lisp programs to call configured OpenAPI, MCP stdio, and MCP HTTP
+  upstream tools without running the MCP server.
+- Added read-only JSON OpenAPI upstream support with credential bindings,
+  operation allow-lists, schema loading, response caps, and the same tagged
+  `tool/call` result model used for MCP upstreams.
+- Added `PtcRunner.Session` for embedding stateful REPL-style PTC-Lisp
+  evaluation with persistent `(def ...)` memory and bounded `*1`/`*2`/`*3`
+  result history.
+- Added upstream-aware `mix ptc.repl` options for loading upstream configs,
+  listing tools, discovery, call budgets, response caps, and catalog snapshot
+  modes.
+- Added `mission_log_in: :user_message` format support so agents can keep system
+  prompts stable for provider prompt caching.
+
+### Changed
+
+- Moved MCP aggregation onto the shared root upstream runtime, so root callers
+  and the MCP server use the same config format, discovery forms, credential
+  redaction, and `tool/call` execution semantics.
+- Expanded PTC-Lisp Clojure conformance across nil-tolerant sequence helpers,
+  multi-collection `map`/`mapv`/`pmap`, variadic `interleave`, three-arity
+  `nth`, seq-form `replace`, Java `Boolean/parseBoolean`, and Java Math special
+  cases.
+- Improved release readiness with deterministic smoke, performance, coverage,
+  docs, and package-content checks.
+
+### Fixed
+
+- Authentication is enforced before MCP HTTP method dispatch, required on
+  non-loopback binds, rate-limited on failed bearer attempts, and scrubbed from
+  traces/log-facing output.
+- Upstream MCP result normalization now returns the first text block rather than
+  only inspecting the first content item.
+- Closed-but-unpruned MCP HTTP sessions now resolve to tombstones instead of
+  crashing through a missing process.
+- Invalid integer HTTP/MCP configuration values now fail fast with clearer
+  errors.
+
 ## [0.11.0] - 2026-05-25
 
 ### Breaking Changes

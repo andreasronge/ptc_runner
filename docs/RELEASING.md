@@ -3,6 +3,11 @@
 `ptc_runner` is the root Hex package. Stable root releases use `v*` tags and
 are published to Hex.pm and HexDocs by `.github/workflows/release.yml`.
 
+This is the operational release checklist. `docs/release-checks-spec.md` is a
+design record for the release-check workflow; if it ever disagrees with this
+checklist or `.github/workflows/release.yml`, use this checklist and the
+workflow as authoritative.
+
 The sibling MCP server has a separate release path and tag namespace. Use
 `mcp_server/RELEASING.md` for `ptc_runner_mcp` releases.
 
