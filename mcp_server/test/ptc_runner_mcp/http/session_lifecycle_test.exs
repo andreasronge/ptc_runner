@@ -130,15 +130,15 @@ defmodule PtcRunnerMcp.Http.SessionLifecycleTest do
       assert ConcurrencyGate.in_flight() == 1
 
       # The :DOWN arm for an abnormal, non-:killed/non-:normal worker exit
-      # (existing tests only cover the :killed arm) is a genuine race against
-      # the sandbox finishing the worker on its own. We freeze the session with
-      # :sys.suspend so it cannot process the worker's real :async_reply,
-      # capture the still-registered worker, kill it, then deliver the exact
-      # production :DOWN message with an abnormal reason and resume. This drives
-      # `handle_info({:DOWN, ...})` deterministically with no race or sleep.
+      # (existing tests only cover the :killed arm). The worker runs Ackermann,
+      # so it neither replies nor exits during this window. Suspend the session
+      # so the forged :DOWN is the only message it processes on resume, then
+      # deliver the exact production :DOWN with an abnormal reason. We must NOT
+      # kill the real worker here: Process.exit/2 would emit a competing real
+      # :DOWN (reason :killed) that could be handled first and steer the test
+      # down the cancelled path instead of the -32603 arm.
       :sys.suspend(session)
       %{"crash-me" => %{pid: worker_pid, ref: worker_ref}} = :sys.get_state(session).in_flight
-      Process.exit(worker_pid, :kill)
       send(session, {:DOWN, worker_ref, :process, worker_pid, :boom})
       :sys.resume(session)
 
@@ -150,6 +150,11 @@ defmodule PtcRunnerMcp.Http.SessionLifecycleTest do
 
       # The slot and the global permit are both released.
       wait_until(fn -> in_flight_count(session) == 0 and ConcurrencyGate.in_flight() == 0 end)
+
+      # The session believes the worker died, so the real (still-running) worker
+      # is now orphaned; stop it. Its in-flight entry is already gone, so the
+      # real :DOWN is a no-op.
+      Process.exit(worker_pid, :kill)
     end
   end
 

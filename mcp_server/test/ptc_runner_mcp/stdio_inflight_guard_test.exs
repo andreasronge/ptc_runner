@@ -112,34 +112,30 @@ defmodule PtcRunnerMcp.StdioInflightGuardTest do
       assert ConcurrencyGate.in_flight() == 0
     end
 
-    test "the original in-flight call still completes after a duplicate-id rejection", %{
-      harness: h
-    } do
+    test "a duplicate id is rejected without evicting the in-flight original or leaking a permit",
+         %{harness: h} do
       _ = JsonRpcHarness.drain_replied_messages()
 
-      # Frame 1: a SHORT call that we keep in flight just long enough to
-      # race a duplicate against it. We use the long-running program so
-      # the in-flight window is wide, then cancel to finish — but here we
-      # want the original to RUN, so instead we use a moderate program
-      # and let it finish on its own.
-      #
-      # To make "original completes" deterministic without a long stall,
-      # we hold the slot with the long-running program, fire the
-      # duplicate, then cancel id 7 and feed a FRESH id 8 to prove the
-      # gate is back to a usable state (permit returned, no leak).
+      # Hold id 7 in flight with the long-running program so a duplicate
+      # deterministically races against a live request.
       :ok = Stdio.feed(h.stdio, tools_call_frame(7, long_running_program()))
       wait_until(fn -> Stdio.in_flight_count(h.stdio) == 1 end, 1_000)
 
       _ = JsonRpcHarness.drain_replied_messages()
       _ = StringIO.flush(h.io)
 
-      # Duplicate id 7 -> rejected -32600, no new permit.
+      # Duplicate id 7 -> rejected -32600, and the original is left untouched:
+      # still exactly one in-flight request and one permit, with NO spurious
+      # result reply for id 7 (a regression that discarded the original would
+      # drop the in-flight count or emit an extra reply here).
       :ok = Stdio.feed(h.stdio, tools_call_frame(7, "(+ 1 2)"))
       replies = drain_replies(h.io)
       assert Enum.find(replies, &(&1["id"] == 7))["error"]["code"] == -32_600
+      refute Enum.any?(replies, &(&1["id"] == 7 and Map.has_key?(&1, "result")))
+      assert Stdio.in_flight_count(h.stdio) == 1
       assert ConcurrencyGate.in_flight() == 1
 
-      # Finish the original; the gate must return to 0.
+      # Cancel the original; the gate returns to 0 (permit released, not leaked).
       :ok = Stdio.feed(h.stdio, cancelled_frame(7))
       wait_until(fn -> Stdio.in_flight_count(h.stdio) == 0 end, 1_500)
       assert ConcurrencyGate.in_flight() == 0
