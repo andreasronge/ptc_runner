@@ -12,7 +12,7 @@ runs:
         otp-version: '28.1'
 
     - name: Cache deps and _build
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       id: cache-deps
       with:
         path: |
@@ -31,7 +31,7 @@ runs:
       shell: bash
 
     - name: Cache Dialyzer PLT
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: priv/plts
         key: plt-${{ runner.os }}-otp28.1-elixir1.19.3-${{ hashFiles('**/mix.lock') }}
@@ -39,7 +39,7 @@ runs:
           plt-${{ runner.os }}-otp28.1-elixir1.19.3-
 
     - name: Cache Babashka
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       id: cache-babashka
       with:
         path: _build/tools

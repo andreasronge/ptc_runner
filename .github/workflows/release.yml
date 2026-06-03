@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-test
           path: tmp/release-report/test.md
@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-soak
           path: tmp/release-report/soak.md
@@ -125,7 +125,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-integrity
           path: tmp/release-report/integrity.md
@@ -233,7 +233,7 @@ jobs:
 
       - name: Upload unpacked package
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-hex-unpack
           path: tmp/hex-unpack/
@@ -249,7 +249,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -300,7 +300,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-docs
           path: tmp/release-report/docs.md
@@ -316,7 +316,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -339,7 +339,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-perf
           path: tmp/release-report/perf.md
@@ -362,7 +362,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -424,7 +424,7 @@ jobs:
 
       - name: Upload LLM reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-llm-smoke-reports
           path: |
@@ -435,7 +435,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-llm-smoke
           path: tmp/release-report/llm-smoke.md
@@ -450,7 +450,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Full history + tags so release-stats.sh can diff against the
           # previous release tag for the growth section.
@@ -468,7 +468,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-stats
           path: tmp/release-report/stats.md
@@ -477,7 +477,7 @@ jobs:
 
       - name: Upload metrics JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-metrics-stats
           path: tmp/metrics/stats.json
@@ -494,7 +494,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -519,7 +519,7 @@ jobs:
 
       - name: Upload report fragment
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-fragment-coverage
           path: tmp/release-report/coverage.md
@@ -528,7 +528,7 @@ jobs:
 
       - name: Upload metrics JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-metrics-coverage
           path: tmp/metrics/coverage.json
@@ -544,10 +544,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download report fragments
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-fragment-*
           path: tmp/release-report/fragments
@@ -636,7 +636,7 @@ jobs:
           cat tmp/release-checks.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-checks-report
           path: tmp/release-checks.md
@@ -651,7 +651,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -691,17 +691,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download release report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: release-checks-report
           path: tmp/dl/report
 
       - name: Download metric JSONs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: release-metrics-*

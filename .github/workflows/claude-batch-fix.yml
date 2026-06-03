@@ -157,7 +157,7 @@ jobs:
 
       - name: Checkout repository
         if: steps.batch_guard.outputs.should_continue == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}

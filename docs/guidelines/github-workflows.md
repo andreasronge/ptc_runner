@@ -112,6 +112,14 @@ This document describes the Claude-powered GitHub workflows for autonomous issue
 
 ## Robustness Features
 
+### Action Runtime Maintenance
+
+GitHub-managed JavaScript actions should track the current major version that
+runs on GitHub's default Node.js action runtime. When GitHub announces a Node
+runtime deprecation, audit every `uses:` reference under `.github/`, including
+composite actions in `.github/actions/`, and update GitHub-managed actions
+before the old runtime is removed from hosted runners.
+
 ### Timeout Handling
 
 All Claude workflows have explicit timeouts to prevent runaway jobs:

@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Configure AWS credentials for Bedrock (OIDC - no secrets needed)
       - name: Configure AWS credentials
@@ -126,7 +126,7 @@ jobs:
 
       - name: Upload reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-reports-${{ matrix.model }}-${{ inputs.provider }}
           path: demo/reports/
@@ -141,13 +141,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
       - name: Download all reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: benchmark-reports-*
           path: all-reports
@@ -191,7 +191,7 @@ jobs:
           done
 
       - name: Upload combined reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: all-benchmark-reports
           path: all-reports/

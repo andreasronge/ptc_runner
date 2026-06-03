@@ -94,7 +94,7 @@ jobs:
 
       - name: Checkout repository
         if: steps.pr.outputs.skip != 'true' && steps.labels.outputs.skip != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ steps.pr.outputs.head_ref }}
