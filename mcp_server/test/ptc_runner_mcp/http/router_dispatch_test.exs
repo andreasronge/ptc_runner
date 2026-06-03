@@ -1,146 +1,17 @@
-defmodule PtcRunnerMcp.HttpRouterTest do
-  use ExUnit.Case, async: false
-  import Plug.Conn
-  import Plug.Test
-  import PtcRunnerMcp.TestSupport.WaitHelpers
+defmodule PtcRunnerMcp.Http.RouterDispatchTest do
+  use PtcRunnerMcp.Http.RouterCase
 
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Http.Auth
-  alias PtcRunnerMcp.Http.Config, as: HttpConfig
-  alias PtcRunnerMcp.Http.Router
   alias PtcRunnerMcp.Http.SessionRegistry
-  alias PtcRunnerMcp.Http.Telemetry
-  alias PtcRunnerMcp.Log
   alias PtcRunnerMcp.McpTestHelpers
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.{Names, Owner, Registry, Supervisor}
-  alias PtcRunnerMcp.TraceConfig
-  alias PtcRunnerMcp.TraceHandler
-
-  @token String.duplicate("a", 32)
-
-  setup context do
-    McpTestHelpers.stop_existing_registry(SessionRegistry)
-    {:ok, cfg} = HttpConfig.resolve(%{http: true, http_auth_token: @token})
-    cfg = %{cfg | max_sessions: Map.get(context, :max_sessions, cfg.max_sessions)}
-    Application.put_env(:ptc_runner_mcp, :http_config, cfg)
-    start_supervised!({SessionRegistry, [config: cfg]})
-    PtcRunnerMcp.ConcurrencyGate.init()
-    PtcRunnerMcp.ConcurrencyGate.reset()
-
-    original_trace = TraceConfig.get()
-    original_log_level = Log.level()
-
-    on_exit(fn ->
-      SessionsConfig.set(SessionsConfig.defaults())
-      TraceConfig.set(original_trace)
-      TraceHandler.detach()
-      Log.set_level(original_log_level)
-    end)
-
-    {:ok, cfg: cfg}
-  end
 
   test "authenticated GET /mcp returns 405 with Allow" do
     conn = call(auth(conn(:get, "/mcp")))
     assert conn.status == 405
     assert get_resp_header(conn, "allow") == ["POST, DELETE"]
-  end
-
-  test "unauthenticated GET /mcp returns 401 bearer challenge" do
-    conn = call(conn(:get, "/mcp"))
-    assert conn.status == 401
-    assert get_resp_header(conn, "www-authenticate") == ["Bearer"]
-  end
-
-  test "GET /mcp with bad Host returns 403 before 405" do
-    conn =
-      conn(:get, "/mcp")
-      |> auth()
-      |> with_host("attacker.example")
-      |> call()
-
-    assert conn.status == 403
-    assert conn.resp_body == "forbidden"
-  end
-
-  test "GET /mcp with invalid Origin returns 403 before 405" do
-    conn =
-      conn(:get, "/mcp")
-      |> auth()
-      |> with_host("127.0.0.1")
-      |> put_req_header("origin", "http://attacker.example")
-      |> call()
-
-    assert conn.status == 403
-    assert conn.resp_body == "forbidden"
-  end
-
-  test "health and ready are unauthenticated" do
-    assert call(conn(:get, "/health")).status == 200
-    assert call(conn(:get, "/ready")).status == 200
-  end
-
-  test "missing and bad auth return bearer challenges" do
-    conn =
-      conn(:post, "/mcp", "{}") |> put_req_header("content-type", "application/json") |> call()
-
-    assert conn.status == 401
-    assert get_resp_header(conn, "www-authenticate") == ["Bearer"]
-
-    conn =
-      conn(:post, "/mcp", "{}")
-      |> put_req_header("authorization", "Bearer nope")
-      |> call()
-
-    assert conn.status == 401
-    assert get_resp_header(conn, "www-authenticate") == [~s(Bearer error="invalid_token")]
-  end
-
-  test "loopback bind rejects hostile Host before reading MCP POST body" do
-    conn =
-      conn(
-        :post,
-        "/mcp",
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
-      )
-      |> auth()
-      |> with_host("attacker.example")
-      |> call()
-
-    assert conn.status == 403
-    assert conn.resp_body == "forbidden"
-  end
-
-  test "missing Origin is allowed when Host is loopback" do
-    conn =
-      conn(
-        :post,
-        "/mcp",
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
-      )
-      |> auth()
-      |> with_host("127.0.0.1")
-      |> call()
-
-    assert conn.status == 200
-    assert get_resp_header(conn, "mcp-session-id") != []
-  end
-
-  test "invalid browser Origin is rejected even with loopback Host" do
-    conn =
-      conn(
-        :post,
-        "/mcp",
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "initialize"})
-      )
-      |> auth()
-      |> with_host("127.0.0.1")
-      |> put_req_header("origin", "http://attacker.example")
-      |> call()
-
-    assert conn.status == 403
-    assert conn.resp_body == "forbidden"
   end
 
   test "POST rejects present non-JSON content types" do
@@ -311,17 +182,6 @@ defmodule PtcRunnerMcp.HttpRouterTest do
       |> call()
 
     assert conn.status == 404
-  end
-
-  test "loopback bind rejects hostile Host on DELETE" do
-    conn =
-      conn(:delete, "/mcp")
-      |> auth()
-      |> with_host("attacker.example")
-      |> call()
-
-    assert conn.status == 403
-    assert conn.resp_body == "forbidden"
   end
 
   test "deleted owner index allows same owner to initialize again" do
@@ -571,184 +431,6 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     assert [%{"session_id" => _}] = get_in(list_body, ["result", "structuredContent", "sessions"])
   end
 
-  test "HTTP request telemetry carries request, owner, and session correlation" do
-    handler_id = attach_http_telemetry()
-
-    conn =
-      conn(
-        :post,
-        "/mcp",
-        Jason.encode!(%{"jsonrpc" => "2.0", "id" => "obs-init", "method" => "initialize"})
-      )
-      |> auth()
-      |> put_req_header("x-request-id", "http-request-1")
-      |> call()
-
-    assert conn.status == 200
-    assert get_resp_header(conn, "x-request-id") == ["http-request-1"]
-    [session_id] = get_resp_header(conn, "mcp-session-id")
-
-    owner_hash = Auth.owner_for(@token).hash
-    session_hash = Telemetry.hash_id(session_id)
-
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :request, :start],
-                    %{system_time: _}, %{request_id: "http-request-1"}}
-
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :session, :created],
-                    %{count: 1},
-                    %{
-                      owner_hash: ^owner_hash,
-                      session_hash: ^session_hash,
-                      protocol_version: _
-                    }}
-
-    assert_receive {:http_telemetry, ^handler_id, [:ptc_lisp, :http, :request, :stop],
-                    %{duration: duration},
-                    %{
-                      request_id: "http-request-1",
-                      status: 200,
-                      owner_hash: ^owner_hash,
-                      session_hash: ^session_hash
-                    }}
-                   when is_integer(duration)
-  end
-
-  test "HTTP request log line is correlated and does not leak the raw session id" do
-    Log.set_level(:info)
-    parent = self()
-
-    stderr =
-      ExUnit.CaptureIO.capture_io(:stderr, fn ->
-        conn =
-          conn(
-            :post,
-            "/mcp",
-            Jason.encode!(%{"jsonrpc" => "2.0", "id" => "log-init", "method" => "initialize"})
-          )
-          |> auth()
-          |> put_req_header("x-request-id", "http-log-1")
-          |> call()
-
-        assert conn.status == 200
-        [session_id] = get_resp_header(conn, "mcp-session-id")
-        send(parent, {:created_session_id, session_id})
-      end)
-
-    assert_receive {:created_session_id, session_id}
-
-    line =
-      stderr
-      |> String.split("\n", trim: true)
-      |> Enum.map(&Jason.decode!/1)
-      |> Enum.find(&(&1["event"] == "http_request_stop"))
-
-    assert line["request_id"] == "http-log-1"
-    assert line["fields"]["status"] == 200
-    assert line["fields"]["owner_hash"] == Auth.owner_for(@token).hash
-    refute String.contains?(stderr, @token)
-    refute String.contains?(stderr, session_id)
-  end
-
-  test "HTTP tool-call traces carry owner and session hashes" do
-    dir = Path.join(System.tmp_dir!(), "ptc_mcp_http_trace_#{System.unique_integer([:positive])}")
-    File.rm_rf!(dir)
-    File.mkdir_p!(dir)
-    TraceConfig.set(%{trace_dir: dir, trace_payloads: :summary, trace_max_files: 1000})
-    TraceHandler.attach()
-
-    session_id = initialize_session()
-    owner_hash = Auth.owner_for(@token).hash
-    session_hash = Telemetry.hash_id(session_id)
-
-    call = %{
-      "jsonrpc" => "2.0",
-      "id" => "trace-call",
-      "method" => "tools/call",
-      "params" => %{
-        "name" => "lisp_eval",
-        "arguments" => %{"program" => "(+ 1 2)", "context" => %{}}
-      }
-    }
-
-    conn =
-      conn(:post, "/mcp", Jason.encode!(call))
-      |> auth()
-      |> put_req_header("x-request-id", "http-trace-1")
-      |> put_req_header("mcp-session-id", session_id)
-      |> call()
-
-    assert conn.status == 200
-
-    [file] = wait_for_files(dir, 1)
-    events = read_jsonl(Path.join(dir, file))
-    call_start = Enum.find(events, &(&1["event"] == "ptc_lisp.call.start"))
-
-    assert call_start["metadata"]["owner_hash"] == owner_hash
-    assert call_start["metadata"]["mcp_session_hash"] == session_hash
-    assert call_start["metadata"]["transport_request_id"] == "http-trace-1"
-    refute inspect(events) =~ @token
-    refute inspect(events) =~ session_id
-
-    File.rm_rf!(dir)
-  end
-
-  defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @token)
-
-  defp call(%{host: host} = conn) when host in ["example.com", "www.example.com"],
-    do: conn |> with_host("127.0.0.1") |> Router.call([])
-
-  defp call(conn), do: Router.call(conn, [])
-
-  defp with_host(conn, host), do: %{conn | host: host, port: 7332}
-
-  defp attach_http_telemetry do
-    handler_id = "http-router-test-#{System.unique_integer([:positive])}"
-    parent = self()
-
-    :ok =
-      :telemetry.attach_many(
-        handler_id,
-        [
-          [:ptc_lisp, :http, :request, :start],
-          [:ptc_lisp, :http, :request, :stop],
-          [:ptc_lisp, :http, :session, :created]
-        ],
-        fn event, measurements, metadata, _config ->
-          send(parent, {:http_telemetry, handler_id, event, measurements, metadata})
-        end,
-        %{}
-      )
-
-    on_exit(fn -> :telemetry.detach(handler_id) end)
-    handler_id
-  end
-
-  defp initialize_session(protocol_version \\ nil) do
-    params =
-      case protocol_version do
-        nil -> %{}
-        version -> %{"protocolVersion" => version}
-      end
-
-    conn =
-      conn(
-        :post,
-        "/mcp",
-        Jason.encode!(%{
-          "jsonrpc" => "2.0",
-          "id" => "i",
-          "method" => "initialize",
-          "params" => params
-        })
-      )
-      |> auth()
-      |> call()
-
-    assert conn.status == 200
-    [session_id] = get_resp_header(conn, "mcp-session-id")
-    session_id
-  end
-
   defp start_ptc_sessions! do
     McpTestHelpers.stop_existing_registry(Registry)
     McpTestHelpers.stop_existing_registry(Supervisor)
@@ -758,13 +440,6 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     SessionsConfig.set(cfg)
 
     Enum.each(PtcRunnerMcp.Sessions.child_specs(), &start_supervised!/1)
-  end
-
-  defp read_jsonl(path) do
-    path
-    |> File.read!()
-    |> String.split("\n", trim: true)
-    |> Enum.map(&Jason.decode!/1)
   end
 
   defp long_running_program do

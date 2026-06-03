@@ -455,7 +455,8 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp normalize_tool_calls(raw_tool_calls) do
+    @doc false
+    def normalize_tool_calls(raw_tool_calls) do
       Enum.map(raw_tool_calls, fn tc ->
         {args, args_error} =
           case Jason.decode(tc.function.arguments || "{}") do
@@ -536,7 +537,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Message Building ---
 
-    defp build_messages(req) do
+    @doc false
+    def build_messages(req) do
       system_msgs =
         if sys = req[:system], do: [%{role: :system, content: sys}], else: []
 
@@ -578,7 +580,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     # --- Caching ---
 
-    defp apply_caching(model, messages, true = _cache_enabled) do
+    @doc false
+    def apply_caching(model, messages, true = _cache_enabled) do
       cond do
         String.starts_with?(model, "anthropic:") ->
           extra_opts = [
@@ -612,7 +615,7 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp apply_caching(_model, messages, false), do: {messages, []}
+    def apply_caching(_model, messages, false), do: {messages, []}
 
     defp apply_bedrock_region(model, opts) do
       if bedrock_model?(model) and System.get_env("AWS_REGION") == nil do
@@ -638,7 +641,8 @@ if Code.ensure_loaded?(ReqLLM) do
     @bedrock_inference_prefixes ["us.", "eu.", "ap.", "ca.", "global."]
     @bedrock_inference_required_families ["amazon."]
 
-    defp maybe_resolve_inference_profile("amazon_bedrock:" <> model_id = full) do
+    @doc false
+    def maybe_resolve_inference_profile("amazon_bedrock:" <> model_id = full) do
       cond do
         String.starts_with?(model_id, @bedrock_inference_prefixes) ->
           [_region, base_id] = String.split(model_id, ".", parts: 2)
@@ -661,7 +665,7 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp maybe_resolve_inference_profile(model), do: model
+    def maybe_resolve_inference_profile(model), do: model
 
     defp bedrock_region_prefix do
       region =
@@ -756,7 +760,8 @@ if Code.ensure_loaded?(ReqLLM) do
       Map.merge(tokens, %{cache_creation: 0, cache_read: 0})
     end
 
-    defp build_tokens_from_req_llm_response(usage, provider_meta) do
+    @doc false
+    def build_tokens_from_req_llm_response(usage, provider_meta) do
       cache_write_from_meta = extract_cache_write_tokens(provider_meta)
 
       cache_read =

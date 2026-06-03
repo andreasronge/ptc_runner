@@ -1,42 +1,8 @@
-defmodule PtcRunnerMcp.HttpRouterRateLimitTest do
-  use ExUnit.Case, async: false
-  import Plug.Conn
-  import Plug.Test
+defmodule PtcRunnerMcp.Http.RouterRateLimitTest do
+  use PtcRunnerMcp.Http.RouterCase
 
-  alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Http.AuthRateLimiter
-  alias PtcRunnerMcp.Http.Config, as: HttpConfig
   alias PtcRunnerMcp.Http.Router
-  alias PtcRunnerMcp.Http.SessionRegistry
-  alias PtcRunnerMcp.Log
-  alias PtcRunnerMcp.McpTestHelpers
-  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
-  alias PtcRunnerMcp.TraceConfig
-  alias PtcRunnerMcp.TraceHandler
-
-  @token String.duplicate("a", 32)
-
-  setup context do
-    McpTestHelpers.stop_existing_registry(SessionRegistry)
-    {:ok, cfg} = HttpConfig.resolve(%{http: true, http_auth_token: @token})
-    cfg = %{cfg | max_sessions: Map.get(context, :max_sessions, cfg.max_sessions)}
-    Application.put_env(:ptc_runner_mcp, :http_config, cfg)
-    start_supervised!({SessionRegistry, [config: cfg]})
-    ConcurrencyGate.init()
-    ConcurrencyGate.reset()
-
-    original_trace = TraceConfig.get()
-    original_log_level = Log.level()
-
-    on_exit(fn ->
-      SessionsConfig.set(SessionsConfig.defaults())
-      TraceConfig.set(original_trace)
-      TraceHandler.detach()
-      Log.set_level(original_log_level)
-    end)
-
-    {:ok, cfg: cfg}
-  end
 
   describe "failed auth rate limiting" do
     setup %{cfg: cfg} do
@@ -162,13 +128,4 @@ defmodule PtcRunnerMcp.HttpRouterRateLimitTest do
   end
 
   defp with_remote_ip(conn, ip), do: %{conn | remote_ip: ip}
-
-  defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @token)
-
-  defp call(%{host: host} = conn) when host in ["example.com", "www.example.com"],
-    do: conn |> with_host("127.0.0.1") |> Router.call([])
-
-  defp call(conn), do: Router.call(conn, [])
-
-  defp with_host(conn, host), do: %{conn | host: host, port: 7332}
 end

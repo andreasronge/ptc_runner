@@ -176,6 +176,7 @@ defmodule PtcRunnerMcp.HttpConfigTest do
              Config.resolve(%{http: true, http_auth_token: String.duplicate("a", 32)})
 
     assert message =~ "--http-port"
+    assert message =~ "PTC_RUNNER_MCP_HTTP_PORT"
     assert message =~ "must be a positive integer"
   end
 
