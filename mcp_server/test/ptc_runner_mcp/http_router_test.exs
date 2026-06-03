@@ -42,10 +42,27 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     {:ok, cfg: cfg}
   end
 
-  test "GET /mcp returns 405 with Allow" do
-    conn = call(conn(:get, "/mcp"))
+  test "authenticated GET /mcp returns 405 with Allow" do
+    conn = call(auth(conn(:get, "/mcp")))
     assert conn.status == 405
     assert get_resp_header(conn, "allow") == ["POST, DELETE"]
+  end
+
+  test "unauthenticated GET /mcp returns 401 bearer challenge" do
+    conn = call(conn(:get, "/mcp"))
+    assert conn.status == 401
+    assert get_resp_header(conn, "www-authenticate") == ["Bearer"]
+  end
+
+  test "GET /mcp with bad Host returns 403 before 405" do
+    conn =
+      conn(:get, "/mcp")
+      |> auth()
+      |> with_host("attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
   end
 
   test "health and ready are unauthenticated" do
