@@ -11,22 +11,35 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   use ExUnit.Case, async: false
 
   alias PtcRunnerMcp.{Application, Limits}
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   setup do
     # Snapshot env vars we touch so we can restore them.
     original = %{
       timeout: System.get_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS"),
-      memory: System.get_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES")
+      memory: System.get_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES"),
+      max_sessions: System.get_env("PTC_RUNNER_MCP_MAX_SESSIONS"),
+      max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     }
 
     on_exit(fn ->
       restore_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS", original.timeout)
       restore_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES", original.memory)
+      restore_env("PTC_RUNNER_MCP_MAX_SESSIONS", original.max_sessions)
+
+      restore_env(
+        "PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES",
+        original.max_upstream_response_bytes
+      )
+
       Limits.set(Limits.defaults())
+      SessionsConfig.reset()
     end)
 
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS")
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES")
+    System.delete_env("PTC_RUNNER_MCP_MAX_SESSIONS")
+    System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     :ok
   end
 
@@ -87,6 +100,40 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       args = Application.parse_args(["--program-memory-limit-bytes", "16777216"])
       assert :ok = run_apply_limits(args)
       assert Limits.program_memory_limit_bytes() == 16_777_216
+    end
+
+    test "rejects numeric-prefix garbage for integer config" do
+      System.put_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES", "64mb")
+
+      assert_raise RuntimeError,
+                   ~r/PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES must be a positive integer/,
+                   fn ->
+                     run_apply_limits(%{})
+                   end
+    end
+  end
+
+  describe "apply_sessions_config/1" do
+    test "rejects invalid explicit integer config" do
+      assert_raise RuntimeError, ~r/--max-sessions .* must be a positive integer/, fn ->
+        Application.apply_sessions_config(%{max_sessions: 0})
+      end
+    end
+
+    test "rejects invalid integer config supplied via env var" do
+      System.put_env("PTC_RUNNER_MCP_MAX_SESSIONS", "not-a-number")
+
+      assert_raise RuntimeError, ~r/PTC_RUNNER_MCP_MAX_SESSIONS must be a positive integer/, fn ->
+        Application.apply_sessions_config(%{})
+      end
+    end
+
+    test "rejects numeric-prefix garbage via shared session resolver" do
+      System.put_env("PTC_RUNNER_MCP_MAX_SESSIONS", "64mb")
+
+      assert_raise RuntimeError, ~r/PTC_RUNNER_MCP_MAX_SESSIONS must be a positive integer/, fn ->
+        Application.apply_sessions_config(%{})
+      end
     end
   end
 

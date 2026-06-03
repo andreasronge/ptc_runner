@@ -71,101 +71,122 @@ defmodule PtcRunnerMcp.Sessions.Config do
   mirrors the existing MCP config modules without requiring the Application
   module to own Phase 1 session wiring yet.
   """
-  @spec resolve(map()) :: t()
+  @spec resolve(map()) :: {:ok, t()} | {:error, String.t()}
   def resolve(args) when is_map(args) do
     defaults = defaults()
 
-    %{
-      enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
-      max_sessions:
-        read_int(args, :max_sessions, "PTC_RUNNER_MCP_MAX_SESSIONS", defaults.max_sessions),
-      max_sessions_per_owner:
-        read_int(
-          args,
-          :max_sessions_per_owner,
-          "PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER",
-          defaults.max_sessions_per_owner
-        ),
-      session_ttl_ms:
-        read_int(args, :session_ttl_ms, "PTC_RUNNER_MCP_SESSION_TTL_MS", defaults.session_ttl_ms),
-      session_idle_timeout_ms:
-        read_int(
-          args,
-          :session_idle_timeout_ms,
-          "PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS",
-          defaults.session_idle_timeout_ms
-        ),
-      max_session_memory_bytes:
-        read_int(
-          args,
-          :max_session_memory_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES",
-          defaults.max_session_memory_bytes
-        ),
-      max_session_binding_bytes:
-        read_int(
-          args,
-          :max_session_binding_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES",
-          defaults.max_session_binding_bytes
-        ),
-      max_session_bindings:
-        read_int(
-          args,
-          :max_session_bindings,
-          "PTC_RUNNER_MCP_MAX_SESSION_BINDINGS",
-          defaults.max_session_bindings
-        ),
-      max_session_history_entry_bytes:
-        read_int(
-          args,
-          :max_session_history_entry_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES",
-          defaults.max_session_history_entry_bytes
-        ),
-      max_session_print_entries:
-        read_int(
-          args,
-          :max_session_print_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES",
-          defaults.max_session_print_entries
-        ),
-      max_session_print_bytes:
-        read_int(
-          args,
-          :max_session_print_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES",
-          defaults.max_session_print_bytes
-        ),
-      max_session_tool_call_entries:
-        read_int(
-          args,
-          :max_session_tool_call_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES",
-          defaults.max_session_tool_call_entries
-        ),
-      max_session_tool_call_bytes:
-        read_int(
-          args,
-          :max_session_tool_call_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES",
-          defaults.max_session_tool_call_bytes
-        ),
-      max_session_upstream_call_entries:
-        read_int(
-          args,
-          :max_session_upstream_call_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES",
-          defaults.max_session_upstream_call_entries
-        ),
-      max_session_upstream_call_bytes:
-        read_int(
-          args,
-          :max_session_upstream_call_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES",
-          defaults.max_session_upstream_call_bytes
-        )
-    }
+    with {:ok, max_sessions} <-
+           read_int(args, :max_sessions, "PTC_RUNNER_MCP_MAX_SESSIONS", defaults.max_sessions),
+         {:ok, max_sessions_per_owner} <-
+           read_int(
+             args,
+             :max_sessions_per_owner,
+             "PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER",
+             defaults.max_sessions_per_owner
+           ),
+         {:ok, session_ttl_ms} <-
+           read_int(
+             args,
+             :session_ttl_ms,
+             "PTC_RUNNER_MCP_SESSION_TTL_MS",
+             defaults.session_ttl_ms
+           ),
+         {:ok, session_idle_timeout_ms} <-
+           read_int(
+             args,
+             :session_idle_timeout_ms,
+             "PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS",
+             defaults.session_idle_timeout_ms
+           ),
+         {:ok, max_session_memory_bytes} <-
+           read_int(
+             args,
+             :max_session_memory_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES",
+             defaults.max_session_memory_bytes
+           ),
+         {:ok, max_session_binding_bytes} <-
+           read_int(
+             args,
+             :max_session_binding_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES",
+             defaults.max_session_binding_bytes
+           ),
+         {:ok, max_session_bindings} <-
+           read_int(
+             args,
+             :max_session_bindings,
+             "PTC_RUNNER_MCP_MAX_SESSION_BINDINGS",
+             defaults.max_session_bindings
+           ),
+         {:ok, max_session_history_entry_bytes} <-
+           read_int(
+             args,
+             :max_session_history_entry_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES",
+             defaults.max_session_history_entry_bytes
+           ),
+         {:ok, max_session_print_entries} <-
+           read_int(
+             args,
+             :max_session_print_entries,
+             "PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES",
+             defaults.max_session_print_entries
+           ),
+         {:ok, max_session_print_bytes} <-
+           read_int(
+             args,
+             :max_session_print_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES",
+             defaults.max_session_print_bytes
+           ),
+         {:ok, max_session_tool_call_entries} <-
+           read_int(
+             args,
+             :max_session_tool_call_entries,
+             "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES",
+             defaults.max_session_tool_call_entries
+           ),
+         {:ok, max_session_tool_call_bytes} <-
+           read_int(
+             args,
+             :max_session_tool_call_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES",
+             defaults.max_session_tool_call_bytes
+           ),
+         {:ok, max_session_upstream_call_entries} <-
+           read_int(
+             args,
+             :max_session_upstream_call_entries,
+             "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES",
+             defaults.max_session_upstream_call_entries
+           ),
+         {:ok, max_session_upstream_call_bytes} <-
+           read_int(
+             args,
+             :max_session_upstream_call_bytes,
+             "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES",
+             defaults.max_session_upstream_call_bytes
+           ) do
+      {:ok,
+       %{
+         enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
+         max_sessions: max_sessions,
+         max_sessions_per_owner: max_sessions_per_owner,
+         session_ttl_ms: session_ttl_ms,
+         session_idle_timeout_ms: session_idle_timeout_ms,
+         max_session_memory_bytes: max_session_memory_bytes,
+         max_session_binding_bytes: max_session_binding_bytes,
+         max_session_bindings: max_session_bindings,
+         max_session_history_entry_bytes: max_session_history_entry_bytes,
+         max_session_print_entries: max_session_print_entries,
+         max_session_print_bytes: max_session_print_bytes,
+         max_session_tool_call_entries: max_session_tool_call_entries,
+         max_session_tool_call_bytes: max_session_tool_call_bytes,
+         max_session_upstream_call_entries: max_session_upstream_call_entries,
+         max_session_upstream_call_bytes: max_session_upstream_call_bytes
+       }}
+    end
   end
 
   @doc "Install process-wide session config."
@@ -183,7 +204,16 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @doc "Read current process-wide session config."
   @spec get() :: t()
   def get do
-    :persistent_term.get({__MODULE__, :config}, resolve(%{}))
+    case :persistent_term.get({__MODULE__, :config}, :__ptc_missing__) do
+      :__ptc_missing__ ->
+        case resolve(%{}) do
+          {:ok, config} -> config
+          {:error, message} -> raise message
+        end
+
+      config ->
+        config
+    end
   end
 
   @doc "Clear installed config; useful for tests and short-lived manual runs."
@@ -240,21 +270,25 @@ defmodule PtcRunnerMcp.Sessions.Config do
   defp read_int(args, key, env_name, default) do
     case env_or(args, key, env_name) do
       nil ->
-        default
+        {:ok, default}
 
       n when is_integer(n) and n > 0 ->
-        n
+        {:ok, n}
 
       bin when is_binary(bin) ->
         case Integer.parse(String.trim(bin)) do
-          {n, ""} when n > 0 -> n
-          {n, _rest} when n > 0 -> n
-          _ -> default
+          {n, ""} when n > 0 -> {:ok, n}
+          _ -> {:error, invalid_int_message(key, env_name, bin)}
         end
 
-      _ ->
-        default
+      value ->
+        {:error, invalid_int_message(key, env_name, value)}
     end
+  end
+
+  defp invalid_int_message(key, env_name, value) do
+    flag = "--" <> (key |> Atom.to_string() |> String.replace("_", "-"))
+    "#{flag} / #{env_name} must be a positive integer, got: #{inspect(value)}"
   end
 
   defp read_bool(args, key, env_name, default) do

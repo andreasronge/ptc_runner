@@ -153,18 +153,24 @@ defmodule PtcRunnerMcp.CatalogConfigTest do
       assert CatalogConfig.get().catalog_mode == :auto
     end
 
-    test "non-positive integer falls back to default" do
+    test "non-positive integer config raises" do
       System.put_env("PTC_RUNNER_MCP_CATALOG_INLINE_MAX_CHARS", "0")
-      Application.apply_catalog_config(%{})
 
-      assert CatalogConfig.get().catalog_inline_max_chars == 800
+      assert_raise RuntimeError,
+                   ~r/--catalog-inline-max-chars .* must be a positive integer/,
+                   fn ->
+                     Application.apply_catalog_config(%{})
+                   end
     end
 
-    test "non-integer string falls back to default" do
+    test "non-integer string config raises" do
       System.put_env("PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES", "abc")
-      Application.apply_catalog_config(%{})
 
-      assert CatalogConfig.get().max_catalog_result_bytes == 262_144
+      assert_raise RuntimeError,
+                   ~r/--max-catalog-result-bytes .* must be a positive integer/,
+                   fn ->
+                     Application.apply_catalog_config(%{})
+                   end
     end
   end
 end

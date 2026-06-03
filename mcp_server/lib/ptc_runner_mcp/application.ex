@@ -610,99 +610,10 @@ defmodule PtcRunnerMcp.Application do
   @doc false
   @spec apply_sessions_config(map()) :: :ok
   def apply_sessions_config(args) when is_map(args) do
-    defaults = SessionsConfig.defaults()
-
-    SessionsConfig.set(%{
-      enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
-      max_sessions:
-        read_int(args, :max_sessions, "PTC_RUNNER_MCP_MAX_SESSIONS", defaults.max_sessions),
-      max_sessions_per_owner:
-        read_int(
-          args,
-          :max_sessions_per_owner,
-          "PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER",
-          defaults.max_sessions_per_owner
-        ),
-      session_ttl_ms:
-        read_int(args, :session_ttl_ms, "PTC_RUNNER_MCP_SESSION_TTL_MS", defaults.session_ttl_ms),
-      session_idle_timeout_ms:
-        read_int(
-          args,
-          :session_idle_timeout_ms,
-          "PTC_RUNNER_MCP_SESSION_IDLE_TIMEOUT_MS",
-          defaults.session_idle_timeout_ms
-        ),
-      max_session_memory_bytes:
-        read_int(
-          args,
-          :max_session_memory_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_MEMORY_BYTES",
-          defaults.max_session_memory_bytes
-        ),
-      max_session_binding_bytes:
-        read_int(
-          args,
-          :max_session_binding_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_BINDING_BYTES",
-          defaults.max_session_binding_bytes
-        ),
-      max_session_bindings:
-        read_int(
-          args,
-          :max_session_bindings,
-          "PTC_RUNNER_MCP_MAX_SESSION_BINDINGS",
-          defaults.max_session_bindings
-        ),
-      max_session_history_entry_bytes:
-        read_int(
-          args,
-          :max_session_history_entry_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_HISTORY_ENTRY_BYTES",
-          defaults.max_session_history_entry_bytes
-        ),
-      max_session_print_entries:
-        read_int(
-          args,
-          :max_session_print_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_ENTRIES",
-          defaults.max_session_print_entries
-        ),
-      max_session_print_bytes:
-        read_int(
-          args,
-          :max_session_print_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_PRINT_BYTES",
-          defaults.max_session_print_bytes
-        ),
-      max_session_tool_call_entries:
-        read_int(
-          args,
-          :max_session_tool_call_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_ENTRIES",
-          defaults.max_session_tool_call_entries
-        ),
-      max_session_tool_call_bytes:
-        read_int(
-          args,
-          :max_session_tool_call_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES",
-          defaults.max_session_tool_call_bytes
-        ),
-      max_session_upstream_call_entries:
-        read_int(
-          args,
-          :max_session_upstream_call_entries,
-          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES",
-          defaults.max_session_upstream_call_entries
-        ),
-      max_session_upstream_call_bytes:
-        read_int(
-          args,
-          :max_session_upstream_call_bytes,
-          "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES",
-          defaults.max_session_upstream_call_bytes
-        )
-    })
+    case SessionsConfig.resolve(args) do
+      {:ok, config} -> SessionsConfig.set(config)
+      {:error, message} -> raise message
+    end
   end
 
   # Public-but-undocumented seam used by `Application.start/2` and by
@@ -785,8 +696,8 @@ defmodule PtcRunnerMcp.Application do
           :max_upstream_response_bytes,
           "PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES",
           # §9 enforce ≥1 floor: a sub-byte cap is degenerate. Limits
-          # storage stays positive_integer; we trust read_int's positive
-          # filter and rely on default if input is invalid.
+          # storage stays positive_integer; read_int/4 fails fast on
+          # invalid explicit input instead of silently using defaults.
           defaults.max_upstream_response_bytes
         ),
       max_upstream_calls_per_program:
@@ -874,14 +785,19 @@ defmodule PtcRunnerMcp.Application do
         n
 
       bin when is_binary(bin) ->
-        case Integer.parse(bin) do
-          {n, _} when n > 0 -> n
-          _ -> default
+        case Integer.parse(String.trim(bin)) do
+          {n, ""} when n > 0 -> n
+          _ -> raise invalid_int_message(key, env_name, bin)
         end
 
-      _ ->
-        default
+      value ->
+        raise invalid_int_message(key, env_name, value)
     end
+  end
+
+  defp invalid_int_message(key, env_name, value) do
+    flag = "--" <> (key |> Atom.to_string() |> String.replace("_", "-"))
+    "#{flag} / #{env_name} must be a positive integer, got: #{inspect(value)}"
   end
 
   # Like `read_int/4` but does NOT reject non-positive values: used for options

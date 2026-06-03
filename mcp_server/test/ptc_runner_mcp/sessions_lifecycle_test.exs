@@ -367,28 +367,38 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
   describe "Sessions.Config table behavior" do
     test "resolve/1 returns disabled defaults from an empty args map" do
-      d = Config.resolve(%{})
+      assert {:ok, d} = Config.resolve(%{})
       assert d.enabled == false
       assert d.max_sessions == 64
       assert d.max_sessions_per_owner == 16
     end
 
     test "resolve/1 honors CLI keys and parses integer strings" do
-      resolved =
-        Config.resolve(%{
-          sessions: true,
-          max_sessions: 7,
-          session_ttl_ms: "1234"
-        })
+      assert {:ok, resolved} =
+               Config.resolve(%{
+                 sessions: true,
+                 max_sessions: 7,
+                 session_ttl_ms: "1234"
+               })
 
       assert resolved.enabled == true
       assert resolved.max_sessions == 7
       assert resolved.session_ttl_ms == 1234
     end
 
-    test "resolve/1 falls back to the default for an unparseable integer" do
-      resolved = Config.resolve(%{max_sessions_per_owner: "not-a-number"})
-      assert resolved.max_sessions_per_owner == 16
+    test "resolve/1 rejects invalid explicit integer config" do
+      assert {:error, message} = Config.resolve(%{max_sessions_per_owner: "not-a-number"})
+
+      assert message =~ "--max-sessions-per-owner"
+      assert message =~ "PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER"
+      assert message =~ "must be a positive integer"
+    end
+
+    test "resolve/1 rejects numeric-prefix garbage" do
+      assert {:error, message} = Config.resolve(%{max_sessions_per_owner: "64mb"})
+
+      assert message =~ "--max-sessions-per-owner"
+      assert message =~ "must be a positive integer"
     end
 
     test "set/1 normalizes non-positive integers back to defaults" do
