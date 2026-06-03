@@ -47,118 +47,104 @@ defmodule PtcRunnerMcp.Http.Config do
   @doc false
   @spec resolve(map()) :: {:ok, t()} | {:error, String.t()}
   def resolve(args) when is_map(args) do
-    cfg = %{
-      enabled: read_bool(args, :http, "PTC_RUNNER_MCP_HTTP", false),
-      host: read_string(args, :http_host, "PTC_RUNNER_MCP_HTTP_HOST", @default_host),
-      port: read_int(args, :http_port, "PTC_RUNNER_MCP_HTTP_PORT", @default_port),
-      path:
-        normalize_path(read_string(args, :http_path, "PTC_RUNNER_MCP_HTTP_PATH", @default_path)),
-      auth_token: read_optional_string(args, :http_auth_token, "PTC_RUNNER_MCP_HTTP_AUTH_TOKEN"),
-      auth_disabled:
-        read_bool(args, :http_disable_auth, "PTC_RUNNER_MCP_HTTP_DISABLE_AUTH", false),
-      allowed_origins:
-        read_list(args, :http_allowed_origin, "PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN"),
-      request_timeout_ms:
-        read_int(
-          args,
-          :http_request_timeout_ms,
-          "PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS",
-          @default_request_timeout_ms
-        ),
-      shutdown_grace_ms:
-        read_int(
-          args,
-          :http_shutdown_grace_ms,
-          "PTC_RUNNER_MCP_HTTP_SHUTDOWN_GRACE_MS",
-          @default_shutdown_grace_ms
-        ),
-      max_body_bytes:
-        read_int(
-          args,
-          :http_max_body_bytes,
-          "PTC_RUNNER_MCP_HTTP_MAX_BODY_BYTES",
-          Limits.max_frame_bytes()
-        ),
-      session_ttl_ms:
-        read_int(
-          args,
-          :http_session_ttl_ms,
-          "PTC_RUNNER_MCP_HTTP_SESSION_TTL_MS",
-          @default_session_ttl_ms
-        ),
-      session_idle_timeout_ms:
-        read_int(
-          args,
-          :http_session_idle_timeout_ms,
-          "PTC_RUNNER_MCP_HTTP_SESSION_IDLE_TIMEOUT_MS",
-          @default_session_idle_timeout_ms
-        ),
-      max_sessions:
-        read_int(
-          args,
-          :http_max_sessions,
-          "PTC_RUNNER_MCP_HTTP_MAX_SESSIONS",
-          @default_max_sessions
-        ),
-      max_sessions_per_owner:
-        read_int(
-          args,
-          :http_max_sessions_per_owner,
-          "PTC_RUNNER_MCP_HTTP_MAX_SESSIONS_PER_OWNER",
-          @default_max_sessions_per_owner
-        ),
-      max_in_flight_per_session:
-        read_int(
-          args,
-          :http_max_in_flight_per_session,
-          "PTC_RUNNER_MCP_HTTP_MAX_IN_FLIGHT_PER_SESSION",
-          @default_max_in_flight_per_session
-        ),
-      auth_rate_limit:
-        read_bool(
-          args,
-          :http_auth_rate_limit,
-          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT",
-          true
-        ),
-      auth_rate_limit_window_ms:
-        read_int(
-          args,
-          :http_auth_rate_limit_window_ms,
-          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_WINDOW_MS",
-          @default_auth_rate_limit_window_ms
-        ),
-      auth_rate_limit_max_failures:
-        read_int(
-          args,
-          :http_auth_rate_limit_max_failures,
-          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_MAX_FAILURES",
-          @default_auth_rate_limit_max_failures
-        ),
-      auth_rate_limit_block_ms:
-        read_int(
-          args,
-          :http_auth_rate_limit_block_ms,
-          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_BLOCK_MS",
-          @default_auth_rate_limit_block_ms
-        ),
-      allow_unsafe_network:
-        read_bool(
-          args,
-          :http_allow_unsafe_network,
-          "PTC_RUNNER_MCP_HTTP_ALLOW_UNSAFE_NETWORK",
-          false
-        ),
-      metrics?: read_bool(args, :http_metrics, "PTC_RUNNER_MCP_HTTP_METRICS", false),
-      metrics_path:
-        normalize_path(
-          read_string(args, :http_metrics_path, "PTC_RUNNER_MCP_HTTP_METRICS_PATH", "/metrics")
-        ),
-      instance_label:
-        read_string(args, :http_instance_label, "PTC_RUNNER_MCP_HTTP_INSTANCE_LABEL", hostname())
-    }
+    enabled = read_bool(args, :http, "PTC_RUNNER_MCP_HTTP", false)
 
-    validate(cfg)
+    with {:ok, ints} <- resolve_ints(args, enabled) do
+      cfg = %{
+        enabled: enabled,
+        host: read_string(args, :http_host, "PTC_RUNNER_MCP_HTTP_HOST", @default_host),
+        port: ints.port,
+        path:
+          normalize_path(read_string(args, :http_path, "PTC_RUNNER_MCP_HTTP_PATH", @default_path)),
+        auth_token:
+          read_optional_string(args, :http_auth_token, "PTC_RUNNER_MCP_HTTP_AUTH_TOKEN"),
+        auth_disabled:
+          read_bool(args, :http_disable_auth, "PTC_RUNNER_MCP_HTTP_DISABLE_AUTH", false),
+        allowed_origins:
+          read_list(args, :http_allowed_origin, "PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN"),
+        request_timeout_ms: ints.request_timeout_ms,
+        shutdown_grace_ms: ints.shutdown_grace_ms,
+        max_body_bytes: ints.max_body_bytes,
+        session_ttl_ms: ints.session_ttl_ms,
+        session_idle_timeout_ms: ints.session_idle_timeout_ms,
+        max_sessions: ints.max_sessions,
+        max_sessions_per_owner: ints.max_sessions_per_owner,
+        max_in_flight_per_session: ints.max_in_flight_per_session,
+        auth_rate_limit:
+          read_bool(
+            args,
+            :http_auth_rate_limit,
+            "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT",
+            true
+          ),
+        auth_rate_limit_window_ms: ints.auth_rate_limit_window_ms,
+        auth_rate_limit_max_failures: ints.auth_rate_limit_max_failures,
+        auth_rate_limit_block_ms: ints.auth_rate_limit_block_ms,
+        allow_unsafe_network:
+          read_bool(
+            args,
+            :http_allow_unsafe_network,
+            "PTC_RUNNER_MCP_HTTP_ALLOW_UNSAFE_NETWORK",
+            false
+          ),
+        metrics?: read_bool(args, :http_metrics, "PTC_RUNNER_MCP_HTTP_METRICS", false),
+        metrics_path:
+          normalize_path(
+            read_string(args, :http_metrics_path, "PTC_RUNNER_MCP_HTTP_METRICS_PATH", "/metrics")
+          ),
+        instance_label:
+          read_string(
+            args,
+            :http_instance_label,
+            "PTC_RUNNER_MCP_HTTP_INSTANCE_LABEL",
+            hostname()
+          )
+      }
+
+      validate(cfg)
+    end
+  end
+
+  # Integer config fields all share the same positive-integer contract.
+  # When HTTP is enabled, an explicitly-supplied but invalid value
+  # (non-positive or non-numeric) fails fast so operators get a signal
+  # instead of a silently-swallowed default. When HTTP is disabled, the
+  # historical silent fallback is preserved so a stray env var can never
+  # block a non-HTTP boot.
+  defp resolve_ints(args, enabled) do
+    specs = [
+      {:port, :http_port, "PTC_RUNNER_MCP_HTTP_PORT", @default_port},
+      {:request_timeout_ms, :http_request_timeout_ms, "PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS",
+       @default_request_timeout_ms},
+      {:shutdown_grace_ms, :http_shutdown_grace_ms, "PTC_RUNNER_MCP_HTTP_SHUTDOWN_GRACE_MS",
+       @default_shutdown_grace_ms},
+      {:max_body_bytes, :http_max_body_bytes, "PTC_RUNNER_MCP_HTTP_MAX_BODY_BYTES",
+       Limits.max_frame_bytes()},
+      {:session_ttl_ms, :http_session_ttl_ms, "PTC_RUNNER_MCP_HTTP_SESSION_TTL_MS",
+       @default_session_ttl_ms},
+      {:session_idle_timeout_ms, :http_session_idle_timeout_ms,
+       "PTC_RUNNER_MCP_HTTP_SESSION_IDLE_TIMEOUT_MS", @default_session_idle_timeout_ms},
+      {:max_sessions, :http_max_sessions, "PTC_RUNNER_MCP_HTTP_MAX_SESSIONS",
+       @default_max_sessions},
+      {:max_sessions_per_owner, :http_max_sessions_per_owner,
+       "PTC_RUNNER_MCP_HTTP_MAX_SESSIONS_PER_OWNER", @default_max_sessions_per_owner},
+      {:max_in_flight_per_session, :http_max_in_flight_per_session,
+       "PTC_RUNNER_MCP_HTTP_MAX_IN_FLIGHT_PER_SESSION", @default_max_in_flight_per_session},
+      {:auth_rate_limit_window_ms, :http_auth_rate_limit_window_ms,
+       "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_WINDOW_MS", @default_auth_rate_limit_window_ms},
+      {:auth_rate_limit_max_failures, :http_auth_rate_limit_max_failures,
+       "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_MAX_FAILURES", @default_auth_rate_limit_max_failures},
+      {:auth_rate_limit_block_ms, :http_auth_rate_limit_block_ms,
+       "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_BLOCK_MS", @default_auth_rate_limit_block_ms}
+    ]
+
+    Enum.reduce_while(specs, {:ok, %{}}, fn {field, key, env, default}, {:ok, acc} ->
+      case read_int(args, key, env, default) do
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, field, value)}}
+        {:error, _msg} when not enabled -> {:cont, {:ok, Map.put(acc, field, default)}}
+        {:error, msg} -> {:halt, {:error, msg}}
+      end
+    end)
   end
 
   @doc false
@@ -269,20 +255,25 @@ defmodule PtcRunnerMcp.Http.Config do
   defp read_int(args, key, env, default) do
     case env_or(args, key, env) do
       nil ->
-        default
+        {:ok, default}
 
       n when is_integer(n) and n > 0 ->
-        n
+        {:ok, n}
 
       value when is_binary(value) ->
         case Integer.parse(value) do
-          {n, _} when n > 0 -> n
-          _ -> default
+          {n, _} when n > 0 -> {:ok, n}
+          _ -> {:error, invalid_int_message(key, value)}
         end
 
-      _ ->
-        default
+      value ->
+        {:error, invalid_int_message(key, value)}
     end
+  end
+
+  defp invalid_int_message(key, value) do
+    flag = "--" <> (key |> Atom.to_string() |> String.replace("_", "-"))
+    "#{flag} must be a positive integer, got: #{inspect(value)}"
   end
 
   defp read_bool(args, key, env, default) do
