@@ -23,9 +23,6 @@ defmodule PtcRunner.Lisp.AST do
           # Calls
           | {:list, [t()]}
 
-  @doc "Create a keyword node"
-  def keyword(name) when is_binary(name), do: {:keyword, SourceAtoms.intern(name)}
-
   @doc "Create a symbol node"
   def symbol(name) when is_binary(name) do
     case name do
@@ -57,19 +54,4 @@ defmodule PtcRunner.Lisp.AST do
         end
     end
   end
-
-  @doc "Create a quoted symbolic reference node without namespace splitting"
-  def quoted_symbol(name) when is_binary(name), do: {:quoted_symbol, name}
-
-  @doc "Create a vector node"
-  def vector(elements), do: {:vector, elements}
-
-  @doc "Create a map node from flat list [k1, v1, k2, v2, ...]"
-  def map_node(pairs) do
-    chunked = Enum.chunk_every(pairs, 2)
-    {:map, Enum.map(chunked, fn [k, v] -> {k, v} end)}
-  end
-
-  @doc "Create a list (call) node"
-  def list(elements), do: {:list, elements}
 end

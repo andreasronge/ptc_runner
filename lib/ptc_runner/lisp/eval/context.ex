@@ -19,7 +19,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
 
   @default_print_length 2000
-  @max_loop_limit 10_000
 
   @default_pmap_timeout 5_000
   @default_pmap_max_concurrency System.schedulers_online() * 2
@@ -368,15 +367,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Sets a new loop limit, respecting the hard maximum.
-  """
-  @spec set_loop_limit(t(), integer()) :: t()
-  def set_loop_limit(%__MODULE__{} = context, new_limit) do
-    limit = min(max(0, new_limit), @max_loop_limit)
-    %{context | loop_limit: limit}
-  end
-
-  @doc """
   Merges new bindings into the environment.
   """
   @spec merge_env(t(), map()) :: t()
@@ -387,25 +377,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       context
       | env: Map.merge(context.env, bindings),
         locals: MapSet.union(context.locals, new_locals)
-    }
-  end
-
-  @doc """
-  Merges two contexts, specifically combining prints, tool calls, and pmap calls.
-  Used to merge results from parallel execution branches (pmap, pcalls).
-  """
-  @spec merge(t(), t()) :: t()
-  def merge(ctx1, ctx2) do
-    %{
-      ctx1
-      | prints: ctx2.prints ++ ctx1.prints,
-        tool_calls: ctx2.tool_calls ++ ctx1.tool_calls,
-        pmap_calls: ctx2.pmap_calls ++ ctx1.pmap_calls,
-        catalog_ops: ctx2.catalog_ops ++ ctx1.catalog_ops,
-        user_ns: Map.merge(ctx1.user_ns, ctx2.user_ns),
-        iteration_count: ctx1.iteration_count + ctx2.iteration_count,
-        summaries: Map.merge(ctx1.summaries, ctx2.summaries),
-        tool_cache: Map.merge(ctx1.tool_cache, ctx2.tool_cache)
     }
   end
 end
