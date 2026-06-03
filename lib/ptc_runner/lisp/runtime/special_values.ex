@@ -18,11 +18,9 @@ defmodule PtcRunner.Lisp.Runtime.SpecialValues do
   Propagation rules: any NaN input results in NaN.
   """
   def any_nan?(args) when is_list(args), do: Enum.any?(args, &nan?/1)
-  def any_nan?(x, y), do: nan?(x) or nan?(y)
 
   @doc """
   Check if any argument is infinite.
   """
   def any_infinite?(args) when is_list(args), do: Enum.any?(args, &infinite?/1)
-  def any_infinite?(x, y), do: infinite?(x) or infinite?(y)
 end
