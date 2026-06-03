@@ -13,6 +13,9 @@ defmodule PtcRunnerMcp.Http.Config do
   @default_max_sessions 256
   @default_max_sessions_per_owner 32
   @default_max_in_flight_per_session 4
+  @default_auth_rate_limit_window_ms 60_000
+  @default_auth_rate_limit_max_failures 5
+  @default_auth_rate_limit_block_ms 60_000
   @token_min_bytes 32
 
   @type t :: %{
@@ -31,6 +34,10 @@ defmodule PtcRunnerMcp.Http.Config do
           max_sessions: pos_integer(),
           max_sessions_per_owner: pos_integer(),
           max_in_flight_per_session: pos_integer(),
+          auth_rate_limit: boolean(),
+          auth_rate_limit_window_ms: pos_integer(),
+          auth_rate_limit_max_failures: pos_integer(),
+          auth_rate_limit_block_ms: pos_integer(),
           allow_unsafe_network: boolean(),
           metrics?: boolean(),
           metrics_path: String.t(),
@@ -106,6 +113,34 @@ defmodule PtcRunnerMcp.Http.Config do
           :http_max_in_flight_per_session,
           "PTC_RUNNER_MCP_HTTP_MAX_IN_FLIGHT_PER_SESSION",
           @default_max_in_flight_per_session
+        ),
+      auth_rate_limit:
+        read_bool(
+          args,
+          :http_auth_rate_limit,
+          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT",
+          true
+        ),
+      auth_rate_limit_window_ms:
+        read_int(
+          args,
+          :http_auth_rate_limit_window_ms,
+          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_WINDOW_MS",
+          @default_auth_rate_limit_window_ms
+        ),
+      auth_rate_limit_max_failures:
+        read_int(
+          args,
+          :http_auth_rate_limit_max_failures,
+          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_MAX_FAILURES",
+          @default_auth_rate_limit_max_failures
+        ),
+      auth_rate_limit_block_ms:
+        read_int(
+          args,
+          :http_auth_rate_limit_block_ms,
+          "PTC_RUNNER_MCP_HTTP_AUTH_RATE_LIMIT_BLOCK_MS",
+          @default_auth_rate_limit_block_ms
         ),
       allow_unsafe_network:
         read_bool(

@@ -58,7 +58,7 @@ defmodule PtcRunnerMcp.Application do
     TraceHandler
   }
 
-  alias PtcRunnerMcp.Http.{Config, Server}
+  alias PtcRunnerMcp.Http.{AuthRateLimiter, Config, Server}
   alias PtcRunnerMcp.Http.SessionRegistry, as: HttpSessionRegistry
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
@@ -170,6 +170,7 @@ defmodule PtcRunnerMcp.Application do
       session_children_for_http() ++
       [
         {HttpSessionRegistry, [config: http_config]},
+        {AuthRateLimiter, [config: http_config]},
         Server.child_spec(http_config)
       ] ++
       debug_children()
@@ -264,6 +265,10 @@ defmodule PtcRunnerMcp.Application do
           http_max_sessions: :integer,
           http_max_sessions_per_owner: :integer,
           http_max_in_flight_per_session: :integer,
+          http_auth_rate_limit: :boolean,
+          http_auth_rate_limit_window_ms: :integer,
+          http_auth_rate_limit_max_failures: :integer,
+          http_auth_rate_limit_block_ms: :integer,
           http_allow_unsafe_network: :boolean,
           http_metrics: :boolean,
           http_metrics_path: :string,

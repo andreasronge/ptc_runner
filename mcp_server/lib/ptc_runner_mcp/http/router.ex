@@ -3,7 +3,16 @@ defmodule PtcRunnerMcp.Http.Router do
 
   use Plug.Router
 
-  alias PtcRunnerMcp.Http.{Auth, Host, Origin, Session, SessionRegistry, Telemetry}
+  alias PtcRunnerMcp.Http.{
+    Auth,
+    AuthRateLimiter,
+    Host,
+    Origin,
+    Session,
+    SessionRegistry,
+    Telemetry
+  }
+
   alias PtcRunnerMcp.{JsonRpc, Limits, Log, Version}
 
   plug(:match)
@@ -63,6 +72,7 @@ defmodule PtcRunnerMcp.Http.Router do
       end
     else
       {:error, {:auth, reason}} -> auth_error(conn, reason)
+      {:error, {:auth_rate_limited, retry_after_s}} -> rate_limit_error(conn, retry_after_s)
       {:error, :missing_session} -> Plug.Conn.send_resp(conn, 400, "missing MCP-Session-Id")
       {:error, :origin} -> Plug.Conn.send_resp(conn, 403, "forbidden")
       {:error, :host} -> Plug.Conn.send_resp(conn, 403, "forbidden")
@@ -82,6 +92,9 @@ defmodule PtcRunnerMcp.Http.Router do
     else
       {:error, {:auth, reason}} ->
         auth_error(conn, reason)
+
+      {:error, {:auth_rate_limited, retry_after_s}} ->
+        rate_limit_error(conn, retry_after_s)
 
       {:error, :origin} ->
         Plug.Conn.send_resp(conn, 403, "forbidden")
@@ -247,11 +260,29 @@ defmodule PtcRunnerMcp.Http.Router do
         {:error, :host}
 
       Origin.allowed?(conn, cfg) ->
+        authenticate_bearer(conn, cfg)
+
+      true ->
+        {:error, :origin}
+    end
+  end
+
+  defp authenticate_bearer(conn, cfg) do
+    source = conn.remote_ip
+
+    case AuthRateLimiter.check(source, cfg) do
+      {:blocked, retry_after_s} ->
+        {:error, {:auth_rate_limited, retry_after_s}}
+
+      :ok ->
         case Auth.authenticate(conn, cfg) do
           {:ok, owner} ->
+            AuthRateLimiter.reset(source, cfg)
             {:ok, owner}
 
           {:error, reason} ->
+            AuthRateLimiter.record_failure(source, cfg)
+
             Telemetry.emit(
               [:auth, :failure],
               %{count: 1},
@@ -260,9 +291,6 @@ defmodule PtcRunnerMcp.Http.Router do
 
             {:error, {:auth, reason}}
         end
-
-      true ->
-        {:error, :origin}
     end
   end
 
@@ -294,6 +322,14 @@ defmodule PtcRunnerMcp.Http.Router do
     conn
     |> Plug.Conn.put_resp_header("www-authenticate", header)
     |> Plug.Conn.send_resp(status, "")
+  end
+
+  # No `www-authenticate` here: a blocked source must not be told whether
+  # its token was missing or invalid.
+  defp rate_limit_error(conn, retry_after_s) do
+    conn
+    |> Plug.Conn.put_resp_header("retry-after", Integer.to_string(retry_after_s))
+    |> Plug.Conn.send_resp(429, "")
   end
 
   defp read_body_capped(conn, cfg) do
