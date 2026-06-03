@@ -263,17 +263,17 @@ defmodule PtcRunnerMcp.Http.Config do
       value when is_binary(value) ->
         case Integer.parse(value) do
           {n, _} when n > 0 -> {:ok, n}
-          _ -> {:error, invalid_int_message(key, value)}
+          _ -> {:error, invalid_int_message(key, env, value)}
         end
 
       value ->
-        {:error, invalid_int_message(key, value)}
+        {:error, invalid_int_message(key, env, value)}
     end
   end
 
-  defp invalid_int_message(key, value) do
+  defp invalid_int_message(key, env, value) do
     flag = "--" <> (key |> Atom.to_string() |> String.replace("_", "-"))
-    "#{flag} must be a positive integer, got: #{inspect(value)}"
+    "#{flag} / #{env} must be a positive integer, got: #{inspect(value)}"
   end
 
   defp read_bool(args, key, env, default) do
