@@ -625,3 +625,111 @@ The benchmark can compare:
 - hard-coded workflow tools versus prelude-defined workflow APIs;
 - direct tool-server discovery versus generic capability discovery;
 - full prompt inventory versus discovery-on-demand visibility.
+
+## Future Ideas
+
+### Agent-Published Capabilities
+
+A later version may let SubAgents publish capabilities discovered or authored
+during a workflow. This should build on the same descriptor model, but remain
+out of the foundational prelude/discovery track until lifecycle, permission,
+and traceability rules are clear.
+
+Example use cases:
+
+- a SubAgent explores an upstream API and publishes a normalized PTC-Lisp helper
+  function for other SubAgents;
+- a SubAgent publishes a callable agent endpoint that wraps a multi-step
+  workflow over upstream tools;
+- a later SubAgent discovers a bug or improvement and publishes a corrected
+  version;
+- a debugging SubAgent inspects descriptor metadata, source, history, or an
+  agent definition when policy allows it.
+
+This should be modeled as capability publication, not direct mutation of another
+agent's namespace. Published APIs should be descriptors plus mediated call
+targets. Other agents may discover and call them according to visibility policy,
+but should not redefine them.
+
+Possible Lisp-facing shape:
+
+```clojure
+(cap/publish
+ {:id "weather/current-forecast"
+  :kind :function
+  :namespace 'weather
+  :symbol 'current-forecast
+  :version "1.0.0"
+  :visibility :workflow
+  :effect :read
+  :signature "[location date] -> map"
+  :doc "Return normalized current forecast for a location/date."
+  :source
+  '(defn current-forecast [location date]
+     (let [raw (tool/weather-api-get {:location location
+                                      :date date})]
+       {:temp-c (:temperatureC raw)
+        :summary (:summary raw)
+        :source :weather-api}))})
+```
+
+Possible agent-backed shape:
+
+```clojure
+(cap/publish
+ {:id "research/summarize-paper"
+  :kind :agent
+  :namespace 'research
+  :symbol 'summarize-paper
+  :version "1.2.0"
+  :visibility :workflow
+  :effect :read
+  :signature "[paper-url question] -> map"
+  :doc "Fetch, inspect, and summarize a paper for a specific question."
+  :agent {:prompt-ref "agents/research-summarizer@sha256:..."
+          :tools ["fetch" "pdf-text"]}})
+```
+
+Calling agents should see the same stable surface regardless of whether the
+implementation is a Lisp function, Elixir tool wrapper, or SubAgent endpoint:
+
+```clojure
+(weather/current-forecast "Stockholm" "2026-06-03")
+(research/summarize-paper data/url "What are the limitations?")
+```
+
+Updates should be versioned rather than mutable in place:
+
+```clojure
+(cap/deprecate "weather/current-forecast" "1.0.0"
+  {:reason "Incorrect temperature unit normalization."
+   :replacement "weather/current-forecast@1.0.1"})
+```
+
+Deletion should usually mean revoking future discovery and calls, not erasing
+history. Existing traces must remain resolvable.
+
+Controlled inspection may expose diagnostic operations such as:
+
+```clojure
+(cap/meta 'weather/current-forecast)
+(cap/source 'weather/current-forecast)
+(cap/history 'weather/current-forecast)
+```
+
+Source and agent-definition visibility should be policy-gated separately from
+call visibility. Published functions or SubAgent definitions may contain prompt
+details, upstream assumptions, or other information that should only be
+available to owners or debug-authorized agents.
+
+Future design questions:
+
+- publication scopes, such as owner-only, sibling-visible, workflow-visible, or
+  global;
+- how published Lisp source is compiled, cached, protected, and revoked;
+- how agent-backed capabilities preserve side-effect and idempotency ledgers;
+- how conflicts are resolved when multiple agents publish the same namespace or
+  symbol;
+- how source inspection redacts secrets, prompt internals, or sensitive
+  deployment assumptions;
+- whether callers pin versions explicitly or resolve latest compatible versions.
