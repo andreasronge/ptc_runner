@@ -65,6 +65,18 @@ defmodule PtcRunnerMcp.HttpRouterTest do
     assert conn.resp_body == "forbidden"
   end
 
+  test "GET /mcp with invalid Origin returns 403 before 405" do
+    conn =
+      conn(:get, "/mcp")
+      |> auth()
+      |> with_host("127.0.0.1")
+      |> put_req_header("origin", "http://attacker.example")
+      |> call()
+
+    assert conn.status == 403
+    assert conn.resp_body == "forbidden"
+  end
+
   test "health and ready are unauthenticated" do
     assert call(conn(:get, "/health")).status == 200
     assert call(conn(:get, "/ready")).status == 200
