@@ -133,7 +133,7 @@ jobs:
       - name: Verify version and changelog
         id: version_changelog
         run: |
-          MIX_VERSION=$(mix run -e 'Mix.Project.config()[:version] |> IO.write()')
+          MIX_VERSION=$(mix run -e 'Mix.Project.config()[:version] |> IO.puts()' | tail -n 1 | tr -d '[:space:]')
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME:-}" != "" ]; then
             TAG_VERSION=${GITHUB_REF_NAME#v}
           else
