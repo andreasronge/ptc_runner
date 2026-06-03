@@ -22,7 +22,21 @@ defmodule PtcRunner.MixProject do
         ignore_modules: [
           ~r/^Mix\.Tasks\./,
           ~r/^PtcRunner\.TestSupport\./,
-          PtcRunner.TypeExtractorFixtures
+          PtcRunner.TypeExtractorFixtures,
+          # Livebook widget: whole body is `if Code.ensure_loaded?(Kino.JS)`;
+          # kino is an optional dep absent in test, so it never compiles here.
+          PtcRunner.Kino.TraceTree,
+          # Dev/conformance tool gated behind Babashka + `--include clojure`;
+          # only production callers are Mix tasks, not runtime code.
+          PtcRunner.Lisp.ClojureValidator,
+          # Bare display structs: they only carry data for their
+          # Inspect/String.Chars/Jason.Encoder impls (separate modules);
+          # zero executable lines of their own.
+          PtcRunner.Lisp.Format.Fn,
+          PtcRunner.Lisp.Format.Builtin,
+          PtcRunner.Lisp.Format.Var,
+          PtcRunner.Lisp.Format.SymbolRef,
+          PtcRunner.Lisp.Format.RegexLiteral
         ]
       ],
       dialyzer: [
