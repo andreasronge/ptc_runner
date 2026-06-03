@@ -49,19 +49,31 @@ defmodule PtcRunner.Upstream.Transport.McpResultTest do
       assert McpResult.normalize(%{}) == {:ok, nil}
     end
 
-    test "an image block before a text block hides the text (only first block is read)" do
+    test "a text block after a non-text block is still returned" do
       result = %{
         "content" => [
           %{"type" => "image", "data" => "b64"},
-          %{"type" => "text", "text" => "hidden"}
+          %{"type" => "text", "text" => "recovered"}
         ]
       }
 
-      assert McpResult.normalize(result) == {:ok, nil}
+      assert McpResult.normalize(result) == {:ok, "recovered"}
     end
   end
 
   describe "normalize/1 error branch" do
+    test "isError surfaces a text block that follows a non-text block" do
+      result = %{
+        "isError" => true,
+        "content" => [
+          %{"type" => "image", "data" => "b64"},
+          %{"type" => "text", "text" => "boom"}
+        ]
+      }
+
+      assert McpResult.normalize(result) == {:error, :tool_error, "boom"}
+    end
+
     test "isError with a text block returns the text" do
       result = %{"isError" => true, "content" => [%{"type" => "text", "text" => "boom"}]}
       assert McpResult.normalize(result) == {:error, :tool_error, "boom"}
