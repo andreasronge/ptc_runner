@@ -165,14 +165,19 @@ defmodule PtcRunnerMcp.Application do
   @spec build_http_children([map()], %{String.t() => Credentials.Binding.t()}, map()) ::
           [Supervisor.child_spec() | {module(), term()}]
   def build_http_children(_upstreams, bindings, http_config, root_runtime_opts \\ nil) do
+    rate_limiter_children =
+      if http_config.auth_rate_limit,
+        do: [{AuthRateLimiter, [config: http_config]}],
+        else: []
+
     [{Credentials, [bindings: bindings]}] ++
       root_runtime_children(root_runtime_opts) ++
       session_children_for_http() ++
       [
-        {HttpSessionRegistry, [config: http_config]},
-        {AuthRateLimiter, [config: http_config]},
-        Server.child_spec(http_config)
+        {HttpSessionRegistry, [config: http_config]}
       ] ++
+      rate_limiter_children ++
+      [Server.child_spec(http_config)] ++
       debug_children()
   end
 

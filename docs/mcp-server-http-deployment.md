@@ -84,7 +84,10 @@ and invalid bearer failures count. Once a source exceeds
 caller is not told whether its token was missing or invalid). A
 successful authentication immediately resets the source's failure state.
 A misconfigured-but-legitimate client can briefly be blocked; it
-self-heals after the block window. The limiter is on by default and is a
+self-heals after the failure *window* elapses (not just the block window
+— if `block_ms < window_ms`, the failure count persists across block
+expiry until the window resets, so the effective recovery time is
+`window_ms`). The limiter is on by default and is a
 no-op when no token is configured or when `--http-auth-rate-limit` is
 `false`; if the limiter process is unavailable it fails open.
 
