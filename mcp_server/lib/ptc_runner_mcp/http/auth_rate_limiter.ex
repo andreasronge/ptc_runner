@@ -171,12 +171,6 @@ defmodule PtcRunnerMcp.Http.AuthRateLimiter do
     {:noreply, %{state | cleanup_ref: ref}}
   end
 
-  @impl GenServer
-  def terminate(_reason, state) do
-    if is_reference(state.cleanup_ref), do: Process.cancel_timer(state.cleanup_ref)
-    :ok
-  end
-
   defp enabled?(cfg) do
     Map.get(cfg, :auth_rate_limit, false) and
       is_binary(Map.get(cfg, :auth_token)) and
