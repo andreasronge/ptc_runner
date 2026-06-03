@@ -62,8 +62,21 @@ defmodule PtcRunnerMcp.Sessions.Registry do
 
   def lookup(session_id, __MODULE__) when is_binary(session_id) do
     case live_lookup(session_id, Process.whereis(__MODULE__)) do
-      [{pid, meta}] -> {:ok, Map.put(meta, :pid, pid)}
-      [] -> GenServer.call(__MODULE__, {:lookup, session_id})
+      [{pid, meta}] when is_pid(pid) ->
+        # The `Sessions.Names` fast path can briefly return a dead pid: a
+        # terminated session is pruned asynchronously, so between its `:DOWN`
+        # and that prune the entry still resolves here. Handing back a dead
+        # pid makes callers crash with `:noproc`; fall through to the
+        # authoritative GenServer, which returns the `:session_closed`
+        # tombstone instead.
+        if Process.alive?(pid) do
+          {:ok, Map.put(meta, :pid, pid)}
+        else
+          GenServer.call(__MODULE__, {:lookup, session_id})
+        end
+
+      _ ->
+        GenServer.call(__MODULE__, {:lookup, session_id})
     end
   end
 

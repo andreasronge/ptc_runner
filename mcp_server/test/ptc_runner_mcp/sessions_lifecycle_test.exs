@@ -315,6 +315,41 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       # The owner index slot was reclaimed on :DOWN, so a new start succeeds.
       assert {:ok, _} = Sessions.start_session(nil, %{})
     end
+
+    test "inspect on a closed session with an unpruned Names entry returns the tombstone" do
+      SoakHelpers.setup_sessions(%{enabled: true})
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+      {:ok, meta} = SessionsRegistry.lookup(sid)
+      pid = meta.pid
+
+      # Freeze the partitioned `Sessions.Names` registry so it cannot prune the
+      # dead-pid entry — deterministically recreating the post-`:DOWN` /
+      # pre-prune window where `lookup/1`'s fast path still resolves `sid` to
+      # the dead session pid. Registry reads hit ETS directly, so lookups still
+      # work while the partition processes are suspended.
+      names_partitions =
+        for {_, p, _, _} <- Supervisor.which_children(PtcRunnerMcp.Sessions.Names),
+            is_pid(p),
+            do: p
+
+      Enum.each(names_partitions, &:sys.suspend/1)
+
+      try do
+        ref = Process.monitor(pid)
+        assert {:ok, _} = Sessions.close(sid, nil, "done")
+        assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 1_000
+        await_session_removed(sid)
+
+        # The Names fast path still hands back the now-dead pid; `lookup/1` must
+        # not return it, so `inspect` resolves to the session_closed tombstone
+        # instead of crashing the caller with a `:noproc` exit.
+        assert {:error, %{"reason" => "session_closed"}} =
+                 Sessions.inspect(sid, nil, "overview")
+      after
+        Enum.each(names_partitions, &:sys.resume/1)
+      end
+    end
   end
 
   describe "disabled surface" do
