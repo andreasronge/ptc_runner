@@ -13,7 +13,7 @@ defmodule PtcRunner.MixProject do
       usage_rules: usage_rules(),
       name: "PtcRunner",
       description:
-        "A BEAM-native Elixir library for Programmatic Tool Calling (PTC) with a lispy DSL (subset of Clojure). PTC lets LLMs generate small programs that orchestrate multiple tool calls and data transformations in code.",
+        "Secure BEAM sandbox runtime for LLM code mode and MCP aggregation. Run concurrent LLM/tool clients safely while agents orchestrate approved tools, call upstream MCP/OpenAPI servers, and transform data.",
       source_url: "https://github.com/andreasronge/ptc_runner",
       docs: docs(),
       package: package(),
