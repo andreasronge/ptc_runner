@@ -27,9 +27,6 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:params]
 
-    @doc false
-    def display(%__MODULE__{params: params}), do: "#fn[#{params}]"
-
     defimpl Inspect do
       def inspect(%{params: params}, _opts), do: "#fn[#{params}]"
     end
@@ -46,9 +43,6 @@ defmodule PtcRunner.Lisp.Format do
   defmodule Builtin do
     @moduledoc false
     defstruct []
-
-    @doc false
-    def display(%__MODULE__{}), do: "#<builtin>"
 
     defimpl Inspect do
       def inspect(%Builtin{}, _opts), do: "#<builtin>"
@@ -67,9 +61,6 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:name]
 
-    @doc false
-    def display(%__MODULE__{name: name}), do: "#'#{name}"
-
     defimpl Inspect do
       def inspect(%{name: name}, _opts), do: "#'#{name}"
     end
@@ -87,9 +78,6 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:name]
 
-    @doc false
-    def display(%__MODULE__{name: name}), do: "'#{name}"
-
     defimpl Inspect do
       def inspect(%{name: name}, _opts), do: "'#{name}"
     end
@@ -106,9 +94,6 @@ defmodule PtcRunner.Lisp.Format do
   defmodule RegexLiteral do
     @moduledoc false
     defstruct [:source]
-
-    @doc false
-    def display(%__MODULE__{source: source}), do: "#\"#{source}\""
 
     defimpl Inspect do
       def inspect(%{source: source}, _opts), do: "#\"#{source}\""
