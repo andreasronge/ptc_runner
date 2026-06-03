@@ -2,12 +2,17 @@ defmodule PtcRunnerMcp.Http.ServerSmokeTest do
   @moduledoc """
   Integration smoke test for the HTTP transport bootstrap.
 
-  Boots `PtcRunnerMcp.Http.Server` for real on an OS-assigned ephemeral
-  port (port 0), issues one real HTTP request over a TCP socket, asserts
-  the server serves it, then lets `start_supervised!/1` tear it down
-  cleanly. This exercises the production `Server.child_spec/1` Bandit glue
-  and the `PlugWithConfig` -> `Router` dispatch path end to end (rather
-  than calling `Router.call/2` in-process like the unit-style tests).
+  Boots `PtcRunnerMcp.Http.Server` for real on a free OS-assigned port,
+  issues one real HTTP request over a TCP socket, asserts the server
+  serves it, then lets `start_supervised!/1` tear it down cleanly. This
+  exercises the production `Server.child_spec/1` Bandit glue and the
+  `PlugWithConfig` -> `Router` dispatch path end to end (rather than
+  calling `Router.call/2` in-process like the unit-style tests).
+
+  The port is acquired from the OS up front via `free_port/0` rather than
+  passing `0`: `Config.resolve/1` rejects a non-positive `http_port` and
+  would silently fall back to the default fixed port, which could collide
+  with a real listener in CI.
   """
   use ExUnit.Case, async: false
 
@@ -19,13 +24,13 @@ defmodule PtcRunnerMcp.Http.ServerSmokeTest do
   # required so `Config.resolve/1` succeeds and the bind host validates.
   @token String.duplicate("a", 32)
 
-  # Boot the real transport on an ephemeral port and return its bound
-  # TCP port. The server is supervised so ExUnit tears it (and its
+  # Boot the real transport on a free OS-assigned port and return its
+  # bound TCP port. The server is supervised so ExUnit tears it (and its
   # listening socket) down at test end without leaking processes/ports.
   defp boot_server!(config_args) do
     {:ok, cfg} =
       HttpConfig.resolve(
-        Map.merge(%{http: true, http_auth_token: @token, http_port: 0}, config_args)
+        Map.merge(%{http: true, http_auth_token: @token, http_port: free_port()}, config_args)
       )
 
     # Drive the production child-spec builder, not a hand-rolled Bandit
@@ -39,7 +44,17 @@ defmodule PtcRunnerMcp.Http.ServerSmokeTest do
     {cfg, port}
   end
 
-  describe "transport bootstrap on an ephemeral port" do
+  # Ask the OS for an unused loopback TCP port, then release it so the
+  # server can bind it. The brief window between close and re-bind is the
+  # standard trade-off for test servers and is safe here (async: false).
+  defp free_port do
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1}, reuseaddr: true)
+    {:ok, port} = :inet.port(socket)
+    :ok = :gen_tcp.close(socket)
+    port
+  end
+
+  describe "transport bootstrap on a free OS-assigned port" do
     test "serves an unauthenticated GET /health over a real socket" do
       {_cfg, port} = boot_server!(%{})
       assert is_integer(port) and port > 0
@@ -56,7 +71,7 @@ defmodule PtcRunnerMcp.Http.ServerSmokeTest do
       # parse_ip/1 turned the string host into an inet tuple for Bandit.
       assert cfg.host == "127.0.0.1"
 
-      # The OS assigned a concrete port (config asked for 0).
+      # The server bound the free port we acquired from the OS.
       assert port != 0
 
       resp = Req.get!("http://127.0.0.1:#{port}/health", retry: false)
