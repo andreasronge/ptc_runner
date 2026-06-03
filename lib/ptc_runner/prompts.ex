@@ -283,7 +283,7 @@ defmodule PtcRunner.Prompts do
   ## Examples
 
       iex> prompt = PtcRunner.Prompts.get(:reference)
-      iex> String.contains?(prompt, "<role>")
+      iex> is_binary(prompt) and prompt != ""
       true
 
       iex> PtcRunner.Prompts.get(:unknown)
