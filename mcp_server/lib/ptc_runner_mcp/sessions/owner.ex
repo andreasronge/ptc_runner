@@ -104,14 +104,6 @@ defmodule PtcRunnerMcp.Sessions.Owner do
   @spec owner?(t(), t()) :: boolean()
   def owner?(expected, actual), do: expected == actual
 
-  @doc false
-  @spec same?(t(), t()) :: boolean()
-  def same?(expected, actual), do: owner?(expected, actual)
-
-  @doc false
-  @spec hash(t()) :: non_neg_integer()
-  def hash(owner) when is_map(owner), do: :erlang.phash2(owner)
-
   @doc "Return `:ok` for matching owners, otherwise a session error tuple."
   @spec check(t(), t()) :: :ok | {:error, :session_owner_mismatch}
   def check(expected, actual) do
