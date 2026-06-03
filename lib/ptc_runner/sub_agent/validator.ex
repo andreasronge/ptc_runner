@@ -330,8 +330,27 @@ defmodule PtcRunner.SubAgent.Validator do
 
   defp validate_format_options!(opts) do
     case Keyword.fetch(opts, :format_options) do
-      {:ok, fo} when is_list(fo) -> :ok
-      {:ok, _} -> raise ArgumentError, "format_options must be a keyword list"
+      {:ok, fo} when is_list(fo) ->
+        validate_format_option_values!(fo)
+
+      {:ok, _} ->
+        raise ArgumentError, "format_options must be a keyword list"
+
+      :error ->
+        :ok
+    end
+  end
+
+  defp validate_format_option_values!(fo) do
+    case Keyword.fetch(fo, :mission_log_in) do
+      {:ok, v} when v in [:system_prompt, :user_message] -> :ok
+      {:ok, _} -> raise ArgumentError, "mission_log_in must be :system_prompt or :user_message"
+      :error -> :ok
+    end
+
+    case Keyword.fetch(fo, :context_in_system) do
+      {:ok, v} when is_boolean(v) -> :ok
+      {:ok, _} -> raise ArgumentError, "context_in_system must be true or false"
       :error -> :ok
     end
   end
