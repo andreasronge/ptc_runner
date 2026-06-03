@@ -10,9 +10,9 @@ defmodule PtcRunnerMcp.Http.ServerSmokeTest do
   calling `Router.call/2` in-process like the unit-style tests).
 
   The port is acquired from the OS up front via `free_port/0` rather than
-  passing `0`: `Config.resolve/1` rejects a non-positive `http_port` and
-  would silently fall back to the default fixed port, which could collide
-  with a real listener in CI.
+  passing `0`: with HTTP enabled, `Config.resolve/1` rejects a non-positive
+  `http_port` with an error, so `0` could not be used to request an
+  OS-assigned port here anyway.
   """
   use ExUnit.Case, async: false
 

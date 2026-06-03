@@ -142,6 +142,65 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     assert cfg.auth_rate_limit_block_ms == 5_000
   end
 
+  test "rejects non-positive rate limit integer overrides" do
+    for {key, value} <- [
+          {:http_auth_rate_limit_max_failures, 0},
+          {:http_auth_rate_limit_max_failures, -1},
+          {:http_auth_rate_limit_window_ms, 0},
+          {:http_auth_rate_limit_block_ms, -5}
+        ] do
+      args =
+        Map.put(%{http: true, http_auth_token: String.duplicate("a", 32)}, key, value)
+
+      assert {:error, message} = Config.resolve(args)
+      assert message =~ "must be a positive integer"
+    end
+  end
+
+  test "rejects non-numeric integer config values" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_auth_token: String.duplicate("a", 32),
+               http_port: "abc"
+             })
+
+    assert message =~ "--http-port"
+    assert message =~ "must be a positive integer"
+  end
+
+  test "rejects invalid integer config supplied via env var" do
+    System.put_env("PTC_RUNNER_MCP_HTTP_PORT", "0")
+
+    assert {:error, message} =
+             Config.resolve(%{http: true, http_auth_token: String.duplicate("a", 32)})
+
+    assert message =~ "--http-port"
+    assert message =~ "must be a positive integer"
+  end
+
+  test "omitted integer fields resolve to documented defaults" do
+    assert {:ok, cfg} = Config.resolve(%{http: true, http_auth_token: String.duplicate("a", 32)})
+
+    assert cfg.port == 7332
+    assert cfg.auth_rate_limit_max_failures == 5
+    assert cfg.auth_rate_limit_window_ms == 60_000
+    assert cfg.auth_rate_limit_block_ms == 60_000
+  end
+
+  test "invalid integer config is silently defaulted when HTTP is disabled" do
+    assert {:ok, cfg} =
+             Config.resolve(%{
+               http: false,
+               http_auth_rate_limit_max_failures: 0,
+               http_port: "abc"
+             })
+
+    assert cfg.enabled == false
+    assert cfg.auth_rate_limit_max_failures == 5
+    assert cfg.port == 7332
+  end
+
   test "default body limit follows the applied max frame limit" do
     on_exit(fn -> PtcRunnerMcp.Limits.set(PtcRunnerMcp.Limits.defaults()) end)
 
