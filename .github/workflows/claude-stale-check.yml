@@ -1,7 +1,9 @@
 name: Claude Stale Check
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */2 * * *"
 
 jobs:
   detect-issues:
@@ -14,6 +16,7 @@ jobs:
       issues: write  # Need write to add needs-attention label as fallback
       pull-requests: read
       contents: read
+      actions: write
 
     steps:
       - name: Detect stuck issues
@@ -25,6 +28,117 @@ jobs:
           echo "=== Detecting stuck issues ==="
           STUCK_ISSUES=""
           HAS_ISSUES="false"
+          STALE_RUNNING_SECONDS=5400
+
+          # Clean durable queue labels that can no longer produce useful work.
+          CLOSED_QUEUE_ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "impl:queued" \
+            --state closed \
+            --json number \
+            --jq '.[].number')
+
+          for ISSUE_NUM in $CLOSED_QUEUE_ISSUES; do
+            echo "CLOSED QUEUED: #$ISSUE_NUM - removing impl:queued"
+            gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --remove-label "impl:queued" 2>/dev/null || true
+          done
+
+          RUNNING_ISSUES=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --label "impl:running" \
+            --state all \
+            --json number,state,updatedAt \
+            --jq '.[] | "\(.number)|\(.state)|\(.updatedAt)"')
+
+          while IFS='|' read -r ISSUE_NUM ISSUE_STATE UPDATED_AT; do
+            [ -z "$ISSUE_NUM" ] && continue
+
+            ISSUE_BODY=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json body --jq '.body // ""')
+            ISSUE_TITLE=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json title --jq '.title')
+            CLAIM_JSON=$(echo "$ISSUE_BODY" | grep -o '<!-- automation-claim: {[^}]*}' | sed 's/<!-- automation-claim: //' | tail -1 || true)
+            RUN_ID=""
+            CLAIMED_AT="$UPDATED_AT"
+            RUN_VALID="false"
+            RUN_STATUS="unknown"
+            RUN_CONCLUSION=""
+
+            if [ -n "$CLAIM_JSON" ]; then
+              RUN_ID=$(echo "$CLAIM_JSON" | jq -r '.run_id // empty' 2>/dev/null || true)
+              CLAIMED_AT=$(echo "$CLAIM_JSON" | jq -r '.claimed_at // empty' 2>/dev/null || true)
+              CLAIMED_AT=${CLAIMED_AT:-$UPDATED_AT}
+            fi
+
+            if [ -n "$RUN_ID" ]; then
+              RUN_DATA=$(gh api "/repos/${{ github.repository }}/actions/runs/${RUN_ID}" 2>/dev/null || echo "{}")
+              RUN_PATH=$(echo "$RUN_DATA" | jq -r '.path // ""')
+              RUN_DISPLAY_TITLE=$(echo "$RUN_DATA" | jq -r '.display_title // ""')
+              RUN_STATUS=$(echo "$RUN_DATA" | jq -r '.status // "unknown"')
+              RUN_CONCLUSION=$(echo "$RUN_DATA" | jq -r '.conclusion // ""')
+
+              if [ "$RUN_PATH" = ".github/workflows/claude-issue.yml" ] && [ "$RUN_DISPLAY_TITLE" = "$ISSUE_TITLE" ]; then
+                RUN_VALID="true"
+              else
+                echo "::warning::Ignoring untrusted run claim for issue #$ISSUE_NUM: run_id=$RUN_ID path=$RUN_PATH title=$RUN_DISPLAY_TITLE"
+              fi
+            fi
+
+            AGE_SECONDS=$(jq -nr --arg ts "$CLAIMED_AT" 'try (now - ($ts | fromdateiso8601)) catch 0')
+            AUTOMATION_STATUS=$(echo "$ISSUE_BODY" | grep -o '<!-- automation-state: {[^}]*}' | sed 's/<!-- automation-state: //' | jq -r '.status // empty' 2>/dev/null || true)
+
+            if [ "$ISSUE_STATE" = "CLOSED" ]; then
+              echo "CLOSED RUNNING: #$ISSUE_NUM - removing impl:running"
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --remove-label "impl:running" 2>/dev/null || true
+
+              if [ "$RUN_VALID" = "true" ]; then
+                if [ "$RUN_STATUS" = "in_progress" ] || [ "$RUN_STATUS" = "queued" ] || [ "$RUN_STATUS" = "waiting" ]; then
+                  echo "Cancelling recorded run $RUN_ID for closed issue #$ISSUE_NUM"
+                  gh run cancel "$RUN_ID" --repo "${{ github.repository }}" || true
+                fi
+              elif [ -z "$RUN_ID" ]; then
+                echo "::warning::Issue #$ISSUE_NUM has impl:running but no trusted run_id; not cancelling any run."
+              fi
+
+              continue
+            fi
+
+            if awk "BEGIN { exit !($AGE_SECONDS > $STALE_RUNNING_SECONDS) }"; then
+              echo "STALE RUNNING: #$ISSUE_NUM claimed ${AGE_SECONDS}s ago"
+              STUCK_ISSUES="$STUCK_ISSUES #$ISSUE_NUM(stale-running)"
+              HAS_ISSUES="true"
+
+              if [ "$RUN_VALID" = "true" ]; then
+                if [ "$RUN_STATUS" = "in_progress" ] || [ "$RUN_STATUS" = "queued" ] || [ "$RUN_STATUS" = "waiting" ]; then
+                  echo "Cancelling recorded stale run $RUN_ID for issue #$ISSUE_NUM"
+                  if gh run cancel "$RUN_ID" --repo "${{ github.repository }}"; then
+                    echo "Requeueing issue #$ISSUE_NUM after cancelling run $RUN_ID"
+                    gh issue edit "$ISSUE_NUM" \
+                      --repo "${{ github.repository }}" \
+                      --remove-label "impl:running" \
+                      --add-label "impl:queued" 2>/dev/null || true
+                  else
+                    echo "::warning::Could not cancel run $RUN_ID for issue #$ISSUE_NUM; leaving impl:running in place."
+                  fi
+                elif [ "$RUN_STATUS" = "completed" ]; then
+                  if [ "$RUN_CONCLUSION" = "success" ] || [ "$AUTOMATION_STATUS" = "SUCCESS" ]; then
+                    echo "Recorded run $RUN_ID completed successfully; removing stale impl:running for issue #$ISSUE_NUM"
+                    gh issue edit "$ISSUE_NUM" \
+                      --repo "${{ github.repository }}" \
+                      --remove-label "impl:running" 2>/dev/null || true
+                  else
+                    echo "Recorded run $RUN_ID completed with conclusion=${RUN_CONCLUSION:-unknown}; requeueing open issue #$ISSUE_NUM"
+                    gh issue edit "$ISSUE_NUM" \
+                      --repo "${{ github.repository }}" \
+                      --remove-label "impl:running" \
+                      --add-label "impl:queued" 2>/dev/null || true
+                  fi
+                fi
+              else
+                echo "::warning::Issue #$ISSUE_NUM is stale but has no trusted run_id; marking needs-attention only."
+              fi
+
+              gh issue edit "$ISSUE_NUM" --repo "${{ github.repository }}" --add-label "needs-attention" 2>/dev/null || true
+            fi
+          done <<< "$RUNNING_ISSUES"
 
           # Find the active epic
           EPIC_NUMBER=$(gh issue list \
@@ -108,8 +222,8 @@ jobs:
             fi
           done
 
-          echo "has_stuck_issues=$HAS_ISSUES" >> $GITHUB_OUTPUT
-          echo "stuck_issues_summary=$STUCK_ISSUES" >> $GITHUB_OUTPUT
+          echo "has_stuck_issues=$HAS_ISSUES" >> "$GITHUB_OUTPUT"
+          echo "stuck_issues_summary=$STUCK_ISSUES" >> "$GITHUB_OUTPUT"
 
           if [ "$HAS_ISSUES" = "true" ]; then
             echo ""

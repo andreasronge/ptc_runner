@@ -35,7 +35,7 @@ jobs:
     if: |
       github.event_name != 'issues' || github.event.label.name == 'impl:queued'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     # The single global implementation lock. Shared with claude-batch-fix and
     # claude-stale-check so main-mutating automation is strictly serialized.
@@ -95,32 +95,99 @@ jobs:
           # Expose to all later steps as $ISSUE_NUMBER / env.ISSUE_NUMBER.
           echo "ISSUE_NUMBER=$NEXT" >> "$GITHUB_ENV"
 
-      - name: Checkout repository
+      - name: Record implementation claim
+        id: claim
         if: steps.pick.outputs.has_work == 'true'
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
+        run: |
+          set -euo pipefail
+
+          CLAIMED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --json body --jq '.body // ""')
+          CLEAN_BODY=$(printf '%s\n' "$CURRENT_BODY" | sed '/^## Automation Claim/,$d')
+
+          cat > /tmp/issue-body.md << EOF
+          $CLEAN_BODY
+
+          ## Automation Claim
+          <!-- automation-claim: {"status":"RUNNING","issue":${ISSUE_NUMBER},"run_id":${GITHUB_RUN_ID},"run_attempt":${GITHUB_RUN_ATTEMPT},"run_url":"${RUN_URL}","claimed_at":"${CLAIMED_AT}"} -->
+
+          | Field | Value |
+          |-------|-------|
+          | Status | \`RUNNING\` |
+          | Run | [${GITHUB_RUN_ID}](${RUN_URL}) |
+          | Attempt | ${GITHUB_RUN_ATTEMPT} |
+          | Claimed At | ${CLAIMED_AT} |
+          EOF
+
+          gh issue edit "$ISSUE_NUMBER" --body-file /tmp/issue-body.md
+
+      - name: Check issue still needs implementation
+        id: issue-state
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state')
+          if [ "$ISSUE_STATE" != "OPEN" ]; then
+            echo "Issue #$ISSUE_NUMBER is $ISSUE_STATE; skipping implementation."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=issue-${ISSUE_STATE}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MERGED_PRS=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --state merged \
+            --limit 100 \
+            --json number,body \
+            | jq --arg issue "$ISSUE_NUMBER" '[.[] | select((.body // "") | test("(?i)(closes|fixes|resolves)[[:space:]]+#" + $issue + "([^0-9]|$)"))] | length')
+
+          if [ "${MERGED_PRS:-0}" -gt 0 ]; then
+            echo "Issue #$ISSUE_NUMBER already has a merged closing PR; skipping implementation."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=merged-pr-exists" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
 
       - name: Install git pre-commit hook
-        if: steps.pick.outputs.has_work == 'true'
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
+        timeout-minutes: 3
         run: |
           cp scripts/pre-commit .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
 
       - name: Setup Elixir environment
-        if: steps.pick.outputs.has_work == 'true'
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         uses: ./.github/actions/setup-elixir
 
       - name: Setup Claude Code
         id: setup-claude
-        if: steps.pick.outputs.has_work == 'true'
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         uses: ./.github/actions/setup-claude-code
 
       - name: Run tests and capture failures
         id: test-feedback
-        if: steps.pick.outputs.has_work == 'true'
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         continue-on-error: true
+        timeout-minutes: 15
         run: |
           echo "Running tests to capture any failures..."
           FAILURES=""
@@ -154,8 +221,8 @@ jobs:
 
           # Capture output for Claude
           if [ -n "$FAILURES" ]; then
-            echo "has_failures=true" >> $GITHUB_OUTPUT
-            echo "failures=$FAILURES" >> $GITHUB_OUTPUT
+            echo "has_failures=true" >> "$GITHUB_OUTPUT"
+            echo "failures=$FAILURES" >> "$GITHUB_OUTPUT"
 
             # Truncate output if too long (keep last 200 lines)
             tail -200 /tmp/test_output.txt > /tmp/test_output_truncated.txt
@@ -165,17 +232,18 @@ jobs:
               echo 'output<<EOF'
               cat /tmp/test_output_truncated.txt
               echo 'EOF'
-            } >> $GITHUB_OUTPUT
+            } >> "$GITHUB_OUTPUT"
 
             echo "::warning::Test failures detected: $FAILURES"
           else
-            echo "has_failures=false" >> $GITHUB_OUTPUT
+            echo "has_failures=false" >> "$GITHUB_OUTPUT"
             echo "All checks passed"
           fi
 
       - name: Run Claude Code
         id: claude
-        if: steps.pick.outputs.has_work == 'true'
+        if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
+        timeout-minutes: 30
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
@@ -352,30 +420,32 @@ jobs:
 
       # Verify status was updated in issue body
       - name: Verify implementation status
-        if: always() && steps.pick.outputs.has_work == 'true'
+        if: always() && steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         id: verify-status
+        timeout-minutes: 3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Check if automation state exists in issue body
-          ISSUE_BODY=$(gh issue view $ISSUE_NUMBER --json body --jq '.body')
+          ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER" --json body --jq '.body')
 
           if echo "$ISSUE_BODY" | grep -q "<!-- automation-state:"; then
-            echo "status_posted=true" >> $GITHUB_OUTPUT
+            echo "status_posted=true" >> "$GITHUB_OUTPUT"
 
             # Extract status from JSON
             STATUS_JSON=$(echo "$ISSUE_BODY" | grep -o '<!-- automation-state: {[^}]*}' | sed 's/<!-- automation-state: //')
             RESULT=$(echo "$STATUS_JSON" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-            echo "result=$RESULT" >> $GITHUB_OUTPUT
+            echo "result=$RESULT" >> "$GITHUB_OUTPUT"
             echo "Implementation result: $RESULT"
           else
-            echo "status_posted=false" >> $GITHUB_OUTPUT
+            echo "status_posted=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No automation state found in issue body"
           fi
 
       # Post fallback status if Claude didn't update issue body
       - name: Post fallback status
-        if: always() && steps.pick.outputs.has_work == 'true' && steps.verify-status.outputs.status_posted == 'false'
+        if: always() && steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true' && steps.verify-status.outputs.status_posted == 'false'
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -390,7 +460,7 @@ jobs:
           fi
 
           # Get current issue body
-          CURRENT_BODY=$(gh issue view $ISSUE_NUMBER --json body --jq '.body')
+          CURRENT_BODY=$(gh issue view "$ISSUE_NUMBER" --json body --jq '.body')
 
           # Remove any partial automation state
           CLEAN_BODY=$(echo "$CURRENT_BODY" | sed '/^## Automation State/,$d')
@@ -414,17 +484,24 @@ jobs:
           **Next Steps:** Re-trigger with \`@claude Please continue implementing this issue.\`
           EOF
 
-          gh issue edit $ISSUE_NUMBER --body-file /tmp/issue-body.md
+          gh issue edit "$ISSUE_NUMBER" --body-file /tmp/issue-body.md
 
           # Add needs-attention label
-          gh issue edit $ISSUE_NUMBER --add-label "needs-attention" || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "needs-attention" || true
 
       # Safety net: push any unpushed commits and remove workflow files
       - name: Push unpushed commits
-        if: always() && steps.pick.outputs.has_work == 'true'
+        if: always() && steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
+          ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state')
+          if [ "$ISSUE_STATE" != "OPEN" ]; then
+            echo "Issue #$ISSUE_NUMBER is $ISSUE_STATE; skipping fallback push."
+            exit 0
+          fi
+
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           [ "$CURRENT_BRANCH" = "main" ] && exit 0
 
@@ -456,21 +533,39 @@ jobs:
             else
               git push -u origin HEAD
             fi
-            echo "branch_pushed=true" >> $GITHUB_OUTPUT
-            echo "branch_name=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+            echo "branch_pushed=true" >> "$GITHUB_OUTPUT"
+            echo "branch_name=$CURRENT_BRANCH" >> "$GITHUB_OUTPUT"
             echo "::notice::Pushed commits"
           fi
 
       - name: Create PR if branch was pushed but no PR exists
-        if: always() && steps.pick.outputs.has_work == 'true'
+        if: always() && steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
+          ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state')
+          if [ "$ISSUE_STATE" != "OPEN" ]; then
+            echo "Issue #$ISSUE_NUMBER is $ISSUE_STATE; skipping fallback PR creation."
+            exit 0
+          fi
+
           CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
           [ "$CURRENT_BRANCH" = "main" ] && exit 0
 
           # Check if PR already exists for this branch
-          EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --state open --json number --jq '.[0].number')
+          EXISTING_PR=$(gh pr list --head "$CURRENT_BRANCH" --state all --json number --jq '.[0].number')
+          MERGED_CLOSING_PR=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --state merged \
+            --limit 100 \
+            --json number,body \
+            | jq -r --arg issue "$ISSUE_NUMBER" '[.[] | select((.body // "") | test("(?i)(closes|fixes|resolves)[[:space:]]+#" + $issue + "([^0-9]|$)"))][0].number // empty')
+
+          if [ -n "$MERGED_CLOSING_PR" ]; then
+            echo "Merged closing PR #$MERGED_CLOSING_PR already exists; skipping fallback PR creation."
+            exit 0
+          fi
 
           if [ -z "$EXISTING_PR" ]; then
             echo "No PR exists for branch $CURRENT_BRANCH, creating one..."
@@ -500,12 +595,27 @@ jobs:
       # path; the */10 schedule is the guaranteed backstop.
       - name: Release claim and drain next
         if: always() && steps.pick.outputs.has_work == 'true'
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.PAT_WORKFLOW_TRIGGER || github.token }}
         run: |
           set -euo pipefail
 
-          gh issue edit "$ISSUE_NUMBER" --remove-label "impl:running" 2>/dev/null || true
+          ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state')
+
+          if [ "${{ steps.claim.outcome }}" != "success" ] || [ "${{ steps.issue-state.outcome }}" != "success" ]; then
+            if [ "$ISSUE_STATE" = "OPEN" ]; then
+              echo "Pre-implementation setup failed; requeueing issue #$ISSUE_NUMBER."
+              gh issue edit "$ISSUE_NUMBER" \
+                --remove-label "impl:running" \
+                --add-label "impl:queued" 2>/dev/null || true
+            else
+              echo "Pre-implementation setup failed, but issue #$ISSUE_NUMBER is $ISSUE_STATE; removing running claim."
+              gh issue edit "$ISSUE_NUMBER" --remove-label "impl:running" 2>/dev/null || true
+            fi
+          else
+            gh issue edit "$ISSUE_NUMBER" --remove-label "impl:running" 2>/dev/null || true
+          fi
 
           REMAINING=$(gh issue list \
             --repo "${{ github.repository }}" \
