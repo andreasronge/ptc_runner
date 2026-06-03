@@ -118,7 +118,7 @@ All Claude workflows have explicit timeouts to prevent runaway jobs:
 
 | Workflow | Timeout |
 |----------|---------|
-| `claude-issue.yml` | 45 minutes |
+| `claude-issue.yml` | 75 minutes |
 | `claude-pr-fix.yml` | 30 minutes |
 | `claude-second-opinion.yml` | 45 minutes |
 
@@ -269,7 +269,11 @@ When implementation discovers prerequisite work:
 - Epic issues with no labels but all blockers resolved
 - Issues with `needs-review` but no review activity after 2 hours
 - Issues with `ready-for-implementation` but no PR/status after 2 hours
+- Closed issues still carrying `impl:queued` or `impl:running`
+- Stale open `impl:running` issues with a recorded workflow run claim
 - Adds `needs-attention` label for visibility
+- Cancels only a recorded stale run ID validated against GitHub run metadata;
+  it never guesses from labels or trusts issue-body metadata alone
 
 **Claude fix (only if issues detected):**
 - Gets the list of stuck issues from detection
@@ -282,6 +286,8 @@ When implementation discovers prerequisite work:
 - Logs stuck PRs with `needs-human-review` for 24+ hours
 
 This design ensures visibility (`needs-attention` label) even if Claude can't run.
+The non-Claude detector may remove stale queue labels and cancel recorded
+workflow runs, but it never pushes branches or creates implementation PRs.
 
 ## Epic-Driven Development
 
@@ -404,12 +410,14 @@ automation will NOT proceed because `needs-human-review` has higher priority.
 ## Concurrency Control
 
 > **Why not one shared group?** A single global `claude-automation` group was
-> the original design, but it has a fatal flaw: a GitHub concurrency group
-> holds at most **one running + one pending** run. When several workflows fire
-> at once, the newest waiting request **evicts and cancels** the older pending
-> one. Read-only reviews competing in the same group could starve an
-> implementation run, and a burst of `@claude` requests could silently drop all
-> but two. (This stranded issue #1039.) The current design replaces the single
+> the original design, but it has a fatal flaw: by default, a GitHub concurrency
+> group holds at most **one running + one pending** run. When several workflows
+> fire at once, the newest waiting request **evicts and cancels** the older
+> pending one. GitHub now supports larger concurrency queues with `queue: max`,
+> but labels remain the durable source of implementation state. Read-only
+> reviews competing in the same group could still starve implementation work,
+> and a burst of `@claude` requests could silently drop work on older default
+> queues. (This stranded issue #1039.) The current design replaces the single
 > group with a durable queue plus purpose-scoped groups.
 
 ### Durable implementation queue
@@ -425,7 +433,9 @@ Issue implementation is split into an **enqueue** front door and a
   picks the oldest `impl:queued` issue, flips it to `impl:running`, implements
   it, then releases the label and re-dispatches itself if the queue is
   non-empty. Triggers: the `labeled` event (fast path), a `*/10` schedule
-  (backstop so the queue can never stall), and `workflow_dispatch`.
+  (backstop so the queue can never stall), and `workflow_dispatch`. When an
+  issue is claimed, the runner records the workflow `run_id`, attempt, run URL,
+  and claim time in the issue body so watchdog cleanup can target only that run.
 
 This guarantees **both** invariants the single group could not:
 - **Never parallel** — `claude-impl` (size 1) lets only one main-mutating run
@@ -532,9 +542,16 @@ gh workflow run claude-issue.yml
 
 If jobs are stuck running:
 ```bash
-# Cancel running workflows
-gh run list --workflow=claude-issue.yml --status in_progress --json databaseId \
-  | jq -r '.[].databaseId' | xargs -I {} gh run cancel {}
+# Prefer the recorded run ID in the issue's Automation Claim.
+gh issue view ISSUE_NUMBER --json body --jq '.body'
+gh run cancel RUN_ID
+```
+
+For closed issues, do not requeue. Remove stale queue labels after cancelling
+any recorded active run:
+
+```bash
+gh issue edit ISSUE_NUMBER --remove-label "impl:running" --remove-label "impl:queued"
 ```
 
 ## Fork PR Handling
