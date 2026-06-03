@@ -734,7 +734,9 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
 
     test "vec turns a set into a list of its elements" do
       assert Enum.sort(eval!("(vec (set [1 2 3]))")) == [1, 2, 3]
-      assert Predicates.vec(MapSet.new([1, 2])) == [1, 2]
+      # MapSet.to_list/1 enumeration order is not guaranteed across runtimes;
+      # sort before comparing (the evaluated path above does the same).
+      assert Enum.sort(Predicates.vec(MapSet.new([1, 2]))) == [1, 2]
     end
 
     test "vec turns a string into a list of graphemes (utf8 aware)" do
