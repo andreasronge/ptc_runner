@@ -85,6 +85,31 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     assert args.http_allowed_origin == ["http://a.test", "http://b.test"]
   end
 
+  test "auth rate limit defaults are enabled with sane thresholds" do
+    assert {:ok, cfg} = Config.resolve(%{http: true, http_auth_token: String.duplicate("a", 32)})
+    assert cfg.auth_rate_limit == true
+    assert cfg.auth_rate_limit_window_ms == 60_000
+    assert cfg.auth_rate_limit_max_failures == 5
+    assert cfg.auth_rate_limit_block_ms == 60_000
+  end
+
+  test "auth rate limit honors CLI overrides" do
+    assert {:ok, cfg} =
+             Config.resolve(%{
+               http: true,
+               http_auth_token: String.duplicate("a", 32),
+               http_auth_rate_limit: false,
+               http_auth_rate_limit_window_ms: 1_000,
+               http_auth_rate_limit_max_failures: 2,
+               http_auth_rate_limit_block_ms: 5_000
+             })
+
+    assert cfg.auth_rate_limit == false
+    assert cfg.auth_rate_limit_window_ms == 1_000
+    assert cfg.auth_rate_limit_max_failures == 2
+    assert cfg.auth_rate_limit_block_ms == 5_000
+  end
+
   test "default body limit follows the applied max frame limit" do
     on_exit(fn -> PtcRunnerMcp.Limits.set(PtcRunnerMcp.Limits.defaults()) end)
 
