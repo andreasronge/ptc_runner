@@ -68,11 +68,11 @@ the deployment runbook.
 | Flag | Env var | Default | Meaning |
 |---|---|---|---|
 | `--http` | `PTC_RUNNER_MCP_HTTP` | `false` | Enable the HTTP listener. |
-| `--http-host` | `PTC_RUNNER_MCP_HTTP_HOST` | `127.0.0.1` | Bind IP address or `localhost`. Non-loopback binds require auth unless explicitly unsafe. |
+| `--http-host` | `PTC_RUNNER_MCP_HTTP_HOST` | `127.0.0.1` | Bind IP address or `localhost`. Non-loopback binds always require auth. |
 | `--http-port` | `PTC_RUNNER_MCP_HTTP_PORT` | `7332` | Bind port. |
 | `--http-path` | `PTC_RUNNER_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP MCP endpoint. Must differ from `/health`, `/ready`, and `--http-metrics-path`. |
 | `--http-auth-token` | `PTC_RUNNER_MCP_HTTP_AUTH_TOKEN` | unset | Static bearer token. Must be at least 32 characters; generate it from a CSPRNG. |
-| `--http-disable-auth` | `PTC_RUNNER_MCP_HTTP_DISABLE_AUTH` | `false` | Disable bearer auth. Permitted on loopback with a warning; non-loopback also requires `--http-allow-unsafe-network`. |
+| `--http-disable-auth` | `PTC_RUNNER_MCP_HTTP_DISABLE_AUTH` | `false` | Disable bearer auth. Only permitted on explicit loopback binds; cannot be combined with `--http-allow-unsafe-network`. |
 | `--http-allowed-origin` | `PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN` | unset | Browser `Origin` allow-list. May be repeated or comma-separated. This is a DNS-rebinding check, not full CORS support. |
 | `--http-request-timeout-ms` | `PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS` | `15000` | HTTP request read timeout. |
 | `--http-shutdown-grace-ms` | `PTC_RUNNER_MCP_HTTP_SHUTDOWN_GRACE_MS` | `10000` | Application-stop drain window before in-flight workers are cancelled. |
@@ -82,7 +82,7 @@ the deployment runbook.
 | `--http-max-sessions` | `PTC_RUNNER_MCP_HTTP_MAX_SESSIONS` | `256` | Global HTTP protocol-session cap. |
 | `--http-max-sessions-per-owner` | `PTC_RUNNER_MCP_HTTP_MAX_SESSIONS_PER_OWNER` | `32` | Per-owner HTTP protocol-session cap. In single-token v1 every client shares one owner. |
 | `--http-max-in-flight-per-session` | `PTC_RUNNER_MCP_HTTP_MAX_IN_FLIGHT_PER_SESSION` | `4` | Non-queueing cap for executing requests in one HTTP protocol session. |
-| `--http-allow-unsafe-network` | `PTC_RUNNER_MCP_HTTP_ALLOW_UNSAFE_NETWORK` | `false` | Allows unauthenticated non-loopback bind only when paired with `--http-disable-auth`. |
+| `--http-allow-unsafe-network` | `PTC_RUNNER_MCP_HTTP_ALLOW_UNSAFE_NETWORK` | `false` | Allows non-loopback bind addresses (network-binding gate only; does not affect auth requirements). |
 | `--http-metrics` | `PTC_RUNNER_MCP_HTTP_METRICS` | `false` | Reserved for the Prometheus endpoint follow-up; core telemetry is emitted regardless. |
 | `--http-metrics-path` | `PTC_RUNNER_MCP_HTTP_METRICS_PATH` | `/metrics` | Reserved metrics path; must not collide with HTTP control paths. |
 | `--http-instance-label` | `PTC_RUNNER_MCP_HTTP_INSTANCE_LABEL` | hostname | Stable instance label stamped into HTTP logs, telemetry, and trace metadata. |
