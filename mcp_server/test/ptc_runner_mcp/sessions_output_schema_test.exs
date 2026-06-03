@@ -11,13 +11,15 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{ConcurrencyGate, ResponseProfile, Sessions, Tools}
+  alias PtcRunnerMcp.{ConcurrencyGate, Limits, ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
 
   setup do
+    old_limits = Limits.get()
     old_profile = ResponseProfile.current()
     stop_sessions_processes()
+    Limits.set(Limits.defaults())
     SessionsConfig.set(%{enabled: true})
     ResponseProfile.set(:structured)
     ConcurrencyGate.reset()
@@ -25,6 +27,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
 
     on_exit(fn ->
       stop_sessions_processes()
+      Limits.set(old_limits)
       SessionsConfig.reset()
       ConcurrencyGate.reset()
       ResponseProfile.set(old_profile)
@@ -272,7 +275,7 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
     value = String.duplicate("x", 80)
 
     items =
-      1..500
+      1..400
       |> Enum.map_join(" ", fn _ -> Jason.encode!(value) end)
 
     "[" <> items <> "]"

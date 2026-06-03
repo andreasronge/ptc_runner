@@ -54,10 +54,13 @@ defmodule PtcRunnerMcp.Http.RouterCase do
     PtcRunnerMcp.ConcurrencyGate.init()
     PtcRunnerMcp.ConcurrencyGate.reset()
 
+    original_limits = PtcRunnerMcp.Limits.get()
     original_trace = TraceConfig.get()
     original_log_level = Log.level()
+    PtcRunnerMcp.Limits.set(PtcRunnerMcp.Limits.defaults())
 
     on_exit(fn ->
+      PtcRunnerMcp.Limits.set(original_limits)
       SessionsConfig.set(SessionsConfig.defaults())
       TraceConfig.set(original_trace)
       TraceHandler.detach()
