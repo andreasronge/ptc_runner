@@ -72,6 +72,31 @@ The v1 auth model has one static token. All token holders are the same
 owner, so an `MCP-Session-Id` is a bearer capability inside that trust
 boundary. Session ids are random and are never logged raw.
 
+### Failed-auth rate limiting
+
+Repeated failed bearer authentications from the same source are rate
+limited to reduce brute-force risk (`OPLANE_REQ-00080322`). Both missing
+and invalid bearer failures count. Once a source exceeds
+`--http-auth-rate-limit-max-failures` within
+`--http-auth-rate-limit-window-ms`, it is temporarily blocked for
+`--http-auth-rate-limit-block-ms`; blocked requests receive `429` with a
+`Retry-After` header and no `www-authenticate` challenge (so a blocked
+caller is not told whether its token was missing or invalid). A
+successful authentication immediately resets the source's failure state.
+A misconfigured-but-legitimate client can briefly be blocked; it
+self-heals after the block window. The limiter is on by default and is a
+no-op when no token is configured or when `--http-auth-rate-limit` is
+`false`; if the limiter process is unavailable it fails open.
+
+The source is keyed by the peer IP (`conn.remote_ip`). `X-Forwarded-For`
+/ `Forwarded` headers are **not** trusted — behind a reverse proxy every
+request appears to originate from the proxy, so deploy per-source
+limiting at the proxy too (or in addition). `Host`/`Origin` rejections
+are not bearer-auth failures and never count toward the limit. Block
+decisions log a JSON line (`http_auth_rate_limited`) with the raw source
+IP, which is operationally useful for acting on abuse; the bearer token
+itself is never logged.
+
 ### Token generation
 
 The server requires a minimum of 32 bytes but does not programmatically
@@ -104,7 +129,8 @@ instance label, `X-Request-Id`, method, path, status, duration, and
 hashed owner/session ids when known.
 
 The server emits sanitized telemetry under `[:ptc_lisp, :http, ...]`
-for request start/stop, session create/close, auth failures, limit
+for request start/stop, session create/close, auth failures, failed-auth
+rate-limit blocks (`[:ptc_lisp, :http, :auth, :rate_limited]`), limit
 rejections, and cancellations.
 
 When `--trace-dir` is enabled, HTTP tool-call trace events include
@@ -137,6 +163,10 @@ sessions return `404` on later use.
 | `--http-max-sessions` | `256` | Global HTTP protocol-session cap. |
 | `--http-max-sessions-per-owner` | `32` | Per-owner protocol-session cap. |
 | `--http-max-in-flight-per-session` | `4` | Per-session executing request cap. |
+| `--http-auth-rate-limit` | `true` | Rate limit failed bearer auth per source. |
+| `--http-auth-rate-limit-window-ms` | `60000` | Window over which failures accumulate. |
+| `--http-auth-rate-limit-max-failures` | `5` | Failures per window before a source is blocked. |
+| `--http-auth-rate-limit-block-ms` | `60000` | Block duration after the threshold is exceeded (`429` + `Retry-After`). |
 | `--http-session-ttl-ms` | `3600000` | Absolute protocol-session lifetime. |
 | `--http-session-idle-timeout-ms` | `900000` | Idle protocol-session timeout. |
 | `--http-instance-label` | hostname | Label stamped into HTTP logs/telemetry/traces. |
