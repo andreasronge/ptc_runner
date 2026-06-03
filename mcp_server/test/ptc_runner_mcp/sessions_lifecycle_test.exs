@@ -310,7 +310,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert {:error, _} = Sessions.start_session(nil, %{})
 
       assert {:ok, _} = Sessions.close(sid, nil, "done")
-      drain_registry()
+      await_session_removed(sid)
 
       # The owner index slot was reclaimed on :DOWN, so a new start succeeds.
       assert {:ok, _} = Sessions.start_session(nil, %{})
@@ -543,6 +543,32 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     :ok
+  end
+
+  # `Sessions.close/3` stops the session process; the Registry frees the
+  # per-owner quota slot only when it handles that process's monitor `:DOWN`
+  # (registry.ex `handle_info({:DOWN, ...})` removes the session from
+  # `sessions` and releases the owner index together). `:sys.get_state` orders
+  # only messages already enqueued, so it cannot wait for that async `:DOWN`.
+  # Poll the Registry's authoritative state until the session is gone —
+  # deterministic, yields the scheduler between checks, no `Process.sleep`.
+  defp await_session_removed(sid, attempts \\ 5_000) do
+    pid = Process.whereis(SessionsRegistry)
+
+    cond do
+      is_nil(pid) ->
+        :ok
+
+      not Map.has_key?(:sys.get_state(pid, 5_000).sessions, sid) ->
+        :ok
+
+      attempts > 0 ->
+        :erlang.yield()
+        await_session_removed(sid, attempts - 1)
+
+      true ->
+        flunk("Sessions.Registry did not process :DOWN for session #{sid}")
+    end
   end
 
   # The public `lookup/1` first consults the partitioned `Sessions.Names`
