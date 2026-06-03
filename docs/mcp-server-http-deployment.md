@@ -64,9 +64,9 @@ TLS should terminate at the load balancer or edge proxy. If traffic from
 the proxy to the BEAM node is plaintext, anything able to observe that
 link can see the bearer token.
 
-Binding to a non-loopback address requires a token unless both
-`--http-disable-auth` and `--http-allow-unsafe-network` are set. That
-pair is for controlled tests only.
+Binding to a non-loopback address always requires a token.
+`--http-disable-auth` is only permitted on loopback binds and cannot be
+combined with `--http-allow-unsafe-network`.
 
 The v1 auth model has one static token. All token holders are the same
 owner, so an `MCP-Session-Id` is a bearer capability inside that trust
