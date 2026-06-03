@@ -5,7 +5,6 @@ defmodule PtcRunner.Lisp.Runtime.String do
   Provides string concatenation, substring, join, split, and parsing functions.
   """
 
-  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Interop.Duration
@@ -140,10 +139,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
     if String.length(separator) == 1 do
       String.split(s, separator)
     else
-      raise ExecutionError,
-        reason: :type_error,
-        message:
-          "split: delimiter must be a regex pattern, got plain string #{inspect(separator)}"
+      raise "type_error: split: delimiter must be a regex pattern, got plain string #{inspect(separator)}"
     end
   end
 

@@ -590,4 +590,43 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
       end
     end
   end
+
+  describe "format_options validation" do
+    test "accepts valid mission_log_in: :system_prompt" do
+      agent = SubAgent.new(prompt: "Test", format_options: [mission_log_in: :system_prompt])
+      assert Keyword.get(agent.format_options, :mission_log_in) == :system_prompt
+    end
+
+    test "accepts valid mission_log_in: :user_message" do
+      agent = SubAgent.new(prompt: "Test", format_options: [mission_log_in: :user_message])
+      assert Keyword.get(agent.format_options, :mission_log_in) == :user_message
+    end
+
+    test "rejects invalid mission_log_in value" do
+      assert_raise ArgumentError,
+                   ~r/mission_log_in must be :system_prompt or :user_message/,
+                   fn ->
+                     SubAgent.new(
+                       prompt: "Test",
+                       format_options: [mission_log_in: :user_messages]
+                     )
+                   end
+    end
+
+    test "accepts valid context_in_system: true" do
+      agent = SubAgent.new(prompt: "Test", format_options: [context_in_system: true])
+      assert Keyword.get(agent.format_options, :context_in_system) == true
+    end
+
+    test "accepts valid context_in_system: false" do
+      agent = SubAgent.new(prompt: "Test", format_options: [context_in_system: false])
+      assert Keyword.get(agent.format_options, :context_in_system) == false
+    end
+
+    test "rejects invalid context_in_system value" do
+      assert_raise ArgumentError, ~r/context_in_system must be true or false/, fn ->
+        SubAgent.new(prompt: "Test", format_options: [context_in_system: :yes])
+      end
+    end
+  end
 end

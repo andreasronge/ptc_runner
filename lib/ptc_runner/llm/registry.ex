@@ -145,6 +145,12 @@ defmodule PtcRunner.LLM.Registry do
   def validate(model_string), do: impl().validate(model_string)
 
   defp impl do
-    Application.get_env(:ptc_runner, :model_registry)
+    case Application.get_env(:ptc_runner, :model_registry) do
+      nil ->
+        raise "No model registry configured. Set config :ptc_runner, :model_registry, MyRegistry"
+
+      mod ->
+        mod
+    end
   end
 end
