@@ -51,37 +51,37 @@ defmodule PtcRunnerMcp.Http.Router do
     end
   end
 
-  defp route_mcp(%{method: "GET"} = conn, _cfg) do
-    conn
-    |> Plug.Conn.put_resp_header("allow", "POST, DELETE")
-    |> Plug.Conn.send_resp(405, "")
-  end
-
-  defp route_mcp(%{method: "DELETE"} = conn, cfg) do
-    with {:ok, owner} <- authenticate(conn, cfg),
-         {:ok, session_id} <- session_id(conn) do
-      conn =
-        put_http_private(conn,
-          owner_hash: owner.hash,
-          session_hash: Telemetry.hash_id(session_id)
-        )
-
-      case SessionRegistry.delete(session_id, owner) do
-        :ok -> Plug.Conn.send_resp(conn, 202, "")
-        {:error, :not_found} -> Plug.Conn.send_resp(conn, 404, "")
-      end
-    else
+  defp route_mcp(conn, cfg) do
+    case authenticate(conn, cfg) do
+      {:ok, owner} -> dispatch_method(conn, cfg, owner)
       {:error, {:auth, reason}} -> auth_error(conn, reason)
       {:error, {:auth_rate_limited, retry_after_s}} -> rate_limit_error(conn, retry_after_s)
-      {:error, :missing_session} -> Plug.Conn.send_resp(conn, 400, "missing MCP-Session-Id")
       {:error, :origin} -> Plug.Conn.send_resp(conn, 403, "forbidden")
       {:error, :host} -> Plug.Conn.send_resp(conn, 403, "forbidden")
     end
   end
 
-  defp route_mcp(%{method: "POST"} = conn, cfg) do
-    with {:ok, owner} <- authenticate(conn, cfg),
-         :ok <- acceptable_content_type(conn),
+  defp dispatch_method(%{method: "DELETE"} = conn, _cfg, owner) do
+    case session_id(conn) do
+      {:ok, session_id} ->
+        conn =
+          put_http_private(conn,
+            owner_hash: owner.hash,
+            session_hash: Telemetry.hash_id(session_id)
+          )
+
+        case SessionRegistry.delete(session_id, owner) do
+          :ok -> Plug.Conn.send_resp(conn, 202, "")
+          {:error, :not_found} -> Plug.Conn.send_resp(conn, 404, "")
+        end
+
+      {:error, :missing_session} ->
+        Plug.Conn.send_resp(conn, 400, "missing MCP-Session-Id")
+    end
+  end
+
+  defp dispatch_method(%{method: "POST"} = conn, cfg, owner) do
+    with :ok <- acceptable_content_type(conn),
          {:ok, body, conn} <- read_body_capped(conn, cfg),
          {:ok, decoded} <- decode_body(body) do
       if registry_draining?() do
@@ -90,18 +90,6 @@ defmodule PtcRunnerMcp.Http.Router do
         handle_post(conn, cfg, owner, decoded)
       end
     else
-      {:error, {:auth, reason}} ->
-        auth_error(conn, reason)
-
-      {:error, {:auth_rate_limited, retry_after_s}} ->
-        rate_limit_error(conn, retry_after_s)
-
-      {:error, :origin} ->
-        Plug.Conn.send_resp(conn, 403, "forbidden")
-
-      {:error, :host} ->
-        Plug.Conn.send_resp(conn, 403, "forbidden")
-
       {:error, :unsupported_media_type} ->
         Plug.Conn.send_resp(conn, 415, "unsupported media type")
 
@@ -116,7 +104,7 @@ defmodule PtcRunnerMcp.Http.Router do
     end
   end
 
-  defp route_mcp(conn, _cfg) do
+  defp dispatch_method(conn, _cfg, _owner) do
     conn
     |> Plug.Conn.put_resp_header("allow", "POST, DELETE")
     |> Plug.Conn.send_resp(405, "")
