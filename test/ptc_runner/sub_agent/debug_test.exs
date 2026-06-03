@@ -774,4 +774,227 @@ defmodule PtcRunner.SubAgent.DebugTest do
       refute output =~ "Tool Calls"
     end
   end
+
+  describe "parse_system_sections/1 — XML-tag sections" do
+    test "splits known XML tags into mapped section keys" do
+      prompt = """
+      <role>
+      You are an agent.
+      </role>
+      <mission>
+      Find the answer.
+      </mission>
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      assert sections[:role] =~ "You are an agent."
+      assert sections[:mission] =~ "Find the answer."
+    end
+
+    test "maps language_reference tag to :ptc_lisp and previous_error to :error" do
+      prompt = """
+      <language_reference>
+      use let
+      </language_reference>
+      <previous_error>
+      arity mismatch
+      </previous_error>
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      assert sections[:ptc_lisp] =~ "use let"
+      assert sections[:error] =~ "arity mismatch"
+      refute Map.has_key?(sections, :language_reference)
+      refute Map.has_key?(sections, :previous_error)
+    end
+
+    test "unknown XML tag keeps its raw tag name (existing-atom fallback to string)" do
+      # "ZZNotAKnownTag" -> lowercase "zznotaknowntag" is unlikely to be an
+      # existing atom, so it stays a string key rather than crashing.
+      prompt = "<zznotaknowntag>\nbody\n</zznotaknowntag>\n"
+
+      sections = Debug.parse_system_sections(prompt)
+
+      assert sections["zznotaknowntag"] =~ "body"
+    end
+  end
+
+  describe "parse_system_sections/1 — markdown-heading sections" do
+    test "splits markdown headings into mapped section keys" do
+      prompt = """
+      # Expected Output
+      a JSON object
+
+      # Role
+      helper
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      assert sections[:expected_output] =~ "a JSON object"
+      assert sections[:role] =~ "helper"
+    end
+
+    test "unmapped heading is slugified to an atom or string" do
+      prompt = """
+      ## Some Custom Heading
+      details here
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      # "Some Custom Heading" -> "some_custom_heading"; unlikely to be an
+      # existing atom, so a string key is used.
+      assert sections["some_custom_heading"] =~ "details here"
+    end
+  end
+
+  describe "parse_system_sections/1 — mixed and empty" do
+    test "handles a mix of XML tags and markdown headings in one prompt" do
+      prompt = """
+      <role>
+      agent role
+      </role>
+      # Expected Output
+      the answer
+      <mission>
+      do the thing
+      </mission>
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      assert sections[:role] =~ "agent role"
+      assert sections[:expected_output] =~ "the answer"
+      assert sections[:mission] =~ "do the thing"
+    end
+
+    test "empty prompt yields no sections" do
+      assert Debug.parse_system_sections("") == %{}
+    end
+
+    test "preamble before the first tag is dropped (no current section key)" do
+      prompt = """
+      leading text with no header
+      <role>
+      the role
+      </role>
+      """
+
+      sections = Debug.parse_system_sections(prompt)
+
+      # The preamble has no section key, so it is not saved anywhere.
+      assert sections[:role] =~ "the role"
+      refute Enum.any?(sections, fn {_k, v} -> v =~ "leading text with no header" end)
+    end
+  end
+
+  describe "print_trace(system: ...) IO branch" do
+    test "system: :all dumps the full captured prompt for each turn" do
+      turns = [
+        Turn.success(1, "(+ 1 2)", "(+ 1 2)", 3, %{
+          system_prompt: "<role>\nthe agent\n</role>"
+        })
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 10, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, system: :all) end)
+
+      assert output =~ "System Prompt"
+      assert output =~ "the agent"
+      # system: option short-circuits the normal turn rendering
+      refute output =~ "Result:"
+    end
+
+    test "system: <key> prints only the requested section" do
+      turns = [
+        Turn.success(1, "(+ 1 2)", "(+ 1 2)", 3, %{
+          system_prompt: "<role>\nthe agent role\n</role>\n<mission>\nfind it\n</mission>"
+        })
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 10, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, system: :role) end)
+
+      assert output =~ ":role"
+      assert output =~ "the agent role"
+      refute output =~ "find it"
+    end
+
+    test "system: <unknown key> reports the key as unknown and lists available sections" do
+      turns = [
+        Turn.success(1, "(+ 1 2)", "(+ 1 2)", 3, %{
+          system_prompt: "<role>\nthe agent\n</role>"
+        })
+      ]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 10, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, system: :mission) end)
+
+      assert output =~ "Unknown section :mission"
+      assert output =~ "Available sections:"
+      assert output =~ ":role"
+    end
+
+    test "system: option with a turn that has no captured prompt notes it" do
+      turns = [Turn.success(1, "(+ 1 2)", "(+ 1 2)", 3)]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        usage: %{duration_ms: 10, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step, system: :all) end)
+
+      assert output =~ "no prompt captured"
+    end
+  end
+
+  describe "print_trace summaries IO branch" do
+    test "non-empty :summaries renders a Progress section" do
+      turns = [Turn.success(1, "(+ 1 2)", "(+ 1 2)", 3)]
+
+      step = %Step{
+        return: 3,
+        fail: nil,
+        memory: %{},
+        turns: turns,
+        summaries: %{"task_1" => "computed the total"},
+        usage: %{duration_ms: 10, memory_bytes: 0}
+      }
+
+      output = capture_io(fn -> Debug.print_trace(step) end)
+
+      assert output =~ "Progress"
+      assert output =~ "task_1"
+      assert output =~ "computed the total"
+      assert output =~ "done"
+    end
+  end
 end
