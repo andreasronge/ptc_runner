@@ -36,9 +36,12 @@ defmodule PtcRunner.Upstream.Transport.McpResult do
     end
   end
 
-  defp text_content(%{"content" => [%{"type" => "text", "text" => text} | _]})
-       when is_binary(text),
-       do: text
+  defp text_content(%{"content" => content}) when is_list(content) do
+    Enum.find_value(content, fn
+      %{"type" => "text", "text" => text} when is_binary(text) -> text
+      _ -> nil
+    end)
+  end
 
   defp text_content(_), do: nil
 
