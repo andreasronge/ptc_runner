@@ -28,9 +28,9 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
 
   alias PtcRunner.Lisp.ExecutionError
-  alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.{LLMTool, SubAgentTool, Telemetry}
+  alias PtcRunner.SubAgent.Runner
 
   @doc """
   Normalize tools map to convert SubAgentTool instances into executable functions.
@@ -440,7 +440,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
     # Execute within a new trace session - this creates the physical trace file
     {:ok, result, _trace_path} =
       TraceLog.with_trace(
-        fn -> SubAgent.run(agent, run_opts_with_trace) end,
+        fn -> Runner.run(agent, run_opts_with_trace) end,
         trace_opts
       )
 
@@ -467,7 +467,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   # Execute SubAgentTool without tracing
   # Still wraps result with __child_step__ so TraceTree can show the hierarchy
   defp execute_without_trace(name, agent, run_opts) do
-    case SubAgent.run(agent, run_opts) do
+    case Runner.run(agent, run_opts) do
       {:ok, step} ->
         %{__child_step__: prune_child_step(step), value: step.return}
 
