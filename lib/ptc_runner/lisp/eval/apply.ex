@@ -709,10 +709,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     # prelude env (resolved from the attached prelude by namespace name); the HOF
     # path returns a value, not a context, so any `(def ...)` writes the isolated
     # env and is discarded.
+    prelude_ns = prelude_ns_tag(metadata)
+
     closure_user_ns =
-      case metadata do
-        %{prelude_ns: ns} -> prelude_ns_env(eval_context.prelude, ns)
-        _ -> eval_context.user_ns
+      case prelude_ns do
+        nil -> eval_context.user_ns
+        ns -> prelude_ns_env(eval_context.prelude, ns)
       end
 
     eval_ctx =
@@ -744,15 +746,34 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       }
       |> EvalContext.inherit_prelude(eval_context)
 
-    case do_eval_fn.(body, eval_ctx) do
-      {:ok, result, final_ctx} ->
-        # Stash side effects (tool_calls, prints) in process dictionary
-        # so they survive the Erlang HOF boundary (closure_to_fun returns only a value)
-        stash_side_effects(final_ctx)
-        result
+    # A `(return …)`/`(fail …)` inside a value-position prelude export throws the
+    # export context (user_ns = private prelude env). Catch it here — at the HOF
+    # boundary where the closure's metadata is still in scope — to restore the
+    # caller's namespace tables before it propagates, so the private env never
+    # leaks into `Step.memory`. The guard limits this to tagged prelude exports;
+    # an ordinary closure's signal propagates unchanged.
+    try do
+      case do_eval_fn.(body, eval_ctx) do
+        {:ok, result, final_ctx} ->
+          # Stash side effects (tool_calls, prints) in process dictionary
+          # so they survive the Erlang HOF boundary (closure_to_fun returns only a value)
+          stash_side_effects(final_ctx)
+          # Tag a returned closure so its private-helper references still resolve
+          # when the HOF result is applied later.
+          tag_prelude_ns(result, prelude_ns)
 
-      {:error, reason} ->
-        raise_closure_error(reason)
+        {:error, reason} ->
+          raise_closure_error(reason)
+      end
+    catch
+      {:return_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
+        throw(
+          {:return_signal, tag_prelude_ns(value, prelude_ns),
+           restore_prelude_caller(thrown_ctx, eval_context)}
+        )
+
+      {:fail_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
+        throw({:fail_signal, value, restore_prelude_caller(thrown_ctx, eval_context)})
     end
   end
 
@@ -938,6 +959,60 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp prelude_ns_env(nil, _ns), do: %{}
   defp prelude_ns_env(prelude, ns), do: Map.get(prelude.private_env, ns, %{})
 
+  # The prelude namespace name a closure was tagged with (value-position export),
+  # or `nil` for an ordinary user closure.
+  defp prelude_ns_tag(%{prelude_ns: ns}), do: ns
+  defp prelude_ns_tag(_meta), do: nil
+
+  # Tag a value RETURNED by a value-position export with its originating prelude
+  # namespace, so a returned closure (e.g. `(defn make [] (fn [x] (helper x)))`)
+  # still resolves its private sibling helpers when the caller applies it later.
+  # Non-closure values and the non-prelude (`nil`) case pass through unchanged,
+  # mirroring `Eval.bind_prelude_ref/2` on the direct `(crm/export …)` path.
+  defp tag_prelude_ns(value, nil), do: value
+
+  defp tag_prelude_ns({:closure, params, body, env, th, meta}, ns) when is_binary(ns),
+    do: {:closure, params, body, env, th, Map.put(meta, :prelude_ns, ns)}
+
+  defp tag_prelude_ns(value, _ns), do: value
+
+  # Restore the caller's namespace tables onto a context thrown out of a
+  # value-position prelude export (a `(return …)`/`(fail …)` abort), while
+  # carrying the export's side-effecting accumulators back. Without this the
+  # thrown context's `user_ns` (the private prelude env) would surface as
+  # `Step.memory` and the caller's own bindings would be dropped. Mirrors
+  # `Eval.merge_export_effects/2` on the direct call path.
+  defp restore_prelude_caller(%EvalContext{} = thrown_ctx, %EvalContext{} = caller_ctx) do
+    %{
+      caller_ctx
+      | tool_calls: thrown_ctx.tool_calls,
+        pmap_calls: thrown_ctx.pmap_calls,
+        catalog_ops: thrown_ctx.catalog_ops,
+        tool_cache: thrown_ctx.tool_cache,
+        prints: thrown_ctx.prints,
+        summaries: thrown_ctx.summaries,
+        journal: thrown_ctx.journal,
+        iteration_count: thrown_ctx.iteration_count
+    }
+  end
+
+  # Re-throw a `(return …)`/`(fail …)` signal that escaped a value-position
+  # closure. For a prelude export, restore the caller's namespace tables and tag
+  # a returned closure; for an ordinary user closure, re-throw verbatim so the
+  # top-level evaluator handles it unchanged.
+  @spec rethrow_export_abort(atom(), term(), EvalContext.t(), map(), EvalContext.t()) ::
+          no_return()
+  defp rethrow_export_abort(signal, value, thrown_ctx, meta, caller_ctx) do
+    case prelude_ns_tag(meta) do
+      nil ->
+        throw({signal, value, thrown_ctx})
+
+      ns ->
+        tagged = if signal == :return_signal, do: tag_prelude_ns(value, ns), else: value
+        throw({signal, tagged, restore_prelude_caller(thrown_ctx, caller_ctx)})
+    end
+  end
+
   defp do_execute_closure(
          {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
          binding_patterns,
@@ -1005,8 +1080,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             # lookups of that name resolve to (a missing) env entry instead
             # of falling through to user_ns. For a prelude-export closure also
             # restore the caller's user_ns (discarding any `(def ...)` the export
-            # made), keeping the namespace isolated.
-            {:ok, result,
+            # made), keeping the namespace isolated, and tag a returned closure so
+            # its private-helper references still resolve when applied later.
+            {:ok, tag_prelude_ns(result, prelude_ns_tag(meta)),
              %{
                final_ctx
                | env: caller_ctx.env,
@@ -1022,6 +1098,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         err
     end
   catch
+    # `(return …)`/`(fail …)` inside a value-position prelude export throws the
+    # EXPORT context (user_ns = private prelude env). Restore the caller's
+    # namespace tables before it propagates so the private env never lands in
+    # `Step.memory` and the caller's bindings survive; ordinary user closures
+    # re-throw verbatim.
+    {:return_signal, value, %EvalContext{} = thrown_ctx} ->
+      rethrow_export_abort(:return_signal, value, thrown_ctx, meta, caller_ctx)
+
+    {:fail_signal, value, %EvalContext{} = thrown_ctx} ->
+      rethrow_export_abort(:fail_signal, value, thrown_ctx, meta, caller_ctx)
+
     {:recur_signal, new_args, effects} ->
       # For recur, variadic functions behave like fixed-arity functions
       # where the & rest pattern is the last parameter.
