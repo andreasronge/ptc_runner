@@ -784,7 +784,7 @@ defmodule PtcRunner.Lisp.Eval do
          %EvalContext{prelude_exports: exports} = eval_ctx
        ) do
     case Map.fetch(exports, ref) do
-      {:ok, {callable, ns_env}} -> {:ok, bind_prelude_env(callable, ns_env), eval_ctx}
+      {:ok, {callable, _ns_env}} -> {:ok, bind_prelude_ref(callable, prelude_ns(ref)), eval_ctx}
       :error -> {:error, {:unbound_var, ref}}
     end
   end
@@ -801,7 +801,7 @@ defmodule PtcRunner.Lisp.Eval do
         with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
           case callable do
             {:closure, _params, _body, _env, _th, _meta} ->
-              invoke_prelude_export(callable, arg_vals, ns_env, eval_ctx2)
+              invoke_prelude_export(callable, arg_vals, ns_env, prelude_ns(ref), eval_ctx2)
 
             # A constant export (`def name value`) captures a plain value, not a
             # closure. The analyzer only admits a zero-arg call here, which
@@ -811,7 +811,7 @@ defmodule PtcRunner.Lisp.Eval do
               {:ok, value, eval_ctx2}
 
             _ ->
-              invoke_prelude_export(callable, arg_vals, ns_env, eval_ctx2)
+              invoke_prelude_export(callable, arg_vals, ns_env, prelude_ns(ref), eval_ctx2)
           end
         end
 
@@ -846,30 +846,23 @@ defmodule PtcRunner.Lisp.Eval do
   # Prelude export invocation
   # ============================================================
 
-  # Fold the private prelude env into a closure's captured lexical scope so the
-  # closure resolves its private sibling helpers wherever it is later applied
-  # (e.g. as a HOF argument). The sibling names are added to the closure's
-  # `captured_locals` so the `:var` resolver finds them via the env path rather
-  # than falling through to the caller's `user_ns`. Already-bound lexical names
-  # in the closure win over prelude env entries. Non-closure callables (e.g. a
-  # `def` constant) are returned unchanged.
-  defp bind_prelude_env(
-         {:closure, params, body, captured_env, turn_history, meta},
-         prelude_env
-       )
-       when is_map(prelude_env) and map_size(prelude_env) > 0 do
-    # Tag the closure with its private prelude env. When it is later applied
-    # (as a HOF value, or after being returned/`def`'d), `do_execute_closure`
-    # runs it with `user_ns` = this env and restores the caller's namespace
-    # afterward — so a prelude export used in value position is isolated exactly
-    # like a direct `(crm/export ...)` call: private siblings resolve, unresolved
-    # names do NOT fall through to user bindings, and `(def ...)` cannot write
-    # user memory.
-    {:closure, params, body, captured_env, turn_history,
-     Map.put(meta, :prelude_ns_env, prelude_env)}
+  # Tag a closure with its prelude NAMESPACE NAME (an opaque, already-public
+  # string) — NOT its private env. When the closure is later applied (as a HOF
+  # value, or after being returned / `def`'d), the applier resolves the
+  # namespace's private env from the ATTACHED prelude and runs the body against
+  # it, restoring the caller's namespace afterward. Tagging the name rather than
+  # the env keeps private helper names/bodies out of user-visible Step data while
+  # giving value-position exports the same isolation as a direct `(crm/export …)`
+  # call. Non-closure callables (e.g. a `def` constant) are returned unchanged.
+  defp bind_prelude_ref({:closure, params, body, captured_env, turn_history, meta}, ns_name)
+       when is_binary(ns_name) do
+    {:closure, params, body, captured_env, turn_history, Map.put(meta, :prelude_ns, ns_name)}
   end
 
-  defp bind_prelude_env(callable, _prelude_env), do: callable
+  defp bind_prelude_ref(callable, _ns_name), do: callable
+
+  # Namespace name of a prelude export ref (`"crm/get-user"` -> `"crm"`).
+  defp prelude_ns(ref) when is_binary(ref), do: ref |> String.split("/", parts: 2) |> hd()
 
   # Invoke a captured prelude export closure against its OWN namespace's private
   # env.
@@ -883,17 +876,17 @@ defmodule PtcRunner.Lisp.Eval do
   # ledger. On return, the accumulators flow back onto the caller's context and
   # the caller's own `user_ns` is restored unchanged: a prelude export cannot
   # mutate user memory, and user code cannot reach the private env.
-  defp invoke_prelude_export(callable, args, ns_env, %EvalContext{} = caller_ctx) do
+  defp invoke_prelude_export(callable, args, ns_env, ns_name, %EvalContext{} = caller_ctx) do
     export_ctx = %{caller_ctx | user_ns: ns_env}
 
     try do
       case Apply.apply_fun(callable, args, export_ctx, &do_eval/2) do
         {:ok, result, final_ctx} ->
           # If the export RETURNS a closure (e.g. `(defn make [] (fn [x] (helper
-          # x)))`), bind the private env into it so its private-helper references
-          # still resolve when the caller applies it later under the caller's own
-          # user namespace. Non-closure results pass through unchanged.
-          {:ok, bind_prelude_env(result, ns_env), merge_export_effects(caller_ctx, final_ctx)}
+          # x)))`), tag it with the prelude namespace name so its private-helper
+          # references still resolve when the caller applies it later. Non-closure
+          # results pass through unchanged.
+          {:ok, bind_prelude_ref(result, ns_name), merge_export_effects(caller_ctx, final_ctx)}
 
         {:error, _} = err ->
           err
@@ -906,7 +899,7 @@ defmodule PtcRunner.Lisp.Eval do
       # the user's own bindings survive.
       {:return_signal, value, %EvalContext{} = thrown_ctx} ->
         throw(
-          {:return_signal, bind_prelude_env(value, ns_env),
+          {:return_signal, bind_prelude_ref(value, ns_name),
            merge_export_effects(caller_ctx, thrown_ctx)}
         )
 

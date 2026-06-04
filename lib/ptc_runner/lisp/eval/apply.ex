@@ -706,11 +706,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     new_env = Map.merge(closure_env, bindings)
 
     # A prelude-export closure used as a HOF value runs against its private
-    # prelude env (isolation); the HOF path returns a value, not a context, so
-    # any `(def ...)` writes the isolated env and is discarded.
+    # prelude env (resolved from the attached prelude by namespace name); the HOF
+    # path returns a value, not a context, so any `(def ...)` writes the isolated
+    # env and is discarded.
     closure_user_ns =
       case metadata do
-        %{prelude_ns_env: ns_env} -> ns_env
+        %{prelude_ns: ns} -> prelude_ns_env(eval_context.prelude, ns)
         _ -> eval_context.user_ns
       end
 
@@ -923,13 +924,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # prelude-export closure (tagged `:prelude_ns_env`) runs against its private
   # env and restores the caller's namespace; any other closure runs against the
   # caller's `user_ns` and keeps whatever it produced.
-  defp prelude_run_scope(%{prelude_ns_env: ns_env}, _user_ns, caller_ctx),
-    do: {ns_env, caller_ctx.user_ns}
+  defp prelude_run_scope(%{prelude_ns: ns}, _user_ns, caller_ctx),
+    do: {prelude_ns_env(caller_ctx.prelude, ns), caller_ctx.user_ns}
 
   defp prelude_run_scope(_meta, user_ns, _caller_ctx), do: {user_ns, :keep}
 
   defp restored_user_ns(:keep, final_ctx), do: final_ctx.user_ns
   defp restored_user_ns(ns, _final_ctx), do: ns
+
+  # Resolve a prelude namespace's private env from the attached prelude artifact.
+  # The closure carries only the (public) namespace NAME, never the env itself,
+  # so private helpers stay out of user-visible values.
+  defp prelude_ns_env(nil, _ns), do: %{}
+  defp prelude_ns_env(prelude, ns), do: Map.get(prelude.private_env, ns, %{})
 
   defp do_execute_closure(
          {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
