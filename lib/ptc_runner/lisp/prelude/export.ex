@@ -41,11 +41,16 @@ defmodule PtcRunner.Lisp.Prelude.Export do
       count of required leading params before `&`. The analyzer rejects calls
       with fewer args than this, so a too-few-args call fails at analysis time
       rather than at runtime after earlier side effects.
+    * `kind` — `:function` for a `defn` export (invoked when called) or
+      `:constant` for a `def` export (a plain value, even if that value is a
+      function). A call `(cfg/answer)` of a constant YIELDS the value rather
+      than applying it.
   """
 
   @type visibility :: :prompt | :discoverable
   @type effect :: :read | :write | :unknown
   @type export_arity :: non_neg_integer() | :variadic
+  @type kind :: :function | :constant
 
   @type t :: %__MODULE__{
           ref: String.t(),
@@ -58,7 +63,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
           provider_ref: String.t() | nil,
           requires: [String.t()],
           tool_refs: [String.t()],
-          min_arity: non_neg_integer()
+          min_arity: non_neg_integer(),
+          kind: kind()
         }
 
   @enforce_keys [:ref, :namespace, :symbol, :arity, :visibility]
@@ -72,7 +78,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
             provider_ref: nil,
             requires: [],
             tool_refs: [],
-            min_arity: 0
+            min_arity: 0,
+            kind: :function
 
   @valid_visibilities [:prompt, :discoverable]
 
