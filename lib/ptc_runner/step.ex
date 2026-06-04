@@ -74,6 +74,18 @@ defmodule PtcRunner.Step do
 
   See `PtcRunner.Tracer` for trace generation and management.
 
+  ### `prelude_trace`
+
+  Trace/debug summary of the attached Capability Prelude (V1, plan §12).
+
+  - **Type:** `PtcRunner.Lisp.Prelude.trace_summary() | nil`
+  - **Set when:** A prelude was attached via `:prelude` (or `runtime_prelude`)
+  - **Nil when:** No prelude was attached
+  - **Contains:** prelude source hash, compiled-artifact hash, the selected
+    protected namespaces, a public export-record summary, and a host-policy
+    hash slot. Credential-free and JSON-serializable — never carries captured
+    closures, the private prelude env, or host secrets.
+
   ### `field_descriptions`
 
   Descriptions for signature fields, propagated from SubAgent.
@@ -198,6 +210,7 @@ defmodule PtcRunner.Step do
     :prompt,
     :original_prompt,
     :tools,
+    :prelude_trace,
     summaries: %{},
     tool_cache: %{}
   ]
@@ -346,6 +359,7 @@ defmodule PtcRunner.Step do
           messages: [message()] | nil,
           prompt: String.t() | nil,
           tools: map() | nil,
+          prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
           summaries: %{String.t() => String.t()},
           tool_cache: map()
         }

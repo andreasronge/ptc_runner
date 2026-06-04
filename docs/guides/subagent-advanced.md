@@ -247,6 +247,68 @@ If the LLM provides text without a code block or terminal form:
 2. Appends: *"Your mission is still active. Provide a PTC-Lisp program or call 'return'."*
 3. LLM must provide a functional result
 
+## Capability Prelude
+
+A **capability prelude** lets a deployment expose curated, Lisp-facing APIs to
+agents without hard-coding each one into the library or stuffing full source
+into the prompt. The prelude defines protected namespaces (for example `crm`)
+with public exports the agent can call and discover normally, while private
+helpers stay hidden. It is stateless: it defines functions, constants,
+docstrings, and metadata, but holds no hidden mutable state.
+
+Compile the prelude source once, then attach the artifact to the agent via
+`runtime_prelude:`:
+
+```elixir
+prelude_source = """
+(ns crm
+  "CRM helpers."
+  {:visibility :prompt})
+
+(defn get-user
+  "Return a CRM user by id."
+  [id]
+  (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+"""
+
+{:ok, prelude} = PtcRunner.Lisp.Prelude.Compiler.compile(prelude_source)
+
+agent =
+  PtcRunner.SubAgent.new(
+    prompt: "Look up the requested user",
+    runtime_prelude: prelude,
+    llm: llm
+  )
+```
+
+The agent's program can then call `(crm/get-user data/user-id)` and discover the
+export through `(ns-publics 'crm)`, `(doc 'crm/get-user)`, and
+`(meta 'crm/get-user)`. Prompt-visible exports (`:visibility :prompt`) are
+summarized in a compact, deployment-defined prompt inventory that is assembled
+dynamically — the core prompt templates stay domain-blind. Exports marked
+`:visibility :discoverable` are omitted from the inventory but remain reachable
+through the discovery forms.
+
+Prelude exports wrap the existing tool surfaces and are recoverable-by-default,
+so the agent can branch on the same `:ok` / `:reason` / `:value` result map a
+direct `(tool/call ...)` returns. Protected namespaces cannot be redefined by
+agent code, and private helpers are never resolvable or discoverable by
+qualified symbol. For the language-level rules, see
+[Capability Prelude](../ptc-lisp-specification.md#99-capability-prelude) in the
+specification.
+
+> **Traceability.** When a prelude is attached, `step.prelude_trace` carries a
+> credential-free summary — source hash, compiled-artifact hash, selected
+> protected namespaces, and the public export records — so a run's capability
+> environment can be reproduced from traces. Secrets and credentials live in
+> host/deployment config and never appear in the prelude artifact, prompts, or
+> traces.
+
+The same compiled artifact also drives the REPL
+(`mix ptc.repl --prelude crm.clj`) and direct execution
+(`PtcRunner.Lisp.run(program, prelude: prelude)`), so behavior is identical
+across surfaces.
+
 ## PTC-Lisp Quick Reference
 
 ### Core

@@ -64,6 +64,28 @@ defmodule PtcRunner.SubAgent.Validator do
     validate_self_tool_requires_signature!(opts)
     validate_compaction!(opts)
     validate_tool_exposure_metadata!(opts)
+    validate_runtime_prelude!(opts)
+  end
+
+  # Capability Prelude V1: `runtime_prelude:` must be a compiled
+  # `%PtcRunner.Lisp.Prelude{}` artifact (or absent/nil). Source compilation
+  # happens before the SubAgent is built; the field carries the artifact only.
+  defp validate_runtime_prelude!(opts) do
+    case Keyword.fetch(opts, :runtime_prelude) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, %PtcRunner.Lisp.Prelude{}} ->
+        :ok
+
+      {:ok, other} ->
+        raise ArgumentError,
+              "runtime_prelude must be a compiled %PtcRunner.Lisp.Prelude{} artifact, got: " <>
+                inspect(other, limit: 5)
+
+      :error ->
+        :ok
+    end
   end
 
   # Tier 1a: validate per-tool `expose:` and `native_result:` metadata at

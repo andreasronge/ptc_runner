@@ -57,7 +57,16 @@ defmodule PtcRunner.Upstream.Eval do
     lisp_opts = Keyword.drop(opts, @context_keys)
 
     with_run_context(runtime, context_opts, fn context ->
-      PtcRunner.Lisp.run(program, Keyword.merge(lisp_opts, eval_options(context)))
+      # Expose the selected upstream runtime to the prelude attach path so an
+      # attached prelude's `requires` are validated against it BEFORE user code
+      # runs (plan §6A). `put_new` lets an explicit `:runtime` opt win; absent a
+      # prelude this key is inert.
+      opts =
+        lisp_opts
+        |> Keyword.merge(eval_options(context))
+        |> Keyword.put_new(:runtime, runtime)
+
+      PtcRunner.Lisp.run(program, opts)
     end)
   end
 end

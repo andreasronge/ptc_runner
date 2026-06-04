@@ -46,6 +46,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
     |> maybe_put(:max_heap, state.max_heap)
     |> maybe_put(:max_tool_calls, agent.max_tool_calls)
     |> maybe_put(:discovery_exec, Map.get(state, :discovery_exec))
+    |> maybe_put(:prelude, Map.get(agent, :runtime_prelude))
   end
 
   defp maybe_put(opts, _key, nil), do: opts

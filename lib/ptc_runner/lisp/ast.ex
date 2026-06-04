@@ -22,6 +22,9 @@ defmodule PtcRunner.Lisp.AST do
           | {:quoted_symbol, String.t()}
           # Calls
           | {:list, [t()]}
+          # Multiple top-level forms (implicit do); produced by the parser
+          # for multi-expression source and consumed by the analyzer.
+          | {:program, [t()]}
 
   @doc "Create a symbol node"
   def symbol(name) when is_binary(name) do

@@ -1161,4 +1161,31 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       assert result.return["result"] == "from child_llm"
     end
   end
+
+  describe "compiled agents honor runtime_prelude (codex round 5 #2)" do
+    test "a compiled agent resolves a prelude export at execute time" do
+      {:ok, prelude} =
+        PtcRunner.Lisp.Prelude.Compiler.compile("""
+        (ns greet "Greeting helpers." {:visibility :prompt})
+        (defn hello [name] (str "hi " name))
+        """)
+
+      agent =
+        SubAgent.new(
+          prompt: "Greet {{name}}",
+          signature: "(name :string) -> {msg :string}",
+          runtime_prelude: prelude,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ -> {:ok, ~S|(return {:msg (greet/hello data/name)})|} end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{name: "ada"})
+
+      # Without the prelude threaded into the compiled execute path, this would
+      # fail at execute time with an unknown namespace `greet/`.
+      result = compiled.execute.(%{"name" => "ada"}, [])
+      assert result.return["msg"] == "hi ada"
+    end
+  end
 end

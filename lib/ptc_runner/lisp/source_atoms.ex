@@ -102,7 +102,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     doseq for
     comment
     juxt pmap pcalls
-    quote apropos dir doc meta ns-publics
+    quote apropos dir doc meta ns-publics all-ns ns-name
     .
   )a
 

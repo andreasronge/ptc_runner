@@ -771,6 +771,55 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   # Tool invocation via tool/ namespace: (tool/name args...)
+  # Public prelude export reference in value position: resolve the captured
+  # callable from the export table. A value-position ref is used as a HOF
+  # argument (e.g. `(map crm/double-it xs)`), where the closure runs against the
+  # CALLER's env, not the prelude env — so we fold the private prelude env into
+  # the returned closure's captured scope. Its private sibling helpers then
+  # resolve lexically wherever it is applied, while user code still cannot name
+  # them (they are not in the export table). Non-closure callables (e.g. a `def`
+  # constant) pass through unchanged.
+  defp do_eval(
+         {:prelude_ref, ref},
+         %EvalContext{prelude_exports: exports} = eval_ctx
+       ) do
+    case Map.fetch(exports, ref) do
+      {:ok, {callable, ns_env}} -> {:ok, bind_prelude_env(callable, ns_env), eval_ctx}
+      :error -> {:error, {:unbound_var, ref}}
+    end
+  end
+
+  # Public prelude export call: `(crm/get-user id)`. Resolve the captured
+  # closure from the export table and invoke it with the captured PRIVATE
+  # prelude env as its `user_ns` layer so the export body's private sibling
+  # helpers resolve (plan §5). Side-effecting accumulators (tool_calls/ledger,
+  # prints, cache, ...) are carried IN from and OUT to the caller's context so
+  # the wrapped `(tool/call ...)` records exactly once in the existing ledger.
+  defp do_eval({:prelude_call, ref, arg_asts}, %EvalContext{prelude_exports: exports} = eval_ctx) do
+    case Map.fetch(exports, ref) do
+      {:ok, {callable, ns_env}} ->
+        with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
+          case callable do
+            {:closure, _params, _body, _env, _th, _meta} ->
+              invoke_prelude_export(callable, arg_vals, ns_env, eval_ctx2)
+
+            # A constant export (`def name value`) captures a plain value, not a
+            # closure. The analyzer only admits a zero-arg call here, which
+            # yields the captured value (Clojure-style: `cfg/answer` is the
+            # value, not a function to apply).
+            value when arg_vals == [] ->
+              {:ok, value, eval_ctx2}
+
+            _ ->
+              invoke_prelude_export(callable, arg_vals, ns_env, eval_ctx2)
+          end
+        end
+
+      :error ->
+        {:error, {:unbound_var, ref}}
+    end
+  end
+
   defp do_eval({:tool_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     # Evaluate all arguments
     case eval_all(arg_asts, eval_ctx) do
@@ -791,6 +840,90 @@ defmodule PtcRunner.Lisp.Eval do
       {:error, _} = err ->
         err
     end
+  end
+
+  # ============================================================
+  # Prelude export invocation
+  # ============================================================
+
+  # Fold the private prelude env into a closure's captured lexical scope so the
+  # closure resolves its private sibling helpers wherever it is later applied
+  # (e.g. as a HOF argument). The sibling names are added to the closure's
+  # `captured_locals` so the `:var` resolver finds them via the env path rather
+  # than falling through to the caller's `user_ns`. Already-bound lexical names
+  # in the closure win over prelude env entries. Non-closure callables (e.g. a
+  # `def` constant) are returned unchanged.
+  defp bind_prelude_env(
+         {:closure, params, body, captured_env, turn_history, meta},
+         prelude_env
+       )
+       when is_map(prelude_env) and map_size(prelude_env) > 0 do
+    merged_env = Map.merge(prelude_env, captured_env)
+
+    captured_locals =
+      meta
+      |> Map.get(:captured_locals, MapSet.new())
+      |> MapSet.union(MapSet.new(Map.keys(prelude_env)))
+
+    meta = Map.put(meta, :captured_locals, captured_locals)
+    {:closure, params, body, merged_env, turn_history, meta}
+  end
+
+  defp bind_prelude_env(callable, _prelude_env), do: callable
+
+  # Invoke a captured prelude export closure against its OWN namespace's private
+  # env.
+  #
+  # The closure runs in a derived context whose `user_ns` is `ns_env` — the
+  # export's namespace slice of the captured `private_env` (so the export body's
+  # sibling helpers resolve by bare name through `do_execute_closure`'s user_ns
+  # threading, and only within its own namespace), while every other field —
+  # tool executor, side-effect accumulators, limits, caches — is inherited from
+  # the caller so the wrapped `(tool/call ...)` records once in the EXISTING
+  # ledger. On return, the accumulators flow back onto the caller's context and
+  # the caller's own `user_ns` is restored unchanged: a prelude export cannot
+  # mutate user memory, and user code cannot reach the private env.
+  defp invoke_prelude_export(callable, args, ns_env, %EvalContext{} = caller_ctx) do
+    export_ctx = %{caller_ctx | user_ns: ns_env}
+
+    try do
+      case Apply.apply_fun(callable, args, export_ctx, &do_eval/2) do
+        {:ok, result, final_ctx} ->
+          {:ok, result, merge_export_effects(caller_ctx, final_ctx)}
+
+        {:error, _} = err ->
+          err
+      end
+    catch
+      # `(return ...)` / `(fail ...)` (the `name!` abort convention) inside an
+      # export body throw the EXPORT context (whose user_ns is the prelude env).
+      # Re-throw with the CALLER's user_ns/env restored and the export's side
+      # effects merged in, so the prelude env never leaks into user memory and
+      # the user's own bindings survive.
+      {:return_signal, value, %EvalContext{} = thrown_ctx} ->
+        throw({:return_signal, value, merge_export_effects(caller_ctx, thrown_ctx)})
+
+      {:fail_signal, value, %EvalContext{} = thrown_ctx} ->
+        throw({:fail_signal, value, merge_export_effects(caller_ctx, thrown_ctx)})
+    end
+  end
+
+  # Carry the export body's side-effecting accumulators (ledger, prints, cache,
+  # iteration count) back onto the caller's context while keeping the caller's
+  # own `user_ns`/`env`/`prelude` tables — a prelude export cannot mutate user
+  # memory, and user code cannot reach the private prelude env.
+  defp merge_export_effects(%EvalContext{} = caller_ctx, %EvalContext{} = export_ctx) do
+    %{
+      caller_ctx
+      | tool_calls: export_ctx.tool_calls,
+        pmap_calls: export_ctx.pmap_calls,
+        catalog_ops: export_ctx.catalog_ops,
+        tool_cache: export_ctx.tool_cache,
+        prints: export_ctx.prints,
+        summaries: export_ctx.summaries,
+        journal: export_ctx.journal,
+        iteration_count: export_ctx.iteration_count
+    }
   end
 
   # ============================================================
@@ -1465,6 +1598,7 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx.tool_exec,
           eval_ctx.turn_history
         )
+        |> EvalContext.inherit_prelude(eval_ctx)
 
       ctx = %{
         ctx
@@ -1580,15 +1714,81 @@ defmodule PtcRunner.Lisp.Eval do
     args = normalize_catalog_args(operation, args)
 
     case operation do
-      :servers -> invoke_mcp_only_discovery(eval_ctx, operation, args)
-      :apropos -> invoke_apropos_discovery(eval_ctx, args)
-      :dir -> invoke_ref_discovery(eval_ctx, operation, args, &Discovery.dir/2)
-      :doc -> invoke_ref_discovery(eval_ctx, operation, args, &local_doc/2)
-      :meta -> invoke_ref_discovery(eval_ctx, operation, args, &local_meta/2)
-      :ns_publics -> invoke_local_only_discovery(eval_ctx, operation, args, &local_ns_publics/2)
-      _ -> invoke_mcp_only_discovery(eval_ctx, operation, args)
+      :servers ->
+        invoke_mcp_only_discovery(eval_ctx, operation, args)
+
+      :apropos ->
+        invoke_apropos_discovery(eval_ctx, args)
+
+      :all_ns ->
+        invoke_all_ns_discovery(eval_ctx)
+
+      :ns_name ->
+        invoke_ns_name_discovery(eval_ctx, args)
+
+      :dir ->
+        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_dir/3, &Discovery.dir/2)
+
+      :doc ->
+        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_doc/3, &local_doc/2)
+
+      :meta ->
+        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_meta/3, &local_meta/2)
+
+      :ns_publics ->
+        invoke_ns_publics_discovery(eval_ctx, operation, args)
+
+      _ ->
+        invoke_mcp_only_discovery(eval_ctx, operation, args)
     end
   end
+
+  # `(all-ns)` — curated Lisp-facing namespace names plus prelude namespaces.
+  # Always available (never needs an MCP backend).
+  defp invoke_all_ns_discovery(%EvalContext{prelude: prelude} = eval_ctx) do
+    {:ok, names} = Discovery.all_ns(prelude)
+    {:ok, names, eval_ctx}
+  end
+
+  # `(ns-name 'crm)` — returns the namespace name string for a known namespace.
+  defp invoke_ns_name_discovery(%EvalContext{prelude: prelude} = eval_ctx, [ref]) do
+    case Discovery.ns_name(prelude, ref) do
+      {:ok, name} ->
+        {:ok, name, eval_ctx}
+
+      :unknown ->
+        raise ExecutionError,
+          reason: :runtime_error,
+          message: "ns-name: unknown namespace #{inspect(ref)}"
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_ns_name_discovery(_eval_ctx, args) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "ns-name requires a namespace ref, got #{inspect(args)}"
+  end
+
+  # `(ns-publics 'crm)` — prelude namespace exports first, then local-only
+  # namespaces (clojure.*, json). Never falls through to MCP discovery.
+  defp invoke_ns_publics_discovery(%EvalContext{prelude: prelude} = eval_ctx, operation, [ref]) do
+    case Discovery.prelude_ns_publics(prelude, ref) do
+      {:ok, result} ->
+        {:ok, result, eval_ctx}
+
+      :unknown ->
+        invoke_local_only_discovery(eval_ctx, operation, [ref], &local_ns_publics/2)
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_ns_publics_discovery(eval_ctx, operation, args),
+    do: invoke_local_only_discovery(eval_ctx, operation, args, &local_ns_publics/2)
 
   defp invoke_mcp_only_discovery(%EvalContext{discovery_exec: nil}, _operation, _args) do
     raise ExecutionError,
@@ -1609,7 +1809,11 @@ defmodule PtcRunner.Lisp.Eval do
 
     with :ok <- validate_apropos_query(query),
          {:ok, opts} <- Discovery.parse_apropos_opts(opts) do
-      local_matches = Discovery.apropos_matches(query, opts)
+      # Prelude exports + local/built-in matches share the non-MCP bucket; their
+      # source ranks (prelude=0, local=1) keep prelude ahead of local, and both
+      # ahead of MCP (rank 2) under `sort_matches/1` (plan §8).
+      prelude_matches = Discovery.prelude_apropos_matches(eval_ctx.prelude, query)
+      local_matches = prelude_matches ++ Discovery.apropos_matches(query, opts)
 
       case eval_ctx.discovery_exec do
         nil ->
@@ -1679,6 +1883,34 @@ defmodule PtcRunner.Lisp.Eval do
     else
       {:programmer_fault, "apropos requires query (non-empty string), got #{inspect(query)}"}
     end
+  end
+
+  # `doc`/`meta`/`dir` for an exact ref: consult the prelude export table FIRST
+  # (plan §8 — exact prelude refs do NOT fall through to MCP discovery). On a
+  # prelude miss, delegate to the existing local-then-MCP resolution.
+  defp invoke_prelude_ref_discovery(
+         %EvalContext{prelude: prelude} = eval_ctx,
+         operation,
+         [ref | rest] = args,
+         prelude_fun,
+         local_fun
+       ) do
+    opts = List.first(rest, %{})
+
+    case prelude_fun.(prelude, ref, opts) do
+      {:ok, result} ->
+        {:ok, result, eval_ctx}
+
+      :unknown ->
+        invoke_ref_discovery(eval_ctx, operation, args, local_fun)
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_prelude_ref_discovery(eval_ctx, operation, args, _prelude_fun, local_fun) do
+    invoke_ref_discovery(eval_ctx, operation, args, local_fun)
   end
 
   defp invoke_ref_discovery(%EvalContext{} = eval_ctx, operation, [ref | rest] = args, local_fun) do
@@ -1778,11 +2010,19 @@ defmodule PtcRunner.Lisp.Eval do
     {:ok, lines, eval_ctx}
   end
 
+  # MCP/upstream discovery matches default to rank 0 (unchanged pre-existing
+  # behavior: upstream tools out-rank local builtins for a matching query, so
+  # they stay discoverable). Capability Prelude V1 only inserts PRELUDE ahead of
+  # everything (prelude rank -1); it does not reorder the established MCP/local
+  # relationship. A backend may still supply its own `source_rank`.
+  @mcp_source_rank 0
+
   defp normalize_mcp_matches(matches) do
     Enum.map(matches, fn
       %{} = match ->
         %{
-          source_rank: Map.get(match, :source_rank, Map.get(match, "source_rank", 0)),
+          source_rank:
+            Map.get(match, :source_rank, Map.get(match, "source_rank", @mcp_source_rank)),
           score: Map.get(match, :score, Map.get(match, "score", 0)),
           source_kind: Map.get(match, :source_kind, Map.get(match, "source_kind", "mcp")),
           server: Map.get(match, :server, Map.get(match, "server", "")),
@@ -1799,12 +2039,24 @@ defmodule PtcRunner.Lisp.Eval do
   defp fallback_mcp_line_matches(lines), do: Enum.map(lines, &fallback_mcp_line_match/1)
 
   defp fallback_mcp_line_match(line) do
-    %{source_rank: 0, score: 0, source_kind: "mcp", server: "", name: line, ref: line, line: line}
+    %{
+      source_rank: @mcp_source_rank,
+      score: 0,
+      source_kind: "mcp",
+      server: "",
+      name: line,
+      ref: line,
+      line: line
+    }
   end
 
   defp local_doc(ref, _opts), do: Discovery.doc(ref)
   defp local_meta(ref, _opts), do: Discovery.meta(ref)
   defp local_ns_publics(ref, _opts), do: Discovery.ns_publics(ref)
+
+  defp prelude_doc(prelude, ref, _opts), do: Discovery.prelude_doc(prelude, ref)
+  defp prelude_meta(prelude, ref, _opts), do: Discovery.prelude_meta(prelude, ref)
+  defp prelude_dir(prelude, ref, opts), do: Discovery.prelude_dir(prelude, ref, opts)
 
   defp catalog_op_args(:servers, []), do: %{}
   defp catalog_op_args(:dir, [server]), do: %{server: server}

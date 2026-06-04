@@ -3178,7 +3178,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
 | `tool/servers` | REPL discovery | List configured MCP upstream servers (requires a discovery backend) |
-| `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery | Inspect local PTC-Lisp builtins (and MCP tools when a discovery backend is configured) |
+| `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery | Inspect local PTC-Lisp builtins, prelude exports, and MCP tools (when a discovery backend is configured) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3364,9 +3364,11 @@ Programs can inspect executable PTC-Lisp capabilities through REPL-style discove
 | `tool/servers` | `(tool/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. Raises a runtime error if no discovery backend is configured (this is neither a world fault nor a recoverable programmer fault). |
 | `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and MCP tools. MCP loaded tools rank before MCP unloaded-server hints, which rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
 | `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one MCP server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
-| `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
-| `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Known local refs win; unknown refs fall through to MCP when available. |
-| `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for local PTC/Clojure namespaces only. Java classes and MCP servers are not supported. |
+| `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
+| `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
+| `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for a prelude-export namespace or a local PTC/Clojure namespace. Java classes and MCP servers are not supported. |
+| `all-ns` | `(all-ns)` | Sorted list of curated Lisp-facing namespace-name strings plus any attached prelude namespaces. Never leaks BEAM internals, Java classes, or implementation-only namespaces. |
+| `ns-name` | `(ns-name ns)` | Namespace-name string for a known curated or prelude namespace. Accepts a quoted symbol (`'crm`) or a string (`"crm"`). |
 
 Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compatibility aliases, discovery returns executable refs such as `Integer/parseInt`, `System/currentTimeMillis`, `Math/abs`, and `java.time.LocalDate/parse`; it does not advertise unsupported fully-qualified `java.lang.*` call forms.
 
@@ -3461,6 +3463,93 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 **Note:** The `data/` and `tool/` namespaces are reserved for context access
 and tool invocation respectively. They are not aliases for Clojure
 namespaces.
+
+### 9.9 Capability Prelude
+
+A deployment may attach a **compiled prelude** that defines curated,
+Lisp-facing APIs in protected namespaces (for example `crm`, `workflow`, or
+`journal`). User programs then call and discover those exports normally, while
+the host keeps full control over what is exposed. The prelude is **stateless**
+in V1: it may define namespaces, constants, functions, docstrings, and
+metadata, but it does not receive or commit hidden state.
+
+The prelude is compiled once into an artifact and attached to a run through one
+seam:
+
+- direct execution: `PtcRunner.Lisp.run(program, prelude: artifact_or_source)`;
+- SubAgent: the `runtime_prelude:` field on `%PtcRunner.SubAgent.Definition{}`;
+- REPL: `mix ptc.repl --prelude file.clj`.
+
+All three surfaces use the same compiled artifact, the same protected namespace
+and export tables, and the same analyzer/evaluator resolution.
+
+#### The `(ns ...)` prelude-compiler directive
+
+Inside prelude source, `(ns ...)` is a **compiler directive**, not a general
+user-runtime form. User programs do not gain Clojure namespace-loading
+semantics. A prelude declares a namespace, an optional docstring, and optional
+metadata, then defines exports with `defn` (public) and `defn-` (private):
+
+```clojure
+(ns crm
+  "CRM helpers."
+  {:visibility :prompt})
+
+(defn- normalize-id
+  "Private helper — not user-visible, not discoverable."
+  [raw]
+  (str "norm:" raw))
+
+(defn get-user
+  "Return a CRM user by id."
+  [id]
+  (tool/call {:server "crm" :tool "get_user" :args {:id (normalize-id id)}}))
+```
+
+Public exports become resolvable namespaced calls (`(crm/get-user id)`) and
+appear in discovery (`(ns-publics 'crm)`, `(doc 'crm/get-user)`,
+`(meta 'crm/get-user)`). `defn-` helpers are captured privately: a public
+export may call them, but user code cannot resolve or discover them by
+qualified symbol. Export visibility is `:prompt` (in the prompt inventory and
+discoverable) or `:discoverable` (discovery-only).
+
+Prelude exports wrap the existing tool surfaces unchanged. A wrapper around
+`(tool/call ...)` is **recoverable-by-default**: it returns the same `:ok` /
+`:reason` / `:value` result map so user code can branch on it. Authors opt into
+abort-on-error behavior explicitly, conventionally with a `name!` suffix, by
+calling `fail` themselves.
+
+#### Protected namespaces
+
+Configured prelude namespaces are protected, and so are the reserved host
+namespaces `tool`, `data`, `budget`, and `ptc.core`. User programs must not
+redefine a protected namespace, a public export, or a private helper:
+
+```clojure
+(defn crm/get-user [id] {:fake true})
+;; Error: cannot redefine crm/get-user — it is a public export of the
+;; protected namespace crm and cannot be redefined by user code.
+
+(def crm/x 1)
+;; Error: cannot define crm/x — crm is a protected namespace whose names
+;; cannot be redefined by user code.
+```
+
+These are programmer faults with a clear message naming the protected namespace
+or symbol — not generic invalid-qualified-name syntax errors. Prelude
+compilation also rejects declaring a reserved namespace such as `(ns tool ...)`
+before any user program runs. Unknown namespaced calls remain programmer faults
+with actionable messages that suggest discovery forms:
+
+```clojure
+(crm/delete-user "u_123")
+;; Error: unknown export crm/delete-user. Try (ns-publics 'crm) or
+;; (apropos "delete") to discover available exports.
+```
+
+The mutable `user` namespace stays available: user code may define unqualified
+bindings (including names that happen to match a private helper's display name)
+without affecting the captured prelude env.
 
 ---
 
@@ -4310,7 +4399,7 @@ Namespaced accesses (`data/y`, `tool/z`, `budget/remaining`) are *not* part of t
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
 | `budget/remaining` | Remaining tool call budget |
-| `tool/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics` | REPL discovery |
+| `tool/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery |
 | `foo` | Local binding, `def` binding, or built-in |
 
 ### Example

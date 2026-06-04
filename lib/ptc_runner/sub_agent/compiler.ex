@@ -162,6 +162,16 @@ defmodule PtcRunner.SubAgent.Compiler do
             |> Keyword.take([:timeout, :max_heap, :float_precision, :max_print_length])
             |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
+          # Carry the configured deployment prelude into compiled-agent execution
+          # too (plan §1A): without it, a compiled program calling a prelude
+          # export (e.g. `(crm/get-user ...)`) would fail at execute time with an
+          # unknown namespace instead of using the same capability environment.
+          lisp_opts =
+            case agent.runtime_prelude do
+              nil -> lisp_opts
+              prelude -> Keyword.put(lisp_opts, :prelude, prelude)
+            end
+
           # Build runtime tools
           runtime_tools =
             if llm_required do
