@@ -73,7 +73,7 @@ defmodule PtcRunner.Upstream.Transport.McpHttp.SseDecoder do
         :no_event
 
       {pos, len} ->
-        <<raw_event::binary-size(pos), _boundary::binary-size(len), rest::binary>> = buffer
+        <<raw_event::binary-size(^pos), _boundary::binary-size(^len), rest::binary>> = buffer
         {:event, raw_event, rest}
     end
   end
@@ -120,7 +120,7 @@ defmodule PtcRunner.Upstream.Transport.McpHttp.SseDecoder do
         rest_size = size - 1
 
         case line do
-          <<rest::binary-size(rest_size), "\r">> -> rest
+          <<rest::binary-size(^rest_size), "\r">> -> rest
           _ -> line
         end
     end

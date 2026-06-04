@@ -170,7 +170,7 @@ defmodule PtcDemo.TraceAnalyzer.EventStream do
            timestamp: copy(trace_start["timestamp"]),
            agent_name: run_start && copy(run_start["agent_name"]),
            status: status,
-           duration_ms: trace_stop && trace_stop["duration_ms"],
+           duration_ms: trace_stop["duration_ms"],
            trace_kind: copy(trace_start["trace_kind"]),
            producer: copy(trace_start["producer"]),
            trace_label: copy(trace_start["trace_label"]),

@@ -7,8 +7,6 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
   import ExUnit.CaptureLog
 
-  require Logger
-
   alias PtcRunner.TraceLog.Collector
 
   @moduletag :tmp_dir

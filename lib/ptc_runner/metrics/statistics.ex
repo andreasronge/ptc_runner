@@ -111,8 +111,8 @@ defmodule PtcRunner.Metrics.Statistics do
   ## Examples
 
       iex> n = PtcRunner.Metrics.Statistics.sample_size_for_two_proportions(0.5, 0.6)
-      iex> is_integer(n) and n > 0
-      true
+      iex> n
+      388
   """
   @spec sample_size_for_two_proportions(float(), float(), float(), float()) :: pos_integer()
   def sample_size_for_two_proportions(p1, p2, power \\ 0.8, alpha \\ 0.05)

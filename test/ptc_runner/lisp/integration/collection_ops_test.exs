@@ -1472,7 +1472,6 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   # ============================================================
   # into
   # ============================================================
-
   describe "into" do
     test "into [] with map converts entries to vectors" do
       {:ok, %Step{return: result}} = Lisp.run(~S|(into [] {:a 1 :b 2})|)

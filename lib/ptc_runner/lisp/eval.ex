@@ -1847,8 +1847,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp safe_keyword_name(name) when is_binary(name) do
     case Map.get(SourceAtoms.table(), name) do
-      atom when is_atom(atom) -> atom
       nil -> name
+      atom when is_atom(atom) -> atom
       other -> other
     end
   end

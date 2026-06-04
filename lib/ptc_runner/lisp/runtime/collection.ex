@@ -93,7 +93,6 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   end
 
   defp sort_keyfn(key) when is_sort_key(key), do: &FlexAccess.flex_get(&1, key)
-  defp sort_keyfn(keyfn), do: &Callable.call(keyfn, [&1])
   defp safe_sort_keyfn(key) when is_sort_key(key), do: sort_keyfn(key)
 
   defp safe_sort_keyfn(keyfn) do

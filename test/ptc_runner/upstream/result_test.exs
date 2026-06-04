@@ -73,8 +73,11 @@ defmodule PtcRunner.Upstream.ResultTest do
     end
 
     test "requires an atom reason and binary message via guard" do
-      assert_raise FunctionClauseError, fn -> Result.error("timeout", "msg") end
-      assert_raise FunctionClauseError, fn -> Result.error(:timeout, :not_a_string) end
+      bad_reason = :erlang.binary_to_term(:erlang.term_to_binary("timeout"))
+      bad_message = :erlang.binary_to_term(:erlang.term_to_binary(:not_a_string))
+
+      assert_raise FunctionClauseError, fn -> Result.error(bad_reason, "msg") end
+      assert_raise FunctionClauseError, fn -> Result.error(:timeout, bad_message) end
     end
   end
 

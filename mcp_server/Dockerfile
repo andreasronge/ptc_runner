@@ -1,4 +1,4 @@
-ARG ELIXIR_IMAGE=hexpm/elixir:1.19.3-erlang-28.1-debian-bookworm-20251103
+ARG ELIXIR_IMAGE=hexpm/elixir:1.20-erlang-28.5.0.1-debian-bookworm-20260518@sha256:281fb303214b516c58e7d2882bb58f56bd5e479027afc285f609264b28f348c4
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM ${ELIXIR_IMAGE} AS builder

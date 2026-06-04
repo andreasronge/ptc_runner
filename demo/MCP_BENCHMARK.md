@@ -7,7 +7,7 @@
 - **Runs per cell:** 20
 - **LLM mode:** stubbed (canned responses, 150 ms simulated latency)
 - **Larger workload N:** 1000 records
-- **Elixir:** 1.19.3
+- **Elixir:** 1.20.0
 - **OTP:** 28
 - **Schedulers:** 10
 

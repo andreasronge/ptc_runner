@@ -100,9 +100,6 @@ defmodule PtcRunner.SubAgent.TextModeTextE2ETest do
         {:ok, %{content: text, tokens: tokens}} ->
           {:ok, %{content: text, tokens: tokens}}
 
-        {:ok, %{content: text}} ->
-          {:ok, text}
-
         {:error, _} = error ->
           error
       end

@@ -55,7 +55,7 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
     Enum.each(PromptRegistry.profile_keys(), fn profile ->
       parts = PromptRegistry.profile_parts!(profile)
 
-      assert parts != []
+      assert [_ | _] = parts
       assert MapSet.subset?(MapSet.new(parts), cards)
       assert Enum.map(PromptRegistry.profile_metadata(profile), & &1.id) == parts
     end)

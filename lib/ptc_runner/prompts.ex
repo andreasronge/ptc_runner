@@ -283,7 +283,7 @@ defmodule PtcRunner.Prompts do
   ## Examples
 
       iex> prompt = PtcRunner.Prompts.get(:reference)
-      iex> is_binary(prompt) and prompt != ""
+      iex> byte_size(prompt) > 0
       true
 
       iex> PtcRunner.Prompts.get(:unknown)

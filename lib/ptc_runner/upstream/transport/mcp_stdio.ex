@@ -209,7 +209,7 @@ defmodule PtcRunner.Upstream.Transport.McpStdio do
   defp pop_line(buffer) do
     case :binary.match(buffer, "\n") do
       {pos, 1} ->
-        <<line::binary-size(pos), _newline, rest::binary>> = buffer
+        <<line::binary-size(^pos), _newline, rest::binary>> = buffer
         {:ok, line, rest}
 
       :nomatch ->

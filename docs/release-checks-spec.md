@@ -87,7 +87,7 @@ env:
 ```
 
 ### Shared setup gotchas (verified)
-- All jobs reuse `./.github/actions/setup-elixir` (Elixir 1.19.3 / OTP 28.1; caches
+- All jobs reuse `./.github/actions/setup-elixir` (Elixir 1.20.0 / OTP 28.5.0.1; caches
   `deps`, `_build`, `demo/deps`, PLT). **It does NOT touch `mcp_server`**
   (`action.yml:21,33` cache/fetch root + demo only) — any MCP job must add
   `working-directory: mcp_server` + `mix deps.get` (and ideally cache `mcp_server/deps`).

@@ -285,8 +285,10 @@ defmodule PtcRunner.SubAgent.KeyNormalizerCanonicalTest do
 
   describe "input validation" do
     test "raises on non-binary tool name" do
+      bad_tool_name = :erlang.binary_to_term(:erlang.term_to_binary(:not_a_string))
+
       assert_raise FunctionClauseError, fn ->
-        KeyNormalizer.canonical_cache_key(:not_a_string, %{})
+        KeyNormalizer.canonical_cache_key(bad_tool_name, %{})
       end
     end
 

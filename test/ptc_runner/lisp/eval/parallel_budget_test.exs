@@ -76,7 +76,11 @@ defmodule PtcRunner.Lisp.Eval.ParallelBudgetTest do
         spawn(fn -> send(test_pid, {:result, ParallelBudget.try_acquire(budget)}) end)
       end
 
-      results = for _ <- 1..racers, do: assert_receive({:result, r}) && r
+      results =
+        for _ <- 1..racers do
+          assert_receive {:result, r}
+          r
+        end
 
       assert Enum.count(results, &(&1 == :ok)) == capacity
       assert Enum.count(results, &(&1 == :full)) == racers - capacity

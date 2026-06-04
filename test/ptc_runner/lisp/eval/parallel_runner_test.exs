@@ -64,7 +64,12 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       _ref = Process.monitor(parent)
 
       workers =
-        Map.new(for _ <- 1..4, do: assert_receive({:ready, item, pid}) && {item, pid})
+        Map.new(
+          for _ <- 1..4 do
+            assert_receive {:ready, item, pid}
+            {item, pid}
+          end
+        )
 
       # Release in reverse input order.
       for item <- [:d, :c, :b, :a], do: send(workers[item], :go)
@@ -840,8 +845,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
         send(runner, {:caller, caller})
         assert_receive :linked, 1_000
 
-        w1 = assert_receive({:worker_up, p1}) && p1
-        w2 = assert_receive({:worker_up, p2}) && p2
+        assert_receive {:worker_up, w1}
+        assert_receive {:worker_up, w2}
 
         # Kill the caller WHILE run/3 is in flight, then release the
         # workers so run/3 races to completion against the cancellation.
