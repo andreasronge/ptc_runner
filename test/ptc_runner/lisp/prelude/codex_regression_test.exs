@@ -21,6 +21,16 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step
 
+  # A `def`-bound name is externalized into `Step.memory` through the bounded
+  # vocabulary, so it may surface as either an atom or a binary key. Check both.
+  defp memory_get(memory, name) when is_binary(name) do
+    Map.get(memory, String.to_atom(name)) || Map.get(memory, name)
+  end
+
+  defp memory_has?(memory, name) when is_binary(name) do
+    Map.has_key?(memory, String.to_atom(name)) or Map.has_key?(memory, name)
+  end
+
   describe "namespace-scoped private env (codex P1 #1)" do
     @two_ns_public """
     (ns crm "CRM." {:visibility :prompt})
@@ -681,6 +691,80 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
                PtcRunner.Lisp.run(~S|(return (crm/search "u_1" "extra"))|, prelude: prelude)
 
       assert step.return == {:__ptc_return__, "u_1"}
+    end
+  end
+
+  describe "value-position exports stay isolated on abort (codex re-review)" do
+    @abort_prelude """
+    (ns crm "C." {:visibility :prompt})
+    (defn- leak [] "PRIVATELEAK")
+    (defn boom [] (str (leak)) (fail "boom-msg"))
+    (defn early [] (str (leak)) (return "early-val"))
+    """
+
+    test "a value-position (fail) does not leak the private env into Step.memory" do
+      {:ok, prelude} = Compiler.compile(@abort_prelude)
+
+      # `(apply crm/boom [])` runs the export in value position (do_execute_closure).
+      # Its `(fail ...)` throws the EXPORT context, whose user_ns is the private
+      # prelude env. Without isolation that env becomes Step.memory and the
+      # caller's own `keep` binding is dropped.
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run("(def keep 7) (apply crm/boom [])", prelude: prelude)
+
+      assert step.return == {:__ptc_fail__, "boom-msg"}
+      assert memory_get(step.memory, "keep") == 7
+      refute memory_has?(step.memory, "leak")
+      refute memory_has?(step.memory, "boom")
+      refute inspect(step.memory) =~ "PRIVATELEAK"
+    end
+
+    test "a value-position (return) keeps caller memory and hides the private env" do
+      {:ok, prelude} = Compiler.compile(@abort_prelude)
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run("(def keep 7) (apply crm/early [])", prelude: prelude)
+
+      assert step.return == {:__ptc_return__, "early-val"}
+      assert memory_get(step.memory, "keep") == 7
+      refute memory_has?(step.memory, "leak")
+      refute inspect(step.memory) =~ "PRIVATELEAK"
+    end
+
+    test "a HOF-position (fail) does not leak the private env into Step.memory" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- leak [] "PRIVATELEAK")
+        (defn boom [x] (str (leak) x) (fail "hof-boom"))
+        """)
+
+      # `(map crm/boom ...)` runs the export through the HOF path
+      # (eval_closure_args). The `(fail ...)` must restore the caller's namespace
+      # before it escapes the Erlang HOF boundary.
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run("(def keep 7) (map crm/boom [1])", prelude: prelude)
+
+      assert step.return == {:__ptc_fail__, "hof-boom"}
+      assert memory_get(step.memory, "keep") == 7
+      refute inspect(step.memory) =~ "PRIVATELEAK"
+    end
+
+    test "a closure returned through a HOF still resolves its private helper" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- helper [x] (str "h:" x))
+        (defn make-adder [n] (fn [x] (helper x)))
+        """)
+
+      # `(map crm/make-adder ...)` returns closures via the HOF path; each must be
+      # tagged with its prelude namespace so a later `(f "a")` reaches `helper`.
+      program = ~S|(let [fs (map crm/make-adder [1]) f (first fs)] (return (f "a")))|
+
+      assert {:ok, %Step{} = step} = PtcRunner.Lisp.run(program, prelude: prelude)
+
+      assert step.return == {:__ptc_return__, "h:a"}
     end
   end
 end
