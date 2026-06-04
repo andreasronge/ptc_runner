@@ -120,12 +120,17 @@ suffix** so the behavior is visible at the call site:
 (defn get-user!
   "Return a CRM user, or abort the program."
   [id]
-  (let [res (crm/get-user id)]
+  (let [res (get-user id)]      ; call the sibling by its BARE name
     (if (res :ok) (res :value) (fail {:reason (res :reason)}))))
 ```
 
 Keep `fail` for intentional aborts; do **not** make every wrapper abort by
 default.
+
+> **Calling siblings.** Within a prelude namespace, call other exports/helpers
+> by their **bare** name (`get-user`), not qualified (`crm/get-user`). Qualified
+> self-references are rejected at compile time — qualified refs are for *user*
+> code calling the prelude, not for the prelude calling itself.
 
 ---
 

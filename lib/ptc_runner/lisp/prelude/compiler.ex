@@ -293,6 +293,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
          :ok <- reject_builtin_name(symbol),
+         :ok <- reject_qualified_self_refs(body, ns),
          {:ok, arity} <- params_arity(params_ast) do
       spec = %Spec{
         namespace: ns,
@@ -302,7 +303,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: metadata,
         params_form: params_ast,
-        body_form: rewrite_def_body(body, ns, params_ast)
+        body_form: body
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
@@ -312,7 +313,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp add_const(acc, name_ast, doc, value_ast) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
-         :ok <- reject_builtin_name(symbol) do
+         :ok <- reject_builtin_name(symbol),
+         :ok <- reject_qualified_self_refs([value_ast], ns) do
       spec = %Spec{
         namespace: ns,
         symbol: symbol,
@@ -321,7 +323,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: %{},
         params_form: nil,
-        body_form: rewrite_def_body([value_ast], ns, nil)
+        body_form: [value_ast]
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
@@ -345,82 +347,35 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  # Rewrite SAME-namespace qualified refs (e.g. `crm/get-user` inside namespace
-  # `crm`) to bare refs (`get-user`) so a prelude export can call a SIBLING
-  # export by its public qualified name. The bare ref resolves at runtime through
-  # the namespace's captured private env, and the `requires` call-graph sees it
-  # as a real sibling edge. Reserved/other-namespace refs (`tool/...`, `hr/...`)
-  # are left untouched.
-  # Rewrite a definition body, seeding the bound set with the def's own PARAMS so
-  # a qualified self-ref whose bare name is a param is left qualified (and fails
-  # compilation) rather than rewritten to capture the param.
-  defp rewrite_def_body(forms, ns, params_ast) do
-    bound = param_names(params_ast)
-    Enum.map(forms, &rewrite_self_refs(&1, ns, bound))
+  # Qualified SELF-references (e.g. `crm/get-user` inside namespace `crm`) are not
+  # allowed in a prelude body: call a sibling by its BARE name (`get-user`). This
+  # is idiomatic (Clojure calls same-namespace members unqualified) and avoids a
+  # scope-fragile rewrite that could let a local with the sibling's name silently
+  # win. Quoted data (`(quote crm/x)`) is skipped — it is not a reference.
+  defp reject_qualified_self_refs(body, ns) do
+    case Enum.find_value(body, &self_ref(&1, ns)) do
+      nil ->
+        :ok
+
+      sym ->
+        {:error,
+         ValidationError.new(
+           :qualified_self_reference,
+           "qualified self-reference `#{ns}/#{sym}` is not allowed in a prelude body; " <>
+             "call the sibling by its bare name `#{sym}`"
+         )}
+    end
   end
 
-  # A same-namespace qualified ref rewrites to a BARE ref so it compiles and
-  # resolves to the sibling at runtime — but ONLY when the bare name is not
-  # locally bound here. A locally-shadowed name is left qualified (so it fails
-  # compilation rather than silently resolving to the local), since a qualified
-  # ref is meant to reach the namespace member, not a same-named local.
-  defp rewrite_self_refs({:ns_symbol, ns, sym} = node, ns, bound) when is_binary(ns) do
-    if sym in bound, do: node, else: {:symbol, sym}
-  end
+  defp self_ref({:ns_symbol, ns, sym}, ns) when is_binary(ns), do: sym
+  defp self_ref({:list, [{:symbol, q} | _]}, _ns) when q in [:quote, "quote"], do: nil
+  defp self_ref({:list, items}, ns), do: Enum.find_value(items, &self_ref(&1, ns))
+  defp self_ref({:vector, items}, ns), do: Enum.find_value(items, &self_ref(&1, ns))
 
-  # (fn [params] body...) — params shadow within the body.
-  defp rewrite_self_refs(
-         {:list, [{:symbol, fn_h} = head, {:vector, _} = params | body]},
-         ns,
-         bound
-       )
-       when fn_h in [:fn, "fn"] do
-    inner = bound ++ param_names(params)
-    {:list, [head, params | Enum.map(body, &rewrite_self_refs(&1, ns, inner))]}
-  end
+  defp self_ref({:map, pairs}, ns),
+    do: Enum.find_value(pairs, fn {k, v} -> self_ref(k, ns) || self_ref(v, ns) end)
 
-  # (let [a v ...] body...) / (loop [...] body...) — bindings shadow.
-  defp rewrite_self_refs(
-         {:list, [{:symbol, binder} = head, {:vector, bindings} | body]},
-         ns,
-         bound
-       )
-       when binder in [:let, "let", :loop, "loop"] do
-    {rewritten, inner} = rewrite_let_bindings(bindings, ns, bound)
-    {:list, [head, {:vector, rewritten} | Enum.map(body, &rewrite_self_refs(&1, ns, inner))]}
-  end
-
-  defp rewrite_self_refs({:list, items}, ns, bound),
-    do: {:list, Enum.map(items, &rewrite_self_refs(&1, ns, bound))}
-
-  defp rewrite_self_refs({:vector, items}, ns, bound),
-    do: {:vector, Enum.map(items, &rewrite_self_refs(&1, ns, bound))}
-
-  defp rewrite_self_refs({:map, pairs}, ns, bound),
-    do:
-      {:map,
-       Enum.map(pairs, fn {k, v} ->
-         {rewrite_self_refs(k, ns, bound), rewrite_self_refs(v, ns, bound)}
-       end)}
-
-  defp rewrite_self_refs(other, _ns, _bound), do: other
-
-  # Rewrite let/loop binding VALUES (names shadow left-to-right); the binding
-  # patterns themselves are not refs and pass through unchanged.
-  defp rewrite_let_bindings(bindings, ns, bound) do
-    {rev, final_bound} =
-      bindings
-      |> Enum.chunk_every(2)
-      |> Enum.reduce({[], bound}, fn
-        [name_form, val], {acc, b} ->
-          {[rewrite_self_refs(val, ns, b), name_form | acc], b ++ pattern_names(name_form)}
-
-        [val], {acc, b} ->
-          {[rewrite_self_refs(val, ns, b) | acc], b}
-      end)
-
-    {Enum.reverse(rev), final_bound}
-  end
+  defp self_ref(_other, _ns), do: nil
 
   defp require_current_ns(%{current_ns: nil}, name_ast) do
     {:error,

@@ -243,33 +243,28 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "qualified self refs respect local shadowing (codex re-review)" do
-    test "an unshadowed qualified sibling call still works" do
-      {:ok, prelude} =
-        Compiler.compile("""
-        (ns crm "C." {:visibility :prompt})
-        (defn- helper [x] (str "sib:" x))
-        (defn use-it [x] (crm/helper x))
-        """)
-
-      assert {:ok, %Step{} = step} =
-               PtcRunner.Lisp.run(~S|(return (crm/use-it "a"))|, prelude: prelude)
-
-      assert step.return == {:__ptc_return__, "sib:a"}
-    end
-
-    test "a param shadowing the bare name is NOT silently resolved to the local" do
-      # `helper` is a param; `(crm/helper x)` must not silently call the param.
-      # The bare name is bound, so the qualified ref is left unrewritten and the
-      # prelude fails to compile (fail-closed) rather than mis-resolving.
+  describe "qualified self references are rejected (codex re-review)" do
+    test "a qualified self-reference is a clear compile error naming the bare alternative" do
       source = """
       (ns crm "C." {:visibility :prompt})
       (defn- helper [x] (str "sib:" x))
-      (defn call-helper [helper x] (crm/helper x))
+      (defn use-it [x] (crm/helper x))
       """
 
       assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :compile_error
+      assert err.reason == :qualified_self_reference
+      assert err.message =~ "helper"
+    end
+
+    test "a quoted qualified symbol is NOT treated as a self-reference" do
+      source = ~S|(ns crm "C." {:visibility :prompt}) (defn names [] (quote crm/helper))|
+
+      # Quoted data is skipped by the self-ref check, so it is never rejected as a
+      # qualified self-reference (it may still fail for other reasons).
+      case Compiler.compile(source) do
+        {:ok, _prelude} -> :ok
+        {:error, err} -> refute err.reason == :qualified_self_reference
+      end
     end
   end
 
@@ -399,7 +394,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "qualified same-namespace sibling calls (codex branch review)" do
+  describe "bare same-namespace sibling calls (codex branch review)" do
     @sibling_prelude """
     (ns crm "CRM helpers." {:visibility :prompt})
     (defn get-user [id]
@@ -407,21 +402,20 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     (defn get-user!
       "Return a CRM user, or abort the program."
       [id]
-      (let [res (crm/get-user id)]
+      (let [res (get-user id)]
         (if (res :ok) (res :value) (fail {:reason (res :reason)}))))
     """
 
-    test "an export calling a sibling by qualified name compiles and inherits its requires" do
+    test "an export calling a sibling by bare name compiles and inherits its requires" do
       {:ok, prelude} = Compiler.compile(@sibling_prelude)
 
       bang = Enum.find(prelude.exports, &(&1.ref == "crm/get-user!"))
 
-      # The qualified sibling call is rewritten to a bare ref, so it both
-      # compiles AND the requires call-graph sees the edge to get-user.
+      # The bare sibling call is seen by the requires call-graph (edge to get-user).
       assert bang.requires == ["upstream:crm/get_user"]
     end
 
-    test "the qualified sibling call resolves at runtime" do
+    test "the bare sibling call resolves at runtime" do
       {:ok, prelude} = Compiler.compile(@sibling_prelude)
       tools = %{"call" => fn _ -> %{ok: true, value: %{"id" => "u_1"}, reason: nil} end}
 
