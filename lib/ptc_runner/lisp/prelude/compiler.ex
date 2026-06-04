@@ -476,13 +476,14 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       |> Map.get(:visibility, @default_visibility)
 
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
-         {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")) do
+         {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
+         {:ok, explicit_provider} <- validate_provider_ref(Map.get(spec.metadata, "provider-ref")) do
       transitive =
         ns_backing
         |> Map.get(spec.namespace, %{})
         |> Map.get(spec.symbol, %{requires: [], tool_refs: []})
 
-      backing = backing(spec, explicit_requires, transitive.requires)
+      backing = backing(spec, explicit_requires, explicit_provider, transitive.requires)
 
       {:ok,
        %Export{
@@ -527,8 +528,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # helpers it (transitively) calls — so an export that reaches an upstream
   # THROUGH a helper still carries the requirement (attach-time validation fails
   # closed) WITHOUT inheriting a sibling export's unrelated requirements.
-  defp backing(%Spec{metadata: metadata, body_form: body}, explicit_requires, transitive_ids) do
-    explicit_provider = Map.get(metadata, "provider-ref")
+  defp backing(
+         %Spec{metadata: metadata, body_form: body},
+         explicit_requires,
+         explicit_provider,
+         transitive_ids
+       ) do
     explicit_effect = effect(Map.get(metadata, "effect"))
 
     inferred = infer_backing(body)
@@ -612,6 +617,10 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        when name not in [:servers, "servers"],
        do: [to_string(name) | acc]
 
+  defp collect_tool_names_raw({:list, [{:symbol, head} | _]}, acc)
+       when head in [:comment, "comment", :quote, "quote"],
+       do: acc
+
   defp collect_tool_names_raw({:list, items}, acc) when is_list(items),
     do: Enum.reduce(items, acc, &collect_tool_names_raw/2)
 
@@ -663,6 +672,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     inner = bound ++ names
     Enum.reduce(body, acc2, &collect_refs(&1, inner, &2))
   end
+
+  # Non-executed forms (`(comment ...)`, `(quote ...)`) introduce no real calls.
+  defp collect_refs({:list, [{:symbol, head} | _]}, _bound, acc)
+       when head in [:comment, "comment", :quote, "quote"],
+       do: acc
 
   defp collect_refs({:list, items}, bound, acc) when is_list(items),
     do: Enum.reduce(items, acc, &collect_refs(&1, bound, &2))
@@ -773,6 +787,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         []
     end
   end
+
+  # Non-executed forms (`(comment ...)`, `(quote ...)`) are dead/data, not calls.
+  defp literal_tool_calls({:list, [{:symbol, head} | _]})
+       when head in [:comment, "comment", :quote, "quote"],
+       do: []
 
   defp literal_tool_calls({:list, items}) when is_list(items) do
     Enum.flat_map(items, &literal_tool_calls/1)
@@ -900,6 +919,21 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
      ValidationError.new(
        :invalid_requires,
        "prelude :requires must be a list of strings, got: #{inspect(other, limit: 5)}"
+     )}
+  end
+
+  # Explicit `:provider-ref` metadata must be a canonical string id. A non-string
+  # (e.g. a keyword `{:provider-ref :crm/search}`) normalizes to a tuple that
+  # would later break JSON serialization of the trace summary, so reject it at
+  # compile time (plan §10: bad metadata fails fast).
+  defp validate_provider_ref(nil), do: {:ok, nil}
+  defp validate_provider_ref(ref) when is_binary(ref), do: {:ok, ref}
+
+  defp validate_provider_ref(other) do
+    {:error,
+     ValidationError.new(
+       :invalid_metadata,
+       "prelude :provider-ref must be a string, got: #{inspect(other, limit: 3)}"
      )}
   end
 

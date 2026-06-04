@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step
 
@@ -282,6 +283,47 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       # `fetch` here is the destructured param, not the helper.
       assert pure.requires == []
       assert pure.tool_refs == []
+    end
+  end
+
+  describe "dead/quoted forms are not inferred as dependencies (codex re-review)" do
+    test "a tool/call inside (comment ...) is not inferred as a requirement" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn noop [] (comment (tool/call {:server "missing" :tool "noop" :args {}})))
+        """)
+
+      noop = Enum.find(prelude.exports, &(&1.ref == "crm/noop"))
+
+      # The commented-out call must not become a requires/tool-ref dependency.
+      assert noop.requires == []
+      assert noop.tool_refs == []
+    end
+  end
+
+  describe "provider-ref metadata is validated (codex re-review)" do
+    test "a non-string :provider-ref fails compilation" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn search "Search." {:provider-ref :backend} [q] q)
+      """
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :invalid_metadata
+    end
+
+    test "a string :provider-ref is kept and the trace stays JSON-serializable" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn search "Search." {:provider-ref "upstream:crm/search"} [q] q)
+      """
+
+      {:ok, prelude} = Compiler.compile(source)
+      search = Enum.find(prelude.exports, &(&1.ref == "crm/search"))
+
+      assert search.provider_ref == "upstream:crm/search"
+      assert {:ok, _json} = Jason.encode(Prelude.trace_summary(prelude))
     end
   end
 
