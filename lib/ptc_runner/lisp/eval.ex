@@ -889,7 +889,11 @@ defmodule PtcRunner.Lisp.Eval do
     try do
       case Apply.apply_fun(callable, args, export_ctx, &do_eval/2) do
         {:ok, result, final_ctx} ->
-          {:ok, result, merge_export_effects(caller_ctx, final_ctx)}
+          # If the export RETURNS a closure (e.g. `(defn make [] (fn [x] (helper
+          # x)))`), bind the private env into it so its private-helper references
+          # still resolve when the caller applies it later under the caller's own
+          # user namespace. Non-closure results pass through unchanged.
+          {:ok, bind_prelude_env(result, ns_env), merge_export_effects(caller_ctx, final_ctx)}
 
         {:error, _} = err ->
           err
@@ -901,7 +905,10 @@ defmodule PtcRunner.Lisp.Eval do
       # effects merged in, so the prelude env never leaks into user memory and
       # the user's own bindings survive.
       {:return_signal, value, %EvalContext{} = thrown_ctx} ->
-        throw({:return_signal, value, merge_export_effects(caller_ctx, thrown_ctx)})
+        throw(
+          {:return_signal, bind_prelude_env(value, ns_env),
+           merge_export_effects(caller_ctx, thrown_ctx)}
+        )
 
       {:fail_signal, value, %EvalContext{} = thrown_ctx} ->
         throw({:fail_signal, value, merge_export_effects(caller_ctx, thrown_ctx)})

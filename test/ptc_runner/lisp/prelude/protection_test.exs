@@ -206,9 +206,9 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
       end
     end
 
-    test "the reserved set is exactly tool/data/budget/ptc.core (V1 lock)" do
+    test "the reserved set is exactly tool/data/budget/mcp/ptc.core (V1 lock)" do
       assert ProtectedNamespaces.reserved() ==
-               MapSet.new(["tool", "data", "budget", "ptc.core"])
+               MapSet.new(["tool", "data", "budget", "mcp", "ptc.core"])
     end
   end
 end

@@ -23,7 +23,11 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
   # (an opaque type), not a compile-time literal with a concrete internal
   # shape. String-backed; NOT added to SourceAtoms @bounded_namespaces —
   # that would leak atoms and broaden the global vocabulary (plan §4).
-  @reserved_names ~w(tool data budget ptc.core)
+  #
+  # `mcp` is reserved because the analyzer has a dedicated `mcp/...` dispatch
+  # clause that runs BEFORE prelude export lookup, so a prelude `mcp/foo` export
+  # could never be called — reject `(ns mcp ...)` at compile time instead.
+  @reserved_names ~w(tool data budget mcp ptc.core)
 
   @doc "The reserved (host-owned) namespace name set."
   @spec reserved() :: MapSet.t()

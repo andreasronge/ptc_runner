@@ -243,6 +243,33 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "exports returning closures keep private-helper access (codex re-review)" do
+    test "a closure returned from an export resolves its private helper when applied" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- helper [x] (str "h:" x))
+        (defn make [] (fn [x] (helper x)))
+        """)
+
+      # The returned closure is applied LATER under the caller's namespace; it
+      # must still reach its private helper.
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(let [f (crm/make)] (return (f "a")))|, prelude: prelude)
+
+      assert step.return == {:__ptc_return__, "h:a"}
+    end
+  end
+
+  describe "mcp is a reserved prelude namespace (codex re-review)" do
+    test "declaring (ns mcp ...) is rejected at compile time" do
+      source = ~S|(ns mcp "M." {:visibility :prompt}) (defn foo [] 1)|
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :reserved_namespace
+    end
+  end
+
   describe "prelude def names cannot shadow builtins (codex re-review)" do
     test "a public def named like a builtin is rejected" do
       source = """
