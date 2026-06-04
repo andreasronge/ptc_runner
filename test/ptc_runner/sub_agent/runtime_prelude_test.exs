@@ -160,5 +160,35 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
 
       assert step.return["msg"] == "hi ada"
     end
+
+    @tool_backed_prelude """
+    (ns find "Find helpers." {:visibility :prompt})
+    (defn lines [pat text] (tool/grep {:pattern pat :text text}))
+    """
+
+    test "a tool-backed prelude (max_turns: 1, no declared tools) runs through the loop" do
+      # `find/lines` wraps `(tool/grep ...)`, so its `tool_refs` is non-empty.
+      # The single-shot fast path runs with `tools: %{}` and could not back that
+      # call (the export would be advertised but fail preflight). Runner routes a
+      # tool-backed prelude to `Loop.run/2`, whose `effective_tools` supplies the
+      # `:grep` builtin so the wrapped call actually resolves.
+      {:ok, prelude} = Compiler.compile(@tool_backed_prelude)
+
+      agent =
+        PtcRunner.SubAgent.new(
+          prompt: "Find {{pat}}",
+          signature: "(pat :string) -> {out :any}",
+          runtime_prelude: prelude,
+          builtin_tools: [:grep],
+          max_turns: 1
+        )
+
+      mock_llm = fn _ -> {:ok, ~S|(return {:out (find/lines data/pat "a\nb\nc\nbb")})|} end
+
+      assert {:ok, step} =
+               PtcRunner.SubAgent.run(agent, llm: mock_llm, context: %{"pat" => "b"})
+
+      assert step.return["out"] == ["b", "bb"]
+    end
   end
 end
