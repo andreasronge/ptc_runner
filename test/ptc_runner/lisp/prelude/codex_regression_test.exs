@@ -328,6 +328,29 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
   end
 
   describe "value-position exports run isolated (codex re-review)" do
+    test "a value-position export does not embed the private env in user-visible data" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- secret-helper [] "PRIVATE")
+        (defn pub [] (secret-helper))
+        """)
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run("(def f crm/pub) (return :ok)", prelude: prelude)
+
+      f = Map.get(step.memory, "f") || Map.get(step.memory, :f)
+      {:closure, _p, _b, _env, _th, meta} = f
+
+      # The closure carries only the PUBLIC namespace name, never the private env
+      # (which would expose private helper BODIES through Step data). pub's body
+      # may reference the helper by name, but the helper's implementation
+      # ("PRIVATE") must not be embedded in the value.
+      assert meta[:prelude_ns] == "crm"
+      refute Map.has_key?(meta, :prelude_ns_env)
+      refute inspect(f) =~ "PRIVATE"
+    end
+
     test "a value-position export's (def) does not write user memory" do
       {:ok, prelude} =
         Compiler.compile("""
