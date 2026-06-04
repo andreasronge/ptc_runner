@@ -44,6 +44,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.ProtectedNamespaces
+  alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.Sandbox
 
   @default_visibility :prompt
@@ -217,9 +218,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp ns_metadata([{:map, _} = meta_ast]), do: ns_metadata([{:string, nil}, meta_ast])
 
   defp ns_metadata([{:string, doc}, {:map, pairs}]) do
-    meta = normalize_meta(pairs)
-
-    with {:ok, visibility} <- visibility(Map.get(meta, "visibility")) do
+    with {:ok, meta} <- normalize_meta(pairs),
+         {:ok, visibility} <- visibility(Map.get(meta, "visibility")) do
       {:ok, %{doc: doc, visibility: visibility}}
     end
   end
@@ -238,7 +238,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   # (defn name "doc" {meta} [params] body...)
   defp handle_defn([name_ast, {:string, doc}, {:map, pairs}, params_ast | body], private?, acc) do
-    add_def(acc, name_ast, doc, normalize_meta(pairs), params_ast, body, private?)
+    with {:ok, meta} <- normalize_meta(pairs) do
+      add_def(acc, name_ast, doc, meta, params_ast, body, private?)
+    end
   end
 
   # (defn name "doc" [params] body...)
@@ -248,7 +250,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   # (defn name {meta} [params] body...)
   defp handle_defn([name_ast, {:map, pairs}, params_ast | body], private?, acc) do
-    add_def(acc, name_ast, nil, normalize_meta(pairs), params_ast, body, private?)
+    with {:ok, meta} <- normalize_meta(pairs) do
+      add_def(acc, name_ast, nil, meta, params_ast, body, private?)
+    end
   end
 
   # (defn name [params] body...)
@@ -288,6 +292,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp add_def(acc, name_ast, doc, metadata, params_ast, body, private?) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
+         :ok <- reject_builtin_name(symbol),
          {:ok, arity} <- params_arity(params_ast) do
       spec = %Spec{
         namespace: ns,
@@ -306,7 +311,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp add_const(acc, name_ast, doc, value_ast) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
-         {:ok, symbol} <- symbol_name(name_ast) do
+         {:ok, symbol} <- symbol_name(name_ast),
+         :ok <- reject_builtin_name(symbol) do
       spec = %Spec{
         namespace: ns,
         symbol: symbol,
@@ -319,6 +325,23 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
+    end
+  end
+
+  # A prelude definition name must not collide with a bounded built-in or
+  # special form (e.g. `count`, `map`, `if`). Such names intern to ATOMS, while
+  # prelude defs are captured under STRING keys, so a bare same-namespace
+  # reference would silently resolve to the built-in instead of the prelude def.
+  # Reject fail-closed; prelude exports should use distinct kebab-case names.
+  defp reject_builtin_name(symbol) do
+    if is_atom(SourceAtoms.intern(symbol)) do
+      {:error,
+       ValidationError.new(
+         :reserved_name,
+         "prelude definition `#{symbol}` collides with a built-in name; choose a distinct (kebab-case) name"
+       )}
+    else
+      :ok
     end
   end
 
@@ -717,13 +740,27 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # keyword values to atoms only for the small bounded set we interpret.
   # Everything stays string-backed except the curated enums.
   defp normalize_meta(pairs) do
-    Map.new(pairs, fn {key_ast, value_ast} ->
-      {meta_key(key_ast), meta_value(value_ast)}
+    Enum.reduce_while(pairs, {:ok, %{}}, fn {key_ast, value_ast}, {:ok, acc} ->
+      case meta_key(key_ast) do
+        {:ok, key} -> {:cont, {:ok, Map.put(acc, key, meta_value(value_ast))}}
+        {:error, _} = err -> {:halt, err}
+      end
     end)
   end
 
-  defp meta_key({:keyword, k}) when is_binary(k), do: k
-  defp meta_key({:keyword, k}) when is_atom(k), do: Atom.to_string(k)
+  defp meta_key({:keyword, k}) when is_binary(k), do: {:ok, k}
+  defp meta_key({:keyword, k}) when is_atom(k), do: {:ok, Atom.to_string(k)}
+
+  # A non-keyword metadata key (e.g. a string key `{"visibility" :prompt}`) is a
+  # recoverable validation error, NOT a FunctionClauseError that crashes the
+  # caller (Lisp.run(prelude: source) compiles directly).
+  defp meta_key(other) do
+    {:error,
+     ValidationError.new(
+       :invalid_metadata,
+       "prelude metadata keys must be keywords, got: #{inspect(other, limit: 3)}"
+     )}
+  end
 
   defp meta_value({:keyword, v}) when is_binary(v), do: {:keyword, v}
   defp meta_value({:keyword, v}) when is_atom(v), do: {:keyword, Atom.to_string(v)}
