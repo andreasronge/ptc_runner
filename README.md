@@ -366,4 +366,5 @@ See `PtcRunner.Lisp` module docs for options.
 
 ## License
 
-MIT
+MIT. This license applies to the repository, including the MCP server in
+`mcp_server/`.

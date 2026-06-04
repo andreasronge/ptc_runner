@@ -334,4 +334,4 @@ as the deployment runbook.
 
 ## License
 
-Apache-2.0. See [LICENSE](../LICENSE) at the repo root.
+MIT. See [LICENSE](../LICENSE) at the repo root.
