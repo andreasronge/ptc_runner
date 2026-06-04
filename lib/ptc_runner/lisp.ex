@@ -46,6 +46,10 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.ParallelBudget
+  alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunner.Lisp.Prelude.ValidationError, as: PreludeValidationError
 
   # Default capacity of the global parallel-worker slot semaphore (see
   # `PtcRunner.Lisp.Eval.ParallelBudget`). Conservative: with the
@@ -110,6 +114,18 @@ defmodule PtcRunner.Lisp do
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
+    - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact or prelude
+      SOURCE string to attach before user code (Capability Prelude V1). Source
+      is compiled first; the attached prelude's protected namespaces and public
+      export table are consulted by the analyzer/evaluator so qualified prelude
+      calls (e.g. `crm/get-user`) resolve, while private helpers stay
+      user-invisible. Compile/attach failures return `{:error, Step}`. When a
+      `:runtime` is also supplied, attach-time `requires` validation runs first.
+      (default: nil)
+    - `:runtime` - Selected upstream runtime handle used for attach-time prelude
+      `requires` validation. When `nil`, prelude `requires` are not validated
+      against any upstream (the configured `:tools` map still guards actual tool
+      surfaces). (default: nil)
     - `:trace_context` - Trace context for nested agent tracing (default: nil)
     - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
       `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
@@ -302,36 +318,11 @@ defmodule PtcRunner.Lisp do
 
   @spec do_run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   defp do_run(source, opts) do
-    ctx = Keyword.get(opts, :context, %{})
     memory = Keyword.get(opts, :memory, %{})
-    raw_tools = Keyword.get(opts, :tools, %{})
-    signature_str = Keyword.get(opts, :signature)
-    float_precision = Keyword.get(opts, :float_precision)
-    timeout = Keyword.get(opts, :timeout, 1000)
-    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
-    # Security H1: every pmap/pcalls worker runs under this FIXED heap
-    # cap (default: the sandbox `max_heap`), and the global
-    # `max_parallel_workers` semaphore caps how many such workers are
-    # alive at once across the whole run. Aggregate live parallel heap
-    # is therefore bounded by `max_parallel_workers * worker_max_heap`.
-    worker_max_heap = Keyword.get(opts, :worker_max_heap, max_heap)
-    max_parallel_workers = Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers)
-    max_symbols = Keyword.get(opts, :max_symbols, 10_000)
     max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
-    compile_timeout = Keyword.get(opts, :compile_timeout, @default_compile_timeout)
-    turn_history = Keyword.get(opts, :turn_history, [])
-    max_print_length = Keyword.get(opts, :max_print_length)
-    filter_context = Keyword.get(opts, :filter_context, true)
-    budget = Keyword.get(opts, :budget)
-    pmap_timeout = Keyword.get(opts, :pmap_timeout)
-    pmap_max_concurrency = Keyword.get(opts, :pmap_max_concurrency)
-    trace_context = Keyword.get(opts, :trace_context)
     journal = Keyword.get(opts, :journal)
-    tool_cache = Keyword.get(opts, :tool_cache, %{})
-    max_tool_calls = Keyword.get(opts, :max_tool_calls)
-    strict_data = Keyword.get(opts, :strict_data, false)
-    discovery_exec = Keyword.get(opts, :discovery_exec)
-    link_sandbox = Keyword.get(opts, :link, false)
+    prelude_opt = Keyword.get(opts, :prelude)
+    runtime = Keyword.get(opts, :runtime)
 
     # Preflight: reject oversized source before any parsing
     if is_binary(source) and byte_size(source) > max_program_bytes do
@@ -344,33 +335,107 @@ defmodule PtcRunner.Lisp do
          journal: journal
        )}
     else
-      do_run_inner(source, %{
-        ctx: ctx,
-        memory: memory,
-        raw_tools: raw_tools,
-        signature_str: signature_str,
-        float_precision: float_precision,
-        timeout: timeout,
-        max_heap: max_heap,
-        worker_max_heap: worker_max_heap,
-        max_parallel_workers: max_parallel_workers,
-        max_symbols: max_symbols,
-        compile_timeout: compile_timeout,
-        turn_history: turn_history,
-        max_print_length: max_print_length,
-        filter_context: filter_context,
-        budget: budget,
-        pmap_timeout: pmap_timeout,
-        pmap_max_concurrency: pmap_max_concurrency,
-        trace_context: trace_context,
-        journal: journal,
-        tool_cache: tool_cache,
-        max_tool_calls: max_tool_calls,
-        strict_data: strict_data,
-        discovery_exec: discovery_exec,
-        link: link_sandbox
-      })
+      # Attach-time: compile prelude source if needed and validate its
+      # `requires` against the selected upstream runtime BEFORE parsing user
+      # code. On failure, return {:error, Step} :prelude_attach_failed (or the
+      # original compile reason). No prelude attached -> nil, unchanged path.
+      case attach_prelude(prelude_opt, runtime, memory, journal) do
+        {:ok, prelude} ->
+          source
+          |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
+          |> stamp_prelude_trace(prelude)
+
+        {:error, %Step{}} = err ->
+          # Attach FAILED — there is no compiled artifact to summarize.
+          err
+      end
     end
+  end
+
+  # Stamp the prelude trace summary (plan §12) onto the result Step so trace
+  # consumers can reproduce the V1 capability environment. Applied to BOTH the
+  # success and error Step; `nil` prelude leaves `prelude_trace` nil.
+  defp stamp_prelude_trace(result, nil), do: result
+
+  defp stamp_prelude_trace({tag, %Step{} = step}, %Prelude{} = prelude)
+       when tag in [:ok, :error] do
+    {tag, %{step | prelude_trace: Prelude.trace_summary(prelude)}}
+  end
+
+  # Bundle the per-run options map consumed by the rest of the run pipeline.
+  defp run_params(opts) do
+    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+
+    %{
+      ctx: Keyword.get(opts, :context, %{}),
+      memory: Keyword.get(opts, :memory, %{}),
+      raw_tools: Keyword.get(opts, :tools, %{}),
+      signature_str: Keyword.get(opts, :signature),
+      float_precision: Keyword.get(opts, :float_precision),
+      timeout: Keyword.get(opts, :timeout, 1000),
+      max_heap: max_heap,
+      # Security H1: every pmap/pcalls worker runs under this FIXED heap cap
+      # (default: the sandbox `max_heap`), and the global `max_parallel_workers`
+      # semaphore caps how many such workers are alive at once across the run.
+      worker_max_heap: Keyword.get(opts, :worker_max_heap, max_heap),
+      max_parallel_workers:
+        Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers),
+      max_symbols: Keyword.get(opts, :max_symbols, 10_000),
+      compile_timeout: Keyword.get(opts, :compile_timeout, @default_compile_timeout),
+      turn_history: Keyword.get(opts, :turn_history, []),
+      max_print_length: Keyword.get(opts, :max_print_length),
+      filter_context: Keyword.get(opts, :filter_context, true),
+      budget: Keyword.get(opts, :budget),
+      pmap_timeout: Keyword.get(opts, :pmap_timeout),
+      pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
+      trace_context: Keyword.get(opts, :trace_context),
+      journal: Keyword.get(opts, :journal),
+      tool_cache: Keyword.get(opts, :tool_cache, %{}),
+      max_tool_calls: Keyword.get(opts, :max_tool_calls),
+      strict_data: Keyword.get(opts, :strict_data, false),
+      discovery_exec: Keyword.get(opts, :discovery_exec),
+      link: Keyword.get(opts, :link, false)
+    }
+  end
+
+  # Resolve the `:prelude` option (compiled artifact or source) and run
+  # attach-time requires validation. `nil` means no prelude. When no upstream
+  # `:runtime` is selected (e.g. direct `Lisp.run` with a stub `tools:` map),
+  # requires validation has nothing to validate against and is skipped — the
+  # compiled artifact passes through and `check_undefined_tools` still guards
+  # the actual tool surface.
+  defp attach_prelude(nil, _runtime, _memory, _journal), do: {:ok, nil}
+
+  defp attach_prelude(prelude_opt, runtime, memory, journal) do
+    result =
+      if is_nil(runtime) do
+        compile_prelude_only(prelude_opt)
+      else
+        PreludeAttach.attach(prelude_opt, runtime)
+      end
+
+    case result do
+      {:ok, prelude} ->
+        {:ok, prelude}
+
+      {:error, %PreludeValidationError{} = err} ->
+        {:error,
+         Step.error(err.reason, "prelude attach failed: #{err.message}", memory, %{},
+           journal: journal
+         )}
+    end
+  end
+
+  defp compile_prelude_only(%Prelude{} = prelude), do: {:ok, prelude}
+
+  defp compile_prelude_only(source) when is_binary(source) do
+    PreludeCompiler.compile(source)
+  end
+
+  defp compile_prelude_only(other) do
+    raise ArgumentError,
+          "prelude must be a %PtcRunner.Lisp.Prelude{} artifact or prelude source string, got: " <>
+            inspect(other, limit: 5)
   end
 
   defp do_run_inner(source, %{raw_tools: raw_tools, memory: memory, journal: journal} = params) do
@@ -515,12 +580,14 @@ defmodule PtcRunner.Lisp do
       journal: journal
     } = opts
 
+    prelude = Map.get(opts, :prelude)
+
     compile_fn = fn ->
       with {:ok, raw_ast} <- Parser.parse(source),
            :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
-           {:ok, core_ast} <- Analyze.analyze(raw_ast),
+           {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude),
            :ok <- check_undefined_vars(core_ast, memory, journal),
-           :ok <- check_undefined_tools(core_ast, normalized_tools, memory, journal) do
+           :ok <- check_undefined_tools(core_ast, normalized_tools, prelude, memory, journal) do
         {:ok, core_ast}
       end
     end
@@ -609,7 +676,17 @@ defmodule PtcRunner.Lisp do
       discovery_exec: discovery_exec
     } = opts
 
-    filtered_ctx = if filter_context, do: DataKeys.filter_context(core_ast, ctx), else: ctx
+    prelude = Map.get(opts, :prelude)
+
+    # Skip dataset filtering when a prelude is attached: a prelude export may
+    # read `data/*` keys that never appear in the user program's own AST, so
+    # filtering (a memory optimization, not a security boundary) would starve
+    # the export of its data. Correctness wins over the optimization here.
+    filtered_ctx =
+      if filter_context and is_nil(prelude),
+        do: DataKeys.filter_context(core_ast, ctx),
+        else: ctx
+
     context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
@@ -629,7 +706,8 @@ defmodule PtcRunner.Lisp do
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         strict_data: strict_data,
-        discovery_exec: discovery_exec
+        discovery_exec: discovery_exec,
+        prelude: prelude
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
@@ -1008,14 +1086,19 @@ defmodule PtcRunner.Lisp do
   # Pre-execution check: reject programs that reference tools not in the provided
   # toolset, preventing partial execution where early tool calls succeed before
   # a later unknown tool call crashes.
-  defp check_undefined_tools(_core_ast, normalized_tools, _memory, _journal)
+  defp check_undefined_tools(_core_ast, normalized_tools, _prelude, _memory, _journal)
        when map_size(normalized_tools) == 0,
        do: :ok
 
-  defp check_undefined_tools(core_ast, normalized_tools, memory, journal) do
+  defp check_undefined_tools(core_ast, normalized_tools, prelude, memory, journal) do
     # CoreAST tool names are atoms, normalized_tools keys are strings — convert to strings
-    referenced =
+    direct =
       core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
+
+    # A prelude export wraps tools in its captured body, invisible to the AST
+    # walk above; union in the tools any referenced export will invoke so a
+    # missing wrapped tool fails BEFORE an earlier tool can run (side-effect guard).
+    referenced = MapSet.union(direct, collect_prelude_tool_refs(core_ast, prelude))
 
     available = MapSet.new(Map.keys(normalized_tools))
     undefined = MapSet.difference(referenced, available)
@@ -1053,6 +1136,14 @@ defmodule PtcRunner.Lisp do
   defp collect_tool_names({:runtime_callable, :tool, name}, acc), do: MapSet.put(acc, name)
   defp collect_tool_names({:runtime_callable, _namespace, _name}, acc), do: acc
   defp collect_tool_names({:symbol_ref, _name}, acc), do: acc
+
+  # Prelude export call: the wrapped tool/call lives inside the captured prelude
+  # closure body, not in the user AST; recurse into the call args only. The
+  # body's own tools are surfaced separately via collect_prelude_tool_refs/2.
+  defp collect_tool_names({:prelude_ref, _ref}, acc), do: acc
+
+  defp collect_tool_names({:prelude_call, _ref, args}, acc),
+    do: Enum.reduce(args, acc, &collect_tool_names/2)
 
   defp collect_tool_names({:repl_discovery, _operation, args}, acc),
     do: Enum.reduce(args, acc, &collect_tool_names/2)
@@ -1131,6 +1222,37 @@ defmodule PtcRunner.Lisp do
   defp collect_tool_names({:juxt, fns}, acc), do: Enum.reduce(fns, acc, &collect_tool_names/2)
 
   defp collect_tool_names(_other, acc), do: acc
+
+  # Typed tools a referenced prelude export will invoke (from its export record),
+  # so the pre-execution guard rejects a wrapped `(tool/call ...)` whose tool is
+  # missing BEFORE any earlier tool can run.
+  defp collect_prelude_tool_refs(_core_ast, nil), do: MapSet.new()
+
+  defp collect_prelude_tool_refs(core_ast, %Prelude{} = prelude) do
+    core_ast
+    |> collect_prelude_refs(MapSet.new())
+    |> Enum.reduce(MapSet.new(), fn ref, acc ->
+      prelude |> Prelude.export_tool_refs(ref) |> MapSet.new() |> MapSet.union(acc)
+    end)
+  end
+
+  # Generic CoreAST walk collecting prelude export refs ({:prelude_call,...} /
+  # {:prelude_ref,...}) referenced anywhere in the user program.
+  defp collect_prelude_refs({:prelude_call, ref, args}, acc),
+    do: Enum.reduce(args, MapSet.put(acc, ref), &collect_prelude_refs/2)
+
+  defp collect_prelude_refs({:prelude_ref, ref}, acc), do: MapSet.put(acc, ref)
+
+  defp collect_prelude_refs(tuple, acc) when is_tuple(tuple),
+    do: Enum.reduce(Tuple.to_list(tuple), acc, &collect_prelude_refs/2)
+
+  defp collect_prelude_refs(list, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_prelude_refs/2)
+
+  defp collect_prelude_refs(map, acc) when is_map(map),
+    do: Enum.reduce(Map.values(map), acc, &collect_prelude_refs/2)
+
+  defp collect_prelude_refs(_other, acc), do: acc
 
   defp execute_tool(normalized_tools, name, args) do
     case Map.fetch(normalized_tools, name) do
@@ -1274,6 +1396,13 @@ defmodule PtcRunner.Lisp do
 
   defp collect_undefined_vars({:runtime_callable, _namespace, _name}, _scope), do: []
   defp collect_undefined_vars({:symbol_ref, _name}, _scope), do: []
+
+  # Prelude export ref/call: the ref resolves through the prelude export table,
+  # not user scope; recurse into call args only.
+  defp collect_undefined_vars({:prelude_ref, _ref}, _scope), do: []
+
+  defp collect_undefined_vars({:prelude_call, _ref, args}, scope),
+    do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))
 
   defp collect_undefined_vars({:repl_discovery, _operation, args}, scope),
     do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))

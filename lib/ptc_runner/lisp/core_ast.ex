@@ -60,6 +60,13 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:task_reset, t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
           | {:tool_call, name(), [t()]}
+          # Public prelude export reference / call (Capability Prelude V1).
+          # `ref` is the host-boundary string ref, e.g. "crm/get-user". The
+          # evaluator resolves it from the attached prelude's export table and
+          # invokes the captured closure against the captured private prelude
+          # env so the export can call its private sibling helpers.
+          | {:prelude_ref, String.t()}
+          | {:prelude_call, String.t(), [t()]}
           # Define binding in user namespace: (def name value) with optional metadata
           | {:def, name(), t(), map()}
           # Idempotent define: (defonce name value) — no-op if already bound

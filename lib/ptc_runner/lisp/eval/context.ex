@@ -72,7 +72,24 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # in the context raises a runtime error naming the binding instead
     # of returning `nil`. Off by default (preserves existing in-process
     # behaviour); MCP requests pass `strict_data: true` per § 9.3.
-    strict_data: false
+    strict_data: false,
+    # Capability Prelude V1 (plan §5): the attached compiled prelude's PUBLIC
+    # export table, a map from string ref (e.g. "crm/get-user") to a
+    # `{callable, ns_env}` tuple — the callable captured from `private_env` plus
+    # its OWN namespace's private env. Qualified prelude calls
+    # (`{:prelude_call, ref, args}`) resolve here — inserted in resolver order
+    # AFTER the mutable `user` namespace and BEFORE builtins. The paired
+    # `ns_env` is threaded as the export body's `user_ns` layer so its private
+    # sibling helpers resolve within its OWN namespace, while user code (whose
+    # `user_ns` is the ordinary mutable namespace) cannot reach private helpers
+    # by qualified symbol. `%{}` when no prelude is attached.
+    prelude_exports: %{},
+    # The attached compiled prelude artifact (`%PtcRunner.Lisp.Prelude{}`) or
+    # `nil`. Discovery forms (`ns-publics`, `doc`, `meta`, `dir`, `apropos`,
+    # `all-ns`, `ns-name`) consult its PUBLIC export records — the SAME records
+    # the analyzer/evaluator use, no separate registry (plan §8). Private
+    # helpers have no export record and so never surface in discovery.
+    prelude: nil
   ]
 
   @typedoc """
@@ -183,7 +200,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
           catalog_ops: [catalog_op()],
           tool_cache: map(),
           tools_meta: %{String.t() => %{cache: boolean()}},
-          strict_data: boolean()
+          strict_data: boolean(),
+          prelude_exports: %{String.t() => {term(), map()}},
+          prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
 
   @type recur_effects :: %{
@@ -254,12 +273,32 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
+      prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
+      prelude: prelude_artifact(Keyword.get(opts, :prelude)),
       prints: [],
       tool_calls: [],
       pmap_calls: [],
       catalog_ops: []
     }
   end
+
+  # Build the public export table (ref => {callable, ns_env}) from the attached
+  # prelude. Each export's callable lives in the captured `private_env` under
+  # its namespace then its bare symbol; we pair the callable with its OWN
+  # namespace's env so a qualified prelude call resolves the right closure AND
+  # runs its body against the right private siblings, while private helpers
+  # (absent from `exports`) stay unreachable by qualified symbol.
+  defp prelude_exports(nil), do: %{}
+
+  defp prelude_exports(%PtcRunner.Lisp.Prelude{exports: exports, private_env: env}) do
+    Map.new(exports, fn export ->
+      ns_env = Map.get(env, export.namespace, %{})
+      {export.ref, {Map.get(ns_env, export.symbol), ns_env}}
+    end)
+  end
+
+  defp prelude_artifact(nil), do: nil
+  defp prelude_artifact(%PtcRunner.Lisp.Prelude{} = prelude), do: prelude
 
   @doc """
   Appends a print message to the context.
@@ -339,6 +378,23 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec update_user_ns(t(), map()) :: t()
   def update_user_ns(%__MODULE__{} = context, new_user_ns) do
     %{context | user_ns: new_user_ns}
+  end
+
+  @doc """
+  Copies the attached prelude tables (`prelude_exports`/`prelude`) from
+  `source` onto `context`.
+
+  Sub-contexts built with `new/6` for closure/thunk evaluation start with empty
+  prelude tables; this re-installs them so a qualified prelude call made from
+  inside a user closure still resolves (Capability Prelude V1, plan §5).
+  """
+  @spec inherit_prelude(t(), t()) :: t()
+  def inherit_prelude(%__MODULE__{} = context, %__MODULE__{} = source) do
+    %{
+      context
+      | prelude_exports: source.prelude_exports,
+        prelude: source.prelude
+    }
   end
 
   @doc """

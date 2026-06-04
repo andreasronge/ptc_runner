@@ -6,7 +6,10 @@ defmodule Mix.Tasks.Ptc.Repl do
   ## Usage
 
       mix ptc.repl                      # Interactive REPL (default)
-      mix ptc.repl -l prelude.clj       # Load file, then interactive
+      mix ptc.repl -l user.clj          # Load user-code file, then interactive
+      mix ptc.repl --prelude crm.clj    # Attach a deployment prelude
+      mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
+      mix ptc.repl --prelude crm.clj --show-prompt-inventory
       mix ptc.repl -e "(+ 1 2)"         # Eval and print result
       mix ptc.repl --upstreams-config upstreams.json -e "(tool/servers)"
       mix ptc.repl -e "(def x 1)" -e "(* x 2)"  # Chain evals (memory persists)
@@ -17,6 +20,11 @@ defmodule Mix.Tasks.Ptc.Repl do
 
     * `-e, --eval` - Evaluate expression and print result (can be repeated)
     * `-l, --load` - Load file before entering interactive mode
+    * `-p, --prelude` - Compile a deployment prelude file and attach it to every
+      evaluation (protected namespaces, public exports, discovery). SEPARATE
+      from `-l/--load`, which loads ordinary user code.
+    * `--show-prompt-inventory` - Print the prelude's compact prompt inventory
+      (the same rendering SubAgent execution injects) before evaluating.
     * `--upstreams-config` - Root upstream JSON config path
       (or `PTC_RUNNER_UPSTREAMS`)
     * `--max-tool-calls` - Per-evaluation `tool/call` cap
@@ -50,6 +58,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   use Mix.Task
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.SubAgent.Loop.ResponseHandler
   alias PtcRunner.Upstream.Eval, as: UpstreamEval
@@ -58,6 +68,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   @switches [
     eval: :keep,
     load: :string,
+    prelude: :string,
+    show_prompt_inventory: :boolean,
     help: :boolean,
     upstreams_config: :string,
     max_tool_calls: :integer,
@@ -67,7 +79,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     catalog_mode: :string,
     catalog_snapshot_mode: :string
   ]
-  @aliases [e: :eval, l: :load, h: :help]
+  @aliases [e: :eval, l: :load, p: :prelude, h: :help]
 
   @impl Mix.Task
   def run(args) do
@@ -75,24 +87,77 @@ defmodule Mix.Tasks.Ptc.Repl do
 
     {opts, rest, _invalid} = OptionParser.parse(args, switches: @switches, aliases: @aliases)
 
-    cond do
-      opts[:help] ->
-        print_help()
+    # `--help` must stay side-effect-free: load the prelude (and print the
+    # inventory) only AFTER ruling out help, so `--help --prelude missing.clj`
+    # shows help instead of raising a file error.
+    if opts[:help] do
+      print_help()
+    else
+      prelude = load_prelude(opts)
+      if opts[:show_prompt_inventory], do: print_prompt_inventory(prelude)
 
-      rest == ["-"] ->
-        with_upstream_runtime(opts, &run_stdin(&1))
+      # `session` bundles the optional upstream runtime with the optional
+      # compiled prelude so every `run_lisp` attaches the SAME artifact.
+      with_session = fn fun -> with_upstream_runtime(opts, &fun.({&1, prelude})) end
 
-      rest != [] ->
-        with_upstream_runtime(opts, &run_file(hd(rest), &1))
+      cond do
+        rest == ["-"] ->
+          with_session.(&run_stdin/1)
 
-      opts[:eval] ->
-        with_upstream_runtime(opts, &run_evals(Keyword.get_values(opts, :eval), &1))
+        rest != [] ->
+          with_session.(&run_file(hd(rest), &1))
 
-      opts[:load] ->
-        with_upstream_runtime(opts, &load_and_repl(opts[:load], &1))
+        opts[:eval] ->
+          with_session.(&run_evals(Keyword.get_values(opts, :eval), &1))
 
-      true ->
-        with_upstream_runtime(opts, &interactive_repl(&1))
+        opts[:load] ->
+          with_session.(&load_and_repl(opts[:load], &1))
+
+        true ->
+          with_session.(&interactive_repl/1)
+      end
+    end
+  end
+
+  @doc """
+  Compiles a deployment prelude source file into a
+  `%PtcRunner.Lisp.Prelude{}` artifact — the SAME compiler, protected-namespace
+  tables, and export records SubAgent execution uses. Raises `Mix.Error` on a
+  missing file or a prelude compile/validation failure.
+  """
+  @spec compile_prelude!(Path.t()) :: PtcRunner.Lisp.Prelude.t()
+  def compile_prelude!(path) do
+    source =
+      case File.read(path) do
+        {:ok, source} ->
+          source
+
+        {:error, reason} ->
+          Mix.raise("Error reading prelude #{path}: #{:file.format_error(reason)}")
+      end
+
+    case PreludeCompiler.compile(source) do
+      {:ok, prelude} ->
+        prelude
+
+      {:error, error} ->
+        Mix.raise("Prelude compile error (#{error.reason}): #{error.message}")
+    end
+  end
+
+  defp load_prelude(opts) do
+    case opts[:prelude] do
+      nil -> nil
+      path -> compile_prelude!(path)
+    end
+  end
+
+  defp print_prompt_inventory(nil), do: :ok
+
+  defp print_prompt_inventory(prelude) do
+    case PromptInventory.render(prelude) do
+      nil -> :ok
+      text -> IO.puts(text <> "\n")
     end
   end
 
@@ -100,21 +165,21 @@ defmodule Mix.Tasks.Ptc.Repl do
     IO.puts(@moduledoc)
   end
 
-  defp run_stdin(runtime) do
+  defp run_stdin(session) do
     case IO.read(:stdio, :eof) do
       {:error, reason} ->
         IO.puts(:stderr, "Error reading stdin: #{reason}")
         System.halt(1)
 
       source ->
-        run_source(source, %{}, runtime)
+        run_source(source, %{}, session)
     end
   end
 
-  defp run_file(path, runtime) do
+  defp run_file(path, session) do
     case File.read(path) do
       {:ok, source} ->
-        run_source(source, %{}, runtime)
+        run_source(source, %{}, session)
 
       {:error, reason} ->
         IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
@@ -122,16 +187,16 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp run_evals(exprs, runtime) do
+  defp run_evals(exprs, session) do
     # run_source halts on error, so we can use simple reduce
     Enum.reduce(exprs, %{}, fn expr, memory ->
-      {:ok, new_memory} = run_source(expr, memory, runtime)
+      {:ok, new_memory} = run_source(expr, memory, session)
       new_memory
     end)
   end
 
-  defp run_source(source, memory, runtime) do
-    case run_lisp(source, [memory: memory], runtime) do
+  defp run_source(source, memory, session) do
+    case run_lisp(source, [memory: memory], session) do
       {:ok, step} ->
         print_captured_output(step.prints)
         {output, _truncated?} = Format.to_clojure(step.return)
@@ -144,23 +209,23 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp interactive_repl(runtime) do
+  defp interactive_repl(session) do
     IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
     IO.puts("Type :help for commands, :doc <name> for function docs\n")
 
-    loop([], %{}, runtime)
+    loop([], %{}, session)
   end
 
-  defp load_and_repl(path, runtime) do
+  defp load_and_repl(path, session) do
     case File.read(path) do
       {:ok, source} ->
-        case run_lisp(source, [], runtime) do
+        case run_lisp(source, [], session) do
           {:ok, step} ->
             print_captured_output(step.prints)
             IO.puts("Loaded #{path}")
             IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
             IO.puts("Type :help for commands, :doc <name> for function docs\n")
-            loop([], step.memory, runtime)
+            loop([], step.memory, session)
 
           {:error, step} ->
             IO.puts(:stderr, format_error(step.fail))
@@ -173,22 +238,22 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp loop(history, memory, runtime) do
+  defp loop(history, memory, {runtime, _prelude} = session) do
     case read_expression("ptc> ", "") do
       :eof ->
         IO.puts("\nGoodbye!")
 
       "" ->
         # Ignore empty lines, only Ctrl+D exits
-        loop(history, memory, runtime)
+        loop(history, memory, session)
 
       ":" <> meta ->
         handle_meta(String.trim(meta), runtime)
-        loop(history, memory, runtime)
+        loop(history, memory, session)
 
       input ->
-        {history, memory} = evaluate(input, history, memory, runtime)
-        loop(history, memory, runtime)
+        {history, memory} = evaluate(input, history, memory, session)
+        loop(history, memory, session)
     end
   end
 
@@ -220,8 +285,8 @@ defmodule Mix.Tasks.Ptc.Repl do
     |> Kernel.==(0)
   end
 
-  defp evaluate(input, history, memory, runtime) do
-    case run_lisp(input, [turn_history: history, memory: memory], runtime) do
+  defp evaluate(input, history, memory, session) do
+    case run_lisp(input, [turn_history: history, memory: memory], session) do
       {:ok, step} ->
         # Show truncated output exactly like LLM feedback sees
         print_captured_output(step.prints)
@@ -324,11 +389,25 @@ defmodule Mix.Tasks.Ptc.Repl do
     "Error (#{reason_str}): #{message}"
   end
 
-  defp run_lisp(source, opts, nil), do: PtcRunner.Lisp.run(source, opts)
-
-  defp run_lisp(source, opts, runtime) do
-    UpstreamEval.run_lisp(runtime, source, opts)
+  # `session` is `{runtime, prelude}`. The prelude artifact is attached to every
+  # evaluation via the same `:prelude` opt SubAgent execution uses. With an
+  # upstream runtime present, also pass `:runtime` so attach-time `requires`
+  # validation runs against it.
+  defp run_lisp(source, opts, {nil, prelude}) do
+    PtcRunner.Lisp.run(source, maybe_attach_prelude(opts, prelude, nil))
   end
+
+  defp run_lisp(source, opts, {runtime, prelude}) do
+    UpstreamEval.run_lisp(runtime, source, maybe_attach_prelude(opts, prelude, runtime))
+  end
+
+  defp maybe_attach_prelude(opts, nil, _runtime), do: opts
+
+  defp maybe_attach_prelude(opts, prelude, nil),
+    do: Keyword.put(opts, :prelude, prelude)
+
+  defp maybe_attach_prelude(opts, prelude, runtime),
+    do: opts |> Keyword.put(:prelude, prelude) |> Keyword.put(:runtime, runtime)
 
   defp with_upstream_runtime(opts, fun) do
     case upstream_runtime_opts(opts) do

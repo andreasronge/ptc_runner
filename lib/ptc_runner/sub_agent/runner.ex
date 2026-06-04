@@ -293,12 +293,16 @@ defmodule PtcRunner.SubAgent.Runner do
         # Extract code from response content
         case extract_code(content) do
           {:ok, code} ->
-            # Execute via Lisp
+            # Execute via Lisp. The single-shot fast path (max_turns == 1) is a
+            # SubAgent execution surface too, so it must attach the configured
+            # `runtime_prelude` (plan §1A) — otherwise a program calling a
+            # prelude export fails with an unknown namespace. `nil` is inert.
             lisp_result =
               case PtcRunner.Lisp.run(code,
                      context: context,
                      tools: %{},
-                     float_precision: agent.float_precision
+                     float_precision: agent.float_precision,
+                     prelude: agent.runtime_prelude
                    ) do
                 {:ok, step} -> Definition.unwrap_sentinels(step)
                 other -> other

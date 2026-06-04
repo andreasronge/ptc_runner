@@ -15,6 +15,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Analyze.Iteration
   alias PtcRunner.Lisp.Analyze.Patterns
   alias PtcRunner.Lisp.Analyze.Placeholder
+  alias PtcRunner.Lisp.Analyze.PreludeScope
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
@@ -137,13 +138,28 @@ defmodule PtcRunner.Lisp.Analyze do
       :doc,
       :meta,
       :"ns-publics",
+      :"all-ns",
+      :"ns-name",
       :"tool/servers"
     ]
   end
 
-  @spec analyze(term()) :: {:ok, CoreAST.t()} | {:error, error_reason()}
-  def analyze(raw_ast) do
-    do_analyze(raw_ast, false)
+  @doc """
+  Validates and desugars `raw_ast` into CoreAST.
+
+  When a compiled `prelude` (`%PtcRunner.Lisp.Prelude{}`) is supplied, the
+  analyzer resolves qualified prelude calls/refs (e.g. `crm/get-user`) against
+  the prelude's PUBLIC export table and rejects writes into protected prelude
+  namespaces (e.g. `(defn crm/get-user ...)`) with a protection programmer
+  fault. The prelude is consulted via process-local state scoped to this single
+  analysis pass (set on entry, cleared on exit), so the deep mutually-recursive
+  `do_analyze/2` clauses do not each have to thread it. Passing `nil` keeps the
+  pre-prelude behavior unchanged.
+  """
+  @spec analyze(term(), PtcRunner.Lisp.Prelude.t() | nil) ::
+          {:ok, CoreAST.t()} | {:error, error_reason()}
+  def analyze(raw_ast, prelude \\ nil) do
+    PreludeScope.with_prelude(prelude, fn -> do_analyze(raw_ast, false) end)
   end
 
   # ============================================================
@@ -277,10 +293,18 @@ defmodule PtcRunner.Lisp.Analyze do
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
   # and `qualified_namespace_lookup/2` (Plans/json-support.md §4.4 OQ-5 option (a)).
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
-    case qualified_namespace_lookup(ns, key) do
-      {:ok, qualified} -> {:ok, {:var, qualified}}
-      :not_qualified -> normalize_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
-      :unknown_member -> namespaced_unknown_member_error(ns, key)
+    case PreludeScope.fetch_export(ns, key) do
+      {:ok, export} ->
+        # Value-position prelude export ref: resolves to the callable export
+        # value at eval time. Arity is enforced at call position.
+        {:ok, {:prelude_ref, export.ref}}
+
+      :error ->
+        case qualified_namespace_lookup(ns, key) do
+          {:ok, qualified} -> {:ok, {:var, qualified}}
+          :not_qualified -> prelude_or_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
+          :unknown_member -> namespaced_unknown_member_error(ns, key)
+        end
     end
   end
 
@@ -386,6 +410,14 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :"task-reset"}, rest, _list, tail?),
     do: analyze_task_reset(rest, tail?)
 
+  # Qualified definition targets: `(def crm/x ...)` / `(defn crm/get-user ...)`.
+  # V1 supports these only to REJECT writes into protected namespaces with a
+  # protection programmer fault (plan §2), not to enable general qualified defs.
+  defp dispatch_list_form({:symbol, head}, [{:ns_symbol, ns, sym} | _], _list, _tail?)
+       when head in [:def, :defonce, :defn] do
+    analyze_qualified_definition(head, ns, sym)
+  end
+
   defp dispatch_list_form({:symbol, :def}, rest, _list, tail?), do: analyze_def(rest, tail?)
 
   defp dispatch_list_form({:symbol, :defonce}, rest, _list, tail?),
@@ -472,6 +504,25 @@ defmodule PtcRunner.Lisp.Analyze do
       "(ns-publics namespace) requires exactly 1 argument, got #{length(args)}"}}
   end
 
+  defp dispatch_list_form({:symbol, :"all-ns"}, [], _list, _tail?),
+    do: {:ok, {:repl_discovery, :all_ns, []}}
+
+  defp dispatch_list_form({:symbol, :"all-ns"}, args, _list, _tail?) do
+    {:error, {:invalid_arity, :"all-ns", "(all-ns) takes no arguments, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:symbol, :"ns-name"}, [ns_ast], _list, _tail?) do
+    with {:ok, ns_ref} <- do_analyze(ns_ast, false) do
+      {:ok, {:repl_discovery, :ns_name, [ns_ref]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :"ns-name"}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :"ns-name",
+      "(ns-name namespace) requires exactly 1 argument, got #{length(args)}"}}
+  end
+
   # Tool invocation via tool/ namespace: (tool/name args...)
   # Tool discovery via tool/ namespace
   defp dispatch_list_form({:ns_symbol, :tool, :servers}, [], _list, _tail?),
@@ -500,17 +551,23 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
-    case qualified_namespace_lookup(ns, func) do
-      {:ok, qualified} ->
-        dispatch_list_form({:symbol, qualified}, rest, list, tail?)
+    case PreludeScope.fetch_export(ns, func) do
+      {:ok, export} ->
+        analyze_prelude_call(export, rest, tail?)
 
-      :not_qualified ->
-        normalize_clojure_namespace(ns, func, fn ->
-          dispatch_list_form({:symbol, func}, rest, list, tail?)
-        end)
+      :error ->
+        case qualified_namespace_lookup(ns, func) do
+          {:ok, qualified} ->
+            dispatch_list_form({:symbol, qualified}, rest, list, tail?)
 
-      :unknown_member ->
-        namespaced_unknown_member_error(ns, func)
+          :not_qualified ->
+            prelude_or_clojure_namespace(ns, func, fn ->
+              dispatch_list_form({:symbol, func}, rest, list, tail?)
+            end)
+
+          :unknown_member ->
+            namespaced_unknown_member_error(ns, func)
+        end
     end
   end
 
@@ -1347,6 +1404,102 @@ defmodule PtcRunner.Lisp.Analyze do
 
     {:error,
      {:invalid_form, "#{ns}/#{func} is not available. #{category_name} functions: #{available}"}}
+  end
+
+  # A public prelude export call: validate arity against the export record,
+  # analyze the args, and emit a {:prelude_call, ref, args} node the evaluator
+  # resolves from the export table (invoking the captured closure against the
+  # captured private prelude env). Private helpers have no export record, so
+  # this path is unreachable for them — they stay user-invisible (plan §5/§8).
+  defp analyze_prelude_call(%{ref: ref, arity: arity} = export, arg_asts, _tail?) do
+    actual = length(arg_asts)
+    min_arity = Map.get(export, :min_arity, 0)
+
+    cond do
+      arity == :variadic and actual >= min_arity ->
+        with {:ok, args} <- analyze_list(arg_asts) do
+          {:ok, {:prelude_call, ref, args}}
+        end
+
+      arity == :variadic ->
+        {:error,
+         {:invalid_arity, :prelude_call,
+          "#{ref} expects at least #{min_arity} argument(s), got #{actual}"}}
+
+      arity == actual ->
+        with {:ok, args} <- analyze_list(arg_asts) do
+          {:ok, {:prelude_call, ref, args}}
+        end
+
+      true ->
+        {:error,
+         {:invalid_arity, :prelude_call, "#{ref} expects #{arity} argument(s), got #{actual}"}}
+    end
+  end
+
+  # Resolution fall-through for an `ns/func` in call/value position whose `ns`
+  # is NOT a known public prelude export. Clojure-style builtin namespaces keep
+  # their existing normalization. A KNOWN prelude namespace whose member is not
+  # a public export (an unknown export, or a private helper with no export
+  # record) becomes an actionable unknown-export programmer fault pointing at
+  # discovery forms (plan acceptance: "Reject Unknown Namespaced Call",
+  # "Private Helper Is Not User-visible"). Everything else keeps the generic
+  # unknown-namespace message.
+  defp prelude_or_clojure_namespace(ns, func, on_success) do
+    cond do
+      Env.clojure_namespace?(ns) ->
+        normalize_clojure_namespace(ns, func, on_success)
+
+      PreludeScope.prelude_namespace?(ns) ->
+        unknown_export_error(ns, func)
+
+      true ->
+        normalize_clojure_namespace(ns, func, on_success)
+    end
+  end
+
+  # A prelude namespace is known but `func` is not one of its public exports
+  # (unknown export, or a private helper that has no export record).
+  defp unknown_export_error(ns, func) do
+    {:error,
+     {:invalid_form,
+      "#{ns}/#{func} is not a public export of namespace #{ns}. " <>
+        "Discover its public exports with (ns-publics '#{ns}) or (apropos \"#{func}\")."}}
+  end
+
+  # A qualified definition target `(def ns/sym ...)` / `(defn ns/sym ...)`.
+  # Writing into a PROTECTED namespace (reserved or prelude-declared) or onto a
+  # public prelude EXPORT is a protection programmer fault naming the
+  # namespace/symbol (plan §2). A qualified definition outside any protected
+  # namespace is an explicit unsupported-qualified-definition error (V1 does
+  # not support general qualified defs).
+  defp analyze_qualified_definition(_head, ns, sym) do
+    cond do
+      # The target IS a public prelude export: say so explicitly so the user
+      # learns they are attempting to shadow a curated capability, not just
+      # writing into a protected namespace (plan §2 "OR the symbol is a public
+      # prelude export").
+      match?({:ok, _}, PreludeScope.fetch_export(ns, sym)) ->
+        {:error,
+         {:invalid_form,
+          "cannot redefine #{ns}/#{sym}: it is a public export of the protected " <>
+            "namespace #{ns} and cannot be redefined by user code."}}
+
+      # The target's namespace is protected (reserved host namespace or a
+      # prelude-declared namespace) even though the symbol is not a public
+      # export (e.g. a private helper or a brand-new symbol).
+      PreludeScope.protected_namespace?(ns) ->
+        {:error,
+         {:invalid_form,
+          "cannot define #{ns}/#{sym}: #{ns} is a protected namespace whose " <>
+            "names cannot be redefined by user code."}}
+
+      true ->
+        {:error,
+         {:invalid_form,
+          "qualified definitions are not supported: cannot define #{ns}/#{sym}. " <>
+            "Define unqualified names in the user namespace instead."}}
+    end
   end
 
   # Normalize Clojure-style namespaces to builtins or provide helpful errors.

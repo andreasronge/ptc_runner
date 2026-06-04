@@ -4915,7 +4915,7 @@
     },
     %{
       name: "ns-publics",
-      description: "Return public vars for a local PTC/Clojure namespace",
+      description: "Return public vars for a PTC/Clojure or prelude namespace",
       binding: nil,
       category: :core,
       dispatch: :analyze,
@@ -4924,10 +4924,47 @@
       section: "Discovery",
       ptc_extension?: false,
       examples: [],
-      notes: "Local namespace discovery only; Java classes and MCP servers are not supported.",
-      see_also: ["dir", "doc", "meta", "apropos"],
+      notes:
+        "Returns a map keyed by public symbol strings. Resolves prelude-export namespaces and local Clojure/PTC namespaces; Java classes and MCP servers are not supported.",
+      see_also: ["dir", "doc", "meta", "apropos", "all-ns", "ns-name"],
       clojure_var: "ns-publics",
       divergences: nil
+    },
+    %{
+      name: "all-ns",
+      description: "Return a sorted list of discoverable namespace-name strings",
+      binding: nil,
+      category: :core,
+      dispatch: :analyze,
+      signatures: ["(all-ns)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Curated Lisp-facing namespaces (e.g. clojure.core, clojure.string) plus any attached prelude namespaces. Does not leak BEAM internals, Java classes, or implementation-only namespaces.",
+      see_also: ["ns-name", "ns-publics", "dir"],
+      clojure_var: "all-ns",
+      divergences:
+        "Returns namespace-name STRINGS, not Clojure Namespace objects (PtcRunner has no first-class namespace value)."
+    },
+    %{
+      name: "ns-name",
+      description: "Return the namespace-name string for a known namespace",
+      binding: nil,
+      category: :core,
+      dispatch: :analyze,
+      signatures: ["(ns-name namespace)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: false,
+      examples: [],
+      notes:
+        "Accepts a quoted symbol ('crm) or a string (\"crm\"). Returns the namespace name as a string for curated and prelude namespaces.",
+      see_also: ["all-ns", "ns-publics"],
+      clojure_var: "ns-name",
+      divergences:
+        "Takes a namespace REF (symbol/string) rather than a Clojure Namespace object and returns a string, not a symbol."
     },
     %{
       name: "or",

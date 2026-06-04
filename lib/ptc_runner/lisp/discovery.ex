@@ -8,9 +8,25 @@ defmodule PtcRunner.Lisp.Discovery do
   """
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Registry
 
+  # Discovery source ranks. `sort_matches/1` sorts ASCENDING on `source_rank`,
+  # so a LOWER rank ranks FIRST. Capability Prelude V1 (plan §8) pins exact
+  # prelude exports as the HIGHEST-priority source: prelude (-1) outranks both
+  # MCP (0) and local/built-in (2). The pre-existing MCP-vs-local relationship
+  # is preserved unchanged (upstream tools out-rank local builtins for a
+  # matching query — see `PtcRunner.Upstream.Discovery` and the
+  # upstream-runtime apropos test), so V1 only inserts prelude at the top.
+  @prelude_source_rank -1
   @local_source_rank 2
+
+  # Curated Lisp-facing namespace names exposed by `(all-ns)`. Deliberately a
+  # small allow-list of the namespaces user code can `dir`/`ns-publics` against,
+  # NOT the raw internal bounded vocabulary: no BEAM internals, Java classes, or
+  # implementation-only namespaces (plan §8). Prelude-declared namespaces are
+  # merged in at call time.
+  @curated_namespaces ~w(clojure.core clojure.string clojure.set clojure.walk json)
 
   @class_aliases %{
     "Math" => "java.lang.Math",
@@ -177,6 +193,149 @@ defmodule PtcRunner.Lisp.Discovery do
       end
     end
   end
+
+  # ============================================================
+  # Capability Prelude V1 discovery (plan §8)
+  #
+  # Prelude export records are consulted BEFORE local/MCP discovery for exact
+  # refs, and merged ahead of them in `apropos`. The SAME `%Export{}` records
+  # the analyzer/evaluator use back these forms — no separate registry. Private
+  # helpers (`defn-`) have no export record, so they never surface here.
+  # ============================================================
+
+  @doc """
+  Public exports of a prelude namespace as a `{symbol-string => meta}` map, or
+  `:unknown` when `ref` is not a declared prelude namespace.
+  """
+  @spec prelude_ns_publics(Prelude.t() | nil, term()) ::
+          {:ok, map()} | :unknown | {:programmer_fault, String.t()}
+  def prelude_ns_publics(prelude, ref) do
+    with {:ok, name} <- normalize_ref(ref, "ns-publics") do
+      case prelude_namespace_exports(prelude, name) do
+        :unknown ->
+          :unknown
+
+        exports ->
+          publics =
+            exports
+            |> Enum.sort_by(& &1.symbol)
+            |> Map.new(fn export -> {export.symbol, export_public_meta(export)} end)
+
+          {:ok, publics}
+      end
+    end
+  end
+
+  @doc """
+  Human-readable docs for an exact prelude export ref (e.g. `"crm/get-user"`),
+  or `:unknown` when there is no such public export.
+  """
+  @spec prelude_doc(Prelude.t() | nil, term()) ::
+          {:ok, String.t()} | :unknown | {:programmer_fault, String.t()}
+  def prelude_doc(prelude, ref) do
+    with {:ok, name} <- normalize_ref(ref, "doc") do
+      case fetch_prelude_export(prelude, name) do
+        {:ok, export} -> {:ok, export_doc_text(export)}
+        :error -> :unknown
+      end
+    end
+  end
+
+  @doc """
+  Compact metadata map for an exact prelude export ref, or `:unknown`.
+  """
+  @spec prelude_meta(Prelude.t() | nil, term()) ::
+          {:ok, map()} | :unknown | {:programmer_fault, String.t()}
+  def prelude_meta(prelude, ref) do
+    with {:ok, name} <- normalize_ref(ref, "meta") do
+      case fetch_prelude_export(prelude, name) do
+        {:ok, export} -> {:ok, export_meta_map(export)}
+        :error -> :unknown
+      end
+    end
+  end
+
+  @doc """
+  `dir`-style member lines for a prelude namespace, or `:unknown` when `ref`
+  is not a declared prelude namespace. Honors the same `:limit`/`:offset`
+  pagination opts as the local/MCP `dir` paths.
+  """
+  @spec prelude_dir(Prelude.t() | nil, term(), map()) ::
+          {:ok, [String.t()]} | :unknown | {:programmer_fault, String.t()}
+  def prelude_dir(prelude, ref, opts \\ %{}) do
+    with {:ok, opts} <- parse_dir_opts(opts),
+         {:ok, name} <- normalize_ref(ref, "dir") do
+      case prelude_namespace_exports(prelude, name) do
+        :unknown ->
+          :unknown
+
+        exports ->
+          limit = Map.get(opts, :limit, 50)
+          offset = Map.get(opts, :offset, 0)
+
+          {:ok,
+           exports
+           |> Enum.sort_by(& &1.symbol)
+           |> Enum.drop(offset)
+           |> Enum.take(limit)
+           |> Enum.map(&export_dir_line/1)}
+      end
+    end
+  end
+
+  @doc """
+  Sorted list of curated Lisp-facing namespace-name strings (plan §8), with the
+  attached prelude's declared namespaces merged in. Never leaks BEAM internals,
+  Java classes, or implementation-only namespaces.
+  """
+  @spec all_ns(Prelude.t() | nil) :: {:ok, [String.t()]}
+  def all_ns(prelude) do
+    prelude_namespaces =
+      case prelude do
+        %Prelude{} = p -> Prelude.namespaces(p)
+        _ -> []
+      end
+
+    names =
+      (@curated_namespaces ++ prelude_namespaces)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    {:ok, names}
+  end
+
+  @doc """
+  Returns the namespace-name string for a known namespace ref (a curated
+  Lisp-facing namespace or a prelude-declared namespace), or `:unknown`.
+  """
+  @spec ns_name(Prelude.t() | nil, term()) ::
+          {:ok, String.t()} | :unknown | {:programmer_fault, String.t()}
+  def ns_name(prelude, ref) do
+    with {:ok, name} <- normalize_ref(ref, "ns-name") do
+      {:ok, known_names} = all_ns(prelude)
+
+      if name in known_names or local_namespace?(name) do
+        {:ok, name}
+      else
+        :unknown
+      end
+    end
+  end
+
+  @doc """
+  Structured prelude apropos matches (`@prelude_source_rank`) for unified
+  ordering. Scored over each public export's ref/symbol/doc/namespace.
+  """
+  @spec prelude_apropos_matches(Prelude.t() | nil, String.t()) :: [map()]
+  def prelude_apropos_matches(%Prelude{exports: exports}, query) when is_binary(query) do
+    query_tokens = tokenize(query)
+
+    exports
+    |> Enum.map(&score_prelude_export(&1, query_tokens))
+    |> Enum.reject(&(&1.score <= 0))
+  end
+
+  def prelude_apropos_matches(_prelude, query) when is_binary(query), do: []
 
   @doc """
   Shared lexical token scoring. Exact matches outrank prefixes; prefixes
@@ -514,6 +673,100 @@ defmodule PtcRunner.Lisp.Discovery do
       arglists: entry.signatures,
       section: entry.section,
       source: "local"
+    }
+  end
+
+  # --- Prelude export discovery helpers (plan §8) ---
+
+  # Public exports of a declared prelude namespace, or `:unknown` when `name`
+  # is not a namespace the attached prelude declares.
+  defp prelude_namespace_exports(%Prelude{} = prelude, name) do
+    if name in Prelude.namespaces(prelude) do
+      Enum.filter(prelude.exports, &(&1.namespace == name))
+    else
+      :unknown
+    end
+  end
+
+  defp prelude_namespace_exports(_prelude, _name), do: :unknown
+
+  defp fetch_prelude_export(%Prelude{} = prelude, ref), do: Prelude.fetch_export(prelude, ref)
+  defp fetch_prelude_export(_prelude, _ref), do: :error
+
+  defp export_public_meta(export) do
+    %{
+      name: export.symbol,
+      doc: export.doc,
+      arglists: [export_signature(export)],
+      arity: export.arity,
+      visibility: export.visibility,
+      effect: export.effect,
+      source: "prelude"
+    }
+  end
+
+  defp export_meta_map(export) do
+    %{
+      kind: "prelude-export",
+      source: "prelude",
+      namespace: export.namespace,
+      name: export.symbol,
+      ref: export.ref,
+      doc: export.doc,
+      arity: export.arity,
+      arglists: [export_signature(export)],
+      visibility: export.visibility,
+      effect: export.effect,
+      provider_ref: export.provider_ref,
+      requires: export.requires
+    }
+  end
+
+  defp export_doc_text(export) do
+    [
+      export.ref,
+      maybe_line("Description", compact_text(export.doc || "")),
+      maybe_line("Kind", "prelude-export"),
+      maybe_line("Namespace", export.namespace),
+      maybe_line("Signature", export_signature(export)),
+      maybe_line("Effect", to_string(export.effect))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp export_dir_line(export) do
+    signature = export_signature(export)
+    description = compact_text(export.doc || "")
+    suffix = if description == "", do: "", else: " - #{truncate_text(description, 120)}"
+    "#{signature}#{suffix}"
+  end
+
+  defp export_signature(%{symbol: symbol, arity: :variadic}), do: "(#{symbol} & args)"
+
+  defp export_signature(%{symbol: symbol, arity: arity}) when is_integer(arity) do
+    args = Enum.map_join(1..arity//1, " ", fn i -> "arg#{i}" end)
+    if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
+  end
+
+  defp score_prelude_export(export, query_tokens) do
+    name_tokens = tokenize(export.symbol) ++ tokenize(export.ref)
+    other_tokens = tokenize(export.doc) ++ tokenize(export.namespace)
+
+    score =
+      score_tokens(query_tokens, name_tokens, 2) + score_tokens(query_tokens, other_tokens, 0)
+
+    description = compact_text(export.doc || "")
+    suffix = if description == "", do: "", else: " - #{description}"
+
+    %{
+      source_kind: "prelude",
+      source_rank: @prelude_source_rank,
+      score: score,
+      namespace: export.namespace,
+      name: export.symbol,
+      ref: export.ref,
+      line: "prelude: #{export.ref}#{suffix}"
     }
   end
 

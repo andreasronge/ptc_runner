@@ -208,7 +208,8 @@ defmodule PtcRunner.SubAgent.Definition do
           plan: [plan_step()],
           progress_fn: (map(), term() -> {String.t(), term()}) | nil,
           journaling: boolean(),
-          completion_mode: completion_mode()
+          completion_mode: completion_mode(),
+          runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
 
   @default_format_options [
@@ -258,7 +259,12 @@ defmodule PtcRunner.SubAgent.Definition do
     plan: [],
     progress_fn: nil,
     journaling: false,
-    completion_mode: :implicit
+    completion_mode: :implicit,
+    # Capability Prelude V1 (plan §1A): a compiled `%PtcRunner.Lisp.Prelude{}`
+    # artifact attached to SubAgent execution. Threaded
+    # `Loop.run -> LispOpts.build/4 -> Lisp.run` as the `:prelude` opt (the
+    # single attach seam), and surfaced in the dynamic prompt inventory.
+    runtime_prelude: nil
   ]
 
   @doc false

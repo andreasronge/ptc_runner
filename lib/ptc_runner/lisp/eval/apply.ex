@@ -724,13 +724,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         discovery_exec: eval_context.discovery_exec
       )
 
-    eval_ctx = %{
-      eval_ctx
-      | locals: closure_locals(metadata, bindings),
-        # Security H1: propagate the shared parallel deadline so a
-        # nested pmap/pcalls inside this closure inherits it.
-        pmap_deadline: eval_context.pmap_deadline
-    }
+    eval_ctx =
+      %{
+        eval_ctx
+        | locals: closure_locals(metadata, bindings),
+          # Security H1: propagate the shared parallel deadline so a
+          # nested pmap/pcalls inside this closure inherits it.
+          pmap_deadline: eval_context.pmap_deadline
+      }
+      |> EvalContext.inherit_prelude(eval_context)
 
     case do_eval_fn.(body, eval_ctx) do
       {:ok, result, final_ctx} ->
@@ -926,7 +928,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             _ -> new_env
           end
 
-        closure_ctx = EvalContext.new(ctx, user_ns, new_env, tool_exec, caller_ctx.turn_history)
+        closure_ctx =
+          EvalContext.new(ctx, user_ns, new_env, tool_exec, caller_ctx.turn_history)
+          |> EvalContext.inherit_prelude(caller_ctx)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
         # `locals` is rebuilt from the closure's lexical capture + this invocation's

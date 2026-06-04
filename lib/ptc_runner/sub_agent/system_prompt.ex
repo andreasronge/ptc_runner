@@ -49,6 +49,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   require Logger
 
   alias PtcRunner.Lisp.LanguageSpec
+  alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.PromptRegistry
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Exposure
@@ -259,6 +260,15 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         has_println: false
       })
 
+    # Capability Prelude V1 (plan §9): dynamic prompt inventory inserted AFTER
+    # the tools/data section. Domain-specific content comes from the attached
+    # prelude's export records, NOT from static core prompt templates. `nil`
+    # when no prelude is attached or it has no prompt-visible exports.
+    prelude_inventory =
+      PromptInventory.render(Map.get(agent, :runtime_prelude),
+        ledger: Keyword.get(opts, :ledger)
+      )
+
     # Expected output stays as markdown (shared with Turn 2+)
     expected_output = Output.generate(context_signature, agent.field_descriptions)
 
@@ -269,7 +279,13 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
         do: "Constraint: maximum #{agent.max_tool_calls} tool calls per turn. Plan efficiently.",
         else: nil
 
-    [namespace_content, expected_output, llm_query_instructions, tool_call_limit_note]
+    [
+      namespace_content,
+      prelude_inventory,
+      expected_output,
+      llm_query_instructions,
+      tool_call_limit_note
+    ]
     |> Enum.reject(&(is_nil(&1) or &1 == ""))
     |> Enum.join("\n\n")
   end
