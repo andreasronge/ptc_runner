@@ -58,6 +58,10 @@ PtcRunner should support loading a configured PTC-Lisp prelude before user code.
 The prelude is stateless in V1. It may define namespaces, constants, functions,
 docstrings, and metadata, but it does not receive or commit hidden state.
 
+`(ns ...)` is a prelude-compiler directive in V1, not a general user-runtime
+form. Ordinary user programs should not gain partial Clojure namespace loading
+semantics as part of this slice.
+
 Example prelude:
 
 ```clojure
@@ -80,6 +84,14 @@ The compiled prelude artifact should include:
 - captured private prelude environment;
 - source hash and enough metadata for traces/debugging;
 - validation errors when prelude compilation fails.
+
+V1 should use focused structs for the compiled artifact rather than passing raw
+maps through analyzer, evaluator, discovery, and prompt code. Initial modules may
+include:
+
+- `PtcRunner.Lisp.Prelude` for the compiled prelude artifact;
+- `PtcRunner.Lisp.Prelude.Export` for public export records;
+- `PtcRunner.Lisp.Prelude.Compiler` for source compilation and validation.
 
 `-l/--load` remains ordinary user-code loading. Deployment preludes should use a
 separate loader path so protected namespaces and export metadata are exercised
@@ -124,6 +136,16 @@ Even if general qualified `def` / `defn` remains unsupported, the analyzer must
 recognize qualified definition targets well enough to reject writes into
 protected namespaces with a protection error rather than a generic invalid
 syntax error.
+
+Qualified definitions do not need to become generally supported in V1. Required
+behavior is targeted:
+
+- `(defn crm/get-user ...)` returns a protected namespace/export programmer fault
+  when `crm/get-user` is protected;
+- `(def crm/x ...)` returns a protected namespace programmer fault when `crm` is
+  protected;
+- qualified definitions outside protected namespaces may remain unsupported and
+  return an explicit unsupported qualified-definition error.
 
 The mutable `user` namespace remains available for agent/user code. Shadowing
 ordinary user bindings is allowed when it does not target a protected namespace
@@ -177,6 +199,18 @@ Rules:
 
 V1 export records are enough for prelude functions and configured namespaces.
 Native tool, SubAgent, and generic capability unification is deferred.
+
+Prelude validation is split into two phases:
+
+- compile-time validation checks source syntax, `(ns ...)` directives, duplicate
+  refs, reserved namespace declarations, export metadata, visibility values,
+  arity/doc metadata, and other facts that do not depend on a selected runtime;
+- attach-time validation checks `requires` against the selected upstream runtime,
+  tool grants, and host policy before user code is analyzed.
+
+This allows a compiled prelude artifact to be reused across runs while still
+failing before execution when the selected runtime does not provide a required
+backing operation.
 
 ### 4. Analyzer Resolution
 
@@ -254,10 +288,10 @@ may wrap already-configured upstream operations through `(tool/call ...)`, and
 its export metadata may declare `requires` entries such as
 `"upstream:crm/get_user"`.
 
-Prelude compilation should fail when a public export requires an upstream
-operation that is not configured or not granted to the selected runtime. Dynamic
-upstream calls whose server/tool are runtime values should remain
-unknown-effect unless explicit host metadata narrows them.
+Prelude attachment should fail before user-code analysis when a public export
+requires an upstream operation that is not configured or not granted to the
+selected runtime. Dynamic upstream calls whose server/tool are runtime values
+should remain unknown-effect unless explicit host metadata narrows them.
 
 Future sandbox profiles may own upstream selection and narrowing. V1 should only
 consume the already-selected upstream runtime.
@@ -368,6 +402,11 @@ implementation should choose and test caps.
 Core prompt text must remain domain-blind. Deployment-specific terms should
 come from the selected prelude/export records or deployment config, not from
 maintained core prompts.
+
+The prompt inventory should be inserted through dynamic SubAgent context
+assembly, not by editing static core prompt templates with deployment-specific
+content. Static prompt templates may mention only stable, domain-blind discovery
+mechanics.
 
 ### 10. Metadata Precedence
 
@@ -571,6 +610,17 @@ V1 can ship in two smaller slices if the evaluator changes prove invasive:
 The first slice should not expose a partial prompt/discovery registry. The
 second slice should reuse the export records and compiled prelude artifact from
 the first slice.
+
+For the first spike, prefer this implementation order:
+
+1. Add `PtcRunner.Lisp.Prelude`, `PtcRunner.Lisp.Prelude.Export`, and
+   `PtcRunner.Lisp.Prelude.Compiler` with tests for `(ns ...)`, `defn`,
+   docstrings, visibility, duplicate refs, and reserved namespace rejection.
+2. Add attach-time `requires` validation against the selected upstream runtime
+   and host policy.
+3. Thread the compiled prelude artifact into analyzer/evaluator options.
+4. Add protected write rejection for qualified `def` / `defn` targets.
+5. Extend discovery and dynamic prompt inventory rendering.
 
 ## Implementation Notes
 
