@@ -83,7 +83,8 @@ defmodule PtcRunner.SubAgent.Runner do
           # JSON and tool_calling modes always use the loop (even for single-shot)
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
           if agent.completion_mode == :implicit and agent.output == :ptc_lisp and
-               agent.max_turns == 1 and map_size(agent.tools) == 0 and agent.retry_turns == 0 do
+               agent.max_turns == 1 and map_size(agent.tools) == 0 and agent.retry_turns == 0 and
+               not prelude_tool_backed?(agent.runtime_prelude) do
             # PTC-Lisp single-shot mode
             run_single_shot(
               agent,
@@ -110,6 +111,18 @@ defmodule PtcRunner.SubAgent.Runner do
       error -> error
     end
   end
+
+  # A prelude whose exports (transitively) invoke typed tools needs the loop
+  # path's tool surface — `BuiltinTools.effective_tools/1` + tool normalization —
+  # to back those calls. The single-shot fast path runs with `tools: %{}`, so a
+  # tool-backed export would be advertised in the prompt yet fail its inner
+  # `(tool/...)` call (the prompt promises a capability the execution surface
+  # can't honor). Route any tool-backed prelude through `Loop.run/2`; only a
+  # tool-free prelude (or none) stays eligible for the fast path.
+  defp prelude_tool_backed?(nil), do: false
+
+  defp prelude_tool_backed?(%PtcRunner.Lisp.Prelude{exports: exports}),
+    do: Enum.any?(exports, &(&1.tool_refs != []))
 
   @doc """
   Resolves `:self` sentinels in a tools map to `SubAgentTool` structs.
@@ -297,6 +310,9 @@ defmodule PtcRunner.SubAgent.Runner do
             # SubAgent execution surface too, so it must attach the configured
             # `runtime_prelude` (plan §1A) — otherwise a program calling a
             # prelude export fails with an unknown namespace. `nil` is inert.
+            # Only TOOL-FREE preludes reach here: a tool-backed prelude is routed
+            # to `Loop.run/2` (see `prelude_tool_backed?/1`), because this path
+            # runs with `tools: %{}` and cannot back an export's `(tool/...)` call.
             lisp_result =
               case PtcRunner.Lisp.run(code,
                      context: context,
