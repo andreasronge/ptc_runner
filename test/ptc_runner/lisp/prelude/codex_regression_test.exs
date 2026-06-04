@@ -243,6 +243,45 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "prelude def names cannot shadow builtins (codex re-review)" do
+    test "a public def named like a builtin is rejected" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn count [xs] 42)
+      """
+
+      # `count` interns to an atom (builtin); a prelude def is string-keyed, so a
+      # bare sibling reference would silently hit the builtin. Reject fail-closed.
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :reserved_name
+      assert err.message =~ "count"
+    end
+
+    test "a private helper named like a builtin is also rejected" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn- map [f xs] xs)
+      """
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :reserved_name
+    end
+  end
+
+  describe "malformed prelude metadata fails recoverably (codex re-review)" do
+    @bad_meta ~S|(ns crm "C." {"visibility" :prompt}) (defn get-user [id] id)|
+
+    test "a non-keyword metadata key is a validation error, not a crash" do
+      assert {:error, err} = Compiler.compile(@bad_meta)
+      assert err.reason == :invalid_metadata
+    end
+
+    test "Lisp.run(prelude: bad_source) returns an error Step, not a raised crash" do
+      assert {:error, %Step{} = step} = PtcRunner.Lisp.run("(return 1)", prelude: @bad_meta)
+      assert step.fail.reason == :invalid_metadata
+    end
+  end
+
   describe "qualified same-namespace sibling calls (codex branch review)" do
     @sibling_prelude """
     (ns crm "CRM helpers." {:visibility :prompt})
