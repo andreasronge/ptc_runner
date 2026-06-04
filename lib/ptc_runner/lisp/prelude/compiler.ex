@@ -302,7 +302,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: metadata,
         params_form: params_ast,
-        body_form: rewrite_self_refs(body, ns)
+        body_form: rewrite_def_body(body, ns, params_ast)
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
@@ -321,7 +321,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: %{},
         params_form: nil,
-        body_form: rewrite_self_refs([value_ast], ns)
+        body_form: rewrite_def_body([value_ast], ns, nil)
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
@@ -351,21 +351,76 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # the namespace's captured private env, and the `requires` call-graph sees it
   # as a real sibling edge. Reserved/other-namespace refs (`tool/...`, `hr/...`)
   # are left untouched.
-  defp rewrite_self_refs(forms, ns) when is_list(forms),
-    do: Enum.map(forms, &rewrite_self_refs(&1, ns))
+  # Rewrite a definition body, seeding the bound set with the def's own PARAMS so
+  # a qualified self-ref whose bare name is a param is left qualified (and fails
+  # compilation) rather than rewritten to capture the param.
+  defp rewrite_def_body(forms, ns, params_ast) do
+    bound = param_names(params_ast)
+    Enum.map(forms, &rewrite_self_refs(&1, ns, bound))
+  end
 
-  defp rewrite_self_refs({:ns_symbol, ns, sym}, ns) when is_binary(ns), do: {:symbol, sym}
+  # A same-namespace qualified ref rewrites to a BARE ref so it compiles and
+  # resolves to the sibling at runtime — but ONLY when the bare name is not
+  # locally bound here. A locally-shadowed name is left qualified (so it fails
+  # compilation rather than silently resolving to the local), since a qualified
+  # ref is meant to reach the namespace member, not a same-named local.
+  defp rewrite_self_refs({:ns_symbol, ns, sym} = node, ns, bound) when is_binary(ns) do
+    if sym in bound, do: node, else: {:symbol, sym}
+  end
 
-  defp rewrite_self_refs({:list, items}, ns), do: {:list, rewrite_self_refs(items, ns)}
+  # (fn [params] body...) — params shadow within the body.
+  defp rewrite_self_refs(
+         {:list, [{:symbol, fn_h} = head, {:vector, _} = params | body]},
+         ns,
+         bound
+       )
+       when fn_h in [:fn, "fn"] do
+    inner = bound ++ param_names(params)
+    {:list, [head, params | Enum.map(body, &rewrite_self_refs(&1, ns, inner))]}
+  end
 
-  defp rewrite_self_refs({:vector, items}, ns), do: {:vector, rewrite_self_refs(items, ns)}
+  # (let [a v ...] body...) / (loop [...] body...) — bindings shadow.
+  defp rewrite_self_refs(
+         {:list, [{:symbol, binder} = head, {:vector, bindings} | body]},
+         ns,
+         bound
+       )
+       when binder in [:let, "let", :loop, "loop"] do
+    {rewritten, inner} = rewrite_let_bindings(bindings, ns, bound)
+    {:list, [head, {:vector, rewritten} | Enum.map(body, &rewrite_self_refs(&1, ns, inner))]}
+  end
 
-  defp rewrite_self_refs({:map, pairs}, ns),
+  defp rewrite_self_refs({:list, items}, ns, bound),
+    do: {:list, Enum.map(items, &rewrite_self_refs(&1, ns, bound))}
+
+  defp rewrite_self_refs({:vector, items}, ns, bound),
+    do: {:vector, Enum.map(items, &rewrite_self_refs(&1, ns, bound))}
+
+  defp rewrite_self_refs({:map, pairs}, ns, bound),
     do:
       {:map,
-       Enum.map(pairs, fn {k, v} -> {rewrite_self_refs(k, ns), rewrite_self_refs(v, ns)} end)}
+       Enum.map(pairs, fn {k, v} ->
+         {rewrite_self_refs(k, ns, bound), rewrite_self_refs(v, ns, bound)}
+       end)}
 
-  defp rewrite_self_refs(other, _ns), do: other
+  defp rewrite_self_refs(other, _ns, _bound), do: other
+
+  # Rewrite let/loop binding VALUES (names shadow left-to-right); the binding
+  # patterns themselves are not refs and pass through unchanged.
+  defp rewrite_let_bindings(bindings, ns, bound) do
+    {rev, final_bound} =
+      bindings
+      |> Enum.chunk_every(2)
+      |> Enum.reduce({[], bound}, fn
+        [name_form, val], {acc, b} ->
+          {[rewrite_self_refs(val, ns, b), name_form | acc], b ++ pattern_names(name_form)}
+
+        [val], {acc, b} ->
+          {[rewrite_self_refs(val, ns, b) | acc], b}
+      end)
+
+    {Enum.reverse(rev), final_bound}
+  end
 
   defp require_current_ns(%{current_ns: nil}, name_ast) do
     {:error,
@@ -691,11 +746,35 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp param_names({:vector, params}), do: Enum.flat_map(params, &pattern_names/1)
   defp param_names(_), do: []
 
-  # Names a binding pattern introduces (plain symbol or simple destructuring).
+  # Names a binding pattern introduces (plain symbol, vector, or map
+  # destructuring).
   defp pattern_names({:symbol, name}), do: [to_string(name)]
   defp pattern_names({:vector, items}), do: Enum.flat_map(items, &pattern_names/1)
-  defp pattern_names({:map, pairs}), do: Enum.flat_map(pairs, fn {k, _v} -> pattern_names(k) end)
+  defp pattern_names({:map, pairs}), do: Enum.flat_map(pairs, &map_binding_names/1)
   defp pattern_names(_other), do: []
+
+  # Map destructuring binding names:
+  #   `{:keys [a b]}` / `{:strs [...]}` / `{:syms [...]}` -> the vector elements
+  #   `{:as name}`                                        -> name
+  #   `{:or {...}}`                                       -> no new names here
+  #   `{local-pattern :source-key}`                       -> the KEY is the binding
+  defp map_binding_names({{:keyword, kw}, val}) do
+    case to_string(kw) do
+      keyed when keyed in ["keys", "strs", "syms"] ->
+        case val do
+          {:vector, names} -> Enum.flat_map(names, &pattern_names/1)
+          _ -> []
+        end
+
+      "as" ->
+        pattern_names(val)
+
+      _ ->
+        []
+    end
+  end
+
+  defp map_binding_names({name_form, _source}), do: pattern_names(name_form)
 
   # Look through the body forms for literal tool/calls with a string :server and
   # string :tool. A single literal yields a backing provider_ref; multiple

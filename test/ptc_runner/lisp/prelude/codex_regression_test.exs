@@ -243,6 +243,53 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "qualified self refs respect local shadowing (codex re-review)" do
+    test "an unshadowed qualified sibling call still works" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- helper [x] (str "sib:" x))
+        (defn use-it [x] (crm/helper x))
+        """)
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(return (crm/use-it "a"))|, prelude: prelude)
+
+      assert step.return == {:__ptc_return__, "sib:a"}
+    end
+
+    test "a param shadowing the bare name is NOT silently resolved to the local" do
+      # `helper` is a param; `(crm/helper x)` must not silently call the param.
+      # The bare name is bound, so the qualified ref is left unrewritten and the
+      # prelude fails to compile (fail-closed) rather than mis-resolving.
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn- helper [x] (str "sib:" x))
+      (defn call-helper [helper x] (crm/helper x))
+      """
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :compile_error
+    end
+  end
+
+  describe "map-destructured locals are not false dependencies (codex re-review)" do
+    test "{:keys [...]} binding shadows a same-named helper" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "C." {:visibility :prompt})
+        (defn- fetch [id] (tool/call {:server "s" :tool "t" :args {:id id}}))
+        (defn pure [{:keys [fetch]}] (str fetch))
+        """)
+
+      pure = Enum.find(prelude.exports, &(&1.ref == "crm/pure"))
+
+      # `fetch` here is the destructured param, not the helper.
+      assert pure.requires == []
+      assert pure.tool_refs == []
+    end
+  end
+
   describe "tool_refs are per-export, not namespace-wide (codex re-review)" do
     @mixed """
     (ns mix "Mixed." {:visibility :prompt})
