@@ -60,13 +60,13 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
          {:ok, exports} <- build_exports(specs, ns_meta),
-         {:ok, private_env, tool_refs} <- build_runtime(specs) do
+         {:ok, private_env} <- build_runtime(specs) do
       namespaces = ns_meta |> Map.keys() |> Enum.sort()
 
       {:ok,
        %Prelude{
          namespaces: namespaces,
-         exports: attach_tool_refs(exports, tool_refs),
+         exports: exports,
          private_env: private_env,
          source_hash: source_hash(source),
          metadata: %{namespaces: ns_meta}
@@ -417,11 +417,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp build_exports(specs, ns_meta) do
     public = Enum.reject(specs, & &1.private?)
-    ns_required_ids = namespace_required_ids(specs)
+    ns_backing = namespace_backing(specs)
 
     with :ok <- reject_duplicate_refs(specs) do
       Enum.reduce_while(public, {:ok, []}, fn spec, {:ok, acc} ->
-        case build_export(spec, ns_meta, ns_required_ids) do
+        case build_export(spec, ns_meta, ns_backing) do
           {:ok, export} -> {:cont, {:ok, [export | acc]}}
           {:error, _} = err -> {:halt, err}
         end
@@ -457,7 +457,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  defp build_export(%Spec{} = spec, ns_meta, ns_required_ids) do
+  defp build_export(%Spec{} = spec, ns_meta, ns_backing) do
     # Visibility precedence: explicit export metadata, then the declaring
     # namespace's default, then the global default (plan §10).
     ns_default =
@@ -467,10 +467,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")) do
-      transitive_ids =
-        ns_required_ids |> Map.get(spec.namespace, %{}) |> Map.get(spec.symbol, [])
+      transitive =
+        ns_backing
+        |> Map.get(spec.namespace, %{})
+        |> Map.get(spec.symbol, %{requires: [], tool_refs: []})
 
-      backing = backing(spec, explicit_requires, transitive_ids)
+      backing = backing(spec, explicit_requires, transitive.requires)
 
       {:ok,
        %Export{
@@ -483,7 +485,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          visibility: visibility,
          effect: backing.effect,
          provider_ref: backing.provider_ref,
-         requires: backing.requires
+         requires: backing.requires,
+         tool_refs: transitive.tool_refs
        }}
     end
   end
@@ -539,16 +542,21 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # through the same-namespace helpers it calls. This keeps a public export's
   # `requires` precise (it does not absorb a sibling export's requirements) while
   # still capturing helper-backed upstream operations.
-  defp namespace_required_ids(specs) do
+  # `%{namespace => %{symbol => %{requires: [...], tool_refs: [...]}}}`. Both the
+  # upstream `requires` ids AND the typed `tool_refs` names are computed PER
+  # EXPORT and transitively over the same-namespace helpers it actually calls
+  # (sharing one scope-aware call graph), so a pure export does NOT inherit a
+  # sibling export's tools/requirements.
+  defp namespace_backing(specs) do
     specs
     |> Enum.group_by(& &1.namespace)
-    |> Map.new(fn {ns, ns_specs} -> {ns, transitive_requires(ns_specs)} end)
+    |> Map.new(fn {ns, ns_specs} -> {ns, transitive_backing(ns_specs)} end)
   end
 
   # Plain lists throughout (not MapSet) to avoid dialyzer opaque-type friction;
   # results are small (a namespace's symbol/id sets) so list dedup is cheap.
-  defp transitive_requires(ns_specs) do
-    direct =
+  defp transitive_backing(ns_specs) do
+    direct_ids =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
         ids =
           body
@@ -557,6 +565,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
           |> Enum.uniq()
 
         {sym, ids}
+      end)
+
+    direct_tools =
+      Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
+        {sym, body |> Enum.reduce([], &collect_tool_names_raw/2) |> Enum.uniq()}
       end)
 
     ns_symbols = Enum.map(ns_specs, & &1.symbol)
@@ -573,9 +586,35 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       end)
 
     Map.new(ns_specs, fn %Spec{symbol: sym} ->
-      {sym, sym |> reachable_ids(direct, calls, []) |> Enum.uniq() |> Enum.sort()}
+      {sym,
+       %{
+         requires: sym |> reachable_ids(direct_ids, calls, []) |> Enum.uniq() |> Enum.sort(),
+         tool_refs: sym |> reachable_ids(direct_tools, calls, []) |> Enum.uniq() |> Enum.sort()
+       }}
     end)
   end
+
+  # Typed tool NAMES a raw body references via `tool/<name>` (in call-head or
+  # value position), EXCLUDING the discovery form `tool/servers` (not a tool
+  # call). Matches the names `check_undefined_tools` collects from the analyzed
+  # AST.
+  defp collect_tool_names_raw({:ns_symbol, :tool, name}, acc)
+       when name not in [:servers, "servers"],
+       do: [to_string(name) | acc]
+
+  defp collect_tool_names_raw({:list, items}, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_tool_names_raw/2)
+
+  defp collect_tool_names_raw({:vector, items}, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_tool_names_raw/2)
+
+  defp collect_tool_names_raw({:map, pairs}, acc) when is_list(pairs),
+    do:
+      Enum.reduce(pairs, acc, fn {k, v}, a ->
+        collect_tool_names_raw(v, collect_tool_names_raw(k, a))
+      end)
+
+  defp collect_tool_names_raw(_other, acc), do: acc
 
   # Upstream ids reachable from `sym`: its own plus those of every helper it
   # transitively calls. `visited` guards mutual-recursion cycles.
@@ -848,77 +887,17 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp build_runtime(specs) do
     specs
     |> Enum.group_by(& &1.namespace)
-    |> Enum.reduce_while({:ok, %{}, %{}}, fn {ns, ns_specs}, {:ok, env_acc, refs_acc} ->
+    |> Enum.reduce_while({:ok, %{}}, fn {ns, ns_specs}, {:ok, env_acc} ->
       program = {:program, Enum.map(ns_specs, &spec_to_defn_form/1)}
 
-      case analyze(program) do
-        {:ok, core} ->
-          case eval_runtime(core) do
-            {:ok, env} ->
-              ns_refs = namespace_tool_refs(core, ns)
-              {:cont, {:ok, Map.put(env_acc, ns, env), Map.merge(refs_acc, ns_refs)}}
-
-            {:error, _} = err ->
-              {:halt, err}
-          end
-
-        {:error, _} = err ->
-          {:halt, err}
+      with {:ok, core} <- analyze(program),
+           {:ok, env} <- eval_runtime(core) do
+        {:cont, {:ok, Map.put(env_acc, ns, env)}}
+      else
+        {:error, _} = err -> {:halt, err}
       end
     end)
   end
-
-  # Stamp each export with the typed tools its namespace invokes. The guard
-  # over-approximates per namespace (every export carries its namespace's whole
-  # tool set): this fails CLOSED — it can never let a wrapped tool slip past the
-  # pre-execution guard, at the cost of occasionally requiring a tool a specific
-  # export does not itself call.
-  defp attach_tool_refs(exports, tool_refs) do
-    Enum.map(exports, fn export ->
-      %{export | tool_refs: Map.get(tool_refs, export.ref, [])}
-    end)
-  end
-
-  # `%{ref => sorted tool names}` for every definition in a namespace's analyzed
-  # core, where the tool set is the UNION of tools referenced across the whole
-  # namespace.
-  defp namespace_tool_refs(core, ns) do
-    defs = top_level_defs(core)
-
-    ns_tools =
-      for {:def, _name, value, _meta} <- defs, reduce: MapSet.new() do
-        acc -> MapSet.union(acc, scan_tools(value, MapSet.new()))
-      end
-      |> MapSet.to_list()
-      |> Enum.sort()
-
-    for {:def, name, _value, _meta} <- defs, into: %{} do
-      {ref(ns, to_string(name)), ns_tools}
-    end
-  end
-
-  # The analyzer wraps a multi-form program in a `{:do, forms}` block; a single
-  # top-level definition can also arrive bare. Extract the top-level def nodes.
-  defp top_level_defs({:do, forms}) when is_list(forms), do: forms
-  defp top_level_defs({:program, forms}) when is_list(forms), do: forms
-  defp top_level_defs({:def, _, _, _} = def_node), do: [def_node]
-  defp top_level_defs(_other), do: []
-
-  # Generic CoreAST walk collecting `{:tool_call, name, _}` tool names anywhere
-  # in a definition body (including nested fns/lets/branches and tool args).
-  defp scan_tools({:tool_call, name, args}, acc),
-    do: Enum.reduce(args, MapSet.put(acc, to_string(name)), &scan_tools/2)
-
-  defp scan_tools(tuple, acc) when is_tuple(tuple),
-    do: Enum.reduce(Tuple.to_list(tuple), acc, &scan_tools/2)
-
-  defp scan_tools(list, acc) when is_list(list),
-    do: Enum.reduce(list, acc, &scan_tools/2)
-
-  defp scan_tools(map, acc) when is_map(map),
-    do: Enum.reduce(Map.values(map), acc, &scan_tools/2)
-
-  defp scan_tools(_other, acc), do: acc
 
   # A (def ...) constant: params_form is nil.
   defp spec_to_defn_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do

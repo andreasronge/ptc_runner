@@ -243,6 +243,49 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "tool_refs are per-export, not namespace-wide (codex re-review)" do
+    @mixed """
+    (ns mix "Mixed." {:visibility :prompt})
+    (defn fetch [id] (tool/call {:server "s" :tool "t" :args {:id id}}))
+    (defn pure [x] (str "p:" x))
+    """
+
+    test "a pure export does not inherit a tool-backed sibling's tool" do
+      {:ok, prelude} = Compiler.compile(@mixed)
+
+      fetch = Enum.find(prelude.exports, &(&1.ref == "mix/fetch"))
+      pure = Enum.find(prelude.exports, &(&1.ref == "mix/pure"))
+
+      assert fetch.tool_refs == ["call"]
+      assert pure.tool_refs == []
+
+      # A non-empty tools map lacking "call": calling ONLY the pure export must
+      # NOT be rejected by the pre-execution tool guard.
+      tools = %{"other" => fn _ -> nil end}
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(return (mix/pure "a"))|, prelude: prelude, tools: tools)
+
+      assert step.return == {:__ptc_return__, "p:a"}
+    end
+
+    test "a tool reached through a private helper is included transitively" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns mix "Mixed." {:visibility :prompt})
+        (defn- do-fetch [id] (tool/call {:server "s" :tool "t" :args {:id id}}))
+        (defn fetch [id] (do-fetch id))
+        (defn pure [x] x)
+        """)
+
+      fetch = Enum.find(prelude.exports, &(&1.ref == "mix/fetch"))
+      pure = Enum.find(prelude.exports, &(&1.ref == "mix/pure"))
+
+      assert fetch.tool_refs == ["call"]
+      assert pure.tool_refs == []
+    end
+  end
+
   describe "exports returning closures keep private-helper access (codex re-review)" do
     test "a closure returned from an export resolves its private helper when applied" do
       {:ok, prelude} =
