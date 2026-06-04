@@ -297,7 +297,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: metadata,
         params_form: params_ast,
-        body_form: body
+        body_form: rewrite_self_refs(body, ns)
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
@@ -315,12 +315,34 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         doc: doc,
         metadata: %{},
         params_form: nil,
-        body_form: [value_ast]
+        body_form: rewrite_self_refs([value_ast], ns)
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
     end
   end
+
+  # Rewrite SAME-namespace qualified refs (e.g. `crm/get-user` inside namespace
+  # `crm`) to bare refs (`get-user`) so a prelude export can call a SIBLING
+  # export by its public qualified name. The bare ref resolves at runtime through
+  # the namespace's captured private env, and the `requires` call-graph sees it
+  # as a real sibling edge. Reserved/other-namespace refs (`tool/...`, `hr/...`)
+  # are left untouched.
+  defp rewrite_self_refs(forms, ns) when is_list(forms),
+    do: Enum.map(forms, &rewrite_self_refs(&1, ns))
+
+  defp rewrite_self_refs({:ns_symbol, ns, sym}, ns) when is_binary(ns), do: {:symbol, sym}
+
+  defp rewrite_self_refs({:list, items}, ns), do: {:list, rewrite_self_refs(items, ns)}
+
+  defp rewrite_self_refs({:vector, items}, ns), do: {:vector, rewrite_self_refs(items, ns)}
+
+  defp rewrite_self_refs({:map, pairs}, ns),
+    do:
+      {:map,
+       Enum.map(pairs, fn {k, v} -> {rewrite_self_refs(k, ns), rewrite_self_refs(v, ns)} end)}
+
+  defp rewrite_self_refs(other, _ns), do: other
 
   defp require_current_ns(%{current_ns: nil}, name_ast) do
     {:error,

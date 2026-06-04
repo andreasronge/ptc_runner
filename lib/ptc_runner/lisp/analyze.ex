@@ -61,7 +61,10 @@ defmodule PtcRunner.Lisp.Analyze do
                       :apropos,
                       :dir,
                       :doc,
-                      :meta
+                      :meta,
+                      :"all-ns",
+                      :"ns-name",
+                      :"ns-publics"
                     ])
 
   @type error_reason ::
