@@ -1329,6 +1329,15 @@ defmodule PtcRunner.Lisp do
   # validate/1 helpers — walk CoreAST collecting undefined vars
   # ============================================================
 
+  @doc false
+  # Returns the unresolved variable names in `core_ast` given an initial scope
+  # (a `MapSet` of in-scope names). Exposed so the prelude compiler can run the
+  # SAME static undefined-var check on captured definition bodies.
+  @spec undefined_vars(term(), MapSet.t()) :: [String.t()]
+  def undefined_vars(core_ast, %MapSet{} = scope) do
+    core_ast |> collect_undefined_vars(scope) |> Enum.uniq()
+  end
+
   # Variable reference — check builtins and local scope
   defp collect_undefined_vars({:var, name}, scope) do
     name_str = to_string(name)

@@ -285,6 +285,49 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "value-position exports run isolated (codex re-review)" do
+    test "a value-position export's (def) does not write user memory" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns iso "Iso." {:visibility :prompt})
+        (defn writer [] (def leaked 1) leaked)
+        """)
+
+      # `iso/writer` used as a value, then invoked, must run in prelude scope —
+      # its internal `(def leaked ...)` must NOT pollute the caller's memory.
+      program = "(def f iso/writer) (def r (f)) (return r)"
+
+      assert {:ok, %Step{} = step} = PtcRunner.Lisp.run(program, prelude: prelude)
+
+      assert step.return == {:__ptc_return__, 1}
+      refute Map.has_key?(step.memory, :leaked)
+      refute Map.has_key?(step.memory, "leaked")
+    end
+  end
+
+  describe "prelude bodies are checked for undefined vars (codex re-review)" do
+    test "a typo in a prelude body is rejected at compile time" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn bad [] (typo))
+      """
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :compile_error
+      assert err.message =~ "typo"
+    end
+
+    test "forward references to siblings are allowed" do
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn caller [] (callee))
+      (defn callee [] 42)
+      """
+
+      assert {:ok, _prelude} = Compiler.compile(source)
+    end
+  end
+
   describe "tool_refs are per-export, not namespace-wide (codex re-review)" do
     @mixed """
     (ns mix "Mixed." {:visibility :prompt})

@@ -705,10 +705,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     new_env = Map.merge(closure_env, bindings)
 
+    # A prelude-export closure used as a HOF value runs against its private
+    # prelude env (isolation); the HOF path returns a value, not a context, so
+    # any `(def ...)` writes the isolated env and is discarded.
+    closure_user_ns =
+      case metadata do
+        %{prelude_ns_env: ns_env} -> ns_env
+        _ -> eval_context.user_ns
+      end
+
     eval_ctx =
       EvalContext.new(
         eval_context.ctx,
-        eval_context.user_ns,
+        closure_user_ns,
         new_env,
         eval_context.tool_exec,
         eval_context.turn_history,
@@ -910,6 +919,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     do_execute_closure(closure, patterns, args, eval_ctx, do_eval_fn)
   end
 
+  # The `user_ns` a closure body runs against, and what to restore on return. A
+  # prelude-export closure (tagged `:prelude_ns_env`) runs against its private
+  # env and restores the caller's namespace; any other closure runs against the
+  # caller's `user_ns` and keeps whatever it produced.
+  defp prelude_run_scope(%{prelude_ns_env: ns_env}, _user_ns, caller_ctx),
+    do: {ns_env, caller_ctx.user_ns}
+
+  defp prelude_run_scope(_meta, user_ns, _caller_ctx), do: {user_ns, :keep}
+
+  defp restored_user_ns(:keep, final_ctx), do: final_ctx.user_ns
+  defp restored_user_ns(ns, _final_ctx), do: ns
+
   defp do_execute_closure(
          {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
          binding_patterns,
@@ -928,8 +949,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             _ -> new_env
           end
 
+        # A prelude-export closure (tagged with `:prelude_ns_env`) runs against
+        # its private prelude env as `user_ns`, restoring the caller's namespace
+        # on return so it cannot read or write user bindings (value-position
+        # isolation, mirroring the direct `(crm/export ...)` call path).
+        {closure_user_ns, restore_user_ns} = prelude_run_scope(meta, user_ns, caller_ctx)
+
         closure_ctx =
-          EvalContext.new(ctx, user_ns, new_env, tool_exec, caller_ctx.turn_history)
+          EvalContext.new(ctx, closure_user_ns, new_env, tool_exec, caller_ctx.turn_history)
           |> EvalContext.inherit_prelude(caller_ctx)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
@@ -969,8 +996,16 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             # param name that shadowed a top-level def would stay in the
             # caller's `locals` set after the call, making subsequent
             # lookups of that name resolve to (a missing) env entry instead
-            # of falling through to user_ns.
-            {:ok, result, %{final_ctx | env: caller_ctx.env, locals: caller_ctx.locals}}
+            # of falling through to user_ns. For a prelude-export closure also
+            # restore the caller's user_ns (discarding any `(def ...)` the export
+            # made), keeping the namespace isolated.
+            {:ok, result,
+             %{
+               final_ctx
+               | env: caller_ctx.env,
+                 locals: caller_ctx.locals,
+                 user_ns: restored_user_ns(restore_user_ns, final_ctx)
+             }}
 
           {:error, _} = err ->
             err
