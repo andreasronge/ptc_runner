@@ -925,12 +925,34 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       program = {:program, Enum.map(ns_specs, &spec_to_defn_form/1)}
 
       with {:ok, core} <- analyze(program),
+           :ok <- check_prelude_vars(core, ns_specs),
            {:ok, env} <- eval_runtime(core) do
         {:cont, {:ok, Map.put(env_acc, ns, env)}}
       else
         {:error, _} = err -> {:halt, err}
       end
     end)
+  end
+
+  # Run the same static undefined-var check `Lisp.run` performs before execution,
+  # seeded with the namespace's own member names so sibling references (forward
+  # or backward) resolve. A typo such as `(defn bad [] (typo))` is then rejected
+  # at compile time rather than advertised as a capability and failing only when
+  # an agent calls it.
+  defp check_prelude_vars(core, ns_specs) do
+    scope = ns_specs |> Enum.map(& &1.symbol) |> MapSet.new()
+
+    case PtcRunner.Lisp.undefined_vars(core, scope) do
+      [] ->
+        :ok
+
+      vars ->
+        {:error,
+         ValidationError.new(
+           :compile_error,
+           "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}"
+         )}
+    end
   end
 
   # A (def ...) constant: params_form is nil.

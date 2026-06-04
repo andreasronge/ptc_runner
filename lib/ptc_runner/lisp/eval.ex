@@ -858,15 +858,15 @@ defmodule PtcRunner.Lisp.Eval do
          prelude_env
        )
        when is_map(prelude_env) and map_size(prelude_env) > 0 do
-    merged_env = Map.merge(prelude_env, captured_env)
-
-    captured_locals =
-      meta
-      |> Map.get(:captured_locals, MapSet.new())
-      |> MapSet.union(MapSet.new(Map.keys(prelude_env)))
-
-    meta = Map.put(meta, :captured_locals, captured_locals)
-    {:closure, params, body, merged_env, turn_history, meta}
+    # Tag the closure with its private prelude env. When it is later applied
+    # (as a HOF value, or after being returned/`def`'d), `do_execute_closure`
+    # runs it with `user_ns` = this env and restores the caller's namespace
+    # afterward — so a prelude export used in value position is isolated exactly
+    # like a direct `(crm/export ...)` call: private siblings resolve, unresolved
+    # names do NOT fall through to user bindings, and `(def ...)` cannot write
+    # user memory.
+    {:closure, params, body, captured_env, turn_history,
+     Map.put(meta, :prelude_ns_env, prelude_env)}
   end
 
   defp bind_prelude_env(callable, _prelude_env), do: callable
