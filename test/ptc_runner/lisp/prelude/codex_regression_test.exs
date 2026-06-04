@@ -243,6 +243,58 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "qualified same-namespace sibling calls (codex branch review)" do
+    @sibling_prelude """
+    (ns crm "CRM helpers." {:visibility :prompt})
+    (defn get-user [id]
+      (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+    (defn get-user!
+      "Return a CRM user, or abort the program."
+      [id]
+      (let [res (crm/get-user id)]
+        (if (res :ok) (res :value) (fail {:reason (res :reason)}))))
+    """
+
+    test "an export calling a sibling by qualified name compiles and inherits its requires" do
+      {:ok, prelude} = Compiler.compile(@sibling_prelude)
+
+      bang = Enum.find(prelude.exports, &(&1.ref == "crm/get-user!"))
+
+      # The qualified sibling call is rewritten to a bare ref, so it both
+      # compiles AND the requires call-graph sees the edge to get-user.
+      assert bang.requires == ["upstream:crm/get_user"]
+    end
+
+    test "the qualified sibling call resolves at runtime" do
+      {:ok, prelude} = Compiler.compile(@sibling_prelude)
+      tools = %{"call" => fn _ -> %{ok: true, value: %{"id" => "u_1"}, reason: nil} end}
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(return (crm/get-user! "u_1"))|,
+                 prelude: prelude,
+                 tools: tools
+               )
+
+      assert step.return == {:__ptc_return__, %{"id" => "u_1"}}
+    end
+  end
+
+  describe "new discovery forms are shadowable by locals (codex branch review)" do
+    test "a local named all-ns shadows the discovery form" do
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(let [all-ns (fn [] 42)] (return (all-ns)))|)
+
+      assert step.return == {:__ptc_return__, 42}
+    end
+
+    test "a local named ns-name shadows the discovery form" do
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(let [ns-name (fn [_] "local")] (return (ns-name 'x)))|)
+
+      assert step.return == {:__ptc_return__, "local"}
+    end
+  end
+
   describe "a namespace cannot be redeclared (codex round 9)" do
     test "reopening a namespace with a different default is rejected, not mis-compiled" do
       source = """
