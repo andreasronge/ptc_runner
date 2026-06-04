@@ -17,9 +17,9 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
     * `reason` — a stable, matchable atom. Compile-time reasons:
       `:reserved_namespace`, `:reserved_name`, `:duplicate_ref`,
       `:invalid_visibility`, `:invalid_requires`, `:invalid_metadata`,
-      `:missing_namespace`, `:invalid_namespace`, `:invalid_signature`,
-      `:parse_error`, `:compile_error`. Attach-time reason:
-      `:prelude_attach_failed`.
+      `:qualified_self_reference`, `:missing_namespace`, `:invalid_namespace`,
+      `:invalid_signature`, `:parse_error`, `:compile_error`. Attach-time
+      reason: `:prelude_attach_failed`.
     * `message` — human-readable detail naming the offending namespace,
       symbol, or value. Must not contain secrets (plan §12).
     * `namespace` — the declaring namespace when known, else `nil`.
@@ -33,6 +33,7 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
           | :invalid_visibility
           | :invalid_requires
           | :invalid_metadata
+          | :qualified_self_reference
           | :missing_namespace
           | :invalid_namespace
           | :invalid_signature
