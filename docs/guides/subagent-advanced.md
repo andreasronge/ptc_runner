@@ -309,6 +309,10 @@ The same compiled artifact also drives the REPL
 (`PtcRunner.Lisp.run(program, prelude: prelude)`), so behavior is identical
 across surfaces.
 
+For a full walkthrough — authoring a prelude file, visibility and `requires`,
+attaching across surfaces, discovery, and troubleshooting — see the
+[Capability Preludes authoring & deploying guide](capability-prelude.md).
+
 ## PTC-Lisp Quick Reference
 
 ### Core
