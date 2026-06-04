@@ -152,6 +152,20 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
 
       assert step.return == {:__ptc_return__, 42}
     end
+
+    test "a def-exported function value is yielded (not applied) by a zero-arg call" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns cfg "Config." {:visibility :prompt})
+        (def handler (fn [x] (* x 2)))
+        """)
+
+      # `(cfg/handler)` yields the function VALUE; applying it then doubles.
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(~S|(let [h (cfg/handler)] (return (h 21)))|, prelude: prelude)
+
+      assert step.return == {:__ptc_return__, 42}
+    end
   end
 
   describe "prelude exports see their own data keys (codex round 3 #A)" do

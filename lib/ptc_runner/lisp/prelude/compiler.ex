@@ -497,10 +497,15 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          effect: backing.effect,
          provider_ref: backing.provider_ref,
          requires: backing.requires,
-         tool_refs: transitive.tool_refs
+         tool_refs: transitive.tool_refs,
+         kind: export_kind(spec)
        }}
     end
   end
+
+  # A `def` constant has no params vector; a `defn` always does.
+  defp export_kind(%Spec{params_form: nil}), do: :constant
+  defp export_kind(%Spec{}), do: :function
 
   # Minimum args a call must supply. Fixed arity == its own value; a variadic
   # `[a b & rest]` requires its leading params (the count before `&`).

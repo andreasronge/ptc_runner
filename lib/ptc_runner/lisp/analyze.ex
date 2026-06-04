@@ -1414,6 +1414,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # resolves from the export table (invoking the captured closure against the
   # captured private prelude env). Private helpers have no export record, so
   # this path is unreachable for them — they stay user-invisible (plan §5/§8).
+  # A `def` constant export: `(cfg/answer)` YIELDS the value (it is not applied),
+  # even when that value is a function. Calling it with arguments is an error.
+  defp analyze_prelude_call(%{ref: ref, kind: :constant}, [], _tail?),
+    do: {:ok, {:prelude_ref, ref}}
+
+  defp analyze_prelude_call(%{ref: ref, kind: :constant}, _arg_asts, _tail?),
+    do: {:error, {:invalid_arity, :prelude_call, "#{ref} is a constant and takes no arguments"}}
+
   defp analyze_prelude_call(%{ref: ref, arity: arity} = export, arg_asts, _tail?) do
     actual = length(arg_asts)
     min_arity = Map.get(export, :min_arity, 0)
