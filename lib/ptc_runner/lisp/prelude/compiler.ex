@@ -683,6 +683,26 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        when head in [:comment, "comment", :quote, "quote"],
        do: acc
 
+  # Runtime `(def name value)` — the binding TARGET is not a sibling call; it
+  # shadows any same-named helper. Walk only the value so a `(def fetch 1)` next
+  # to a private helper named `fetch` does not forge a false requires/tool_refs
+  # edge to that helper.
+  defp collect_refs({:list, [{:symbol, def_h}, {:symbol, _name} | rest]}, bound, acc)
+       when def_h in [:def, "def"],
+       do: Enum.reduce(rest, acc, &collect_refs(&1, bound, &2))
+
+  # Runtime `(defn name [params] body...)` / `(defn- ...)` — skip the target name,
+  # and let the params shadow within the body, same as `fn`.
+  defp collect_refs(
+         {:list, [{:symbol, defn_h}, {:symbol, _name}, {:vector, params} | body]},
+         bound,
+         acc
+       )
+       when defn_h in [:defn, "defn", :"defn-", "defn-"] do
+    inner = bound ++ param_names({:vector, params})
+    Enum.reduce(body, acc, &collect_refs(&1, inner, &2))
+  end
+
   defp collect_refs({:list, items}, bound, acc) when is_list(items),
     do: Enum.reduce(items, acc, &collect_refs(&1, bound, &2))
 

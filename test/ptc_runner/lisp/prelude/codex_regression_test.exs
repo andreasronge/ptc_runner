@@ -460,6 +460,31 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
+  describe "runtime def targets are not dependency edges (codex re-review)" do
+    @def_shadow """
+    (ns mix "Mixed." {:visibility :prompt})
+    (defn- fetch [id] (tool/call {:server "s" :tool "t" :args {:id id}}))
+    (defn shadows [] (def fetch 1) 99)
+    (defn caller [] (fetch 1))
+    """
+
+    test "a (def name ...) target sharing a helper name forges no requires/tool_refs edge" do
+      {:ok, prelude} = Compiler.compile(@def_shadow)
+
+      shadows = Enum.find(prelude.exports, &(&1.ref == "mix/shadows"))
+      caller = Enum.find(prelude.exports, &(&1.ref == "mix/caller"))
+
+      # `shadows` only BINDS `fetch` via `(def fetch 1)`; it never calls the
+      # private helper, so it must inherit none of its backing.
+      assert shadows.requires == []
+      assert shadows.tool_refs == []
+
+      # `caller` genuinely calls the helper, so the real edge is preserved.
+      assert caller.requires == ["upstream:s/t"]
+      assert caller.tool_refs == ["call"]
+    end
+  end
+
   describe "exports returning closures keep private-helper access (codex re-review)" do
     test "a closure returned from an export resolves its private helper when applied" do
       {:ok, prelude} =
