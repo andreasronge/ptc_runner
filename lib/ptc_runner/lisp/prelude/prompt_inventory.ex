@@ -15,7 +15,9 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
     * a per-namespace summary (namespace name + docstring) for namespaces that
       have at least one `:prompt`-visible export;
     * for each such namespace, up to `per_namespace_cap/0` prompt-visible
-      exports, each with its signature, short doc, and resolved effect hint;
+      exports, each with its signature, short doc, and — only for an inferred
+      `:read`/`:write` backing — an effect hint (`:unknown` is omitted as noise,
+      but stays available via `(meta ...)` / `(ns-publics ...)`);
     * a "more via `(ns-publics 'ns)`" line when a namespace has more
       prompt-visible exports than the cap;
     * a discovery hint noting that additional `:discoverable` exports (omitted
@@ -125,14 +127,24 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   end
 
   # `crm/get-user (get-user arg1) [read] — Return a CRM user by id.`
+  #
+  # The `[effect]` hint is rendered only for an inferred `:read`/`:write`
+  # backing. `:unknown` carries no usable signal — it is the fallback for both a
+  # pure local export AND a dynamic `tool/call` whose effect could not be
+  # inferred — so rendering it would either over-warn (on a pure helper) or
+  # under-warn (on a dynamic write). It is omitted to keep the inventory compact
+  # and honest; the effect stays available via `(meta ...)` / `(ns-publics ...)`.
   defp export_line(%Export{} = export) do
-    base = "  #{export.ref} #{signature(export)} [#{export.effect}]"
+    base = "  #{export.ref} #{signature(export)}#{effect_hint(export.effect)}"
 
     case compact(export.doc) do
       "" -> base
       doc -> base <> " — " <> doc
     end
   end
+
+  defp effect_hint(:unknown), do: ""
+  defp effect_hint(effect), do: " [#{effect}]"
 
   defp signature(%Export{symbol: symbol, arity: :variadic}), do: "(#{symbol} & args)"
 
