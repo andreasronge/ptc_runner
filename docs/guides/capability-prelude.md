@@ -222,6 +222,14 @@ covers **the agent given the runtime**: a child SubAgent invoked via `as_tool` i
 `requires`-backed prelude is only validated if that child is itself run through
 its own upstream bridge/runtime.
 
+> **Host-supplied side-effect guard (Phase 1).** Fail-closed `requires`
+> validation bounds *which* operations a prelude may reach, but Phase 1 does
+> **not** install a side-effect *continuation* guard by default. Continuation
+> policy — how far a run may keep producing side effects — is **host-supplied**
+> in Phase 1: `mcp_server` installs one; a standalone caller must pass its own
+> `continuation_guard` (to `run_subagent/3`, §7) to bound side effects, until a
+> core default lands in a later phase.
+
 > The prelude does **not** define upstream endpoints or credentials. It only
 > *wraps* operations the host has already configured. Credentials live in
 > host/deployment config and never appear in the artifact, prompts, or traces.
@@ -250,7 +258,7 @@ have no export record and never appear.
 
 ## 7. Attaching a prelude to a run
 
-The same compiled artifact attaches through three seams.
+The same compiled artifact attaches through four seams.
 
 **Direct execution** (`PtcRunner.Lisp.run/2`) — pass a compiled artifact *or*
 source (compiled before user-code analysis):
@@ -269,12 +277,34 @@ PtcRunner.Lisp.run(program, prelude: prelude, runtime: upstream_runtime)
 %PtcRunner.SubAgent.Definition{runtime_prelude: prelude}
 ```
 
-**Upstream-backed runs** — `PtcRunner.Upstream.Eval.run_lisp/3` forwards its
+**Upstream-backed single program** — `PtcRunner.Upstream.Eval.run_lisp/3` runs
+**one** Lisp program against a selected upstream runtime and forwards that
 runtime into the attach path automatically, so `requires` are validated:
 
 ```elixir
 PtcRunner.Upstream.Eval.run_lisp(runtime, program, prelude: prelude)
 ```
+
+**Upstream-backed multi-turn SubAgent** — `PtcRunner.Upstream.Eval.run_subagent/3`
+is the analogue of `run_lisp/3` for a **multi-turn** agent. It owns a single
+`RunContext` for the whole run, enriches the agent with the upstream-call tool
+**before** prompt generation, and threads the runtime into **every** turn so the
+prelude `requires` validate fail-closed per turn:
+
+```elixir
+PtcRunner.Upstream.Eval.run_subagent(runtime, agent, llm: llm, context: ctx)
+```
+
+The distinction: `run_lisp/3` runs a **single program**; `run_subagent/3` runs a
+**multi-turn agent**. Both forward the same `runtime` into the attach path, so in
+either case `requires` are validated against the selected upstream.
+
+> **Host-supplied side-effect guard (Phase 1).** `run_subagent/3` validates a
+> prelude's `requires` fail-closed per turn, but Phase 1 installs **no**
+> side-effect continuation guard by default. That policy is host-supplied:
+> `mcp_server` installs one; a standalone caller must pass its own
+> `continuation_guard` to `run_subagent/3` to bound side effects, until a core
+> default lands in a later phase. (See §5.)
 
 If no upstream runtime is selected (e.g. a direct `Lisp.run` with a stub
 `tools:` map), `requires` validation is skipped — the artifact still attaches
