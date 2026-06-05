@@ -1,5 +1,30 @@
 # Capability Prelude V1 Requirements
 
+**Status:** V1 implemented on `main` as of 2026-06-05. This file is retained as
+the requirements and acceptance record; the user-facing guide is
+[`docs/guides/capability-prelude.md`](../guides/capability-prelude.md).
+
+Implemented surfaces:
+
+- compiled prelude artifacts and export records:
+  `PtcRunner.Lisp.Prelude`, `PtcRunner.Lisp.Prelude.Export`, and
+  `PtcRunner.Lisp.Prelude.Compiler`;
+- direct execution attachment through `PtcRunner.Lisp.run/2` with `prelude:`;
+- SubAgent attachment through `runtime_prelude:`;
+- REPL attachment through `mix ptc.repl --prelude`;
+- protected namespace/export analysis, evaluator resolution, private helper
+  isolation, and trace summaries;
+- prelude discovery through `doc`, `dir`, `meta`, `apropos`, `ns-publics`,
+  `all-ns`, and `ns-name`;
+- deterministic prompt inventory rendering from the same export records;
+- upstream-backed `requires` validation when a selected runtime is attached,
+  including the SubAgent upstream bridge path.
+
+Remaining work is intentionally outside V1 and stays under
+[Deferred Work](#deferred-work): stateful preludes, authoring DSLs,
+generic `cap/*` catalog APIs, descriptor taxonomy, capability registry
+unification, cache-policy declarations, and benchmark-gated comparisons.
+
 ## Problem
 
 PtcRunner should let deployments expose curated, Lisp-facing APIs without
