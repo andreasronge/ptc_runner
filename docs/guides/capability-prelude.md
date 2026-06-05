@@ -207,6 +207,14 @@ runs**. If a required upstream operation is not configured/granted, attachment
 fails fast with `:prelude_attach_failed` — so a missing backing can never cause
 a partial run with side effects.
 
+This holds across execution surfaces: direct `Lisp.run`, the multi-turn SubAgent
+loop, and the single-shot fast path. On the multi-turn path a
+`:prelude_attach_failed` is a **hard stop**, never a recoverable retry turn, so
+the guarantee survives across turns. The validation covers **the agent given the
+runtime**: a child SubAgent invoked via `as_tool` is **upstream-blind** — it does
+not inherit the parent's runtime, so its own `requires`-backed prelude is only
+validated if that child is itself constructed with a runtime.
+
 > The prelude does **not** define upstream endpoints or credentials. It only
 > *wraps* operations the host has already configured. Credentials live in
 > host/deployment config and never appear in the artifact, prompts, or traces.

@@ -158,6 +158,11 @@ defmodule PtcRunner.SubAgent.Loop do
     # Caller-owned, not inherited by child SubAgents.
     discovery_exec = Keyword.get(opts, :discovery_exec)
 
+    # Optional upstream runtime handle. Opaque passthrough for attach-time
+    # prelude `requires` validation only; the bridge (`Upstream.Eval.run_subagent/3`)
+    # owns the RunContext lifecycle. Caller-owned, not inherited by children.
+    runtime = Keyword.get(opts, :runtime)
+
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
 
@@ -205,6 +210,7 @@ defmodule PtcRunner.SubAgent.Loop do
           journal: journal,
           tool_cache: tool_cache,
           discovery_exec: discovery_exec,
+          runtime: runtime,
           on_chunk: on_chunk,
           initial_messages: initial_messages,
           initial_memory: initial_memory
@@ -304,6 +310,7 @@ defmodule PtcRunner.SubAgent.Loop do
       journal: run_opts.journal,
       tool_cache: run_opts.tool_cache,
       discovery_exec: run_opts.discovery_exec,
+      runtime: run_opts.runtime,
       agent_name: agent.name,
       agent_id: run_opts.agent_id,
       on_chunk: run_opts.on_chunk,
@@ -841,8 +848,6 @@ defmodule PtcRunner.SubAgent.Loop do
       {:error, lisp_step} ->
         # Emit pmap/pcalls telemetry events even on error
         emit_pmap_telemetry(state, lisp_step)
-        # Build error message for LLM
-        error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
 
         # Build Turn struct (failure turn) with turn type
         turn =
@@ -854,21 +859,51 @@ defmodule PtcRunner.SubAgent.Loop do
             type: state.current_turn_type
           )
 
-        # Build feedback with appropriate turn info
-        feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
+        if Shared.terminal_lisp_failure?(lisp_step.fail) do
+          # Fail closed: a prelude attach failure (a missing upstream backing) is
+          # NOT a program error the LLM can repair by rewriting, and treating it
+          # as a recoverable retry turn would let earlier side-effecting turns
+          # stand (plan §3.5 #2). Stop the run immediately.
+          duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-        # Deferred step-done: discard current turn's summaries on error
-        new_state =
-          build_continuation_state(state, turn, response, feedback,
-            memory: lisp_step.memory,
-            journal: lisp_step.journal,
-            tool_cache: lisp_step.tool_cache,
-            child_steps: state.child_steps ++ lisp_step.child_steps,
-            last_fail: lisp_step.fail,
-            last_return_error: error_message
-          )
+          # Preserve the assistant response that triggered the failure (for
+          # collect_messages) and this turn's tokens (for turn-stop telemetry),
+          # parity with the explicit-fail terminal path and the :tool_call hard
+          # stop. A pre-execution attach step carries no usage, so memory_bytes
+          # defaults to 0.
+          final_messages =
+            state.messages ++
+              [%{role: :assistant, content: ResponseHandler.strip_thinking(response)}]
 
-        {:continue, new_state, turn}
+          final_step =
+            StepAssembler.finalize(lisp_step, state,
+              duration_ms: duration_ms,
+              is_error: true,
+              final_turn: turn,
+              final_messages: final_messages,
+              journal: lisp_step.journal,
+              child_steps: state.child_steps ++ lisp_step.child_steps
+            )
+
+          {:stop, {:error, final_step}, turn, state.turn_tokens}
+        else
+          # Build feedback with appropriate turn info
+          error_message = ResponseHandler.format_error_for_llm(lisp_step.fail)
+          feedback = TurnFeedback.build_error_feedback(error_message, agent, state)
+
+          # Deferred step-done: discard current turn's summaries on error
+          new_state =
+            build_continuation_state(state, turn, response, feedback,
+              memory: lisp_step.memory,
+              journal: lisp_step.journal,
+              tool_cache: lisp_step.tool_cache,
+              child_steps: state.child_steps ++ lisp_step.child_steps,
+              last_fail: lisp_step.fail,
+              last_return_error: error_message
+            )
+
+          {:continue, new_state, turn}
+        end
     end
   end
 

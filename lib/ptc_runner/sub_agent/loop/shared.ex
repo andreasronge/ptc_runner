@@ -62,6 +62,21 @@ defmodule PtcRunner.SubAgent.Loop.Shared do
     end
   end
 
+  @doc """
+  Whether a `Lisp.run` failure must terminate the SubAgent run rather than become
+  a recoverable retry turn — consulted by every Lisp-running transport (`:content`
+  and `:tool_call`).
+
+  A `:prelude_attach_failed` means a public capability-prelude export's required
+  upstream backing is missing. That is not a program error the LLM can repair by
+  rewriting, and feeding it back as a retry turn would let earlier side-effecting
+  turns stand. Failing closed here preserves the prelude guarantee on every
+  multi-turn path (plan §3.5 #2).
+  """
+  @spec terminal_lisp_failure?(map() | nil) :: boolean()
+  def terminal_lisp_failure?(%{reason: :prelude_attach_failed}), do: true
+  def terminal_lisp_failure?(_fail), do: false
+
   # ----------------------------------------------------------------
   # Final-text parsing
   # ----------------------------------------------------------------

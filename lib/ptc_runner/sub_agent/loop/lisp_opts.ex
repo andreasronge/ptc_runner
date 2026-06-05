@@ -47,6 +47,9 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
     |> maybe_put(:max_tool_calls, agent.max_tool_calls)
     |> maybe_put(:discovery_exec, Map.get(state, :discovery_exec))
     |> maybe_put(:prelude, Map.get(agent, :runtime_prelude))
+    # Opaque upstream runtime handle, forwarded only so `Lisp.run/2`'s
+    # attach-time prelude `requires` validation runs against it. `nil` is inert.
+    |> maybe_put(:runtime, Map.get(state, :runtime))
   end
 
   defp maybe_put(opts, _key, nil), do: opts
