@@ -703,17 +703,37 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     if fatal_step do
       duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
+      # Preserve the halting turn for traces/collected messages (parity with the
+      # :content and :tool_call hard stops): the assistant tool call, the tool
+      # results accumulated up to the fatal call, and a failure turn.
+      assistant_msg = combined_assistant_message(assistant_content, tool_calls_with_ids)
+      tool_results = Enum.reverse(tool_results_rev)
+      final_messages = state.messages ++ [assistant_msg | tool_results]
+
+      turn =
+        Metrics.build_turn(state, inspect(tool_calls_with_ids), nil, fatal_step.fail,
+          success?: false,
+          prints: [],
+          tool_calls: Enum.reverse(current_turn_calls),
+          memory: %{}
+        )
+
       step_with_metrics = %{
         fatal_step
         | usage: Metrics.build_final_usage(state, duration_ms, 0),
-          turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
-          messages: Shared.build_collected_messages(state, state.messages),
+          turns:
+            Metrics.apply_trace_filter(
+              Enum.reverse([turn | state.turns]),
+              state.trace_mode,
+              true
+            ),
+          messages: Shared.build_collected_messages(state, final_messages),
           prompt: state.expanded_prompt,
           original_prompt: state.original_prompt,
           tools: state.normalized_tools
       }
 
-      {:stop, {:error, step_with_metrics}, nil, state.turn_tokens}
+      {:stop, {:error, step_with_metrics}, turn, state.turn_tokens}
     else
       tool_results = Enum.reverse(tool_results_rev)
 
@@ -738,22 +758,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           tool_results
         end
 
-      assistant_msg = %{
-        role: :assistant,
-        content: assistant_content || "",
-        tool_calls:
-          Enum.map(tool_calls_with_ids, fn tc ->
-            %{
-              id: tc.id,
-              type: "function",
-              function: %{
-                name: tc.name,
-                arguments:
-                  if(is_binary(tc.args), do: tc.args, else: Jason.encode!(tc.args || %{}))
-              }
-            }
-          end)
-      }
+      assistant_msg = combined_assistant_message(assistant_content, tool_calls_with_ids)
 
       turn =
         Metrics.build_turn(state, inspect(tool_calls_with_ids), nil, nil,
@@ -799,8 +804,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
             {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
 
-          {:fatal, error_step} ->
-            {:halt, {results_acc, calls_acc, st, error_step}}
+          {:fatal, error_step, result_str, step_entry} ->
+            # Terminal Lisp failure (`:prelude_attach_failed` or a strict
+            # memory-limit exit): keep the paired tool result + step entry for
+            # observability, then halt the reduce.
+            tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
+            {:halt, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, error_step}}
         end
 
       # Tier 3.5 Fix 4: unknown_tool wins over args_error in combined
@@ -832,6 +841,27 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
         {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
     end
+  end
+
+  # Build the combined-mode assistant message carrying the turn's tool calls.
+  # Shared by the normal continue path and the fatal hard-stop path so their
+  # message shapes can't drift.
+  defp combined_assistant_message(assistant_content, tool_calls_with_ids) do
+    %{
+      role: :assistant,
+      content: assistant_content || "",
+      tool_calls:
+        Enum.map(tool_calls_with_ids, fn tc ->
+          %{
+            id: tc.id,
+            type: "function",
+            function: %{
+              name: tc.name,
+              arguments: if(is_binary(tc.args), do: tc.args, else: Jason.encode!(tc.args || %{}))
+            }
+          }
+        end)
+    }
   end
 
   defp simple_step_entry(tool_name, tool_args, error_msg) do
@@ -1050,8 +1080,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   #   - `:args_error` paths render through `PtcToolProtocol.render_error/3`.
 
   # Returns one of:
-  #   {:ok, result_json, step_entry, new_state}   — continue
-  #   {:fatal, error_step}                          — terminate run with error
+  #   {:ok, result_json, step_entry, new_state}            — continue
+  #   {:fatal, error_step, result_json, step_entry}        — terminate run, paired result
   defp dispatch_lisp_eval(call, agent, state) do
     start = System.monotonic_time(:millisecond)
 
@@ -1191,22 +1221,39 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp handle_lisp_runtime_error(lisp_step, program, call, _agent, state, duration_ms) do
     fail = lisp_step.fail
-    reason_atom = Shared.classify_lisp_error(fail)
-    message = fail.message
 
-    result_json = PtcToolProtocol.render_error(reason_atom, message)
+    if Shared.terminal_lisp_failure?(fail) do
+      # Fail closed (§3.5 #2): a prelude attach failure must terminate the run,
+      # never become a recoverable `lisp_eval` tool error that the LLM retries —
+      # parity with the `:content` and `:tool_call` transports. Render the paired
+      # tool error + step entry so the halting turn stays observable, then signal
+      # fatal: the 4-tuple `{:fatal, step, result_json, step_entry}` halts the
+      # combined-mode reduce while preserving the assistant call + tool result.
+      reason_atom = Shared.classify_lisp_error(fail)
+      message = fail.message
+      result_json = PtcToolProtocol.render_error(reason_atom, message)
+      emit_ptc_lisp_telemetry(state, duration_ms, true)
+      step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
+      _ = program
+      {:fatal, lisp_step, result_json, step_entry}
+    else
+      reason_atom = Shared.classify_lisp_error(fail)
+      message = fail.message
 
-    state_next =
-      thread_lisp_step_state(state, lisp_step,
-        advance_turn_history: false,
-        last_fail: fail,
-        last_return_error: message
-      )
+      result_json = PtcToolProtocol.render_error(reason_atom, message)
 
-    emit_ptc_lisp_telemetry(state, duration_ms, true)
-    step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
-    _ = program
-    {:ok, result_json, step_entry, state_next}
+      state_next =
+        thread_lisp_step_state(state, lisp_step,
+          advance_turn_history: false,
+          last_fail: fail,
+          last_return_error: message
+        )
+
+      emit_ptc_lisp_telemetry(state, duration_ms, true)
+      step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
+      _ = program
+      {:ok, result_json, step_entry, state_next}
+    end
   end
 
   defp handle_memory_limit_exceeded(
@@ -1232,7 +1279,11 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     else
       emit_ptc_lisp_telemetry(state, duration_ms, true)
       error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
-      {:fatal, error_step}
+      # Pair a tool result so the fatal finalizer's assistant tool call has its
+      # matching `role: :tool` response (valid transcript under collect_messages).
+      result_json = PtcToolProtocol.render_error(:memory_limit, error_msg)
+      step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, error_msg)
+      {:fatal, error_step, result_json, step_entry}
     end
   end
 
