@@ -416,20 +416,46 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
     end
 
     test "never exceeds capacity, and frees every slot on normal completion" do
+      test_pid = self()
       budget = ParallelBudget.new(3)
       {:ok, agent} = start_supervised({Agent, fn -> {0, 0} end})
 
       fun = fn _ ->
-        held = ParallelBudget.held(budget)
-        Agent.update(agent, fn {_last, peak} -> {held, max(peak, held)} end)
+        Agent.update(agent, fn {live, peak} -> {live + 1, max(peak, live + 1)} end)
+        send(test_pid, {:worker_ready, self()})
+        wait_for_go()
+        Agent.update(agent, fn {live, peak} -> {live - 1, peak} end)
         {:ok, :done}
       end
 
-      assert {:ok, results} =
-               ParallelRunner.run(Enum.to_list(1..20), fun, base_opts(budget: budget))
+      runner =
+        spawn(fn ->
+          send(
+            test_pid,
+            {:result,
+             ParallelRunner.run(
+               Enum.to_list(1..6),
+               fun,
+               base_opts(budget: budget, max_concurrency: 10)
+             )}
+          )
+        end)
 
-      assert length(results) == 20
-      {_last, peak} = Agent.get(agent, & &1)
+      _ref = Process.monitor(runner)
+
+      first = collect_pids(:worker_ready, [])
+      assert length(first) == 3
+      for pid <- first, do: send(pid, :go)
+
+      second = collect_pids(:worker_ready, [])
+      assert length(second) == 3
+      for pid <- second, do: send(pid, :go)
+
+      assert_receive {:result, {:ok, results}}, 2_000
+
+      assert length(results) == 6
+      {live, peak} = Agent.get(agent, & &1)
+      assert live == 0
       assert peak <= 3
       # Every slot released on normal completion.
       assert ParallelBudget.held(budget) == 0
