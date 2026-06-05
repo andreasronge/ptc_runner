@@ -77,12 +77,21 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
                "fail: #{inspect(step.fail)}"
     end
 
-    test "discovers and calls a :discoverable export omitted from the inventory" do
-      # The needed export (cat/lookup) is :discoverable, so it is NOT in the prompt
-      # inventory. A prompt-visible DECOY (cat/size) IS listed but is an obvious
-      # non-fit — a zero-arg count, not a keyed lookup — so the model cannot
-      # shortcut to it and must reach for a discovery form (ns-publics / apropos)
-      # to find lookup. This is the test's subject: DISCOVERY.
+    @tag :high_variance
+    test "independently discovers an omitted :discoverable export (stochastic)" do
+      # HIGH-VARIANCE, by design — the genuinely-uncertain behavior. The prompt is
+      # UN-coached: it gives only the user goal (key + output shape), NOT that a
+      # hidden capability exists, which namespace to inspect, or which discovery
+      # form to use. The model must rely on the prelude surface alone: the
+      # inventory's global discovery hint (from PromptInventory.render/2) plus the
+      # `cat` namespace exposed by the visible decoy (cat/size, an obvious non-fit
+      # — a zero-arg count, not a keyed lookup). So this tests INDEPENDENT
+      # discovery, not "follows a discovery instruction".
+      #
+      # Measured ~5/6 on gemini-3.1-flash-lite (2026-06-05): a capable model mostly
+      # self-discovers but not reliably. A single binary pass is a smoke signal,
+      # NOT a reliability claim — the rigorous measure is a pass-rate run (the
+      # llm-benchmark gap), not this assert. Expect occasional reds.
       #
       # lookup accepts the key as a bare string OR wrapped in a map, because
       # discovery currently surfaces only a generic `(lookup arg1)` arity (no
@@ -111,10 +120,8 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       agent =
         SubAgent.new(
           prompt:
-            "Find the cataloged value for key \"r-1\". The capability you need may " <>
-              "not be listed directly — discover what the `cat` namespace exposes " <>
-              "(e.g. via (ns-publics 'cat) or (apropos \"...\")), then call it. " <>
-              "Return just the number.",
+            "Find the cataloged value for key \"r-1\" using the available " <>
+              "capabilities. Return just the number.",
           signature: "() -> :int",
           runtime_prelude: prelude,
           max_turns: 4
