@@ -1,0 +1,746 @@
+# SubAgent ↔ Upstream Runtime: First-Class Integration
+
+**Status:** Phase 1 implemented on `main` as of 2026-06-05 · **Created:**
+2026-06-05 · **Revised:** 2026-06-05 (replaced §3.2 lifecycle design with a
+core upstream *bridge* after review; promoted three correctness gaps from risks
+to Phase 1 requirements; updated status after merge; reconciled status against
+shipped code — the `SubAgent.run(runtime:)` delegating facade is **deferred**,
+and two §6 test-plan items plus the guide docs remain outstanding)
+**Owner:** TBD · **Related:** `docs/plans/root-upstream-runtime.md`,
+`docs/plans/transport-neutral-tool-upstreams.md`,
+`docs/guides/capability-prelude.md` §5/§7
+
+---
+
+## 0. Implementation Status
+
+Phase 1 has shipped in core:
+
+- `PtcRunner.Upstream.Eval.run_subagent/3` owns one `RunContext` for the whole
+  SubAgent run, enriches the agent with upstream `"call"` before prompt
+  generation, threads `discovery_exec`, and returns drained upstream records.
+- `SubAgent.run/2` **forwards** a caller-supplied `runtime:` opt through to
+  `Loop.run/2`, so a prelude's `requires` is validated on the multi-turn loop
+  path. It does **not** delegate to `run_subagent/3`: it opens no `RunContext`,
+  does not enrich the agent with the upstream `"call"` tool, and drains no
+  records. A bare `SubAgent.run(agent, runtime: rt)` therefore validates
+  `requires` but cannot dispatch upstream calls — with no `RunContext` there is
+  no `"call"` tool in scope, so a call attempt fails safe (raises
+  undefined-tool); it does **not** silently dispatch a partial write. The
+  dedicated thin facade that *delegates to the bridge* (§3.1) is **deferred to
+  Phase 2**; `Upstream.Eval.run_subagent/3` is the supported entry point today.
+- `Loop.run/2` threads an opaque `:runtime` handle through `State` and
+  `Loop.LispOpts.build/4` so each turn's `Lisp.run/2` can validate prelude
+  `requires` before user code.
+- `:prelude_attach_failed` is terminal in PTC-Lisp, native tool-call, and
+  combined text-mode paths rather than recoverable retry feedback.
+- The single-shot fast-path bypass is closed for preludes with non-empty
+  `requires`, even when `tool_refs` is empty.
+- Child SubAgents remain upstream-blind unless explicitly run with their own
+  runtime, matching the existing `discovery_exec` ownership boundary.
+- `mcp_server` delegates agent-over-upstream execution to the core bridge while
+  keeping its ledger and continuation-guard policy server-side.
+
+Phase 2/3 items remain future work: run-scoped `upstreams:` convenience,
+validate-once against a frozen-for-run snapshot, and a unified core upstream
+record surface.
+
+Still outstanding *within* Phase 1's own plan (tracked here so they are not read
+as done):
+
+- **The thin `SubAgent.run(runtime:)` delegating facade** (§3.1) — deferred to
+  Phase 2; today `runtime:` on `SubAgent.run/2` is a passthrough, not a bridge
+  delegate (see the bullet above).
+- **§6 raise/fault test through the bridge** — close-on-raise is exercised on
+  `with_run_context` directly (`upstream_runtime_test.exs`), but not through a
+  genuinely-raising `run_subagent/3` path (a raising `llm` callback or a
+  malformed `continuation_guard`, per §5.2).
+- **§6 `:e2e` test** — real LLM + the bridge over the dummy upstream is not yet
+  written.
+- **Guide docs** — `docs/guides/capability-prelude.md` §7 still documents only
+  `run_lisp/3`, not `run_subagent/3` as the SubAgent↔upstream seam. (§5's
+  cross-turn guarantee wording has already been corrected to *fail-closed before
+  any side-effecting turn*.)
+- **Standalone side-effect honesty gap** — a standalone bridge consumer gets
+  fail-closed `requires` validation but **no** side-effect continuation guard by
+  default (`continuation_guard == nil ⇒ :continue`, `loop.ex:478-480`); the
+  stop-after-side-effect policy is mcp-owned until Phase 3. §8's "safe by default"
+  is a Phase-3 target, not Phase-1 reality, and the guide does not yet say so.
+
+**Phase 1.5 (do now) — see [§9 Implementation Checklist](#9-phase-15--implementation-checklist-do-now-workflow-executable).**
+A small, behaviour-preserving cleanup batch the 2026-06-05 design review surfaced:
+switch the bridge onto the internal `Runner.run/2` (`Definition`-only), add a
+Definition-contract test + a no-default-guard canary, and close the guide §7/§5 +
+§8 honesty gaps. Architecture unchanged; the Phase-2 facade and Phase-3 record
+surface stay deferred.
+
+Sections below preserve the original pre-implementation design record; read
+current-architecture claims there as historical context unless this status
+section says otherwise.
+
+## 1. Problem
+
+A multi-turn `PtcRunner.SubAgent` cannot drive an upstream (MCP/HTTP/OpenAPI)
+runtime through a first-class core API. The orchestration that lets it happen
+lives in the **mcp_server** app (`PtcRunnerMcp.Agentic.run_subagent/5`), not in
+`ptc_runner`. Two consequences:
+
+1. **Misplaced layer.** Post-refactor, `mcp_server` should only *expose*
+   `ptc_runner` as an MCP server. Agent-over-upstream orchestration is core
+   capability, not server-exposure logic. A `ptc_runner`-only consumer (no
+   mcp_server) has no supported way to run a multi-turn agent over upstream
+   tools — they'd have to re-implement the adaptation.
+2. **Weakened prelude safety on the path agents actually use.** A tool-backed
+   capability prelude's attach-time `requires` validation is **fail-closed only
+   when a `:runtime` is threaded into the attach path** (`lisp.ex:409-415`). The
+   SubAgent loop never threads `:runtime` (`lisp_opts.ex:30-50`), so on the
+   multi-turn path `requires` is **not** validated; the prelude's "a missing
+   backing can never cause a partial run with side effects" guarantee (guide §5)
+   silently degrades to a runtime-recoverable error. For write-effect upstream
+   ops this is the difference between "never attempted" and "attempted, then
+   rejected" — and in the requires/body-divergence case (§3.5 #1) it is the
+   difference between "rejected" and an **actually-dispatched unauthorized
+   write**.
+
+> The upstream **client** (`lib/ptc_runner/upstream/*` — `Runtime`, `Eval`,
+> `OpenApi`, MCP transports, `Catalog`, `Credentials`) is **already in core**.
+> `Upstream.Eval.run_lisp/3` works standalone. The gap is purely the
+> **SubAgent ↔ runtime bridge**, plus the multi-turn lifecycle around it.
+
+---
+
+## 2. Current architecture (grounded)
+
+### What's where
+
+| Concern | Location | Notes |
+|---|---|---|
+| Upstream client (Runtime/Eval/transports/catalog/creds) | `lib/ptc_runner/upstream/*` (core) | ✅ correct |
+| Single-shot eval against a runtime | `Upstream.Eval.run_lisp/3` (core) | sets `:runtime` → prelude `requires` validated |
+| Run-context lifecycle | `Upstream.Eval.with_run_context/3` (core, `eval.ex:33-43`) | opens/closes one `RunContext` (ledger, discovery, limits); `try/after` closes on return *and* raise |
+| Runtime → tools + discovery hooks | `Upstream.Eval.eval_options/1` (core, `eval.ex:24`) | yields `tools` `"call"` fn + `discovery_exec` |
+| SubAgent loop opts builder | `Loop.LispOpts.build/4` (core, `lisp_opts.ex:30-50`) | threads `tools:`, `prelude:`, `discovery_exec:` — **never `:runtime`** |
+| Prelude attach + requires gate | `Lisp.attach_prelude/4` (core, `lisp.ex:407-415`) | `nil` runtime → `compile_prelude_only` (no validation); non-nil → `PreludeAttach.attach` (`lisp.ex:414`) |
+| **SubAgent ↔ upstream glue** | **`PtcRunnerMcp.Agentic.run_subagent/5`** (mcp_server) | **misplaced** |
+| Server's aggregated-upstreams config | `PtcRunnerMcp.RootUpstreamRuntime` (mcp_server) | reasonably server-specific — **stays** |
+
+### How the bridge works today (`agentic.ex:165-194`)
+
+```elixir
+Eval.with_run_context(RootUpstreamRuntime.runtime(), root_context_opts(), fn context ->
+  eval_opts = Eval.eval_options(context)
+  root_agent = %{agent | tools: root_tools_with_ledger(eval_opts[:tools], ledger)}
+  SubAgent.run(root_agent,
+    llm: llm,
+    context: validated.context,
+    discovery_exec: eval_opts[:discovery_exec],
+    ...)
+end)
+```
+
+The runtime is **adapted into a `tools` function map + a `discovery_exec` hook**;
+the runtime object never enters SubAgent. The whole multi-turn `SubAgent.run`
+executes inside **one** `with_run_context` (so the ledger, discovery cache, and
+limits span all turns). Critically, `:runtime` is *not* passed to the prelude
+attach path → `requires` validation is skipped.
+
+### Why it's like this (legit forces, not just history)
+
+1. **SubAgent's tool seam is deliberately "just functions"** (`fn args -> result`).
+   Zero dependency on the upstream process subsystem. SubAgent runs identically
+   over pure Elixir / child agents / MCP / HTTP / test stubs. Decoupling has real
+   value (it is a *choice*, not a forced dependency — both are one OTP app).
+2. **One run-context must span all turns.** `with_run_context` opens/closes a
+   `RunContext` (ledger, discovery backend, per-call limits, response caps). A
+   multi-turn run spans N evals; the ledger/limits/discovery cache must aggregate
+   across **all** of them.
+
+   **Correction (this revision):** the original sketch read this force as
+   "core SubAgent must *own* the run-context lifecycle inside its turn loop."
+   That conflates two different things:
+
+   - the **runtime handle** — a long-lived `%Upstream.Runtime{}`/pid GenServer,
+     used by `Lisp.run` in exactly one place: read-only attach-time `requires`
+     validation (`PreludeAttach.attach` → `Runtime.upstream/2`). Threading it
+     into `Lisp.run` opens **no** context and touches **no** counter; and
+   - the **per-run `RunContext`** — the ledger/caps/discovery wrapper.
+
+   Cross-turn aggregation does **not** require the loop to own the context. The
+   `tools`/`discovery_exec` closures returned by `eval_options/1` capture the
+   process-external `Collector` and the `:atomics` counters; they aggregate
+   across turns *regardless of where the context is opened*. `agentic.ex` already
+   proves this — it wraps the **entire** `SubAgent.run` in one `with_run_context`
+   with **zero** changes to `Loop.run`. So the right boundary is an **outer
+   bridge**, not lifecycle ownership inside the loop.
+3. **History.** mcp_server was the first/only consumer needing
+   agent-over-aggregated-upstreams; the glue grew there.
+
+---
+
+## 3. Proposed design
+
+Add a first-class upstream story to core as a **bridge module** that owns the
+run-context lifecycle from *outside* the SubAgent loop — the same shape
+`agentic.ex` already uses — so the loop stays upstream-light and mcp_server's
+`run_subagent` collapses to "pass the server's runtime (and its ledger policy) to
+the core bridge."
+
+### 3.1 Public API
+
+**Primary — the core bridge (mirrors `Upstream.Eval.run_lisp/3`):**
+
+```elixir
+PtcRunner.Upstream.Eval.run_subagent(runtime, agent, opts)
+```
+
+The bridge owns the whole lifecycle:
+
+1. open **one** `RunContext` (`with_run_context`) spanning the entire run;
+2. derive `{tools, discovery_exec}` via `eval_options/1`;
+3. build an **enriched agent** whose tool map merges the upstream `"call"` tool
+   into `agent.tools` (collision policy in §3.4) — done **before** the agent runs
+   so it is prompt-visible (§3.2.1);
+4. call the **internal runner** `Runner.run(enriched, … discovery_exec:,
+   runtime:)` — **not** the public `SubAgent.run/2`, so the optional
+   `SubAgent.run(runtime:)` facade can delegate to the bridge without recursing
+   (see the implementation note below);
+5. drain upstream records, then close the context (the existing
+   `with_run_context` `after`).
+
+`opts` accepts the normal `SubAgent.run` opts plus the upstream context-limit
+keys (`:max_tool_calls`, `:max_catalog_ops`, `:call_timeout_ms`,
+`:max_response_bytes`, `:max_catalog_result_bytes`) and an optional
+`on_upstream_call`/tool-decorator + `continuation_guard` (§3.4). `:discovery_exec`
+and `:runtime` are **bridge-owned**: `run_subagent/3` drops any caller-supplied
+values for these keys and sets them itself from the `RunContext`, so the facade's
+"one public meaning" holds — a caller cannot smuggle a different runtime or
+discovery hook into the bridge path. (This differs from `run_lisp/3`'s
+`Keyword.put_new(:runtime, runtime)` precedent, where an explicit caller key
+wins.)
+
+**Optional — a convenience facade (sugar, *not* the primary architecture):**
+
+```elixir
+SubAgent.run(agent, llm: llm, context: ctx, runtime: upstream_runtime)
+```
+
+This delegates to `Upstream.Eval.run_subagent/3` (so it also enriches the agent
+and routes through the loop). It exists purely for call-site ergonomics; the
+bridge is the real entry point. Keep the delegation thin — the facade is the
+*only* place `SubAgent` references `Upstream`, and it should add no behaviour of
+its own. When `runtime:` is absent, behaviour is exactly as today (tools-only).
+
+**Implementation note (facade↔bridge recursion, return shape, and the semantics
+change).** Three things the facade must get right:
+
+- *Avoid recursion.* The bridge re-enters SubAgent via the internal
+  `PtcRunner.SubAgent.Runner.run/2`, **not** the public `SubAgent.run/2` (as the
+  §3.2 lifecycle shows). The bridge passes `runtime:` in its opts and the facade
+  keys on `runtime:`, so calling the public entry would recurse (facade → bridge
+  → `SubAgent.run` → facade → …). *Scheduled for **Phase 1.5** (§9 T1): switch the
+  bridge to call `PtcRunner.SubAgent.Runner.run/2` directly — decoupled from the
+  deferred facade, since it is behaviour-preserving today (the `%Definition{}`
+  clause of `SubAgent.run/2` is a pure forward to `Runner.run/2`) and pre-empts the
+  recursion the moment a Phase-2 facade lands. That switch also narrows
+  `run_subagent/3` to **`Definition`-only** (`@spec` → `Definition.t()`; a
+  non-Definition agent has no `:tools` field for `enrich_agent` to merge). The
+  shipped bridge still calls `PtcRunner.SubAgent.run` until T1 lands.*
+- *Return shape.* `SubAgent.run(runtime:)` returns only the `SubAgent.run/2`
+  result, **dropping** the bridge's `records` — mirroring `run_lisp/3` vs
+  `run_lisp_with_records/3`. This keeps the public facade unsurprising and leaves
+  the records-on-`Step` surface for Phase 3 (§3.4).
+- *Semantics change — only one public meaning.* The facade changes what
+  `SubAgent.run(agent, runtime: rt)` *means*. Today it is an attach-validation
+  **passthrough**: `runtime:` reaches `Lisp.run`'s attach path and validates the
+  prelude's `requires`, but it does **not** enrich `"call"`, open a `RunContext`,
+  or execute upstream calls (a call attempt fails safe with undefined-tool). Once
+  the facade lands it becomes a full **bridge delegate** (enriches `"call"`,
+  opens one `RunContext`, drains records, executes upstream). After the facade,
+  treat the public `SubAgent.run(runtime:)` as having a **single** meaning — the
+  bridge — and treat the `:runtime` opt at the `Runner.run` / `Loop.run` /
+  `LispOpts` level as internal plumbing the bridge sets for per-turn attach
+  validation, **not** a public entry point for upstream execution. Audit existing
+  public `SubAgent.run(..., runtime:)` call sites when the facade lands (e.g.
+  `test/ptc_runner/upstream/eval_run_subagent_test.exs`): they flip from
+  passthrough to bridge semantics and must move to `Runner.run/2` if they only
+  wanted attach validation. Tests and comments must not conflate "runtime reaches
+  attach validation" with "runtime-backed upstream execution."
+
+### 3.2 Lifecycle: the bridge owns it, the loop stays upstream-light
+
+```
+Upstream.Eval.run_subagent(runtime, agent, opts)
+  └─ with_run_context(runtime)                 ── ONE context, spans the whole run (OUTSIDE the loop)
+       ├─ {tools, discovery_exec} = eval_options(context)
+       ├─ enriched = %{agent | tools: merge "call" tool}   ── before prompt generation
+       └─ Runner.run(enriched, discovery_exec:, runtime:)   ── internal runner (not public SubAgent.run ⇒ no facade recursion)
+            ├─ turn 1: Lisp.run(prog, …, runtime: rt)   ── rt = HANDLE (attach validation only)
+            ├─ turn 2: Lisp.run(prog, …, runtime: rt)   ── same closures ⇒ same ledger/caps/discovery
+            └─ turn N: …
+  └─ drain records → close                     ── with_run_context `after`: fires on return AND raise
+```
+
+Implementation notes:
+
+- **The SubAgent loop gains exactly one thing: a `:runtime` *handle*
+  passthrough.** Plumb it `Loop.run/2` opts → `run_opts` → `State` →
+  `LispOpts.build/4`, mirroring how `discovery_exec` already flows
+  (`loop.ex:159 → 207 → 306`). `LispOpts.build/4` gains a single
+  `|> maybe_put(:runtime, Map.get(state, :runtime))` next to the existing
+  `:prelude`/`:discovery_exec` lines (`lisp_opts.ex:48-49`). The loop never opens
+  or closes a `RunContext`; it only forwards the handle so each turn's `Lisp.run`
+  can validate `requires` (§3.3).
+- **No new `try/after` inside `Loop.run`.** The single `RunContext`'s
+  open/drain/close lives in `with_run_context` (`eval.ex:33-43`), already
+  exercised by the "closes the collector when callback raises" test. Reuse it;
+  don't re-implement teardown in the loop. (Note: on a *raise*, `with_run_context`
+  closes **without** draining — records are lost. Match or deliberately improve
+  this when porting; don't change it by accident.)
+- **Cross-turn aggregation is automatic.** The `tools`/`discovery_exec` closures
+  capture the process-external `Collector` + `:atomics` counters from the one
+  `RunContext`, so the ledger, caps, and discovery cache aggregate across all
+  turns exactly as `agentic.ex` achieves today.
+- **No `Runner.run/2` fast-path change for the bridge path.** Because the bridge
+  enriches `agent.tools` with the `"call"` tool *before* the runner runs,
+  `map_size(agent.tools) != 0`, so the run already routes to `Loop.run` (the
+  single-shot predicate at `runner.ex:85-87` requires an empty tools map). The
+  prompt inventory is built from the enriched `agent.tools`, so it matches the
+  execution surface by construction. (The single-shot fast path still needs the
+  `requires` guard for an agent with *no* local tools that is **not** enriched by
+  the bridge — i.e. the internal passthrough / plain `SubAgent.run` with a
+  `runtime_prelude` — independent of the facade; see §3.5 #1, which must be fixed
+  regardless.)
+
+### 3.2.1 Prompt-visible tool enrichment
+
+The SubAgent prompt is built from `agent.tools` /
+`BuiltinTools.effective_tools(agent)` before the first turn, and the per-turn
+execution surface is re-derived from the same `agent.tools` each turn. So the
+upstream `"call"` tool must be merged into **`agent.tools` itself**, once, by the
+bridge before the agent runs — exactly what `agentic.ex:173` does today
+(`%{agent | tools: root_tools_with_ledger(eval_opts[:tools], ledger)}`).
+
+Do **not** also merge upstream tools inside the per-turn `LispOpts.build/4`
+opts: the per-turn path needs only the runtime *handle* (for attach validation),
+not the tool merge. Two merge sites would re-introduce the `LispOpts`-divergence
+bug class (#874) the single builder exists to prevent. One merge, on the agent,
+in the bridge.
+
+### 3.3 Prelude `requires` validation (the safety fix)
+
+Once each turn's `Lisp.run` receives `:runtime`, `attach_prelude/4`
+(`lisp.ex:414`) takes the `PreludeAttach.attach/2` branch → `requires` is
+validated **before any user code runs**, fail-closed. This restores the guide §5
+**per-turn fail-closed validation** on the multi-turn path (initial attach, plus
+re-validation each turn) — though under the default `:live` catalog the resulting
+guarantee is *fail-closed before any side-effecting turn*, not whole-run
+side-effect freedom (§3.5 #2). The same fix must also cover the **single-shot
+path** (§3.5 #1), so the validation does not depend on which execution surface the
+agent happens to select.
+
+### 3.4 Tool merge + ledger — V1 keeps the MCP wrapper as Phase 1 compatibility (option 3)
+
+**This is a Phase 1 compatibility choice, not the target boundary** (see §4's
+principle and §7 Phase 3). The mcp side-effect machinery cannot be reduced to
+"drain core records to a callback" *yet* — but the reason is a **core
+record-surface gap**, not anything genuinely mcp-specific:
+
+- The `continuation_guard` (`agentic.ex:346-354`) blocks continuation via
+  `Ledger.side_effecting_attempted?`, which keys on each entry's **`:effect`**
+  (`:write`/`:unknown`), recorded **before** dispatch so an interrupted write
+  still blocks (`agentic_contract_test.exs` locks "records attempt before
+  dispatch").
+- That `:effect` classification is **not** inherently mcp-specific: it is a
+  trivial, domain-blind pure function (`annotations_effect/1`,
+  `agentic.ex:275-283`) over `readOnlyHint`/`destructiveHint` **catalog
+  annotations that core already exposes** (`upstream/discovery.ex:74`;
+  `upstream/open_api/compiler.ex:78` synthesizes `readOnlyHint` for GETs). Core
+  can compute the same classification from its own catalog.
+- The real blocker is core's **record surface**: `RunContext` records
+  (`run_context.ex:64-90`) are written **after** dispatch and carry **no**
+  `:effect`, `:turn`, or `:args_hash`, so they cannot host the guard today.
+  Closing that (record-before-dispatch + richer schema) is the Phase 3 unified
+  record-surface work — after which the guard, classification, and ledger
+  primitives belong in **core** with fail-safe defaults: a default
+  *classification* (unknown effect ⇒ treated as side-effecting) **and a default
+  *action*** — absent a host policy, core **stops continuation once a
+  side-effecting call is attempted** (mirroring today's mcp guard,
+  `agentic.ex:347` → `{:stop, partial_side_effects}`). The host may **override**
+  that decision (allow / prompt / require explicit approval) and owns the
+  audit/export format — but it never has to *install* safety to get it.
+
+So **Phase 1 keeps mcp's `"call"` wrapper and `continuation_guard` mcp-owned**,
+passed into the bridge as opts:
+
+- Collision policy: the bridge reserves the upstream `"call"` key when `runtime:`
+  is present and raises on a silent local override (mirroring
+  `validate_tool_data_conflict!`'s raise style, `runner.ex:180-213`) unless an
+  explicit override flag is supplied (tests/stubs). A local `"call"` would make
+  `requires` validation (against the runtime) and execution (a local fn)
+  disagree. The collision check lives in the bridge, not in `Loop`/`LispOpts` —
+  the string key `"call"` stays out of generic loop code.
+- The bridge accepts an optional **tool decorator** (`on_upstream_call` /
+  `upstream_tool_wrapper`) and a `continuation_guard`; mcp passes its
+  `root_tools_with_ledger` decorator + guard and keeps `Ledger`/`Projection`
+  entirely server-side. **No mcp `Ledger` format enters core.**
+- The bridge returns the drained `RunContext` records to the caller (and may
+  attach them to the final `Step`). Reconcile that "records on the `Step`" idea
+  with the **already-deferred** `step.upstream_calls` field in
+  `root-upstream-runtime.md:781` so the two plans converge on **one** core record
+  surface (Phase 3), rather than designing it twice.
+- `discovery_exec` from `eval_options` flows to the loop exactly as today.
+
+### 3.5 Phase 1 correctness requirements (promoted from "risks")
+
+These are **requirements**, not open questions. Each has a failing test written
+first (repo bug-fix rule).
+
+1. **Single-shot path must not skip `requires` validation.** The fast-path
+   predicate (`runner.ex:85-87`) gates on `map_size(agent.tools) == 0` and
+   `not prelude_tool_backed?(agent.runtime_prelude)`, but `prelude_tool_backed?/1`
+   (`runner.ex:122-125`) keys on **`tool_refs`** (AST-derived), **not**
+   `requires`. These diverge: an export with explicit
+   `{:requires ["upstream:crm/do_write"] :effect :write}` and a body containing
+   **no** literal `(tool/…)` form compiles to `tool_refs = []` →
+   `prelude_tool_backed? = false` → the agent routes to `run_single_shot`, which
+   calls `Lisp.run(code, …, prelude: agent.runtime_prelude)` with **no**
+   `:runtime` (`runner.ex:316-322`). Its write-effect `requires` is never
+   validated, and because the declared id and the literal args diverge, the
+   runtime call guard can't catch it either → an unauthorized write can actually
+   dispatch. **Fix:** make any prelude with non-empty `requires` ineligible for
+   the single-shot fast path (preferred — add a `prelude_requires_backed?` clause
+   to the predicate), **or** thread `:runtime` into the single-shot `Lisp.run`
+   when present. Either way the agent's `requires` validation must not depend on
+   which execution surface it lands on.
+
+2. **A mid-run attach failure must fail closed, not become a retry turn.**
+   `catalog_snapshot_mode` defaults to **`:live`** (`runtime.ex:37`), which
+   re-fetches upstreams per catalog op, so a turn-N `requires` re-validation can
+   fail where turn 1 passed (a tool disappears upstream mid-run). But a turn-N
+   `Lisp.run` returning `{:error, :prelude_attach_failed}` currently flows
+   through the **recoverable** error branch (`loop.ex:841`) → builds LLM feedback
+   → `{:continue, …}` (`loop.ex:871`). By then turns 1..N-1 may already have
+   executed write-effect upstream calls — directly contradicting "never a partial
+   run with side effects." **Fix (V1):** treat `:prelude_attach_failed` as a
+   **hard stop** — a missing backing is not a program error the LLM can fix by
+   rewriting, so terminate the run rather than feeding it back. (Phase 3's
+   validate-once-against-a-frozen-run-snapshot is the more elegant long-term
+   answer: it removes both the per-turn redundancy *and* the live-catalog hazard.
+   Until then, hard-stop is the minimal change that restores the guarantee.) The
+   "fail-closed on the multi-turn path" claim must be qualified to "before any
+   side-effecting turn," not "on every turn under a live catalog."
+
+3. **Child agents are upstream-blind in V1 (explicit, not an open question).**
+   `SubAgentTool`/`as_tool` children build run_opts that inherit only
+   `llm`/`llm_registry`/`context`/`_nesting_depth`/`_remaining_turns`/
+   `_mission_deadline` (+`max_heap`) — **not** `discovery_exec`, **not**
+   `continuation_guard`, and **not** `runtime`
+   (`tool_normalizer.ex:380-389`; `discovery_exec` is explicitly "caller-owned,
+   not inherited" at `loop.ex:157-159`). Phase 1 **decides: a child SubAgent does
+   not inherit the parent's runtime — it is upstream-blind unless it carries its
+   own `runtime_prelude` *and* is run through its own runtime/bridge.** Rationale:
+   matches the existing
+   `discovery_exec` ownership model and avoids accidental shared upstream
+   authority across a composition boundary. Consequence: the fail-closed
+   guarantee holds for the agent the bridge enriches, **not transitively** for
+   its children; a child whose own `runtime_prelude` carries `requires` has those
+   `requires` **left unvalidated** (the child runs upstream-blind) unless it is
+   itself run through its own bridge/runtime. Document this boundary in the guide.
+
+---
+
+## 4. Migration / what moves vs. stays
+
+| Item | Action |
+|---|---|
+| `Agentic.run_subagent/5` | Collapse to `Upstream.Eval.run_subagent(RootUpstreamRuntime.runtime(), agent, llm:, context:, continuation_guard:, on_upstream_call: ledger_decorator, …)` |
+| `with_run_context`-spans-the-run wrapper + agent enrichment | **Move to core** (`Upstream.Eval.run_subagent/3`) |
+| `:runtime` handle threading through the SubAgent loop | **New** — one passthrough (`Loop.run` opts → `State` → `LispOpts.build`) |
+| `root_tools_with_ledger/2`, `call_with_ledger/3`, effect classification, `continuation_guard`, retry-feedback rendering | **Phase 1: stay in mcp_server**, passed into the bridge as a tool decorator + guard. **Phase 3:** the *generic* parts (effect classification, ledger primitives, guard mechanism, caps) move to **core** with fail-safe defaults; mcp keeps only deployment policy + protocol/UX (retry-feedback rendering, audit export). |
+| `RootUpstreamRuntime` (runtime *selection*/config) | **Stays in mcp_server** (host-owned: which upstreams a deployment selects) |
+| `Ledger` retention / projection / export format | **Stays** mcp-side. (Phase 3: a *generic* call-record/ledger primitive lives in core — converging on `step.upstream_calls` — while mcp keeps its own retention/projection/export.) |
+| `SubAgent.run(runtime:)` facade | Optional thin delegate to the bridge |
+
+Principle (target boundary): **core owns *how* an agent drives a runtime —
+including neutral runtime/catalog metadata, call recording, generic side-effect
+classification, and policy *extension points* (`continuation_guard`,
+`on_upstream_call`, approval callbacks, caps) with safe defaults. The embedding
+host owns runtime *selection* and deployment-specific *decisions* —
+authorization, and the UX/protocol around approval, denial, continuation,
+retries, and audit export.** `mcp_server` is **one such host**: it configures
+and exposes `ptc_runner` and installs MCP-specific policy callbacks; it is
+**not** the architectural home for upstream execution or generic side-effect
+logic. Otherwise `ptc_runner`-standalone users would have to reimplement safety
+policy — the very layering problem this bridge exists to fix. The Phase 1 split
+above (ledger / classification mcp-side) is **compatibility with the existing
+contract**, not the target; Phase 3 (§7) moves the generic mechanism into core.
+
+---
+
+## 5. Risks & open questions
+
+(The three former entries here — single-shot bypass, live-catalog re-validation,
+child inheritance — are now Phase 1 requirements in §3.5.)
+
+1. **Coupling SubAgent → Upstream — now minimal.** The loop gains only an opaque
+   `:runtime` handle passthrough (it never interprets it beyond forwarding to
+   `Lisp.run`). The bridge lives in the `Upstream` namespace, consistent with
+   `Upstream.Eval`/`Session`. The optional `SubAgent.run(runtime:)` facade is the
+   only `SubAgent → Upstream` reference; keep it a thin delegate. Guard the
+   `runtime:` codepath so a `nil` runtime is a pure no-op (today's behaviour).
+2. **Context lifetime on raise.** Reuse `with_run_context`'s tested `after`
+   close. Note records are **not** drained on a raise today (lost); decide
+   deliberately whether the port matches or improves that. Add a fault test that
+   exercises an **actually-raising** path (a raising `llm` callback, or a
+   `continuation_guard` returning a malformed value → `loop.ex:487`) — asserting
+   close-on-*sandbox-timeout* proves nothing, since that path returns an
+   `{:error, Step}` normally, not a raise.
+3. **Per-turn re-validation cost.** Re-attaching/validating `requires` each turn
+   is idempotent and cheap (pure reads of the runtime handle's catalog). The
+   Phase 3 frozen-snapshot validate-once both removes the redundancy and closes
+   §3.5 #2's live-catalog hazard. Don't let the redundancy argument motivate
+   caching state inside `Loop` (that would re-introduce the lifecycle coupling
+   this design avoids).
+4. **Core record surface.** Converge the bridge's drained-records-on-`Step` idea
+   with `root-upstream-runtime.md`'s deferred `step.upstream_calls` (Phase 3) so
+   there is one core record surface, not two.
+5. **Catalog snapshot mode.** `live`/`frozen` is a property of the **Runtime**,
+   orthogonal to how many `RunContext`s wrap the run. The real decision driven by
+   it is §3.5 #2, not "does one context freeze the catalog" (it doesn't).
+
+---
+
+## 6. Test plan
+
+*Status legend (added on status reconciliation): items without a status marker
+are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
+`test/ptc_runner/sub_agent/loop/lisp_opts_test.exs`, and the mcp_server
+`agentic_contract_test.exs`; items marked **outstanding** are not yet written.*
+
+- **Core unit:** `LispOpts.build` threads `:runtime`; `nil` runtime is inert.
+- **Bridge lifecycle:** one `RunContext` opens/closes per
+  `Upstream.Eval.run_subagent`; ledger/caps aggregate across turns; drained
+  records are available before close; closes on success, recoverable error, and
+  **raise** (fault test against a genuinely-raising path, per §5.2).
+  *(Status: happy-path, recoverable-error, round-trip, and the direct
+  `with_run_context` close-on-raise are covered; the genuinely-raising path
+  **through the bridge** is **outstanding**.)*
+- **Prelude requires — loop path (the safety fix):** a tool-backed prelude whose
+  `requires` is *not* satisfied fails fast with `:prelude_attach_failed` **on the
+  SubAgent multi-turn path** before any turn runs. Mirror
+  `test/ptc_runner/lisp/prelude/attach_test.exs` via the bridge.
+- **Prelude requires — single-shot path (§3.5 #1):** an agent with `output:
+  :ptc_lisp`, `max_turns: 1`, no local tools, `retry_turns: 0`, and a
+  `runtime_prelude` whose export has **non-empty `requires` but empty
+  `tool_refs`** must **not** take `run_single_shot`; its `requires` validates
+  fail-closed (or the run is routed to the loop). This is the path with no
+  existing test and the one that can dispatch an unauthorized write.
+- **Mid-run hard stop (§3.5 #2):** a multi-turn run where `requires` becomes
+  unsatisfiable at turn N (live catalog) → `:prelude_attach_failed` **terminates**
+  the run; it is **not** fed back as a recoverable turn, and no side-effecting
+  call fires after the failure.
+- **Child upstream-blind (§3.5 #3):** a parent with a runtime and an `as_tool`
+  child whose own `runtime_prelude` carries `requires` but is given no runtime →
+  the child is upstream-blind: its `requires` are **not validated** (attach
+  proceeds without runtime-backed checks) unless it is run through its own
+  bridge/runtime; assert the documented boundary (no transitive inheritance).
+- **Prompt/execution alignment:** with the bridge, the first-turn prompt
+  inventory includes the upstream `"call"` tool and the per-turn execution
+  surface matches.
+- **Collision policy:** local `"call"` plus `runtime:` is rejected unless an
+  explicit override flag is supplied.
+- **Round-trip:** real upstream (reuse `start_http_fixture` /
+  `examples/ptc_repl_dummy_upstream`) — a multi-turn agent calls a tool-backed
+  export against a reachable upstream and surfaces the result (deterministic
+  counterpart to `upstream_roundtrip_test.exs`, now via the bridge).
+- **e2e (`:e2e`):** real LLM + the bridge over the dummy upstream — the combined
+  path that currently has no single home. *(Status: **outstanding** — not yet
+  written.)*
+- **mcp_server regression:** `agentic_contract_test.exs` still green after
+  `run_subagent` collapses onto the core bridge (the ledger decorator + guard are
+  unchanged mcp-side, so its `Ledger`/`root_tools_with_ledger` units still pass).
+- **Definition-only contract (§9 T1/T2, scheduled):** `run_subagent/3` runs a
+  `%Definition{}` and **raises** for a non-Definition agent (a `%CompiledAgent{}`
+  has no `:tools` field; a string is not a struct) — locking the contract that the
+  bridge re-enters the internal `Runner.run/2`, not the public facade.
+- **Standalone no-default-guard canary (§9 T3, scheduled):** a bridge run with a
+  *dispatching* write-effect upstream call and **no** `continuation_guard`
+  **continues** (no `partial_side_effects` stop), pinning today's
+  `continuation_guard == nil ⇒ :continue` so a future Phase-3 core default flips
+  this test loudly. *(Distinct from the still-outstanding raise-through-bridge
+  fault test and `:e2e` test — the canary pins behaviour, it does not exercise a
+  raising path or a real LLM.)*
+
+---
+
+## 7. Phasing
+
+1. **Phase 1 (core bridge + safety, all required):**
+   - `PtcRunner.Upstream.Eval.run_subagent/3` bridge: one `RunContext` spanning
+     the run, `eval_options` closures, agent-tool enrichment **before** prompt
+     generation, drain + close; accepts a tool decorator + `continuation_guard`.
+   - `:runtime` handle passthrough in the SubAgent loop (`Loop.run` →
+     `State` → `LispOpts.build`).
+   - **§3.5 #1** single-shot `requires` validation, **§3.5 #2** mid-run hard
+     stop, **§3.5 #3** children upstream-blind — all three.
+   - Collapse `Agentic.run_subagent` onto the bridge, keeping mcp's ledger
+     decorator + guard (§3.4 option 3).
+   - Optional: the thin `SubAgent.run(runtime:)` facade (trivial once the bridge
+     exists). **Deferred to Phase 2** — not shipped in Phase 1; `runtime:` on
+     `SubAgent.run/2` is currently a loop passthrough, not a bridge delegate.
+
+   This closes both the misplacement and the prelude fail-closed gap without
+   moving the existing MCP ledger contract (its retention/projection/export
+   format) into core yet — the *generic* ledger/classification/guard mechanism
+   does belong in core; that move is Phase 3 (§4 target boundary).
+
+   **Phase 1.5 (do-now fast-follow, §9):** behaviour-preserving cleanups from the
+   2026-06-05 review — bridge → internal `Runner.run/2` (`Definition`-only),
+   Definition-contract + no-default-guard canary tests, and the guide §7/§5 + §8
+   honesty fixes. No architecture change; does not gate or block Phases 2/3.
+2. **Phase 2 (convenience):** `upstreams: config` form where core starts/stops a
+   runtime for the run's duration (a facade over the bridge — does **not** need
+   `runtime:` inside the loop); and the thin `SubAgent.run(runtime:)` delegating
+   facade (deferred from Phase 1).
+3. **Phase 3 (optimization + convergence + the target boundary):** *Gating first
+   step — core record-surface convergence:* give `RunContext` records a
+   record-before-dispatch, effect-bearing schema (`:effect`/`:turn`/`:args_hash`)
+   converged with `root-upstream-runtime.md`'s `step.upstream_calls`; the core
+   guard default, effect classification, and `step.upstream_calls` all
+   structurally depend on it, so it is the critical path, not a parallel
+   work-item. Then validate
+   `requires` once at run-context open against a frozen-for-the-run snapshot
+   (removes per-turn redundancy *and* §3.5 #2's live-catalog hazard); and **move
+   the generic side-effect mechanism into
+   core** — neutral effect classification (from the catalog annotations core
+   already exposes, §3.4), record-before-dispatch ledger primitives carrying
+   `:effect`/`:turn`/`:args_hash`, and the `continuation_guard`/approval/caps
+   hooks with fail-safe defaults — unknown effect ⇒ side-effecting, **and absent
+   a host guard core stops continuation after a side-effecting attempt** (host
+   may override to allow / prompt / require approval). Result: a
+   `ptc_runner`-standalone consumer gets safe upstream execution without
+   reimplementing policy, and `mcp_server` keeps only deployment policy +
+   protocol/UX (§4 target boundary).
+
+---
+
+## 8. Why this is worth doing
+
+- Restores the capability-prelude **fail-closed `requires` guarantee on the
+  multi-turn path** (the path most production agents use) — and, via §3.5 #1, on
+  the single-shot path too.
+- Makes "multi-turn agent over MCP/HTTP upstreams" a **supported core
+  capability** of `ptc_runner` standalone, independent of `mcp_server`.
+- Lets `mcp_server` shrink toward its intended role (a stated direction in
+  `root-upstream-runtime.md:36-44/69`): configure and expose `ptc_runner` as an
+  MCP server, owning only *deployment* policy + protocol/UX (which upstreams,
+  authorization, approval/denial, audit export). The generic side-effect
+  mechanism (classification, ledger primitives, guard) **moves to core in
+  Phase 3** (§4) — *after which* standalone users will be safe by default without
+  reimplementing it. **Phase 1 ships fail-closed `requires` validation standalone,
+  but not the side-effect continuation guard** (`continuation_guard == nil ⇒
+  :continue`); a standalone caller must supply its own `continuation_guard` until
+  the Phase-3 core default lands.
+- Keeps the SubAgent loop's deliberate "just functions" decoupling intact: the
+  only new coupling is a single, opaque `:runtime` handle passthrough behind a
+  bridge, not lifecycle ownership woven through the loop.
+
+---
+
+## 9. Phase 1.5 — Implementation Checklist (do now, workflow-executable)
+
+**Scope.** Behaviour-preserving cleanups + honesty/test gaps the 2026-06-05
+design review surfaced. **No architecture change.** The Phase-2 facade and the
+Phase-3 record surface stay deferred. Each task is self-contained with an exact
+target, the change, and an acceptance check, so it can be handed to a Claude
+workflow (suggested decomposition at the end).
+
+### Tasks
+
+**T1 — Bridge re-enters the internal runner (code).**
+- *File:* `lib/ptc_runner/upstream/eval.ex`.
+- *Change:* in `run_subagent/3`, replace `PtcRunner.SubAgent.run(enriched,
+  run_opts)` with `PtcRunner.SubAgent.Runner.run(enriched, run_opts)` (add the
+  `Runner` + `Definition` aliases). Narrow `@spec run_subagent` agent arg from
+  `struct()` to `PtcRunner.SubAgent.Definition.t()`; note `Definition`-only in the
+  `@doc`. Add a one-line call-site comment: *internal runner, not the public facade
+  — pre-empts facade↔bridge recursion when the Phase-2 `SubAgent.run(runtime:)`
+  facade lands (§3.1); behaviour-preserving today since the `%Definition{}` clause
+  of `SubAgent.run/2` is a pure forward to `Runner.run/2`.*
+- *Why it's safe:* `enrich_agent` matches `%{tools: tools}`; only `%Definition{}`
+  has a `:tools` field (`CompiledAgent` does not), so the bridge already only ever
+  receives a `Definition`. The switch makes the typed contract match reality.
+- *Accept:* `mix compile --warnings-as-errors`; `eval_run_subagent_test.exs` and
+  the mcp_server `agentic_contract_test.exs` stay green.
+- *Deps:* none. File-disjoint from T4 (parallel-safe).
+
+**T2 — Definition-only contract test (test).**
+- *File:* `test/ptc_runner/upstream/eval_run_subagent_test.exs`.
+- *Change:* assert `run_subagent/3` runs a `%Definition{}` and **raises** a clear
+  error for a non-Definition agent (e.g. a `%PtcRunner.SubAgent.CompiledAgent{}`
+  or a bare string). Locks the contract T1 makes explicit.
+- *Accept:* new test green.
+- *Deps:* after T1. Shares the test file with T3 → one agent owns both.
+
+**T3 — Standalone no-default-guard canary (test).**
+- *File:* `test/ptc_runner/upstream/eval_run_subagent_test.exs`.
+- *Change:* a bridge run with a *dispatching* write-effect upstream call (reuse
+  `start_http_fixture` / `examples/ptc_repl_dummy_upstream`) and **no**
+  `continuation_guard` **continues** — assert no `partial_side_effects` stop.
+  Comment: pins today's `continuation_guard == nil ⇒ :continue` (`loop.ex:478-480`)
+  so the Phase-3 core default (stop-after-side-effect) flips this test loudly.
+- *Accept:* new test green; asserts continuation, not stop.
+- *Deps:* same test file as T2 (same owning agent).
+
+**T4 — Guide honesty + the `run_subagent/3` seam (docs).**
+- *File:* `docs/guides/capability-prelude.md`.
+- *Change:* §7 — add `Upstream.Eval.run_subagent/3` as the multi-turn
+  SubAgent↔upstream seam (the analogue of `run_lisp/3`, the supported multi-turn
+  entry today). §5/§7 — add the host-supplied-guard caveat:
+  > Phase 1 validates prelude `requires` fail-closed. Side-effect continuation
+  > policy is host-supplied in Phase 1; `mcp_server` installs one, standalone
+  > callers must pass their own `continuation_guard` until the Phase 3 core
+  > default lands.
+- *Accept:* §7 names `run_subagent/3`; the caveat is present.
+- *Deps:* none. File-disjoint from T1 (parallel-safe).
+
+**T5 — Plan reconciliation (docs, last).**
+- *File:* this plan.
+- *Change:* flip the §0 / §3.1 / §6 / §7 markers for T1–T4 from *scheduled* to
+  *delivered*; keep the §6 raise-through-bridge fault test and `:e2e` test as
+  **outstanding** (they are NOT closed by T2/T3 — the canary pins behaviour, it
+  does not exercise a raising path or a real LLM).
+- *Deps:* after T1–T4 land and the verification gate is green.
+
+### Verification gate (after T1–T4, before T5 / commit)
+
+1. `mix precommit` — format, compile, credo, schema, spec, tests. Fix all
+   failures.
+2. `codex review` the diff as a hard quality gate (subagent-written code tends to
+   need ~5–6 rounds; stop on the first clean round).
+3. Commit directly to `main`. In this shared working dir, do isolated work in a
+   git worktree and verify `git show --stat` before pushing; `git push` needs
+   `--no-verify` (two unrelated mcp_stdio stdio flakes in this sandbox).
+
+### Out of scope for Phase 1.5 (stay deferred)
+
+- The `SubAgent.run(runtime:)` → bridge **facade** (Phase 2).
+- A core default `continuation_guard` / effect classification / record-before-
+  dispatch ledger (Phase 3 — gated on record-surface convergence, §7).
+- The **raise-through-bridge** fault test and the **`:e2e`** test (still §6
+  outstanding — track, don't fold into Phase 1.5).
+
+### Suggested Claude workflow shape
+
+- **Stage A (parallel):** `T1` (eval.ex code) ‖ `T4` (guide docs) — disjoint
+  files, run concurrently; no worktree isolation needed.
+- **Stage B (serial, after A):** one agent owns `eval_run_subagent_test.exs` and
+  writes `T2` + `T3` together (single file → avoid a parallel-edit conflict).
+- **Stage C (verify):** run `mix precommit`; on green, `codex review` the diff;
+  loop fixes until a clean round.
+- **Stage D (after green + clean):** `T5` plan reconciliation, then one commit
+  (e.g. `feat(subagent): bridge → internal Runner.run; Definition-only;
+  standalone-guard docs`) + push.
+- Parallel agents that mutate overlapping files in a workflow need
+  `isolation: 'worktree'`; here only the disjoint T1‖T4 run in parallel, so plain
+  fan-out is fine.
