@@ -160,6 +160,51 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
     end
   end
 
+  describe "real LLM recovers from a recoverable tool failure" do
+    test "the model surfaces the :reason from a (:ok false ...) result" do
+      # A RECOVERABLE export (plain wrapper, NOT a !-abort): a tool failure comes
+      # back as a branchable {:ok false :reason ...} map, not a crash. The
+      # docstring states the result-map shape (the export's real contract), so
+      # the test measures whether the model ACTS on the failure, not whether it
+      # guesses the shape.
+      billing_source = """
+      (ns billing "Billing helpers." {:visibility :prompt})
+
+      (defn charge
+        "Charge an account. Returns a result map: (:ok true :value ...) on
+         success, or (:ok false :reason ...) on a recoverable failure."
+        [account-id]
+        (tool/call {:server "billing" :tool "charge" :args {:id account-id}}))
+      """
+
+      {:ok, prelude} = Compiler.compile(billing_source)
+
+      # The tool fails with an UNGUESSABLE reason. The model can only produce
+      # "card_declined_x7q" by calling charge, getting {:ok false ...}, and
+      # reading (res :reason) — proof it handled the recoverable failure.
+      call_tool = fn _args ->
+        %{ok: false, value: nil, reason: "card_declined_x7q"}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt:
+            "Try to charge account \"acct-9\" using the available capabilities. " <>
+              "If the charge fails, return the failure reason.",
+          signature: "() -> :string",
+          runtime_prelude: prelude,
+          tools: %{"call" => call_tool},
+          max_turns: 3
+        )
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
+
+      assert to_string(step.return) =~ "card_declined_x7q",
+             "expected the recoverable :reason (proves the model branched on " <>
+               "(:ok false ...)); got: #{inspect(step.return)} fail: #{inspect(step.fail)}"
+    end
+  end
+
   defp model, do: LispTestLLM.model()
 
   defp llm_callback do
