@@ -7,6 +7,7 @@ defmodule PtcRunner.Upstream.Eval do
   `discovery_exec:`), and runs PTC-Lisp programs against them.
   """
 
+  alias PtcRunner.SubAgent.{Definition, Runner}
   alias PtcRunner.Upstream.{CallTool, Discovery, RunContext}
 
   @context_keys [
@@ -100,10 +101,15 @@ defmodule PtcRunner.Upstream.Eval do
 
   `:discovery_exec` and `:runtime` are bridge-owned; any caller-supplied values
   for those keys are ignored.
+
+  The `agent` argument must be a `%PtcRunner.SubAgent.Definition{}` (as built by
+  `SubAgent.new/1`): the bridge merges the upstream `"call"` tool into the
+  agent's `.tools` map and re-enters the internal `PtcRunner.SubAgent.Runner.run/2`
+  rather than the public facade.
   """
   @bridge_keys [:on_upstream_call, :allow_call_override, :discovery_exec, :runtime]
 
-  @spec run_subagent(struct() | pid(), struct(), keyword()) ::
+  @spec run_subagent(struct() | pid(), Definition.t(), keyword()) ::
           {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
   def run_subagent(runtime, agent, opts \\ []) do
     context_opts = Keyword.take(opts, @context_keys)
@@ -121,7 +127,11 @@ defmodule PtcRunner.Upstream.Eval do
         |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
         |> Keyword.put(:runtime, runtime)
 
-      PtcRunner.SubAgent.run(enriched, run_opts)
+      # Internal runner, not the public facade -- pre-empts facade/bridge recursion
+      # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).
+      # Behaviour-preserving today: the %Definition{} clause of SubAgent.run/2 is a
+      # pure forward to Runner.run/2.
+      Runner.run(enriched, run_opts)
     end)
   end
 
@@ -131,12 +141,16 @@ defmodule PtcRunner.Upstream.Eval do
     %{tools | "call" => decorate.(call)}
   end
 
-  # Merge the upstream `"call"` tool into the agent BEFORE SubAgent.run so it is
+  # Merge the upstream `"call"` tool into the agent BEFORE the agent runs so it is
   # visible both in the first-turn prompt and in every per-turn execution surface
   # (both re-derive from `agent.tools`). Reserve `"call"` for the upstream tool: a
   # silent local override would make prelude `requires` validation (against the
   # runtime) disagree with execution (a local fn).
-  defp enrich_agent(%{tools: tools} = agent, call_tool, allow_override) do
+  #
+  # Matches `%Definition{}` specifically (not just any `%{tools: _}`): the bridge
+  # is Definition-only (see `@spec`), so a non-Definition agent fails closed here
+  # with `FunctionClauseError` rather than slipping through enrich to raise later.
+  defp enrich_agent(%Definition{tools: tools} = agent, call_tool, allow_override) do
     cond do
       not Map.has_key?(tools, "call") ->
         %{agent | tools: Map.merge(tools, call_tool)}

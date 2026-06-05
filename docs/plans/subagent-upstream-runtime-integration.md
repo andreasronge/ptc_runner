@@ -57,22 +57,26 @@ as done):
   malformed `continuation_guard`, per §5.2).
 - **§6 `:e2e` test** — real LLM + the bridge over the dummy upstream is not yet
   written.
-- **Guide docs** — `docs/guides/capability-prelude.md` §7 still documents only
-  `run_lisp/3`, not `run_subagent/3` as the SubAgent↔upstream seam. (§5's
-  cross-turn guarantee wording has already been corrected to *fail-closed before
-  any side-effecting turn*.)
-- **Standalone side-effect honesty gap** — a standalone bridge consumer gets
-  fail-closed `requires` validation but **no** side-effect continuation guard by
-  default (`continuation_guard == nil ⇒ :continue`, `loop.ex:478-480`); the
-  stop-after-side-effect policy is mcp-owned until Phase 3. §8's "safe by default"
-  is a Phase-3 target, not Phase-1 reality, and the guide does not yet say so.
+- **Guide docs (delivered, §9 T4)** — `docs/guides/capability-prelude.md` §7 now
+  documents `run_subagent/3` as the multi-turn SubAgent↔upstream seam alongside
+  `run_lisp/3`. (§5's cross-turn guarantee wording was already corrected to
+  *fail-closed before any side-effecting turn*.)
+- **Standalone side-effect honesty gap (documented, §9 T4; gap stays Phase 3)** —
+  a standalone bridge consumer gets fail-closed `requires` validation but **no**
+  side-effect continuation guard by default (`continuation_guard == nil ⇒
+  :continue`, `loop.ex:478-480`); the stop-after-side-effect policy is mcp-owned
+  until Phase 3. §8's "safe by default" is a Phase-3 target, not Phase-1 reality —
+  the guide §5/§7 now says so (host-supplied-guard caveat). The underlying gap (no
+  core default guard) remains a Phase-3 item.
 
-**Phase 1.5 (do now) — see [§9 Implementation Checklist](#9-phase-15--implementation-checklist-do-now-workflow-executable).**
-A small, behaviour-preserving cleanup batch the 2026-06-05 design review surfaced:
-switch the bridge onto the internal `Runner.run/2` (`Definition`-only), add a
-Definition-contract test + a no-default-guard canary, and close the guide §7/§5 +
-§8 honesty gaps. Architecture unchanged; the Phase-2 facade and Phase-3 record
-surface stay deferred.
+**Phase 1.5 (delivered) — see [§9 Implementation Checklist](#9-phase-15--implementation-checklist-do-now-workflow-executable).**
+A small, behaviour-preserving cleanup batch the 2026-06-05 design review surfaced,
+now shipped: the bridge calls the internal `Runner.run/2` (`Definition`-only — §9
+T1), a Definition-contract test (T2) and a no-default-guard canary (T3) are in
+`test/ptc_runner/upstream/eval_run_subagent_test.exs`, and the guide §7/§5 + §8
+honesty gaps are closed (T4). Architecture unchanged; the Phase-2 facade and
+Phase-3 record surface stay deferred. The §6 raise-through-bridge fault test and
+the `:e2e` test remain outstanding — T2/T3 do not close them.
 
 Sections below preserve the original pre-implementation design record; read
 current-architecture claims there as historical context unless this status
@@ -237,14 +241,15 @@ change).** Three things the facade must get right:
   `PtcRunner.SubAgent.Runner.run/2`, **not** the public `SubAgent.run/2` (as the
   §3.2 lifecycle shows). The bridge passes `runtime:` in its opts and the facade
   keys on `runtime:`, so calling the public entry would recurse (facade → bridge
-  → `SubAgent.run` → facade → …). *Scheduled for **Phase 1.5** (§9 T1): switch the
-  bridge to call `PtcRunner.SubAgent.Runner.run/2` directly — decoupled from the
-  deferred facade, since it is behaviour-preserving today (the `%Definition{}`
-  clause of `SubAgent.run/2` is a pure forward to `Runner.run/2`) and pre-empts the
-  recursion the moment a Phase-2 facade lands. That switch also narrows
-  `run_subagent/3` to **`Definition`-only** (`@spec` → `Definition.t()`; a
-  non-Definition agent has no `:tools` field for `enrich_agent` to merge). The
-  shipped bridge still calls `PtcRunner.SubAgent.run` until T1 lands.*
+  → `SubAgent.run` → facade → …). *Delivered in **Phase 1.5** (§9 T1): the bridge
+  now calls `PtcRunner.SubAgent.Runner.run/2` directly — decoupled from the
+  deferred facade, behaviour-preserving (the `%Definition{}` clause of
+  `SubAgent.run/2` is a pure forward to `Runner.run/2`), and pre-empting the
+  recursion the moment a Phase-2 facade lands. The switch also narrowed
+  `run_subagent/3` to **`Definition`-only** (`@spec` → `Definition.t()`;
+  `enrich_agent/3` matches `%Definition{}` specifically, so a non-Definition fails
+  closed at enrich with `FunctionClauseError` rather than slipping through to raise
+  later in `Runner.run/2`).*
 - *Return shape.* `SubAgent.run(runtime:)` returns only the `SubAgent.run/2`
   result, **dropping** the bridge's `records` — mirroring `run_lisp/3` vs
   `run_lisp_with_records/3`. This keeps the public facade unsurprising and leaves
@@ -559,17 +564,24 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 - **mcp_server regression:** `agentic_contract_test.exs` still green after
   `run_subagent` collapses onto the core bridge (the ledger decorator + guard are
   unchanged mcp-side, so its `Ledger`/`root_tools_with_ledger` units still pass).
-- **Definition-only contract (§9 T1/T2, scheduled):** `run_subagent/3` runs a
-  `%Definition{}` and **raises** for a non-Definition agent (a `%CompiledAgent{}`
-  has no `:tools` field; a string is not a struct) — locking the contract that the
-  bridge re-enters the internal `Runner.run/2`, not the public facade.
-- **Standalone no-default-guard canary (§9 T3, scheduled):** a bridge run with a
-  *dispatching* write-effect upstream call and **no** `continuation_guard`
-  **continues** (no `partial_side_effects` stop), pinning today's
-  `continuation_guard == nil ⇒ :continue` so a future Phase-3 core default flips
-  this test loudly. *(Distinct from the still-outstanding raise-through-bridge
-  fault test and `:e2e` test — the canary pins behaviour, it does not exercise a
-  raising path or a real LLM.)*
+- **Definition-only contract (§9 T1/T2, delivered):** `run_subagent/3` runs a
+  `%Definition{}` and **raises** `FunctionClauseError` at `enrich_agent/3` for a
+  non-Definition agent — a bare string, a `%CompiledAgent{}`, and (critically) a
+  bare map that *does* carry a `:tools` field. The map case asserts the raise
+  originates in `enrich_agent/3` specifically, so a loose `%{tools: _}` regression
+  (which would instead raise later in `Runner.run/2`) fails the test. Locks the
+  contract that the bridge re-enters the internal `Runner.run/2`, not the public
+  facade.
+- **Standalone no-default-guard canary (§9 T3, delivered):** a bridge run with a
+  *dispatching* upstream call and **no** `continuation_guard` is **not stopped**
+  between turns — it reaches turn 2 and returns. This pins the observable shape of
+  `continuation_guard == nil ⇒ :continue` (no side-effect bounding by default for a
+  standalone caller). Scope kept honest: the dispatched op is a read-only GET and
+  core is effect-blind, so the test pins *"not stopped"*, **not** behaviour against
+  a future Phase-3 effect-classifying default (which would need a write/unknown
+  dispatch to flip loudly). *(Distinct from the still-outstanding
+  raise-through-bridge fault test and `:e2e` test — the canary pins behaviour, it
+  does not exercise a raising path or a real LLM.)*
 
 ---
 
@@ -594,10 +606,12 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    format) into core yet — the *generic* ledger/classification/guard mechanism
    does belong in core; that move is Phase 3 (§4 target boundary).
 
-   **Phase 1.5 (do-now fast-follow, §9):** behaviour-preserving cleanups from the
-   2026-06-05 review — bridge → internal `Runner.run/2` (`Definition`-only),
-   Definition-contract + no-default-guard canary tests, and the guide §7/§5 + §8
-   honesty fixes. No architecture change; does not gate or block Phases 2/3.
+   **Phase 1.5 (delivered, §9):** behaviour-preserving cleanups from the
+   2026-06-05 review, now shipped — bridge → internal `Runner.run/2`
+   (`Definition`-only), Definition-contract + no-default-guard canary tests, and the
+   guide §7/§5 + §8 honesty fixes. No architecture change; did not gate or block
+   Phases 2/3. The §6 raise-through-bridge fault test and the `:e2e` test remain
+   outstanding.
 2. **Phase 2 (convenience):** `upstreams: config` form where core starts/stops a
    runtime for the run's duration (a facade over the bridge — does **not** need
    `runtime:` inside the loop); and the thin `SubAgent.run(runtime:)` delegating
@@ -648,6 +662,14 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 ---
 
 ## 9. Phase 1.5 — Implementation Checklist (do now, workflow-executable)
+
+> **Status: T1–T5 delivered.** T1 (bridge → internal `Runner.run/2`, `Definition`-only),
+> T2/T3 (Definition-contract + no-default-guard canary in
+> `test/ptc_runner/upstream/eval_run_subagent_test.exs`), T4 (guide §5/§7 seam +
+> host-guard caveat), and T5 (this reconciliation) shipped together. The
+> verification gate (precommit + mcp `agentic_contract_test.exs` + codex review)
+> passed. The §6 raise-through-bridge fault test and the `:e2e` test stay
+> **outstanding** — they are explicitly *not* closed by T2/T3.
 
 **Scope.** Behaviour-preserving cleanups + honesty/test gaps the 2026-06-05
 design review surfaced. **No architecture change.** The Phase-2 facade and the
