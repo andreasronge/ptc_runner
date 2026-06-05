@@ -9,20 +9,20 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
 
   Requires OPENROUTER_API_KEY. Optionally set PTC_TEST_MODEL (defaults to gemini).
 
-  ## Why these tests are meaningful (non-shortcuttable)
+  ## Domain-blind + non-shortcuttable
 
-  The model is shown ONLY each export's docstring + signature in the prompt
-  inventory — never the body. Each export returns an UNGUESSABLE value via an
-  opaque internal lookup. So a correct answer can only come from the model
-  actually calling the prelude export: if `risk-score "c-100"` comes back as the
-  exact magic number, the program must have invoked `acme/risk-score`. The value
-  IS the proof of invocation — no trace inspection needed.
+  Prompts and fixtures are deliberately domain-NEUTRAL (generic `reg`/`svc`
+  namespaces, opaque ids, opaque values) per the repo's domain-blind test-prompt
+  rule — they encode no business domain or expected answer pattern. The model is
+  shown ONLY each export's docstring + signature in the prompt inventory, never
+  the body, and each export returns an UNGUESSABLE value, so a correct answer can
+  only come from the model actually calling the export (the value IS the proof of
+  invocation). The tool-backed tests additionally assert the tool callback fired
+  (`assert_receive`), making that guarantee explicit rather than inferential.
 
   These are the deterministic capture tests' (`prelude_feedback_capture_test.exs`)
-  stochastic counterpart: that file pins the prompt+feedback contract with a mock;
-  this file checks a real model actually discovers and calls exports. Treat a
-  single pass as a smoke signal, not a pass-rate claim (see the llm-benchmark
-  skill for statistical runs).
+  stochastic counterpart. Treat a single pass as a smoke signal, not a pass-rate
+  claim (see the llm-benchmark skill for statistical runs).
   """
 
   @moduletag :e2e
@@ -35,22 +35,14 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
 
   @timeout 30_000
 
-  # Two pure exports with hidden, unguessable bodies:
-  #   acme/risk-score      — :prompt (listed in the inventory)
-  #   acme/account-balance — :discoverable (omitted; reachable via discovery)
+  # One pure, prompt-visible export with a hidden, unguessable body.
   @prelude_source """
-  (ns acme "Acme deployment helpers." {:visibility :prompt})
+  (ns reg "Registry helpers." {:visibility :prompt})
 
-  (defn risk-score
-    "Return the internal risk score for a customer id string (opaque lookup)."
-    [id]
-    (get {"c-100" 137 "c-200" 58} id -1))
-
-  (defn account-balance
-    "Return the internal account balance for an account id string (opaque lookup)."
-    {:visibility :discoverable}
-    [id]
-    (get {"a-1" 909 "a-2" 410} id -1))
+  (defn value-of
+    "Return the registered value for a key string (opaque lookup)."
+    [key]
+    (get {"k-100" 137 "k-200" 58} key -1))
   """
 
   setup_all do
@@ -69,7 +61,7 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       agent =
         SubAgent.new(
           prompt:
-            "Look up the risk score for customer \"c-100\" using the available " <>
+            "Look up the registered value for key \"k-100\" using the available " <>
               "capabilities, and return just that number.",
           signature: "() -> :int",
           runtime_prelude: prelude,
@@ -79,25 +71,50 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
 
       # 137 is unguessable from the docstring alone -> the model must have called
-      # acme/risk-score to get it.
+      # reg/value-of to get it.
       assert step.return == 137,
-             "expected 137 (proves acme/risk-score was called); got: #{inspect(step.return)} " <>
+             "expected 137 (proves reg/value-of was called); got: #{inspect(step.return)} " <>
                "fail: #{inspect(step.fail)}"
     end
 
-    test "discovers and calls a :discoverable export omitted from the inventory", %{
-      prelude: prelude
-    } do
-      # account-balance is NOT in the prompt inventory; the model must reach for a
-      # discovery form (ns-publics / apropos / dir) before it can call it. This is
-      # the highest-variance behavioral claim in the design — keep that in mind if
-      # it ever flakes on a weaker model.
+    test "discovers and calls a :discoverable export omitted from the inventory" do
+      # The needed export (cat/lookup) is :discoverable, so it is NOT in the prompt
+      # inventory. A prompt-visible DECOY (cat/size) IS listed but is an obvious
+      # non-fit — a zero-arg count, not a keyed lookup — so the model cannot
+      # shortcut to it and must reach for a discovery form (ns-publics / apropos)
+      # to find lookup. This is the test's subject: DISCOVERY.
+      #
+      # lookup accepts the key as a bare string OR wrapped in a map, because
+      # discovery currently surfaces only a generic `(lookup arg1)` arity (no
+      # param name/type — see private/Plans/prelude-param-names-and-typed-signatures.md),
+      # so a model legitimately guesses the call shape. Tolerating both isolates
+      # this test to discovery rather than arg-convention guessing.
+      cat_source = """
+      (ns cat "Catalog helpers." {:visibility :prompt})
+
+      (defn size
+        "Return how many entries the catalog has."
+        []
+        2)
+
+      (defn lookup
+        "Return the cataloged value for a key string (opaque lookup)."
+        {:visibility :discoverable}
+        [k]
+        (get {"r-1" 909 "r-2" 410}
+             (if (map? k) (or (get k :key) (get k "key")) k)
+             -1))
+      """
+
+      {:ok, prelude} = Compiler.compile(cat_source)
+
       agent =
         SubAgent.new(
           prompt:
-            "Find the account balance for account \"a-1\". The capability may not be " <>
-              "listed directly — discover what the `acme` namespace exposes (e.g. via " <>
-              "(ns-publics 'acme) or (apropos ...)) if you need to. Return just the number.",
+            "Find the cataloged value for key \"r-1\". The capability you need may " <>
+              "not be listed directly — discover what the `cat` namespace exposes " <>
+              "(e.g. via (ns-publics 'cat) or (apropos \"...\")), then call it. " <>
+              "Return just the number.",
           signature: "() -> :int",
           runtime_prelude: prelude,
           max_turns: 4
@@ -106,46 +123,48 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
 
       assert step.return == 909,
-             "expected 909 (proves acme/account-balance was discovered + called); got: " <>
-               "#{inspect(step.return)} fail: #{inspect(step.fail)}"
+             "expected 909 (proves cat/lookup was discovered + called, not the " <>
+               "visible decoy cat/size); got: #{inspect(step.return)} fail: #{inspect(step.fail)}"
     end
   end
 
   describe "real LLM calls a tool-backed export" do
     test "the model calls a tool-backed export and surfaces the tool's result" do
-      # vault/lookup! wraps a PRIVATE helper that calls (tool/call ...), so it is
+      # svc/fetch! wraps a PRIVATE helper that calls (tool/call ...), so it is
       # tool-backed (non-empty tool_refs -> routes through Loop.run) and aborts on
-      # failure. The model sees only the export's docstring/signature, never the
-      # body or the private helper.
-      vault_source = """
-      (ns vault "Vault helpers." {:visibility :prompt})
+      # failure. The model sees only the export's docstring/signature.
+      svc_source = """
+      (ns svc "Service helpers." {:visibility :prompt})
 
-      (defn- raw-lookup
-        [id]
-        (tool/call {:server "vault" :tool "secret" :args {:id id}}))
+      (defn- raw-fetch
+        [key]
+        (tool/call {:server "svc" :tool "fetch" :args {:key key}}))
 
-      (defn lookup!
-        "Return the secret record for a customer id, aborting on failure."
-        [id]
-        (let [res (raw-lookup id)]
+      (defn fetch!
+        "Return the record for a key string, aborting on failure."
+        [key]
+        (let [res (raw-fetch key)]
           (if (res :ok) (res :value) (fail {:reason (res :reason)}))))
       """
 
-      {:ok, prelude} = Compiler.compile(vault_source)
+      {:ok, prelude} = Compiler.compile(svc_source)
 
-      # The real tool the export wraps. It returns an UNGUESSABLE code derived
-      # from the id, so a correct answer proves vault/lookup! -> tool/call ran:
-      # the model cannot produce "ZX-alpha-42" from the docstring alone.
+      # The real tool the export wraps. It returns an UNGUESSABLE token derived
+      # from the key, so a correct answer proves svc/fetch! -> tool/call ran; we
+      # also assert the callback fired (assert_receive) to make that explicit.
+      parent = self()
+
       call_tool = fn args ->
-        id = get_in(args, ["args", "id"]) || get_in(args, [:args, :id])
-        %{ok: true, value: %{"code" => "ZX-#{id}-42"}, reason: nil}
+        send(parent, {:tool_called, args})
+        key = get_in(args, ["args", "key"]) || get_in(args, [:args, :key])
+        %{ok: true, value: %{"token" => "TK-#{key}-42"}, reason: nil}
       end
 
       agent =
         SubAgent.new(
           prompt:
-            "Look up the secret for id \"alpha\" using the available capabilities, " <>
-              "and return its code.",
+            "Fetch the record for key \"x1\" using the available capabilities, " <>
+              "and return its token.",
           signature: "() -> :string",
           runtime_prelude: prelude,
           tools: %{"call" => call_tool},
@@ -154,8 +173,10 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
 
-      assert step.return == "ZX-alpha-42",
-             "expected the tool-derived code (proves the tool-backed export ran); got: " <>
+      assert_receive {:tool_called, _args}
+
+      assert step.return == "TK-x1-42",
+             "expected the tool-derived token (proves the tool-backed export ran); got: " <>
                "#{inspect(step.return)} fail: #{inspect(step.fail)}"
     end
   end
@@ -167,30 +188,33 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       # docstring states the result-map shape (the export's real contract), so
       # the test measures whether the model ACTS on the failure, not whether it
       # guesses the shape.
-      billing_source = """
-      (ns billing "Billing helpers." {:visibility :prompt})
+      svc_source = """
+      (ns svc "Service helpers." {:visibility :prompt})
 
-      (defn charge
-        "Charge an account. Returns a result map: (:ok true :value ...) on
-         success, or (:ok false :reason ...) on a recoverable failure."
-        [account-id]
-        (tool/call {:server "billing" :tool "charge" :args {:id account-id}}))
+      (defn submit
+        "Submit a key. Returns a result map: (:ok true :value ...) on success,
+         or (:ok false :reason ...) on a recoverable failure."
+        [key]
+        (tool/call {:server "svc" :tool "submit" :args {:key key}}))
       """
 
-      {:ok, prelude} = Compiler.compile(billing_source)
+      {:ok, prelude} = Compiler.compile(svc_source)
 
       # The tool fails with an UNGUESSABLE reason. The model can only produce
-      # "card_declined_x7q" by calling charge, getting {:ok false ...}, and
-      # reading (res :reason) — proof it handled the recoverable failure.
-      call_tool = fn _args ->
-        %{ok: false, value: nil, reason: "card_declined_x7q"}
+      # "ERR-7q9z" by calling submit, getting {:ok false ...}, and reading
+      # (res :reason); we also assert the callback fired.
+      parent = self()
+
+      call_tool = fn args ->
+        send(parent, {:tool_called, args})
+        %{ok: false, value: nil, reason: "ERR-7q9z"}
       end
 
       agent =
         SubAgent.new(
           prompt:
-            "Try to charge account \"acct-9\" using the available capabilities. " <>
-              "If the charge fails, return the failure reason.",
+            "Try to submit key \"u-9\" using the available capabilities. If it " <>
+              "fails, return only the failure reason string, with no other text.",
           signature: "() -> :string",
           runtime_prelude: prelude,
           tools: %{"call" => call_tool},
@@ -199,9 +223,13 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
 
-      assert to_string(step.return) =~ "card_declined_x7q",
-             "expected the recoverable :reason (proves the model branched on " <>
-               "(:ok false ...)); got: #{inspect(step.return)} fail: #{inspect(step.fail)}"
+      assert_receive {:tool_called, _args}
+
+      # Strict equality: the prompt asks for ONLY the reason and the signature is
+      # () -> :string, so a verbose/malformed answer should fail the test.
+      assert step.return == "ERR-7q9z",
+             "expected exactly the recoverable :reason (proves the model branched " <>
+               "on (:ok false ...)); got: #{inspect(step.return)} fail: #{inspect(step.fail)}"
     end
   end
 
@@ -212,8 +240,11 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       full_messages = [%{role: :system, content: system} | messages]
 
       case LLM.generate_text(model(), full_messages, receive_timeout: @timeout) do
-        {:ok, text} -> {:ok, text}
-        {:error, _} = error -> error
+        {:ok, text} ->
+          {:ok, text}
+
+        {:error, _} = error ->
+          error
       end
     end
   end
