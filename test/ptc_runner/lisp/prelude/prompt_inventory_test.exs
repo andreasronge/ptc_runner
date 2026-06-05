@@ -55,6 +55,34 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
       assert out =~ "read"
     end
 
+    test "renders the [read] hint but omits [unknown]" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns mix
+          "Mixed effects."
+          {:visibility :prompt})
+
+        (defn fetch
+          "Reads upstream."
+          [id]
+          (tool/call {:server "svc" :tool "get" :args {:id id}}))
+
+        (defn area
+          "Pure local computation."
+          [w h]
+          (* w h))
+        """)
+
+      out = PromptInventory.render(prelude)
+
+      # The inferred-read export keeps its hint...
+      assert out =~ "mix/fetch"
+      assert out =~ "[read]"
+      # ...but the pure (:unknown) export renders no effect bracket.
+      assert out =~ "mix/area"
+      refute out =~ "[unknown]"
+    end
+
     test "renders a namespace summary with the namespace docstring", %{prelude: prelude} do
       out = PromptInventory.render(prelude)
       assert out =~ "crm"
