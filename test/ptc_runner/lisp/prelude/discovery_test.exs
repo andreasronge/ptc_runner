@@ -38,6 +38,11 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
     {:visibility :discoverable}
     []
     (tool/call {:server "crm" :tool "list_users" :args {}}))
+
+  (defn combine-users
+    "Combine a required pair and any extra ids."
+    [first-id second-id & extra-ids]
+    [first-id second-id extra-ids])
   """
 
   setup do
@@ -69,6 +74,10 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
       assert entry[:doc] == "Return a CRM user by id."
       assert entry[:name] == "get-user"
+      assert entry[:arglists] == ["(get-user id)"]
+
+      variadic_entry = Map.fetch!(publics, "combine-users")
+      assert variadic_entry[:arglists] == ["(combine-users first-id second-id & extra-ids)"]
     end
 
     test "accepts a string namespace ref", %{prelude: prelude} do
@@ -88,6 +97,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert is_binary(doc)
       assert doc =~ "crm/get-user"
       assert doc =~ "Return a CRM user by id."
+      assert doc =~ "(get-user id)"
     end
 
     test "resolves a :discoverable export too", %{prelude: prelude} do
@@ -114,6 +124,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert meta[:namespace] == "crm"
       assert meta[:name] == "get-user"
       assert meta[:doc] == "Return a CRM user by id."
+      assert meta[:arglists] == ["(get-user id)"]
     end
   end
 
@@ -124,8 +135,14 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert is_list(lines)
 
       # Each line carries the export's signature (arity-bearing) and short doc.
-      assert Enum.any?(lines, &String.starts_with?(&1, "(get-user arg1)"))
+      assert Enum.any?(lines, &String.starts_with?(&1, "(get-user id)"))
       assert Enum.any?(lines, &String.starts_with?(&1, "(list-users)"))
+
+      assert Enum.any?(
+               lines,
+               &String.starts_with?(&1, "(combine-users first-id second-id & extra-ids)")
+             )
+
       # The private helper has no export record and must NOT appear.
       refute Enum.any?(lines, &String.contains?(&1, "normalize-id"))
     end

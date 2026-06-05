@@ -93,11 +93,10 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
       # NOT a reliability claim — the rigorous measure is a pass-rate run (the
       # llm-benchmark gap), not this assert. Expect occasional reds.
       #
-      # lookup accepts the key as a bare string OR wrapped in a map, because
-      # discovery currently surfaces only a generic `(lookup arg1)` arity (no
-      # param name/type — see private/Plans/prelude-param-names-and-typed-signatures.md),
-      # so a model legitimately guesses the call shape. Tolerating both isolates
-      # this test to discovery rather than arg-convention guessing.
+      # lookup accepts the key as a bare string OR wrapped in a map. Discovery
+      # now surfaces the param name, but no type layer yet (see
+      # private/Plans/prelude-param-names-and-typed-signatures.md), so a model
+      # can still legitimately guess the value shape.
       cat_source = """
       (ns cat "Catalog helpers." {:visibility :prompt})
 

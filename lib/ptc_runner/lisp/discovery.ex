@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.Discovery do
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Registry
 
   # Discovery source ranks. `sort_matches/1` sorts ASCENDING on `source_rank`,
@@ -742,12 +743,7 @@ defmodule PtcRunner.Lisp.Discovery do
     "#{signature}#{suffix}"
   end
 
-  defp export_signature(%{symbol: symbol, arity: :variadic}), do: "(#{symbol} & args)"
-
-  defp export_signature(%{symbol: symbol, arity: arity}) when is_integer(arity) do
-    args = Enum.map_join(1..arity//1, " ", fn i -> "arg#{i}" end)
-    if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
-  end
+  defp export_signature(export), do: Export.signature(export)
 
   defp score_prelude_export(export, query_tokens) do
     name_tokens = tokenize(export.symbol) ++ tokenize(export.ref)

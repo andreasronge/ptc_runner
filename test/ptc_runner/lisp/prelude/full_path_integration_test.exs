@@ -113,7 +113,7 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
     inventory = PromptInventory.render(prelude, ledger: step.tool_calls)
 
     assert inventory =~ "crm/get-user"
-    assert inventory =~ "(get-user arg1)"
+    assert inventory =~ "(get-user id)"
     assert inventory =~ "Return a CRM user by id."
     assert inventory =~ "[read]"
     # The :discoverable export is omitted from the inventory but hinted.

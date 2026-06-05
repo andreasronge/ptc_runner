@@ -82,7 +82,7 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
       context_prompt = SystemPrompt.generate_context(agent, context: %{user_id: "u_1"})
 
       assert context_prompt =~ "crm/get-user"
-      assert context_prompt =~ "(get-user arg1)"
+      assert context_prompt =~ "(get-user id)"
       assert context_prompt =~ "Return a CRM user by id."
 
       # Inserted AFTER the data/ and tools sections.

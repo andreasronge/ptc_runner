@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Ptc.ReplPreludeTest do
 
       assert output =~ "prelude capabilities"
       assert output =~ "crm/get-user"
-      assert output =~ "(get-user arg1)"
+      assert output =~ "(get-user id)"
       # And it still evaluates the expression.
       assert output =~ "3"
     end

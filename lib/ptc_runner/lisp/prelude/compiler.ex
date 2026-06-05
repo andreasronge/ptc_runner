@@ -491,6 +491,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          namespace: spec.namespace,
          symbol: spec.symbol,
          arity: spec.arity,
+         params: export_params(spec.params_form),
          min_arity: min_arity(spec.arity, spec.params_form),
          doc: spec.doc,
          visibility: visibility,
@@ -506,6 +507,24 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # A `def` constant has no params vector; a `defn` always does.
   defp export_kind(%Spec{params_form: nil}), do: :constant
   defp export_kind(%Spec{}), do: :function
+
+  # Constants have no params vector. Function params preserve source names for
+  # display, while destructuring forms get a stable positional fallback.
+  defp export_params(nil), do: []
+
+  defp export_params({:vector, params}) do
+    params
+    |> Enum.with_index(1)
+    |> Enum.map(fn {param, index} -> export_param(param, index) end)
+  end
+
+  defp export_params(_), do: []
+
+  defp export_param({:symbol, :&}, _index), do: "&"
+  defp export_param({:symbol, "&"}, _index), do: "&"
+  defp export_param({:symbol, name}, _index) when is_binary(name), do: name
+  defp export_param({:symbol, name}, _index) when is_atom(name), do: Atom.to_string(name)
+  defp export_param(_param, index), do: "arg#{index}"
 
   # Minimum args a call must supply. Fixed arity == its own value; a variadic
   # `[a b & rest]` requires its leading params (the count before `&`).

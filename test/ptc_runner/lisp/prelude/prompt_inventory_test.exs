@@ -48,7 +48,7 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
       assert is_binary(out)
       # The prompt-visible export name with its signature.
       assert out =~ "crm/get-user"
-      assert out =~ "(get-user arg1)"
+      assert out =~ "(get-user id)"
       # Its short doc.
       assert out =~ "Return a CRM user by id."
       # Its resolved effect hint (literal tool/call inference -> :read).
@@ -77,10 +77,43 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
 
       # The inferred-read export keeps its hint...
       assert out =~ "mix/fetch"
+      assert out =~ "(fetch id)"
       assert out =~ "[read]"
       # ...but the pure (:unknown) export renders no effect bracket.
       assert out =~ "mix/area"
+      assert out =~ "(area w h)"
       refute out =~ "[unknown]"
+    end
+
+    test "renders required params before the variadic marker" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns mix "Mixed exports." {:visibility :prompt})
+
+        (defn foo
+          "Join values."
+          [a b & rest]
+          (str a b rest))
+        """)
+
+      out = PromptInventory.render(prelude)
+
+      assert out =~ "(foo a b & rest)"
+      refute out =~ "(foo & args)"
+    end
+
+    test "falls back to synthetic names for destructuring params" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns mix "Mixed exports." {:visibility :prompt})
+
+        (defn pull
+          "Pull from a map."
+          [{:keys [id]}]
+          id)
+        """)
+
+      assert PromptInventory.render(prelude) =~ "(pull arg1)"
     end
 
     test "renders a namespace summary with the namespace docstring", %{prelude: prelude} do

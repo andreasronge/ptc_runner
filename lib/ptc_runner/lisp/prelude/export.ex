@@ -23,6 +23,9 @@ defmodule PtcRunner.Lisp.Prelude.Export do
     * `namespace` — declaring namespace, e.g. `"crm"`.
     * `symbol` — bare export symbol, e.g. `"get-user"` (curated kebab-case).
     * `arity` — non-negative integer arity, or `:variadic`.
+    * `params` — display arglist names captured from the source params vector,
+      with `"&"` preserved as the variadic marker. Destructuring params use a
+      synthetic `argN` fallback because they have no single display name.
     * `doc` — docstring binary, or `nil`.
     * `visibility` — `:prompt` (prompt inventory + discoverable) or
       `:discoverable` (discovery-only).
@@ -57,6 +60,7 @@ defmodule PtcRunner.Lisp.Prelude.Export do
           namespace: String.t(),
           symbol: String.t(),
           arity: export_arity(),
+          params: [String.t()],
           doc: String.t() | nil,
           visibility: visibility(),
           effect: effect(),
@@ -72,6 +76,7 @@ defmodule PtcRunner.Lisp.Prelude.Export do
             namespace: nil,
             symbol: nil,
             arity: nil,
+            params: [],
             doc: nil,
             visibility: :prompt,
             effect: :unknown,
@@ -90,4 +95,32 @@ defmodule PtcRunner.Lisp.Prelude.Export do
   @doc "Whether `value` is a valid export visibility."
   @spec valid_visibility?(term()) :: boolean()
   def valid_visibility?(value), do: value in @valid_visibilities
+
+  @doc """
+  Renders the Lisp-facing arglist for an export.
+
+  Uses captured source parameter names when present and falls back to the old
+  arity-based synthetic names for defensive compatibility with reconstructed
+  export-like records.
+  """
+  @spec signature(map()) :: String.t()
+  def signature(%{symbol: symbol} = export) do
+    params = Map.get(export, :params, [])
+
+    args =
+      case params do
+        [_ | _] -> Enum.join(params, " ")
+        _ -> synthetic_args(Map.get(export, :arity))
+      end
+
+    if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
+  end
+
+  defp synthetic_args(:variadic), do: "& args"
+
+  defp synthetic_args(arity) when is_integer(arity) do
+    Enum.map_join(1..arity//1, " ", fn i -> "arg#{i}" end)
+  end
+
+  defp synthetic_args(_), do: ""
 end

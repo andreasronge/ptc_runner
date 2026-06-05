@@ -296,8 +296,8 @@ summary so a run's capability environment is reproducible from traces:
 
 - prelude source hash and compiled-artifact hash,
 - selected protected namespaces,
-- the public export records (ref, namespace, symbol, arity, visibility, effect,
-  provider, requires).
+- the public export records (ref, namespace, symbol, arity, params, visibility,
+  effect, provider, requires).
 
 No closures, no private env, and no secrets appear in it.
 

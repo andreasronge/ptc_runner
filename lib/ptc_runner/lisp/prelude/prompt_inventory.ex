@@ -126,7 +126,7 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
     Enum.join([header | export_lines] ++ more_line, "\n")
   end
 
-  # `crm/get-user (get-user arg1) [read] — Return a CRM user by id.`
+  # `crm/get-user (get-user id) [read] — Return a CRM user by id.`
   #
   # The `[effect]` hint is rendered only for an inferred `:read`/`:write`
   # backing. `:unknown` carries no usable signal — it is the fallback for both a
@@ -146,12 +146,7 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   defp effect_hint(:unknown), do: ""
   defp effect_hint(effect), do: " [#{effect}]"
 
-  defp signature(%Export{symbol: symbol, arity: :variadic}), do: "(#{symbol} & args)"
-
-  defp signature(%Export{symbol: symbol, arity: arity}) when is_integer(arity) do
-    args = Enum.map_join(1..arity//1, " ", fn i -> "arg#{i}" end)
-    if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
-  end
+  defp signature(%Export{} = export), do: Export.signature(export)
 
   defp namespace_doc(%Prelude{metadata: metadata}, namespace) do
     metadata
