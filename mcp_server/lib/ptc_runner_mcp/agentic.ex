@@ -164,22 +164,23 @@ defmodule PtcRunnerMcp.Agentic do
 
   defp run_subagent(agent, llm, validated, request_id, ledger) do
     if RootUpstreamRuntime.configured?() do
+      # Core owns the lifecycle + `:runtime` threading (so prelude `requires`
+      # validate fail-closed); mcp keeps only the side-effect *policy* — the
+      # ledger (wrapped around the upstream `"call"` fn before dispatch) and the
+      # continuation guard. The bridge enriches the agent's tools with `"call"`
+      # before prompt generation, so it is prompt-visible and routes through the
+      # loop without any fast-path special-casing.
       {result, _records} =
-        Eval.with_run_context(
+        Eval.run_subagent(
           RootUpstreamRuntime.runtime(),
-          root_context_opts(),
-          fn context ->
-            eval_opts = Eval.eval_options(context)
-            root_agent = %{agent | tools: root_tools_with_ledger(eval_opts[:tools], ledger)}
-
-            SubAgent.run(root_agent,
-              llm: llm,
-              context: validated.context,
-              continuation_guard: continuation_guard(ledger),
-              trace_context: %{request_id: request_id},
-              discovery_exec: eval_opts[:discovery_exec]
-            )
-          end
+          agent,
+          [
+            llm: llm,
+            context: validated.context,
+            continuation_guard: continuation_guard(ledger),
+            trace_context: %{request_id: request_id},
+            on_upstream_call: fn call -> fn args -> call_with_ledger(call, ledger, args) end end
+          ] ++ root_context_opts()
         )
 
       result

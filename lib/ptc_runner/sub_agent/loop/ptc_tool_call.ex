@@ -546,22 +546,49 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         type: state.current_turn_type
       )
 
-    new_state =
-      build_continuation_state(
-        state,
-        turn,
-        assistant_content,
-        native_call,
-        tool_result_json,
-        memory: lisp_step.memory,
-        journal: lisp_step.journal,
-        tool_cache: lisp_step.tool_cache,
-        child_steps: state.child_steps ++ lisp_step.child_steps,
-        last_fail: fail,
-        last_return_error: message
-      )
+    if Shared.terminal_lisp_failure?(fail) do
+      # Fail closed (§3.5 #2): a prelude attach failure must terminate, never
+      # retry — parity with the `:content` transport. The tool call is still
+      # paired with its error result so the message log stays coherent.
+      duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-    {:continue, new_state, turn}
+      final_messages =
+        state.messages ++
+          assistant_with_tool_calls_messages(assistant_content, [native_call], [
+            {Map.get(native_call, :id) || Map.get(native_call, "id"), tool_result_json}
+          ])
+
+      # A pre-execution attach failure carries no `usage`, so `memory_bytes`
+      # defaults to 0 (parity with the `:content` transport hard stop).
+      final_step =
+        StepAssembler.finalize(lisp_step, state,
+          duration_ms: duration_ms,
+          is_error: true,
+          final_turn: turn,
+          final_messages: final_messages,
+          journal: lisp_step.journal,
+          child_steps: state.child_steps ++ lisp_step.child_steps
+        )
+
+      {:stop, {:error, final_step}, turn, state.turn_tokens}
+    else
+      new_state =
+        build_continuation_state(
+          state,
+          turn,
+          assistant_content,
+          native_call,
+          tool_result_json,
+          memory: lisp_step.memory,
+          journal: lisp_step.journal,
+          tool_cache: lisp_step.tool_cache,
+          child_steps: state.child_steps ++ lisp_step.child_steps,
+          last_fail: fail,
+          last_return_error: message
+        )
+
+      {:continue, new_state, turn}
+    end
   end
 
   defp handle_return_validation_error(

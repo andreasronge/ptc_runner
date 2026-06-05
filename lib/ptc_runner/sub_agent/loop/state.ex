@@ -104,6 +104,14 @@ defmodule PtcRunner.SubAgent.Loop.State do
     # across child SubAgents.
     discovery_exec: nil,
 
+    # Optional upstream runtime handle (`%Upstream.Runtime{}`/pid). Threaded
+    # through to each turn's `Lisp.run/2` solely so attach-time prelude
+    # `requires` validation runs against it (`PreludeAttach.attach`). It is an
+    # opaque handle — this loop opens no `RunContext` and resets no counters;
+    # the bridge (`Upstream.Eval.run_subagent/3`) owns that lifecycle. Like
+    # `discovery_exec`, it is caller-owned and NOT inherited by child SubAgents.
+    runtime: nil,
+
     # Pluggable progress renderer state (opaque, owned by progress_fn)
     progress_state: nil,
 
@@ -197,6 +205,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           tool_cache: map() | nil,
           # Optional discovery executor closure
           discovery_exec: (atom(), list() -> term()) | nil,
+          # Optional upstream runtime handle (opaque; attach-time validation only)
+          runtime: struct() | pid() | nil,
           # Pluggable progress renderer state
           progress_state: term(),
           # Child steps

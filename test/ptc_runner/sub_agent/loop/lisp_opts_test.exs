@@ -91,5 +91,17 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
       agent = agent_fixture(%{format_options: [max_print_length: 80]})
       assert LispOpts.build(agent, state_fixture(), %{}, %{})[:max_print_length] == 80
     end
+
+    test "appends :runtime when state.runtime is set, omits when nil" do
+      agent = agent_fixture()
+
+      # nil by default → omitted, so the base key list (and the nil-runtime,
+      # tools-only path) is unchanged.
+      refute Keyword.has_key?(LispOpts.build(agent, state_fixture(), %{}, %{}), :runtime)
+
+      runtime = %{fake: :runtime_handle}
+      with_runtime = state_fixture(%{runtime: runtime})
+      assert LispOpts.build(agent, with_runtime, %{}, %{})[:runtime] == runtime
+    end
   end
 end

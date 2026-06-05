@@ -84,7 +84,8 @@ defmodule PtcRunner.SubAgent.Runner do
           # PTC-Lisp single-shot (max_turns == 1, no tools) uses run_single_shot for efficiency
           if agent.completion_mode == :implicit and agent.output == :ptc_lisp and
                agent.max_turns == 1 and map_size(agent.tools) == 0 and agent.retry_turns == 0 and
-               not prelude_tool_backed?(agent.runtime_prelude) do
+               not prelude_tool_backed?(agent.runtime_prelude) and
+               not prelude_requires_backed?(agent.runtime_prelude) do
             # PTC-Lisp single-shot mode
             run_single_shot(
               agent,
@@ -123,6 +124,22 @@ defmodule PtcRunner.SubAgent.Runner do
 
   defp prelude_tool_backed?(%PtcRunner.Lisp.Prelude{exports: exports}),
     do: Enum.any?(exports, &(&1.tool_refs != []))
+
+  # A prelude whose exports declare upstream `requires` must have those
+  # `requires` validated against the selected runtime at attach time
+  # (`PreludeAttach.attach`). The single-shot fast path runs `Lisp.run` with no
+  # `:runtime` (runner.ex single-shot), so attach skips validation there. Route
+  # any requires-carrying prelude through `Loop.run/2`, where the bridge's
+  # `:runtime` handle reaches the attach path — making fail-closed validation
+  # independent of which execution surface the agent selects (plan §3.5 #1).
+  # `tool_refs` (AST-derived) and `requires` (explicit metadata is merged in)
+  # diverge: an explicit-`:requires` export with no literal `(tool/...)` body has
+  # `tool_refs == []` but `requires != []`, so `prelude_tool_backed?/1` alone
+  # would leave it on the fast path.
+  defp prelude_requires_backed?(nil), do: false
+
+  defp prelude_requires_backed?(%PtcRunner.Lisp.Prelude{exports: exports}),
+    do: Enum.any?(exports, &(&1.requires != []))
 
   @doc """
   Resolves `:self` sentinels in a tools map to `SubAgentTool` structs.

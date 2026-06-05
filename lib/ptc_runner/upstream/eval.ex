@@ -69,4 +69,87 @@ defmodule PtcRunner.Upstream.Eval do
       PtcRunner.Lisp.run(program, opts)
     end)
   end
+
+  @doc """
+  Run a multi-turn `PtcRunner.SubAgent` over an upstream runtime.
+
+  This is the first-class SubAgent↔upstream bridge. It owns **one**
+  `RunContext` spanning the entire multi-turn run (so the ledger, caps, and
+  discovery cache aggregate across all turns), derives the upstream `"call"`
+  tool + discovery hook from it, enriches the agent's tool map **before** prompt
+  generation so the capability is prompt-visible, and threads the runtime handle
+  into every turn so attach-time prelude `requires` validation runs fail-closed.
+  The SubAgent loop never opens a `RunContext`; this function does.
+
+  Returns `{result, records}` where `result` is the `SubAgent.run/2` result and
+  `records` are the drained upstream call records (mirrors
+  `run_lisp_with_records/3`).
+
+  ## Options
+
+  All `SubAgent.run/2` opts are forwarded, plus:
+
+    * the upstream context-limit keys (`:max_tool_calls`, `:max_catalog_ops`,
+      `:call_timeout_ms`, `:max_response_bytes`, `:max_catalog_result_bytes`) —
+      consumed to build the `RunContext`, not forwarded to `SubAgent.run`.
+    * `:on_upstream_call` — optional `((args -> result) -> (args -> result))`
+      decorator wrapping the upstream `"call"` fn, e.g. a server-side ledger
+      that records attempts before dispatch. The mcp ledger lives here.
+    * `:allow_call_override` — when `true`, a local `"call"` tool on the agent is
+      kept instead of raising on the collision (tests/stubs only).
+
+  `:discovery_exec` and `:runtime` are bridge-owned; any caller-supplied values
+  for those keys are ignored.
+  """
+  @bridge_keys [:on_upstream_call, :allow_call_override, :discovery_exec, :runtime]
+
+  @spec run_subagent(struct() | pid(), struct(), keyword()) ::
+          {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
+  def run_subagent(runtime, agent, opts \\ []) do
+    context_opts = Keyword.take(opts, @context_keys)
+    decorate = Keyword.get(opts, :on_upstream_call)
+    allow_override = Keyword.get(opts, :allow_call_override, false)
+    sub_opts = Keyword.drop(opts, @context_keys ++ @bridge_keys)
+
+    with_run_context(runtime, context_opts, fn context ->
+      eval_opts = eval_options(context)
+      call_tool = maybe_decorate(eval_opts[:tools], decorate)
+      enriched = enrich_agent(agent, call_tool, allow_override)
+
+      run_opts =
+        sub_opts
+        |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
+        |> Keyword.put(:runtime, runtime)
+
+      PtcRunner.SubAgent.run(enriched, run_opts)
+    end)
+  end
+
+  defp maybe_decorate(tools, nil), do: tools
+
+  defp maybe_decorate(%{"call" => call} = tools, decorate) when is_function(decorate, 1) do
+    %{tools | "call" => decorate.(call)}
+  end
+
+  # Merge the upstream `"call"` tool into the agent BEFORE SubAgent.run so it is
+  # visible both in the first-turn prompt and in every per-turn execution surface
+  # (both re-derive from `agent.tools`). Reserve `"call"` for the upstream tool: a
+  # silent local override would make prelude `requires` validation (against the
+  # runtime) disagree with execution (a local fn).
+  defp enrich_agent(%{tools: tools} = agent, call_tool, allow_override) do
+    cond do
+      not Map.has_key?(tools, "call") ->
+        %{agent | tools: Map.merge(tools, call_tool)}
+
+      allow_override ->
+        # Caller explicitly keeps its local "call" (tests/stubs).
+        %{agent | tools: Map.merge(call_tool, tools)}
+
+      true ->
+        raise ArgumentError,
+              "agent defines a local \"call\" tool that collides with the upstream " <>
+                "call tool; pass `allow_call_override: true` to keep the local one " <>
+                "(tests/stubs only)"
+    end
+  end
 end
