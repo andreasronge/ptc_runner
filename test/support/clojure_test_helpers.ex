@@ -198,6 +198,7 @@ defmodule PtcRunner.TestSupport.ClojureTestHelpers do
   defp normalize_for_clojure(value), do: value
 
   # Import ExUnit assertions
+  @spec flunk(String.t()) :: no_return()
   defp flunk(message) do
     ExUnit.Assertions.flunk(message)
   end
