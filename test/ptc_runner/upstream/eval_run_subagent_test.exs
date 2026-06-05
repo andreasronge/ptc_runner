@@ -143,6 +143,41 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
       assert Agent.get(counter, & &1) == 1
     end
 
+    test "fails closed and hard-stops in combined text mode too", %{runtime: runtime} do
+      # output: :text + ptc_transport: :tool_call is combined mode, which has its
+      # OWN lisp_eval error handler (text_mode.ex) that otherwise renders a
+      # recoverable tool error and retries.
+      prelude = literal_prelude("crm", "get_user")
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      agent =
+        SubAgent.new(
+          prompt: "Do the thing.",
+          runtime_prelude: prelude,
+          output: :text,
+          ptc_transport: :tool_call,
+          max_turns: 3
+        )
+
+      {result, _records} =
+        Eval.run_subagent(runtime, agent,
+          llm: counting_tool_call_llm(counter, ~S|(crm/list-traces "o")|),
+          collect_messages: true
+        )
+
+      assert {:error, step} = result
+      assert step.fail.reason == :prelude_attach_failed
+      assert Agent.get(counter, & &1) == 1
+
+      # Observability parity: the halting turn is preserved (not an empty trace),
+      # carries the failure reason (so error-breakdown metrics count it), and the
+      # assistant tool call survives under collect_messages.
+      assert [turn] = step.turns
+      refute turn.success?
+      assert turn.result == step.fail
+      assert Enum.any?(step.messages, &(&1.role == :assistant))
+    end
+
     test "a satisfied requires does not block (validation passes)", %{runtime: runtime} do
       prelude = literal_prelude("observatory", "list-traces")
 
