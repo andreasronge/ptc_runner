@@ -204,16 +204,23 @@ rather than being silently dropped.
 When you attach a prelude *with a selected upstream runtime* (§7), each public
 export's `requires` is checked against that runtime **before any user code
 runs**. If a required upstream operation is not configured/granted, attachment
-fails fast with `:prelude_attach_failed` — so a missing backing can never cause
-a partial run with side effects.
+fails fast with `:prelude_attach_failed` — so a backing that is missing *at
+attach time* can never cause a partial run with side effects.
 
-This holds across execution surfaces: direct `Lisp.run`, the multi-turn SubAgent
-loop, and the single-shot fast path. On the multi-turn path a
-`:prelude_attach_failed` is a **hard stop**, never a recoverable retry turn, so
-the guarantee survives across turns. The validation covers **the agent given the
-runtime**: a child SubAgent invoked via `as_tool` is **upstream-blind** — it does
-not inherit the parent's runtime, so its own `requires`-backed prelude is only
-validated if that child is itself constructed with a runtime.
+This holds at the **initial** attach across every execution surface: direct
+`Lisp.run`, the multi-turn SubAgent loop's first turn, and the single-shot fast
+path. On the multi-turn path each turn re-validates, and a mid-run
+`:prelude_attach_failed` is a **hard stop**, never a recoverable retry turn — but
+note the scope: under the default `:live` catalog a backing can disappear *after*
+an earlier turn has already executed a side effect, so the hard stop then
+guarantees only that **no further turn runs**, not that the whole run was
+side-effect-free. An unconditional cross-turn guarantee requires a
+frozen-for-the-run catalog snapshot (a planned optimization); until then the
+honest scope is **fail-closed before any side-effecting turn**. The validation
+covers **the agent given the runtime**: a child SubAgent invoked via `as_tool` is
+**upstream-blind** — it does not inherit the parent's runtime, so its own
+`requires`-backed prelude is only validated if that child is itself run through
+its own upstream bridge/runtime.
 
 > The prelude does **not** define upstream endpoints or credentials. It only
 > *wraps* operations the host has already configured. Credentials live in
