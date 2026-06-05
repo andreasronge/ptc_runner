@@ -133,6 +133,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp run_source(source, memory, runtime) do
     case run_lisp(source, [memory: memory], runtime) do
       {:ok, step} ->
+        print_captured_output(step.prints)
         {output, _truncated?} = Format.to_clojure(step.return)
         IO.puts(output)
         {:ok, step.memory}
@@ -155,6 +156,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       {:ok, source} ->
         case run_lisp(source, [], runtime) do
           {:ok, step} ->
+            print_captured_output(step.prints)
             IO.puts("Loaded #{path}")
             IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
             IO.puts("Type :help for commands, :doc <name> for function docs\n")
@@ -222,6 +224,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     case run_lisp(input, [turn_history: history, memory: memory], runtime) do
       {:ok, step} ->
         # Show truncated output exactly like LLM feedback sees
+        print_captured_output(step.prints)
         {output, _truncated?} = ResponseHandler.format_execution_result(step.return)
         IO.puts(output)
         new_history = (history ++ [step.return]) |> Enum.take(-3)
@@ -231,6 +234,12 @@ defmodule Mix.Tasks.Ptc.Repl do
         IO.puts(format_error(step.fail))
         {history, memory}
     end
+  end
+
+  defp print_captured_output([]), do: :ok
+
+  defp print_captured_output(prints) do
+    Enum.each(prints, &IO.puts/1)
   end
 
   defp handle_meta("help", _runtime) do
