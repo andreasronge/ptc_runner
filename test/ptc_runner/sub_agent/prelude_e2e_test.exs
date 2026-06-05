@@ -111,6 +111,55 @@ defmodule PtcRunner.SubAgent.PreludeE2ETest do
     end
   end
 
+  describe "real LLM calls a tool-backed export" do
+    test "the model calls a tool-backed export and surfaces the tool's result" do
+      # vault/lookup! wraps a PRIVATE helper that calls (tool/call ...), so it is
+      # tool-backed (non-empty tool_refs -> routes through Loop.run) and aborts on
+      # failure. The model sees only the export's docstring/signature, never the
+      # body or the private helper.
+      vault_source = """
+      (ns vault "Vault helpers." {:visibility :prompt})
+
+      (defn- raw-lookup
+        [id]
+        (tool/call {:server "vault" :tool "secret" :args {:id id}}))
+
+      (defn lookup!
+        "Return the secret record for a customer id, aborting on failure."
+        [id]
+        (let [res (raw-lookup id)]
+          (if (res :ok) (res :value) (fail {:reason (res :reason)}))))
+      """
+
+      {:ok, prelude} = Compiler.compile(vault_source)
+
+      # The real tool the export wraps. It returns an UNGUESSABLE code derived
+      # from the id, so a correct answer proves vault/lookup! -> tool/call ran:
+      # the model cannot produce "ZX-alpha-42" from the docstring alone.
+      call_tool = fn args ->
+        id = get_in(args, ["args", "id"]) || get_in(args, [:args, :id])
+        %{ok: true, value: %{"code" => "ZX-#{id}-42"}, reason: nil}
+      end
+
+      agent =
+        SubAgent.new(
+          prompt:
+            "Look up the secret for id \"alpha\" using the available capabilities, " <>
+              "and return its code.",
+          signature: "() -> :string",
+          runtime_prelude: prelude,
+          tools: %{"call" => call_tool},
+          max_turns: 3
+        )
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm_callback(), timeout: @timeout)
+
+      assert step.return == "ZX-alpha-42",
+             "expected the tool-derived code (proves the tool-backed export ran); got: " <>
+               "#{inspect(step.return)} fail: #{inspect(step.fail)}"
+    end
+  end
+
   defp model, do: LispTestLLM.model()
 
   defp llm_callback do
