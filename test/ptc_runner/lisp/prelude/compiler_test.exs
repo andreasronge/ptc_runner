@@ -34,12 +34,13 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       assert "crm" in Prelude.namespaces(prelude)
     end
 
-    test "public export record carries ref/namespace/symbol/arity/doc", %{prelude: prelude} do
+    test "public export record carries ref/namespace/symbol/arity/params/doc", %{prelude: prelude} do
       assert [%Export{} = export] = prelude.exports
       assert export.ref == "crm/get-user"
       assert export.namespace == "crm"
       assert export.symbol == "get-user"
       assert export.arity == 1
+      assert export.params == ["id"]
       assert export.doc == "Return a CRM user by id."
       assert export.visibility == :prompt
     end

@@ -299,10 +299,10 @@ specification.
 
 > **Traceability.** When a prelude is attached, `step.prelude_trace` carries a
 > credential-free summary — source hash, compiled-artifact hash, selected
-> protected namespaces, and the public export records — so a run's capability
-> environment can be reproduced from traces. Secrets and credentials live in
-> host/deployment config and never appear in the prelude artifact, prompts, or
-> traces.
+> protected namespaces, and public export records including arglist params — so
+> a run's capability environment can be reproduced from traces. Secrets and
+> credentials live in host/deployment config and never appear in the prelude
+> artifact, prompts, or traces.
 
 The same compiled artifact also drives the REPL
 (`mix ptc.repl --prelude crm.clj`) and direct execution

@@ -103,6 +103,7 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
       assert get_user.namespace == "crm"
       assert get_user.symbol == "get-user"
       assert get_user.arity == 1
+      assert get_user.params == ["id"]
       assert get_user.visibility == :prompt
       assert get_user.effect == :read
       assert get_user.provider_ref == "upstream:crm/get_user"
