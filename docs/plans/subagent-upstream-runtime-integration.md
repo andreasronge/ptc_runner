@@ -1,13 +1,14 @@
 # SubAgent ↔ Upstream Runtime: First-Class Integration
 
 **Status:** Phase 1 implemented on `main` as of 2026-06-05 · **Created:**
-2026-06-05 · **Revised:** 2026-06-05 (replaced §3.2 lifecycle design with a
-core upstream *bridge* after review; promoted three correctness gaps from risks
-to Phase 1 requirements; updated status after merge; reconciled status against
-shipped code — the `SubAgent.run(runtime:)` delegating facade is **deferred**,
-and two §6 test-plan items plus the guide docs remain outstanding)
+2026-06-05 · **Revised:** 2026-06-06 (Phase 1.5 merged; the
+`SubAgent.run(runtime:)` delegating facade is **deferred**, two §6 test-plan
+items remain outstanding, and the capability-profile discussion is
+cross-referenced so this plan stays the concrete upstream-provider bridge rather
+than the generic capability-runtime design)
 **Owner:** TBD · **Related:** `docs/plans/root-upstream-runtime.md`,
 `docs/plans/transport-neutral-tool-upstreams.md`,
+`docs/plans/capability-prelude-discovery.md`,
 `docs/guides/capability-prelude.md` §5/§7
 
 ---
@@ -41,12 +42,14 @@ Phase 1 has shipped in core:
 - `mcp_server` delegates agent-over-upstream execution to the core bridge while
   keeping its ledger and continuation-guard policy server-side.
 
-Phase 2/3 items remain future work: run-scoped `upstreams:` convenience,
-validate-once against a frozen-for-run snapshot, and a unified core upstream
-record surface.
+Phase 2/3 items remain future work: a convenience facade for selecting/owning an
+upstream runtime for a run, validate-once against a frozen-for-run snapshot, and
+a unified core upstream record surface. The broader capability-profile/provider
+direction is tracked in
+[`capability-prelude-discovery.md`](capability-prelude-discovery.md); this plan
+stays scoped to the concrete upstream provider bridge.
 
-Still outstanding *within* Phase 1's own plan (tracked here so they are not read
-as done):
+Still outstanding *within* Phase 1's own plan:
 
 - **The thin `SubAgent.run(runtime:)` delegating facade** (§3.1) — deferred to
   Phase 2; today `runtime:` on `SubAgent.run/2` is a passthrough, not a bridge
@@ -57,6 +60,9 @@ as done):
   malformed `continuation_guard`, per §5.2).
 - **§6 `:e2e` test** — real LLM + the bridge over the dummy upstream is not yet
   written.
+
+Delivered status notes:
+
 - **Guide docs (delivered, §9 T4)** — `docs/guides/capability-prelude.md` §7 now
   documents `run_subagent/3` as the multi-turn SubAgent↔upstream seam alongside
   `run_lisp/3`. (§5's cross-turn guarantee wording was already corrected to
@@ -81,6 +87,25 @@ the `:e2e` test remain outstanding — T2/T3 do not close them.
 Sections below preserve the original pre-implementation design record; read
 current-architecture claims there as historical context unless this status
 section says otherwise.
+
+### Relationship to Capability Profiles
+
+The capability-profile discussion reframes this plan's long-term role without
+changing the shipped Phase 1/1.5 bridge:
+
+- `PtcRunner.Upstream.*` remains the concrete upstream provider implementation
+  for OpenAPI and external MCP tools.
+- `PtcRunner.Upstream.Eval.run_lisp/3` and `run_subagent/3` are upstream adapters
+  around `Lisp.run/2` / the SubAgent runner, not the generic capability runtime.
+- Future generic record, effect, guard, and descriptor work should be designed so
+  upstream can become the first capability provider rather than the only special
+  case.
+- Child SubAgents being upstream-blind today maps to a broader future principle:
+  child agents should not inherit a parent's capability profile or provider
+  authority unless the host explicitly grants that composition.
+- A run-scoped `upstreams:` convenience may still be useful, but it should not
+  pre-empt a future capability-profile facade that can own upstream plus other
+  providers.
 
 ## 1. Problem
 
@@ -462,23 +487,25 @@ first (repo bug-fix rule).
 | `with_run_context`-spans-the-run wrapper + agent enrichment | **Move to core** (`Upstream.Eval.run_subagent/3`) |
 | `:runtime` handle threading through the SubAgent loop | **New** — one passthrough (`Loop.run` opts → `State` → `LispOpts.build`) |
 | `root_tools_with_ledger/2`, `call_with_ledger/3`, effect classification, `continuation_guard`, retry-feedback rendering | **Phase 1: stay in mcp_server**, passed into the bridge as a tool decorator + guard. **Phase 3:** the *generic* parts (effect classification, ledger primitives, guard mechanism, caps) move to **core** with fail-safe defaults; mcp keeps only deployment policy + protocol/UX (retry-feedback rendering, audit export). |
-| `RootUpstreamRuntime` (runtime *selection*/config) | **Stays in mcp_server** (host-owned: which upstreams a deployment selects) |
+| `RootUpstreamRuntime` (upstream runtime *selection*/config) | **Stays in mcp_server** (host-owned: which upstreams a deployment selects). A future capability profile may provide a more general host-owned facade, but this plan should not move endpoint/credential authority into preludes. |
 | `Ledger` retention / projection / export format | **Stays** mcp-side. (Phase 3: a *generic* call-record/ledger primitive lives in core — converging on `step.upstream_calls` — while mcp keeps its own retention/projection/export.) |
 | `SubAgent.run(runtime:)` facade | Optional thin delegate to the bridge |
 
-Principle (target boundary): **core owns *how* an agent drives a runtime —
-including neutral runtime/catalog metadata, call recording, generic side-effect
-classification, and policy *extension points* (`continuation_guard`,
-`on_upstream_call`, approval callbacks, caps) with safe defaults. The embedding
-host owns runtime *selection* and deployment-specific *decisions* —
-authorization, and the UX/protocol around approval, denial, continuation,
-retries, and audit export.** `mcp_server` is **one such host**: it configures
-and exposes `ptc_runner` and installs MCP-specific policy callbacks; it is
-**not** the architectural home for upstream execution or generic side-effect
-logic. Otherwise `ptc_runner`-standalone users would have to reimplement safety
-policy — the very layering problem this bridge exists to fix. The Phase 1 split
-above (ledger / classification mcp-side) is **compatibility with the existing
-contract**, not the target; Phase 3 (§7) moves the generic mechanism into core.
+Principle (target boundary): **core owns *how* an agent drives an upstream
+runtime — including neutral catalog metadata, call recording, generic
+side-effect classification, and policy *extension points*
+(`continuation_guard`, `on_upstream_call`, approval callbacks, caps) with safe
+defaults. The embedding host owns upstream runtime *selection* and
+deployment-specific *decisions* — authorization, and the UX/protocol around
+approval, denial, continuation, retries, and audit export.** `mcp_server` is
+**one such host**: it configures and exposes `ptc_runner` and installs
+MCP-specific policy callbacks; it is **not** the architectural home for upstream
+execution or generic side-effect logic. Otherwise `ptc_runner`-standalone users
+would have to reimplement safety policy — the very layering problem this bridge
+exists to fix. The Phase 1 split above (ledger / classification mcp-side) is
+**compatibility with the existing contract**, not the target; Phase 3 (§7) moves
+the generic mechanism into core, ideally in a shape that can later be reused by
+a capability-provider runtime above `PtcRunner.Upstream.*`.
 
 ---
 
@@ -612,10 +639,14 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    guide §7/§5 + §8 honesty fixes. No architecture change; did not gate or block
    Phases 2/3. The §6 raise-through-bridge fault test and the `:e2e` test remain
    outstanding.
-2. **Phase 2 (convenience):** `upstreams: config` form where core starts/stops a
-   runtime for the run's duration (a facade over the bridge — does **not** need
-   `runtime:` inside the loop); and the thin `SubAgent.run(runtime:)` delegating
-   facade (deferred from Phase 1).
+2. **Phase 2 (convenience):** a run-scoped convenience for selecting or owning
+   an upstream runtime for the run's duration, plus the thin
+   `SubAgent.run(runtime:)` delegating facade (deferred from Phase 1). One
+   possible API is an `upstreams: config` facade over the bridge; another is a
+   small capability-profile facade that imports existing upstream JSON. Do not
+   let the convenience API pre-empt the broader profile/provider design in
+   `capability-prelude-discovery.md`. The bridge still does **not** need
+   `runtime:` lifecycle ownership inside the loop.
 3. **Phase 3 (optimization + convergence + the target boundary):** *Gating first
    step — core record-surface convergence:* give `RunContext` records a
    record-before-dispatch, effect-bearing schema (`:effect`/`:turn`/`:args_hash`)
@@ -634,7 +665,10 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    may override to allow / prompt / require approval). Result: a
    `ptc_runner`-standalone consumer gets safe upstream execution without
    reimplementing policy, and `mcp_server` keeps only deployment policy +
-   protocol/UX (§4 target boundary).
+   protocol/UX (§4 target boundary). Design the record/effect/guard primitives
+   as provider-neutral where practical: upstream is the first concrete provider,
+   but the same primitives should be able to serve future local, sandbox, and
+   SubAgent capability providers.
 
 ---
 
