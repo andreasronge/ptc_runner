@@ -67,10 +67,12 @@ The split would be:
 
 ```text
 Capability Profile
-  declares providers, credentials refs, grants, effects, limits, cache policy
+  declares providers, credential refs, model aliases, grants, effects, limits,
+  cache policy
 
 Capability Runtime
-  materializes a profile into live provider state and per-run contexts
+  materializes a profile into live provider state, resolved clients, and
+  per-run contexts
 
 Capability Prelude
   exposes curated Lisp-facing functions that require capabilities
@@ -89,6 +91,78 @@ This keeps API curation separate from authority and infrastructure. A prelude
 can be prompt-visible and trace-safe; a profile can reference secrets, endpoint
 configuration, grants, and deployment policy without becoming agent-visible.
 
+## Credentials and Secret References
+
+Credentials should be a profile/runtime concern, not ordinary user-space
+PTC-Lisp. Runtime programs may use granted capabilities, but they should not
+mint new capabilities by reading credentials, defining upstreams, or configuring
+providers during a run.
+
+Possible split:
+
+```text
+CredentialStore
+  owns secret sources, resolution, redaction, audit records
+
+CredentialRef
+  references a secret without exposing material, e.g. env/file/provider chain
+
+CapabilityProfile
+  references credential refs by ID
+
+CapabilityRuntime
+  resolves refs into live provider clients
+
+Prelude/User Program
+  sees descriptors such as credential? true, never secret values
+```
+
+Credential references might be profile-time data such as:
+
+```clojure
+(cap/credential "openrouter-key"
+  {:env "OPENROUTER_API_KEY"})
+
+(cap/credential "crm-token"
+  {:file {:path "secrets/crm-token"}})
+
+(cap/credential "bedrock-default"
+  {:provider :aws-default-chain})
+
+(cap/credential "bedrock-ci"
+  {:env {:access-key-id "AWS_ACCESS_KEY_ID"
+         :secret-access-key "AWS_SECRET_ACCESS_KEY"
+         :session-token "AWS_SESSION_TOKEN"}})
+```
+
+Descriptors can disclose that a capability is credential-backed without
+disclosing material:
+
+```clojure
+{:ref "crm/get-user"
+ :requires ["cap:crm.user.read"]
+ :effect :read
+ :credential? true
+ :auth "bearer"
+ :secret-visible? false}
+```
+
+JSON loading for config is useful, but it belongs at profile time or behind an
+explicit sandbox filesystem capability. Profile-time JSON should support schema
+validation so configuration fails before a run starts:
+
+```clojure
+(profile/load-json {:path "upstreams.json"
+                    :schema "upstreams.schema.json"})
+
+(cap/upstreams-from-json {:path "upstreams.json"
+                          :schema "upstreams.schema.json"})
+```
+
+Runtime forms such as `(fs/read-json ...)` may be useful for ordinary data, but
+only when the selected sandbox profile grants access to specific paths or
+resources. They should not be the mechanism for loading credentials.
+
 ## Capability Providers
 
 A profile can become extensible through provider modules. Upstream would be the
@@ -97,6 +171,7 @@ first provider, backed initially by the existing upstream JSON/config machinery.
 Possible provider families:
 
 - `upstream`: OpenAPI and external MCP upstream operations;
+- `llm`: LLM providers, model aliases, default model roles, and model policy;
 - `local`: host functions or native BEAM tools with custom config;
 - `sandbox`: filesystem, process, network, or resource affordances;
 - `subagent`: SubAgent-as-tool definitions;
@@ -118,6 +193,104 @@ The exact behaviour API is open. The important part is that provider extension
 should happen at profile/runtime boundaries, not by giving ordinary user Lisp new
 authority.
 
+## LLM Providers and Registry
+
+LLM configuration fits naturally as a capability provider. The current
+`PtcRunner.LLM` adapter/registry model can be lifted into profiles without
+making credentials visible to runtime Lisp.
+
+Conceptual split:
+
+```text
+CredentialStore
+  owns OpenRouter, Bedrock, OpenAI-compatible, and other provider credentials
+
+LLMProviderProfile
+  provider type, base URL, region, auth refs, provider-specific options
+
+LLMRegistry
+  aliases, defaults, tags, model metadata, and call policy
+
+CapabilityProfile
+  grants which aliases/models a participant or sandbox may use
+
+Runtime PTC-Lisp
+  calls aliases such as :haiku or :code, never provider secrets
+```
+
+Profile-time sketch:
+
+```clojure
+(cap/credential "openrouter-key"
+  {:env "OPENROUTER_API_KEY"})
+
+(cap/credential "bedrock-default"
+  {:provider :aws-default-chain})
+
+(llm/provider :openrouter
+  {:type :openrouter
+   :api-key {:credential "openrouter-key"}})
+
+(llm/provider :bedrock
+  {:type :bedrock
+   :region {:env "AWS_REGION"}
+   :auth {:credential "bedrock-default"}})
+
+(llm/alias :haiku
+  {:provider :openrouter
+   :model "anthropic/claude-haiku-4.5"
+   :tags [:fast :cheap]})
+
+(llm/alias :sonnet
+  {:provider :openrouter
+   :model "anthropic/claude-sonnet-4"
+   :tags [:reasoning :code]})
+
+(llm/alias :bedrock-haiku
+  {:provider :bedrock
+   :model "anthropic.claude-haiku-4-5-20251001-v1:0"})
+
+(llm/default :chat :haiku)
+(llm/default :code :sonnet)
+(llm/default :extract :haiku)
+
+(cap/grant "llm:haiku"
+  {:effect :llm-call
+   :visibility :discoverable
+   :limits {:max-output-tokens 2000}})
+
+(cap/grant "llm:sonnet"
+  {:effect :llm-call
+   :visibility :hidden
+   :limits {:max-output-tokens 4000}})
+```
+
+Runtime PTC-Lisp would use the aliases:
+
+```clojure
+(llm/call {:model :haiku
+           :messages [{:role :user
+                       :content "Summarize this"}]})
+
+(agent/run {:prompt "Analyze this"
+            :llm :code
+            :output :text})
+```
+
+If a sandbox/profile grants only `llm:haiku`, calls to `:sonnet` should fail
+before provider invocation. Discovery can expose safe descriptors:
+
+```clojure
+{:alias :haiku
+ :provider :openrouter
+ :model "anthropic/claude-haiku-4.5"
+ :credential? true
+ :secret-visible? false
+ :effects [:llm-call]
+ :limits {:max-output-tokens 2000}
+ :tags [:fast :cheap]}
+```
+
 ## Profile-Time Forms
 
 If the profile language is PTC-Lisp-shaped, forms such as `cap/upstream` should
@@ -132,7 +305,7 @@ Example sketch:
   {:transport :openapi
    :schema {:path "priv/crm.openapi.json"}
    :base-url {:env "CRM_BASE_URL"}
-   :auth {:bearer {:env "CRM_TOKEN"}}})
+   :auth {:bearer {:credential "crm-token"}}})
 
 (cap/grant "upstream:crm/get_user"
   {:effect :read
@@ -194,10 +367,12 @@ things uniformly:
 
 - prelude exports;
 - upstream operations;
+- LLM providers, aliases, defaults, and model grants;
 - typed native tools;
 - SubAgent tools;
 - sandbox affordances;
 - cacheable resources;
+- credential-backed provider bindings without secret values;
 - profile-level grants.
 
 Deferred catalog APIs such as `cap/list`, `cap/search`, and `cap/meta` should be
@@ -208,6 +383,23 @@ Open question: whether `cap/*` is only a profile-time namespace, only a
 user-facing discovery namespace, or two separate namespaces with explicit names.
 Avoid one namespace that both grants authority and exposes discovery inside
 ordinary programs.
+
+## Relationship to Conversation Control Plane
+
+[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+explores the runtime UX side: using PTC-Lisp to inspect and operate REPL
+sessions, LLM chats, SubAgent runs, and historical debug artifacts.
+
+This document is the authority/model side. Capability profiles, providers,
+runtimes, and descriptors answer what capabilities exist, how they are backed,
+what grants/effects they carry, and what metadata can be exposed safely.
+
+The conversation/control-plane surface should consume this descriptor model for
+`apropos`, `doc`, `meta`, `dir`, `ptc/inspect`, and `ptc/invoke` style APIs. It
+should not define endpoints, credentials, grants, provider configuration, or
+authority-bearing profile state. Historical sessions, live conversation
+handles, and SubAgent debug artifacts are consumers of the descriptor registry,
+not the core profile system itself.
 
 ## Safety Principles
 
