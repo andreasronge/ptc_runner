@@ -226,6 +226,33 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
       end
     end
 
+    test "a bridge-owned context closes when run_subagent raises", %{runtime: runtime} do
+      parent = self()
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          tools: %{"call" => fn _args -> %{ok: true, value: "local"} end},
+          output: :ptc_lisp,
+          max_turns: 1
+        )
+
+      assert_raise ArgumentError, ~r/local "call" tool/, fn ->
+        Eval.run_subagent(runtime, agent,
+          llm: stub_llm("1"),
+          on_upstream_call: fn call ->
+            send(parent, {:borrowed_bridge_call, call})
+            call
+          end
+        )
+      end
+
+      assert_receive {:borrowed_bridge_call, call}, 1_000
+
+      assert call.(%{server: "observatory", tool: "list-traces", args: %{org_id: "acme"}}) ==
+               %{ok: false, reason: :run_context_closed, message: "run_context_closed"}
+    end
+
     test "allow_call_override: true keeps the local tool instead of raising", %{runtime: runtime} do
       agent =
         SubAgent.new(

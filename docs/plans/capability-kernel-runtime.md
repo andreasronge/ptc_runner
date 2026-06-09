@@ -1,18 +1,18 @@
 # Run Environment and Future Capability Runtime
 
-**Status:** implementation spec for the near-term closed-context guard, plus a
-deferred `PtcRunner.Lisp.RunEnv` design note. Future runtime/kernel vocabulary is
-non-binding appendix material.
+**Status:** near-term closed-context guard delivered. The remaining material is
+durable option-classification guidance plus deferred `PtcRunner.Lisp.RunEnv` and
+future runtime/kernel design notes.
 
 ## Goal
 
 Separate an immediate borrowed-capability lifetime bug fix from a future typed
 Lisp run-environment refactor.
 
-Two deliverables are intentionally sequenced separately:
+The work is intentionally sequenced:
 
-1. **Ship now:** add a closed-context guard so borrowed upstream closures that
-   start after `RunContext.close/1` fail before upstream side effects.
+1. **Delivered:** borrowed upstream closures that start after
+   `RunContext.close/1` fail before upstream side effects.
 2. **Keep as durable design guidance:** preserve the eval-input vs sibling-policy
    option classification table so new options land in the right bucket.
 3. **Defer until the conversation control plane becomes committed work:** add
@@ -349,27 +349,39 @@ so unrecognized keys are dropped (as today), not raised.
 | Other SubAgent builders (`runner.ex`, `compiler.ex`, `tool_normalizer.ex`) | Independent flat opts | Audit together before any SubAgent `env:` migration to avoid reintroducing route divergence. |
 | `mcp_server` snapshot eval (`PtcRunnerMcp.Sessions.run_snapshot` → `Session.lisp_opts/3`, sessions.ex:296 / session.ex:779) | Independent flat opts builder | Stay as-is; out-of-scope-but-verify-still-compiling (the closed-context guard protects this path regardless, since it lives in the CallTool/Discovery closures). |
 
-## Near-Term: Borrowed Closure Lifetime
+## Delivered: Borrowed Closure Lifetime
 
 `PtcRunner.Upstream.RunContext` produces borrowed closures for upstream tool calls
 and discovery. Today those closures travel through flat `tools:` /
 `discovery_exec:` options; a future `RunEnv` would carry the same borrowed
 closures in typed fields. Borrowed closures that start after the close boundary
-must fail closed instead of dispatching upstream side effects.
+fail closed instead of dispatching upstream side effects.
 
 `RunEnv` is a by-value evaluation input, not a lifecycle owner. If a caller stores
 or reuses a `RunEnv`, it can keep borrowed closures, atomics references, and the
 upstream runtime handle alive until normal BEAM garbage collection. This is
-allowed but outside the intended one-evaluation use; the closed-context guard is
-the safety boundary for stale borrowed closures.
+allowed but outside the intended one-evaluation use; the delivered
+closed-context guard is the safety boundary for stale borrowed closures.
 
-Current code does not enforce this: `RunContext.close/1` stops the collector,
-but closures still capture live `:atomics` counters and the upstream runtime.
-`Collector.record/2` is a raw `send/2`, so stale use can dispatch a real
-upstream side effect and silently lose the audit record.
+Delivered implementation:
 
-V1 must make the fail-closed guarantee true for calls that begin after the close
-boundary is crossed:
+- `PtcRunner.Upstream.RunContext` owns a per-context closed flag,
+  `ensure_open/1`, idempotent `close/1`, and `mark_closed/1`.
+- `PtcRunner.Upstream.CallTool` checks `ensure_open/1` before argument
+  validation, cap accounting, schema checks, records, or dispatch.
+- `PtcRunner.Upstream.Discovery` checks `ensure_open/1` before catalog cap
+  accounting or dispatch.
+- `PtcRunner.Upstream.Eval.with_run_context/3` marks the context closed before
+  draining records and always closes in `after`, including raise paths.
+- Closed tool calls return `Result.error(:run_context_closed,
+  "run_context_closed")`; closed discovery calls return
+  `{:world_fault, :run_context_closed}`.
+- `:run_context_closed` is part of `PtcRunner.Upstream.Result.reason/0`.
+
+### Historical Implementation Notes
+
+The following bullets record the reviewed V1 implementation constraints that led
+to the delivered guard. Treat them as historical guardrails, not pending work:
 
 1. Add a **per-context** `:closed` atomic to `%PtcRunner.Upstream.RunContext{}`:
    - 1a. Add `:closed` to the defstruct bare-atom field list
@@ -467,7 +479,7 @@ iex> step.return
 2450.0
 ```
 
-Acceptance tests for the near-term closed-context guard:
+Delivered acceptance tests for the closed-context guard:
 
 - Stale upstream tool closures fail with `:run_context_closed` before dispatch.
 - Stale upstream tool closures fail with `:run_context_closed` even when invoked
