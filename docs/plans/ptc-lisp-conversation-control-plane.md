@@ -61,11 +61,11 @@ provider policy, model registries, MCP ownership, or persistence rules.
 ## Capability Boundary
 
 See also
-[`capability-kernel-runtime.md`](capability-kernel-runtime.md), which separates
-`RunEnv` as the Lisp evaluation surface, isolation policy, and future runtime
-lifecycle/authority. This control-plane document is downstream of that work:
-do not implement these Lisp-facing APIs until the `RunEnv` boundary and
-borrowed-capability authority model are boring and explicit.
+[`capability-kernel-runtime.md`](capability-kernel-runtime.md), which now
+separates the immediate borrowed-closure lifetime guard from the deferred
+`RunEnv` typed-projection refactor. This control-plane document is downstream of
+both pieces: do not implement these Lisp-facing APIs until the closed-context
+guard is shipped and the `RunEnv` boundary has a committed reason to exist.
 
 A useful primitive layer could be a host capability interface threaded through
 `PtcRunner.Lisp.run/2`, similar in spirit to the existing tool executor and
@@ -95,10 +95,12 @@ lower-level host interface.
 
 This primitive layer should not make a single provider, such as upstream tools,
 responsible for running Lisp. Today the concrete cleanup is smaller:
-provider-owned state is projected into `PtcRunner.Lisp.RunEnv`, and
-`PtcRunner.Lisp` evaluates against that prepared environment. A shared runtime
-kernel may generalize that only after more lifecycle-bearing providers justify
-it.
+`PtcRunner.Upstream.Eval` is already a thin projection over `PtcRunner.Lisp.run/2`;
+the immediate hardening is to make borrowed upstream closures fail closed after
+their `RunContext` closes. A future `PtcRunner.Lisp.RunEnv` may make provider
+state projection typed and explicit once this control plane is no longer
+exploratory. A shared runtime kernel may generalize that only after more
+lifecycle-bearing providers justify it.
 
 ## Relationship to Capability Profiles
 

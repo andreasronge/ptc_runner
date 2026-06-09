@@ -7,13 +7,15 @@ presentation/runtime wrapper.
 Status: extraction direction approved; much of the upstream subsystem now lives
 in root. Treat this document as an upstream-provider extraction record and
 remaining-contracts note. The active architecture source is
-[`capability-kernel-runtime.md`](capability-kernel-runtime.md), whose current
-path is `PtcRunner.Lisp.RunEnv` first, upstream projection next, and a generic
-runtime later.
+[`capability-kernel-runtime.md`](capability-kernel-runtime.md): the immediate
+runtime hardening is the closed-context guard, while `PtcRunner.Lisp.RunEnv` is a
+deferred typed-projection refactor.
 
 The older provider-owned Lisp convenience shape in this document should be read
-as superseded. Upstream should project `PtcRunner.Upstream.RunContext` into a
-`PtcRunner.Lisp.RunEnv`; `PtcRunner.Lisp` remains the owner of evaluation.
+as superseded. `PtcRunner.Lisp` remains the owner of evaluation; upstream should
+stay a thin projection/bridge over `PtcRunner.Upstream.RunContext`, with a future
+`RunEnv` projection only if the control-plane work makes that boundary worth
+shipping.
 
 The blocking contracts are:
 
@@ -179,10 +181,12 @@ stoppable with `PtcRunner.Upstream.Runtime.stop/1`.
 - `(tool/call ...)` closures;
 - `discovery_exec` closures.
 
-The near-term cleanup should attach upstream by projecting this run context into
-`PtcRunner.Lisp.RunEnv`. A future neutral `PtcRunner.Runtime.with_run/3` can
-generalize that shape after another lifecycle-bearing provider needs it. Lisp
-evaluation remains owned by `PtcRunner.Lisp`, not by `PtcRunner.Upstream`.
+The near-term cleanup is to make the run context's borrowed closures fail closed
+after the context closes. A future `PtcRunner.Lisp.RunEnv` projection can make
+the eval-input boundary typed if the conversation control plane becomes
+committed work. A future neutral `PtcRunner.Runtime.with_run/3` can generalize
+that shape after another lifecycle-bearing provider needs it. Lisp evaluation
+remains owned by `PtcRunner.Lisp`, not by `PtcRunner.Upstream`.
 
 Do not expose a reusable `Runtime.tools(runtime)` API for evaluation. Reusing
 the same tool closure map across evaluations risks sharing live counters between
@@ -423,9 +427,10 @@ Public APIs must make teardown hard to forget:
   server code that needs manual drain timing, but callers must close it in
   `after`.
 
-If a Lisp-specific helper is kept, it should be a thin convenience over
-`PtcRunner.Lisp.RunEnv` construction and internally use the same closeable
-run-context contract.
+If a Lisp-specific helper is kept, it should stay a thin convenience over
+`with_run_context/3`, `eval_options/1`, and `PtcRunner.Lisp.run/2`. If `RunEnv`
+ships later, that helper can project into `PtcRunner.Lisp.RunEnv` internally
+while preserving the same closeable run-context contract.
 
 Drain completeness depends on BEAM message ordering and synchronous evaluator
 joins, not on the collector being `self()`. Local `send/2` enqueues the record
@@ -867,8 +872,9 @@ The following details remain implementation choices, not contract blockers:
 - Expose a small public embedding API, but mark it experimental during 0.x.
   The intended upstream-provider surface is `start_link/1`, `stop/1`,
   `with_run_context/3`, and catalog/diagnostics readers. A Lisp evaluation
-  convenience should be a thin `RunEnv` projection, not provider-owned
-  evaluation on `PtcRunner.Upstream.Runtime`.
+  convenience should be a thin projection into `PtcRunner.Lisp.run/2`, not
+  provider-owned evaluation on `PtcRunner.Upstream.Runtime`. A `RunEnv`
+  projection is deferred until it has a committed downstream consumer.
 - Keep MCP upstream client transports in root for this migration. They are
   client transports for external tool servers, not MCP server transports, and
   root needs them to keep `(tool/call ...)` transport-neutral across OpenAPI and

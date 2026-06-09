@@ -1,27 +1,35 @@
 # Run Environment and Future Capability Runtime
 
-**Status:** implementation spec for the near-term `PtcRunner.Lisp.RunEnv`
-slice. Future runtime/kernel vocabulary is non-binding appendix material.
+**Status:** implementation spec for the near-term closed-context guard, plus a
+deferred `PtcRunner.Lisp.RunEnv` design note. Future runtime/kernel vocabulary is
+non-binding appendix material.
 
 ## Goal
 
-Introduce a typed Lisp run environment that removes provider-owned Lisp
-evaluation without building a generic capability kernel yet.
+Separate an immediate borrowed-capability lifetime bug fix from a future typed
+Lisp run-environment refactor.
 
-The near-term implementation is:
+Two deliverables are intentionally sequenced separately:
 
-1. Add `PtcRunner.Lisp.RunEnv` as the structured evaluation-input surface.
-2. Teach `PtcRunner.Lisp.run/2` to accept `env: %RunEnv{}` while preserving the
-   existing flat option path for 0.x callers and tests.
-3. Project `PtcRunner.Upstream.RunContext` into `RunEnv`.
-4. Keep `PtcRunner.Upstream.Eval.run_lisp/3` as a thin compatibility
-   convenience over `with_run_context/3` plus `RunEnv`.
-5. Add a closed-context guard so borrowed upstream closures fail before side
-   effects after `RunContext.close/1`.
+1. **Ship now:** add a closed-context guard so borrowed upstream closures that
+   start after `RunContext.close/1` fail before upstream side effects.
+2. **Keep as durable design guidance:** preserve the eval-input vs sibling-policy
+   option classification table so new options land in the right bucket.
+3. **Defer until the conversation control plane becomes committed work:** add
+   `PtcRunner.Lisp.RunEnv`, teach `PtcRunner.Lisp.run/2` to accept
+   `env: %RunEnv{}`, and project `PtcRunner.Upstream.RunContext` into it.
 
-Non-goals for this slice:
+`PtcRunner.Upstream.Eval` already keeps Lisp evaluation owned by
+`PtcRunner.Lisp`: `run_lisp_with_records/3` is a thin `with_run_context/3` +
+`eval_options/1` + `Lisp.run/2` convenience. `RunEnv` would make that projection
+typed and explicit; it is not required to remove a current provider-owned
+evaluation path.
+
+Near-term non-goals:
 
 - no neutral `PtcRunner.Runtime` or provider behaviour;
+- no `PtcRunner.Lisp.RunEnv` implementation;
+- no `env: %RunEnv{}` path on `PtcRunner.Lisp.run/2`;
 - no `RunEnv.from_run/2` or `RunEnv.from_capabilities/2`;
 - no public `isolation: :none`;
 - no deprecation of legacy flat `Lisp.run/2` options;
@@ -29,7 +37,7 @@ Non-goals for this slice:
 
 ## Boundaries
 
-The architecture boundary is:
+The target architecture boundary, if/when `RunEnv` ships, is:
 
 ```text
 RunEnv
@@ -44,19 +52,20 @@ Upstream RunContext
 
 Three run nouns must stay distinct:
 
-- `PtcRunner.Lisp.RunEnv` is the input surface for one Lisp evaluation. It does
-  not own lifecycle.
+- `PtcRunner.Lisp.RunEnv` would be the input surface for one Lisp evaluation. It
+  would not own lifecycle. It is deferred in the near-term guard PR.
 - `PtcRunner.Upstream.RunContext` is the closeable upstream lifecycle boundary.
-  It owns counters, collectors, and borrowed closure validity.
+  It owns counters, collectors, and borrowed closure validity. This is the
+  near-term implementation target.
 - Future names such as `RunScope` or `PtcRunner.Runtime.*` are deferred and
   non-binding.
 
 ## Option Classification
 
 Rule: if an option changes what the program computes over or observes during
-evaluation, it belongs in `RunEnv`. If it changes resource policy, sandboxing,
-parallelism, instrumentation, or post-eval rendering, it remains a sibling
-option to `Lisp.run/2`.
+evaluation, it belongs in the eventual `RunEnv`. If it changes resource policy,
+sandboxing, parallelism, instrumentation, or post-eval rendering, it remains a
+sibling option to `Lisp.run/2`.
 
 | Option | V1 home | Reason |
 | --- | --- | --- |
@@ -111,7 +120,10 @@ eval.ex:13-19):
   `check_call_cap`, run_context.ex:39-53; fails `:cap_exhausted`) and `Keyword.drop`
   removes it before `Lisp.run` — so the Lisp sibling cap is unreachable there.
 
-## `PtcRunner.Lisp.RunEnv`
+## Deferred: `PtcRunner.Lisp.RunEnv`
+
+Do not implement this section in the closed-context-guard PR. Keep it as the
+reviewed target shape for a future control-plane-driven `RunEnv` cutover.
 
 V1 struct:
 
@@ -166,7 +178,7 @@ so the defstruct, `new/1` key validation, `to_flat_opts/1`, the forbidden-key li
 in `Lisp.run/2`, and the `run_lisp_with_records/3` take/drop split all consume a
 single source of truth and cannot drift.
 
-## `Lisp.run/2` API
+## Deferred: `Lisp.run/2` `env:` API
 
 Add support for:
 
@@ -188,8 +200,8 @@ Rules:
   `:max_tool_calls`, `:filter_context`, `:float_precision`, `:journal`,
   `:trace_context`, `:link`, `:caller`, `:profile`, and future `:isolation`.
 - With `env:` present, unknown top-level keys raise `ArgumentError`.
-- On the legacy flat path, keep current unknown-key tolerance for this slice.
-  Global strict-key checking is separate hardening.
+- On the legacy flat path, keep current unknown-key tolerance in the deferred
+  `RunEnv` refactor. Global strict-key checking is separate hardening.
 - `caller` and `profile` telemetry validation continue to run at entry.
   `signature_supplied?` MUST be derived from the **effective merged** signature
   *after* the env merge — on the env-path `:signature` lives in `env.signature`
@@ -219,21 +231,23 @@ Helper contracts:
 
 - `normalize_env_opts!/1` — no `:env` key ⇒ return `{nil, opts}` unchanged
   (legacy tolerance, including current unknown-key tolerance). `:env` present ⇒
-  pop `:env`; raise `ArgumentError` on any of the 11 forbidden eval-input keys and
-  on any unknown top-level key; return `{env, sibling_opts}`.
+  pop `:env`; require its value to be a `%PtcRunner.Lisp.RunEnv{}`; raise
+  `ArgumentError` on `env: nil`, plain maps, duplicate `:env` keys, any of the 11
+  forbidden eval-input keys, and any unknown top-level key; return
+  `{env, sibling_opts}`.
 - `merge_env_for_internal_run/2` — `(nil, opts)` returns `opts` verbatim (no
   default-`RunEnv` wrapping, no injected keys, so the legacy flat path is
   untouched). `(env, sibling_opts)` returns `to_flat_opts(env) ++ sibling_opts`;
   the two key-sets are disjoint by construction, so concat order is safe.
 
-No public `isolation: :none` ships in this slice. If `:isolation` is accepted at
-all, only `:sandbox` is valid.
+No public `isolation: :none` ships with the deferred `RunEnv` work. If
+`:isolation` is accepted at all while wiring `env:`, only `:sandbox` is valid.
 
-## Upstream Projection
+## Deferred: Upstream Projection
 
 `PtcRunner.Upstream.Eval` remains the canonical upstream projection module.
 Do not add `with_run_context/3` or `eval_options/1` to
-`PtcRunner.Upstream.Runtime` in this slice.
+`PtcRunner.Upstream.Runtime` in the deferred `RunEnv` work.
 
 Current projection seam:
 
@@ -242,7 +256,7 @@ PtcRunner.Upstream.Eval.with_run_context(runtime, context_opts, fn run_context -
   env =
     run_context
     |> PtcRunner.Upstream.Eval.eval_options()
-    |> Keyword.put_new(:runtime, runtime)
+    |> Keyword.put(:runtime, runtime)
     |> Keyword.merge(context: ctx, memory: memory)
     |> PtcRunner.Lisp.RunEnv.new()
 
@@ -262,10 +276,10 @@ new `RunEnv` projection can share the same upstream closures.
 Prelude-backed upstream runs must thread `runtime:` into `RunEnv`; otherwise
 attach-time `requires` validation silently degrades to compile-only validation.
 
-## `run_lisp/3` Disposition
+## Deferred: `run_lisp/3` Disposition
 
-Do not delete `PtcRunner.Upstream.Eval.run_lisp/3` in this slice. It has live
-production callers:
+If `RunEnv` ships later, do not delete `PtcRunner.Upstream.Eval.run_lisp/3` in
+that refactor. It has live production callers:
 
 | Caller | Target |
 | --- | --- |
@@ -290,7 +304,7 @@ def run_lisp_with_records(runtime, program, opts \\ []) do
       lisp_opts
       |> Keyword.take(RunEnv.keys())
       |> Keyword.merge(eval_options(context))
-      |> Keyword.put_new(:runtime, runtime)
+      |> Keyword.put(:runtime, runtime)
       |> RunEnv.new()
 
     policy_opts = Keyword.drop(lisp_opts, RunEnv.keys())
@@ -305,6 +319,12 @@ closures override any caller-supplied values, and the `"call"` closure stays
 reserved and non-displaceable by caller tools (mirrors eval.ex:66-68 and the
 `run_subagent/3` bridge-owned rule). Do not reorder this merge.
 
+`Keyword.put(:runtime, runtime)` is also deliberate, not `put_new`: the upstream
+path must validate prelude `requires` against the same runtime that owns the
+borrowed `tools`/`discovery_exec` closures. A caller-supplied `runtime:` option
+must not make prelude validation observe a different upstream surface than
+execution dispatches through.
+
 `policy_opts` MUST preserve today's flat-path unknown-key tolerance rather than
 inheriting the strict env-path raise. `PtcRunner.Session` forwards arbitrary user
 `run_opts` (session.ex:66,82,144-145), so routing them through the strict `env:`
@@ -314,7 +334,7 @@ path while the in-process path stays tolerant. Before attaching `env:`, narrow
 `policy_opts` with `Keyword.take(policy_opts, <sibling allow-list ∪ [:caller, :profile]>)`
 so unrecognized keys are dropped (as today), not raised.
 
-## Migration Table
+## Deferred: Migration Table
 
 | Surface | Current shape | Migration |
 | --- | --- | --- |
@@ -329,17 +349,27 @@ so unrecognized keys are dropped (as today), not raised.
 | Other SubAgent builders (`runner.ex`, `compiler.ex`, `tool_normalizer.ex`) | Independent flat opts | Audit together before any SubAgent `env:` migration to avoid reintroducing route divergence. |
 | `mcp_server` snapshot eval (`PtcRunnerMcp.Sessions.run_snapshot` → `Session.lisp_opts/3`, sessions.ex:296 / session.ex:779) | Independent flat opts builder | Stay as-is; out-of-scope-but-verify-still-compiling (the closed-context guard protects this path regardless, since it lives in the CallTool/Discovery closures). |
 
-## Borrowed Closure Lifetime
+## Near-Term: Borrowed Closure Lifetime
 
-`RunEnv` may contain borrowed closures produced from `PtcRunner.Upstream.RunContext`.
-Those closures must not dispatch after the run context closes.
+`PtcRunner.Upstream.RunContext` produces borrowed closures for upstream tool calls
+and discovery. Today those closures travel through flat `tools:` /
+`discovery_exec:` options; a future `RunEnv` would carry the same borrowed
+closures in typed fields. Borrowed closures that start after the close boundary
+must fail closed instead of dispatching upstream side effects.
+
+`RunEnv` is a by-value evaluation input, not a lifecycle owner. If a caller stores
+or reuses a `RunEnv`, it can keep borrowed closures, atomics references, and the
+upstream runtime handle alive until normal BEAM garbage collection. This is
+allowed but outside the intended one-evaluation use; the closed-context guard is
+the safety boundary for stale borrowed closures.
 
 Current code does not enforce this: `RunContext.close/1` stops the collector,
 but closures still capture live `:atomics` counters and the upstream runtime.
 `Collector.record/2` is a raw `send/2`, so stale use can dispatch a real
 upstream side effect and silently lose the audit record.
 
-V1 must make the fail-closed guarantee true:
+V1 must make the fail-closed guarantee true for calls that begin after the close
+boundary is crossed:
 
 1. Add a **per-context** `:closed` atomic to `%PtcRunner.Upstream.RunContext{}`:
    - 1a. Add `:closed` to the defstruct bare-atom field list
@@ -364,17 +394,37 @@ V1 must make the fail-closed guarantee true:
    `:atomics.put(ctx.closed, 1, 1)` (idempotent — NOT `add_get`, which is for the
    monotonic cap counters at run_context.ex:45,60). `close/1` must be safe to call
    twice.
-4. `PtcRunner.Upstream.CallTool.call/2` calls `ensure_open/1` as its **first
-   statement**, before `validate_args!` (which raises at call_tool.ex:173-175),
-   counter increments, schema checks, or dispatch — returning early **without
-   touching the cap counter**, so no spurious cap-audit record is emitted.
-5. `PtcRunner.Upstream.Discovery`'s closure calls `ensure_open/1` before
+4. `PtcRunner.Upstream.Eval.with_run_context/3` must preserve today's manual
+   drain-before-stop timing but should cross the close boundary before draining:
+   mark the context closed, drain records, then stop the collector. This prevents
+   any new borrowed closure call from starting during the drain window while
+   preserving already-recorded in-scope calls. Do not close by stopping the
+   collector first.
+5. `PtcRunner.Upstream.CallTool.call/2` calls `ensure_open/1` as its first
+   operation for **all argument shapes**, including non-map args. Do not place the
+   guard only in the current map-only function clause (call_tool.ex:21), or a
+   stale closure invoked with a non-map would still raise `ExecutionError` instead
+   of returning `:run_context_closed`. The check must happen before
+   `validate_args!` (which raises at call_tool.ex:173-175), counter increments,
+   schema checks, or dispatch — returning early **without touching the cap
+   counter**, so no spurious cap-audit record is emitted.
+6. `PtcRunner.Upstream.Discovery`'s closure calls `ensure_open/1` before
    `check_catalog_cap` or dispatch, returning early on closed.
-6. Closed tool calls MUST return
+7. Closed tool calls MUST return
    `Result.error(:run_context_closed, "run_context_closed")` (distinct from
    `:cap_exhausted`).
-7. Closed discovery calls MUST return `{:world_fault, :run_context_closed}`
+8. Closed discovery calls MUST return `{:world_fault, :run_context_closed}`
    (distinct from `:catalog_cap_exhausted`).
+
+Add `:run_context_closed` to `PtcRunner.Upstream.Result.reason/0`; otherwise the
+new `Result.error/2` shape is runtime-valid but out of sync with the public type
+and Dialyzer specs.
+
+This atomic check is a start-boundary guard, not a transaction around dispatch.
+It does not cancel an upstream call that already passed `ensure_open/1` before
+another process closes the context. If a future requirement needs "no dispatch may
+race with close" rather than "no call may start after close", add an active-call
+lease/refcount protocol around dispatch before claiming that stronger guarantee.
 
 Use the atomic flag, not `Process.alive?(collector.pid)`: it is the intentional
 authority signal, decoupled from collector liveness. `Collector.record/2` is a
@@ -417,11 +467,24 @@ iex> step.return
 2450.0
 ```
 
-Acceptance tests for this slice:
+Acceptance tests for the near-term closed-context guard:
+
+- Stale upstream tool closures fail with `:run_context_closed` before dispatch.
+- Stale upstream tool closures fail with `:run_context_closed` even when invoked
+  with non-map args.
+- Stale upstream discovery closures fail with `{:world_fault, :run_context_closed}`.
+- `:run_context_closed` is included in `PtcRunner.Upstream.Result.reason/0`.
+- `RunContext.close/1` is safe to call twice; `ensure_open/1` still reports closed.
+- Existing `PtcRunner.Upstream.Eval.run_lisp_with_records/3` tests continue to
+  see records for successful in-scope calls.
+
+Deferred acceptance tests if/when `RunEnv` ships:
 
 - `RunEnv.new/1` accepts valid eval-input keys and raises on unknown keys.
 - `Lisp.run(source, env: env)` produces the same result as the equivalent flat
   opts for a plain tool/context/memory case.
+- `Lisp.run(source, env: nil)`, `env: %{}`, and duplicate `env:` keys raise
+  `ArgumentError` before evaluation.
 - `Lisp.run(source, env: env, context: %{})` raises because `context:` is a
   duplicate eval-input channel.
 - `Lisp.run(source, env: env, foobar: 1)` raises `ArgumentError` (unknown
@@ -438,23 +501,23 @@ Acceptance tests for this slice:
   `signature_supplied?: true` on `:start` and `:stop`; `false` when
   `env.signature` is `nil`.
 - Upstream `run_lisp/3` still validates prelude `requires` through `runtime:`.
+- Upstream `run_lisp_with_records/3` ignores caller-supplied `runtime:` for
+  projection; prelude `requires` validation uses the bridge runtime that owns the
+  borrowed upstream closures.
 - **Reserved `"call"` precedence:** `run_lisp_with_records(runtime, prog, tools:
   %{"call" => fake})` still dispatches through the upstream `"call"` closure (the
   caller tool does not displace it).
 - **Session tolerance preserved:** `PtcRunner.Session.new(foo: 1)` evaluates on
   the upstream path without `ArgumentError`, matching the in-process path.
-- Stale upstream tool closures fail with `:run_context_closed` before dispatch.
-- Stale upstream discovery closures fail with `{:world_fault, :run_context_closed}`.
-- `RunContext.close/1` is safe to call twice; `ensure_open/1` still reports closed.
-- Existing `PtcRunner.Upstream.Eval.run_lisp_with_records/3` tests continue to
-  see records for successful in-scope calls.
 
-Do **not** add an `isolation: :none`-rejection test — isolation is deferred for
-this slice (see Non-goals and §Isolation).
+Do **not** add an `isolation: :none`-rejection test in the closed-context guard
+PR. Isolation remains deferred with the `RunEnv` API work (see Non-goals and
+§Isolation).
 
 ## Appendix: Future Runtime Direction
 
-Do not implement this appendix in the `RunEnv` slice.
+Do not implement this appendix in the closed-context guard PR or the deferred
+`RunEnv` refactor.
 
 A future neutral host integration layer may be useful after another
 lifecycle-bearing provider exists. Prefer a non-conflicting name such as
