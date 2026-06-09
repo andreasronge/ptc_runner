@@ -4,7 +4,7 @@ defmodule PtcRunnerMcp.Agentic do
   alias PtcRunner.Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop.StepAssembler
-  alias PtcRunner.Upstream.{Eval, Result, Runtime}
+  alias PtcRunner.Upstream.{Effect, Eval, Result, Runtime}
 
   alias PtcRunnerMcp.{
     AgenticConfig,
@@ -242,54 +242,20 @@ defmodule PtcRunnerMcp.Agentic do
 
   defp ledger_call_args(_args), do: :error
 
+  # Pre-dispatch side-effect classification. Defers to the canonical
+  # `PtcRunner.Upstream.Effect` classifier so MCP's continuation-guard policy
+  # stays in lockstep with core (conflicting read+destructive hints fail closed
+  # as `:unknown`, OpenAPI method drives read/write). Fail closed if the runtime
+  # call raises.
   defp upstream_tool_effect(server, tool) do
     if RootUpstreamRuntime.configured?() do
-      RootUpstreamRuntime.runtime()
-      |> Runtime.catalog_snapshot()
-      |> find_tool_annotations(server, tool)
-      |> annotations_effect()
+      Effect.classify(RootUpstreamRuntime.runtime(), server, tool)
     else
       :unknown
     end
   rescue
     _ -> :unknown
   end
-
-  defp find_tool_annotations(snapshot, server, tool) when is_list(snapshot) do
-    snapshot
-    |> Enum.find(&(Map.get(&1, "name") == server))
-    |> case do
-      %{"tools" => tools} when is_list(tools) ->
-        tools
-        |> Enum.find(&(Map.get(&1, "name") == tool))
-        |> case do
-          %{"annotations" => annotations} -> annotations
-          _ -> nil
-        end
-
-      _ ->
-        nil
-    end
-  end
-
-  defp annotations_effect(%{} = annotations) do
-    cond do
-      annotation_true?(annotations, "readOnlyHint") -> :read
-      annotation_true?(annotations, "destructiveHint") -> :write
-      true -> :unknown
-    end
-  end
-
-  defp annotations_effect(_annotations), do: :unknown
-
-  defp annotation_true?(annotations, "readOnlyHint"),
-    do:
-      Map.get(annotations, "readOnlyHint") == true or Map.get(annotations, :readOnlyHint) == true
-
-  defp annotation_true?(annotations, "destructiveHint"),
-    do:
-      Map.get(annotations, "destructiveHint") == true or
-        Map.get(annotations, :destructiveHint) == true
 
   defp complete_ledger_attempt(_ledger, :none, _result), do: :ok
 

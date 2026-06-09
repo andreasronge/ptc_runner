@@ -9,6 +9,44 @@ defmodule PtcRunnerMcp.AgenticContractTest do
 
   @schema Path.expand("../fixtures/openapi/observatory.openapi.json", __DIR__)
 
+  # Minimal runtime stub registered under the root-runtime name. It answers
+  # both classifier sources so the regression test fails on the old MCP-local
+  # classifier (which read `:catalog_snapshot`) and passes on the canonical
+  # `PtcRunner.Upstream.Effect.classify/3` (which reads `Runtime.upstream/2`).
+  defmodule ConflictingHintRuntime do
+    @moduledoc false
+    use GenServer
+
+    @server "github"
+    @tool "create_issue"
+    @annotations %{"readOnlyHint" => true, "destructiveHint" => true}
+
+    def start_link(_opts),
+      do: GenServer.start_link(__MODULE__, %{}, name: PtcRunnerMcp.RootUpstreamRuntime.name())
+
+    @impl GenServer
+    def init(state), do: {:ok, state}
+
+    # Canonical path: `Effect.classify/3` -> `Runtime.upstream/2`.
+    @impl GenServer
+    def handle_call({:upstream, @server}, _from, state),
+      do: {:reply, %{tools: [%{"name" => @tool, "annotations" => @annotations}]}, state}
+
+    def handle_call({:upstream, _name}, _from, state), do: {:reply, nil, state}
+
+    # Old path: MCP-local classifier walked `:catalog_snapshot`.
+    def handle_call(:catalog_snapshot, _from, state) do
+      snapshot = [
+        %{"name" => @server, "tools" => [%{"name" => @tool, "annotations" => @annotations}]}
+      ]
+
+      {:reply, snapshot, state}
+    end
+
+    # Success-path overview scrubs through the runtime; nothing secret here.
+    def handle_call({:scrub, term}, _from, state), do: {:reply, term, state}
+  end
+
   test "agentic config carries Phase 0 SubAgent-backed defaults" do
     defaults = AgenticConfig.defaults()
 
@@ -210,6 +248,32 @@ defmodule PtcRunnerMcp.AgenticContractTest do
     [result] = Projection.upstream_results(Ledger.entries(ledger))
     assert result["preview"] =~ "[REDACTED]"
     refute result["preview"] =~ "SECRET"
+  end
+
+  test "ledger classifies conflicting read+destructive hints as unknown side effect" do
+    # A tool annotated `readOnlyHint: true` AND `destructiveHint: true` is
+    # ambiguous and must fail closed. The canonical `PtcRunner.Upstream.Effect`
+    # classifier returns `:unknown` for this; the deleted MCP-local classifier
+    # checked `readOnlyHint` first and wrongly returned `:read`, which let an
+    # interrupted destructive call slip past the continuation guard.
+    Runtime.stop(RootUpstreamRuntime.name())
+    start_supervised!(ConflictingHintRuntime)
+    on_exit(fn -> Runtime.stop(RootUpstreamRuntime.name()) end)
+
+    {:ok, ledger} = Ledger.start_link()
+
+    tools =
+      Agentic.root_tools_with_ledger(
+        %{"call" => fn _args -> Result.success(%{"ok" => true}) end},
+        ledger
+      )
+
+    tools["call"].(%{server: "github", tool: "create_issue", args: %{"title" => "x"}})
+
+    assert [%{server: "github", tool: "create_issue", effect: :unknown}] = Ledger.entries(ledger)
+    assert Ledger.side_effecting_attempted?(ledger)
+
+    assert [%{"effect" => "unknown"}] = Projection.ledger_entries(Ledger.entries(ledger))
   end
 
   defp redacting_config do
