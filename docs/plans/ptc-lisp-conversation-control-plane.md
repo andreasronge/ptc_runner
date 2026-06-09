@@ -60,6 +60,13 @@ provider policy, model registries, MCP ownership, or persistence rules.
 
 ## Capability Boundary
 
+See also
+[`capability-kernel-runtime.md`](capability-kernel-runtime.md), which separates
+`RunEnv` as the Lisp evaluation surface, isolation policy, and future runtime
+lifecycle/authority. This control-plane document is downstream of that work:
+do not implement these Lisp-facing APIs until the `RunEnv` boundary and
+borrowed-capability authority model are boring and explicit.
+
 A useful primitive layer could be a host capability interface threaded through
 `PtcRunner.Lisp.run/2`, similar in spirit to the existing tool executor and
 discovery executor:
@@ -85,6 +92,13 @@ and trace policy.
 
 High-level Clojure-facing namespaces can then be prelude wrappers over this
 lower-level host interface.
+
+This primitive layer should not make a single provider, such as upstream tools,
+responsible for running Lisp. Today the concrete cleanup is smaller:
+provider-owned state is projected into `PtcRunner.Lisp.RunEnv`, and
+`PtcRunner.Lisp` evaluates against that prepared environment. A shared runtime
+kernel may generalize that only after more lifecycle-bearing providers justify
+it.
 
 ## Relationship to Capability Profiles
 
@@ -135,6 +149,13 @@ inspect safe descriptors and call allowed aliases:
 ;;  :secret-visible? false
 ;;  :effects [:llm-call]}
 ```
+
+This should preserve the existing Elixir-side LLM callback primitive. A model
+alias may ultimately point to a direct function callback, a
+`PtcRunner.LLM.callback/2` adapter wrapper, or a stateful provider-backed
+client. Any future capability runtime would compose aliases, grants, budgets,
+tracing, and descriptors around those callbacks; it should not replace the
+simple callback API that makes SubAgent tests and custom providers easy.
 
 ## Possible Lisp Surface
 

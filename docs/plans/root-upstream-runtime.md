@@ -4,8 +4,18 @@ High-level architecture for moving transport-neutral upstream tools into the
 root `ptc_runner` library while keeping `mcp_server` as a thin MCP
 presentation/runtime wrapper.
 
-Status: direction approved, implementation blocked until the runtime contracts
-below are explicit. The blocking contracts are:
+Status: extraction direction approved; much of the upstream subsystem now lives
+in root. Treat this document as an upstream-provider extraction record and
+remaining-contracts note. The active architecture source is
+[`capability-kernel-runtime.md`](capability-kernel-runtime.md), whose current
+path is `PtcRunner.Lisp.RunEnv` first, upstream projection next, and a generic
+runtime later.
+
+The older provider-owned Lisp convenience shape in this document should be read
+as superseded. Upstream should project `PtcRunner.Upstream.RunContext` into a
+`PtcRunner.Lisp.RunEnv`; `PtcRunner.Lisp` remains the owner of evaluation.
+
+The blocking contracts are:
 
 - runtime handle lifecycle;
 - per-run budget/context ownership and teardown;
@@ -46,8 +56,10 @@ The target split is:
 ## Goals
 
 - Make OpenAPI and MCP upstreams available from root `mix ptc.repl`.
-- Let library callers pass an upstream runtime into `PtcRunner.Lisp.run/2` or
-  higher-level subagent loops.
+- Let library callers attach upstream capabilities to `PtcRunner.Lisp.run/2`,
+  root REPL evaluations, MCP evaluations, and higher-level SubAgent loops
+  through a closeable upstream run context projected into a Lisp run
+  environment.
 - Keep the public PTC-Lisp upstream surface transport-neutral:
   `(tool/call ...)`, `(tool/servers)`, `dir`, `doc`, `meta`, and `apropos`.
 - Preserve the already-root-side PTC-Lisp authoring model and remove only dead
@@ -88,10 +100,9 @@ Candidate root modules:
 - `PtcRunner.Upstream.Runtime` starts/stops a configured upstream runtime and
   exposes a handle for long-lived upstream services.
 - `PtcRunner.Upstream.RunContext` creates and tears down per-evaluation
-  call/discovery budgets, failure caches, collectors, and tool closures for a
-  single `Lisp.run/2`.
-- `PtcRunner.Upstream.Collector` owns each run's ETS failure cache and call
-  record mailbox.
+  call/discovery budgets, collectors, and tool closures for a single
+  `Lisp.run/2`.
+- `PtcRunner.Upstream.Collector` owns each run's call-record buffer.
 - `PtcRunner.Upstream.Result` is the transport-neutral result contract returned
   by upstream transports.
 - `PtcRunner.Upstream.Registry` stores configured upstreams and cached catalog
@@ -118,8 +129,9 @@ Candidate root modules:
 
 ## Runtime Shape
 
-Root callers should use OTP-backed runtime handles. There are two ownership
-styles, but both use the same OTP runtime implementation:
+Root upstream callers should use OTP-backed provider/runtime handles when
+upstream transports need lifecycle. There are two ownership styles, but both use
+the same OTP implementation:
 
 - caller-managed start/stop for REPLs, scripts, tests, and embedded callers;
 - app-supervised children for `mcp_server` and future long-running
@@ -140,34 +152,37 @@ For REPLs, scripts, tests, and embedded callers:
     catalog_snapshot_mode: :live
   )
 
-{:ok, step} =
-  PtcRunner.Upstream.Runtime.run_lisp(runtime, program,
-    memory: memory,
-    turn_history: history,
-    max_tool_calls: 50,
-    max_catalog_ops: 25
+PtcRunner.Upstream.Eval.with_run_context(runtime,
+  max_tool_calls: 50,
+  max_catalog_ops: 25
+}, fn run_context ->
+  upstream_opts = PtcRunner.Upstream.Eval.eval_options(run_context)
+
+  PtcRunner.Lisp.run(program,
+    Keyword.merge(upstream_opts,
+      memory: memory,
+      turn_history: history
+    )
   )
+end)
 ```
 
 The runtime owns long-lived state: normalized config, credentials, upstream
 clients/connections, registry, cached metadata, and default limits. It should be
 stoppable with `PtcRunner.Upstream.Runtime.stop/1`.
 
-`run_lisp/3` and `with_run_context/3` must mint fresh per-program state for
-each evaluation:
+`with_run_context/3` must mint fresh per-program state for each evaluation:
 
 - call counters;
 - discovery counters;
 - a short-lived collector process;
-- per-run failure caches;
 - `(tool/call ...)` closures;
 - `discovery_exec` closures.
 
-`run_lisp/3` forwards normal `PtcRunner.Lisp.run/2` options such as `memory:`,
-`turn_history:`, and validation options while adding upstream eval options. It
-is safe for one-shot callers and for stateful callers such as REPLs/subagent
-loops that already own their memory and turn history outside the upstream
-runtime.
+The near-term cleanup should attach upstream by projecting this run context into
+`PtcRunner.Lisp.RunEnv`. A future neutral `PtcRunner.Runtime.with_run/3` can
+generalize that shape after another lifecycle-bearing provider needs it. Lisp
+evaluation remains owned by `PtcRunner.Lisp`, not by `PtcRunner.Upstream`.
 
 Do not expose a reusable `Runtime.tools(runtime)` API for evaluation. Reusing
 the same tool closure map across evaluations risks sharing live counters between
@@ -390,25 +405,27 @@ independent `Lisp.run/2` calls do not.
 Each run context must own a short-lived collector process. The collector process
 owns:
 
-- the ETS failure cache and leader/follower ensure-start lock table;
-- the mailbox that receives sanitized upstream call records;
+- the in-process list of sanitized upstream call records;
 - the call record drain operation.
 
 Closures running in the main evaluator or in `pmap` children send records to
 the collector process, not to the caller's long-lived process. Closing the run
-context stops the collector, which deletes the ETS table by owner death and
+context stops the collector, which discards any undrained record buffer and
 prevents `{:upstream_call_recorded, ...}` messages from accumulating in REPL or
 subagent mailboxes.
 
 Public APIs must make teardown hard to forget:
 
-- `Runtime.run_lisp/3` wraps `Lisp.run/2`, forwards ordinary `Lisp.run/2`
-  options, drains records for diagnostics, and closes the context internally.
-- `Runtime.with_run_context/3` creates a context, yields it to the supplied
+- `PtcRunner.Upstream.Eval.with_run_context/3` creates a context, yields it to the supplied
   function, drains records after the function returns, closes in `after`, and
   returns `{fun_result, records}`.
-- Lower-level `Runtime.run_context/2` is available for MCP server code that
-  needs manual drain timing, but callers must close it in `after`.
+- Lower-level `PtcRunner.Upstream.Eval.run_context/2` is available for MCP
+  server code that needs manual drain timing, but callers must close it in
+  `after`.
+
+If a Lisp-specific helper is kept, it should be a thin convenience over
+`PtcRunner.Lisp.RunEnv` construction and internally use the same closeable
+run-context contract.
 
 Drain completeness depends on BEAM message ordering and synchronous evaluator
 joins, not on the collector being `self()`. Local `send/2` enqueues the record
@@ -417,9 +434,10 @@ closures, including `pmap` children, before returning. A drain performed after
 the run must therefore see every record emitted by completed call closures,
 whether the collector is the caller process or a separate collector process.
 
-Cancellation or evaluator crashes should still reclaim the failure cache by
-collector death. If a collector is linked to the evaluator worker, document the
-linking strategy so MCP cancellation keeps the current cleanup guarantee.
+Cancellation or evaluator crashes should still stop the collector and discard
+undrained call records. If a collector is linked to the evaluator worker,
+document the linking strategy so MCP cancellation keeps the current cleanup
+guarantee.
 
 ### Result Contract
 
@@ -509,15 +527,12 @@ Introduce these root entry points first so later phases have a stable target:
   runtime.
 - `PtcRunner.Upstream.Runtime.stop/1` stops caller-managed runtimes
   idempotently.
-- `PtcRunner.Upstream.Runtime.run_context/2` creates one fresh
+- `PtcRunner.Upstream.Eval.run_context/2` creates one fresh
   `%PtcRunner.Upstream.RunContext{}` for one `Lisp.run/2`.
-- `PtcRunner.Upstream.Runtime.with_run_context/3` creates a context, yields it,
+- `PtcRunner.Upstream.Eval.with_run_context/3` creates a context, yields it,
   drains call records after the callback returns, closes in `after`, and
   returns `{fun_result, records}`.
-- `PtcRunner.Upstream.Runtime.run_lisp/3` is the safe convenience API for
-  callers that do not need manual call-record drain timing; it forwards normal
-  `Lisp.run/2` options such as `memory:` and `turn_history:`.
-- `PtcRunner.Upstream.RunContext.eval_options/1` returns the `tools:` and
+- `PtcRunner.Upstream.Eval.eval_options/1` returns the `tools:` and
   `discovery_exec:` options to merge into `PtcRunner.Lisp.run/2`.
 - `PtcRunner.Upstream.RunContext.drain_calls/1` returns call records after a
   run for MCP envelope rendering, tests, traces, and future diagnostics.
@@ -530,9 +545,9 @@ Introduce these root entry points first so later phases have a stable target:
   configured upstream names, selected catalog exposure mode, selected catalog
   snapshot mode, loaded catalog status, transport names, and limit values.
 
-The important API shape is `with_run_context/3` plus `eval_options/1`; this
-keeps the per-run collector drainable by the MCP server while making teardown
-automatic for REPLs and embedded callers.
+The important upstream-provider API shape is `with_run_context/3` plus a Lisp
+projection; this keeps the per-run collector drainable by the MCP server and by
+future runtime projections.
 
 ### Module Extraction Map
 
@@ -541,7 +556,7 @@ Use the existing MCP modules as the implementation source where possible:
 | Current module | Root destination | Notes |
 | --- | --- | --- |
 | `PtcRunnerMcp.Upstream` | `PtcRunner.Upstream.Transport` | Rename the behaviour so it is not MCP-server-specific. Keep client MCP transports explicit. |
-| `PtcRunnerMcp.UpstreamCalls` | `PtcRunner.Upstream.RunContext`, `Collector`, and `CallRecords` | Keep atomics counters, ETS failure cache, ensure leader/follower lock, and call record shapes, but move ETS/mailbox ownership into a short-lived collector process. |
+| `PtcRunnerMcp.UpstreamCalls` | `PtcRunner.Upstream.RunContext`, `Collector`, and call-record helpers | Keep atomics counters and call record shapes, but move call-record ownership into a short-lived collector process. |
 | `PtcRunnerMcp.McpResult` | `PtcRunner.Upstream.Result` | Rename and remove MCP envelope naming. Transports normalize into this root result contract. |
 | `PtcRunnerMcp.RawEnvelopePolicy` | MCP transport config plus diagnostics | Keep raw MCP envelope retention transport-specific; do not make neutral `CallTool` depend on it. |
 | `PtcRunnerMcp.AggregatorTools` | `PtcRunner.Upstream.CallTool` | Preserve the existing `tool/call` Lisp surface and programmer-fault versus world-fault split. Move MCP envelope unwrapping into MCP client transports. |
@@ -624,19 +639,19 @@ except when live discovery explicitly needs to fill a missing cache.
 }
 ```
 
-`RunContext.new(runtime, opts)` should start a collector process, create the ETS
-failure cache under that collector, and merge runtime defaults with per-run
-overrides such as `max_tool_calls`, `max_catalog_ops`, `call_timeout_ms`,
-`max_response_bytes`, and `max_catalog_result_bytes`.
+`RunContext.new(runtime, opts)` should start a collector process, allocate
+per-run atomics, and merge runtime defaults with per-run overrides such as
+`max_tool_calls`, `max_catalog_ops`, `call_timeout_ms`, `max_response_bytes`,
+and `max_catalog_result_bytes`.
 
 The generated closures must capture the run context. They must not read live
 budget counters from runtime state, application env, the process dictionary, or
 global ETS. Parallel `pmap` children inside one Lisp program must share the
-same atomics and failure cache; separate `Lisp.run/2` invocations must never do
-so.
+same atomics; separate `Lisp.run/2` invocations must never do so.
 
-All normal caller paths should use `Runtime.with_run_context/3` or
-`Runtime.run_lisp/3`. Manual users of `run_context/2` must close the context in
+All normal caller paths should use `with_run_context/3`. A future
+`PtcRunner.Runtime.with_run/3` projection may delegate to it once a neutral
+runtime exists. Manual users of `run_context/2` must close the context in
 `after`.
 
 ### Tool Call Execution
@@ -810,12 +825,11 @@ The following details remain implementation choices, not contract blockers:
 
 - Root unit tests for upstream config parsing, credentials, redaction, OpenAPI
   compilation, and OpenAPI execution against local fixtures.
-- Root unit tests proving `Runtime.with_run_context/3` and `run_lisp/3` create
-  fresh per-run counters while preserving shared counters across parallel calls
-  inside one program.
-- Collector lifecycle tests proving per-run ETS tables are reclaimed and caller
-  mailboxes do not retain upstream call records across repeated REPL/subagent
-  evaluations.
+- Root unit tests proving `PtcRunner.Upstream.Eval.with_run_context/3` creates fresh per-run
+  counters while preserving shared counters across parallel calls inside one
+  program.
+- Collector lifecycle tests proving collectors stop cleanly and caller mailboxes
+  do not retain upstream call records across repeated REPL/subagent evaluations.
 - Drain-completeness tests proving a program that performs N `(tool/call ...)`
   invocations inside `pmap` returns all N records from
   `RunContext.drain_calls/1` with the separate collector process.
@@ -851,10 +865,10 @@ The following details remain implementation choices, not contract blockers:
   compatibility alias that is translated into root runtime options at server
   boot. Root modules should not read or document the MCP alias.
 - Expose a small public embedding API, but mark it experimental during 0.x.
-  The intended public surface is `start_link/1`, `stop/1`, `run_lisp/3`,
-  `with_run_context/3`, and catalog/diagnostics readers. Lower-level registry,
-  transport, config, and runtime structs should not be documented as stable
-  until the root REPL and MCP server have both exercised the boundary.
+  The intended upstream-provider surface is `start_link/1`, `stop/1`,
+  `with_run_context/3`, and catalog/diagnostics readers. A Lisp evaluation
+  convenience should be a thin `RunEnv` projection, not provider-owned
+  evaluation on `PtcRunner.Upstream.Runtime`.
 - Keep MCP upstream client transports in root for this migration. They are
   client transports for external tool servers, not MCP server transports, and
   root needs them to keep `(tool/call ...)` transport-neutral across OpenAPI and
