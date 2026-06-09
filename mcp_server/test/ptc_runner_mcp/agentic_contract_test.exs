@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.AgenticContractTest do
   use ExUnit.Case, async: false
 
-  alias PtcRunner.Upstream.Runtime
+  alias PtcRunner.Upstream.{Result, Runtime}
   alias PtcRunnerMcp.Agentic
   alias PtcRunnerMcp.Agentic.{Ledger, Projection}
   alias PtcRunnerMcp.AgenticConfig
@@ -73,6 +73,21 @@ defmodule PtcRunnerMcp.AgenticContractTest do
   end
 
   test "root agentic tool wrapper records unknown side-effect attempt before dispatch" do
+    # The success-overview path scrubs through the configured root runtime, so
+    # the wrapper must run under one (as it always does in production). A
+    # secret-free runtime leaves the value untouched, so the overview is
+    # identical to the unscrubbed shape.
+    Runtime.stop(RootUpstreamRuntime.name())
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: %{},
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    on_exit(fn -> Runtime.stop(RootUpstreamRuntime.name()) end)
+
     {:ok, ledger} = Ledger.start_link()
     parent = self()
 
@@ -160,6 +175,45 @@ defmodule PtcRunnerMcp.AgenticContractTest do
                effect: :read
              }
            ] = Ledger.entries(ledger)
+  end
+
+  test "success overview redacts upstream credentials via runtime scrub" do
+    Runtime.stop(RootUpstreamRuntime.name())
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: redacting_config(),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    on_exit(fn -> Runtime.stop(RootUpstreamRuntime.name()) end)
+
+    {:ok, ledger} = Ledger.start_link()
+
+    tools =
+      Agentic.root_tools_with_ledger(
+        %{"call" => fn _args -> Result.success(%{"token" => "SECRET"}) end},
+        ledger
+      )
+
+    tools["call"].(%{server: "vault", tool: "read_secret", args: %{"path" => "db"}})
+
+    [entry] = Ledger.entries(ledger)
+    preview = entry.result_overview["preview"]
+
+    assert preview =~ "[REDACTED]"
+    refute preview =~ "SECRET"
+
+    # `upstream_results[]` is the wire-facing surface; it must inherit the
+    # same scrubbed overview, not the raw value.
+    [result] = Projection.upstream_results(Ledger.entries(ledger))
+    assert result["preview"] =~ "[REDACTED]"
+    refute result["preview"] =~ "SECRET"
+  end
+
+  defp redacting_config do
+    %{"credentials" => %{"token" => %{"source" => "literal", "value" => "SECRET"}}}
   end
 
   defp root_config do

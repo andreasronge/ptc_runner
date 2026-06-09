@@ -298,7 +298,7 @@ defmodule PtcRunnerMcp.Agentic do
     value_kind = Map.get(result, :value_kind, Result.value_kind(value))
 
     Ledger.complete_success(ledger, id,
-      result_overview: Result.result_overview(value, value_kind),
+      result_overview: scrubbed_overview(value, value_kind),
       result_bytes: safe_external_size(value),
       effect: :unknown
     )
@@ -324,6 +324,29 @@ defmodule PtcRunnerMcp.Agentic do
     Ledger.complete_error(ledger, id, "runtime_error", Exception.message(exception),
       effect: :unknown
     )
+  end
+
+  # Build the diagnostic `result_overview` from the *scrubbed* value so the
+  # `upstream_results[]` preview cannot leak upstream credentials. Mirrors
+  # `PtcRunner.Upstream.CallTool`, which scrubs the value before
+  # `result_overview/2`; `value_kind` and `result_bytes` stay derived from the
+  # raw value, matching core's raw size/kind accounting.
+  #
+  # Fail closed: the wrapper only runs under a configured root runtime in
+  # production, so the unconfigured branch should be unreachable. If it is hit
+  # (or the scrub call raises/exits), omit `result_overview` entirely — a
+  # missing preview beats a raw one. A nil runtime is a `GenServer.call/2`
+  # *exit*, not a rescuable error, so both clauses are needed.
+  defp scrubbed_overview(value, value_kind) do
+    if RootUpstreamRuntime.configured?() do
+      RootUpstreamRuntime.runtime()
+      |> Runtime.scrub(value)
+      |> Result.result_overview(value_kind)
+    end
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
   end
 
   defp safe_external_size(value) do
