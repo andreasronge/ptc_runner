@@ -1,8 +1,8 @@
 # Root Upstream Runtime
 
-High-level architecture for moving transport-neutral upstream tools into the
-root `ptc_runner` library while keeping `mcp_server` as a thin MCP
-presentation/runtime wrapper.
+High-level architecture for moving transport-neutral upstream tool machinery
+into the root `ptc_runner` library while keeping `mcp_server` as the MCP
+deployment and presentation wrapper.
 
 Status: extraction direction approved; much of the upstream subsystem now lives
 in root. Treat this document as an upstream-provider extraction record and
@@ -16,6 +16,16 @@ as superseded. `PtcRunner.Lisp` remains the owner of evaluation; upstream should
 stay a thin projection/bridge over `PtcRunner.Upstream.RunContext`, with a future
 `RunEnv` projection only if the control-plane work makes that boundary worth
 shipping.
+
+Use the two-layer ownership sentence consistently:
+
+- root `ptc_runner` owns the upstream runtime machinery: config parsing,
+  transports, OpenAPI execution, catalog/discovery, credential attachment,
+  redaction helpers, result normalization, caps, and `RunContext` lifecycle;
+- `mcp_server` owns MCP deployment selection and presentation: whether and
+  which root runtime a server process starts, its CLI/env aliases, its
+  deployment secret materialization and redaction ETS, MCP envelopes/prompts,
+  sessions, debug/trace UX, and release packaging.
 
 The blocking contracts are:
 
@@ -33,7 +43,7 @@ in-process `PtcRunner.Lisp.run/2`, subagents, and future non-MCP runtimes should
 be able to call curated external tools such as OpenAPI endpoints without going
 through an MCP server process.
 
-Today, most upstream machinery lives under `mcp_server`:
+Originally, most upstream machinery lived under `mcp_server`:
 
 - upstream JSON config parsing;
 - credentials and redaction;
@@ -45,15 +55,15 @@ Today, most upstream machinery lives under `mcp_server`:
 That makes `mcp_server` heavier than it needs to be and makes OpenAPI tools feel
 MCP-specific even though the concept is transport-neutral.
 
-The target split is:
+Much of that extraction has now landed. The target split remains:
 
-- `ptc_runner` owns PTC-Lisp, tool execution, upstream config, upstream
-  transports, discovery, catalog metadata, credentials, limits, and reusable
-  runtime services.
-- `mcp_server` owns only the MCP presentation/runtime surface needed to expose
+- `ptc_runner` owns PTC-Lisp, tool execution, root-owned upstream config,
+  upstream transports, discovery, catalog metadata, credential attachment,
+  limits, and reusable runtime services.
+- `mcp_server` owns the MCP deployment and presentation surface needed to expose
   `ptc_runner` over MCP: stdio/HTTP JSON-RPC, MCP envelopes, MCP tool
   advertisements, MCP sessions, MCP debug/trace presentation, release packaging,
-  and server boot configuration.
+  server boot configuration, and server-local secret/redaction infrastructure.
 
 ## Goals
 
@@ -69,8 +79,9 @@ The target split is:
 - Preserve existing sandbox safety: auth material is never visible to PTC-Lisp,
   upstream calls are capped, catalog/discovery has separate caps, and all
   external failures return recoverable tagged values where possible.
-- Keep `mcp_server` thin by delegating upstream runtime setup and execution to
-  root modules.
+- Keep `mcp_server` thin by delegating upstream runtime machinery and execution
+  to root modules while retaining server-owned deployment selection and
+  presentation policy.
 - Avoid circular dependencies: root `ptc_runner` must not depend on
   `ptc_runner_mcp`.
 - Keep long-lived upstream runtime state separate from per-program evaluation
@@ -119,7 +130,8 @@ Candidate root modules:
   `PtcRunner.Upstream.Transport.McpHttp` own MCP upstream client transports.
   These are MCP clients, not the MCP server.
 
-`mcp_server` should keep modules that are specifically about serving MCP:
+`mcp_server` should keep modules that are specifically about serving MCP and
+about selecting/presenting a root runtime for one server deployment:
 
 - JSON-RPC framing and protocol negotiation.
 - Stdio and Streamable HTTP MCP server transports.
@@ -127,6 +139,11 @@ Candidate root modules:
 - MCP response envelopes and response profiles.
 - Stateful MCP session tools and owner/session lifecycle.
 - MCP debug tool, trace files, and operator-facing diagnostics.
+- `PtcRunnerMcp.RootUpstreamRuntime`, the server's singleton handle to the
+  root upstream runtime selected for this deployment.
+- `PtcRunnerMcp.Credentials`, the GenServer and ETS redaction set that
+  materialize deployment secrets and scrub MCP-side prompts, traces, logs,
+  debug records, and session state.
 - Release, Docker, and server CLI packaging.
 
 ## Runtime Shape
@@ -208,9 +225,9 @@ children = [
 ]
 ```
 
-`mcp_server` should read CLI/env values, build root upstream runtime options,
-start the root runtime as a child, and pass the runtime handle to MCP tool and
-session handlers.
+`mcp_server` should read CLI/env values, decide whether this deployment exposes
+upstreams, build root upstream runtime options, start the root runtime as a
+child, and pass the runtime handle to MCP tool and session handlers.
 
 Each MCP `tools/call` or session evaluation must create a fresh
 `PtcRunner.Upstream.RunContext` while reusing the same long-lived runtime
@@ -251,7 +268,10 @@ CLI/env surface, but should translate it into root runtime options internally.
 
 ## MCP Server Integration
 
-After extraction, `mcp_server` should stop owning upstream internals.
+After extraction, `mcp_server` should stop owning upstream internals. It still
+owns deployment selection and MCP presentation. In particular,
+`PtcRunnerMcp.RootUpstreamRuntime` is not a second upstream implementation; it is
+the MCP deployment's handle to the root `PtcRunner.Upstream.Runtime`.
 
 Boot flow:
 
@@ -268,16 +288,20 @@ Boot flow:
 7. For session tools, store only session state and pass the same root runtime
    handle into each session evaluation while creating new per-run contexts.
 
-The MCP server may still own MCP-specific response shaping:
+The MCP server may still own MCP-specific response shaping and deployment
+plumbing:
 
 - slim/structured/debug envelope profiles;
 - `structuredContent` choices;
 - `isError` mapping;
 - MCP debug records;
 - MCP request IDs and transport-level telemetry.
+- server CLI/env aliases and defaults;
+- server-local credential materialization and redaction ETS.
 
-It should not own OpenAPI compilation, upstream call semantics, credential
-materialization, or catalog source-of-truth data.
+It should not own OpenAPI compilation, upstream call semantics, upstream
+credential attachment/materialization used by runtime calls, or catalog
+source-of-truth data.
 
 MCP envelope normalization is a transport concern. MCP client transports should
 unwrap MCP `content`, `isError`, raw-envelope policy, and JSON text content into
@@ -287,9 +311,11 @@ through MCP envelope assumptions.
 
 ## Config Ownership
 
-The upstream JSON format should become root-owned documentation. The config
-should avoid MCP-specific names unless an upstream transport is explicitly an
-MCP client transport.
+The upstream JSON format is root-owned documentation. The config should avoid
+MCP-specific names unless an upstream transport is explicitly an MCP client
+transport. `mcp_server` may keep server-local CLI/env aliases such as
+`PTC_RUNNER_MCP_UPSTREAMS`, but it translates the selected upstream config and
+server defaults into root runtime options at boot.
 
 Example:
 
@@ -340,19 +366,14 @@ Avoid bare names such as `"stdio"` in root docs because they hide that the
 transport is an MCP client transport, not generic process stdio and not the MCP
 server itself.
 
-This is a breaking 0.x config migration from the current MCP server parser,
-which accepts `"stdio"`, `"http"`, and absent transport as implicit stdio. The
-root parser should fail loudly on old names after docs and fixtures are updated,
-unless a short transitional parser is intentionally added for one release. The
-implementation checklist must include fixture, example, and test churn for this
-rename.
+The breaking 0.x config migration to explicit transport names has landed in the
+root parser: old names such as `"stdio"` and `"http"` are rejected. Keep MCP
+docs and fixtures on the explicit root names so the server does not appear to
+own a separate upstream config dialect.
 
-The actual JSON config parser currently lives mostly in
-`PtcRunnerMcp.Application` (`load_aggregator_config/1`,
-`parse_upstream_entry/3`, transport validation, credential binding validation,
-URL/scheme/static-header/proxy validation). Extraction work should move that
-parser to `PtcRunner.Upstream.Config`; `PtcRunnerMcp.AggregatorConfig` is only a
-persistent-term store for MCP aggregator flags and is not the parser.
+`PtcRunnerMcp.AggregatorConfig` remains MCP-owned. It is not the JSON upstream
+parser; it stores server presentation flags such as read-only posture and raw
+envelope policy.
 
 ## Dependency Ownership
 

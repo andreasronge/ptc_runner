@@ -89,7 +89,7 @@ defmodule PtcRunnerMcp.Application do
 
     if AgenticConfig.enabled?() and upstreams == [] and root_runtime_opts == nil do
       Log.log(:warn, "agentic_without_aggregator", %{
-        message: "agentic mode is enabled but no upstream MCP servers are configured"
+        message: "agentic mode is enabled but no upstream servers are configured"
       })
     end
 

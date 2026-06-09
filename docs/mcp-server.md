@@ -21,7 +21,7 @@ tools enabled.
 Several capabilities are opt-in and add their own top-level tools:
 
 - [Aggregator mode](aggregator-mode.md) lets PTC-Lisp programs call
-  configured upstream MCP servers via `(tool/call ...)`.
+  configured upstream tools via `(tool/call ...)`.
 - [Agentic mode](agentic-mode.md) adds `lisp_task`, a
   natural-language task tool backed by a planner LLM (requires
   aggregator mode).
@@ -72,7 +72,7 @@ Concrete cases:
   programmatic value the calling client can consume directly.
 - **Cross-server orchestration.** With [aggregator
   mode](aggregator-mode.md) on, one PTC-Lisp program can fan out to
-  several configured upstream MCP servers, reduce the results, and
+  several configured upstream servers, reduce the results, and
   return the collapsed answer — typically an order of magnitude fewer
   bytes than the LLM doing the same work N round-trips at a time.
 - **Filtering or reshaping a structured payload** that already lives
@@ -96,7 +96,7 @@ look like this:
 | Authoring overhead for the LLM | Zero — every program is a self-contained expression | Imports, virtualenv awareness, library knowledge | `require`, `import`, package availability |
 | Schema validation of the return value | First-class — `output_schema` JSON Schema, structured `validated` payload | None (server returns raw stdout / repr) | None (server returns raw value or `JSON.stringify`) |
 | Stable wire format | Yes — same R22/R23 contract as in-process PtcRunner | None standardized | None standardized |
-| Network access from the program | None directly — opt-in only via configured upstream MCP servers in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
+| Network access from the program | None directly — opt-in only via configured upstream tools in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
 | Filesystem access from the program | None directly — opt-in only via filesystem-MCP upstreams in [aggregator mode](aggregator-mode.md) | Often available unless the operator sandboxes harder | Often available unless the operator sandboxes harder |
 | Install footprint | Single Mix release (BEAM + ERTS bundled) | Python + interpreter + libs + sandbox tooling | Node + sandbox tooling |
 | Concurrency model | Per-call BEAM process, semaphore-bounded | Process-per-call (typical) or threadpool | Worker-per-call or single-loop |
@@ -319,7 +319,7 @@ the full set.
   every flag, environment variable, response profile, catalog mode,
   tracing setup, and lifecycle command.
 - [`docs/aggregator-mode.md`](aggregator-mode.md) — calling configured
-  upstream MCP servers from inside the sandbox via `(tool/call …)`,
+  upstream tools from inside the sandbox via `(tool/call …)`,
   plus the payload-reduction metrics emitted on every aggregator
   response.
 - [`docs/agentic-mode.md`](agentic-mode.md) — `lisp_task`, the

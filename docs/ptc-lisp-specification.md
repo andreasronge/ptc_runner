@@ -3177,8 +3177,8 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `data/` | Current request context | Current request context (read-only) |
 | `tool/` | Tool invocation | Call registered tools |
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
-| `tool/servers` | REPL discovery | List configured MCP upstream servers (requires a discovery backend) |
-| `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery | Inspect local PTC-Lisp builtins, prelude exports, and MCP tools (when a discovery backend is configured) |
+| `tool/servers` | REPL discovery | List configured upstream servers (requires a discovery backend) |
+| `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery | Inspect local PTC-Lisp builtins, prelude exports, and configured upstream tools (when a discovery backend is configured) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3357,13 +3357,13 @@ Invoke registered tools using the `tool/` namespace:
 
 ### 9.7 REPL Discovery
 
-Programs can inspect executable PTC-Lisp capabilities through REPL-style discovery forms. Plain `Lisp.run/2` exposes local PTC/Clojure builtins and curated Java interop. When PtcRunner runs as an MCP aggregator (`ptc_runner_mcp` with configured upstreams), the same forms also inspect configured upstream MCP tools. `tool/servers` remains MCP-only and requires a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the aggregator details.
+Programs can inspect executable PTC-Lisp capabilities through REPL-style discovery forms. Plain `Lisp.run/2` exposes local PTC/Clojure builtins and curated Java interop. When a root upstream discovery backend is configured, the same forms also inspect configured upstream tools exposed through `PtcRunner.Upstream`. `tool/servers` requires a configured discovery backend. See [docs/aggregator-mode.md](aggregator-mode.md#repl-discovery-from-ptc-lisp) for the MCP server presentation details.
 
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `tool/servers` | `(tool/servers)` | List of `{"name" "description" "tool_count" "catalog_loaded"}` maps. Raises a runtime error if no discovery backend is configured (this is neither a world fault nor a recoverable programmer fault). |
-| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and MCP tools. MCP loaded tools rank before MCP unloaded-server hints, which rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
-| `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one MCP server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
+| `apropos` | `(apropos query)` / `(apropos query opts)` | Deterministic lexical search returning compact strings for executable local refs and configured upstream tools. Upstream matches rank before local results. `opts`: `:limit` (1..50, default 8) and `:load` (boolean, default false). |
+| `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one upstream server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
 | `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
 | `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
 | `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for a prelude-export namespace or a local PTC/Clojure namespace. Java classes and MCP servers are not supported. |

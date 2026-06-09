@@ -163,12 +163,16 @@ Discovery forms have a separate budget from upstream calls: `--max-catalog-ops-p
 | `--max-catalog-ops-per-program` | `PTC_RUNNER_MCP_MAX_CATALOG_OPS_PER_PROGRAM` | `25` | Discovery call budget per program |
 | `--max-catalog-result-bytes` | `PTC_RUNNER_MCP_MAX_CATALOG_RESULT_BYTES` | `262144` (256 KiB) | Per-discovery-result cap |
 
-The MCP server uses the root upstream runtime in frozen snapshot mode:
-configured MCP stdio/http upstreams are started and listed during
-server boot, and the scrubbed snapshot is reused for `tools/list`.
-Root `mix ptc.repl` uses the same upstream config format but defaults
-to live snapshot mode, where MCP client startup/listing is attempted on
-discovery or call.
+The MCP server uses the root upstream runtime machinery in frozen
+snapshot mode, while the server owns deployment selection and MCP
+presentation. At boot, `ptc_runner_mcp` translates its CLI/env flags
+into `PtcRunner.Upstream.Runtime` options, starts the selected root
+runtime as a supervised child, and registers deployment secrets with
+the MCP-side redaction ETS. Configured MCP stdio/http client upstreams
+are started and listed during server boot, and the scrubbed root
+snapshot is reused for `tools/list`. Root `mix ptc.repl` uses the same
+upstream config format but defaults to live snapshot mode, where MCP
+client startup/listing is attempted on discovery or call.
 
 ## Aggregator-mode flags
 
@@ -191,7 +195,11 @@ CLI flag wins over env var; aggregator-mode defaults only apply when no explicit
 The upstream JSON format is owned by the root `ptc_runner` upstream
 runtime and shared by `mix ptc.repl` and `ptc_runner_mcp`. The MCP
 server keeps its own flag/env names, including `PTC_RUNNER_MCP_UPSTREAMS`,
-but translates the selected config into root runtime options at boot.
+because deployment selection is server-owned, but the selected config is
+parsed by root upstream modules and translated into root runtime options
+at boot. MCP-local config remains for MCP presentation concerns such as
+response profiles, sessions, debug/trace, HTTP transport, agentic mode,
+and server-side redaction.
 See [`upstream-runtime.md`](upstream-runtime.md) for the root REPL
 entrypoint and snapshot-mode behavior.
 

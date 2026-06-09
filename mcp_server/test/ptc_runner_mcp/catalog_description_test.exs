@@ -99,7 +99,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
 
       out = CatalogDescription.render_for_entries(entries, config(%{catalog_mode: :lazy}))
 
-      assert out =~ "Synthetic discovery snapshot for configured upstreams:"
+      assert out =~ "Upstream discovery snapshot:"
       assert out =~ "(tool/servers)"
       # alpha sorts first; it has 2 loaded tools.
       assert out =~ ~s("name" "alpha")
@@ -173,7 +173,7 @@ defmodule PtcRunnerMcp.CatalogDescriptionTest do
       assert out =~ ~s(Warning: catalog for "zeta" not loaded yet.)
       # Warnings come after the discovery body.
       [body, warnings] = String.split(out, "\n\nWarning:", parts: 2)
-      assert body =~ "Synthetic discovery snapshot"
+      assert body =~ "Upstream discovery snapshot"
       assert warnings =~ "not loaded yet"
     end
 

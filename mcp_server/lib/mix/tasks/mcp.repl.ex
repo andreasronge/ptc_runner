@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Mcp.Repl do
     * `--session` - require a session-backed REPL.
     * `--stateless` - force stateless `lisp_eval`.
     * `--display MODE` - `text`, `envelope`, or `json`.
-    * `--upstreams-config PATH` - load upstream MCP servers for discovery
+    * `--upstreams-config PATH` - load upstream servers for discovery
       forms and `(tool/call ...)`.
     * `-e`, `--eval PROGRAM` - evaluate one program and exit.
   """

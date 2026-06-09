@@ -5,7 +5,7 @@ defmodule PtcRunnerMcp.AggregatorConfig do
 
   The `:read_only` flag is an operator assertion used for MCP tool
   annotations. It does not enforce read-only behavior by itself; the
-  upstream MCP servers must be configured to enforce that policy.
+  configured upstreams must enforce that policy.
   """
 
   @default_read_only false

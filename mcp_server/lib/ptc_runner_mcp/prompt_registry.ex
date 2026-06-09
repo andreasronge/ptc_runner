@@ -5,7 +5,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
   alias PtcRunner.Upstream.Runtime
   alias PtcRunnerMcp.{CatalogConfig, CatalogDescription, CatalogPrompt, RootUpstreamRuntime}
 
-  @agentic_role "You are an agent that writes PTC-Lisp programs to fulfill plain-English tasks via the configured upstream MCP servers and return human-readable text."
+  @agentic_role "You are an agent that writes PTC-Lisp programs to fulfill plain-English tasks via configured upstream tools and return human-readable text."
 
   @prompt_dir Path.expand(Path.join([__DIR__, "..", "..", "priv", "prompts"]))
   @mcp_language_reference_path Path.join(@prompt_dir, "reference.md")

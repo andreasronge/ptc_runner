@@ -1,13 +1,13 @@
 # PtcRunner MCP Aggregator Mode
 
 Reference for operating PtcRunner's MCP server as a programmatic
-tool-calling aggregator over configured upstream MCP servers.
+tool-calling aggregator over configured upstream tools.
 
 ## Overview
 
 Aggregator mode does not advertise upstream tools individually. It
 adds `(tool/call ...)` to the PTC-Lisp sandbox — a programmatic
-primitive that calls configured upstream MCP servers and composes their
+primitive that calls configured upstream tools and composes their
 results deterministically inside the sandbox. In an aggregator-only
 configuration, the MCP server advertises `lisp_eval`; optional
 features such as sessions, diagnostics, or agentic tools may add their
@@ -344,7 +344,7 @@ selected upstream with `tool/call`. In inline catalog mode the
 dynamic tail also includes a synthetic discovery snapshot:
 
 ```
-Configured upstream MCP servers:
+Configured upstream servers:
 - fs: Filesystem MCP server. 2 tools. files.
   Tools:
   - read_text_file - Read the contents of a UTF-8 text file
@@ -429,11 +429,11 @@ search across catalogs, or read a tool's full input schema.
 | Form | Signature | Returns |
 |------|-----------|---------|
 | `tool/servers` | `(tool/servers)` | A list of `{"name" "description" "tool_count" "catalog_loaded"}` maps, sorted by name. |
-| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Loaded MCP tool matches rank before unloaded MCP server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` live-mode runtimes attempt to load configured upstreams first and only tool-level matches are returned. |
-| `dir` | `(dir ref)`<br>`(dir ref opts)` | For known local namespaces/classes, lists executable local members. Otherwise, lists `tool - description` strings for one MCP server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
-| `doc` | `(doc ref)` | One detailed local or MCP description string. Known local refs win; unknown refs fall through to MCP tool refs shaped as `server/tool`. MCP docs include args, required args, a ready-to-edit `(tool/call …)` example, and the `Result<...>` payload shape. |
-| `meta` | `(meta ref)` | Structured local or MCP metadata. Known local refs win; unknown refs fall through to MCP tool refs. |
-| `ns-publics` | `(ns-publics ns)` | Local-only map of public names to compact metadata for PTC/Clojure namespaces. Java classes and MCP servers are not supported. |
+| `apropos` | `(apropos query)`<br>`(apropos query opts)` | A list of compact discovery strings ranked by lexical relevance to `query`. Upstream tool matches rank before unloaded upstream server hints, and both rank before local PTC/Clojure/Java matches. `opts`: `:limit` (integer `1..50`, default `8`) and `:load` (boolean, default `false`). With `:load false` an unloaded server contributes a server-level placeholder string with a `dir` next-step hint instead of triggering a load; with `:load true` live-mode runtimes attempt to load configured upstreams first and only tool-level matches are returned. |
+| `dir` | `(dir ref)`<br>`(dir ref opts)` | For known local namespaces/classes, lists executable local members. Otherwise, lists `tool - description` strings for one upstream server, sorted by tool name. `opts`: `:limit` (integer `1..200`, default `50`) and `:offset` (integer `≥ 0`, default `0`) for pagination. |
+| `doc` | `(doc ref)` | One detailed local or upstream description string. Known local refs win; unknown refs fall through to upstream tool refs shaped as `server/tool`. Upstream docs include args, required args, a ready-to-edit `(tool/call …)` example, and the `Result<...>` payload shape. |
+| `meta` | `(meta ref)` | Structured local or upstream metadata. Known local refs win; unknown refs fall through to upstream tool refs. |
+| `ns-publics` | `(ns-publics ns)` | Local-only map of public names to compact metadata for PTC/Clojure namespaces. Java classes and upstream servers are not supported. |
 
 `apropos` ranks each candidate with a deterministic
 lexical score: `query` tokens are matched against the tokenized
@@ -590,7 +590,7 @@ detail string).
 ## Payload reduction
 
 The whole point of programmatic tool calling is that the program
-fetches from upstream MCP tools and **collapses** the results down to
+fetches from upstream tools and **collapses** the results down to
 a small answer before handing it back. Aggregator-mode responses
 can carry deterministic accounting for that work: a `ptc_metrics`
 block plus `result_bytes` / `oversize` on each `upstream_calls[]`

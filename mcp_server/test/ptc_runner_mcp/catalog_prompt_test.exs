@@ -65,7 +65,7 @@ defmodule PtcRunnerMcp.CatalogPromptTest do
         ] do
       text = PromptRegistry.card_text(key)
 
-      assert String.starts_with?(text, "Synthetic discovery snapshot below. Live:")
+      assert String.starts_with?(text, "Upstream discovery snapshot below. Live:")
       assert text =~ ~s|`(tool/servers)`|
       assert text =~ ~s|`(doc "server/tool")`|
       assert text =~ ~s|`(dir "server" {:limit 20})`|

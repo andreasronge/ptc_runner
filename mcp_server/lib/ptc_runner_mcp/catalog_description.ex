@@ -132,7 +132,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
         Enum.flat_map(entries, &render_inline_server(&1, description_mode)) ++
         render_doc_example(entries, description_mode)
 
-    "Synthetic discovery snapshot for configured upstreams:\n\n" <>
+    "Upstream discovery snapshot:\n\n" <>
       Enum.join(discovery_blocks, "\n\n")
   end
 
@@ -185,7 +185,7 @@ defmodule PtcRunnerMcp.CatalogDescription do
   defp render_lazy(entries) do
     entries = Enum.sort_by(entries, & &1.name)
 
-    "Synthetic discovery snapshot for configured upstreams:\n\n" <>
+    "Upstream discovery snapshot:\n\n" <>
       render_servers_snapshot(entries)
   end
 

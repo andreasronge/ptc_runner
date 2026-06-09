@@ -11,14 +11,14 @@ clients that want to ask for a natural-language task instead of
 authoring PTC-Lisp directly. The server uses the configured planner
 model to run a SubAgent in explicit completion mode with one MCP-owned
 tool available inside the planner: `tool/call`. The planner may
-call upstream MCP servers, inspect the tagged result, and must finish
+call configured upstream tools, inspect the tagged result, and must finish
 with `(return ...)` or `(fail ...)`. Successful answers are intended to
 be human-readable text.
 
 `lisp_task` does not replace `lisp_eval`. Both tools are
 advertised when all of these are true:
 
-- at least one upstream MCP server is configured;
+- at least one upstream server is configured;
 - `--agentic` or `PTC_RUNNER_MCP_AGENTIC=true` is set;
 - the aggregator posture is read-only, or
   `--agentic-allow-writes` / `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES=true`

@@ -312,7 +312,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `meta` * | `(meta tool-ref)` | Return structured metadata for a REPL discovery reference |
 | `ns-name` | `(ns-name namespace)` | Return the namespace-name string for a known namespace |
 | `ns-publics` | `(ns-publics namespace)` | Return public vars for a PTC/Clojure or prelude namespace |
-| `tool/servers` * | `(tool/servers)` | List configured upstream MCP servers |
+| `tool/servers` * | `(tool/servers)` | List configured upstream servers |
 
 
 
@@ -481,5 +481,4 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 |----------|-----------|-------------|
 | `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
-
 
