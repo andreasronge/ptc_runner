@@ -221,6 +221,8 @@ defmodule PtcRunner.Step do
   Fields:
   - `reason`: Machine-readable error code. System failures use atoms;
     structured `(fail {:reason ...})` can carry a caller-defined atom or string.
+    Core SubAgent reasons include `:partial_side_effects` when a continuation
+    guard stops after an observed write/unknown upstream call.
   - `message`: Human-readable description
   - `op`: Optional operation/tool that failed
   - `details`: Optional additional context

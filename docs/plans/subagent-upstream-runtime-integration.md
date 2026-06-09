@@ -43,9 +43,11 @@ Phase 1 has shipped in core:
   keeping its ledger and continuation-guard policy server-side.
 
 Phase 2/3 items remain future work: a convenience facade for selecting/owning an
-upstream runtime for a run, validate-once against a frozen-for-run snapshot, and
-a unified core upstream record surface. The broader capability-profile/provider
-direction is tracked in
+upstream runtime for a run, a Phase-3a core default continuation guard driven by
+existing `Turn.tool_calls` evidence, validate-once against a frozen-for-run
+snapshot, and an optional Phase-3b core attempt record surface if audit
+completeness requires it. The broader capability-profile/provider direction is
+tracked in
 [`capability-prelude-discovery.md`](capability-prelude-discovery.md); this plan
 stays scoped to the concrete upstream provider bridge.
 
@@ -71,9 +73,9 @@ Delivered status notes:
   a standalone bridge consumer gets fail-closed `requires` validation but **no**
   side-effect continuation guard by default (`continuation_guard == nil ⇒
   :continue`, `loop.ex:478-480`); the stop-after-side-effect policy is mcp-owned
-  until Phase 3. §8's "safe by default" is a Phase-3 target, not Phase-1 reality —
-  the guide §5/§7 now says so (host-supplied-guard caveat). The underlying gap (no
-  core default guard) remains a Phase-3 item.
+  until Phase 3a. §8's "safe by default" is a Phase-3a target, not Phase-1
+  reality — the guide §5/§7 now says so (host-supplied-guard caveat). The
+  underlying gap (no core default guard) remains a Phase-3a item.
 
 **Phase 1.5 (delivered) — see [§9 Implementation Checklist](#9-phase-15--implementation-checklist-do-now-workflow-executable).**
 A small, behaviour-preserving cleanup batch the 2026-06-05 design review surfaced,
@@ -81,8 +83,9 @@ now shipped: the bridge calls the internal `Runner.run/2` (`Definition`-only —
 T1), a Definition-contract test (T2) and a no-default-guard canary (T3) are in
 `test/ptc_runner/upstream/eval_run_subagent_test.exs`, and the guide §7/§5 + §8
 honesty gaps are closed (T4). Architecture unchanged; the Phase-2 facade and
-Phase-3 record surface stay deferred. The §6 raise-through-bridge fault test and
-the `:e2e` test remain outstanding — T2/T3 do not close them.
+Phase-3 default guard/record-surface work stay deferred. The §6
+raise-through-bridge fault test and the `:e2e` test remain outstanding — T2/T3
+do not close them.
 
 Sections below preserve the original pre-implementation design record; read
 current-architecture claims there as historical context unless this status
@@ -278,7 +281,8 @@ change).** Three things the facade must get right:
 - *Return shape.* `SubAgent.run(runtime:)` returns only the `SubAgent.run/2`
   result, **dropping** the bridge's `records` — mirroring `run_lisp/3` vs
   `run_lisp_with_records/3`. This keeps the public facade unsurprising and leaves
-  the records-on-`Step` surface for Phase 3 (§3.4).
+  any records-on-`Step` surface for the optional Phase 3b audit-completeness work
+  (§3.4).
 - *Semantics change — only one public meaning.* The facade changes what
   `SubAgent.run(agent, runtime: rt)` *means*. Today it is an attach-validation
   **passthrough**: `runtime:` reaches `Lisp.run`'s attach path and validates the
@@ -368,36 +372,74 @@ side-effect freedom (§3.5 #2). The same fix must also cover the **single-shot
 path** (§3.5 #1), so the validation does not depend on which execution surface the
 agent happens to select.
 
-### 3.4 Tool merge + ledger — V1 keeps the MCP wrapper as Phase 1 compatibility (option 3)
+### 3.4 Tool merge + side-effect policy
 
 **This is a Phase 1 compatibility choice, not the target boundary** (see §4's
-principle and §7 Phase 3). The mcp side-effect machinery cannot be reduced to
-"drain core records to a callback" *yet* — but the reason is a **core
-record-surface gap**, not anything genuinely mcp-specific:
+principle and §7 Phase 3). The mcp side-effect machinery already proves the
+policy shape, but Phase 3 should migrate it incrementally rather than treating a
+new core ledger as the gating first step:
 
 - The `continuation_guard` (`agentic.ex:346-354`) blocks continuation via
   `Ledger.side_effecting_attempted?`, which keys on each entry's **`:effect`**
   (`:write`/`:unknown`), recorded **before** dispatch so an interrupted write
   still blocks (`agentic_contract_test.exs` locks "records attempt before
-  dispatch").
+  dispatch"). This is already an MCP-side Phase-0 contract, not a greenfield
+  design problem.
 - That `:effect` classification is **not** inherently mcp-specific: it is a
   trivial, domain-blind pure function (`annotations_effect/1`,
   `agentic.ex:275-283`) over `readOnlyHint`/`destructiveHint` **catalog
-  annotations that core already exposes** (`upstream/discovery.ex:74`;
+  annotations that core already exposes** (the `:meta` discovery dispatch returns
+  `tool_entry["annotations"]`, `upstream/discovery.ex`; and they ride on
+  `Runtime.catalog_snapshot/1`, `upstream/runtime.ex:107-108`;
   `upstream/open_api/compiler.ex:78` synthesizes `readOnlyHint` for GETs). Core
-  can compute the same classification from its own catalog.
-- The real blocker is core's **record surface**: `RunContext` records
-  (`run_context.ex:64-90`) are written **after** dispatch and carry **no**
-  `:effect`, `:turn`, or `:args_hash`, so they cannot host the guard today.
-  Closing that (record-before-dispatch + richer schema) is the Phase 3 unified
-  record-surface work — after which the guard, classification, and ledger
-  primitives belong in **core** with fail-safe defaults: a default
-  *classification* (unknown effect ⇒ treated as side-effecting) **and a default
-  *action*** — absent a host policy, core **stops continuation once a
-  side-effecting call is attempted** (mirroring today's mcp guard,
-  `agentic.ex:347` → `{:stop, partial_side_effects}`). The host may **override**
-  that decision (allow / prompt / require explicit approval) and owns the
-  audit/export format — but it never has to *install* safety to get it.
+  can compute the same classification from its own catalog. For OpenAPI, prefer
+  the `_ptc.method` descriptor (`compiler.ex:82`) over the synthesized
+  `readOnlyHint`; OpenAPI v1 is GET-only today (`require_get`, `compiler.ex:90`),
+  but method-based classification avoids a latent trap if write methods are added
+  later. For MCP, treat `readOnlyHint`/`destructiveHint` as **weak, untrusted
+  server-supplied hints**: the `unknown ⇒ side-effecting` default protects the
+  *absent*-annotation case, but a present-but-lying `readOnlyHint: true` still
+  classifies as `:read` and therefore does not trip the default guard — that
+  residual trust is the host's risk to accept, not something core can close.
+- Core already has the continuation stop hook (`:continuation_guard`) and already
+  has turn-local evidence: the upstream `"call"` tool is merged into
+  `agent.tools`, so `(call ...)` / `(tool/call ...)` appears in
+  `Turn.tool_calls` with `name: "call"` and args containing `server`, `tool`, and
+  `args`. That is enough for the Phase-3a default guard. A guard can scan the
+  completed turn, classify each upstream call, and stop before the next LLM turn
+  when any call is `:write` or `:unknown`. No `RunContext` drain, `:turn`
+  threading, `:args_hash`, or `Step.upstream_calls` schema is required for that
+  cooperative stop-after-observed-side-effect property.
+- The default guard should mirror the proven MCP stop shape without depending on
+  MCP modules: emit the core reason atom `:partial_side_effects`, return
+  `{:stop, {:error, %Step{}}}`, and build the failed step from `next_state` with
+  `StepAssembler.finalize/3` (`turn_offset: -1`, `is_error: true`) so the
+  side-effecting turn is preserved under trace filters. Classify and collect
+  matched calls from `turn.tool_calls`, but build memory, turns, journal,
+  child-steps, and usage from `next_state`.
+- Guard details must be sanitized. `Turn.tool_calls` carries full upstream args
+  and result payloads; `Step.fail.details` must project only minimal
+  `%{server: server, tool: tool, effect: effect}` entries. Do not copy raw
+  `args`, `result`, or the whole tool-call map into the failure details. If a
+  `"call"` entry is malformed and lacks `server` or `tool`, treat it as
+  `:unknown` and stop fail-closed.
+- The pre-dispatch record surface remains useful, but it is **Phase 3b audit
+  completeness**, not Phase 3a's gate. It closes holes the turn-surface guard
+  cannot close: a write whose request is already on the wire when the sandbox
+  timeout fires, or a transport that raises after dispatch. If built, record only
+  on the `:proceed` arm before `Runtime.call_tool`, classify there, and retire
+  any overlapping MCP decorator/ledger path in the same migration so metrics and
+  call limits are not double-counted.
+
+The Phase-3a default is therefore: neutral classification in core, unknown
+effect treated as side-effecting, and absent a host policy core stops
+continuation after an observed side-effecting upstream call. The host may
+override the decision via `:continuation_guard` (allow / prompt / require
+approval) and still owns deployment policy plus protocol/UX. Be precise about
+the guarantee: this is a **turn-boundary circuit breaker**, not write
+prevention. The first side-effecting call, same-turn `pmap` siblings, terminal
+turns, and single-shot paths are outside that guarantee unless a later
+pre-dispatch deny/approval seam is added.
 
 So **Phase 1 keeps mcp's `"call"` wrapper and `continuation_guard` mcp-owned**,
 passed into the bridge as opts:
@@ -412,12 +454,14 @@ passed into the bridge as opts:
 - The bridge accepts an optional **tool decorator** (`on_upstream_call` /
   `upstream_tool_wrapper`) and a `continuation_guard`; mcp passes its
   `root_tools_with_ledger` decorator + guard and keeps `Ledger`/`Projection`
-  entirely server-side. **No mcp `Ledger` format enters core.**
+  entirely server-side. **No mcp `Ledger` format enters core.** Phase 3a can
+  coexist with this because a host-supplied guard overrides the core default;
+  Phase 3b must delete or replace overlapping MCP ledger decoration if core
+  starts recording pre-dispatch attempts.
 - The bridge returns the drained `RunContext` records to the caller (and may
-  attach them to the final `Step`). Reconcile that "records on the `Step`" idea
-  with the **already-deferred** `step.upstream_calls` field in
-  `root-upstream-runtime.md:781` so the two plans converge on **one** core record
-  surface (Phase 3), rather than designing it twice.
+  attach them to the final `Step`). Do not design `Step.upstream_calls` solely for
+  Phase 3a; no current consumer requires it. Revisit a single core record surface
+  only if Phase 3b makes audit-complete attempts a committed requirement.
 - `discovery_exec` from `eval_options` flows to the loop exactly as today.
 
 ### 3.5 Phase 1 correctness requirements (promoted from "risks")
@@ -486,26 +530,27 @@ first (repo bug-fix rule).
 | `Agentic.run_subagent/5` | Collapse to `Upstream.Eval.run_subagent(RootUpstreamRuntime.runtime(), agent, llm:, context:, continuation_guard:, on_upstream_call: ledger_decorator, …)` |
 | `with_run_context`-spans-the-run wrapper + agent enrichment | **Move to core** (`Upstream.Eval.run_subagent/3`) |
 | `:runtime` handle threading through the SubAgent loop | **New** — one passthrough (`Loop.run` opts → `State` → `LispOpts.build`) |
-| `root_tools_with_ledger/2`, `call_with_ledger/3`, effect classification, `continuation_guard`, retry-feedback rendering | **Phase 1: stay in mcp_server**, passed into the bridge as a tool decorator + guard. **Phase 3:** the *generic* parts (effect classification, ledger primitives, guard mechanism, caps) move to **core** with fail-safe defaults; mcp keeps only deployment policy + protocol/UX (retry-feedback rendering, audit export). |
+| `root_tools_with_ledger/2`, `call_with_ledger/3`, effect classification, `continuation_guard`, retry-feedback rendering | **Phase 1: stay in mcp_server**, passed into the bridge as a tool decorator + guard. **Phase 3a:** move neutral effect classification and the default stop-after-observed-side-effect `continuation_guard` policy to **core** using `Turn.tool_calls`; mcp keeps deployment policy + protocol/UX and may continue overriding the guard. **Phase 3b, only if audit completeness is required:** move pre-dispatch attempt recording into core and delete/replace the overlapping MCP ledger decorator. |
 | `RootUpstreamRuntime` (upstream runtime *selection*/config) | **Stays in mcp_server** (host-owned: which upstreams a deployment selects). A future capability profile may provide a more general host-owned facade, but this plan should not move endpoint/credential authority into preludes. |
-| `Ledger` retention / projection / export format | **Stays** mcp-side. (Phase 3: a *generic* call-record/ledger primitive lives in core — converging on `step.upstream_calls` — while mcp keeps its own retention/projection/export.) |
+| `Ledger` retention / projection / export format | **Stays** mcp-side. Phase 3a does not move the MCP ledger format or add `Step.upstream_calls`. Revisit a generic core attempt record only in Phase 3b if the audit-completeness holes justify it; mcp still owns retention/projection/export. |
 | `SubAgent.run(runtime:)` facade | Optional thin delegate to the bridge |
 
 Principle (target boundary): **core owns *how* an agent drives an upstream
-runtime — including neutral catalog metadata, call recording, generic
-side-effect classification, and policy *extension points*
-(`continuation_guard`, `on_upstream_call`, approval callbacks, caps) with safe
-defaults. The embedding host owns upstream runtime *selection* and
+runtime — including neutral catalog metadata, generic side-effect
+classification, and policy *extension points* (`continuation_guard`,
+`on_upstream_call`, approval callbacks, caps) with safe defaults. Core should own
+attempt recording only if a committed audit-completeness requirement needs a
+provider-neutral pre-dispatch ledger. The embedding host owns upstream runtime *selection* and
 deployment-specific *decisions* — authorization, and the UX/protocol around
 approval, denial, continuation, retries, and audit export.** `mcp_server` is
 **one such host**: it configures and exposes `ptc_runner` and installs
 MCP-specific policy callbacks; it is **not** the architectural home for upstream
 execution or generic side-effect logic. Otherwise `ptc_runner`-standalone users
 would have to reimplement safety policy — the very layering problem this bridge
-exists to fix. The Phase 1 split above (ledger / classification mcp-side) is
-**compatibility with the existing contract**, not the target; Phase 3 (§7) moves
-the generic mechanism into core, ideally in a shape that can later be reused by
-a capability-provider runtime above `PtcRunner.Upstream.*`.
+exists to fix. The Phase 1 split above is **compatibility with the existing
+contract**, not the target; Phase 3a (§7) moves the generic classification and
+default guard into core, ideally in a shape that can later be reused by a
+capability-provider runtime above `PtcRunner.Upstream.*`.
 
 ---
 
@@ -533,9 +578,10 @@ child inheritance — are now Phase 1 requirements in §3.5.)
    §3.5 #2's live-catalog hazard. Don't let the redundancy argument motivate
    caching state inside `Loop` (that would re-introduce the lifecycle coupling
    this design avoids).
-4. **Core record surface.** Converge the bridge's drained-records-on-`Step` idea
-   with `root-upstream-runtime.md`'s deferred `step.upstream_calls` (Phase 3) so
-   there is one core record surface, not two.
+4. **Core record surface.** Do not add a drained-records-on-`Step` or
+   `step.upstream_calls` schema for Phase 3a's default guard. Revisit one core
+   record surface only if Phase 3b commits to audit-complete pre-dispatch
+   attempts.
 5. **Catalog snapshot mode.** `live`/`frozen` is a property of the **Runtime**,
    orthogonal to how many `RunContext`s wrap the run. The real decision driven by
    it is §3.5 #2, not "does one context freeze the catalog" (it doesn't).
@@ -647,27 +693,64 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    let the convenience API pre-empt the broader profile/provider design in
    `capability-prelude-discovery.md`. The bridge still does **not** need
    `runtime:` lifecycle ownership inside the loop.
-3. **Phase 3 (optimization + convergence + the target boundary):** *Gating first
-   step — core record-surface convergence:* give `RunContext` records a
-   record-before-dispatch, effect-bearing schema (`:effect`/`:turn`/`:args_hash`)
-   converged with `root-upstream-runtime.md`'s `step.upstream_calls`; the core
-   guard default, effect classification, and `step.upstream_calls` all
-   structurally depend on it, so it is the critical path, not a parallel
-   work-item. Then validate
-   `requires` once at run-context open against a frozen-for-the-run snapshot
-   (removes per-turn redundancy *and* §3.5 #2's live-catalog hazard); and **move
-   the generic side-effect mechanism into
-   core** — neutral effect classification (from the catalog annotations core
-   already exposes, §3.4), record-before-dispatch ledger primitives carrying
-   `:effect`/`:turn`/`:args_hash`, and the `continuation_guard`/approval/caps
-   hooks with fail-safe defaults — unknown effect ⇒ side-effecting, **and absent
-   a host guard core stops continuation after a side-effecting attempt** (host
-   may override to allow / prompt / require approval). Result: a
-   `ptc_runner`-standalone consumer gets safe upstream execution without
-   reimplementing policy, and `mcp_server` keeps only deployment policy +
-   protocol/UX (§4 target boundary). Design the record/effect/guard primitives
-   as provider-neutral where practical: upstream is the first concrete provider,
-   but the same primitives should be able to serve future local, sandbox, and
+3. **Phase 3a (default side-effect circuit breaker):** move the generic,
+   provider-neutral pieces that are needed for standalone safety into core
+   without adding a new ledger first:
+   - add `PtcRunner.Upstream.Effect.classify(runtime, server, tool)` returning
+     `:read | :write | :unknown`; classify OpenAPI from `_ptc.method`, classify
+     MCP from its (weak, untrusted) `readOnlyHint`/`destructiveHint` annotations,
+     and fail closed on missing/conflicting metadata;
+   - install a default `continuation_guard` inside
+     `Upstream.Eval.run_subagent/3` with `Keyword.put_new/3`, so a host-supplied
+     guard completely owns policy when present;
+   - have the default guard scan `Turn.tool_calls` for upstream `"call"` entries,
+     classify their `{server, tool}`, continue for reads, and stop before the
+     next LLM turn after any `:write` or `:unknown` call;
+   - put the default guard builder in a small core module, for example
+     `PtcRunner.Upstream.SideEffectGuard.default(runtime)`, so
+     `run_subagent/3` only closes over `runtime` and installs the returned
+     closure;
+   - on stop, return `{:stop, {:error, step}}` where `step.fail.reason` is the
+     core atom `:partial_side_effects`; build it with
+     `Step.error(:partial_side_effects, message, next_state.memory,
+     %{matched_calls: sanitized_calls})` and then
+     `StepAssembler.finalize/3` using `turn_offset: -1` and `is_error: true`.
+     `sanitized_calls` must contain only `server`, `tool`, and `effect`; never
+     include upstream args, results, or raw tool-call maps. A malformed `"call"`
+     entry with missing `server` or `tool` is `:unknown` and stops fail-closed;
+   - do not drain `RunContext`, do not thread `:turn` into `RunContext`, do not
+     compute `:args_hash`, and do not add `Step.upstream_calls` for this phase.
+
+   This delivers the Phase-3 "safe by default" target for cooperative multi-turn
+   bridge runs while preserving the existing host override surface. Word the
+   guarantee narrowly: after an **observed completed turn** contains a
+   write/unknown upstream call, core issues no further LLM turn. It does not
+   prevent the first side effect, same-turn `pmap` fan-out, terminal-turn side
+   effects, single-shot-path side effects, or dispatches lost to timeout/raise
+   before a turn is produced. Pin tests on stable observables: `length(step.turns)`
+   includes the observed side-effecting turn after a turn-boundary stop; do not
+   assert directly on derived `usage.turns` counters.
+
+4. **Phase 3b (optional audit-completeness ledger):** only if the in-flight
+   timeout/transport-raise holes matter enough, add a provider-neutral
+   pre-dispatch attempt record in core. Record on the `:proceed` arm immediately
+   before `Runtime.call_tool`, include `server`, `tool`, `effect`, status, and
+   any minimal correlation data a real consumer needs. Do **not** pull in
+   `:args_hash` or `Step.upstream_calls` preemptively. Retire or replace the MCP
+   `root_tools_with_ledger` / `call_with_ledger` decorator in the same migration
+   so core, MCP, and `Turn.tool_calls` do not double- or triple-count attempts.
+   Watch the drain contract: `Collector.drain` is **destructive** and resets to
+   `[]` (`collector.ex:55-57`), and `run_subagent/3` drains exactly once at run
+   end to return `{result, records}` (`eval.ex:38-41`). If a 3b guard drains
+   per-turn for "records since last turn," it must re-accumulate into the
+   bridge's returned `records` or that public contract silently becomes `[]`.
+   (Phase 3a is immune — it reads the completed `Turn`, never drains.)
+
+5. **Phase 3c (snapshot/capability convergence):** validate `requires` once at
+   run-context open against a frozen-for-the-run snapshot, removing per-turn
+   redundancy and §3.5 #2's live-catalog hazard. Keep the effect/guard primitives
+   provider-neutral where practical: upstream is the first concrete provider,
+   but the same concepts should be able to serve future local, sandbox, and
    SubAgent capability providers.
 
 ---
@@ -682,13 +765,13 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 - Lets `mcp_server` shrink toward its intended role (a stated direction in
   `root-upstream-runtime.md:36-44/69`): configure and expose `ptc_runner` as an
   MCP server, owning only *deployment* policy + protocol/UX (which upstreams,
-  authorization, approval/denial, audit export). The generic side-effect
-  mechanism (classification, ledger primitives, guard) **moves to core in
-  Phase 3** (§4) — *after which* standalone users will be safe by default without
-  reimplementing it. **Phase 1 ships fail-closed `requires` validation standalone,
-  but not the side-effect continuation guard** (`continuation_guard == nil ⇒
-  :continue`); a standalone caller must supply its own `continuation_guard` until
-  the Phase-3 core default lands.
+  authorization, approval/denial, audit export). Phase 3a moves generic
+  classification and the default stop-after-observed-side-effect guard to core —
+  after which standalone users will be safe by default for cooperative multi-turn
+  bridge runs without reimplementing that policy. **Phase 1 ships fail-closed
+  `requires` validation standalone, but not the side-effect continuation guard**
+  (`continuation_guard == nil ⇒ :continue`); a standalone caller must supply its
+  own `continuation_guard` until the Phase-3a core default lands.
 - Keeps the SubAgent loop's deliberate "just functions" decoupling intact: the
   only new coupling is a single, opaque `:runtime` handle passthrough behind a
   bridge, not lifecycle ownership woven through the loop.
@@ -707,7 +790,7 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 
 **Scope.** Behaviour-preserving cleanups + honesty/test gaps the 2026-06-05
 design review surfaced. **No architecture change.** The Phase-2 facade and the
-Phase-3 record surface stay deferred. Each task is self-contained with an exact
+Phase-3 default guard/record-surface work stay deferred. Each task is self-contained with an exact
 target, the change, and an acceptance check, so it can be handed to a Claude
 workflow (suggested decomposition at the end).
 
@@ -744,7 +827,7 @@ workflow (suggested decomposition at the end).
   `start_http_fixture` / `examples/ptc_repl_dummy_upstream`) and **no**
   `continuation_guard` **continues** — assert no `partial_side_effects` stop.
   Comment: pins today's `continuation_guard == nil ⇒ :continue` (`loop.ex:478-480`)
-  so the Phase-3 core default (stop-after-side-effect) flips this test loudly.
+  so the Phase-3a core default (stop-after-side-effect) flips this test loudly.
 - *Accept:* new test green; asserts continuation, not stop.
 - *Deps:* same test file as T2 (same owning agent).
 
@@ -781,8 +864,8 @@ workflow (suggested decomposition at the end).
 ### Out of scope for Phase 1.5 (stay deferred)
 
 - The `SubAgent.run(runtime:)` → bridge **facade** (Phase 2).
-- A core default `continuation_guard` / effect classification / record-before-
-  dispatch ledger (Phase 3 — gated on record-surface convergence, §7).
+- A core default `continuation_guard` / effect classification (Phase 3a) and any
+  record-before-dispatch ledger (optional Phase 3b, no longer the Phase 3a gate).
 - The **raise-through-bridge** fault test and the **`:e2e`** test (still §6
   outstanding — track, don't fold into Phase 1.5).
 
