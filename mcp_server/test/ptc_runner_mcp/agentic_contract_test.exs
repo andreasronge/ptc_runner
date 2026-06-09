@@ -67,8 +67,8 @@ defmodule PtcRunnerMcp.AgenticContractTest do
   test "ledger records attempt order and detects write or unknown effects" do
     {:ok, ledger} = Ledger.start_link()
 
-    first = Ledger.record_attempt(ledger, "github", "search_issues", %{"q" => "auth"}, :read, 1)
-    second = Ledger.record_attempt(ledger, "github", "create_issue", %{}, :unknown, 1)
+    first = Ledger.record_attempt(ledger, "github", "search_issues", :read)
+    second = Ledger.record_attempt(ledger, "github", "create_issue", :unknown)
 
     :ok = Ledger.complete_success(ledger, first, duration_ms: 12, result_bytes: 40)
     :ok = Ledger.complete_error(ledger, second, "timeout", "request timed out", duration_ms: 50)
@@ -88,6 +88,8 @@ defmodule PtcRunnerMcp.AgenticContractTest do
 
     assert Ledger.side_effecting_attempted?(entries)
 
+    projected = Projection.ledger_entries(entries)
+
     assert [
              %{
                "server" => "github",
@@ -95,8 +97,7 @@ defmodule PtcRunnerMcp.AgenticContractTest do
                "status" => "ok",
                "effect" => "read",
                "duration_ms" => 12,
-               "result_bytes" => 40,
-               "turn" => 1
+               "result_bytes" => 40
              },
              %{
                "server" => "github",
@@ -104,10 +105,14 @@ defmodule PtcRunnerMcp.AgenticContractTest do
                "status" => "error",
                "effect" => "unknown",
                "reason" => "timeout",
-               "error" => "request timed out",
-               "turn" => 1
+               "error" => "request timed out"
              }
-           ] = Projection.ledger_entries(entries)
+           ] = projected
+
+    # The slimmed wire shape drops `turn` and `args_hash` (no truthful
+    # current semantics); assert their absence, not just the present subset.
+    refute Enum.any?(projected, &Map.has_key?(&1, "turn"))
+    refute Enum.any?(projected, &Map.has_key?(&1, "args_hash"))
   end
 
   test "root agentic tool wrapper records unknown side-effect attempt before dispatch" do

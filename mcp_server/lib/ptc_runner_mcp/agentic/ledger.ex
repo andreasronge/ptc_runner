@@ -22,10 +22,8 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
           required(:id) => reference(),
           required(:server) => String.t(),
           required(:tool) => String.t(),
-          required(:args_hash) => String.t(),
           required(:status) => status(),
           required(:effect) => effect(),
-          required(:turn) => pos_integer(),
           required(:started_at) => DateTime.t(),
           optional(:completed_at) => DateTime.t(),
           optional(:duration_ms) => non_neg_integer(),
@@ -56,20 +54,18 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
   Attempts are recorded before dispatch once `server`, `tool`, and `effect`
   are known, so interrupted write/unknown calls still block continuation.
   """
-  @spec record_attempt(t(), String.t(), String.t(), map(), effect(), pos_integer()) :: reference()
-  def record_attempt(ledger, server, tool, args, effect, turn)
+  @spec record_attempt(t(), String.t(), String.t(), effect()) :: reference()
+  def record_attempt(ledger, server, tool, effect)
       when is_pid(ledger) and is_binary(server) and is_binary(tool) and
-             effect in [:read, :write, :unknown] and is_integer(turn) and turn > 0 do
+             effect in [:read, :write, :unknown] do
     id = make_ref()
 
     entry = %{
       id: id,
       server: server,
       tool: tool,
-      args_hash: hash_args(args),
       status: :attempted,
       effect: effect,
-      turn: turn,
       started_at: DateTime.utc_now()
     }
 
@@ -132,15 +128,4 @@ defmodule PtcRunnerMcp.Agentic.Ledger do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  defp hash_args(args) do
-    encoded =
-      case Jason.encode(args) do
-        {:ok, json} -> json
-        {:error, _} -> inspect(args)
-      end
-
-    :crypto.hash(:sha256, encoded)
-    |> Base.encode16(case: :lower)
-  end
 end

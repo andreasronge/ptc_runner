@@ -44,8 +44,6 @@ defmodule PtcRunnerMcp.Agentic.Projection do
       "status" => status_string(Map.fetch!(entry, :status)),
       "duration_ms" => Map.get(entry, :duration_ms, 0),
       "effect" => Atom.to_string(Map.fetch!(entry, :effect)),
-      "turn" => Map.fetch!(entry, :turn),
-      "args_hash" => Map.fetch!(entry, :args_hash),
       "result_bytes" => normalize_result_bytes(Map.get(entry, :result_bytes)),
       "oversize" => Map.get(entry, :oversize, false) == true
     }

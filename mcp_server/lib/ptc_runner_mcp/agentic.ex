@@ -218,9 +218,9 @@ defmodule PtcRunnerMcp.Agentic do
 
   defp ledger_attempt(ledger, args) do
     case ledger_call_args(args) do
-      {:ok, server, tool, call_args} ->
+      {:ok, server, tool, _call_args} ->
         effect = upstream_tool_effect(server, tool)
-        {:ok, Ledger.record_attempt(ledger, server, tool, call_args, effect, 1)}
+        {:ok, Ledger.record_attempt(ledger, server, tool, effect)}
 
       :error ->
         :none
@@ -265,8 +265,7 @@ defmodule PtcRunnerMcp.Agentic do
 
     Ledger.complete_success(ledger, id,
       result_overview: scrubbed_overview(value, value_kind),
-      result_bytes: safe_external_size(value),
-      effect: :unknown
+      result_bytes: safe_external_size(value)
     )
   end
 
@@ -275,21 +274,18 @@ defmodule PtcRunnerMcp.Agentic do
       ledger,
       id,
       result[:reason] |> to_string(),
-      result[:message] || "",
-      effect: :unknown
+      result[:message] || ""
     )
   end
 
   defp complete_ledger_attempt(ledger, {:ok, id}, _result) do
-    Ledger.complete_success(ledger, id, effect: :unknown)
+    Ledger.complete_success(ledger, id)
   end
 
   defp complete_ledger_exception(_ledger, :none, _exception), do: :ok
 
   defp complete_ledger_exception(ledger, {:ok, id}, exception) do
-    Ledger.complete_error(ledger, id, "runtime_error", Exception.message(exception),
-      effect: :unknown
-    )
+    Ledger.complete_error(ledger, id, "runtime_error", Exception.message(exception))
   end
 
   # Build the diagnostic `result_overview` from the *scrubbed* value so the
@@ -841,8 +837,6 @@ defmodule PtcRunnerMcp.Agentic do
       "status" => %{"type" => "string"},
       "duration_ms" => %{"type" => "integer", "minimum" => 0},
       "effect" => %{"type" => "string"},
-      "turn" => %{"type" => "integer"},
-      "args_hash" => %{"type" => "string"},
       "result_bytes" => %{"type" => ["integer", "null"], "minimum" => 0},
       "oversize" => %{"type" => "boolean"},
       "reason" => %{"type" => "string"},
