@@ -431,30 +431,100 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
   end
 
   # ------------------------------------------------------------------
-  # No-default-guard canary (T3)
+  # Phase 3a default side-effect guard
   # ------------------------------------------------------------------
 
-  describe "a dispatching upstream call is not stopped between turns without a guard" do
-    # What this asserts (observable): with NO continuation_guard supplied, a turn
-    # that dispatches an upstream call does not stop the run — it proceeds to turn 2
-    # and returns. That is the visible shape of "no side-effect bounding by default"
-    # (capability-prelude guide §5/§7): a standalone caller that passes no
-    # continuation_guard gets no between-turn stop.
-    #
-    # At the code level this is the nil-guard branch of loop.ex
-    # apply_continuation_guard (nil => :continue, ~line 478); run_subagent/3 forwards
-    # only caller opts and adds no guard of its own. CORE is effect-blind here: the
-    # read/write classification + any stop-after-side-effect policy are mcp-owned
-    # (the ledger) and ABSENT in this standalone run.
-    #
-    # Scope (deliberately narrow, to avoid overclaiming): the dispatched op is a
-    # read-only observatory GET, so a "continue" outcome only proves *this dispatch
-    # was not stopped*. It does NOT prove behaviour against a hypothetical default
-    # guard that classifies effects — a read-allowing guard would also let it pass.
-    # Pinning behaviour against the planned Phase-3 write/unknown-stop default would
-    # need a side-effecting dispatch, and is deferred with that default. (Distinct
-    # from the still-outstanding raise-through-bridge fault test and the :e2e test.)
-    test "a dispatched upstream call between turns does not stop the run" do
+  describe "default side-effect guard" do
+    test "write/unknown upstream call stops continuation" do
+      {:ok, server} = start_mcp_http_fixture()
+      {:ok, runtime} = Runtime.start_link(config: mcp_http_config(server))
+
+      agent =
+        SubAgent.new(
+          prompt: "Call an unknown-effect tool, then return.",
+          output: :ptc_lisp,
+          max_turns: 2
+        )
+
+      try do
+        {result, records} =
+          Eval.run_subagent(runtime, agent,
+            llm:
+              sequenced_llm([
+                ~S|(do (tool/call {:server "remote" :tool "echo" :args {:secret "do-not-leak"}}) (tool/call {:server "remote" :tool "mutate" :args {:secret "still-hidden"}}))|,
+                "(return 42)"
+              ])
+          )
+
+        assert {:error, step} = result
+        assert step.fail.reason == :partial_side_effects
+        assert length(step.turns) == 1
+        assert step.prompt == "Call an unknown-effect tool, then return."
+        assert Map.has_key?(step.tools, "call")
+
+        assert step.fail.details == %{
+                 matched_calls: [
+                   %{
+                     server: "remote",
+                     tool: "echo",
+                     effect: :unknown
+                   },
+                   %{
+                     server: "remote",
+                     tool: "mutate",
+                     effect: :unknown
+                   }
+                 ]
+               }
+
+        refute Map.has_key?(step.fail.details, :args)
+        refute Map.has_key?(step.fail.details, :result)
+        refute Enum.any?(step.fail.details.matched_calls, &Map.has_key?(&1, :args))
+        refute Enum.any?(step.fail.details.matched_calls, &Map.has_key?(&1, :result))
+
+        assert [
+                 %{"server" => "remote", "tool" => "echo", "status" => "ok"},
+                 %{"server" => "remote", "tool" => "mutate", "status" => "ok"}
+               ] = records
+
+        assert_receive {:mcp_http_fixture_request, "tools/call"}, 1_000
+        assert_receive {:mcp_http_fixture_request, "tools/call"}, 1_000
+      after
+        Runtime.stop(runtime)
+      end
+    end
+
+    test "write/unknown stop respects trace_mode false" do
+      {:ok, server} = start_mcp_http_fixture()
+      {:ok, runtime} = Runtime.start_link(config: mcp_http_config(server))
+
+      agent =
+        SubAgent.new(
+          prompt: "Call an unknown-effect tool, then return.",
+          output: :ptc_lisp,
+          max_turns: 2
+        )
+
+      try do
+        {result, _records} =
+          Eval.run_subagent(runtime, agent,
+            trace: false,
+            llm:
+              sequenced_llm([
+                ~S|(tool/call {:server "remote" :tool "echo" :args {:secret "do-not-leak"}})|,
+                "(return 42)"
+              ])
+          )
+
+        assert {:error, step} = result
+        assert step.fail.reason == :partial_side_effects
+        assert step.turns == nil
+      after
+        Runtime.stop(runtime)
+      end
+    end
+
+    test "read upstream call continues" do
       {:ok, server} = start_http_fixture(%{"traces" => [%{"id" => "t-1", "org_id" => "acme"}]})
       {:ok, runtime} = Runtime.start_link(config: config(base_url: server.base_url))
 
@@ -479,19 +549,45 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
               ])
           )
 
-        # Reached turn 2 and completed normally — the run continued.
         assert {:ok, step} = result
         assert step.return == 42
-
-        # NOT stopped — no guard fired (e.g. no :partial_side_effects).
         assert step.fail == nil
-
-        # The between-turn checkpoint did NOT stop the loop after turn 1.
         assert length(step.turns) == 2
-
-        # Prove the turn-1 upstream call genuinely dispatched through the bridge.
         assert [%{"server" => "observatory", "tool" => "list-traces", "status" => "ok"}] = records
         assert_receive {:http_fixture_request, _request}, 1_000
+      after
+        Runtime.stop(runtime)
+      end
+    end
+
+    test "host continuation_guard overrides default" do
+      {:ok, server} = start_mcp_http_fixture()
+      {:ok, runtime} = Runtime.start_link(config: mcp_http_config(server))
+
+      agent =
+        SubAgent.new(
+          prompt: "Call an unknown-effect tool, then return.",
+          output: :ptc_lisp,
+          max_turns: 2
+        )
+
+      try do
+        {result, records} =
+          Eval.run_subagent(runtime, agent,
+            continuation_guard: fn _turn, _state, _next_state -> :continue end,
+            llm:
+              sequenced_llm([
+                ~S|(tool/call {:server "remote" :tool "echo" :args {:secret "do-not-leak"}})|,
+                "(return 42)"
+              ])
+          )
+
+        assert {:ok, step} = result
+        assert step.return == 42
+        assert length(step.turns) == 2
+
+        assert [%{"server" => "remote", "tool" => "echo", "status" => "ok"}] = records
+        assert_receive {:mcp_http_fixture_request, "tools/call"}, 1_000
       after
         Runtime.stop(runtime)
       end
@@ -617,6 +713,18 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
     }
   end
 
+  defp mcp_http_config(server) do
+    %{
+      "upstreams" => %{
+        "remote" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true
+        }
+      }
+    }
+  end
+
   # Ephemeral one-shot HTTP server (mirrors upstream_roundtrip_test.exs).
   defp start_http_fixture(response_body) do
     parent = self()
@@ -654,5 +762,134 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
       end)
 
     {:ok, %{pid: pid, base_url: "http://127.0.0.1:#{port}"}}
+  end
+
+  defp start_mcp_http_fixture do
+    parent = self()
+
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        ip: {127, 0, 0, 1}
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        serve_mcp_http(parent, listen_socket, 6)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    {:ok, %{pid: pid, url: "http://127.0.0.1:#{port}/mcp"}}
+  end
+
+  defp serve_mcp_http(_parent, _listen_socket, 0), do: :ok
+
+  defp serve_mcp_http(parent, listen_socket, remaining) do
+    case :gen_tcp.accept(listen_socket, @fixture_recv_timeout_ms) do
+      {:ok, socket} ->
+        {:ok, request} = read_http_request(socket)
+        method = get_in(request, [:decoded, "method"])
+        send(parent, {:mcp_http_fixture_request, method})
+        send_mcp_http_response(socket, request.decoded)
+        :gen_tcp.close(socket)
+        serve_mcp_http(parent, listen_socket, remaining - 1)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp send_mcp_http_response(socket, %{"method" => "notifications/initialized"}) do
+    :ok =
+      :gen_tcp.send(socket, [
+        "HTTP/1.1 202 Accepted\r\n",
+        "mcp-session-id: phase-3a-test-session\r\n",
+        "content-length: 0\r\n",
+        "connection: close\r\n\r\n"
+      ])
+  end
+
+  defp send_mcp_http_response(socket, %{"id" => id, "method" => "initialize"}) do
+    json_response(socket, id, %{"protocolVersion" => "2025-06-18", "capabilities" => %{}},
+      session?: true
+    )
+  end
+
+  defp send_mcp_http_response(socket, %{"id" => id, "method" => "tools/list"}) do
+    json_response(socket, id, %{
+      "tools" => [
+        %{
+          "name" => "echo",
+          "description" => "Echo arguments",
+          "inputSchema" => %{"type" => "object"}
+        },
+        %{
+          "name" => "mutate",
+          "description" => "Unknown-effect mutation",
+          "inputSchema" => %{"type" => "object"}
+        }
+      ]
+    })
+  end
+
+  defp send_mcp_http_response(socket, %{"id" => id, "method" => "tools/call"} = frame) do
+    args = get_in(frame, ["params", "arguments"]) || %{}
+    json_response(socket, id, %{"structuredContent" => %{"echo" => args}})
+  end
+
+  defp read_http_request(socket) do
+    {:ok, head} = read_until(socket, "\r\n\r\n", "")
+    [header_text, rest] = String.split(head, "\r\n\r\n", parts: 2)
+    [_request_line | header_lines] = String.split(header_text, "\r\n")
+
+    content_length =
+      header_lines
+      |> Enum.find_value("0", fn line ->
+        [key, value] = String.split(line, ":", parts: 2)
+        if String.downcase(key) == "content-length", do: String.trim(value)
+      end)
+      |> String.to_integer()
+
+    body = read_body(socket, rest, content_length)
+    {:ok, %{body: body, decoded: Jason.decode!(body)}}
+  end
+
+  defp read_until(socket, marker, acc) do
+    if String.contains?(acc, marker) do
+      {:ok, acc}
+    else
+      {:ok, chunk} = :gen_tcp.recv(socket, 0, @fixture_recv_timeout_ms)
+      read_until(socket, marker, acc <> chunk)
+    end
+  end
+
+  defp read_body(_socket, buffered, length) when byte_size(buffered) >= length do
+    binary_part(buffered, 0, length)
+  end
+
+  defp read_body(socket, buffered, length) do
+    {:ok, chunk} = :gen_tcp.recv(socket, length - byte_size(buffered), @fixture_recv_timeout_ms)
+    read_body(socket, buffered <> chunk, length)
+  end
+
+  defp json_response(socket, id, result, opts \\ []) do
+    body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
+
+    session_header =
+      if Keyword.get(opts, :session?), do: "mcp-session-id: phase-3a-test\r\n", else: ""
+
+    :gen_tcp.send(socket, [
+      "HTTP/1.1 200 OK\r\n",
+      session_header,
+      "content-type: application/json\r\n",
+      "content-length: #{byte_size(body)}\r\n",
+      "connection: close\r\n\r\n",
+      body
+    ])
   end
 end

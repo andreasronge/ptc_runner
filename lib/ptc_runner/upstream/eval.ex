@@ -8,7 +8,7 @@ defmodule PtcRunner.Upstream.Eval do
   """
 
   alias PtcRunner.SubAgent.{Definition, Runner}
-  alias PtcRunner.Upstream.{CallTool, Discovery, RunContext}
+  alias PtcRunner.Upstream.{CallTool, Discovery, RunContext, SideEffectGuard}
 
   @context_keys [
     :max_tool_calls,
@@ -127,6 +127,7 @@ defmodule PtcRunner.Upstream.Eval do
         sub_opts
         |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
         |> Keyword.put(:runtime, runtime)
+        |> Keyword.put_new(:continuation_guard, SideEffectGuard.default(runtime))
 
       # Internal runner, not the public facade -- pre-empts facade/bridge recursion
       # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).

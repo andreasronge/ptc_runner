@@ -222,13 +222,15 @@ covers **the agent given the runtime**: a child SubAgent invoked via `as_tool` i
 `requires`-backed prelude is only validated if that child is itself run through
 its own upstream bridge/runtime.
 
-> **Host-supplied side-effect guard (Phase 1).** Fail-closed `requires`
-> validation bounds *which* operations a prelude may reach, but Phase 1 does
-> **not** install a side-effect *continuation* guard by default. Continuation
-> policy — how far a run may keep producing side effects — is **host-supplied**
-> in Phase 1: `mcp_server` installs one; a standalone caller must pass its own
-> `continuation_guard` (to `run_subagent/3`, §7) to bound side effects, until a
-> core default lands in a later phase.
+> **Default side-effect guard.** Fail-closed `requires` validation bounds
+> *which* operations a prelude may reach. `PtcRunner.Upstream.Eval.run_subagent/3`
+> also installs a default continuation guard: after an observed upstream
+> `tool/call`, read-classified calls may continue, while write-classified or
+> unknown-effect calls stop before the next LLM turn with
+> `:partial_side_effects`. The failure details contain sanitized
+> `%{matched_calls: [%{server, tool, effect}, ...]}` entries only — never
+> upstream args or results. A host-supplied `continuation_guard` overrides this
+> default completely.
 
 > The prelude does **not** define upstream endpoints or credentials. It only
 > *wraps* operations the host has already configured. Credentials live in
@@ -299,12 +301,12 @@ The distinction: `run_lisp/3` runs a **single program**; `run_subagent/3` runs a
 **multi-turn agent**. Both forward the same `runtime` into the attach path, so in
 either case `requires` are validated against the selected upstream.
 
-> **Host-supplied side-effect guard (Phase 1).** `run_subagent/3` validates a
-> prelude's `requires` fail-closed per turn, but Phase 1 installs **no**
-> side-effect continuation guard by default. That policy is host-supplied:
-> `mcp_server` installs one; a standalone caller must pass its own
-> `continuation_guard` to `run_subagent/3` to bound side effects, until a core
-> default lands in a later phase. (See §5.)
+> **Default side-effect guard.** `run_subagent/3` validates a prelude's
+> `requires` fail-closed per turn and installs a default side-effect continuation
+> guard. Read-classified upstream calls may continue; write or unknown calls stop
+> before the next turn with `:partial_side_effects` and sanitized
+> `%{matched_calls: [...]}` details. Pass `continuation_guard:` to replace this
+> default with host-owned policy. (See §5.)
 
 If no upstream runtime is selected (e.g. a direct `Lisp.run` with a stub
 `tools:` map), `requires` validation is skipped — the artifact still attaches

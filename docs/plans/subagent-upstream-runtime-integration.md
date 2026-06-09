@@ -43,11 +43,11 @@ Phase 1 has shipped in core:
   keeping its ledger and continuation-guard policy server-side.
 
 Phase 2/3 items remain future work: a convenience facade for selecting/owning an
-upstream runtime for a run, a Phase-3a core default continuation guard driven by
-existing `Turn.tool_calls` evidence, validate-once against a frozen-for-run
-snapshot, and an optional Phase-3b core attempt record surface if audit
-completeness requires it. The broader capability-profile/provider direction is
-tracked in
+upstream runtime for a run, validate-once against a frozen-for-run snapshot, and
+an optional Phase-3b core attempt record surface if audit completeness requires
+it. Phase 3a's core default continuation guard driven by existing
+`Turn.tool_calls` evidence is delivered. The broader capability-profile/provider
+direction is tracked in
 [`capability-prelude-discovery.md`](capability-prelude-discovery.md); this plan
 stays scoped to the concrete upstream provider bridge.
 
@@ -69,21 +69,20 @@ Delivered status notes:
   documents `run_subagent/3` as the multi-turn SubAgent↔upstream seam alongside
   `run_lisp/3`. (§5's cross-turn guarantee wording was already corrected to
   *fail-closed before any side-effecting turn*.)
-- **Standalone side-effect honesty gap (documented, §9 T4; gap stays Phase 3)** —
-  a standalone bridge consumer gets fail-closed `requires` validation but **no**
-  side-effect continuation guard by default (`continuation_guard == nil ⇒
-  :continue`, `loop.ex:478-480`); the stop-after-side-effect policy is mcp-owned
-  until Phase 3a. §8's "safe by default" is a Phase-3a target, not Phase-1
-  reality — the guide §5/§7 now says so (host-supplied-guard caveat). The
-  underlying gap (no core default guard) remains a Phase-3a item.
+- **Default side-effect guard (Phase 3a, delivered)** — standalone bridge
+  consumers now get a core default `continuation_guard` from
+  `Upstream.Eval.run_subagent/3`: read-classified upstream calls continue, while
+  write or unknown calls stop before the next LLM turn with
+  `:partial_side_effects`. Host-supplied `continuation_guard` still completely
+  overrides the default. The guide §5/§7 documents the current default.
 
 **Phase 1.5 (delivered) — see [§9 Implementation Checklist](#9-phase-15--implementation-checklist-do-now-workflow-executable).**
 A small, behaviour-preserving cleanup batch the 2026-06-05 design review surfaced,
 now shipped: the bridge calls the internal `Runner.run/2` (`Definition`-only — §9
-T1), a Definition-contract test (T2) and a no-default-guard canary (T3) are in
-`test/ptc_runner/upstream/eval_run_subagent_test.exs`, and the guide §7/§5 + §8
-honesty gaps are closed (T4). Architecture unchanged; the Phase-2 facade and
-Phase-3 default guard/record-surface work stay deferred. The §6
+T1), a Definition-contract test (T2) and the later Phase-3a default-guard tests
+are in `test/ptc_runner/upstream/eval_run_subagent_test.exs`, and the guide
+§7/§5 + §8 side-effect-guard docs are current (T4). Architecture unchanged; the
+Phase-2 facade and optional Phase-3b record-surface work stay deferred. The §6
 raise-through-bridge fault test and the `:e2e` test remain outstanding — T2/T3
 do not close them.
 
@@ -645,14 +644,14 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
   (which would instead raise later in `Runner.run/2`) fails the test. Locks the
   contract that the bridge re-enters the internal `Runner.run/2`, not the public
   facade.
-- **Standalone no-default-guard canary (§9 T3, delivered):** a bridge run with a
-  *dispatching* upstream call and **no** `continuation_guard` is **not stopped**
-  between turns — it reaches turn 2 and returns. This pins the observable shape of
-  `continuation_guard == nil ⇒ :continue` (no side-effect bounding by default for a
-  standalone caller). Scope kept honest: the dispatched op is a read-only GET and
-  core is effect-blind, so the test pins *"not stopped"*, **not** behaviour against
-  a future Phase-3 effect-classifying default (which would need a write/unknown
-  dispatch to flip loudly). *(Distinct from the still-outstanding
+- **Default side-effect guard (§7 Phase 3a, delivered):** the old no-default
+  canary has been replaced. `eval_run_subagent_test.exs` now pins three core
+  behaviours: unknown/write-effect upstream calls stop continuation with
+  `:partial_side_effects`; read-classified upstream calls reach turn 2; and a
+  host-supplied `continuation_guard` overrides the default. The stop details use
+  the sanitized `%{matched_calls: [%{server, tool, effect}, ...]}` shape and
+  never include upstream args, results, or raw tool-call maps. *(Distinct from
+  the still-outstanding
   raise-through-bridge fault test and `:e2e` test — the canary pins behaviour, it
   does not exercise a raising path or a real LLM.)*
 
@@ -681,10 +680,10 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 
    **Phase 1.5 (delivered, §9):** behaviour-preserving cleanups from the
    2026-06-05 review, now shipped — bridge → internal `Runner.run/2`
-   (`Definition`-only), Definition-contract + no-default-guard canary tests, and the
-   guide §7/§5 + §8 honesty fixes. No architecture change; did not gate or block
-   Phases 2/3. The §6 raise-through-bridge fault test and the `:e2e` test remain
-   outstanding.
+   (`Definition`-only), Definition-contract tests, and the guide §7/§5 + §8
+   seam docs. No architecture change; did not gate or block Phases 2/3. The
+   later Phase-3a default side-effect guard is also now delivered. The §6
+   raise-through-bridge fault test and the `:e2e` test remain outstanding.
 2. **Phase 2 (convenience):** a run-scoped convenience for selecting or owning
    an upstream runtime for the run's duration, plus the thin
    `SubAgent.run(runtime:)` delegating facade (deferred from Phase 1). One
@@ -693,35 +692,35 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    let the convenience API pre-empt the broader profile/provider design in
    `capability-prelude-discovery.md`. The bridge still does **not** need
    `runtime:` lifecycle ownership inside the loop.
-3. **Phase 3a (default side-effect circuit breaker):** move the generic,
-   provider-neutral pieces that are needed for standalone safety into core
-   without adding a new ledger first:
-   - add `PtcRunner.Upstream.Effect.classify(runtime, server, tool)` returning
+3. **Phase 3a (default side-effect circuit breaker, delivered):** the generic,
+   provider-neutral pieces needed for standalone safety now live in core without
+   adding a new ledger:
+   - `PtcRunner.Upstream.Effect.classify(runtime, server, tool)` returns
      `:read | :write | :unknown`; classify OpenAPI from `_ptc.method`, classify
      MCP from its (weak, untrusted) `readOnlyHint`/`destructiveHint` annotations,
      and fail closed on missing/conflicting metadata;
-   - install a default `continuation_guard` inside
-     `Upstream.Eval.run_subagent/3` with `Keyword.put_new/3`, so a host-supplied
-     guard completely owns policy when present;
-   - have the default guard scan `Turn.tool_calls` for upstream `"call"` entries,
-     classify their `{server, tool}`, continue for reads, and stop before the
+   - `Upstream.Eval.run_subagent/3` installs a default `continuation_guard` with
+     `Keyword.put_new/3`, so a host-supplied guard completely owns policy when
+     present;
+   - the default guard scans `Turn.tool_calls` for upstream `"call"` entries,
+     classifies their `{server, tool}`, continues for reads, and stops before the
      next LLM turn after any `:write` or `:unknown` call;
-   - put the default guard builder in a small core module, for example
+   - the default guard builder lives in
      `PtcRunner.Upstream.SideEffectGuard.default(runtime)`, so
      `run_subagent/3` only closes over `runtime` and installs the returned
      closure;
-   - on stop, return `{:stop, {:error, step}}` where `step.fail.reason` is the
-     core atom `:partial_side_effects`; build it with
+   - on stop, it returns `{:stop, {:error, step}}` where `step.fail.reason` is the
+     core atom `:partial_side_effects`; it builds the failure with
      `Step.error(:partial_side_effects, message, next_state.memory,
      %{matched_calls: sanitized_calls})` and then
      `StepAssembler.finalize/3` using `turn_offset: -1` and `is_error: true`.
-     `sanitized_calls` must contain only `server`, `tool`, and `effect`; never
-     include upstream args, results, or raw tool-call maps. A malformed `"call"`
+     `sanitized_calls` contains only `server`, `tool`, and `effect`; it never
+     includes upstream args, results, or raw tool-call maps. A malformed `"call"`
      entry with missing `server` or `tool` is `:unknown` and stops fail-closed;
-   - do not drain `RunContext`, do not thread `:turn` into `RunContext`, do not
-     compute `:args_hash`, and do not add `Step.upstream_calls` for this phase.
+   - it does not drain `RunContext`, does not thread `:turn` into `RunContext`,
+     does not compute `:args_hash`, and does not add `Step.upstream_calls`.
 
-   This delivers the Phase-3 "safe by default" target for cooperative multi-turn
+   This delivered the Phase-3 "safe by default" target for cooperative multi-turn
    bridge runs while preserving the existing host override surface. Word the
    guarantee narrowly: after an **observed completed turn** contains a
    write/unknown upstream call, core issues no further LLM turn. It does not
@@ -765,13 +764,11 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 - Lets `mcp_server` shrink toward its intended role (a stated direction in
   `root-upstream-runtime.md:36-44/69`): configure and expose `ptc_runner` as an
   MCP server, owning only *deployment* policy + protocol/UX (which upstreams,
-  authorization, approval/denial, audit export). Phase 3a moves generic
-  classification and the default stop-after-observed-side-effect guard to core —
-  after which standalone users will be safe by default for cooperative multi-turn
-  bridge runs without reimplementing that policy. **Phase 1 ships fail-closed
-  `requires` validation standalone, but not the side-effect continuation guard**
-  (`continuation_guard == nil ⇒ :continue`); a standalone caller must supply its
-  own `continuation_guard` until the Phase-3a core default lands.
+  authorization, approval/denial, audit export). Phase 3a has moved generic
+  classification and the default stop-after-observed-side-effect guard to core:
+  standalone users are now safe by default for cooperative multi-turn bridge
+  runs, while hosts can still replace the default with their own
+  `continuation_guard`.
 - Keeps the SubAgent loop's deliberate "just functions" decoupling intact: the
   only new coupling is a single, opaque `:runtime` handle passthrough behind a
   bridge, not lifecycle ownership woven through the loop.
@@ -781,18 +778,19 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
 ## 9. Phase 1.5 — Implementation Checklist (do now, workflow-executable)
 
 > **Status: T1–T5 delivered.** T1 (bridge → internal `Runner.run/2`, `Definition`-only),
-> T2/T3 (Definition-contract + no-default-guard canary in
+> T2/T3 (Definition-contract + the now-superseded no-default-guard canary in
 > `test/ptc_runner/upstream/eval_run_subagent_test.exs`), T4 (guide §5/§7 seam +
-> host-guard caveat), and T5 (this reconciliation) shipped together. The
+> side-effect-guard caveat), and T5 (this reconciliation) shipped together. The
 > verification gate (precommit + mcp `agentic_contract_test.exs` + codex review)
 > passed. The §6 raise-through-bridge fault test and the `:e2e` test stay
 > **outstanding** — they are explicitly *not* closed by T2/T3.
 
 **Scope.** Behaviour-preserving cleanups + honesty/test gaps the 2026-06-05
 design review surfaced. **No architecture change.** The Phase-2 facade and the
-Phase-3 default guard/record-surface work stay deferred. Each task is self-contained with an exact
-target, the change, and an acceptance check, so it can be handed to a Claude
-workflow (suggested decomposition at the end).
+optional Phase-3b record-surface work stay deferred; the Phase-3a default guard
+is delivered. Each task is self-contained with an exact target, the change, and
+an acceptance check, so it can be handed to a Claude workflow (suggested
+decomposition at the end).
 
 ### Tasks
 
@@ -821,26 +819,24 @@ workflow (suggested decomposition at the end).
 - *Accept:* new test green.
 - *Deps:* after T1. Shares the test file with T3 → one agent owns both.
 
-**T3 — Standalone no-default-guard canary (test).**
+**T3 — Standalone default side-effect guard (test, superseded by Phase 3a).**
 - *File:* `test/ptc_runner/upstream/eval_run_subagent_test.exs`.
-- *Change:* a bridge run with a *dispatching* write-effect upstream call (reuse
-  `start_http_fixture` / `examples/ptc_repl_dummy_upstream`) and **no**
-  `continuation_guard` **continues** — assert no `partial_side_effects` stop.
-  Comment: pins today's `continuation_guard == nil ⇒ :continue` (`loop.ex:478-480`)
-  so the Phase-3a core default (stop-after-side-effect) flips this test loudly.
-- *Accept:* new test green; asserts continuation, not stop.
+- *Change:* the old Phase-1.5 no-default canary has been flipped. A bridge run
+  with no host guard now stops after write/unknown upstream calls, continues
+  after read-classified calls, and still lets a host guard override the default.
+- *Accept:* tests green; stop details are
+  `%{matched_calls: [%{server, tool, effect}, ...]}` with no args/results.
 - *Deps:* same test file as T2 (same owning agent).
 
 **T4 — Guide honesty + the `run_subagent/3` seam (docs).**
 - *File:* `docs/guides/capability-prelude.md`.
-- *Change:* §7 — add `Upstream.Eval.run_subagent/3` as the multi-turn
+- *Change:* §7 names `Upstream.Eval.run_subagent/3` as the multi-turn
   SubAgent↔upstream seam (the analogue of `run_lisp/3`, the supported multi-turn
-  entry today). §5/§7 — add the host-supplied-guard caveat:
-  > Phase 1 validates prelude `requires` fail-closed. Side-effect continuation
-  > policy is host-supplied in Phase 1; `mcp_server` installs one, standalone
-  > callers must pass their own `continuation_guard` until the Phase 3 core
-  > default lands.
-- *Accept:* §7 names `run_subagent/3`; the caveat is present.
+  entry today). §5/§7 now documents the delivered default side-effect guard:
+  reads continue, write/unknown calls stop with `:partial_side_effects`, and
+  hosts can pass `continuation_guard:` to replace the default.
+- *Accept:* §7 names `run_subagent/3`; default guard behavior and host override
+  are documented.
 - *Deps:* none. File-disjoint from T1 (parallel-safe).
 
 **T5 — Plan reconciliation (docs, last).**
@@ -864,8 +860,9 @@ workflow (suggested decomposition at the end).
 ### Out of scope for Phase 1.5 (stay deferred)
 
 - The `SubAgent.run(runtime:)` → bridge **facade** (Phase 2).
-- A core default `continuation_guard` / effect classification (Phase 3a) and any
-  record-before-dispatch ledger (optional Phase 3b, no longer the Phase 3a gate).
+- A record-before-dispatch ledger remains optional Phase 3b work if audit
+  completeness requires it. The core default `continuation_guard` / effect
+  classification from Phase 3a is now delivered.
 - The **raise-through-bridge** fault test and the **`:e2e`** test (still §6
   outstanding — track, don't fold into Phase 1.5).
 

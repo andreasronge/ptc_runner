@@ -11,6 +11,14 @@ remaining-contracts note. The active architecture source is
 runtime hardening is the closed-context guard, while `PtcRunner.Lisp.RunEnv` is a
 deferred typed-projection refactor.
 
+Current status: root now also owns the provider-neutral default continuation
+guard for `PtcRunner.Upstream.Eval.run_subagent/3`. The guard classifies
+completed upstream `"call"` entries from `Turn.tool_calls`; read-classified
+calls may continue, while write or unknown calls stop before the next LLM turn
+with `:partial_side_effects` and sanitized
+`%{matched_calls: [%{server, tool, effect}, ...]}` details. Hosts can still
+replace this policy by passing their own `continuation_guard`.
+
 The older provider-owned Lisp convenience shape in this document should be read
 as superseded. `PtcRunner.Lisp` remains the owner of evaluation; upstream should
 stay a thin projection/bridge over `PtcRunner.Upstream.RunContext`, with a future
