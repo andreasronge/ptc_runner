@@ -36,6 +36,7 @@ defmodule PtcRunner.Upstream.Eval do
 
     try do
       result = fun.(context)
+      RunContext.mark_closed(context)
       records = RunContext.drain_calls(context)
       {result, records}
     after

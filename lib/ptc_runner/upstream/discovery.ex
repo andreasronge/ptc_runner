@@ -7,9 +7,15 @@ defmodule PtcRunner.Upstream.Discovery do
   @spec build(RunContext.t()) :: (atom(), list() -> term())
   def build(%RunContext{} = context) do
     fn operation, args ->
-      case RunContext.check_catalog_cap(context) do
-        :proceed -> dispatch(context, operation, args) |> enforce_result_limit(context)
-        :cap_exhausted -> {:world_fault, :catalog_cap_exhausted}
+      case RunContext.ensure_open(context) do
+        :ok ->
+          case RunContext.check_catalog_cap(context) do
+            :proceed -> dispatch(context, operation, args) |> enforce_result_limit(context)
+            :cap_exhausted -> {:world_fault, :catalog_cap_exhausted}
+          end
+
+        {:error, :run_context_closed} ->
+          {:world_fault, :run_context_closed}
       end
     end
   end

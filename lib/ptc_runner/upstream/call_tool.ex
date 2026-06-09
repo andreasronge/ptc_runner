@@ -18,7 +18,14 @@ defmodule PtcRunner.Upstream.CallTool do
     %{"call" => fn args -> call(context, args) end}
   end
 
-  defp call(%RunContext{} = context, args) when is_map(args) do
+  defp call(%RunContext{} = context, args) do
+    case RunContext.ensure_open(context) do
+      :ok -> call_open(context, args)
+      {:error, :run_context_closed} -> Result.error(:run_context_closed, "run_context_closed")
+    end
+  end
+
+  defp call_open(%RunContext{} = context, args) when is_map(args) do
     {server, tool, call_args} = validate_args!(args, context)
     check_configured!(context, server, tool)
     check_args_encodable!(server, tool, call_args)
@@ -30,7 +37,7 @@ defmodule PtcRunner.Upstream.CallTool do
     end
   end
 
-  defp call(_context, other) do
+  defp call_open(_context, other) do
     raise_fault!("tool/call requires a map, got #{inspect(other)}")
   end
 

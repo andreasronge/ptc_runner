@@ -12,6 +12,7 @@ defmodule PtcRunner.Upstream.Result do
           | :timeout
           | :response_too_large
           | :cap_exhausted
+          | :run_context_closed
 
   @type t :: {:ok, json()} | {:error, reason(), String.t()}
 

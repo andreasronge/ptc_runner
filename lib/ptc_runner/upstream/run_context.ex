@@ -10,7 +10,8 @@ defmodule PtcRunner.Upstream.RunContext do
     :collector,
     :call_counter,
     :catalog_op_counter,
-    :limits
+    :limits,
+    :closed
   ]
 
   @spec new(term(), keyword()) :: {:ok, struct()} | {:error, term()}
@@ -22,16 +23,35 @@ defmodule PtcRunner.Upstream.RunContext do
          collector: collector,
          call_counter: :atomics.new(1, signed: false),
          catalog_op_counter: :atomics.new(1, signed: false),
-         limits: limits(runtime, opts)
+         limits: limits(runtime, opts),
+         closed: :atomics.new(1, signed: false)
        }}
     end
+  end
+
+  @spec ensure_open(struct()) :: :ok | {:error, :run_context_closed}
+  def ensure_open(%__MODULE__{closed: closed}) do
+    case :atomics.get(closed, 1) do
+      0 -> :ok
+      _ -> {:error, :run_context_closed}
+    end
+  end
+
+  @doc false
+  @spec mark_closed(struct()) :: :ok
+  def mark_closed(%__MODULE__{closed: closed}) do
+    :atomics.put(closed, 1, 1)
+    :ok
   end
 
   @spec drain_calls(struct()) :: [map()]
   def drain_calls(%__MODULE__{collector: collector}), do: Collector.drain(collector)
 
   @spec close(struct()) :: :ok
-  def close(%__MODULE__{collector: collector}), do: Collector.stop(collector)
+  def close(%__MODULE__{collector: collector} = context) do
+    mark_closed(context)
+    Collector.stop(collector)
+  end
 
   @spec record(struct(), map()) :: :ok
   def record(%__MODULE__{collector: collector}, entry), do: Collector.record(collector, entry)

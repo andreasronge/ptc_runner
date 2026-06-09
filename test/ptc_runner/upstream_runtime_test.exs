@@ -846,9 +846,69 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     try do
       {:ok, context} = Eval.run_context(runtime)
 
+      assert :ok = RunContext.ensure_open(context)
       assert :ok = RunContext.close(context)
       refute Process.alive?(context.collector.pid)
       assert :ok = RunContext.close(context)
+      assert {:error, :run_context_closed} = RunContext.ensure_open(context)
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "stale upstream tool closures fail closed before dispatch" do
+    {:ok, server} =
+      start_http_fixture(%{
+        "traces" => [
+          %{"id" => "trace-1", "org_id" => "acme"}
+        ]
+      })
+
+    {:ok, runtime} =
+      Runtime.start_link(config: config(base_url: server.base_url, allow_insecure_http: true))
+
+    try do
+      {:ok, context} = Eval.run_context(runtime)
+      call = Eval.eval_options(context)[:tools]["call"]
+
+      assert :ok = RunContext.close(context)
+
+      assert call.(%{server: "observatory", tool: "list-traces", args: %{org_id: "acme"}}) ==
+               %{ok: false, reason: :run_context_closed, message: "run_context_closed"}
+
+      refute_receive {:http_fixture_request, _request}, 100
+      assert [] = RunContext.drain_calls(context)
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "stale upstream tool closures fail closed before argument validation" do
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    try do
+      {:ok, context} = Eval.run_context(runtime)
+      call = Eval.eval_options(context)[:tools]["call"]
+
+      assert :ok = RunContext.close(context)
+
+      assert call.(:not_a_map) ==
+               %{ok: false, reason: :run_context_closed, message: "run_context_closed"}
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "stale upstream discovery closures fail closed" do
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    try do
+      {:ok, context} = Eval.run_context(runtime)
+      discovery_exec = Eval.eval_options(context)[:discovery_exec]
+
+      assert :ok = RunContext.close(context)
+
+      assert discovery_exec.(:servers, []) == {:world_fault, :run_context_closed}
     after
       Runtime.stop(runtime)
     end
