@@ -827,9 +827,20 @@ The following details remain implementation choices, not contract blockers:
   `(tool/call 'observatory/list-traces {:limit 3})` can be implemented without
   parser/runtime changes. The map form should remain the implementation
   fallback until that is confirmed.
-- Where root call records should appear outside MCP. They may remain a
-  `RunContext.drain_calls/1` side channel, but tracing and subagent loops may
-  want a first-class `step.upstream_calls` field later.
+- Where root call records should appear outside MCP. **Resolved (2026-06-09):**
+  they stay the `RunContext.drain_calls/1` side channel, surfaced as the
+  `{result, records}` tuple from `run_subagent/3` / `run_lisp_with_records/3` —
+  this is sufficient and is the single source of truth. Do **not** add a
+  first-class `step.upstream_calls` field now: the only consumer is MCP (which
+  discards `_records` and keeps its own ledger), and a `%Step{}` field would
+  create a second source of truth against `Upstream.Result.decorate_payload/2`.
+  Promote to a `Step.upstream_calls` field (populated *from* the drained records,
+  never in parallel) only when a `%Step{}` flows where the tuple does not — the
+  Phase-2 `SubAgent.run(runtime:)` facade, child-step aggregation, or a
+  Step-serializing trace consumer. The same trigger set governs the broader
+  audit-complete core record surface; see the **Phase 3b decision (2026-06-09:
+  defer)** in
+  [`subagent-upstream-runtime-integration.md`](subagent-upstream-runtime-integration.md) §7.
 - Whether the namespace remains `PtcRunner.Upstream` or is renamed
   consistently before implementation to avoid the audit-upstream terminology
   collision.

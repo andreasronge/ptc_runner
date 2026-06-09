@@ -45,7 +45,8 @@ Phase 1 has shipped in core:
 Phase 2/3 items remain future work: a convenience facade for selecting/owning an
 upstream runtime for a run, validate-once against a frozen-for-run snapshot, and
 an optional Phase-3b core attempt record surface if audit completeness requires
-it. Phase 3a's core default continuation guard driven by existing
+it (**decision 2026-06-09: deferred — see the [Phase 3b decision](#phase-3b-decision-2026-06-09--defer)
+block in §7**). Phase 3a's core default continuation guard driven by existing
 `Turn.tool_calls` evidence is delivered. The broader capability-profile/provider
 direction is tracked in
 [`capability-prelude-discovery.md`](capability-prelude-discovery.md); this plan
@@ -744,6 +745,135 @@ are delivered — see `test/ptc_runner/upstream/eval_run_subagent_test.exs`,
    per-turn for "records since last turn," it must re-accumulate into the
    bridge's returned `records` or that public contract silently becomes `[]`.
    (Phase 3a is immune — it reads the completed `Turn`, never drains.)
+
+   <a id="phase-3b-decision-2026-06-09--defer"></a>
+   #### Phase 3b decision (2026-06-09): **DEFER**
+
+   A design investigation (5 parallel source audits + adversarial verification)
+   confirms 3b is, today, **MCP-ledger-retirement only** — there is no
+   correctness reason to build a core attempt-record surface yet. Build nothing
+   in core until a trigger below fires.
+
+   **Why defer (source-verified):**
+
+   - **No consumer.** The only non-test caller of `Eval.run_subagent/3` is
+     `mcp_server/.../agentic.ex:174`, and it **discards** the bridge records
+     (`{result, _records}`), using its own ledger instead. `ptc_viewer` (a disk
+     JSONL reader) and `demo` consume zero upstream records. The core
+     `{result, records}` surface is exercised only by core tests asserting
+     `RunContext`-native fields — never `effect`/`turn`/`args_hash`. The total
+     absence of any record consumer is itself the decisive defer signal.
+   - **The ledger works and is test-locked.** MCP closes the holes server-side
+     via **pre-dispatch** `record_attempt` (`ledger.ex:60-78`) +
+     `call_with_ledger`'s rescue/reraise (`agentic.ex:205-217`); the in-flight
+     block is locked by `agentic_contract_test.exs:75` (`{:attempted_during_dispatch,
+     true}`). No TODO/known-bug/audit-hole marker near `ledger.ex`.
+   - **The holes are real but bite nobody.** `CallTool.dispatch` records
+     POST-dispatch only (`call_tool.ex:151/165`, after `Runtime.call_tool`
+     returns). So an upstream write can side-effect and then be lost: **H1** a
+     raise in the post-`{:ok,value}` helpers (realistically only
+     `Runtime.scrub`, a `GenServer.call` that `:exit`s if the Runtime died)
+     unwinds past `RunContext.record`; **H2** a sandbox timeout / heap kill —
+     an **untrappable** `Process.exit(pid, :kill)` (`sandbox.ex`) — destroys the
+     worker mid-dispatch before the record message reaches the (separate-process)
+     Collector. H3 is not a third hole — it is the shared window H1/H2 exploit.
+     Worse, on a raise *through* the bridge, `with_run_context`'s `after
+     RunContext.close` runs `Collector.stop` (**destroy, no drain**) and
+     re-raises (`eval.ex:42-44`, `collector.ex:39-45`), losing *all* records.
+     The upstream-side **call timeout is NOT a hole** — transports catch `:exit`
+     and return `{:error, :timeout, _}`, which `dispatch` records via
+     `error_entry`. These holes only bite a standalone (non-MCP) consumer that
+     reads `run_subagent/3`'s records as an audit trail — none exists; MCP plugs
+     all of them. The H2 fix is structural (a write into a separate process
+     before dispatch), which is exactly why MCP's separate-process ledger closes
+     it and a future core pre-dispatch record would too.
+   - **Building now adds cost for a hypothetical.** The minimal correct design
+     re-introduces the guard↔record coupling Phase 3a deliberately removed, needs
+     a non-destructive attempt reader the append-only Collector lacks, and
+     **still** would not close the raise-through-bridge hole without an extra
+     drain-in-`after`.
+
+   **Trigger to implement (any one):**
+
+   1. a committed **non-MCP consumer** of `run_subagent/3` (or
+      `run_lisp_with_records/3`) that reads `records` and needs
+      killed-in-flight / raised writes audited;
+   2. the **Phase-2 `SubAgent.run(runtime:)` facade** lands returning only
+      `{:ok, step}` (records no longer reach callers via the tuple) — forces a
+      `Step.upstream_calls` surface;
+   3. **child/nested SubAgents** whose upstream calls must roll up to a parent
+      that sees only the child `%Step{}`;
+   4. a decision to **delete the MCP decorator** for maintenance reasons
+      (e.g. to stop maintaining two effect classifiers). **Do not execute this
+      trigger before migration Steps 1–2 below land**, or retiring the ledger
+      *regresses* the in-flight-killed-write continuation block (a genuine,
+      operator-config-reachable safety property — `retry_turns > 0` /
+      `max_turns > 1` — that the pre-dispatch ledger provides and the Phase-3a
+      `Turn`-reading guard does not).
+
+   **When triggered — minimal record surface (do not pre-build):** core records
+   gain only `"id"` (a `make_ref` correlation token) + `"effect"`
+   (`Upstream.Effect.classify`, captured pre-dispatch on the `:proceed` arm so an
+   interrupted write keeps its classification) + an `"attempted"` status value.
+   Keep `args_hash` **OUT** (SHA-256 read by no consumer anywhere; if MCP wants
+   byte parity, compute it in a thin MCP-side projection), `turn` **OUT** (it is
+   the hardcoded literal `1` at `agentic.ex:223`, not a real signal — let the MCP
+   projection stamp it), and `Step.upstream_calls` **OUT** (records already reach
+   root via the tuple; a `%Step{}` field would be a second source of truth — the
+   Q6 hazard). Use **fork (a)**: two correlated rows (`:attempted` + terminal),
+   merged by a stateless end-of-run projection — the only design that keeps the
+   single destructive drain (`collector.ex:55-57`) and the `{result, records}`
+   contract without giving the append-only Collector an upsert. The MCP wire
+   becomes a pure stateless projection over the drained core records.
+
+   **When triggered — safe migration order (retire the ledger without
+   double-counting or regression):**
+
+   1. Add core pre-dispatch recording in `CallTool.dispatch` (write an
+      `:attempted` row with `id`+`effect` *before* `Runtime.call_tool`; finalize
+      to `:ok`/`:error` after; finalize to `:error` on raise via `try/rescue`)
+      **plus** a non-destructive `RunContext` attempt reader. Lock with a core
+      test that an attempt exists mid-dispatch and survives a transport raise.
+      MCP unchanged, ledger still authoritative → **no double-count yet.**
+   2. Add `SideEffectGuard.from_records/1` and default the bridge to it; lock the
+      in-flight block at the guard level (mirror the `{:attempted_during_dispatch,
+      true}` assertion). `put_new` at `eval.ex:130` lets MCP's explicit guard
+      still win → no behaviour change.
+   3. *(The only step that retires the ledger as a counting site — do
+      atomically.)* Replace `continuation_guard(ledger)` with the core
+      record-aware guard, and **re-source both** `side_effecting_attempted?` and
+      `entries` from the drained core records in one change (`agentic.ex:475-477`
+      reads both). Stop passing `on_upstream_call`; delete `call_with_ledger` /
+      `root_tools_with_ledger`; move the `agentic_contract_test.exs:75` lock onto
+      the core path.
+   4. Pair fork (a) with **draining-in-`after`** (or a bridge catch-and-attach)
+      so a raise-through-bridge still surfaces records; ship the outstanding §6
+      raise-through-bridge fault test.
+   5. Delete the `Ledger` module once unreferenced.
+
+   Verify with `mix precommit` + the mcp `agentic_contract_test` + `codex review`
+   at each step. The three counting/observation sites have **disjoint
+   authority** — keep them so: `RunContext` call-cap atomics own *rate limiting*
+   only; the (retiring) ledger owns *side-effect policy + wire projection*;
+   Phase-3a's `Turn.tool_calls` guard stays *guard-only* and must never be
+   projected to the audit surface (that would be a third count).
+
+   **Caveat — byte-for-byte parity is asymmetric (correcting an over-strong
+   reading).** Re-pointing the MCP `upstream_calls[]` (ledger-entries shape) onto
+   core records is straightforward (only `effect`/`turn`/`args_hash` differ, all
+   stampable). But the `upstream_results[]` `result_overview` (shape/preview) is
+   built from the **raw** upstream value in the ledger (`agentic.ex:296-305`) and
+   from the **scrubbed** value on the core path
+   (`call_tool.ex:146-149` → `Runtime.scrub`). The raw value is discarded after
+   dispatch and is not in the core record, so a thin adapter **cannot** reproduce
+   today's raw-sourced preview bytes; a core-sourced projection would shift
+   preview/shape from raw to `[REDACTED]`. Treat this as a deliberate decision,
+   not a silent swap: the migration must **explicitly choose raw-vs-scrubbed
+   preview semantics** (scrubbed is arguably the safer default) and lock it with a
+   test on a *credentialed* runtime — none exists today, and whether the current
+   raw-sourced preview is independently redacted at the MCP envelope/transport
+   layer (the `PtcRunnerMcp.Credentials` ETS set) is itself unverified and must be
+   confirmed before relying on either behaviour.
 
 5. **Phase 3c (snapshot/capability convergence):** validate `requires` once at
    run-context open against a frozen-for-the-run snapshot, removing per-turn
