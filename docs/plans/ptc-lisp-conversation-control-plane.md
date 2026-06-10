@@ -10,6 +10,35 @@ The core question is: what would it look like if PTC-Lisp could inspect and
 invoke the same low-level capabilities that Elixir and MCP callers already use,
 including sessions, LLM calls, SubAgents, chat history, and prior debug traces?
 
+## Why This Exists
+
+The concrete goal is to make PTC-Lisp a durable working memory and control
+surface for analysis tasks that are too large or iterative for one MCP tool call
+or one LLM context window.
+
+Simple MCP calls work well for request/response actions. They are weaker when a
+task needs an evolving workspace: load data, define filters, save intermediate
+hypotheses, ask an LLM about a bounded subset, refine the program, compare with
+earlier results, and resume or fork the investigation later. Without a
+Lisp-facing control plane, that state lives in client chat context, temporary
+files, or opaque MCP session state.
+
+For example, log analysis can become a shared programmatic workspace:
+
+```clojure
+(def errors (filter error? logs))
+(def by-service (group-by :service errors))
+(def suspicious (filter spike? by-service))
+
+(chat/send "Explain the common failure pattern"
+  {:vars ['suspicious]
+   :sample-limit 20})
+```
+
+The useful product shape is not a vague agentic operating system. It is a
+programmable, inspectable, resumable analysis session for debugging, log
+analysis, data exploration, and agent replay.
+
 ## Starting Point
 
 `ptc_runner` already has several adjacent pieces:
