@@ -464,10 +464,10 @@ defmodule PtcRunner.SubAgent.Validator do
     end
   end
 
-  # Reserve `lisp_eval` as a tool name globally — see Phase 1 of
-  # docs/plans/ptc-lisp-tool-call-transport.md (R4). The reservation applies
-  # regardless of `ptc_transport` value or `output` mode so that adding the
-  # transport in a later phase cannot collide with a user-defined tool.
+  # Reserve `lisp_eval` as a tool name globally (transport reservation R4). The
+  # reservation applies regardless of `ptc_transport` value or `output` mode so
+  # that adding the transport in a later phase cannot collide with a user-defined
+  # tool.
   defp validate_reserved_tool_names!(opts) do
     case Keyword.fetch(opts, :tools) do
       {:ok, tools} when is_map(tools) ->

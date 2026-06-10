@@ -1,62 +1,13 @@
 # Capability Preludes and Profiles — Discussion Notes
 
-**Status:** V1 capability preludes are implemented on `main` as of 2026-06-05.
-This document is now discussion material for the next design step. The
-user-facing V1 guide is
-[`docs/guides/capability-prelude.md`](../guides/capability-prelude.md).
+**Status:** V1 shipped (see guide); this doc is forward-looking design for
+capability profiles/credentials/providers.
 
-The old V1 requirements are intentionally compressed here. The useful question
-now is how to evolve from "preludes wrap configured upstream tools" toward a
-more general capability model without blurring the security boundary.
-
-## Implemented Baseline
-
-V1 shipped a stateless, deployment-authored prelude mechanism:
-
-- compiled prelude artifacts and export records:
-  `PtcRunner.Lisp.Prelude`, `PtcRunner.Lisp.Prelude.Export`, and
-  `PtcRunner.Lisp.Prelude.Compiler`;
-- direct attachment through `PtcRunner.Lisp.run/2` with `prelude:`;
-- SubAgent attachment through `runtime_prelude:`;
-- REPL attachment through `mix ptc.repl --prelude`;
-- protected namespace/export analysis, evaluator resolution, private helper
-  isolation, prompt inventory rendering, and trace summaries;
-- discovery through `doc`, `dir`, `meta`, `apropos`, `ns-publics`, `all-ns`,
-  and `ns-name`;
-- upstream-backed `requires` validation when a selected upstream runtime is
-  attached, including the multi-turn SubAgent upstream bridge.
-
-The V1 contract is deliberately narrow:
-
-- preludes define curated Lisp-facing namespaces, constants, functions,
-  docstrings, and metadata;
-- preludes do not define upstream endpoints, credentials, grants, or sandbox
-  authority;
-- public exports may wrap existing tool surfaces such as `(tool/call ...)` and
-  typed `tool/name` calls;
-- `requires` entries such as `"upstream:crm/get_user"` are validated against the
-  selected upstream runtime at attach time;
-- prelude metadata is advisory. Runtime facts and host policy are authoritative.
-
-## Current Shape
-
-Today there are two separate ideas that are easy to conflate:
-
-1. **Capability prelude:** a non-secret, user-facing API layer. It gives the
-   agent curated functions such as `crm/get-user`, protects those namespaces, and
-   makes them discoverable.
-2. **Upstream runtime:** a concrete provider runtime under
-   `PtcRunner.Upstream.*`. It owns configured OpenAPI/MCP upstreams,
-   credentials, transport clients, catalog data, redaction, limits, and per-run
-   `RunContext` wiring.
-
-`PtcRunner.Upstream.Eval.run_lisp/3` and `run_subagent/3` are upstream adapters
-around the lower-level `Lisp.run/2` / SubAgent runner paths. They create a
-per-run upstream context, expose `tool/call` and discovery hooks, thread the
-runtime into prelude attachment, and drain upstream call records.
-
-This is useful, but it should not be mistaken for a generic runtime abstraction.
-It is the first concrete provider integration.
+V1 capability preludes have SHIPPED; see the guide
+[`docs/guides/capability-prelude.md`](../guides/capability-prelude.md)
+(implemented under `lib/ptc_runner/lisp/prelude/*`). This doc covers the next
+design step: how to evolve from "preludes wrap configured upstream tools" toward
+a more general capability model without blurring the security boundary.
 
 ## Proposed Direction: Capability Profiles
 

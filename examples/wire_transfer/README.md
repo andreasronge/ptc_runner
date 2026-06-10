@@ -178,7 +178,3 @@ journal = Map.put(step.journal, "manager_decision_bob_5000", :rejected)
 step.return
 # => %{status: :cancelled, msg: "Hold released"}
 ```
-
-## See Also
-
-- [v0.7 Plan: Journaled Task System](../../docs/plans/v0.7-journaled-tasks.md)

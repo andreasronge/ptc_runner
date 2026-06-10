@@ -1,8 +1,9 @@
 # Run Environment and Future Capability Runtime
 
-**Status:** near-term closed-context guard delivered. The remaining material is
-durable option-classification guidance plus deferred `PtcRunner.Lisp.RunEnv` and
-future runtime/kernel design notes.
+**Status:** the closed-context borrowed-closure lifetime guard has SHIPPED. The
+`PtcRunner.Lisp.RunEnv` refactor is deferred — this doc is the active
+architecture source for it (durable option-classification guidance plus the
+deferred `RunEnv` struct/API and future runtime/kernel design notes).
 
 ## Goal
 
@@ -53,10 +54,10 @@ Upstream RunContext
 Three run nouns must stay distinct:
 
 - `PtcRunner.Lisp.RunEnv` would be the input surface for one Lisp evaluation. It
-  would not own lifecycle. It is deferred in the near-term guard PR.
+  would not own lifecycle. It is deferred (this doc is its design source).
 - `PtcRunner.Upstream.RunContext` is the closeable upstream lifecycle boundary.
-  It owns counters, collectors, and borrowed closure validity. This is the
-  near-term implementation target.
+  It owns counters, collectors, and borrowed closure validity. Its close-boundary
+  guard has shipped.
 - Future names such as `RunScope` or `PtcRunner.Runtime.*` are deferred and
   non-binding.
 
@@ -349,100 +350,16 @@ so unrecognized keys are dropped (as today), not raised.
 | Other SubAgent builders (`runner.ex`, `compiler.ex`, `tool_normalizer.ex`) | Independent flat opts | Audit together before any SubAgent `env:` migration to avoid reintroducing route divergence. |
 | `mcp_server` snapshot eval (`PtcRunnerMcp.Sessions.run_snapshot` → `Session.lisp_opts/3`, sessions.ex:296 / session.ex:779) | Independent flat opts builder | Stay as-is; out-of-scope-but-verify-still-compiling (the closed-context guard protects this path regardless, since it lives in the CallTool/Discovery closures). |
 
-## Delivered: Borrowed Closure Lifetime
+## Delivered: Borrowed Closure Lifetime (shipped)
 
-`PtcRunner.Upstream.RunContext` produces borrowed closures for upstream tool calls
-and discovery. Today those closures travel through flat `tools:` /
-`discovery_exec:` options; a future `RunEnv` would carry the same borrowed
-closures in typed fields. Borrowed closures that start after the close boundary
-fail closed instead of dispatching upstream side effects.
-
-`RunEnv` is a by-value evaluation input, not a lifecycle owner. If a caller stores
-or reuses a `RunEnv`, it can keep borrowed closures, atomics references, and the
-upstream runtime handle alive until normal BEAM garbage collection. This is
-allowed but outside the intended one-evaluation use; the delivered
-closed-context guard is the safety boundary for stale borrowed closures.
-
-Delivered implementation:
-
-- `PtcRunner.Upstream.RunContext` owns a per-context closed flag,
-  `ensure_open/1`, idempotent `close/1`, and `mark_closed/1`.
-- `PtcRunner.Upstream.CallTool` checks `ensure_open/1` before argument
-  validation, cap accounting, schema checks, records, or dispatch.
-- `PtcRunner.Upstream.Discovery` checks `ensure_open/1` before catalog cap
-  accounting or dispatch.
-- `PtcRunner.Upstream.Eval.with_run_context/3` marks the context closed before
-  draining records and always closes in `after`, including raise paths.
-- Closed tool calls return `Result.error(:run_context_closed,
-  "run_context_closed")`; closed discovery calls return
-  `{:world_fault, :run_context_closed}`.
-- `:run_context_closed` is part of `PtcRunner.Upstream.Result.reason/0`.
-
-### Historical Implementation Notes
-
-The following bullets record the reviewed V1 implementation constraints that led
-to the delivered guard. Treat them as historical guardrails, not pending work:
-
-1. Add a **per-context** `:closed` atomic to `%PtcRunner.Upstream.RunContext{}`:
-   - 1a. Add `:closed` to the defstruct bare-atom field list
-     (run_context.ex:8-14):
-     `defstruct [:runtime, :collector, :call_counter, :catalog_op_counter, :limits, :closed]`.
-   - 1b. Allocate it **inside `new/1`** alongside the existing counters
-     (run_context.ex:19-27): add `closed: :atomics.new(1, signed: false)` to the
-     returned `%__MODULE__{...}`.
-
-   Do **not** write `closed: :atomics.new(1, signed: false)` as a `defstruct`
-   default. A Reference is not an escapable compile-time term (compile error:
-   `cannot escape #Reference`), and a default would be one ref shared by every
-   context — closing one would close all, breaking `run_subagent` and concurrent
-   sessions. Allocating per-context in `new/1` mirrors
-   `call_counter`/`catalog_op_counter` and is what makes the by-value struct
-   capture (the precondition this guarantee depends on) actually hold.
-
-2. Add `RunContext.ensure_open/1 :: :ok | {:error, :run_context_closed}`,
-   reading the flag via `:atomics.get(ctx.closed, 1)` (0 = open).
-
-3. `RunContext.close/1` sets the flag **before** stopping the collector, using
-   `:atomics.put(ctx.closed, 1, 1)` (idempotent — NOT `add_get`, which is for the
-   monotonic cap counters at run_context.ex:45,60). `close/1` must be safe to call
-   twice.
-4. `PtcRunner.Upstream.Eval.with_run_context/3` must preserve today's manual
-   drain-before-stop timing but should cross the close boundary before draining:
-   mark the context closed, drain records, then stop the collector. This prevents
-   any new borrowed closure call from starting during the drain window while
-   preserving already-recorded in-scope calls. Do not close by stopping the
-   collector first.
-5. `PtcRunner.Upstream.CallTool.call/2` calls `ensure_open/1` as its first
-   operation for **all argument shapes**, including non-map args. Do not place the
-   guard only in the current map-only function clause (call_tool.ex:21), or a
-   stale closure invoked with a non-map would still raise `ExecutionError` instead
-   of returning `:run_context_closed`. The check must happen before
-   `validate_args!` (which raises at call_tool.ex:173-175), counter increments,
-   schema checks, or dispatch — returning early **without touching the cap
-   counter**, so no spurious cap-audit record is emitted.
-6. `PtcRunner.Upstream.Discovery`'s closure calls `ensure_open/1` before
-   `check_catalog_cap` or dispatch, returning early on closed.
-7. Closed tool calls MUST return
-   `Result.error(:run_context_closed, "run_context_closed")` (distinct from
-   `:cap_exhausted`).
-8. Closed discovery calls MUST return `{:world_fault, :run_context_closed}`
-   (distinct from `:catalog_cap_exhausted`).
-
-Add `:run_context_closed` to `PtcRunner.Upstream.Result.reason/0`; otherwise the
-new `Result.error/2` shape is runtime-valid but out of sync with the public type
-and Dialyzer specs.
-
-This atomic check is a start-boundary guard, not a transaction around dispatch.
-It does not cancel an upstream call that already passed `ensure_open/1` before
-another process closes the context. If a future requirement needs "no dispatch may
-race with close" rather than "no call may start after close", add an active-call
-lease/refcount protocol around dispatch before claiming that stronger guarantee.
-
-Use the atomic flag, not `Process.alive?(collector.pid)`: it is the intentional
-authority signal, decoupled from collector liveness. `Collector.record/2` is a
-raw `send/2` to a possibly-dead pid (collector.ex:27-30) that silently no-ops, so
-no `Process.alive?` check or lock is needed — the atomic flag is the sole
-authority.
+The closed-context borrowed-closure lifetime guard described in this plan has
+SHIPPED — see `lib/ptc_runner/upstream/{run_context,call_tool,discovery,eval}.ex`
+and its tests. Borrowed upstream closures (`tools:` / `discovery_exec:`) that
+start after the `RunContext` close boundary now fail closed: closed tool calls
+return `Result.error(:run_context_closed, "run_context_closed")`, closed
+discovery returns `{:world_fault, :run_context_closed}`, and
+`:run_context_closed` is part of `PtcRunner.Upstream.Result.reason/0`. The
+remainder of this doc is the deferred `RunEnv` design.
 
 ## Isolation
 
@@ -479,16 +396,8 @@ iex> step.return
 2450.0
 ```
 
-Delivered acceptance tests for the closed-context guard:
-
-- Stale upstream tool closures fail with `:run_context_closed` before dispatch.
-- Stale upstream tool closures fail with `:run_context_closed` even when invoked
-  with non-map args.
-- Stale upstream discovery closures fail with `{:world_fault, :run_context_closed}`.
-- `:run_context_closed` is included in `PtcRunner.Upstream.Result.reason/0`.
-- `RunContext.close/1` is safe to call twice; `ensure_open/1` still reports closed.
-- Existing `PtcRunner.Upstream.Eval.run_lisp_with_records/3` tests continue to
-  see records for successful in-scope calls.
+The closed-context guard's acceptance tests have shipped alongside the guard
+(see `lib/ptc_runner/upstream/{run_context,call_tool,discovery,eval}.ex` tests).
 
 Deferred acceptance tests if/when `RunEnv` ships:
 

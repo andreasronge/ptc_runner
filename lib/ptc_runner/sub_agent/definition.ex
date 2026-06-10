@@ -111,8 +111,6 @@ defmodule PtcRunner.SubAgent.Definition do
   - `:tool_call` - LLM invokes the internal `lisp_eval` native tool with
     a `program` argument; final answers are returned as direct content and
     validated against `signature:`. Valid only with `output: :ptc_lisp`.
-
-  See `docs/plans/ptc-lisp-tool-call-transport.md` for the full design.
   """
   @type ptc_transport :: :content | :tool_call
 
