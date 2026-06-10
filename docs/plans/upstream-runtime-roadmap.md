@@ -13,7 +13,7 @@ capability-runtime design surface stays in
 [`docs/plans/capability-kernel-runtime.md`](capability-kernel-runtime.md); the
 broader capability-profile/provider direction stays in
 [`docs/plans/capability-prelude-discovery.md`](capability-prelude-discovery.md).
-The MCP ledger hardening sequence in §4.2-§4.4 has shipped and is retained here
+The MCP ledger hardening sequence (§4.2) has shipped and is retained here
 as historical context. The remaining forward-looking work is the Phase 2 facade
 plus optional Phase 3b ledger retirement ([§3](#3-subagent-bridge-future),
 [§4](#4-mcp-ledger-boundary)).
@@ -248,9 +248,8 @@ Two test-plan items remain from the bridge plan:
 
 The MCP ledger currently owns side-effect policy + wire projection server-side.
 This section covers (a) the deferred Phase 3b decision to move attempt recording
-into core, including its triggers and migration order, (b) the PR2/PR3 ledger
-hardening that should land **before** any Phase 3b migration, (c) non-goals, and
-(d) the landing workflow.
+into core, including its triggers and migration order, (b) the shipped PR1–PR3
+ledger hardening the Phase 3b migration builds on, and (c) non-goals.
 
 ### 4.1 Phase 3b — core attempt-record ledger + MCP ledger retirement (DEFER)
 
@@ -357,114 +356,32 @@ MCP `upstream_calls[]` ledger shape onto core records is still straightforward
 `upstream_results[]` projection should be locked with a credentialed parity test
 so `[REDACTED]` preview/shape behavior stays intentional.
 
-### 4.2 PR1 — Success overview redaction (delivered 2026-06-10)
+### 4.2 Shipped ledger hardening (PR1–PR3)
 
-Close the credential preview leak in `lisp_task` without changing error handling
-or byte accounting. Change only the `%{ok: true}` completion path in
-`mcp_server/lib/ptc_runner_mcp/agentic.ex`:
+Three PR-sized hardening changes have landed on `main`; they are recorded here
+as context for the Phase 3b migration that inherits their state. The code lives
+in `mcp_server/lib/ptc_runner_mcp/agentic.ex` and
+`agentic/{ledger,projection}.ex`.
 
-- Keep `value_kind` derived from the raw `value`, matching
-  `lib/ptc_runner/upstream/call_tool.ex`.
-- Build `result_overview` from `Runtime.scrub(RootUpstreamRuntime.runtime(),
-  value)`.
-- Keep `result_bytes` from the raw `value`, matching core's raw size accounting.
-- Do not change the `%{ok: false}` path; it already receives
-  `Result.error(reason, scrubbed_detail)` from core.
+- **PR1 — success-overview redaction** (`319ef732`). The `%{ok: true}` ledger
+  path builds `result_overview` from `Runtime.scrub(RootUpstreamRuntime.runtime(),
+  value)`, closing the credential-preview leak in `lisp_task` while keeping raw
+  `result_bytes` accounting. A future Phase 3b migration inherits core's
+  already-scrubbed overview and can delete this duplication (see the §4.1
+  preview-parity caveat).
+- **PR2 — canonical effect classification** (`7225a8c3`). MCP side-effect policy
+  now calls `PtcRunner.Upstream.Effect.classify/3` (fail-closed
+  `rescue -> :unknown`) instead of the deleted MCP-local `find_tool_annotations/3`
+  / `annotations_effect/1` / `annotation_true?/2`, so there is one effect
+  classifier, not two.
+- **PR3 — ledger slimming** (`75732434`). `Ledger.record_attempt/6` became
+  `record_attempt/4` (`ledger, server, tool, effect`); the untruthful `args`/`turn`
+  arguments, the `:args_hash`/`:turn` entry fields, `hash_args/1`, and the
+  projected `"turn"`/`"args_hash"` keys (with their `lisp_task` schema entries)
+  are gone. A real turn is deliberately **not** threaded here; that belongs to a
+  future Phase 3b record surface.
 
-If the helper must be testable without a configured root runtime, **fail closed
-without leaking**: rescue runtime lookup failures and omit `result_overview`
-entirely (no preview is better than a raw preview). Tests: a credentialed
-regression that drives the ledger wrapper directly via `Runtime.scrub/2` (not the
-MCP ETS redactor), wraps a stub `"call"` with `root_tools_with_ledger/2`, returns
-`Result.success(%{"token" => "SECRET"})`, and asserts both the ledger success
-entry's `result_overview["preview"]` and `Projection.upstream_results/1` contain
-`"[REDACTED]"` and not `"SECRET"`. This is a temporary patch over the
-parallel-ledger duplication; a future Phase 3b migration inherits core's
-already-scrubbed overview and deletes it.
-
-### 4.3 PR2 — Canonical effect classification (delivered 2026-06-10)
-
-Make MCP side-effect policy use the **same classifier as core**. In
-`mcp_server/lib/ptc_runner_mcp/agentic.ex`:
-
-- Replace `upstream_tool_effect/2` with a call to
-  `PtcRunner.Upstream.Effect.classify/3`.
-- Keep `rescue _ -> :unknown` so classification stays fail-closed if the runtime
-  call raises.
-- Delete the now-dead MCP-local classifier functions: `find_tool_annotations/3`,
-  `annotations_effect/1`, and `annotation_true?/2`.
-- Add `PtcRunner.Upstream.Effect` to aliases if useful.
-
-Expected shape:
-
-```elixir
-defp upstream_tool_effect(server, tool) do
-  if RootUpstreamRuntime.configured?() do
-    Effect.classify(RootUpstreamRuntime.runtime(), server, tool)
-  else
-    :unknown
-  end
-rescue
-  _ -> :unknown
-end
-```
-
-This preserves the pre-dispatch in-flight write block because `ledger_attempt/2`
-still records the classified attempt before dispatch. Tests (deterministic
-contract level, not a planner-driven `lisp_task` run): follow the
-`agentic_contract_test.exs` wrapper harness, configure a catalog entry with
-annotations `%{"readOnlyHint" => true, "destructiveHint" => true}`, drive the stub
-through the ledger wrapper, assert the recorded effect is `:unknown` / projected
-`"unknown"` (not `"read"`), and assert `Ledger.side_effecting_attempted?/1` is
-`true`. Also keep/add a synthetic OpenAPI POST classifier test in core
-`PtcRunner.Upstream.EffectTest` (OpenAPI POST is not reachable through v1 GET-only
-config, so it stays a classifier unit test). Verify: core upstream effect tests,
-MCP agentic contract tests, then `mix precommit`.
-
-### 4.4 PR3 — Ledger slimming (delivered 2026-06-10)
-
-Remove ledger fields and arguments with no truthful current semantics. Treat this
-as one intentional 0.x wire change (all edits collapse the same signature).
-
-In `mcp_server/lib/ptc_runner_mcp/agentic/ledger.ex`:
-
-- Change `record_attempt/6` to `record_attempt/4`: `(ledger, server, tool,
-  effect)`.
-- Remove the `args` and `turn` parameters.
-- Remove `:args_hash` and `:turn` from the entry type and recorded entry.
-- Delete `hash_args/1`.
-- Keep `:effect` as the pre-dispatch classification.
-
-In `mcp_server/lib/ptc_runner_mcp/agentic.ex`:
-
-- Update `ledger_attempt/2` to stop passing `call_args` and the literal `1`.
-- Remove ignored completion options `effect: :unknown` from
-  `Ledger.complete_success/3` and `Ledger.complete_error/5` calls.
-
-In `mcp_server/lib/ptc_runner_mcp/agentic/projection.ex`: remove `"turn"` and
-`"args_hash"` from projected `upstream_calls[]`. In the `lisp_task` output schema:
-remove `"turn"` and `"args_hash"` from `@upstream_calls_item_schema`.
-
-Do not attempt to thread a real turn in this PR (the `on_upstream_call` wrapper has
-no turn in scope; that belongs to a future Phase 3b record surface). Preserve
-unrelated real turn state: planner turn tracking, session lifecycle / session
-output schema `turn` assertions, and core SubAgent loop turn state. Tests: assert
-the slim shape (`upstream_calls[]` contains
-server/tool/status/duration/effect/result_bytes/oversize and optional
-reason/error; no `"turn"`/`"args_hash"`; completion-time `effect:` cannot appear).
-Name and update the known breaking assertions in `agentic_contract_test.exs` that
-expect projected `"turn" => 1`. Search verification:
-
-```sh
-rg -n "args_hash|\"turn\" =>|:turn|effect: :unknown" \
-  mcp_server/lib/ptc_runner_mcp/agentic* mcp_server/test
-```
-
-Treat `:turn` hits as candidates requiring inspection, not automatic removals.
-Because this PR changes typespecs and the `record_attempt` arity, run
-`mix prepush` or at least dialyzer before pushing.
-
-### 4.5 Non-goals
+### 4.3 Non-goals
 
 - Do not add core pre-dispatch attempt recording (until a Phase 3b trigger fires).
 - Do not change `Eval.with_run_context/3` drain-on-raise behavior.
@@ -478,25 +395,6 @@ test: a bridge-owned context closes on raise, and records from a pre-raise
 upstream call are unavailable after close. This remains a deliberate current
 limitation until a real Phase 3b trigger creates a consumer for bridge records on
 raise.
-
-### 4.6 Landing workflow
-
-Use one isolated worktree (or equivalent) per PR-sized commit so unrelated doc or
-code edits do not leak between changes. Land the commits sequentially: PR2 and PR3
-both edit the same `agentic.ex` ledger path, so PR3 should rebase on PR2 rather
-than being built in parallel against the original file state. For each PR:
-
-1. Write the failing test first.
-2. Implement the smallest code change that satisfies the test.
-3. Run the narrow test target.
-4. Run `mix precommit`.
-5. Run a Codex review gate for that commit's diff and address findings before
-   landing.
-6. For PR3, also run `mix prepush` or dialyzer because the ledger typespecs and
-   arities change.
-7. Commit directly to `main` only after verification, with a concise Conventional
-   Commit subject.
-8. Verify the final commit with `git show --stat`.
 
 ---
 
