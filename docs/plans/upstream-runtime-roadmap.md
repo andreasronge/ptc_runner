@@ -363,18 +363,18 @@ as context for the Phase 3b migration that inherits their state. The code lives
 in `mcp_server/lib/ptc_runner_mcp/agentic.ex` and
 `agentic/{ledger,projection}.ex`.
 
-- **PR1 — success-overview redaction** (`319ef732`). The `%{ok: true}` ledger
+- **PR1 — success-overview redaction** (`f3bb8929`). The `%{ok: true}` ledger
   path builds `result_overview` from `Runtime.scrub(RootUpstreamRuntime.runtime(),
   value)`, closing the credential-preview leak in `lisp_task` while keeping raw
   `result_bytes` accounting. A future Phase 3b migration inherits core's
   already-scrubbed overview and can delete this duplication (see the §4.1
   preview-parity caveat).
-- **PR2 — canonical effect classification** (`7225a8c3`). MCP side-effect policy
+- **PR2 — canonical effect classification** (`d0230ce7`). MCP side-effect policy
   now calls `PtcRunner.Upstream.Effect.classify/3` (fail-closed
   `rescue -> :unknown`) instead of the deleted MCP-local `find_tool_annotations/3`
   / `annotations_effect/1` / `annotation_true?/2`, so there is one effect
   classifier, not two.
-- **PR3 — ledger slimming** (`75732434`). `Ledger.record_attempt/6` became
+- **PR3 — ledger slimming** (`417e01ee`). `Ledger.record_attempt/6` became
   `record_attempt/4` (`ledger, server, tool, effect`); the untruthful `args`/`turn`
   arguments, the `:args_hash`/`:turn` entry fields, `hash_args/1`, and the
   projected `"turn"`/`"args_hash"` keys (with their `lisp_task` schema entries)
