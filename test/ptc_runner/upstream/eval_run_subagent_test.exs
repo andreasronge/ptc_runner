@@ -20,6 +20,7 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
 
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.SubAgent
+  alias PtcRunner.Upstream.Collector
   alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.Runtime
 
@@ -251,6 +252,55 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
 
       assert call.(%{server: "observatory", tool: "list-traces", args: %{org_id: "acme"}}) ==
                %{ok: false, reason: :run_context_closed, message: "run_context_closed"}
+    end
+
+    test "records from a bridge call are unavailable after a later bridge raise" do
+      {:ok, server} = start_http_fixture(%{"traces" => [%{"id" => "t-1", "org_id" => "acme"}]})
+      {:ok, runtime} = Runtime.start_link(config: config(base_url: server.base_url))
+      parent = self()
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          tools: %{"call" => fn _args -> %{ok: true, value: "local"} end},
+          output: :ptc_lisp,
+          max_turns: 1
+        )
+
+      try do
+        assert_raise ArgumentError, ~r/local "call" tool/, fn ->
+          Eval.run_subagent(runtime, agent,
+            llm: stub_llm("1"),
+            on_upstream_call: fn call ->
+              result =
+                call.(%{server: "observatory", tool: "list-traces", args: %{org_id: "acme"}})
+
+              send(parent, {:pre_raise_bridge_call, result})
+              send(parent, {:pre_raise_collector_state, current_collector_state!()})
+
+              call
+            end
+          )
+        end
+
+        assert_receive {:pre_raise_bridge_call,
+                        %{ok: true, value: %{"traces" => [%{"id" => "t-1"}]}, value_kind: :json}},
+                       1_000
+
+        assert_receive {:pre_raise_collector_state, {collector, records}}, 1_000
+        assert [%{"server" => "observatory", "tool" => "list-traces", "status" => "ok"}] = records
+
+        assert_receive {:http_fixture_request, request}, 1_000
+        assert request =~ "org_id=acme"
+
+        # Current-behavior pin, not the desired durable-audit contract. If a
+        # future Phase 3b change drains/attaches records on raise, update this
+        # assertion to the new contract.
+        refute Process.alive?(collector.pid)
+        assert Collector.drain(collector) == []
+      after
+        Runtime.stop(runtime)
+      end
     end
 
     test "allow_call_override: true keeps the local tool instead of raising", %{runtime: runtime} do
@@ -634,6 +684,35 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
          tokens: %{input: 0, output: 0}
        }}
     end
+  end
+
+  defp current_collector_state! do
+    # Test-only seam: run_subagent/3 starts the collector linked to the caller.
+    # This avoids exposing the live RunContext as a public bridge option.
+    {:links, links} = Process.info(self(), :links)
+
+    Enum.find_value(links, fn
+      pid when is_pid(pid) ->
+        case collector_state(pid) do
+          {:ok, ref, records} -> {%Collector{pid: pid, ref: ref}, Enum.reverse(records)}
+          :error -> nil
+        end
+
+      _other ->
+        nil
+    end) || flunk("expected bridge collector to be linked to the test process")
+  end
+
+  defp collector_state(pid) do
+    case :sys.get_state(pid, 1_000) do
+      %{ref: ref, records: records} when is_reference(ref) and is_list(records) ->
+        {:ok, ref, records}
+
+      _state ->
+        :error
+    end
+  catch
+    :exit, _ -> :error
   end
 
   # Returns different programs per caller, keyed by a marker substring present in
