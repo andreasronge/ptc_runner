@@ -225,6 +225,122 @@ prompt cards).
 
 ---
 
+## 7. Unified callable model: agents as typed functions
+
+**Problem.** `SubAgent.run/2` takes a long option list; tools, `llm-query`,
+prelude exports, and SubAgents are presented as different concepts with
+different calling conventions; and authoring agents or tools requires Elixir.
+The goal: running a SubAgent should feel like a function call with declared
+input and output parameters, and PTC-Lisp should be sufficient to *compose*
+agents and tools — Elixir remains the host that backs them.
+
+**The unification is already latent in the source.** The signature grammar is
+a function type — "Full format: `(params) -> output`"
+(`sub_agent/signature.ex`), e.g. `(name :string) -> {greeting :string}` —
+with `Signature.validate_input/2` already implemented. `SubAgentTool` already
+presents an agent to a calling agent as a typed callable carrying that
+signature, and the builtin `llm-query` already takes a prompt plus a
+signature. The function-call model exists in the type system; it just is not
+the primary surface.
+
+**Direction.** Treat everything invocable as a typed function; they differ
+only in *backing*:
+
+```text
+pure defn ⊂ prelude export ⊂ tool ⊂ llm-query ⊂ single-shot agent ⊂ multi-turn agent
+```
+
+`llm-query` *is* a single-turn agent with no tools; a single-shot SubAgent is
+`llm-query` plus tools; multi-turn adds the loop. One calling convention (map
+in → validated value out), one descriptor shape (name, params, returns,
+docstring, effects/`requires`), one discovery surface (`doc` / `meta` /
+`apropos` over all of them — the descriptor registry direction in
+[`capability-prelude-discovery.md`](capability-prelude-discovery.md)).
+
+`SubAgent`'s option list sorts into three buckets, mirroring the eval-input vs
+sibling-policy discipline of
+[`capability-kernel-runtime.md`](capability-kernel-runtime.md):
+
+1. **Contract** — prompt template, `params -> returns` signature, output
+   mode. Defines the function.
+2. **Capability refs** — `tools:`, `llm:`. In Lisp-authored definitions these
+   are *names resolved against grants* (`:crm/get-user`, `:code`), never raw
+   closures or credentials. Composition without authority.
+3. **Policy siblings** — `max_turns`, `retry_turns`, `compaction`, budgets.
+   Host/profile defaults, rarely per-call.
+
+A Lisp-authored agent is a **pure data value** holding bucket 1 plus bucket-2
+refs:
+
+```clojure
+(def analyst
+  (agent {:params  "(topic :string, orders [:map])"
+          :returns "{summary :string, top-regions [:string]}"
+          :prompt  "Analyze {{topic}} in the provided orders."
+          :tools   [:crm/get-user :llm-query]
+          :llm     :code}))
+
+(analyst {:topic "orders" :orders vip-orders})
+```
+
+Because the value references granted capabilities by name, it cannot
+escalate: a child can only name tools and model aliases the enclosing profile
+grants. That dissolves the "`agent/run` as escape hatch" concern in
+[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+— authority is answered by profiles, not by the agent API.
+
+Two further unifications fall out:
+
+- **Context and params merge.** The child's context *is* its validated
+  params: the args map becomes `data/*`, template vars resolve from it, and
+  `validate_input/2` runs **before any tokens are spent**. Declared keys
+  validated; undeclared rejected by default. Large values surface in the
+  child prompt as schema + samples, not inlined — the PTC philosophy applied
+  to the call boundary.
+- **Higher-order agents.** A `:fn` param type plus
+  [`function-passing-between-subagents.md`](function-passing-between-subagents.md)
+  (closures cross boundaries as immutable tuples) makes agents combinators
+  that accept functions as arguments.
+
+**Hold the line on three things:**
+
+- *Function-call shape, not cost illusion.* Invocation dispatches through the
+  capability boundary like `tool/*` — the `Lisp.RuntimeCallable` pattern (a
+  value carrying a qualified ref, bound to the eval context at call time) is
+  the precedent — so budgets, depth caps, tracing, and the §1 ledger all
+  apply. The call appears in `tool_calls` and can be refused.
+- *Only `run` is a function.* Stateful chat/sessions (memory threading,
+  `agent/session`) are not functions; they stay a separate surface per the
+  control-plane sketch.
+- *The Elixir floor stays.* LLM adapters/credentials, native tool
+  implementations that touch the world, grants, limits, persistence —
+  host-side, period. The end state is not "no Elixir"; it is the
+  control-plane README pressure test realized: PTC-Lisp as the authoring
+  language, Elixir as the host SDK that backs the names.
+
+**Migration order (each step useful alone):**
+
+1. Enforce input signatures on `SubAgent.run` itself — validate context
+   against declared params when present. The machinery exists; this promotes
+   it from the tool boundary to the primary surface.
+2. Collapse `llm_query` / `LlmTool` / `SubAgentTool` toward one callable
+   descriptor — one schema-derivation path, one prompt presentation.
+3. `(agent ...)` values + invocation from Lisp via the host capability
+   interface — requires the control-plane primitive layer and budget/depth
+   inheritance to land first.
+4. Descriptor/discovery unification; README flips to Lisp-primary with
+   Elixir as the host layer.
+
+**Open questions.** Policy for undeclared arg keys (closed by default, or an
+explicit `:open` flag); whether agent values serialize into memory/traces (as
+data they should — but bucket-2 refs must re-resolve against the *current*
+grants on rehydration, never capture backing); ad-hoc `(agent ...)` values vs
+profile-registered agents (both should yield the same descriptor; only the
+latter are discoverable capabilities); how bucket-3 policy defaults resolve
+for Lisp-defined agents (profile defaults vs explicit per-agent overrides).
+
+---
+
 ## Sequencing notes
 
 Rough dependency order, not commitment:
@@ -238,3 +354,7 @@ Rough dependency order, not commitment:
   the approval workflow; it is slow-loop by construction.
 - §6 is independent and cheap; worth a benchmark experiment whenever
   convenient.
+- §7 step 1 (input-signature enforcement on `SubAgent.run`) is independent
+  and small — a good first PR. Steps 3–4 depend on the control-plane
+  primitive layer and the profiles/grants model; §7's higher-order params
+  depend on function passing (Option E).

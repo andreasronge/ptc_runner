@@ -434,6 +434,13 @@ also be able to inspect it in a bounded, structured way.
 SubAgent should probably become invokable from PTC-Lisp as a core capability,
 not only as Elixir structs or JSON/MCP configuration.
 
+See [`future-directions.md`](future-directions.md) §7 for the consolidated
+direction: agents as typed functions (`params -> returns` is already the
+signature grammar), agent definitions as pure data over granted capability
+refs, and the contract / capability-refs / policy bucket split for
+`SubAgent`'s options. The sketches below predate that section and stay as
+raw material.
+
 Possible one-shot form:
 
 ```clojure
@@ -481,6 +488,11 @@ SubAgent inspect or inherit? A likely answer is explicit projection:
 ```
 
 ## Historical Sessions and Debug Artifacts
+
+See [`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md)
+for the committed first slice of this idea: driver-agnostic turn-log events,
+an in-memory sink, and read-only introspection capabilities exported from a
+prelude. The `run/*` and `session/from-run` surfaces below remain deferred.
 
 For debugging, live sessions are not enough. Previous `ptc.repl` sessions,
 SubAgent runs, failed turns, and MCP evaluations should be queryable as durable

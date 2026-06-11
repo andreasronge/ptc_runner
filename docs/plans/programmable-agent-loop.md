@@ -113,7 +113,15 @@ Hook contracts the host enforces:
   exists). Malformed output ⇒ fallback, recorded.
 - **Execution:** one sandboxed eval per hook call, no tools, no discovery,
   tight timeout (likely well under the 1s default). BEAM process spawn cost
-  makes this affordable per turn.
+  makes this affordable per turn. "Sandboxed" means the *existing*
+  `Lisp.run` → `Sandbox.execute` path — no new mechanism. Two non-options:
+  sharing the turn program's sandbox invocation is impossible in general
+  (most hooks fire when no program eval exists, and `render-feedback`'s most
+  important trigger is precisely when the program's sandbox process was
+  *killed* — timeout/heap — so there is nothing to run inside), and
+  unsandboxed in-process eval in the Loop is ruled out because timeout-kill
+  and `max_heap` are process-level mechanisms — the host-fallback design
+  depends on a runaway hook being killable without taking the Loop with it.
 - **Rendering safety:** any hook-produced text that reaches the prompt goes
   through `PtcRunner.SubAgent.UntrustedRenderer` envelopes, same as tool
   output. A hook is *policy*, but its output is still model-visible text and
@@ -242,8 +250,6 @@ forms, and evolvable through the slow loop.
   its redaction contract?
 - Are hooks named exports in a reserved namespace (e.g. `loop-policy/*`), or
   declared in prelude/profile metadata?
-- Do hooks run in the *same* sandbox process as the turn's program eval (one
-  spawn, sequenced) or separate per-hook spawns (isolation, simpler limits)?
 - How do hook results appear in traces — full input/output capture, or
   bounded summaries with the same payload policy as tool calls?
 - Should compaction Phase 2 (`:summarize`, custom strategies — see
