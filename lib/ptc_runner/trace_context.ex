@@ -36,9 +36,64 @@ defmodule PtcRunner.TraceContext do
 
   @collector_key :ptc_trace_collectors
   @handler_key :ptc_trace_handler_ids
+  @memory_sink_key :ptc_trace_memory_sinks
   @span_stack_key :ptc_telemetry_span_stack
   @child_trace_key :last_child_trace_id
   @child_step_key :last_child_step
+
+  # --- Memory Sink Stack ---
+
+  @doc """
+  Pushes an in-memory turn-log sink onto the stack.
+
+  Mirrors the collector stack: turn-event emitters route to every active
+  in-memory sink in addition to the JSONL collectors.
+  """
+  @spec push_memory_sink(pid()) :: :ok
+  def push_memory_sink(sink) when is_pid(sink) do
+    Process.put(@memory_sink_key, [sink | Process.get(@memory_sink_key, [])])
+    :ok
+  end
+
+  @doc """
+  Removes a specific in-memory sink from the stack. Returns the pid or `nil`.
+  """
+  @spec remove_memory_sink(pid()) :: pid() | nil
+  def remove_memory_sink(sink) when is_pid(sink) do
+    sinks = Process.get(@memory_sink_key, [])
+
+    if sink in sinks do
+      Process.put(@memory_sink_key, List.delete(sinks, sink))
+      sink
+    else
+      nil
+    end
+  end
+
+  @doc """
+  Returns all active in-memory sinks (innermost first).
+  """
+  @spec memory_sinks() :: [pid()]
+  def memory_sinks do
+    Process.get(@memory_sink_key, [])
+  end
+
+  @doc """
+  Merges in-memory sinks from another process into the current stack.
+
+  Filters out dead processes and deduplicates while preserving order.
+  """
+  @spec merge_memory_sinks([pid()]) :: :ok
+  def merge_memory_sinks(new_sinks) when is_list(new_sinks) do
+    alive = Enum.filter(new_sinks, &Process.alive?/1)
+
+    if alive != [] do
+      existing = Process.get(@memory_sink_key, [])
+      Process.put(@memory_sink_key, Enum.uniq(existing ++ alive))
+    end
+
+    :ok
+  end
 
   # --- Collector Stack ---
 
@@ -224,6 +279,7 @@ defmodule PtcRunner.TraceContext do
   def capture do
     %{
       collectors: Process.get(@collector_key, []),
+      memory_sinks: Process.get(@memory_sink_key, []),
       span_stack: Process.get(@span_stack_key, [])
     }
   end
@@ -234,8 +290,9 @@ defmodule PtcRunner.TraceContext do
   Merges collectors (filtering dead PIDs) and restores the span stack.
   """
   @spec attach(map()) :: :ok
-  def attach(%{collectors: collectors, span_stack: span_stack}) do
+  def attach(%{collectors: collectors, span_stack: span_stack} = ctx) do
     merge_collectors(collectors)
+    merge_memory_sinks(Map.get(ctx, :memory_sinks, []))
 
     if span_stack != [] do
       # Set the parent span from the captured context

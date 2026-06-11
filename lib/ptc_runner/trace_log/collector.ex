@@ -239,6 +239,15 @@ defmodule PtcRunner.TraceLog.Collector do
         _ -> event
       end
 
+    # Telemetry-sourced events already carry trace_id/timestamp; `write_to_active`
+    # callers (e.g. session/SubAgent turn events) need not know the collector's
+    # trace_id, so stamp ours when absent. `put_new` never overrides an
+    # explicitly-set value (the MCP per-call records set their own).
+    event =
+      event
+      |> Map.put_new("trace_id", state.trace_id)
+      |> Map.put_new_lazy("timestamp", fn -> DateTime.utc_now() |> DateTime.to_iso8601() end)
+
     event = Map.put(event, "seq", seq)
 
     case Event.encode(event) do

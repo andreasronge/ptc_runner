@@ -12,6 +12,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunner.Turn
 
   @doc """
@@ -195,8 +197,94 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
     Telemetry.emit([:turn, :stop], measurements, metadata)
 
+    # Also emit the shared canonical turn event (plan P2, D1) so SubAgent-driven
+    # and session-driven turns produce the SAME top-level shape, queryable
+    # through the same TraceLog.Analyzer calls. The `[:turn, :stop]` telemetry
+    # above stays as the nested/legacy record consumed by the Tracer.
+    record_canonical_turn(turn, state, turn_type, measurements,
+      program: program,
+      result_preview: result_preview,
+      prints: prints,
+      raw_response: raw_response
+    )
+
     :ok
   end
+
+  defp record_canonical_turn(turn, state, turn_type, measurements, fields) do
+    if TraceLog.recording?() do
+      program = Keyword.fetch!(fields, :program)
+
+      {committed?, status} =
+        case turn do
+          %Turn{success?: true} -> {true, :ok}
+          %Turn{success?: false} -> {false, :error}
+          # nil turn: LLM error before a Turn was created
+          _ -> {false, :error}
+        end
+
+      %{
+        driver: :sub_agent,
+        agent_id: state.agent_id,
+        agent_name: state.agent_name,
+        # SubAgent advances one loop turn per attempt; turn == attempt here.
+        turn: state.turn,
+        attempt: state.turn,
+        committed: committed?,
+        status: status,
+        duration_ms: duration_ms(measurements),
+        input_tokens: Map.get(measurements, :input_tokens),
+        output_tokens: Map.get(measurements, :output_tokens),
+        total_tokens: Map.get(measurements, :tokens),
+        program: program,
+        # Carry the raw LLM output for no-program turns (parse/text-mode
+        # failures) so a memory-sink-only trace still shows what was generated.
+        raw_response: if(is_nil(program), do: Keyword.get(fields, :raw_response)),
+        result_preview: Keyword.fetch!(fields, :result_preview),
+        prints: Keyword.fetch!(fields, :prints),
+        tool_calls: turn_tool_calls(turn),
+        fail: turn_fail(turn),
+        turn_type: turn_type
+      }
+      |> TurnEvent.build()
+      |> TraceLog.record_turn_event()
+    end
+
+    :ok
+  end
+
+  # A failed SubAgent turn carries its reason/message in `turn.result` (shapes
+  # vary across the loop's failure paths). Normalize it into the shared
+  # `%{reason, message}` fail shape so failed turns are diagnosable from the
+  # canonical analyzer path, not only the legacy `turn.stop` event.
+  defp turn_fail(%Turn{success?: false, result: result}), do: fail_from_result(result)
+  defp turn_fail(_), do: nil
+
+  defp fail_from_result(%{reason: reason, message: message}),
+    do: %{reason: reason, message: message}
+
+  defp fail_from_result(%{error: error}), do: %{reason: :error, message: error}
+
+  defp fail_from_result(other),
+    do: %{reason: :error, message: inspect(other, limit: 5, printable_limit: 512)}
+
+  defp duration_ms(%{duration: duration}) when is_integer(duration) do
+    System.convert_time_unit(duration, :native, :millisecond)
+  end
+
+  defp duration_ms(_), do: nil
+
+  defp turn_tool_calls(%Turn{tool_calls: tool_calls}) when is_list(tool_calls) do
+    Enum.map(tool_calls, fn call ->
+      %{
+        "tool" => Map.get(call, :name) || Map.get(call, :tool),
+        "duration_ms" => Map.get(call, :duration_ms),
+        "outcome" => if(Map.get(call, :error), do: "error", else: "ok")
+      }
+    end)
+  end
+
+  defp turn_tool_calls(_), do: []
 
   @doc """
   Build a truncated preview of the result for telemetry metadata.

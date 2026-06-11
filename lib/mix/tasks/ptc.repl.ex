@@ -62,6 +62,8 @@ defmodule Mix.Tasks.Ptc.Repl do
   alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.SubAgent.Loop.ResponseHandler
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.{Analyzer, MemorySink}
   alias PtcRunner.Upstream.Eval, as: UpstreamEval
   alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
 
@@ -96,9 +98,16 @@ defmodule Mix.Tasks.Ptc.Repl do
       prelude = load_prelude(opts)
       if opts[:show_prompt_inventory], do: print_prompt_inventory(prelude)
 
-      # `session` bundles the optional upstream runtime with the optional
-      # compiled prelude so every `run_lisp` attaches the SAME artifact.
-      with_session = fn fun -> with_upstream_runtime(opts, &fun.({&1, prelude})) end
+      # Each run drives a `PtcRunner.Session` (the canonical external turn
+      # driver, plan D1): it owns memory + `*1/*2/*3` history and emits a turn
+      # event per eval. A default in-memory turn-log sink is enabled so
+      # "analyze my last session" (`:turns`) works with no filesystem setup.
+      with_session = fn fun ->
+        with_upstream_runtime(opts, fn runtime ->
+          {:ok, _sink} = TraceLog.start_memory_sink()
+          fun.(build_session(runtime, prelude))
+        end)
+      end
 
       cond do
         rest == ["-"] ->
@@ -117,6 +126,14 @@ defmodule Mix.Tasks.Ptc.Repl do
           with_session.(&interactive_repl/1)
       end
     end
+  end
+
+  # Builds the session that owns REPL state for this run. The optional upstream
+  # runtime and compiled prelude are bound here so every eval attaches the SAME
+  # artifact (the prelude rides as a default run option).
+  defp build_session(runtime, prelude) do
+    opts = if prelude, do: [prelude: prelude], else: []
+    PtcRunner.Session.new([upstream_runtime: runtime] ++ opts)
   end
 
   @doc """
@@ -172,14 +189,14 @@ defmodule Mix.Tasks.Ptc.Repl do
         System.halt(1)
 
       source ->
-        run_source(source, %{}, session)
+        run_source(source, session)
     end
   end
 
   defp run_file(path, session) do
     case File.read(path) do
       {:ok, source} ->
-        run_source(source, %{}, session)
+        run_source(source, session)
 
       {:error, reason} ->
         IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
@@ -188,22 +205,22 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp run_evals(exprs, session) do
-    # run_source halts on error, so we can use simple reduce
-    Enum.reduce(exprs, %{}, fn expr, memory ->
-      {:ok, new_memory} = run_source(expr, memory, session)
-      new_memory
+    # run_source halts on error, so we can use a simple reduce over sessions.
+    Enum.reduce(exprs, session, fn expr, sess ->
+      {:ok, next} = run_source(expr, sess)
+      next
     end)
   end
 
-  defp run_source(source, memory, session) do
-    case run_lisp(source, [memory: memory], session) do
-      {:ok, step} ->
+  defp run_source(source, session) do
+    case PtcRunner.Session.eval(session, source) do
+      {{:ok, step}, session} ->
         print_captured_output(step.prints)
         {output, _truncated?} = Format.to_clojure(step.return)
         IO.puts(output)
-        {:ok, step.memory}
+        {:ok, session}
 
-      {:error, step} ->
+      {{:error, step}, _session} ->
         IO.puts(:stderr, format_error(step.fail))
         System.halt(1)
     end
@@ -213,21 +230,21 @@ defmodule Mix.Tasks.Ptc.Repl do
     IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
     IO.puts("Type :help for commands, :doc <name> for function docs\n")
 
-    loop([], %{}, session)
+    loop(session)
   end
 
   defp load_and_repl(path, session) do
     case File.read(path) do
       {:ok, source} ->
-        case run_lisp(source, [], session) do
-          {:ok, step} ->
+        case PtcRunner.Session.eval(session, source) do
+          {{:ok, step}, session} ->
             print_captured_output(step.prints)
             IO.puts("Loaded #{path}")
             IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
             IO.puts("Type :help for commands, :doc <name> for function docs\n")
-            loop([], step.memory, session)
+            loop(session)
 
-          {:error, step} ->
+          {{:error, step}, _session} ->
             IO.puts(:stderr, format_error(step.fail))
             System.halt(1)
         end
@@ -238,22 +255,21 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp loop(history, memory, {runtime, _prelude} = session) do
+  defp loop(session) do
     case read_expression("ptc> ", "") do
       :eof ->
         IO.puts("\nGoodbye!")
 
       "" ->
         # Ignore empty lines, only Ctrl+D exits
-        loop(history, memory, session)
+        loop(session)
 
       ":" <> meta ->
-        handle_meta(String.trim(meta), runtime)
-        loop(history, memory, session)
+        handle_meta(String.trim(meta), session)
+        loop(session)
 
       input ->
-        {history, memory} = evaluate(input, history, memory, session)
-        loop(history, memory, session)
+        loop(evaluate(input, session))
     end
   end
 
@@ -285,19 +301,18 @@ defmodule Mix.Tasks.Ptc.Repl do
     |> Kernel.==(0)
   end
 
-  defp evaluate(input, history, memory, session) do
-    case run_lisp(input, [turn_history: history, memory: memory], session) do
-      {:ok, step} ->
+  defp evaluate(input, session) do
+    case PtcRunner.Session.eval(session, input) do
+      {{:ok, step}, session} ->
         # Show truncated output exactly like LLM feedback sees
         print_captured_output(step.prints)
         {output, _truncated?} = ResponseHandler.format_execution_result(step.return)
         IO.puts(output)
-        new_history = (history ++ [step.return]) |> Enum.take(-3)
-        {new_history, step.memory}
+        session
 
-      {:error, step} ->
+      {{:error, step}, session} ->
         IO.puts(format_error(step.fail))
-        {history, memory}
+        session
     end
   end
 
@@ -307,13 +322,14 @@ defmodule Mix.Tasks.Ptc.Repl do
     Enum.each(prints, &IO.puts/1)
   end
 
-  defp handle_meta("help", _runtime) do
+  defp handle_meta("help", _session) do
     IO.puts("""
     Commands:
       :doc <name>      Show documentation for a function
       :find <pattern>  Search functions by name or description
       :apropos <pat>   Alias for :find
       :tools           Show configured upstream tools
+      :turns           Summarize recorded turns (this REPL session)
       :help            Show this help
 
     Turn history: *1, *2, *3 reference last 3 results
@@ -321,29 +337,54 @@ defmodule Mix.Tasks.Ptc.Repl do
     """)
   end
 
-  defp handle_meta("doc " <> name, runtime) do
+  defp handle_meta("doc " <> name, session) do
     case Registry.doc(String.trim(name)) do
-      nil -> print_upstream_doc(String.trim(name), runtime)
+      nil -> print_upstream_doc(String.trim(name), session.upstream_runtime)
       entry -> print_doc(entry)
     end
   end
 
-  defp handle_meta("find " <> pattern, runtime),
-    do: print_search_results(String.trim(pattern), runtime)
+  defp handle_meta("find " <> pattern, session),
+    do: print_search_results(String.trim(pattern), session.upstream_runtime)
 
-  defp handle_meta("apropos " <> pattern, runtime),
-    do: print_search_results(String.trim(pattern), runtime)
+  defp handle_meta("apropos " <> pattern, session),
+    do: print_search_results(String.trim(pattern), session.upstream_runtime)
 
-  defp handle_meta("tools", nil), do: IO.puts("No upstream runtime configured")
+  defp handle_meta("tools", session), do: print_tools(session.upstream_runtime)
 
-  defp handle_meta("tools", runtime) do
-    IO.puts(UpstreamRuntime.catalog_text(runtime))
+  defp handle_meta("turns", _session), do: print_turns()
+
+  defp handle_meta(_, _session) do
+    IO.puts(
+      "Unknown command. Available: :doc <name>, :find <pattern>, :apropos <pattern>, :tools, :turns"
+    )
   end
 
-  defp handle_meta(_, _runtime) do
-    IO.puts(
-      "Unknown command. Available: :doc <name>, :find <pattern>, :apropos <pattern>, :tools"
-    )
+  defp print_tools(nil), do: IO.puts("No upstream runtime configured")
+  defp print_tools(runtime), do: IO.puts(UpstreamRuntime.catalog_text(runtime))
+
+  # Summarize the in-memory turn log enabled by default for this REPL run. This
+  # is the "analyze my last session" affordance — turn records with no
+  # filesystem setup (plan P2).
+  defp print_turns do
+    case TraceLog.active_memory_sinks() do
+      [] ->
+        IO.puts("No turn-log sink active")
+
+      [sink | _] ->
+        case Analyzer.sessions(MemorySink.events(sink)) do
+          [] ->
+            IO.puts("No turns recorded yet")
+
+          summaries ->
+            Enum.each(summaries, fn s ->
+              IO.puts(
+                "  #{s.correlation_id} (#{s.driver}): #{s.turns} turns, " <>
+                  "#{s.committed} committed, #{s.failed} failed, #{s.tool_calls} tool calls"
+              )
+            end)
+        end
+    end
   end
 
   defp print_doc(entry) do
@@ -393,22 +434,6 @@ defmodule Mix.Tasks.Ptc.Repl do
   # evaluation via the same `:prelude` opt SubAgent execution uses. With an
   # upstream runtime present, also pass `:runtime` so attach-time `requires`
   # validation runs against it.
-  defp run_lisp(source, opts, {nil, prelude}) do
-    PtcRunner.Lisp.run(source, maybe_attach_prelude(opts, prelude, nil))
-  end
-
-  defp run_lisp(source, opts, {runtime, prelude}) do
-    UpstreamEval.run_lisp(runtime, source, maybe_attach_prelude(opts, prelude, runtime))
-  end
-
-  defp maybe_attach_prelude(opts, nil, _runtime), do: opts
-
-  defp maybe_attach_prelude(opts, prelude, nil),
-    do: Keyword.put(opts, :prelude, prelude)
-
-  defp maybe_attach_prelude(opts, prelude, runtime),
-    do: opts |> Keyword.put(:prelude, prelude) |> Keyword.put(:runtime, runtime)
-
   defp with_upstream_runtime(opts, fun) do
     case upstream_runtime_opts(opts) do
       nil ->

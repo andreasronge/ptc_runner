@@ -71,7 +71,7 @@ defmodule PtcRunner.TraceLog do
 
   alias PtcRunner.SubAgent.Telemetry
   alias PtcRunner.TraceContext
-  alias PtcRunner.TraceLog.{Collector, Handler}
+  alias PtcRunner.TraceLog.{Collector, Handler, MemorySink}
 
   @doc """
   Starts trace collection for the current process.
@@ -317,4 +317,87 @@ defmodule PtcRunner.TraceLog do
   end
 
   def write_to_active(_), do: :no_collector
+
+  @doc """
+  Returns true if any turn-log sink (JSONL collector or in-memory sink) is
+  active in the current process.
+
+  Turn drivers consult this before building a turn event so the (small) build
+  cost is skipped entirely when nothing is recording.
+  """
+  @spec recording?() :: boolean()
+  def recording? do
+    TraceContext.current_collector() != nil or TraceContext.memory_sinks() != []
+  end
+
+  @doc """
+  Records an already-built turn-event map to every active sink — *every* JSONL
+  collector on the stack and every active in-memory sink.
+
+  Unlike `write_to_active/1` (innermost collector only), this fans out to all
+  active collectors, matching the telemetry handler's routing: under nested
+  `with_trace/2` scopes both the inner and outer trace files capture the turn,
+  so cross-session analysis works for either. Each collector stamps its own
+  `trace_id`/`seq` on its copy of the event.
+
+  This is the single emission point shared by both turn drivers
+  (`PtcRunner.Session` and the `PtcRunner.SubAgent` loop). It never raises and
+  is a no-op when nothing is recording. Build the event with
+  `PtcRunner.TraceLog.TurnEvent.build/1`.
+  """
+  @spec record_turn_event(map()) :: :ok
+  def record_turn_event(event_map) when is_map(event_map) do
+    Enum.each(TraceContext.collectors(), fn collector ->
+      safe_write(fn -> Collector.write_event(collector, event_map) end)
+    end)
+
+    Enum.each(TraceContext.memory_sinks(), fn sink ->
+      safe_write(fn -> MemorySink.record(sink, event_map) end)
+    end)
+
+    :ok
+  end
+
+  def record_turn_event(_), do: :ok
+
+  defp safe_write(fun) do
+    fun.()
+    :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @doc """
+  Starts an in-memory turn-log sink and activates it for the current process.
+
+  Returns the sink pid; query it with `PtcRunner.TraceLog.MemorySink.events/1`
+  (or the cross-session `PtcRunner.TraceLog.Analyzer` functions). Accepts the
+  same options as `PtcRunner.TraceLog.MemorySink.start_link/1` (`:max_bytes`,
+  `:name`). Detach with `stop_memory_sink/1`.
+  """
+  @spec start_memory_sink(keyword()) :: {:ok, pid()}
+  def start_memory_sink(opts \\ []) do
+    {:ok, sink} = MemorySink.start_link(opts)
+    TraceContext.push_memory_sink(sink)
+    {:ok, sink}
+  end
+
+  @doc """
+  Detaches an in-memory sink from the current process so new turn events no
+  longer route to it. The sink process is left alive so its events stay
+  queryable; stop it explicitly when done.
+  """
+  @spec stop_memory_sink(pid()) :: :ok
+  def stop_memory_sink(sink) when is_pid(sink) do
+    TraceContext.remove_memory_sink(sink)
+    :ok
+  end
+
+  @doc """
+  Returns all in-memory sinks active in the current process (innermost first).
+  """
+  @spec active_memory_sinks() :: [pid()]
+  def active_memory_sinks do
+    TraceContext.memory_sinks()
+  end
 end

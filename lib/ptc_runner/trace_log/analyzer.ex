@@ -67,6 +67,80 @@ defmodule PtcRunner.TraceLog.Analyzer do
     }
   end
 
+  # ============================================================
+  # Cross-session turn-log queries (plan P2)
+  #
+  # These read the canonical `event: "turn"` records emitted by both turn
+  # drivers (session + SubAgent) through `PtcRunner.TraceLog.TurnEvent`, so a
+  # single trace spanning several sessions can be sliced per session. The
+  # Elixir surface stays boring/data-oriented (plan P3): higher-level analysis
+  # (dedup detection, cost aggregation) belongs in PTC-Lisp programs.
+  # ============================================================
+
+  @doc """
+  Returns all canonical turn events (`event == "turn"`), in load order.
+  """
+  @spec turn_events([map()]) :: [map()]
+  def turn_events(events) do
+    Enum.filter(events, &(&1["event"] == "turn"))
+  end
+
+  @doc """
+  Groups turn events into per-session summaries, keyed by correlation id (the
+  `session_id` for session-driven turns, the `agent_id` for SubAgent turns).
+
+  Each summary reports the driver, total turns, committed/failed counts, and
+  total tool calls — enough to answer "what did my previous sessions do, and
+  where did they waste turns?" before drilling into `session_turns/2`.
+  """
+  @spec sessions([map()]) :: [map()]
+  def sessions(events) do
+    events
+    |> turn_events()
+    |> Enum.group_by(&turn_correlation_id/1)
+    |> Enum.map(fn {id, turns} -> session_summary(id, turns) end)
+    |> Enum.sort_by(& &1.correlation_id)
+  end
+
+  @doc """
+  Returns the turn events for a single session/correlation id, in load order.
+  """
+  @spec session_turns([map()], String.t()) :: [map()]
+  def session_turns(events, correlation_id) do
+    events
+    |> turn_events()
+    |> Enum.filter(&(turn_correlation_id(&1) == correlation_id))
+  end
+
+  @doc """
+  Returns the program sources from turn events, in load order (nil for turns
+  with no program, e.g. parse-failure or budget-stop turns).
+  """
+  @spec programs([map()]) :: [String.t() | nil]
+  def programs(events) do
+    events
+    |> turn_events()
+    |> Enum.map(&get_in(&1, ["data", "program"]))
+  end
+
+  defp turn_correlation_id(event) do
+    event["session_id"] || event["agent_id"] || "unknown"
+  end
+
+  defp session_summary(id, turns) do
+    %{
+      correlation_id: id,
+      driver: turns |> List.first() |> Map.get("driver"),
+      turns: length(turns),
+      committed: Enum.count(turns, & &1["committed"]),
+      failed: Enum.count(turns, &(&1["committed"] == false)),
+      tool_calls: turns |> Enum.flat_map(&turn_tool_calls/1) |> length()
+    }
+  end
+
+  defp turn_tool_calls(%{"data" => %{"tool_calls" => calls}}) when is_list(calls), do: calls
+  defp turn_tool_calls(_), do: []
+
   @doc """
   Filters events by various criteria.
 
