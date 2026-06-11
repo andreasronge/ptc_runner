@@ -36,6 +36,12 @@ invisible to the turn log. That is WP-A.
 
 ## WP-A — `ptc_runner_mcp`: record real agent sessions (repo: ptc_runner)
 
+> **Status: DONE** (commit `4f14016f` + `tool_call_summary` upstream-lift fix;
+> end-to-end smoke passed 2026-06-11: a real headless Claude Code session
+> against the sandbox server produced 3 canonical turn events with lifted
+> upstream tool identity and a working `args_hash`, introspected via the
+> `log/` prelude). The `--prelude` server flag remains a follow-up for M2.
+
 **Goal:** a headless Claude Code session against `ptc_runner_mcp --sessions`
 produces canonical turn events in a JSONL file, correlated by the
 client-visible MCP session id (`ptcs_...`).
@@ -181,10 +187,22 @@ Keep harness scripts out of ptc_runner (domain-blindness: core repo stays
 generic). Extend `~/ptc-mcp-sandbox/`.
 
 1. **Runner:** for each seed: generate variant (WP-B), start fixture server,
-   launch headless Claude Code (`claude -p --allowedTools` pattern,
-   `--tools ""` + ptc MCP config with `--sessions --turn-log-dir`), task
-   prompt from a template parameterized by org/environment (spend-spike
-   style), capture client `stream-json` + server turn-log JSONL, teardown.
+   launch headless Claude Code against the ptc MCP server
+   (`--sessions --turn-log-dir`), task prompt from a template parameterized
+   by org/environment (spend-spike style), capture client `stream-json` +
+   server turn-log JSONL, teardown. **Verified launch pattern (claude CLI
+   2.1.173, smoke-tested 2026-06-11; reference: `~/ptc-mcp-sandbox/
+   run-turnlog.sh` + `mcp-turnlog.json`):**
+   - `MCP_TIMEOUT=60000` env is REQUIRED — the ~2.5 s `mix run` boot exceeds
+     the default MCP startup timeout and the server is dropped silently.
+   - Do NOT use `--tools ""` — it now strips MCP tools too (the
+     spend-spike-era pattern is gone). Restrict with `--allowedTools
+     "mcp__<server>__lisp_session_*"` plus a prompt-level instruction.
+   - Upstreams config: `"transport"` must be `"mcp_stdio"` (or
+     `"openapi"`/`"mcp_http"`); the old bare `"stdio"` fails boot.
+   - Each server spawn writes a fresh `<ts>-<rand>-turns.jsonl`; failed
+     client connects leave header-only files — resolve the session's file
+     per run, don't assume one file per directory.
 2. **Metrics:** from the turn log (Analyzer or `log/` prelude): turns,
    attempts, upstream call count, duplicate fetches (group by
    `[tool, args_hash]`), payload metrics; from stream-json: client tokens;
