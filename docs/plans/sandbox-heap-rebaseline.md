@@ -1,10 +1,20 @@
 # Sandbox Heap Re-baseline — grant data must not consume the program's budget
 
-**Status:** P1+P3 IMPLEMENTED (2026-06-11; spec v3 reviewed clean by codex
-rounds 1–3). P2 (introspection holder proxies) remains open. From the F3
+**Status:** FULLY IMPLEMENTED 2026-06-11 (P1+P3 in `18ed7c1f`, P2 in the
+follow-up commit; spec v3 reviewed clean by codex rounds 1–3). From the F3
 investigation in [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md); was blocking
 M2 (the `obs/` prelude will cache fetched data in session memory — exactly
 the pattern the old accounting punished).
+
+**P2 implementation notes:** `MemorySink.query/2` runs projections inside the
+sink; path/list sources get a `TraceLog.Introspection.Holder` (monitors its
+owner and stops with it — monitor, not link, so a holder crash cannot take
+the owner down; refuses loads over `:max_bytes`, default 64 MB, with a clear
+`ArgumentError`; a projection raise is re-raised in the caller and the
+holder/sink survives). A stopped sink/holder surfaces as a recoverable tool
+error. Verified by `introspection_projection_test.exs`: a ~30 MB event-list
+grant answers `(count (log/sessions))` at ALL default limits with a < 5 MB
+sandbox baseline.
 
 **Implementation notes (measured during P1, refining the estimates below):**
 

@@ -75,6 +75,24 @@ defmodule PtcRunner.TraceLog.MemorySink do
     GenServer.call(sink, :count)
   end
 
+  @doc """
+  Runs `fun` over the retained events (chronological order) INSIDE the sink
+  process and returns its result.
+
+  Host-side projection support (P2 of `docs/plans/sandbox-heap-rebaseline.md`):
+  a caller running under a heap budget — the PTC-Lisp sandbox holding a
+  `log/` introspection grant — pays only for the projected result crossing
+  back, never for a copy of the full buffer. `fun` must be host-trusted code;
+  if it raises, the error is re-raised in the caller and the sink survives.
+  """
+  @spec query(GenServer.server(), ([map()] -> term())) :: term()
+  def query(sink, fun) when is_function(fun, 1) do
+    case GenServer.call(sink, {:query, fun}) do
+      {:ok, result} -> result
+      {:error, exception, stacktrace} -> reraise(exception, stacktrace)
+    end
+  end
+
   @doc "Drops all retained events."
   @spec clear(GenServer.server()) :: :ok
   def clear(sink) do
@@ -113,19 +131,31 @@ defmodule PtcRunner.TraceLog.MemorySink do
 
   @impl true
   def handle_call(:events, _from, state) do
-    chronological =
-      state.events
-      |> Enum.reverse()
-      |> Enum.map(fn {_size, event} -> event end)
-
-    {:reply, chronological, state}
+    {:reply, chronological_events(state), state}
   end
 
   def handle_call(:count, _from, state) do
     {:reply, length(state.events), state}
   end
 
+  def handle_call({:query, fun}, _from, state) do
+    reply =
+      try do
+        {:ok, fun.(chronological_events(state))}
+      rescue
+        exception -> {:error, exception, __STACKTRACE__}
+      end
+
+    {:reply, reply, state}
+  end
+
   # --- private ---
+
+  defp chronological_events(state) do
+    state.events
+    |> Enum.reverse()
+    |> Enum.map(fn {_size, event} -> event end)
+  end
 
   defp next_seq(state) do
     seq = state.seq + 1

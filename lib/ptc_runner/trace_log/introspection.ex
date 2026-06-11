@@ -21,6 +21,17 @@ defmodule PtcRunner.TraceLog.Introspection do
   unless the host grants those tools (the `tools/0` map). Read-only by design
   (the two-grant rule, D4): there is no live-session control here.
 
+  ## Memory model (P2 of `docs/plans/sandbox-heap-rebaseline.md`)
+
+  The granted closures are thin proxies: projections are computed host-side —
+  inside the `MemorySink` for pid sources, inside a
+  `PtcRunner.TraceLog.Introspection.Holder` started by `tools/2` for path and
+  list sources — so only each call's RESULT enters the sandbox and a program's
+  heap cost tracks result size, never log size. Call `tools/2` once per grant
+  (each path/list call starts a holder owned by the calling process; it stops
+  when that process goes down). A stopped sink/holder surfaces as a clear,
+  recoverable tool error, not a hang.
+
   ## Trust
 
   Recorded sessions are **untrusted data** — they may contain adversarial or
@@ -29,6 +40,7 @@ defmodule PtcRunner.TraceLog.Introspection do
   """
 
   alias PtcRunner.TraceLog.{Analyzer, MemorySink}
+  alias PtcRunner.TraceLog.Introspection.Holder
 
   @typedoc """
   A turn-log source: an in-memory sink pid, a JSONL trace path, or an already
@@ -76,48 +88,88 @@ defmodule PtcRunner.TraceLog.Introspection do
   Grant these as `tools:`; the keys (`"log_sessions"`, `"log_turns"`,
   `"log_programs"`, `"log_tool_calls"`) match the `tool:<name>` requirements the
   `log/` prelude infers. All closures are read-only and return string-keyed data.
+
+  Path and list sources start a `Holder` owned by the calling process (see the
+  memory-model section above). Options: `:max_bytes` — the holder's
+  serialized-size load cap; raises `ArgumentError` for oversized logs.
   """
-  @spec tools(source()) :: %{optional(String.t()) => (map() -> term())}
-  def tools(source) do
+  @spec tools(source(), keyword()) :: %{optional(String.t()) => (map() -> term())}
+  def tools(source, opts \\ []) do
+    owner = build_owner(source, opts)
+
     %{
-      "log_sessions" => fn _args -> list_sessions(source) end,
-      "log_turns" => fn args -> list_turns(source, session_id_arg(args)) end,
-      "log_programs" => fn args -> list_programs(source, session_id_arg(args)) end,
-      "log_tool_calls" => fn args -> list_tool_calls(source, session_id_arg(args)) end
+      "log_sessions" => fn _args -> run_query(owner, &list_sessions/1) end,
+      "log_turns" => fn args ->
+        sid = session_id_arg(args)
+        run_query(owner, &list_turns(&1, sid))
+      end,
+      "log_programs" => fn args ->
+        sid = session_id_arg(args)
+        run_query(owner, &list_programs(&1, sid))
+      end,
+      "log_tool_calls" => fn args ->
+        sid = session_id_arg(args)
+        run_query(owner, &list_tool_calls(&1, sid))
+      end
     }
   end
 
-  # --- data access (boring by design) ---
+  # --- host-side execution (P2): closures capture only an owner handle ---
 
-  defp list_sessions(source) do
-    source
-    |> events()
+  defp build_owner(pid, _opts) when is_pid(pid), do: {:sink, pid}
+
+  defp build_owner(path, opts) when is_binary(path) do
+    {:ok, holder} = Holder.start(Analyzer.load(path), opts)
+    {:holder, holder}
+  end
+
+  defp build_owner(events, opts) when is_list(events) do
+    {:ok, holder} = Holder.start(events, opts)
+    {:holder, holder}
+  end
+
+  defp run_query({:sink, pid}, fun), do: guarded(fn -> MemorySink.query(pid, fun) end)
+  defp run_query({:holder, pid}, fun), do: guarded(fn -> Holder.query(pid, fun) end)
+
+  # A stopped sink/holder must surface as a clear, recoverable tool error
+  # inside the sandbox — never as an exit crashing the eval, never as a hang.
+  defp guarded(thunk) do
+    thunk.()
+  catch
+    :exit, _reason ->
+      raise "introspection source is no longer available (its sink/holder stopped)"
+  end
+
+  # --- projections (boring by design; run inside the sink/holder) ---
+
+  defp list_sessions(events) do
+    events
     |> Analyzer.sessions()
     |> Enum.map(&stringify_summary/1)
   end
 
-  defp list_turns(source, session_id) do
-    source
+  defp list_turns(events, session_id) do
+    events
     |> session_turns(session_id)
     |> Enum.map(&project_turn/1)
   end
 
-  defp list_programs(source, session_id) do
-    source
+  defp list_programs(events, session_id) do
+    events
     |> session_turns(session_id)
     |> Enum.map(&get_in(&1, ["data", "program"]))
   end
 
-  defp list_tool_calls(source, session_id) do
-    source
+  defp list_tool_calls(events, session_id) do
+    events
     |> session_turns(session_id)
     |> Enum.flat_map(fn turn -> get_in(turn, ["data", "tool_calls"]) || [] end)
   end
 
-  defp session_turns(_source, nil), do: []
+  defp session_turns(_events, nil), do: []
 
-  defp session_turns(source, session_id) do
-    source |> events() |> Analyzer.session_turns(session_id)
+  defp session_turns(events, session_id) do
+    Analyzer.session_turns(events, session_id)
   end
 
   # A slim, string-keyed projection of a turn event: enough to reason about what
@@ -137,10 +189,6 @@ defmodule PtcRunner.TraceLog.Introspection do
   defp stringify_summary(summary) do
     Map.new(summary, fn {k, v} -> {to_string(k), v} end)
   end
-
-  defp events(pid) when is_pid(pid), do: MemorySink.events(pid)
-  defp events(path) when is_binary(path), do: Analyzer.load(path)
-  defp events(events) when is_list(events), do: events
 
   # Typed-tool args arrive string-keyed (`:session-id` -> "session-id"); accept
   # the underscore spelling too for callers passing "session_id".
