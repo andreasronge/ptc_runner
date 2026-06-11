@@ -43,6 +43,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   that is where memory-diff values and prints get their byte bounds.
   """
 
+  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceLog.Event
 
   @schema_version 2
@@ -151,6 +152,29 @@ defmodule PtcRunner.TraceLog.TurnEvent do
 
   def memory_diff(_before, _after), do: nil
 
+  @doc """
+  Builds the credential-free turn-log projection for a single tool call.
+
+  The projection intentionally excludes raw arguments and results. It keeps a
+  stable `args_hash` derived from the same canonical argument identity used by
+  tool caching, so PTC-Lisp log analysis can detect duplicate fetches without
+  ingesting potentially large or sensitive payloads.
+  """
+  @spec tool_call_summary(map()) :: map()
+  def tool_call_summary(call) when is_map(call) do
+    tool = Map.get(call, :name) || Map.get(call, :tool)
+
+    %{
+      "server" => Map.get(call, :server),
+      "tool" => tool,
+      "args_hash" => args_hash(tool, Map.get(call, :args)),
+      "duration_ms" => Map.get(call, :duration_ms),
+      "outcome" => if(Map.get(call, :error), do: "error", else: "ok")
+    }
+  end
+
+  def tool_call_summary(_), do: %{}
+
   # --- private ---
 
   defp build_data(attrs) do
@@ -199,4 +223,13 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   defp status_string(nil), do: nil
   defp status_string(status) when is_atom(status), do: Atom.to_string(status)
   defp status_string(status) when is_binary(status), do: status
+
+  defp args_hash(tool, args) when is_binary(tool) do
+    {_tool, canonical_args} = KeyNormalizer.canonical_cache_key(tool, args)
+
+    :crypto.hash(:sha256, :erlang.term_to_binary(canonical_args))
+    |> Base.encode16(case: :lower)
+  end
+
+  defp args_hash(_, _), do: nil
 end

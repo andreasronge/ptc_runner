@@ -101,6 +101,34 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert "(inc a)" in Analyzer.programs(session_turns)
     end
 
+    test "both drivers record hashed tool-call identity in canonical turn events", %{
+      tmp_dir: dir
+    } do
+      tools = %{"fetch" => fn %{"id" => id} -> %{"id" => id} end}
+
+      session_turns =
+        session_turn_events(dir, "session-tools", fn ->
+          session = Session.new(session_id: "sess-tools", tools: tools)
+          {{:ok, _}, _session} = Session.eval(session, ~S|(tool/fetch {:id 1})|)
+        end)
+
+      sub_turns =
+        session_turn_events(dir, "sub-tools", fn ->
+          agent = SubAgent.new(prompt: "Fetch", max_turns: 1, tools: tools)
+          SubAgent.run(agent, llm: mock_llm([~S|(return (tool/fetch {:id 1}))|]))
+        end)
+
+      assert [session_call] = hd(session_turns)["data"]["tool_calls"]
+      assert [sub_call] = hd(sub_turns)["data"]["tool_calls"]
+
+      assert session_call["tool"] == "fetch"
+      assert sub_call["tool"] == "fetch"
+      assert is_binary(session_call["args_hash"])
+      assert session_call["args_hash"] == sub_call["args_hash"]
+      refute Map.has_key?(session_call, "args")
+      refute Map.has_key?(sub_call, "args")
+    end
+
     test "SubAgent turns carry prelude provenance only when actually attached", %{tmp_dir: dir} do
       {:ok, prelude} =
         Compiler.compile("""

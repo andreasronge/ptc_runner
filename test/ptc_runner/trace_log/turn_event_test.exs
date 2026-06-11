@@ -106,6 +106,42 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
     end
   end
 
+  describe "tool_call_summary/1" do
+    test "keeps a stable args hash without exposing raw args or results" do
+      first =
+        TurnEvent.tool_call_summary(%{
+          name: "fetch",
+          args: %{"id" => 1.0, "nested" => %{a: "b"}},
+          result: %{secret: "do not log"},
+          duration_ms: 7
+        })
+
+      equivalent =
+        TurnEvent.tool_call_summary(%{
+          name: "fetch",
+          args: %{nested: %{"a" => "b"}, id: 1},
+          result: %{secret: "different"},
+          duration_ms: 9
+        })
+
+      different =
+        TurnEvent.tool_call_summary(%{
+          name: "fetch",
+          args: %{"id" => 2, "nested" => %{a: "b"}}
+        })
+
+      assert first["tool"] == "fetch"
+      assert first["duration_ms"] == 7
+      assert first["outcome"] == "ok"
+      assert is_binary(first["args_hash"])
+      assert byte_size(first["args_hash"]) == 64
+      assert first["args_hash"] == equivalent["args_hash"]
+      assert first["args_hash"] != different["args_hash"]
+      refute Map.has_key?(first, "args")
+      refute Map.has_key?(first, "result")
+    end
+  end
+
   describe "preview/1" do
     test "renders nil and bounds long values" do
       assert TurnEvent.preview(nil) == "nil"

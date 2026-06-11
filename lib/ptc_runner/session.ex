@@ -176,14 +176,7 @@ defmodule PtcRunner.Session do
   end
 
   defp tool_call_summaries(tool_calls) when is_list(tool_calls) do
-    Enum.map(tool_calls, fn call ->
-      %{
-        "server" => Map.get(call, :server),
-        "tool" => Map.get(call, :tool) || Map.get(call, :name),
-        "duration_ms" => Map.get(call, :duration_ms),
-        "outcome" => if(Map.get(call, :error), do: "error", else: "ok")
-      }
-    end)
+    Enum.map(tool_calls, &TurnEvent.tool_call_summary/1)
   end
 
   defp generate_session_id do

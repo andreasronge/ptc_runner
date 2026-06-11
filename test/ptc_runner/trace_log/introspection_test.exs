@@ -28,6 +28,27 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
     MemorySink.events(sink)
   end
 
+  defp recorded_tool_events do
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      tools = %{
+        "fetch" => fn %{"id" => id} -> %{"id" => id} end
+      }
+
+      session = Session.new(session_id: "dupes", tools: tools)
+
+      {{:ok, _}, session} =
+        Session.eval(session, ~S|[(tool/fetch {:id 1}) (tool/fetch {:id 1})]|)
+
+      {{:ok, _}, _session} = Session.eval(session, ~S|(tool/fetch {:id 2})|)
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    MemorySink.events(sink)
+  end
+
   describe "tool closures (plain data access)" do
     test "expose sessions, turns, programs, and tool calls over a source" do
       tools = Introspection.tools(recorded_events())
@@ -82,6 +103,25 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
       program = """
       (def turns (log/turns "investigation"))
       (count (filter (fn [t] (= (get t "committed") false)) turns))
+      """
+
+      assert {:ok, %Step{return: 1}} =
+               Lisp.run(program,
+                 prelude: Introspection.prelude_source(),
+                 tools: Introspection.tools(events)
+               )
+    end
+
+    test "duplicate tool calls can be detected in PTC-Lisp from args hashes" do
+      events = recorded_tool_events()
+
+      program = """
+      (def calls (log/tool-calls "dupes"))
+      (def grouped
+        (group-by
+          (fn [c] [(get c "tool") (get c "args_hash")])
+          calls))
+      (count (filter (fn [entry] (> (count (second entry)) 1)) grouped))
       """
 
       assert {:ok, %Step{return: 1}} =

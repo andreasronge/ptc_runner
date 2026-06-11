@@ -291,13 +291,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   defp duration_ms(_), do: nil
 
   defp turn_tool_calls(%Turn{tool_calls: tool_calls}) when is_list(tool_calls) do
-    Enum.map(tool_calls, fn call ->
-      %{
-        "tool" => Map.get(call, :name) || Map.get(call, :tool),
-        "duration_ms" => Map.get(call, :duration_ms),
-        "outcome" => if(Map.get(call, :error), do: "error", else: "ok")
-      }
-    end)
+    Enum.map(tool_calls, &TurnEvent.tool_call_summary/1)
   end
 
   defp turn_tool_calls(_), do: []
