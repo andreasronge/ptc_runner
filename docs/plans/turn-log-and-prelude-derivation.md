@@ -145,6 +145,8 @@ state — but journal replacement is not part of this plan.
 
 ### P1 — Doc ergonomics (smallest, immediate win)
 
+**Status: shipped** (`88ac00e7`). User docs: `docs/guides/subagent-observability.md`.
+
 **Problem.** PTC-Lisp `doc` returns a string
 (`PtcRunner.Lisp.Discovery.doc/1` → `{:ok, String.t()}`), so doc text lands
 in the result channel, which has the harshest budget
@@ -185,6 +187,9 @@ raises `:max_print_length` (the configured-override path);
 (3) existing `repl_discovery` tests for `dir`/`apropos` pass unchanged.
 
 ### P2 — Turn log: substrate telemetry + in-memory sink
+
+**Status: shipped** (`1ab6e641`; provenance hardened in `78d4b8f2`, tool-call
+hashing in `23deca22`). User docs: `docs/guides/subagent-observability.md`.
 
 **Problem.** Telemetry exists at two layers already, but neither yields a
 session-correlated record:
@@ -244,6 +249,10 @@ SubAgent run under `TraceLog.with_trace`; assert both produce turn events of
 the same shape, queryable through the same Analyzer calls.
 
 ### P3 — Introspection prelude (no MCP first)
+
+**Status: shipped** (`04eac9ab`). User docs:
+`docs/guides/capability-prelude.md` (`tool:` requires) and
+`docs/guides/subagent-observability.md` (the `log/` prelude).
 
 **Prerequisite: generalize the `requires` resolver.** Prelude attach today
 recognizes exactly one requirement shape — `"upstream:<server>/<tool>"` —

@@ -10,6 +10,7 @@ PtcRunner provides three complementary tracing layers. Each serves a different w
 |-----------|----------|--------|
 | `PtcRunner.Tracer.new/1` | Aggregate usage stats, inspect traces in code | In-memory struct on `Step` |
 | `PtcRunner.TraceLog.with_trace/2` | Offline debugging, performance analysis, Chrome DevTools | JSONL files |
+| `PtcRunner.TraceLog.start_memory_sink/1` | Cross-session turn analysis without files | In-memory ring buffer |
 
 **Data flow:**
 
@@ -276,6 +277,80 @@ end)
 
 > **Full API:** See `PtcRunner.TraceLog.with_trace/2`, `PtcRunner.TraceLog.Analyzer.summary/1`, and `PtcRunner.TraceLog.Analyzer.export_chrome_trace/2`.
 
+## Turn Log
+
+The turn log records every driver turn as a session-correlated event, queryable across runs. The same event shape is emitted by both `PtcRunner.Session.eval/3` (an external LLM driving via MCP or `mix ptc.repl`) and the SubAgent loop, so sessions and agents analyze identically.
+
+Each turn event carries the program, a bounded result preview, prints, a memory diff, credential-free tool-call identities, attached-prelude provenance, and correlation ids (`session_id`/`agent_id`, `turn`, `attempt`). Failed and parse-error attempts are recorded too, so wasted work stays visible. See `PtcRunner.TraceLog.TurnEvent` for the field reference.
+
+### Recording
+
+Turn events flow to any active sink. A JSONL trace captures them alongside the other TraceLog events:
+
+```elixir
+{:ok, _result, path} = TraceLog.with_trace(fn ->
+  session = PtcRunner.Session.new(session_id: "investigation")
+  {{:ok, _}, session} = PtcRunner.Session.eval(session, "(def x 1)")
+  {{:ok, _}, _} = PtcRunner.Session.eval(session, "(inc x)")
+end)
+```
+
+To analyze a session with no filesystem setup, enable the in-memory ring buffer with `PtcRunner.TraceLog.start_memory_sink/1`:
+
+```elixir
+{:ok, sink} = TraceLog.start_memory_sink()
+# ... run sessions / agents in this process ...
+TraceLog.stop_memory_sink(sink)
+events = PtcRunner.TraceLog.MemorySink.events(sink)
+```
+
+Both drivers skip the build cost when nothing is recording — check `PtcRunner.TraceLog.recording?/0`. The ring buffer evicts oldest-first under a byte budget (`:max_bytes`).
+
+### Querying Across Sessions
+
+`PtcRunner.TraceLog.Analyzer` reads turn events from either sink:
+
+```elixir
+alias PtcRunner.TraceLog.Analyzer
+
+Analyzer.turn_events(events)                      # all "turn" records
+Analyzer.sessions(events)                         # per-session summaries
+Analyzer.session_turns(events, "investigation")   # one session's turns
+Analyzer.programs(events)                         # program sources, in order
+```
+
+> **Full API:** See `PtcRunner.TraceLog.Analyzer.sessions/1` and `PtcRunner.TraceLog.MemorySink.events/1`.
+
+## Session Introspection
+
+The `log/` prelude lets a session or agent inspect *recorded* sessions from PTC-Lisp — list sessions, read turns and programs, and find duplicated work. The Elixir surface is plain data access; the analysis lives in the program.
+
+Grant the host-bound tools and attach the prelude with `PtcRunner.TraceLog.Introspection.tools/1` and `PtcRunner.TraceLog.Introspection.prelude_source/0`:
+
+```elixir
+alias PtcRunner.TraceLog.Introspection
+
+# `source` is a MemorySink pid, a JSONL path, or a list of event maps.
+PtcRunner.Lisp.run(
+  ~S|(count (log/turns "investigation"))|,
+  prelude: Introspection.prelude_source(),
+  tools: Introspection.tools(source)
+)
+```
+
+The exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
+
+### REPL
+
+`mix ptc.repl --log-prelude` attaches the `log/` prelude to the REPL's default in-memory sink, and `:turns` summarizes what has been recorded — so you can dogfood session introspection with no setup:
+
+```
+ptc> (def x 1)
+ptc> :turns
+  <id> (session): 1 turns, 1 committed, 0 failed, 0 tool calls
+ptc> (log/programs "<id>")
+```
+
 ## Telemetry Events
 
 SubAgent emits `:telemetry` events for integration with Prometheus, OpenTelemetry, or custom handlers:
@@ -325,5 +400,7 @@ System.convert_time_unit(duration, :native, :millisecond)
 - [Testing](subagent-testing.md) - Mock LLMs and test strategies
 - `PtcRunner.TraceLog.with_trace/2` - Capture execution traces to JSONL files
 - `PtcRunner.TraceLog.Analyzer.summary/1` - Offline trace analysis
+- `PtcRunner.TraceLog.Analyzer.sessions/1` - Cross-session turn-log queries
+- `PtcRunner.TraceLog.Introspection.tools/1` - Host-bound `log/` introspection tools
 - `PtcRunner.SubAgent.Telemetry.span/3` - Telemetry module with event reference
 - `PtcRunner.SubAgent.Debug.print_trace/2` - Trace inspection API

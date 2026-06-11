@@ -289,6 +289,7 @@ defmodule PtcRunner.MixProject do
         "docs/guides/subagent-observability.md",
         "docs/guides/subagent-compaction.md",
         "docs/guides/subagent-advanced.md",
+        "docs/guides/capability-prelude.md",
         "docs/guides/subagent-prompts.md",
         # Integration Guides
         "docs/guides/phoenix-streaming.md",
@@ -342,7 +343,8 @@ defmodule PtcRunner.MixProject do
         "livebooks/prompt_caching.livemd"
       ],
       groups_for_extras: [
-        "SubAgent Guides": ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute)\.md/,
+        "SubAgent Guides":
+          ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute|capability-prelude)\.md/,
         "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
         "Upstream Runtime": ~r/docs\/(upstream-runtime|aggregator-mode)\.md/,
         "MCP Server":
