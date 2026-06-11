@@ -84,7 +84,8 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert Enum.any?(fq_math_dir.return, &String.starts_with?(&1, "abs"))
 
       assert {:ok, doc_step} = Lisp.run("(doc 'LocalDate/parse)")
-      assert doc_step.return =~ "LocalDate/parse"
+      assert doc_step.return == nil
+      assert Enum.join(doc_step.prints, "\n") =~ "LocalDate/parse"
 
       assert {:ok, meta_step} = Lisp.run("(meta 'java.time.Duration/between)")
       assert meta_step.return.kind in ["java-interop", "ptc-builtin"]
@@ -99,7 +100,8 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert step.fail.message =~ "REPL discovery forms are only available"
 
       assert {:ok, short_doc} = Lisp.run("(doc 'Integer/parseInt)")
-      assert short_doc.return =~ "Integer/parseInt"
+      assert short_doc.return == nil
+      assert Enum.join(short_doc.prints, "\n") =~ "Integer/parseInt"
 
       assert {:ok, apropos_step} = Lisp.run(~s|(apropos "parseInt")|)
       refute Enum.any?(apropos_step.return, &String.contains?(&1, "java.lang.Integer/parseInt"))
@@ -145,11 +147,14 @@ defmodule PtcRunner.ReplDiscoveryTest do
       end
 
       assert {:ok, local_step} = Lisp.run("(doc 'LocalDate/parse)", discovery_exec: exec)
-      assert local_step.return =~ "LocalDate/parse"
-      refute local_step.return =~ "mcp LocalDate/parse"
+      assert local_step.return == nil
+      local_doc = Enum.join(local_step.prints, "\n")
+      assert local_doc =~ "LocalDate/parse"
+      refute local_doc =~ "mcp LocalDate/parse"
 
       assert {:ok, mcp_step} = Lisp.run("(doc 'LocalDate/unknown)", discovery_exec: exec)
-      assert mcp_step.return == "mcp LocalDate/unknown"
+      assert mcp_step.return == nil
+      assert Enum.join(mcp_step.prints, "\n") =~ "mcp LocalDate/unknown"
     end
 
     test "mcp servers still requires discovery_exec" do
@@ -170,7 +175,8 @@ defmodule PtcRunner.ReplDiscoveryTest do
       exec = discovery_exec()
 
       assert {:ok, doc_step} = Lisp.run("(doc 'github/search)", discovery_exec: exec)
-      assert doc_step.return =~ "github.search"
+      assert doc_step.return == nil
+      assert Enum.join(doc_step.prints, "\n") =~ "github.search"
 
       assert {:ok, meta_step} = Lisp.run(~s|(meta "github/search")|, discovery_exec: exec)
       assert meta_step.return["kind"] == "mcp-tool"

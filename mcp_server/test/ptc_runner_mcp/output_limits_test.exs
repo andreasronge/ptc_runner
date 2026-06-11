@@ -50,6 +50,30 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     assert shaped["output_truncated"] == true
   end
 
+  test "slim preserves a doc-sized print that the result-channel preview would truncate (P1)" do
+    # `(doc ...)` now routes its rendered text through the print channel (P1).
+    # On the :slim profile the result preview is capped at 512 chars, but the
+    # print channel allows 8KB — so a ~700-char doc survives intact in prints,
+    # the exact case the old result-channel `doc` path truncated.
+    doc_text = "observatory/list-traces\nDescription: " <> String.duplicate("detail ", 100)
+    assert byte_size(doc_text) > 512
+    assert byte_size(doc_text) < 8 * 1024
+
+    shaped =
+      %{"status" => "ok", "prints" => [doc_text]}
+      |> OutputLimits.shape_lisp_payload(:ok, :slim)
+
+    assert shaped["prints"] == [doc_text]
+    refute Map.has_key?(shaped, "prints_truncated")
+
+    # Contrast: the same text in the RESULT channel is preview-truncated to 512.
+    result_shaped =
+      %{"status" => "ok", "validated" => doc_text}
+      |> OutputLimits.shape_lisp_payload(:ok, :slim)
+
+    assert result_shaped["validated_preview_truncated"] == true
+  end
+
   test "slim success text renders the validated preview when the structured value was shaped away" do
     # The post-shaping shape: `validated` removed, only the preview remains,
     # and no string `result` accompanies it. The renderer must surface the

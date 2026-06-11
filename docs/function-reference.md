@@ -308,7 +308,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `all-ns` | `(all-ns)` | Return a sorted list of discoverable namespace-name strings |
 | `apropos` * | `(apropos query), (apropos query opts)` | Search loaded REPL discovery backends |
 | `dir` * | `(dir server), (dir server opts)` | List members of a REPL discovery reference |
-| `doc` * | `(doc tool-ref)` | Return human-readable documentation for a REPL discovery reference |
+| `doc` * | `(doc tool-ref)` | Print human-readable documentation for a REPL discovery reference (returns nil) |
 | `meta` * | `(meta tool-ref)` | Return structured metadata for a REPL discovery reference |
 | `ns-name` | `(ns-name namespace)` | Return the namespace-name string for a known namespace |
 | `ns-publics` | `(ns-publics namespace)` | Return public vars for a PTC/Clojure or prelude namespace |
@@ -481,4 +481,5 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 |----------|-----------|-------------|
 | `json/generate-string` | `(json/generate-string v)` | Encode a value as a JSON string; nil on non-encodable input. |
 | `json/parse-string` | `(json/parse-string s)` | Parse a JSON string into a value; nil on failure. |
+
 

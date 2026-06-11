@@ -2446,6 +2446,46 @@ so it surfaces a recoverable `:type_error` signal value instead. Regex
 delimiters (single- or multi-character), the empty-string delimiter (graphemes),
 and single-character delimiters (char-equivalent) continue to work unchanged.
 
+### DIV-51: REPL discovery forms — `doc` prints, but `dir`/`apropos`/`meta` return data
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | **by design (DIV)** |
+| **Source** | Plan `docs/plans/turn-log-and-prelude-derivation.md` (P1) |
+
+```clojure
+;; Clojure (clojure.repl)
+(doc 'str)     ;=> prints docs, returns nil
+(dir clojure.string)  ;=> prints member names, returns nil
+(apropos "map")       ;=> returns a seq of matching symbols
+
+;; PTC-Lisp
+(doc 'str)            ;=> prints docs, returns nil          (conformant)
+(dir 'clojure.string) ;=> returns a vector of member lines  (DIV)
+(apropos "map")       ;=> returns a vector of match lines    (close)
+(meta 'str)           ;=> returns a metadata map             (DIV)
+```
+
+**Decision:** DIV (split). `doc` is brought into line with `clojure.repl/doc`:
+it routes the rendered documentation through the **print** channel and returns
+`nil`. This restores conformance — returning the doc string (the prior PTC
+behavior) was the divergence, and it was costly because the result channel has
+the harshest output budget (512 chars on the MCP `:slim` profile), which
+truncated long docstrings to uselessness; the print channel is far larger.
+
+`dir`, `apropos`, and `meta` **deliberately keep returning structured data**
+instead of `clojure.repl`'s print-and-return-nil (`dir`) / seq-of-symbols
+(`apropos`) behavior. PTC programs consume these results programmatically
+(pagination, filtering, and — per the turn-log/prelude plan — programs that
+mine discovery output), so data-returning forms are the design goal. Only `doc`
+is a pure human-facing render with no useful structured form, so only `doc`
+prints.
+
+**Fix:** None — by design. Hosts that attach preludes with long docstrings tune
+the per-entry print cap via `:max_print_length` (default 2000) and align it with
+their envelope print budget.
+
 ### GAP-S116: `clojure.string` helpers accept character arguments Clojure rejects
 
 | Field | Value |

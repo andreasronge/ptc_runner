@@ -27,7 +27,8 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert Enum.any?(dir_step.return, &String.contains?(&1, "observatory/list-traces"))
 
       assert {:ok, doc_step} = Eval.run_lisp(runtime, "(doc 'observatory/list-traces)")
-      assert doc_step.return =~ "observatory/list-traces"
+      assert doc_step.return == nil
+      assert Enum.join(doc_step.prints, "\n") =~ "observatory/list-traces"
     after
       Runtime.stop(runtime)
     end
@@ -1002,7 +1003,8 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       refute inspect(dir_step.return) =~ secret
 
       assert {:ok, doc_step} = Eval.run_lisp(runtime, "(doc 'observatory/list-traces)")
-      refute doc_step.return =~ secret
+      assert doc_step.return == nil
+      refute Enum.join(doc_step.prints, "\n") =~ secret
 
       assert {:ok, meta_step} = Eval.run_lisp(runtime, "(meta 'observatory/list-traces)")
       refute inspect(meta_step.return) =~ secret

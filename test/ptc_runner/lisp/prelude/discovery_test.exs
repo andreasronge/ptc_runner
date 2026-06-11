@@ -55,6 +55,14 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
     step.return
   end
 
+  # `(doc ...)` prints and returns nil (clojure.repl/doc semantics, P1): the
+  # rendered docstring lands in `step.prints`, not the result channel.
+  defp run_doc(program, prelude) do
+    assert {:ok, %Step{} = step} = PtcRunner.Lisp.run(program, prelude: prelude)
+    assert step.return == nil
+    Enum.join(step.prints, "\n")
+  end
+
   describe "ns-publics" do
     test "returns a map keyed by public symbol strings, including discoverable exports",
          %{prelude: prelude} do
@@ -93,7 +101,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
   describe "doc" do
     test "resolves an exact prelude export ref to its docstring", %{prelude: prelude} do
-      doc = run_return("(doc 'crm/get-user)", prelude)
+      doc = run_doc("(doc 'crm/get-user)", prelude)
       assert is_binary(doc)
       assert doc =~ "crm/get-user"
       assert doc =~ "Return a CRM user by id."
@@ -101,7 +109,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
     end
 
     test "resolves a :discoverable export too", %{prelude: prelude} do
-      doc = run_return("(doc 'crm/list-users)", prelude)
+      doc = run_doc("(doc 'crm/list-users)", prelude)
       assert doc =~ "crm/list-users"
       assert doc =~ "List CRM users."
     end
@@ -114,6 +122,73 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
       assert step.fail.reason == :runtime_error
     end
+  end
+
+  # A docstring that renders to MORE than the MCP `:slim` result-channel preview
+  # budget (512 chars) but LESS than the default per-entry print cap
+  # (`:max_print_length` = 2000) — exactly the case the old result-channel `doc`
+  # path truncated to uselessness.
+  @midsize_doc "BEGIN-DOC " <> String.duplicate("lorem ipsum dolor sit amet ", 24) <> "END-DOC"
+
+  describe "doc routes through the print channel (P1)" do
+    test "a >512 / <2000 docstring arrives complete in prints, untruncated" do
+      {:ok, prelude} = Compiler.compile(midsize_prelude_source())
+
+      assert {:ok, %Step{return: nil, prints: prints}} =
+               PtcRunner.Lisp.run("(doc 'big/wide)", prelude: prelude)
+
+      text = Enum.join(prints, "\n")
+      assert String.length(@midsize_doc) > 512
+      assert String.length(@midsize_doc) < 2000
+      # Full docstring present end-to-end, with no append_print truncation suffix.
+      assert text =~ "BEGIN-DOC"
+      assert text =~ "END-DOC"
+      refute text =~ "chars)"
+    end
+
+    test "a docstring longer than the default cap is truncated unless the host raises :max_print_length" do
+      {:ok, prelude} = Compiler.compile(oversize_prelude_source())
+
+      # Default per-entry cap (2000): the print is truncated with a suffix.
+      assert {:ok, %Step{return: nil, prints: [capped]}} =
+               PtcRunner.Lisp.run("(doc 'big/wide)", prelude: prelude)
+
+      assert capped =~ "(2000/"
+      refute capped =~ "TAIL-MARKER"
+
+      # Host raises the cap: the full docstring (incl. its tail) arrives.
+      assert {:ok, %Step{return: nil, prints: [full]}} =
+               PtcRunner.Lisp.run("(doc 'big/wide)", prelude: prelude, max_print_length: 6000)
+
+      assert full =~ "TAIL-MARKER"
+      refute full =~ "chars)"
+    end
+  end
+
+  defp midsize_prelude_source do
+    """
+    (ns big "Big docs namespace." {:visibility :prompt})
+
+    (defn wide
+      "#{@midsize_doc}"
+      [x]
+      x)
+    """
+  end
+
+  defp oversize_prelude_source do
+    # ~2400-char docstring ending in a unique tail marker; > the 2000 default
+    # print cap, < a raised 6000 cap.
+    body = String.duplicate("padding ", 300)
+
+    """
+    (ns big "Big docs namespace." {:visibility :prompt})
+
+    (defn wide
+      "HEAD-MARKER #{body} TAIL-MARKER"
+      [x]
+      x)
+    """
   end
 
   describe "meta" do

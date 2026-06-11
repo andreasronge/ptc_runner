@@ -1730,7 +1730,9 @@ defmodule PtcRunner.Lisp.Eval do
         invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_dir/3, &Discovery.dir/2)
 
       :doc ->
-        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_doc/3, &local_doc/2)
+        eval_ctx
+        |> invoke_prelude_ref_discovery(operation, args, &prelude_doc/3, &local_doc/2)
+        |> route_doc_to_prints()
 
       :meta ->
         invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_meta/3, &local_meta/2)
@@ -1911,6 +1913,25 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp invoke_prelude_ref_discovery(eval_ctx, operation, args, _prelude_fun, local_fun) do
     invoke_ref_discovery(eval_ctx, operation, args, local_fun)
+  end
+
+  # `(doc ...)` matches `clojure.repl/doc`: it prints the rendered documentation
+  # and returns nil. Doc text therefore flows through the print channel (capped
+  # per entry at `:max_print_length`, then the host's print budget — 8-64KB on
+  # MCP) instead of the result channel, whose preview budget (512 chars on the
+  # `:slim` profile) truncated long docstrings to uselessness. All other
+  # discovery forms (dir/apropos/meta/ns-publics) keep returning structured
+  # data — see docs/plans/turn-log-and-prelude-derivation.md (P1) and the
+  # deliberate `dir` divergence noted in docs/clojure-conformance-gaps.md.
+  defp route_doc_to_prints({:ok, doc_text, %EvalContext{} = eval_ctx}) when is_binary(doc_text) do
+    {:ok, nil, EvalContext.append_print(eval_ctx, doc_text)}
+  end
+
+  # A discovery backend may return a non-string (e.g. nil on a world fault).
+  # Nothing to print; preserve `clojure.repl/doc`'s nil return. (Unknown refs
+  # and programmer faults raise upstream and never reach here.)
+  defp route_doc_to_prints({:ok, _other, %EvalContext{} = eval_ctx}) do
+    {:ok, nil, eval_ctx}
   end
 
   defp invoke_ref_discovery(%EvalContext{} = eval_ctx, operation, [ref | rest] = args, local_fun) do

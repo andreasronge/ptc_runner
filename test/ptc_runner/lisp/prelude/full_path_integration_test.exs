@@ -94,7 +94,11 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
     assert Map.has_key?(publics, "list-users")
     refute Map.has_key?(publics, "normalize-id")
 
-    doc = run_value("(doc 'crm/get-user)", prelude)
+    # `(doc ...)` prints and returns nil (clojure.repl/doc semantics, P1).
+    assert {:ok, %Step{return: nil, prints: doc_prints}} =
+             PtcRunner.Lisp.run("(doc 'crm/get-user)", prelude: prelude)
+
+    doc = Enum.join(doc_prints, "\n")
     assert doc =~ "crm/get-user"
     assert doc =~ "Return a CRM user by id."
 

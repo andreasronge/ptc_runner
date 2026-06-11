@@ -4685,7 +4685,8 @@
     },
     %{
       name: "doc",
-      description: "Return human-readable documentation for a REPL discovery reference",
+      description:
+        "Print human-readable documentation for a REPL discovery reference (returns nil)",
       binding: nil,
       category: :mcp,
       dispatch: :analyze,
@@ -4695,7 +4696,10 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
+        "Like clojure.repl/doc, prints the rendered documentation and returns nil, so doc text " <>
+          "flows through the (larger) print budget rather than the result channel. Sibling " <>
+          "discovery forms dir/apropos/meta return structured data instead of printing. " <>
+          "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
       see_also: ["apropos", "dir", "meta"],
       clojure_var: "doc",
       divergences: nil
@@ -4898,7 +4902,7 @@
     },
     %{
       name: "tool/servers",
-      description: "List configured upstream MCP servers",
+      description: "List configured upstream servers",
       binding: nil,
       category: :mcp,
       dispatch: :analyze,
