@@ -166,7 +166,7 @@ defmodule PtcRunner.Session do
         memory_diff: TurnEvent.memory_diff(prev.memory, step.memory),
         tool_calls: tool_call_summaries(step.tool_calls),
         fail: step.fail,
-        preludes: prelude_provenance(step.prelude_trace)
+        preludes: TurnEvent.prelude_provenance(step.prelude_trace)
       }
       |> TurnEvent.build()
       |> TraceLog.record_turn_event()
@@ -185,12 +185,6 @@ defmodule PtcRunner.Session do
       }
     end)
   end
-
-  defp prelude_provenance(%{source_hash: hash, protected_namespaces: namespaces}) do
-    [%{"source_hash" => hash, "namespaces" => namespaces}]
-  end
-
-  defp prelude_provenance(_), do: []
 
   defp generate_session_id do
     :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)

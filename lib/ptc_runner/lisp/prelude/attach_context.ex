@@ -19,6 +19,14 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
     * `:tools` — the granted `tools:` map (`%{name => closure | Tool}`) whose
       keys name the typed-tool capabilities the host has granted. Validates
       `tool:<name>` requirements.
+
+  Tool names are **strings**, matching `PtcRunner.Lisp.run/2`'s execution
+  contract (a `(tool/foo ...)` call resolves the tool by the string `"foo"`).
+  `tool:<name>` grant checks compare against string keys, so atom-keyed tools
+  are treated as ungranted — consistent with execution, where they would also be
+  unresolved. This is intentionally not papered over here: stringifying keys at
+  attach while execution stays string-keyed would let attach pass and the call
+  then fail at runtime.
   """
 
   alias PtcRunner.Lisp.Prelude.Attach

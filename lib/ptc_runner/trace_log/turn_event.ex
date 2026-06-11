@@ -50,6 +50,9 @@ defmodule PtcRunner.TraceLog.TurnEvent do
 
   # Bound for the inspected `result_preview` string before sanitize's own cap.
   @preview_limit 4_096
+  # Cap collection elements rendered while building a preview, so previewing a
+  # large (≤10MB) sandbox result is O(preview size), not O(result size).
+  @preview_items 50
 
   @typedoc "Normalized attributes accepted by `build/1` (atom-keyed)."
   @type attrs :: map() | keyword()
@@ -94,7 +97,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   def preview(nil), do: "nil"
 
   def preview(value) do
-    rendered = inspect(value, limit: :infinity, printable_limit: @preview_limit)
+    rendered = inspect(value, limit: @preview_items, printable_limit: @preview_limit)
 
     if String.length(rendered) > @preview_limit do
       String.slice(rendered, 0, @preview_limit - 3) <> "..."
@@ -102,6 +105,22 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       rendered
     end
   end
+
+  @doc """
+  Slims a prelude trace summary (`PtcRunner.Lisp.Prelude.trace_summary/1`) to the
+  turn-event `preludes` provenance shape — `[%{"source_hash" => ...,
+  "namespaces" => ...}]`, or `[]` when no prelude was attached.
+
+  Shared by both drivers so the provenance field (the single field that makes
+  A/B benchmarking and derivation provenance trivial, per the plan) reads
+  identically whether a session or a SubAgent turn produced it.
+  """
+  @spec prelude_provenance(map() | nil) :: [map()]
+  def prelude_provenance(%{source_hash: hash, protected_namespaces: namespaces}) do
+    [%{"source_hash" => hash, "namespaces" => namespaces}]
+  end
+
+  def prelude_provenance(_), do: []
 
   @doc """
   Computes a memory diff (`changed_keys` + bounded `values`) between the

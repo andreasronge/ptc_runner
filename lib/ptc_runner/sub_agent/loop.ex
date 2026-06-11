@@ -62,6 +62,7 @@ defmodule PtcRunner.SubAgent.Loop do
   """
 
   alias PtcRunner.{Lisp, Step, Turn}
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
 
@@ -311,6 +312,7 @@ defmodule PtcRunner.SubAgent.Loop do
       tool_cache: run_opts.tool_cache,
       discovery_exec: run_opts.discovery_exec,
       runtime: run_opts.runtime,
+      prelude_trace: Prelude.trace_summary(Map.get(agent, :runtime_prelude)),
       agent_name: agent.name,
       agent_id: run_opts.agent_id,
       on_chunk: run_opts.on_chunk,

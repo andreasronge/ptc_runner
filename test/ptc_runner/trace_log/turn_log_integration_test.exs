@@ -6,6 +6,7 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.{Session, SubAgent, TraceLog}
   alias PtcRunner.TraceLog.{Analyzer, MemorySink}
 
@@ -97,6 +98,55 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
 
       assert Analyzer.session_turns(combined, "sess-Q") == session_turns
       assert "(inc a)" in Analyzer.programs(session_turns)
+    end
+
+    test "SubAgent turns carry prelude provenance only when actually attached", %{tmp_dir: dir} do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns util "Pure helpers." {:visibility :prompt})
+        (defn add-one [x] (+ x 1))
+        """)
+
+      turns =
+        session_turn_events(dir, "sub-prelude", fn ->
+          agent = SubAgent.new(prompt: "Return", max_turns: 5, runtime_prelude: prelude)
+          # turn 1 is a parse failure (no program -> never attached); the rest
+          # execute under the prelude.
+          SubAgent.run(agent, llm: mock_llm(["not lisp ((", "(+ 1 0)", "(return 1)"]))
+        end)
+
+      {no_program, executed} = Enum.split_with(turns, &is_nil(&1["data"]["program"]))
+
+      # Previously [] for ALL sub_agent turns even with a prelude attached.
+      assert executed != []
+
+      assert Enum.all?(executed, fn t ->
+               match?([%{"namespaces" => ["util"], "source_hash" => _}], t["data"]["preludes"])
+             end)
+
+      # No-program turns never reached Lisp attach, so no provenance (matches
+      # Session, which reads the step's prelude_trace).
+      assert Enum.all?(no_program, &(&1["data"]["preludes"] == []))
+    end
+
+    test "an attach-failure turn reports no prelude even when one is configured", %{tmp_dir: dir} do
+      # A prelude requiring an ungranted tool fails attach on every turn.
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns cap "Needs an ungranted tool." {:visibility :prompt})
+        (defn f [] (tool/ungranted {}))
+        """)
+
+      turns =
+        session_turn_events(dir, "sub-attach-fail", fn ->
+          agent = SubAgent.new(prompt: "Return", max_turns: 3, runtime_prelude: prelude)
+          SubAgent.run(agent, llm: mock_llm(["(f)", "(f)", "(f)"]))
+        end)
+
+      assert turns != []
+      assert Enum.any?(turns, &(&1["data"]["fail"]["reason"] == "prelude_attach_failed"))
+      # Configured but never attached -> empty provenance (no false positive).
+      assert Enum.all?(turns, &(&1["data"]["preludes"] == []))
     end
 
     test "SubAgent failed turns carry fail reason; no-program turns keep raw_response",

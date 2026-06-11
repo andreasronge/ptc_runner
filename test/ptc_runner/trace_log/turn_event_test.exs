@@ -116,5 +116,25 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       assert String.length(preview) <= 4_096
       assert String.ends_with?(preview, "...")
     end
+
+    test "bounds large collections without rendering every element" do
+      # A bounded inspect `limit:` keeps previewing O(preview size), not
+      # O(result size) — the full 100k-element rendering is never materialized.
+      preview = TurnEvent.preview(Enum.to_list(1..100_000))
+      assert String.length(preview) <= 4_096
+      assert preview =~ "..."
+      refute preview =~ "99999"
+    end
+  end
+
+  describe "prelude_provenance/1" do
+    test "slims a trace summary to source_hash + namespaces, or [] when absent" do
+      summary = %{source_hash: "abc", protected_namespaces: ["log"], exports: [:lots]}
+
+      assert TurnEvent.prelude_provenance(summary) ==
+               [%{"source_hash" => "abc", "namespaces" => ["log"]}]
+
+      assert TurnEvent.prelude_provenance(nil) == []
+    end
   end
 end
