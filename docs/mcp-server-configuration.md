@@ -22,6 +22,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-dir` | `PTC_RUNNER_MCP_TRACE_DIR` | unset | Directory for per-call JSONL trace files. Tracing is OFF unless this is set. |
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
+| `--turn-log-dir` | `PTC_RUNNER_MCP_TURN_LOG_DIR` | unset | Directory for the canonical stateful-session turn log. When set, all accepted `lisp_session_eval` attempts write `event: "turn"` records to one JSONL file. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
 | `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
@@ -56,6 +57,15 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `lisp_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `lisp_debug` (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `lisp_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
+
+`--trace-dir` and `--turn-log-dir` are separate on purpose. Trace files are
+per-request MCP debug envelopes. The turn log is the cross-session record used
+by `PtcRunner.TraceLog.Analyzer` and the `log/` introspection prelude: it records
+accepted session eval attempts with the client-visible `ptcs_...` session id,
+monotonic attempt number, committed turn counter, status, result preview,
+credential-free tool-call summaries, and session-level failure/limit reasons.
+Owner mismatches, stale request ids, expiry races, and aborted evals do not emit
+turn events because no accepted session work can be attributed.
 
 ## Streamable HTTP flags
 

@@ -17,6 +17,7 @@ defmodule PtcRunnerMcp.Application do
     * `--trace-dir <path>` / `PTC_RUNNER_MCP_TRACE_DIR`
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
     * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
+    * `--turn-log-dir <path>` / `PTC_RUNNER_MCP_TURN_LOG_DIR`
     * `--agentic-max-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS`
     * `--agentic-retry-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS`
     * `--agentic-allow-writes` / `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES`
@@ -55,7 +56,8 @@ defmodule PtcRunnerMcp.Application do
     ResponseProfile,
     Sessions,
     TraceConfig,
-    TraceHandler
+    TraceHandler,
+    TurnLogConfig
   }
 
   alias PtcRunnerMcp.Http.{AuthRateLimiter, Config, Server}
@@ -86,6 +88,7 @@ defmodule PtcRunnerMcp.Application do
     Application.put_env(:ptc_runner_mcp, :http_config, http_config)
     validate_agentic_boot!([], root_runtime_opts != nil)
     apply_trace_config(args)
+    apply_turn_log_config(args)
 
     if AgenticConfig.enabled?() and upstreams == [] and root_runtime_opts == nil do
       Log.log(:warn, "agentic_without_aggregator", %{
@@ -250,6 +253,7 @@ defmodule PtcRunnerMcp.Application do
           trace_dir: :string,
           trace_payloads: :string,
           trace_max_files: :integer,
+          turn_log_dir: :string,
           # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
           debug_tool: :boolean,
           debug_ring_size: :integer,
@@ -776,6 +780,21 @@ defmodule PtcRunnerMcp.Application do
     end
   end
 
+  @doc false
+  @spec apply_turn_log_config(map()) :: :ok
+  def apply_turn_log_config(args) do
+    turn_log_dir =
+      case env_or(args, :turn_log_dir, "PTC_RUNNER_MCP_TURN_LOG_DIR", nil) do
+        nil -> nil
+        "" -> nil
+        v when is_binary(v) -> v
+      end
+
+    TurnLogConfig.set(%{turn_log_dir: turn_log_dir})
+    TurnLogConfig.put_collector(nil)
+    :ok
+  end
+
   defp read_int(args, key, env_name, default) do
     case env_or(args, key, env_name, nil) do
       nil ->
@@ -934,7 +953,7 @@ defmodule PtcRunnerMcp.Application do
   # diagnostics", never to a client-visible stdio disconnect.
   defp stdio_children(_args) do
     if attach_stdio?() do
-      [{PtcRunnerMcp.Stdio, []}] ++ debug_children()
+      turn_log_children() ++ [{PtcRunnerMcp.Stdio, []}] ++ debug_children()
     else
       []
     end
@@ -957,7 +976,14 @@ defmodule PtcRunnerMcp.Application do
   end
 
   defp session_children_for_http do
-    Sessions.child_specs()
+    Sessions.child_specs() ++ turn_log_children()
+  end
+
+  defp turn_log_children do
+    case TurnLogConfig.turn_log_dir() do
+      nil -> []
+      dir -> [{PtcRunnerMcp.TurnLogCollector, [dir: dir]}]
+    end
   end
 
   defp root_runtime_children(nil), do: []

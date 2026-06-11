@@ -10,7 +10,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{Application, Limits}
+  alias PtcRunnerMcp.{Application, Limits, TurnLogConfig}
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   setup do
@@ -19,7 +19,8 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       timeout: System.get_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS"),
       memory: System.get_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES"),
       max_sessions: System.get_env("PTC_RUNNER_MCP_MAX_SESSIONS"),
-      max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
+      max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
+      turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     }
 
     on_exit(fn ->
@@ -32,14 +33,19 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
         original.max_upstream_response_bytes
       )
 
+      restore_env("PTC_RUNNER_MCP_TURN_LOG_DIR", original.turn_log_dir)
+
       Limits.set(Limits.defaults())
       SessionsConfig.reset()
+      TurnLogConfig.set(TurnLogConfig.defaults())
+      TurnLogConfig.put_collector(nil)
     end)
 
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS")
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES")
     System.delete_env("PTC_RUNNER_MCP_MAX_SESSIONS")
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
+    System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     :ok
   end
 
@@ -65,6 +71,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       args = Application.parse_args(["--program-timeout-ms", "1500", "--max-frame-bytes", "1024"])
       assert args[:program_timeout_ms] == 1500
       assert args[:max_frame_bytes] == 1024
+    end
+
+    test "accepts --turn-log-dir" do
+      args = Application.parse_args(["--turn-log-dir", "/tmp/ptc-turns"])
+      assert args[:turn_log_dir] == "/tmp/ptc-turns"
     end
   end
 
@@ -134,6 +145,33 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       assert_raise RuntimeError, ~r/PTC_RUNNER_MCP_MAX_SESSIONS must be a positive integer/, fn ->
         Application.apply_sessions_config(%{})
       end
+    end
+  end
+
+  describe "apply_turn_log_config/1" do
+    test "defaults to disabled" do
+      assert :ok = Application.apply_turn_log_config(%{})
+      assert TurnLogConfig.turn_log_dir() == nil
+      refute TurnLogConfig.enabled?()
+    end
+
+    test "env var enables turn log dir" do
+      System.put_env("PTC_RUNNER_MCP_TURN_LOG_DIR", "/tmp/from-env")
+
+      assert :ok = Application.apply_turn_log_config(%{})
+      assert TurnLogConfig.turn_log_dir() == "/tmp/from-env"
+      assert TurnLogConfig.enabled?()
+    end
+
+    test "CLI flag overrides env var" do
+      System.put_env("PTC_RUNNER_MCP_TURN_LOG_DIR", "/tmp/from-env")
+
+      assert :ok =
+               Application.apply_turn_log_config(%{
+                 turn_log_dir: "/tmp/from-cli"
+               })
+
+      assert TurnLogConfig.turn_log_dir() == "/tmp/from-cli"
     end
   end
 

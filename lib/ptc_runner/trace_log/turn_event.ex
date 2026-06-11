@@ -162,14 +162,14 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   """
   @spec tool_call_summary(map()) :: map()
   def tool_call_summary(call) when is_map(call) do
-    tool = Map.get(call, :name) || Map.get(call, :tool)
+    {server, tool, args} = tool_identity(call)
 
     %{
-      "server" => Map.get(call, :server),
+      "server" => server,
       "tool" => tool,
-      "args_hash" => args_hash(tool, Map.get(call, :args)),
-      "duration_ms" => Map.get(call, :duration_ms),
-      "outcome" => if(Map.get(call, :error), do: "error", else: "ok")
+      "args_hash" => args_hash(tool, args),
+      "duration_ms" => get_key(call, :duration_ms),
+      "outcome" => tool_outcome(call)
     }
   end
 
@@ -223,6 +223,44 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   defp status_string(nil), do: nil
   defp status_string(status) when is_atom(status), do: Atom.to_string(status)
   defp status_string(status) when is_binary(status), do: status
+
+  defp tool_identity(call) do
+    tool = get_key(call, :name) || get_key(call, :tool)
+    args = get_key(call, :args)
+
+    if tool == "call" and is_map(args) do
+      upstream_tool = get_key(args, :tool)
+
+      case upstream_tool do
+        tool_name when is_binary(tool_name) ->
+          {get_key(args, :server), tool_name, get_key(args, :args) || %{}}
+
+        _ ->
+          {get_key(call, :server), tool, args}
+      end
+    else
+      {get_key(call, :server), tool, args}
+    end
+  end
+
+  defp tool_outcome(call) do
+    cond do
+      truthy?(get_key(call, :error)) -> "error"
+      get_key(call, :status) == "error" -> "error"
+      get_key(call, :status) == :error -> "error"
+      true -> "ok"
+    end
+  end
+
+  defp truthy?(nil), do: false
+  defp truthy?(false), do: false
+  defp truthy?(_), do: true
+
+  defp get_key(map, key) when is_map(map) and is_atom(key) do
+    Map.get(map, key) || Map.get(map, Atom.to_string(key))
+  end
+
+  defp args_hash(_tool, nil), do: nil
 
   defp args_hash(tool, args) when is_binary(tool) do
     {_tool, canonical_args} = KeyNormalizer.canonical_cache_key(tool, args)

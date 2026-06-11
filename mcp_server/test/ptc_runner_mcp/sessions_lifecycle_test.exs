@@ -19,10 +19,13 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   """
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Lisp
+  alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
   alias PtcRunnerMcp.{ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Session}
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.TestSupport.SoakHelpers
+  alias PtcRunnerMcp.{TurnLogCollector, TurnLogConfig}
 
   # A second stdio owner with a *different* instance id. Because the
   # session is created under the process-wide stdio owner, this map is a
@@ -36,7 +39,14 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     # registers an on_exit that tears it all back down + resets config.
     SoakHelpers.setup_sessions(%{enabled: true})
     ResponseProfile.set(:structured)
-    on_exit(fn -> ResponseProfile.set(old_profile) end)
+    old_turn_log_config = TurnLogConfig.get()
+
+    on_exit(fn ->
+      ResponseProfile.set(old_profile)
+      TurnLogConfig.set(old_turn_log_config)
+      TurnLogConfig.put_collector(nil)
+    end)
+
     :ok
   end
 
@@ -232,6 +242,112 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert {:error, response} = Sessions.forget(sid, nil, %{})
       assert response["reason"] == "session_busy"
       assert response["session_id"] == sid
+    end
+  end
+
+  describe "turn log recording" do
+    @tag :tmp_dir
+    test "records accepted MCP session eval attempts as canonical turn events", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+      assert String.starts_with?(sid, "ptcs_")
+
+      commit_tool_eval!(sid)
+
+      assert {:error, sandbox_error} = Sessions.eval(sid, "(no-such-fn 1)")
+      assert sandbox_error["reason"] == "unbound_var"
+
+      validation_error =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "\"not-an-integer\"",
+          "output_schema" => %{"type" => "integer"}
+        })
+
+      assert validation_error["isError"] == true
+      assert validation_error["structuredContent"]["reason"] == "validation_error"
+
+      stop_turn_log!()
+
+      events = Analyzer.load(path)
+      turns = Analyzer.session_turns(events, sid)
+
+      assert length(turns) == 3
+      assert Enum.map(turns, & &1["session_id"]) == [sid, sid, sid]
+      assert Enum.map(turns, & &1["driver"]) == ["session", "session", "session"]
+      assert Enum.map(turns, & &1["attempt"]) == [1, 2, 3]
+      assert Enum.map(turns, & &1["turn"]) == [1, 1, 1]
+      assert Enum.map(turns, & &1["committed"]) == [true, false, false]
+      assert Enum.map(turns, & &1["status"]) == ["ok", "error", "error"]
+
+      [[tool_call], [], []] = Enum.map(turns, &get_in(&1, ["data", "tool_calls"]))
+      assert tool_call["tool"] == "fetch"
+      assert is_binary(tool_call["args_hash"])
+      assert byte_size(tool_call["args_hash"]) > 0
+
+      sandbox_turn = Enum.at(turns, 1)
+      assert get_in(sandbox_turn, ["data", "fail", "reason"]) == "unbound_var"
+
+      validation_turn = Enum.at(turns, 2)
+      assert get_in(validation_turn, ["data", "fail", "reason"]) == "validation_failed"
+      assert get_in(validation_turn, ["data", "result_preview"]) =~ "not-an-integer"
+
+      assert [summary] = Analyzer.sessions(events)
+      assert summary.correlation_id == sid
+      assert summary.turns == 3
+      assert summary.committed == 1
+      assert summary.failed == 2
+      assert summary.tool_calls == 1
+
+      log_program = ~s|[(count (log/turns "#{sid}")) (log/programs "#{sid}")]|
+
+      assert {:ok,
+              %{return: [3, ["(tool/fetch {:id 1})", "(no-such-fn 1)", "\"not-an-integer\""]]}} =
+               Lisp.run(
+                 log_program,
+                 prelude: Introspection.prelude_source(),
+                 tools: Introspection.tools(path)
+               )
+    end
+
+    @tag :tmp_dir
+    test "records upstream-style tool/call entries once with real tool identity", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+
+      commit_call_tool_eval!(
+        sid,
+        ~S|(tool/call {:server "observatory" :tool "list_traces" :args {:org_id "acme"}})|
+      )
+
+      commit_call_tool_eval!(
+        sid,
+        ~S|(tool/call {:server "observatory" :tool "fail_trace" :args {:id "missing"}})|
+      )
+
+      stop_turn_log!()
+
+      turns = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert length(turns) == 2
+
+      assert [ok_call] = get_in(Enum.at(turns, 0), ["data", "tool_calls"])
+      assert ok_call["server"] == "observatory"
+      assert ok_call["tool"] == "list_traces"
+      assert ok_call["outcome"] == "ok"
+      assert is_binary(ok_call["args_hash"])
+
+      assert [error_call] = get_in(Enum.at(turns, 1), ["data", "tool_calls"])
+      assert error_call["server"] == "observatory"
+      assert error_call["tool"] == "fail_trace"
+      assert error_call["outcome"] == "error"
+      assert is_binary(error_call["args_hash"])
+      assert ok_call["args_hash"] != error_call["args_hash"]
     end
   end
 
@@ -575,6 +691,54 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
   defp inspect_view(sid, view) do
     call("lisp_session_inspect", %{"session_id" => sid, "view" => view})["structuredContent"]
+  end
+
+  defp commit_tool_eval!(sid) do
+    owner = Owner.stdio()
+    {:ok, meta} = SessionsRegistry.lookup(sid)
+    request_id = make_ref()
+    program = "(tool/fetch {:id 1})"
+
+    {:ok, snapshot} =
+      Session.begin_eval(meta.pid, owner, request_id, %{program: program})
+
+    tools = %{"fetch" => fn %{"id" => id} -> %{"id" => id} end}
+    result = Sessions.run_snapshot(snapshot, program, %{tools: tools})
+
+    assert {:ok, response} =
+             Session.commit_eval(meta.pid, owner, request_id, result, %{})
+
+    assert response["status"] == "ok"
+  end
+
+  defp commit_call_tool_eval!(sid, program) do
+    owner = Owner.stdio()
+    {:ok, meta} = SessionsRegistry.lookup(sid)
+    request_id = make_ref()
+
+    {:ok, snapshot} =
+      Session.begin_eval(meta.pid, owner, request_id, %{program: program})
+
+    result = Sessions.run_snapshot(snapshot, program, %{tools: %{"call" => &call_tool_stub/1}})
+
+    response = Session.commit_eval(meta.pid, owner, request_id, result, %{})
+    assert match?({:ok, _}, response) or match?({:error, _}, response)
+    response
+  end
+
+  defp call_tool_stub(%{"tool" => "fail_trace"}), do: raise("upstream failed")
+
+  defp call_tool_stub(%{"server" => server, "tool" => tool, "args" => args}) do
+    %{"server" => server, "tool" => tool, "args" => args}
+  end
+
+  defp stop_turn_log! do
+    case TurnLogConfig.collector() do
+      nil -> :ok
+      collector -> assert {:ok, _path, 0} = Collector.stop(collector)
+    end
+
+    TurnLogConfig.put_collector(nil)
   end
 
   # `lisp_session_close` / eviction makes the Session GenServer reply (or

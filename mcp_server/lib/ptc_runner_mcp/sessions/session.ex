@@ -11,10 +11,13 @@ defmodule PtcRunnerMcp.Sessions.Session do
   use GenServer
 
   alias PtcRunner.PtcToolProtocol
+  alias PtcRunner.TraceLog.Collector
+  alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunnerMcp.Limits, as: McpLimits
   alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sandbox
   alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
+  alias PtcRunnerMcp.TurnLogConfig
   alias PtcRunnerMcp.UpstreamResultFeedback
 
   @bytes_per_word :erlang.system_info(:wordsize)
@@ -34,6 +37,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     ttl_timer: nil,
     idle_timer: nil,
     turn: 0,
+    attempts: 0,
     memory: %{},
     turn_history: [],
     prints: [],
@@ -50,6 +54,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
           updated_at: DateTime.t(),
           expires_at: DateTime.t(),
           turn: non_neg_integer(),
+          attempts: non_neg_integer(),
           memory: map(),
           turn_history: [term()],
           prints: [String.t()],
@@ -202,13 +207,15 @@ defmodule PtcRunnerMcp.Sessions.Session do
          {:ok, eval} <- matching_eval(state, request_id) do
       state = clear_eval_monitor(state, eval)
       previous = eval.snapshot
+      attempt = state.attempts + 1
 
       case result do
         {:ok, step} ->
-          commit_success(state, previous, step, opts)
+          commit_success(%{state | attempts: attempt}, previous, eval, step, opts, attempt)
 
         {:error, step} ->
           upstream_calls = Map.get(opts, :upstream_calls, [])
+          state = %{state | attempts: attempt}
 
           public =
             Projection.eval_lisp_error(state, step)
@@ -229,6 +236,11 @@ defmodule PtcRunnerMcp.Sessions.Session do
             mode: state.mode,
             reason: response["reason"]
           })
+
+          emit_turn_event(previous, state, eval, step, attempt, false, :error,
+            fail: step.fail,
+            upstream_calls: upstream_calls
+          )
 
           {:reply, {:error, response}, touch(state)}
       end
@@ -366,11 +378,20 @@ defmodule PtcRunnerMcp.Sessions.Session do
         memory: state.memory,
         turn_history: state.turn_history,
         turn: state.turn,
+        attempts: state.attempts,
         mode: state.mode,
         limits: state.limits
       }
 
-      eval = %{request_id: request_id, worker: worker, monitor: ref, snapshot: snapshot}
+      eval = %{
+        request_id: request_id,
+        worker: worker,
+        monitor: ref,
+        snapshot: snapshot,
+        program: Map.get(opts, :program),
+        started_at: System.monotonic_time(:millisecond)
+      }
+
       state = state |> cancel_idle_timer() |> Map.put(:eval, eval)
 
       :telemetry.execute([:ptc_lisp, :session, :eval, :start], %{turn: state.turn}, %{
@@ -437,7 +458,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp commit_success(state, previous, step, opts) do
+  defp commit_success(state, previous, eval, step, opts, attempt) do
     # `(return v)` wraps step.return in a sentinel; in single-shot session
     # context that's identical to a final expression value. Unwrap once
     # here so everything downstream (turn history `*1`, the `result`
@@ -493,6 +514,10 @@ defmodule PtcRunnerMcp.Sessions.Session do
               }
             )
 
+            emit_turn_event(previous, committed, eval, step, attempt, true, :ok,
+              upstream_calls: upstream_calls
+            )
+
             {:reply, {:ok, response}, committed}
 
           {:ok, validated} ->
@@ -527,6 +552,10 @@ defmodule PtcRunnerMcp.Sessions.Session do
                 owner_hash: Owner.fingerprint(committed.owner),
                 mode: committed.mode
               }
+            )
+
+            emit_turn_event(previous, committed, eval, step, attempt, true, :ok,
+              upstream_calls: upstream_calls
             )
 
             {:reply, {:ok, response}, committed}
@@ -569,6 +598,11 @@ defmodule PtcRunnerMcp.Sessions.Session do
               }
             )
 
+            emit_turn_event(previous, state, eval, step, attempt, false, :error,
+              fail: %{reason: :validation_failed, message: message},
+              upstream_calls: upstream_calls
+            )
+
             {:reply, {:error, response}, touch(state)}
         end
 
@@ -601,9 +635,53 @@ defmodule PtcRunnerMcp.Sessions.Session do
           reason: :session_limit_exceeded
         })
 
+        emit_turn_event(previous, state, eval, step, attempt, false, :error,
+          fail: %{
+            reason: :session_limit_exceeded,
+            message: "session persisted-state limit exceeded; eval was not committed"
+          },
+          limits_hit: [detail],
+          upstream_calls: upstream_calls
+        )
+
         {:reply, {:error, response}, touch(state)}
     end
   end
+
+  defp emit_turn_event(previous, current, eval, step, attempt, committed?, status, opts) do
+    case TurnLogConfig.collector() do
+      nil ->
+        :ok
+
+      collector when is_pid(collector) ->
+        event =
+          TurnEvent.build(
+            driver: :session,
+            session_id: current.id,
+            turn: current.turn,
+            attempt: attempt,
+            committed: committed?,
+            status: status,
+            duration_ms: System.monotonic_time(:millisecond) - Map.get(eval, :started_at),
+            program: Map.get(eval, :program),
+            result_preview: TurnEvent.preview(Map.get(step, :return)),
+            prints: Map.get(step, :prints, []),
+            memory_diff: TurnEvent.memory_diff(previous.memory, Map.get(step, :memory)),
+            tool_calls: Enum.map(step_tool_calls(step), &TurnEvent.tool_call_summary/1),
+            fail: Keyword.get(opts, :fail),
+            limits_hit: Keyword.get(opts, :limits_hit, []),
+            preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace))
+          )
+
+        Collector.write_event(collector, event)
+        :ok
+    end
+  catch
+    _, _ -> :ok
+  end
+
+  defp step_tool_calls(%{tool_calls: calls}) when is_list(calls), do: calls
+  defp step_tool_calls(_step), do: []
 
   defp clear_eval_monitor(state, eval) do
     if eval.monitor, do: Process.demonitor(eval.monitor, [:flush])

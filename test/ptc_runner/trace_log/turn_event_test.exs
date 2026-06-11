@@ -140,6 +140,69 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       refute Map.has_key?(first, "args")
       refute Map.has_key?(first, "result")
     end
+
+    test "lifts synthetic upstream tool/call entries to the real upstream identity" do
+      first =
+        TurnEvent.tool_call_summary(%{
+          name: "call",
+          args: %{
+            "server" => "observatory",
+            "tool" => "list_traces",
+            "args" => %{"org_id" => "acme", "limit" => 10}
+          },
+          duration_ms: 12
+        })
+
+      equivalent =
+        TurnEvent.tool_call_summary(%{
+          name: "call",
+          args: %{
+            server: "observatory",
+            tool: "list_traces",
+            args: %{limit: 10.0, org_id: "acme"}
+          },
+          duration_ms: 20
+        })
+
+      different =
+        TurnEvent.tool_call_summary(%{
+          name: "call",
+          args: %{
+            server: "observatory",
+            tool: "list_traces",
+            args: %{org_id: "other", limit: 10}
+          }
+        })
+
+      assert first["server"] == "observatory"
+      assert first["tool"] == "list_traces"
+      assert first["duration_ms"] == 12
+      assert first["outcome"] == "ok"
+      assert is_binary(first["args_hash"])
+      assert byte_size(first["args_hash"]) == 64
+      assert first["args_hash"] == equivalent["args_hash"]
+      assert first["args_hash"] != different["args_hash"]
+      refute Map.has_key?(first, "args")
+    end
+
+    test "accepts string-keyed upstream ledger entries without nil tool names" do
+      summary =
+        TurnEvent.tool_call_summary(%{
+          "server" => "observatory",
+          "tool" => "get_trace",
+          "status" => "error",
+          "duration_ms" => 9,
+          "error" => "not found"
+        })
+
+      assert summary == %{
+               "server" => "observatory",
+               "tool" => "get_trace",
+               "args_hash" => nil,
+               "duration_ms" => 9,
+               "outcome" => "error"
+             }
+    end
   end
 
   describe "preview/1" do

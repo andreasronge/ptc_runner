@@ -335,6 +335,10 @@ do, and where did it waste turns?" using only prelude exports.
 
 ### Gate between P3 and P4 — measure before automating (M1, M2)
 
+> Setup work packages for these gates (MCP turn-log recording, fixture
+> extraction, bench harness) are specified in
+> [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md).
+
 P4 is the most interesting phase and the easiest place to overfit to the
 spend-spike example. It does not start until two cheap, falsifiable
 milestones pass, in order:
