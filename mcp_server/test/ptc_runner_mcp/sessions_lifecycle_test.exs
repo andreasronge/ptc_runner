@@ -685,6 +685,32 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
   end
 
+  describe "Session.lisp_opts setup ceiling" do
+    # Heap re-baseline (docs/plans/sandbox-heap-rebaseline.md): every eval
+    # passes a setup ceiling sized for the program budget plus the session
+    # memory copied in at spawn, at the pinned 5x refc amplification.
+    test "derives setup_max_heap from max_heap and the session memory limit" do
+      snapshot = %{
+        memory: %{},
+        turn_history: [],
+        limits: %{Config.session_limits() | max_memory_bytes: 8_000_000}
+      }
+
+      opts = Session.lisp_opts(snapshot, "(+ 1 2)", %{})
+      max_heap = Keyword.fetch!(opts, :max_heap)
+
+      assert Keyword.fetch!(opts, :setup_max_heap) ==
+               4 * max_heap + 5 * div(8_000_000, 8)
+    end
+
+    test "an explicit :setup_max_heap override wins" do
+      snapshot = %{memory: %{}, turn_history: [], limits: Config.session_limits()}
+
+      opts = Session.lisp_opts(snapshot, "(+ 1 2)", %{setup_max_heap: 123_456})
+      assert Keyword.fetch!(opts, :setup_max_heap) == 123_456
+    end
+  end
+
   defp call(name, args) do
     Tools.call(%{"name" => name, "arguments" => args})
   end

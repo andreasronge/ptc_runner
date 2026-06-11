@@ -1,9 +1,28 @@
 # Sandbox Heap Re-baseline — grant data must not consume the program's budget
 
-**Status:** draft spec v3 (2026-06-11; after codex review rounds 1–2), from the
-F3 investigation in [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md). Blocks M2
-(the `obs/` prelude will cache fetched data in session memory — exactly the
-pattern the current accounting punishes).
+**Status:** P1+P3 IMPLEMENTED (2026-06-11; spec v3 reviewed clean by codex
+rounds 1–3). P2 (introspection holder proxies) remains open. From the F3
+investigation in [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md); was blocking
+M2 (the `obs/` prelude will cache fetched data in session memory — exactly
+the pattern the old accounting punished).
+
+**Implementation notes (measured during P1, refining the estimates below):**
+
+- Amplification is *reference-count*-shaped, pinned by
+  `test/ptc_runner/lisp/heap_rebaseline_test.exs`: `memory:` ≈ 1.7× its refc
+  payload; a tool grant ≈ 3.5× **per closure capturing the data** (two
+  closures over the same rows ≈ 7×). The MCP formula's 5× factor holds for
+  session memory (1.7× measured) with real margin.
+- The setup ceiling is checked at GC time and counts GC workspace (~2× the
+  live baseline), so the practical capacity of the default `4 × max_heap`
+  ceiling is roughly half its nominal value.
+- A second grant copy-site surfaced: the **compile sandbox** closure
+  (`run_bounded(compile_fn)`) captured memory + tool closures. Fixed by
+  minimal capture (tool *names*, memory *keys*; error Steps re-hydrated in
+  the parent) — `run_bounded/2` semantics stay untouched as specced.
+- Baseline lands in `Step.usage.baseline_bytes` on success and in
+  `Step.fail.details` (`%{phase, limit_bytes, baseline_bytes, budget_bytes}`)
+  on kills; nested pmap-worker kills keep their existing message shape.
 
 ## Problem
 
@@ -122,12 +141,13 @@ In the spawned sandbox fun, before `eval_fn`:
    `:setup_max_heap` (new option, words), a hard fail-closed bound while the
    host environment is copied in. **Concrete derivation (v1):**
    - Bare `Lisp.run/2` default: `4 × max_heap` (40 MB at the default
-     budget). Rationale: covers `max_program_bytes` (1 MB source) +
-     `memory:`/grants up to ~6 MB of refc payload at the measured ≤5×
-     accounting amplification. Callers granting more must raise
-     `:setup_max_heap` explicitly — and get the distinguishable
-     setup-kill error (P3) if they don't, which is the boundedness
-     precondition *enforced*, not prose.
+     budget). Measured capacity (see implementation notes): covers
+     `max_program_bytes` (1 MB source) plus roughly 9 MB of `memory:`
+     refc payload or ~2 MB captured by a two-closure tool grant — the
+     GC-workspace factor (~2×) halves the nominal ceiling. Callers
+     granting more must raise `:setup_max_heap` explicitly — and get the
+     distinguishable setup-kill error (P3) if they don't, which is the
+     boundedness precondition *enforced*, not prose.
    - MCP sessions pass an explicit value:
      `4 × max_heap + 5 × words(max_session_memory_bytes)` — both terms
      config-derived; `5×` is the measured refc amplification ceiling,

@@ -106,7 +106,16 @@ defmodule PtcRunner.Lisp do
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
     - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
     - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
-    - `:max_heap` - Sandbox-process max heap size in words (default: 1_250_000)
+    - `:max_heap` - Program heap budget in words ABOVE the measured
+      environment baseline (default: 1_250_000). Host-provided data
+      (context, `:memory`, tool closures, the parsed program) is measured
+      after spawn and excluded from this budget — see
+      `PtcRunner.Sandbox` for the re-baseline semantics.
+    - `:setup_max_heap` - Hard heap ceiling in words while the host
+      environment is copied into the sandbox, before the re-baseline
+      (default: `4 × max_heap`). Callers granting large tools/memory must
+      raise this explicitly; exceeding it fails with a setup-phase
+      `:memory_exceeded` error.
     - `:worker_max_heap` - Fixed `max_heap_size` (words) for every pmap/pcalls worker, top-level and nested (default: the `:max_heap` value)
     - `:max_parallel_workers` - Global cap on pmap/pcalls worker processes alive at once across the whole run, at any nesting depth (default: 8). Aggregate live parallel heap ≈ `max_parallel_workers * worker_max_heap`. A pmap/pcalls that cannot get a slot fails with `:parallel_capacity_exceeded`.
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
@@ -214,7 +223,10 @@ defmodule PtcRunner.Lisp do
 
   Exceeding limits returns an error:
   - `{:error, {:timeout, ms}}` - execution exceeded timeout
-  - `{:error, {:memory_exceeded, bytes}}` - heap limit exceeded
+  - `{:error, {:memory_exceeded, info}}` - heap limit exceeded; `info` is
+    `PtcRunner.Sandbox.memory_exceeded_info/0` diagnostics (`phase: :eval`
+    for a program over its budget, `phase: :setup` for a granted
+    environment over the setup ceiling), surfaced in `Step.fail.details`
 
   ## Context Filtering
 
@@ -375,6 +387,7 @@ defmodule PtcRunner.Lisp do
       float_precision: Keyword.get(opts, :float_precision),
       timeout: Keyword.get(opts, :timeout, 1000),
       max_heap: max_heap,
+      setup_max_heap: Keyword.get(opts, :setup_max_heap),
       # Security H1: every pmap/pcalls worker runs under this FIXED heap cap
       # (default: the sandbox `max_heap`), and the global `max_parallel_workers`
       # semaphore caps how many such workers are alive at once across the run.
@@ -566,12 +579,22 @@ defmodule PtcRunner.Lisp do
 
     prelude = Map.get(opts, :prelude)
 
+    # The compile sandbox closure must capture ONLY what parse/analyze need:
+    # tool NAMES and memory KEYS, never the tool closures or memory values
+    # (whose data can be megabytes of granted environment). Error Steps built
+    # inside carry placeholder memory/journal, re-hydrated in
+    # `handle_compile_error/3`. `run_bounded/2` bills everything the closure
+    # references against `max_heap` at spawn — by design (the closure is the
+    # workload), so the grant must not ride along.
+    tool_names = Map.keys(normalized_tools)
+    memory_keys = Map.keys(memory)
+
     compile_fn = fn ->
       with {:ok, raw_ast} <- Parser.parse(source),
-           :ok <- check_symbol_limit(raw_ast, max_symbols, memory, journal),
+           :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude),
-           :ok <- check_undefined_vars(core_ast, memory, journal),
-           :ok <- check_undefined_tools(core_ast, normalized_tools, prelude, memory, journal) do
+           :ok <- check_undefined_vars(core_ast, memory_keys),
+           :ok <- check_undefined_tools(core_ast, tool_names, prelude) do
         {:ok, core_ast}
       end
     end
@@ -618,8 +641,11 @@ defmodule PtcRunner.Lisp do
     {:error, Step.error(:parse_error, msg, memory, %{}, journal: journal)}
   end
 
-  defp handle_compile_error({:error, %Step{} = step}, _memory, _journal) do
-    {:error, step}
+  # Compile-sandbox Steps are built with placeholder memory/journal so the
+  # compile closure doesn't capture the granted environment — restore the
+  # real values here.
+  defp handle_compile_error({:error, %Step{} = step}, memory, journal) do
+    {:error, %{step | memory: memory, journal: journal}}
   end
 
   defp handle_compile_error({:error, {reason_atom, _, _} = reason}, memory, journal)
@@ -643,6 +669,7 @@ defmodule PtcRunner.Lisp do
       float_precision: float_precision,
       timeout: timeout,
       max_heap: max_heap,
+      setup_max_heap: setup_max_heap,
       worker_max_heap: worker_max_heap,
       max_parallel_workers: max_parallel_workers,
       turn_history: turn_history,
@@ -718,12 +745,14 @@ defmodule PtcRunner.Lisp do
       end
     end
 
-    sandbox_opts = [
-      timeout: timeout,
-      max_heap: max_heap,
-      eval_fn: eval_fn,
-      link: Map.get(opts, :link, false)
-    ]
+    sandbox_opts =
+      [
+        timeout: timeout,
+        max_heap: max_heap,
+        eval_fn: eval_fn,
+        link: Map.get(opts, :link, false)
+      ]
+      |> put_setup_max_heap(setup_max_heap)
 
     case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
       {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
@@ -804,13 +833,8 @@ defmodule PtcRunner.Lisp do
         {:error,
          Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
 
-      {:error, {:memory_exceeded, bytes}} ->
-        Logger.warning("PTC-Lisp execution killed: heap limit #{bytes} bytes exceeded")
-
-        {:error,
-         Step.error(:memory_exceeded, "heap limit #{bytes} bytes exceeded", memory, %{},
-           journal: journal
-         )}
+      {:error, {:memory_exceeded, info}} ->
+        memory_exceeded_step(info, memory, journal)
 
       {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
         {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
@@ -843,7 +867,10 @@ defmodule PtcRunner.Lisp do
       "Analysis error: placeholder '#{name}' can only be used inside #() anonymous function syntax"
 
   def format_error({:timeout, ms}), do: "Timeout: execution exceeded #{ms}ms limit"
-  def format_error({:memory_exceeded, bytes}), do: "Memory exceeded: #{bytes} byte limit"
+
+  def format_error({:memory_exceeded, info}),
+    do: "Memory exceeded: #{memory_exceeded_message(info)}"
+
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
   # Handle Eval errors with specific types
@@ -883,6 +910,38 @@ defmodule PtcRunner.Lisp do
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
+
+  # Human-readable kill message from `PtcRunner.Sandbox.memory_exceeded_info/0`
+  # diagnostics (setup-phase kills are a grant problem, not a program
+  # problem) or the legacy integer byte limit (`run_bounded/2`).
+  defp memory_exceeded_message(%{phase: :setup} = info) do
+    "killed during environment setup: granted context/memory/tools exceeded " <>
+      "the #{info.limit_bytes}-byte setup ceiling (raise :setup_max_heap or shrink the grant)"
+  end
+
+  defp memory_exceeded_message(%{phase: :eval} = info) do
+    "heap limit exceeded: program used more than its #{info.budget_bytes}-byte " <>
+      "budget above the #{info.baseline_bytes}-byte environment baseline " <>
+      "(limit #{info.limit_bytes} bytes)"
+  end
+
+  defp memory_exceeded_message(bytes) when is_integer(bytes),
+    do: "heap limit #{bytes} bytes exceeded"
+
+  # Nested pmap/pcalls worker kills surface as {:memory_exceeded, message}
+  # from the eval layer — already human-readable.
+  defp memory_exceeded_message(message) when is_binary(message), do: message
+
+  defp memory_exceeded_step(info, memory, journal) do
+    message = memory_exceeded_message(info)
+    details = if is_map(info), do: info, else: %{}
+    Logger.warning("PTC-Lisp execution killed: #{message}")
+
+    {:error, Step.error(:memory_exceeded, message, memory, details, journal: journal)}
+  end
+
+  defp put_setup_max_heap(opts, nil), do: opts
+  defp put_setup_max_heap(opts, words), do: [{:setup_max_heap, words} | opts]
 
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
@@ -1024,7 +1083,7 @@ defmodule PtcRunner.Lisp do
   end
 
   # Check if symbol count exceeds limit
-  defp check_symbol_limit(ast, max_symbols, memory, journal) do
+  defp check_symbol_limit(ast, max_symbols) do
     count = SymbolCounter.count(ast)
 
     if count <= max_symbols do
@@ -1034,9 +1093,7 @@ defmodule PtcRunner.Lisp do
        Step.error(
          :symbol_limit_exceeded,
          "program contains #{count} unique symbols/keywords, exceeds limit of #{max_symbols}",
-         memory,
-         %{},
-         journal: journal
+         %{}
        )}
     end
   end
@@ -1044,8 +1101,12 @@ defmodule PtcRunner.Lisp do
   # Pre-execution check: reject programs with undefined variables before any
   # side effects (tool calls) can execute. Memory keys are included in scope
   # to support multi-turn SubAgent execution where previous turns def'd variables.
-  defp check_undefined_vars(core_ast, memory, journal) do
-    initial_scope = memory |> Map.keys() |> MapSet.new()
+  # Runs inside the compile sandbox: takes memory KEYS (pre-bound vars from
+  # prior turns), not the memory map, so the closure doesn't capture grant
+  # data. Error Steps carry placeholder memory/journal — re-hydrated in
+  # `handle_compile_error/3`.
+  defp check_undefined_vars(core_ast, memory_keys) do
+    initial_scope = MapSet.new(memory_keys)
 
     case collect_undefined_vars(core_ast, initial_scope) do
       [] ->
@@ -1056,26 +1117,19 @@ defmodule PtcRunner.Lisp do
 
         label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
 
-        {:error,
-         Step.error(
-           :unbound_var,
-           "#{label}: #{Enum.join(vars, ", ")}",
-           memory,
-           %{},
-           journal: journal
-         )}
+        {:error, Step.error(:unbound_var, "#{label}: #{Enum.join(vars, ", ")}", %{})}
     end
   end
 
   # Pre-execution check: reject programs that reference tools not in the provided
   # toolset, preventing partial execution where early tool calls succeed before
   # a later unknown tool call crashes.
-  defp check_undefined_tools(_core_ast, normalized_tools, _prelude, _memory, _journal)
-       when map_size(normalized_tools) == 0,
-       do: :ok
+  # Takes tool NAMES (not the tools map) so the compile sandbox closure never
+  # captures the tool closures and their granted environments.
+  defp check_undefined_tools(_core_ast, [], _prelude), do: :ok
 
-  defp check_undefined_tools(core_ast, normalized_tools, prelude, memory, journal) do
-    # CoreAST tool names are atoms, normalized_tools keys are strings — convert to strings
+  defp check_undefined_tools(core_ast, tool_names, prelude) do
+    # CoreAST tool names are atoms, tool_names entries are strings — convert to strings
     direct =
       core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
 
@@ -1084,7 +1138,7 @@ defmodule PtcRunner.Lisp do
     # missing wrapped tool fails BEFORE an earlier tool can run (side-effect guard).
     referenced = MapSet.union(direct, collect_prelude_tool_refs(core_ast, prelude))
 
-    available = MapSet.new(Map.keys(normalized_tools))
+    available = MapSet.new(tool_names)
     undefined = MapSet.difference(referenced, available)
 
     if MapSet.size(undefined) == 0 do
@@ -1099,14 +1153,7 @@ defmodule PtcRunner.Lisp do
           tools -> "Available tools: #{Enum.join(tools, ", ")}"
         end
 
-      {:error,
-       Step.error(
-         :unknown_tool,
-         "#{label}: #{Enum.join(names, ", ")}. #{hint}",
-         memory,
-         %{},
-         journal: journal
-       )}
+      {:error, Step.error(:unknown_tool, "#{label}: #{Enum.join(names, ", ")}. #{hint}", %{})}
     end
   end
 

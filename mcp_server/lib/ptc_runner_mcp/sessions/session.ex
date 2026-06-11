@@ -862,6 +862,19 @@ defmodule PtcRunnerMcp.Sessions.Session do
         max(@min_max_heap_words, div(McpLimits.program_memory_limit_bytes(), @bytes_per_word))
       )
 
+    # Setup ceiling for the sandbox heap re-baseline
+    # (docs/plans/sandbox-heap-rebaseline.md): the bare 4 × max_heap default
+    # plus headroom for the session memory copied into every eval, at the
+    # 5× refc-amplification ceiling pinned by HeapRebaselineTest.
+    max_session_memory_bytes = get_in(snapshot, [:limits, :max_memory_bytes]) || 0
+
+    setup_max_heap =
+      Map.get(
+        opts,
+        :setup_max_heap,
+        4 * max_heap + 5 * div(max_session_memory_bytes, @bytes_per_word)
+      )
+
     ([
        memory: snapshot.memory,
        turn_history: snapshot.turn_history,
@@ -872,6 +885,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        profile: Map.get(opts, :profile, :mcp_no_tools),
        timeout: Map.get(opts, :timeout, McpLimits.program_timeout_ms()),
        max_heap: max_heap,
+       setup_max_heap: setup_max_heap,
        strict_data: true,
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
