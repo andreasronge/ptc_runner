@@ -634,6 +634,36 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       payload = Projection.list([%{"session_id" => "a"}, %{"session_id" => "b"}])
       assert payload["count"] == 2
     end
+
+    test "eval_success uses configured session preview chars" do
+      Config.set(%{Config.get() | max_session_preview_chars: 20})
+
+      previous = %{memory: %{}}
+
+      committed = %{
+        id: "sess-preview",
+        turn: 1,
+        memory: %{},
+        turn_history: [],
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      step = %{
+        return: String.duplicate("a", 200),
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["truncated"] == true
+      assert String.length(payload["result"]) < 120
+      assert payload["feedback"] =~ "truncated"
+    end
   end
 
   describe "Sessions.Owner derivation" do

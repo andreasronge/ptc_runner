@@ -22,6 +22,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_max_session_tool_call_bytes 128 * 1024
   @default_max_session_upstream_call_entries 50
   @default_max_session_upstream_call_bytes 128 * 1024
+  @default_max_session_preview_chars 512
 
   @typedoc "Process-wide sessions configuration."
   @type t :: %{
@@ -39,7 +40,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
           max_session_tool_call_entries: pos_integer(),
           max_session_tool_call_bytes: pos_integer(),
           max_session_upstream_call_entries: pos_integer(),
-          max_session_upstream_call_bytes: pos_integer()
+          max_session_upstream_call_bytes: pos_integer(),
+          max_session_preview_chars: pos_integer()
         }
 
   @doc "Default session config. Sessions are disabled by default."
@@ -60,7 +62,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
       max_session_tool_call_entries: @default_max_session_tool_call_entries,
       max_session_tool_call_bytes: @default_max_session_tool_call_bytes,
       max_session_upstream_call_entries: @default_max_session_upstream_call_entries,
-      max_session_upstream_call_bytes: @default_max_session_upstream_call_bytes
+      max_session_upstream_call_bytes: @default_max_session_upstream_call_bytes,
+      max_session_preview_chars: @default_max_session_preview_chars
     }
   end
 
@@ -167,6 +170,13 @@ defmodule PtcRunnerMcp.Sessions.Config do
              :max_session_upstream_call_bytes,
              "PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES",
              defaults.max_session_upstream_call_bytes
+           ),
+         {:ok, max_session_preview_chars} <-
+           read_int(
+             args,
+             :max_session_preview_chars,
+             "PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS",
+             defaults.max_session_preview_chars
            ) do
       {:ok,
        %{
@@ -184,7 +194,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
          max_session_tool_call_entries: max_session_tool_call_entries,
          max_session_tool_call_bytes: max_session_tool_call_bytes,
          max_session_upstream_call_entries: max_session_upstream_call_entries,
-         max_session_upstream_call_bytes: max_session_upstream_call_bytes
+         max_session_upstream_call_bytes: max_session_upstream_call_bytes,
+         max_session_preview_chars: max_session_preview_chars
        }}
     end
   end

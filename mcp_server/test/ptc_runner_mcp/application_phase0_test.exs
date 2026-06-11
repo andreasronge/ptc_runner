@@ -19,6 +19,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       timeout: System.get_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS"),
       memory: System.get_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES"),
       max_sessions: System.get_env("PTC_RUNNER_MCP_MAX_SESSIONS"),
+      max_session_preview_chars: System.get_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS"),
       max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
       turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     }
@@ -27,6 +28,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       restore_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS", original.timeout)
       restore_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES", original.memory)
       restore_env("PTC_RUNNER_MCP_MAX_SESSIONS", original.max_sessions)
+      restore_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS", original.max_session_preview_chars)
 
       restore_env(
         "PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES",
@@ -44,6 +46,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_TIMEOUT_MS")
     System.delete_env("PTC_RUNNER_MCP_PROGRAM_MEMORY_LIMIT_BYTES")
     System.delete_env("PTC_RUNNER_MCP_MAX_SESSIONS")
+    System.delete_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS")
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     :ok
@@ -76,6 +79,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     test "accepts --turn-log-dir" do
       args = Application.parse_args(["--turn-log-dir", "/tmp/ptc-turns"])
       assert args[:turn_log_dir] == "/tmp/ptc-turns"
+    end
+
+    test "accepts --max-session-preview-chars" do
+      args = Application.parse_args(["--max-session-preview-chars", "4096"])
+      assert args[:max_session_preview_chars] == 4096
     end
   end
 
@@ -145,6 +153,33 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       assert_raise RuntimeError, ~r/PTC_RUNNER_MCP_MAX_SESSIONS must be a positive integer/, fn ->
         Application.apply_sessions_config(%{})
       end
+    end
+
+    test "max session preview chars defaults to the session projection preview cap" do
+      assert :ok = Application.apply_sessions_config(%{})
+      assert SessionsConfig.get().max_session_preview_chars == 512
+    end
+
+    test "max session preview chars follows env vars" do
+      System.put_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS", "4096")
+
+      assert :ok = Application.apply_sessions_config(%{})
+      assert SessionsConfig.get().max_session_preview_chars == 4096
+    end
+
+    test "max session preview chars CLI flag overrides env var" do
+      System.put_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS", "4096")
+
+      assert :ok = Application.apply_sessions_config(%{max_session_preview_chars: 8192})
+      assert SessionsConfig.get().max_session_preview_chars == 8192
+    end
+
+    test "rejects invalid max session preview chars" do
+      assert_raise RuntimeError,
+                   ~r/--max-session-preview-chars .* must be a positive integer/,
+                   fn ->
+                     Application.apply_sessions_config(%{max_session_preview_chars: 0})
+                   end
     end
   end
 

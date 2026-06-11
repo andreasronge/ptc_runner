@@ -6,12 +6,10 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.Loop.TurnFeedback
   alias PtcRunner.SubAgent.Namespace.{ExecutionHistory, User}
+  alias PtcRunnerMcp.Sessions.Config
   alias PtcRunnerMcp.Sessions.Limits
 
-  @session_agent %{
-    max_turns: 2,
-    format_options: [feedback_max_chars: 2048, preview_max_chars: 512]
-  }
+  @session_feedback_max_chars 2048
 
   @doc "Render a session-start response."
   @spec start(map()) :: map()
@@ -82,12 +80,22 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   defp eval_execution(previous, step) do
     execution =
       TurnFeedback.execution_feedback(
-        @session_agent,
+        session_agent(),
         %{memory: previous.memory || %{}},
         step
       )
 
     execution
+  end
+
+  defp session_agent do
+    %{
+      max_turns: 2,
+      format_options: [
+        feedback_max_chars: @session_feedback_max_chars,
+        preview_max_chars: Config.get().max_session_preview_chars
+      ]
+    }
   end
 
   @doc "Render a Lisp execution failure. Session state was not committed."

@@ -53,6 +53,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--max-session-tool-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_TOOL_CALL_BYTES` | `131072` (128 KiB) | Persisted tool-call history byte cap. |
 | `--max-session-upstream-call-entries` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_ENTRIES` | `50` | Maximum persisted upstream-call history entries. |
 | `--max-session-upstream-call-bytes` | `PTC_RUNNER_MCP_MAX_SESSION_UPSTREAM_CALL_BYTES` | `131072` (128 KiB) | Persisted upstream-call history byte cap. |
+| `--max-session-preview-chars` | `PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS` | `512` | Character cap for value previews in `lisp_session_eval` result and memory feedback. Raising this increases response tokens and remains subject to response profile / envelope caps. |
 | `--response-profile` | `PTC_RUNNER_MCP_RESPONSE_PROFILE` | `slim` (or `debug` when `--debug-tool` is set) | `lisp_eval` / `lisp_session_eval` response shape: `slim` \| `structured` \| `debug`. See [Response profiles](#response-profiles). |
 | `--debug-tool` | `PTC_RUNNER_MCP_DEBUG_TOOL` | `false` | Expose the opt-in read-only `lisp_debug` diagnostics tool (see [`mcp-debug.md`](mcp-debug.md)). Also flips the response profile to `debug` unless `--response-profile` is set explicitly. |
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `lisp_debug` (clamped to `[10, 5000]`). |
