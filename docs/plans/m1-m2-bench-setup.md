@@ -183,6 +183,17 @@ planted trace ids with consistent shapes.
 
 ## WP-C — bench harness + M1/M2 protocol (repo: sandbox dir, not ptc_runner)
 
+> **Status: steps 1–3 DONE, M1 gate PASSED** (2026-06-11). Harness in
+> `~/ptc-mcp-sandbox/bench/` (`bench-run.sh`, `bench-metrics.py`,
+> `task-prompt.template`, `m1-introspect.exs`); full findings report in
+> `~/ptc-mcp-sandbox/M1-findings.md`, per-run artifacts in
+> `bench/runs/seed-*/`. 6 sessions recorded (seeds 11–16, sonnet, all four
+> anomaly types); oracle 5/5 on valid runs. **Harness caveat discovered:**
+> the variant generator always plants the anomaly in `production` — a prompt
+> pointing elsewhere makes the oracle unsatisfiable (seed-15 became an
+> accidental control this way). See the M1 findings summary below; M2
+> remains blocked on the WP-A `--prelude` follow-up.
+
 Keep harness scripts out of ptc_runner (domain-blindness: core repo stays
 generic). Extend `~/ptc-mcp-sandbox/`.
 
@@ -220,6 +231,56 @@ generic). Extend `~/ptc-mcp-sandbox/`.
    Leakage rules are mandatory even though manual: fresh seeds, randomized
    planted ids, prelude written before eval seeds are generated. M2's prelude
    becomes the gold standard P4 automation is later judged against.
+
+## M1 findings summary (2026-06-11; full report `~/ptc-mcp-sandbox/M1-findings.md`)
+
+Headline numbers across 6 sessions: 63 eval attempts / 56 committed turns;
+40 upstream calls of which only 21 unique `(tool, args_hash)` groups — **18
+within-session duplicate fetches (45%)** plus 1 cross-session; 24/63 turns
+(38%) spent on catalog discovery; 7 failed attempts; client side 86 turns,
+~21k output tokens, $1.79.
+
+**Waste patterns (input for the M2 `obs/` prelude author):**
+
+- **W1 fetch-then-reshape without memory** — 0/63 programs used `(def ...)`;
+  the same upstream call is repeated 2–3× with identical args (inspect shape
+  → project fields → print rows). Accounts for all 18 duplicate fetches.
+- **W2 fixed discovery prelude** — every session opens
+  `(tool/servers)` → `(dir ...)` → `(doc <first op>)`, re-deriving identical
+  information per session.
+- **W3 id-vs-trace_id param guess** — 6/6 sessions: for the second operation
+  used, guess `{:trace_id ...}`, fail (`missing required args id`), read the
+  doc, retry with `{:id ...}` — a 2-turn tax every session. Docs are read
+  only *after* the first failure of an op.
+- **W4 string-encoded cost arithmetic** — one hard failure (`sort-by`
+  negating `"0.018600"`); other sessions avoided computing costs by printing
+  and eyeballing rows.
+- **W5 println/doseq discards** — committed turns returning `[nil nil ...]`
+  with the real data in `prints`: analysis flows through the client
+  transcript instead of session memory.
+
+**Introspection-surface gaps (fix/consider before M2):**
+
+- **F1** `log/turns` projection drops `data.fail` — a prelude-only analyst
+  sees `status: "error"` but never *why* (W3 was only diagnosable from raw
+  JSONL). Cheap fix: add fail reason/message to
+  `Introspection.project_turn/1`.
+- **F2** catalog ops (`tool/servers`/`dir`/`doc`) are invisible in
+  `tool_calls`; discovery overhead (38% of turns) is only recoverable by
+  pattern-matching program source. `Step.catalog_ops` exists — consider
+  lifting it into the turn event.
+- **F3** default ~10MB `max_heap` kills ordinary grouping analyses over just
+  40 tool-call rows, and the pass/fail boundary tracks interpreter
+  allocation, not data size (`(mapv count (vec (vals groups)))` dies while
+  the un-`vec`'d variant and `(count (vec (vals groups)))` both pass; strings
+  verified fully copied, not sub-binaries). The M1 pass ran host-side with
+  `max_heap: 12_500_000` words, but an agent-attached `obs/` prelude runs at
+  the default — needs a core decision (raise default, better diagnostics, or
+  allocation-leaner eval) before M2.
+- **F4** the documented vector-key flex-access DIV makes
+  `(get groups [tool hash])` after composite-key `group-by` silently return
+  `nil` — the textbook dedup idiom reports "no duplicates". Workaround:
+  iterate `(vals groups)`; prelude grouping helpers should route around it.
 
 ## Suggested session split
 

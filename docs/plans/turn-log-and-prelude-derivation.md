@@ -338,6 +338,17 @@ do, and where did it waste turns?" using only prelude exports.
 > Setup work packages for these gates (MCP turn-log recording, fixture
 > extraction, bench harness) are specified in
 > [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md).
+>
+> **M1: PASSED** (2026-06-11). Six recorded sessions, prelude-only
+> introspection identified recurring duplicated/wasted work: 45% of upstream
+> calls were within-session duplicate fetches (no session ever used
+> `(def ...)` memory), 38% of turns were catalog discovery, and all sessions
+> paid an identical 2-turn parameter-guess tax. Findings W1–W5 (prelude
+> candidates for M2's human author) and introspection-surface gaps F1–F4
+> (fix before M2; notably the default `max_heap` killing ordinary analysis
+> programs) are summarized in `m1-m2-bench-setup.md` and in full in
+> `~/ptc-mcp-sandbox/M1-findings.md`. M2 awaits the MCP `--prelude`
+> follow-up.
 
 P4 is the most interesting phase and the easiest place to overfit to the
 spend-spike example. It does not start until two cheap, falsifiable
