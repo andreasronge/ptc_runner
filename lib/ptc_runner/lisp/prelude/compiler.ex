@@ -483,7 +483,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         |> Map.get(spec.namespace, %{})
         |> Map.get(spec.symbol, %{requires: [], tool_refs: []})
 
-      backing = backing(spec, explicit_requires, explicit_provider, transitive.requires)
+      backing = backing(spec, explicit_requires, explicit_provider, transitive)
 
       {:ok,
        %Export{
@@ -545,25 +545,47 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # Backing inference + explicit metadata (plan §3)
   # ============================================================
 
-  # Explicit prelude metadata wins over inference. `provider_ref` is inferred
-  # only from a single literal (tool/call {:server "x" :tool "y" ...}) in the
-  # export's OWN body. `requires` is the export's TRANSITIVE set of literal
-  # upstream ids — its own body plus the bodies of the same-namespace private
-  # helpers it (transitively) calls — so an export that reaches an upstream
-  # THROUGH a helper still carries the requirement (attach-time validation fails
-  # closed) WITHOUT inheriting a sibling export's unrelated requirements.
+  # `requires` is the UNION of inferred and explicit backing ids (plan P3):
+  # explicit metadata can ADD requirements but never drop an inferred
+  # fail-closed one. `provider_ref` and `effect` keep their explicit-override
+  # semantics.
+  #
+  # Inferred ids are the export's TRANSITIVE backing — its own body plus the
+  # bodies of the same-namespace private helpers it (transitively) calls, so an
+  # export that reaches a capability THROUGH a helper still carries the
+  # requirement WITHOUT inheriting a sibling export's unrelated requirements:
+  #
+  #   * literal `(tool/call {:server "x" :tool "y" ...})` -> `upstream:x/y`, and
+  #   * each transitively-referenced typed tool `(tool/<name> ...)` ->
+  #     `tool:<name>`, EXCEPT the synthetic `"call"` of `(tool/call ...)` (the
+  #     literal case is already covered precisely by `upstream:`, and dynamic
+  #     `(tool/call ...)` dispatch must be declared explicitly).
+  @tool_call_name "call"
+
   defp backing(
          %Spec{metadata: metadata, body_form: body},
          explicit_requires,
          explicit_provider,
-         transitive_ids
+         transitive
        ) do
     explicit_effect = effect(Map.get(metadata, "effect"))
 
     inferred = infer_backing(body)
 
     provider_ref = explicit_provider || inferred.provider_ref
-    requires = explicit_requires || transitive_ids
+
+    inferred_tool_requires =
+      transitive.tool_refs
+      |> Enum.reject(&(&1 == @tool_call_name))
+      |> Enum.map(&("tool:" <> &1))
+
+    inferred_ids = transitive.requires ++ inferred_tool_requires
+
+    # Union (explicit adds, never removes), deduped and sorted for determinism.
+    requires =
+      (inferred_ids ++ (explicit_requires || []))
+      |> Enum.uniq()
+      |> Enum.sort()
 
     effect =
       cond do
@@ -573,7 +595,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         true -> :unknown
       end
 
-    %{provider_ref: provider_ref, requires: requires || [], effect: effect}
+    %{provider_ref: provider_ref, requires: requires, effect: effect}
   end
 
   # `%{namespace => %{symbol => sorted upstream ids}}` where each symbol's id set

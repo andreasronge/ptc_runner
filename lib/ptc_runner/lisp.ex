@@ -48,7 +48,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Eval.ParallelBudget
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
-  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunner.Lisp.Prelude.AttachContext, as: PreludeAttachContext
   alias PtcRunner.Lisp.Prelude.ValidationError, as: PreludeValidationError
 
   # Default capacity of the global parallel-worker slot semaphore (see
@@ -323,6 +323,7 @@ defmodule PtcRunner.Lisp do
     journal = Keyword.get(opts, :journal)
     prelude_opt = Keyword.get(opts, :prelude)
     runtime = Keyword.get(opts, :runtime)
+    tools = Keyword.get(opts, :tools, %{})
 
     # Preflight: reject oversized source before any parsing
     if is_binary(source) and byte_size(source) > max_program_bytes do
@@ -339,7 +340,7 @@ defmodule PtcRunner.Lisp do
       # `requires` against the selected upstream runtime BEFORE parsing user
       # code. On failure, return {:error, Step} :prelude_attach_failed (or the
       # original compile reason). No prelude attached -> nil, unchanged path.
-      case attach_prelude(prelude_opt, runtime, memory, journal) do
+      case attach_prelude(prelude_opt, runtime, tools, memory, journal) do
         {:ok, prelude} ->
           source
           |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
@@ -399,22 +400,17 @@ defmodule PtcRunner.Lisp do
   end
 
   # Resolve the `:prelude` option (compiled artifact or source) and run
-  # attach-time requires validation. `nil` means no prelude. When no upstream
-  # `:runtime` is selected (e.g. direct `Lisp.run` with a stub `tools:` map),
-  # requires validation has nothing to validate against and is skipped — the
-  # compiled artifact passes through and `check_undefined_tools` still guards
-  # the actual tool surface.
-  defp attach_prelude(nil, _runtime, _memory, _journal), do: {:ok, nil}
+  # attach-time requires validation against the attach context (the selected
+  # upstream `:runtime` and the granted `:tools` map). `nil` means no prelude.
+  # `upstream:` requirements validate against the runtime (skipped when none is
+  # configured — see `PtcRunner.Lisp.Prelude.Attach`); `tool:` requirements
+  # validate against the granted tools map and fail closed when ungranted.
+  defp attach_prelude(nil, _runtime, _tools, _memory, _journal), do: {:ok, nil}
 
-  defp attach_prelude(prelude_opt, runtime, memory, journal) do
-    result =
-      if is_nil(runtime) do
-        compile_prelude_only(prelude_opt)
-      else
-        PreludeAttach.attach(prelude_opt, runtime)
-      end
+  defp attach_prelude(prelude_opt, runtime, tools, memory, journal) do
+    context = PreludeAttachContext.new(runtime: runtime, tools: tools)
 
-    case result do
+    case PreludeAttach.attach(prelude_opt, context) do
       {:ok, prelude} ->
         {:ok, prelude}
 
@@ -424,18 +420,6 @@ defmodule PtcRunner.Lisp do
            journal: journal
          )}
     end
-  end
-
-  defp compile_prelude_only(%Prelude{} = prelude), do: {:ok, prelude}
-
-  defp compile_prelude_only(source) when is_binary(source) do
-    PreludeCompiler.compile(source)
-  end
-
-  defp compile_prelude_only(other) do
-    raise ArgumentError,
-          "prelude must be a %PtcRunner.Lisp.Prelude{} artifact or prelude source string, got: " <>
-            inspect(other, limit: 5)
   end
 
   defp do_run_inner(source, %{raw_tools: raw_tools, memory: memory, journal: journal} = params) do

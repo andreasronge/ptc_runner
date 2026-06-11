@@ -1,6 +1,7 @@
 defmodule PtcRunner.UpstreamRuntimeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.TraceLog.Introspection
   alias PtcRunner.Upstream.Credentials
   alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.RunContext
@@ -29,6 +30,38 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert {:ok, doc_step} = Eval.run_lisp(runtime, "(doc 'observatory/list-traces)")
       assert doc_step.return == nil
       assert Enum.join(doc_step.prints, "\n") =~ "observatory/list-traces"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "merges caller host tools with the upstream call tool (tool: preludes work on the upstream path)" do
+    # Regression: the bridge used to OVERWRITE caller `:tools` with the synthetic
+    # `"call"` tool, so a host-bound `tool:` prelude (here the log/ introspection
+    # prelude) failed attach on the upstream path even though the host granted it.
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    events = [
+      %{"event" => "turn", "session_id" => "sess", "data" => %{"program" => "(def x 1)"}}
+    ]
+
+    try do
+      assert {:ok, step} =
+               Eval.run_lisp(runtime, ~S|(log/programs "sess")|,
+                 prelude: Introspection.prelude_source(),
+                 tools: Introspection.tools(events)
+               )
+
+      assert step.return == ["(def x 1)"]
+
+      # The tuple-list `tools:` shape `Lisp.run/2` accepts must merge too.
+      assert {:ok, list_step} =
+               Eval.run_lisp(runtime, ~S|(log/programs "sess")|,
+                 prelude: Introspection.prelude_source(),
+                 tools: Map.to_list(Introspection.tools(events))
+               )
+
+      assert list_step.return == ["(def x 1)"]
     after
       Runtime.stop(runtime)
     end

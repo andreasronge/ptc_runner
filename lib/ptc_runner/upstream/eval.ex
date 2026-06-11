@@ -59,13 +59,24 @@ defmodule PtcRunner.Upstream.Eval do
     lisp_opts = Keyword.drop(opts, @context_keys)
 
     with_run_context(runtime, context_opts, fn context ->
+      eval_opts = eval_options(context)
+
+      # The bridge owns the synthetic `"call"` tool; merge it OVER the caller's
+      # `:tools` rather than replacing them, so host-granted `tool:` capabilities
+      # (e.g. the `log/` introspection prelude) survive on the upstream path and
+      # attach-time `tool:` validation can see them. `Map.new/1` canonicalizes the
+      # caller's tools from either shape `Lisp.run/2` accepts (map or tuple list).
+      merged_tools =
+        Map.merge(Map.new(Keyword.get(lisp_opts, :tools, %{})), Keyword.fetch!(eval_opts, :tools))
+
       # Expose the selected upstream runtime to the prelude attach path so an
       # attached prelude's `requires` are validated against it BEFORE user code
       # runs (plan §6A). `put_new` lets an explicit `:runtime` opt win; absent a
       # prelude this key is inert.
       opts =
         lisp_opts
-        |> Keyword.merge(eval_options(context))
+        |> Keyword.merge(eval_opts)
+        |> Keyword.put(:tools, merged_tools)
         |> Keyword.put_new(:runtime, runtime)
 
       PtcRunner.Lisp.run(program, opts)

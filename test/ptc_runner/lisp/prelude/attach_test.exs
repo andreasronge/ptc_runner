@@ -3,9 +3,14 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Attach
+  alias PtcRunner.Lisp.Prelude.AttachContext
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.Runtime
+
+  # Attach context bundling the upstream runtime (plan P3). Granted-tools
+  # validation has its own dedicated suite in tool_requires_test.exs.
+  defp ctx(runtime), do: AttachContext.new(runtime: runtime)
 
   @schema Path.expand(
             "../../../../mcp_server/test/fixtures/openapi/observatory.openapi.json",
@@ -99,7 +104,7 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
 
     test "passes when the required upstream operation is configured", %{runtime: runtime} do
       prelude = literal_prelude("observatory", "list-traces")
-      assert :ok = Attach.validate_requires(prelude, runtime)
+      assert :ok = Attach.validate_requires(prelude, ctx(runtime))
     end
 
     test "fails naming the operation when the upstream server is not configured", %{
@@ -107,7 +112,7 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
     } do
       prelude = literal_prelude("crm", "get_user")
 
-      assert {:error, err} = Attach.validate_requires(prelude, runtime)
+      assert {:error, err} = Attach.validate_requires(prelude, ctx(runtime))
       assert err.reason == :prelude_attach_failed
       assert err.message =~ "upstream:crm/get_user"
       # names the export that needs it, too
@@ -119,29 +124,30 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
     } do
       prelude = literal_prelude("observatory", "delete-everything")
 
-      assert {:error, err} = Attach.validate_requires(prelude, runtime)
+      assert {:error, err} = Attach.validate_requires(prelude, ctx(runtime))
       assert err.reason == :prelude_attach_failed
       assert err.message =~ "upstream:observatory/delete-everything"
     end
 
     test "dynamic-backed export is skipped (no requires to validate)", %{runtime: runtime} do
       prelude = dynamic_prelude()
-      assert :ok = Attach.validate_requires(prelude, runtime)
+      assert :ok = Attach.validate_requires(prelude, ctx(runtime))
     end
   end
 
   describe "validate_requires/2 with no runtime selected" do
-    test "fails naming the operation when an export requires an upstream op but no runtime exists" do
+    test "skips upstream requirements when no runtime is configured (plan P3)" do
+      # Deliberate change: with no runtime to validate against, upstream
+      # requirements are skipped (the granted (tool/call ...) closure plus
+      # check_undefined_tools still guard the surface). This preserves direct
+      # Lisp.run with a stub tools: map and no configured runtime.
       prelude = literal_prelude("observatory", "list-traces")
-
-      assert {:error, err} = Attach.validate_requires(prelude, nil)
-      assert err.reason == :prelude_attach_failed
-      assert err.message =~ "upstream:observatory/list-traces"
+      assert :ok = Attach.validate_requires(prelude, ctx(nil))
     end
 
     test "passes for a dynamic-backed export even with no runtime" do
       prelude = dynamic_prelude()
-      assert :ok = Attach.validate_requires(prelude, nil)
+      assert :ok = Attach.validate_requires(prelude, ctx(nil))
     end
 
     test "passes for a prelude with no upstream-backed exports" do
@@ -151,7 +157,7 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
       """
 
       {:ok, prelude} = Compiler.compile(source)
-      assert :ok = Attach.validate_requires(prelude, nil)
+      assert :ok = Attach.validate_requires(prelude, ctx(nil))
     end
   end
 
@@ -173,20 +179,20 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
         (tool/call {:server "observatory" :tool "list-traces" :args {:org_id org-id}}))
       """
 
-      assert {:ok, %Prelude{} = prelude} = Attach.attach(source, runtime)
+      assert {:ok, %Prelude{} = prelude} = Attach.attach(source, ctx(runtime))
       assert [%{ref: "crm/list-traces"}] = prelude.exports
     end
 
     test "passes a precompiled artifact straight through after validation", %{runtime: runtime} do
       prelude = literal_prelude("observatory", "list-traces")
-      assert {:ok, ^prelude} = Attach.attach(prelude, runtime)
+      assert {:ok, ^prelude} = Attach.attach(prelude, ctx(runtime))
     end
 
     test "surfaces a compile-time validation error from bad source", %{runtime: runtime} do
       # reserved namespace -> compile-time failure, not attach-time
       source = "(ns tool \"nope\" {:visibility :prompt}) (defn evil [x] x)"
 
-      assert {:error, err} = Attach.attach(source, runtime)
+      assert {:error, err} = Attach.attach(source, ctx(runtime))
       assert err.reason == :reserved_namespace
     end
 
@@ -199,13 +205,13 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
         (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
       """
 
-      assert {:error, err} = Attach.attach(source, runtime)
+      assert {:error, err} = Attach.attach(source, ctx(runtime))
       assert err.reason == :prelude_attach_failed
       assert err.message =~ "upstream:crm/get_user"
     end
 
     test "raises for genuine programmer misuse (non-prelude struct)", %{runtime: runtime} do
-      assert_raise ArgumentError, fn -> Attach.attach(%{not: :a_prelude}, runtime) end
+      assert_raise ArgumentError, fn -> Attach.attach(%{not: :a_prelude}, ctx(runtime)) end
     end
   end
 

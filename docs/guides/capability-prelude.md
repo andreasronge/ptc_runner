@@ -177,14 +177,24 @@ backing operation id and records it under `requires`:
 ;; => provider_ref "upstream:crm/get_user", requires ["upstream:crm/get_user"]
 ```
 
-- A literal call backing is `"upstream:<server>/<tool>"`.
-- An export that reaches an upstream **through a private helper** inherits the
-  requirement transitively (it still fails closed at attach time).
-- A **dynamic** call whose server/tool are runtime values (e.g.
-  `(tool/call {:server server :tool tool ...})`) cannot be inferred — its effect
-  is `:unknown` and it carries no `requires`.
+Two backing id shapes are inferred and validated:
 
-You can also declare backing metadata explicitly; it wins over inference:
+- `"upstream:<server>/<tool>"` — a **literal** `(tool/call {:server "x" :tool
+  "y" ...})`. Validated against the selected upstream runtime.
+- `"tool:<name>"` — a **typed tool** call `(tool/<name> ...)` (a host-bound
+  capability). Validated against the run's granted `tools:` map. The synthetic
+  `"call"` of `(tool/call ...)` is **not** promoted to `tool:call` — literal
+  upstream calls are already covered precisely by their `upstream:` id.
+- An export that reaches a backing **through a private helper** inherits the
+  requirement transitively (it still fails closed at attach time).
+- A **dynamic** `(tool/call {:server server :tool tool ...})` whose server/tool
+  are runtime values cannot be inferred — it carries no `requires` and must be
+  declared explicitly if you want a fail-closed guarantee.
+
+You can also declare backing metadata explicitly. `requires` is the **union** of
+inferred and explicit ids — explicit can **add** requirements but never drop an
+inferred (fail-closed) one. `provider-ref` and `effect` keep explicit-override
+semantics:
 
 ```clojure
 (defn search
@@ -197,7 +207,8 @@ You can also declare backing metadata explicitly; it wins over inference:
 
 Metadata uses kebab-case keywords (`:provider-ref`); they are normalized at the
 host boundary. Malformed `:requires` (non-string entries) **fails compilation**
-rather than being silently dropped.
+rather than being silently dropped; an unrecognized id *shape* (neither
+`upstream:` nor `tool:`) fails closed at **attach** time.
 
 ### Attach-time validation
 
@@ -309,8 +320,12 @@ either case `requires` are validated against the selected upstream.
 > default with host-owned policy. (See §5.)
 
 If no upstream runtime is selected (e.g. a direct `Lisp.run` with a stub
-`tools:` map), `requires` validation is skipped — the artifact still attaches
-and the normal pre-execution tool guard still applies.
+`tools:` map), **`upstream:` requirements are skipped** (there is no runtime to
+check; the granted `(tool/call ...)` closure plus the pre-execution tool guard
+still apply). **`tool:` requirements are always validated** against the granted
+`tools:` map and fail closed when ungranted — so a host-bound capability prelude
+(like the `log/` introspection prelude) is guarded whether or not a runtime is
+configured.
 
 ---
 
@@ -372,7 +387,8 @@ No closures, no private env, and no secrets appear in it.
 | Symptom | Cause & fix |
 |---|---|
 | `unknown namespace crm/...` at runtime | The prelude wasn't attached on this execution path. Confirm `prelude:` / `runtime_prelude:` is set; for SubAgents this covers loop, single-shot, and compiled agents. |
-| `prelude attach failed: ... upstream:crm/get_user` (`:prelude_attach_failed`) | A public export `requires` an upstream operation the selected runtime doesn't provide. Configure/grant it, or attach without a `:runtime` to skip validation. |
+| `prelude attach failed: ... upstream:crm/get_user` (`:prelude_attach_failed`) | A public export `requires` an upstream operation the selected runtime doesn't provide. Configure/grant it, or attach without a `:runtime` to skip the upstream check. |
+| `prelude attach failed: ... requires granted tool \`log_sessions\`` (`:prelude_attach_failed`) | A public export `requires` a `tool:<name>` the host did not grant. Add the closure to the run's `tools:` map (these are validated even with no `:runtime`). |
 | `cannot redefine crm/get-user` / `crm is a protected namespace` | Agent code tried to `def`/`defn` into a protected namespace or over an export. Protected names are immutable from user code. |
 | `namespace 'crm' is declared more than once` | Two `(ns crm ...)` directives in one file. Merge them. |
 | `invalid visibility` / `:requires must be a list of strings` / `duplicate ... ref` | Bad export metadata — compilation fails fast. Fix the metadata. |
