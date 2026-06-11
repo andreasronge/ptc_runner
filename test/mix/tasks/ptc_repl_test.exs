@@ -23,6 +23,32 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert output == "first\nsecond\nnil\n"
   end
 
+  test "--log-prelude exposes the current REPL turn log to Lisp" do
+    Mix.Task.reenable("ptc.repl")
+
+    output =
+      capture_io(fn ->
+        Repl.run([
+          "--log-prelude",
+          "-e",
+          "(def x 1)",
+          "-e",
+          ~S|(log/programs (get (first (log/sessions)) "correlation_id"))|
+        ])
+      end)
+
+    assert output =~ "#'x"
+    assert output =~ ~S|["(def x 1)"]|
+  end
+
+  test "--log-prelude is mutually exclusive with --prelude" do
+    Mix.Task.reenable("ptc.repl")
+
+    assert_raise Mix.Error, ~r/--log-prelude is mutually exclusive with --prelude/, fn ->
+      Repl.run(["--log-prelude", "--prelude", "somewhere.clj", "-e", "(+ 1 2)"])
+    end
+  end
+
   test "-l prints captured println output before entering repl" do
     path = Path.join(System.tmp_dir!(), "ptc-repl-load-#{System.unique_integer([:positive])}.clj")
     File.write!(path, ~S|(println "loaded output")|)

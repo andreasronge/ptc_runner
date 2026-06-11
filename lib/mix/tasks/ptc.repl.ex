@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl                      # Interactive REPL (default)
       mix ptc.repl -l user.clj          # Load user-code file, then interactive
       mix ptc.repl --prelude crm.clj    # Attach a deployment prelude
+      mix ptc.repl --log-prelude        # Attach the built-in turn-log prelude
       mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
       mix ptc.repl --prelude crm.clj --show-prompt-inventory
       mix ptc.repl -e "(+ 1 2)"         # Eval and print result
@@ -23,6 +24,9 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `-p, --prelude` - Compile a deployment prelude file and attach it to every
       evaluation (protected namespaces, public exports, discovery). SEPARATE
       from `-l/--load`, which loads ordinary user code.
+    * `--log-prelude` - Attach the built-in read-only `log/` introspection
+      prelude to the REPL's default in-memory turn-log sink. Mutually exclusive
+      with `--prelude` until general prelude composition is defined.
     * `--show-prompt-inventory` - Print the prelude's compact prompt inventory
       (the same rendering SubAgent execution injects) before evaluating.
     * `--upstreams-config` - Root upstream JSON config path
@@ -63,7 +67,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.SubAgent.Loop.ResponseHandler
   alias PtcRunner.TraceLog
-  alias PtcRunner.TraceLog.{Analyzer, MemorySink}
+  alias PtcRunner.TraceLog.{Analyzer, Introspection, MemorySink}
   alias PtcRunner.Upstream.Eval, as: UpstreamEval
   alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
 
@@ -71,6 +75,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     eval: :keep,
     load: :string,
     prelude: :string,
+    log_prelude: :boolean,
     show_prompt_inventory: :boolean,
     help: :boolean,
     upstreams_config: :string,
@@ -95,6 +100,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     if opts[:help] do
       print_help()
     else
+      validate_prelude_opts!(opts)
       prelude = load_prelude(opts)
       if opts[:show_prompt_inventory], do: print_prompt_inventory(prelude)
 
@@ -104,8 +110,8 @@ defmodule Mix.Tasks.Ptc.Repl do
       # "analyze my last session" (`:turns`) works with no filesystem setup.
       with_session = fn fun ->
         with_upstream_runtime(opts, fn runtime ->
-          {:ok, _sink} = TraceLog.start_memory_sink()
-          fun.(build_session(runtime, prelude))
+          {:ok, sink} = TraceLog.start_memory_sink()
+          fun.(build_session(runtime, prelude, sink, opts))
         end)
       end
 
@@ -131,9 +137,39 @@ defmodule Mix.Tasks.Ptc.Repl do
   # Builds the session that owns REPL state for this run. The optional upstream
   # runtime and compiled prelude are bound here so every eval attaches the SAME
   # artifact (the prelude rides as a default run option).
-  defp build_session(runtime, prelude) do
-    opts = if prelude, do: [prelude: prelude], else: []
+  defp build_session(runtime, prelude, sink, opts) do
+    opts =
+      cond do
+        prelude ->
+          [prelude: prelude]
+
+        opts[:log_prelude] ->
+          [
+            prelude: compile_introspection_prelude!(),
+            tools: Introspection.tools(sink)
+          ]
+
+        true ->
+          []
+      end
+
     PtcRunner.Session.new([upstream_runtime: runtime] ++ opts)
+  end
+
+  defp compile_introspection_prelude! do
+    case PreludeCompiler.compile(Introspection.prelude_source()) do
+      {:ok, prelude} ->
+        prelude
+
+      {:error, error} ->
+        Mix.raise("Built-in log/ prelude compile error (#{error.reason}): #{error.message}")
+    end
+  end
+
+  defp validate_prelude_opts!(opts) do
+    if opts[:prelude] && opts[:log_prelude] do
+      Mix.raise("--log-prelude is mutually exclusive with --prelude")
+    end
   end
 
   @doc """
