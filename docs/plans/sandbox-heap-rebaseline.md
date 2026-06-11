@@ -249,8 +249,10 @@ real retention.
 - `{:error, {:memory_exceeded, bytes}}` grows to
   `%{limit, baseline, budget}` (bytes), built from the `{:baseline, _}`
   message the child sent before eval, so a kill can say *"program budget
-  10 MB, granted-environment baseline 11.6 MB"* instead of "heap limit
-  exceeded". A kill with **no** baseline message received is reported as
+  10 MB, pre-eval sandbox baseline 11.6 MB"* instead of "heap limit
+  exceeded". (It is a *sandbox* baseline — grants + AST + eval plumbing —
+  per the P1 caveat; don't label it "grant baseline" unless option G
+  lands.) A kill with **no** baseline message received is reported as
   *killed during environment setup (ceiling N bytes)* — the two failure
   modes are distinguishable and each is actionable.
 - Surface in `Step.fail.details` and the turn event.
@@ -264,7 +266,8 @@ Suggested split: P1 (+P3, they share plumbing) and P2 as separate PRs.
 
 With workers unchanged, MCP's existing invariant
 `max_parallel_workers × worker_max_heap ≤ max_heap_words` holds as-is. The
-per-eval envelope becomes:
+**worst-case transient** per-eval envelope (not the steady-state cap — the
+setup ceiling is replaced by `baseline + max_heap` once re-flagged) is:
 
     setup ceiling (covers baseline)  +  max_heap (program headroom)
                                      +  max_parallel_workers × worker_max_heap
