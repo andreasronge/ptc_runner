@@ -270,13 +270,20 @@ within-session duplicate fetches (45%)** plus 1 cross-session; 24/63 turns
   pattern-matching program source. `Step.catalog_ops` exists — consider
   lifting it into the turn event.
 - **F3** default ~10MB `max_heap` kills ordinary grouping analyses over just
-  40 tool-call rows, and the pass/fail boundary tracks interpreter
-  allocation, not data size (`(mapv count (vec (vals groups)))` dies while
-  the un-`vec`'d variant and `(count (vec (vals groups)))` both pass; strings
-  verified fully copied, not sub-binaries). The M1 pass ran host-side with
-  `max_heap: 12_500_000` words, but an agent-attached `obs/` prelude runs at
-  the default — needs a core decision (raise default, better diagnostics, or
-  allocation-leaner eval) before M2.
+  40 tool-call rows. **Root cause (measured 2026-06-11):** granting tool
+  closures that capture the in-memory event list costs ~9–12MB of *accounted*
+  sandbox heap before the program runs an instruction — `(+ 1 2)` under the
+  `Introspection.tools(events)` grant needs ~11.6MB. The cost comes from
+  `include_shared_binaries: true` accounting of refc binaries (strings >64B:
+  programs, previews, hashes) referenced by the grant: ~2.5–5× the binary
+  payload, while 2MB of small-string/on-heap captured data costs nothing.
+  All "failing idioms" were noise at this cliff edge (the analyses themselves
+  need only ~1–3MB). **Fix directions:** (a) handle-based introspection
+  sources — a JSONL-path source has zero overhead, already supported;
+  (b) core: re-baseline or GC after grant setup so long-lived shared
+  binaries the sandbox merely references don't consume the program's budget;
+  (c) kill diagnostics should report the heap vs binary-vheap split. Raising
+  the default alone just moves the cliff.
 - **F4** the documented vector-key flex-access DIV makes
   `(get groups [tool hash])` after composite-key `group-by` silently return
   `nil` — the textbook dedup idiom reports "no duplicates". Workaround:
