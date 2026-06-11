@@ -1,6 +1,6 @@
 # Sandbox Heap Re-baseline — grant data must not consume the program's budget
 
-**Status:** draft spec v2 (2026-06-11; v2 after codex review round 1), from the
+**Status:** draft spec v3 (2026-06-11; after codex review rounds 1–2), from the
 F3 investigation in [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md). Blocks M2
 (the `obs/` prelude will cache fetched data in session memory — exactly the
 pattern the current accounting punishes).
@@ -119,11 +119,24 @@ the backstop, not the primary bound.
 In the spawned sandbox fun, before `eval_fn`:
 
 1. Spawn with a **setup ceiling** instead of the final budget:
-   `:setup_max_heap` (new option, words). Default: `4 × max_heap` plus the
-   word-equivalent of the caller's known data caps when supplied; MCP passes
-   a value derived from `program_memory_limit_bytes +
-   max_session_memory_bytes + grant allowance`. This stays a hard
-   fail-closed bound while the host environment is copied in.
+   `:setup_max_heap` (new option, words), a hard fail-closed bound while the
+   host environment is copied in. **Concrete derivation (v1):**
+   - Bare `Lisp.run/2` default: `4 × max_heap` (40 MB at the default
+     budget). Rationale: covers `max_program_bytes` (1 MB source) +
+     `memory:`/grants up to ~6 MB of refc payload at the measured ≤5×
+     accounting amplification. Callers granting more must raise
+     `:setup_max_heap` explicitly — and get the distinguishable
+     setup-kill error (P3) if they don't, which is the boundedness
+     precondition *enforced*, not prose.
+   - MCP sessions pass an explicit value:
+     `4 × max_heap + 5 × words(max_session_memory_bytes)` — both terms
+     config-derived; `5×` is the measured refc amplification ceiling,
+     pinned by a regression test so a BEAM accounting change moves the
+     test, not production behavior.
+   - This option applies to `Sandbox.execute/3` only. `run_bounded/2` is
+     out of scope: there the caller's closure *is* the workload, so
+     re-baselining would exempt exactly what the limit exists to bill —
+     it keeps spawn-time semantics unchanged.
 2. `:erlang.garbage_collect()`, then measure
    `baseline = total_heap_size + ceil(binary_refs_bytes / word_size)` where
    `binary_refs_bytes` sums the sizes from `Process.info(self(), :binary)`.
@@ -133,35 +146,50 @@ In the spawned sandbox fun, before `eval_fn`:
    false kills. No measure-GC-measure loop in v1 unless tests show drift.
 3. `Process.flag(:max_heap_size, %{size: baseline + max_heap, kill: true,
    error_logger: false, include_shared_binaries: true})`.
-4. Send `{:baseline, baseline_words}` to the parent before eval starts (one
-   small message; needed for P3 diagnostics — after a `kill: true` the child
-   can report nothing).
+4. Send `{:baseline, baseline_words}` to the parent before eval starts
+   (needed for P3 diagnostics — after a `kill: true` the child can report
+   nothing). The parent's receive handling gains a small state update to
+   consume this message alongside result/DOWN — it must not be left to sit
+   unmatched in the mailbox or race the DOWN clause.
 
 Semantics change to document: **`:max_heap` becomes the program's allocation
 headroom above the granted environment**, not the process's absolute size.
 Per OTP, headroom is consumed by transient garbage and GC workspace, not
 just live data — the docs must say so.
 
-**Documented caveat — user AST is part of the baseline.** The spawned fun's
-environment includes the parsed user program (`ast`/`core_ast` captured by
-`eval_fn`), so program-*authored* literals land in the baseline, exempt from
-`max_heap`. This is bounded by `:max_program_bytes` (default 1 MB source;
-AST expansion is a small constant factor) and by the setup ceiling. V1
-accepts and documents this; option G (send the AST to the sandbox only
-after re-baseline, so it is billed as heap-part message data) is the clean
-close if the bound ever proves too loose.
+**Documented caveat — the baseline is a *sandbox* baseline, not a grant
+baseline.** The spawned fun's environment includes the parsed user program
+(`ast`/`core_ast` captured by `eval_fn`), `eval_opts`, the compiled
+prelude, and trace context — so program-*authored* literals land in the
+baseline, exempt from `max_heap`. This is bounded by `:max_program_bytes`
+(default 1 MB source) and by the setup ceiling. The AST expansion factor
+must be **measured, not assumed**: the P1 test list includes a worst-case
+literal test (deep nesting, large maps, string-heavy source at the size
+cap) that pins source-bytes→baseline-words expansion. V1 accepts and
+documents the hole; option G (send the AST to the sandbox only after
+re-baseline, so it is billed as heap-part message data) is the clean close
+if the measured bound proves too loose — and is worth prioritizing for MCP,
+where untrusted programs arrive over the wire.
 
-**Workers (pmap/pcalls) keep spawn-time enforcement.** `ParallelRunner`
+**Workers (pmap/pcalls) are unchanged in v1.** `ParallelRunner`
 deliberately forces an immediate GC before `fun.(item)` so an oversized
 *program-created* captured environment is caught before work starts — that
-guard stays; re-baselining workers would exempt exactly the data
-`worker_max_heap` exists to bill. What changes: granted host data rides
-along in worker closures too, so the parent passes its measured **grant
-baseline** down and the worker flag becomes
-`worker_max_heap + grant_baseline` (additive allowance for host data,
-program-created env still billed). The documented aggregate bound becomes:
-
-    max_parallel_workers × (worker_max_heap + grant_baseline)
+guard stays exactly as is, and so does the spawn-time `worker_max_heap`
+flag. Re-baselining workers (or granting them an additive allowance from
+the parent's measured baseline) was considered and dropped: the parent
+baseline is a *sandbox* baseline (it includes user AST, `eval_fn`,
+`eval_opts`, the compiled prelude, and setup noise — not just grants), so
+any allowance derived from it hands program-created worker envs unearned
+headroom and silently breaks the MCP invariant
+`max_parallel_workers × worker_max_heap ≤ max_heap_words`
+(`mcp_server/lib/ptc_runner_mcp/sandbox.ex` divides worker heap to preserve
+it). **Documented v1 limitation:** a program that captures heavy granted
+data into a `pmap` closure can still hit `worker_max_heap` at the old
+accounting — none of the motivating workloads (introspection, `obs/`
+caching) use `pmap` over grant-heavy closures, and P2 removes the heavy
+grant from the introspection path anyway. Revisit with a *grant-only*
+allowance if a real workload hits this; that requires separating grant
+transfer from the rest of the closure env first (option G plumbing).
 
 **Tests (write the failing ones first):**
 
@@ -174,9 +202,16 @@ program-created env still billed). The documented aggregate bound becomes:
   `range`→`vec`) is still killed, with the stable `:memory_exceeded` error.
 - Setup ceiling: a grant larger than `:setup_max_heap` kills during setup
   with a distinguishable error (see P3).
-- Worker: a pmap worker whose *program-created* captured env exceeds
-  `worker_max_heap` is still killed (existing guard); a worker under a heavy
-  grant baseline plus small program env is not.
+- AST expansion measurement: worst-case source at `:max_program_bytes`
+  (deep nesting, big literals, string-heavy) — pins the
+  source-bytes→baseline-words factor claimed in the caveat above.
+- Amplification pin: the `5×` refc factor used in the MCP setup-ceiling
+  formula has its own regression test (a known refc payload's measured
+  baseline stays under 5× + slack), so an OTP accounting change surfaces in
+  CI, not in killed sessions.
+- Worker guard regression: a pmap worker whose *program-created* captured
+  env exceeds `worker_max_heap` is still killed (existing behavior,
+  unchanged).
 
 ### P2 — introspection sources stop hauling the log into the sandbox
 
@@ -196,6 +231,12 @@ real retention.
   copied-events read would give); for path/list sources `tools/1` starts a
   holder process owned by the grant's creator, linked/monitored so it dies
   with its owner and cannot leak past the session.
+- Holder bounds: the holder is not an unbounded escape hatch for the data
+  it owns. Memory-sink sources inherit the sink's existing byte-budget
+  ring buffer; path/list holders get a load cap (`:max_bytes`, refusing
+  oversized logs with a recoverable error). A holder is a plain GenServer —
+  one projection call at a time (natural serialization/backpressure), no
+  call queue beyond the mailbox.
 - Calls use a timeout no larger than the sandbox's remaining `:timeout`
   budget; a dead/unresponsive holder is a recoverable tool error (signal
   value), not a hang.
@@ -219,13 +260,27 @@ real retention.
 
 Suggested split: P1 (+P3, they share plumbing) and P2 as separate PRs.
 
+## MCP memory envelope (post-change)
+
+With workers unchanged, MCP's existing invariant
+`max_parallel_workers × worker_max_heap ≤ max_heap_words` holds as-is. The
+per-eval envelope becomes:
+
+    setup ceiling (covers baseline)  +  max_heap (program headroom)
+                                     +  max_parallel_workers × worker_max_heap
+
+with the baseline itself bounded by `max_session_memory_bytes`,
+`max_program_bytes`, and the grant sizes the server config chose.
+`program_memory_limit_bytes` keeps meaning "per-eval program headroom" —
+the user-facing semantics MCP documents today.
+
 ## Open questions (for review rounds)
 
-- `:setup_max_heap` derivation: is `4 × max_heap` + caller caps the right
-  default shape, or should MCP/SubAgent always pass an explicit value and
-  the bare default stay small (strict)?
-- Worker grant allowance: pass the parent's measured `grant_baseline`
-  verbatim, or re-measure per worker (costlier, tighter)?
-- Is option G (two-phase AST transfer) worth doing in v1 for MCP sessions,
-  where untrusted programs arrive over the wire and `max_program_bytes` is
-  the only bound on baseline gaming?
+- Option G (two-phase AST transfer) in v1 for MCP, where untrusted programs
+  arrive over the wire and `max_program_bytes` + the measured expansion
+  factor is the only bound on baseline gaming — or wait for the AST
+  expansion test to say whether the hole is material?
+- Should the bare `Lisp.run/2` setup-ceiling default be strict
+  (`2 × max_heap`) instead of `4 ×`, forcing callers with real grants to
+  opt in explicitly? (Trade: more setup-kills for casual heavy-grant
+  callers vs a tighter default envelope.)
