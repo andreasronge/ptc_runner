@@ -10,6 +10,7 @@ defmodule PtcRunner.TraceContextTest do
     Process.delete(:ptc_telemetry_span_stack)
     Process.delete(:last_child_trace_id)
     Process.delete(:last_child_step)
+    Process.delete(:turn_lisp_prelude_trace)
     :ok
   end
 
@@ -204,6 +205,30 @@ defmodule PtcRunner.TraceContextTest do
       TraceContext.put_child_result("trace-123", nil)
 
       assert {"trace-123", nil} = TraceContext.take_child_result()
+    end
+  end
+
+  describe "turn lisp prelude trace" do
+    test "round-trips the stashed trace and starts empty" do
+      assert TraceContext.lisp_prelude_trace() == nil
+
+      trace = %{source_hash: "abc", protected_namespaces: ["log"]}
+      assert TraceContext.put_lisp_prelude_trace(trace) == :ok
+      assert TraceContext.lisp_prelude_trace() == trace
+    end
+
+    test "stashing nil (attach failed / no Lisp) reads back as nil" do
+      TraceContext.put_lisp_prelude_trace(%{source_hash: "abc"})
+      TraceContext.put_lisp_prelude_trace(nil)
+
+      assert TraceContext.lisp_prelude_trace() == nil
+    end
+
+    test "clear resets the slot so a no-Lisp turn never reads a stale value" do
+      TraceContext.put_lisp_prelude_trace(%{source_hash: "abc"})
+      assert TraceContext.clear_lisp_prelude_trace() == :ok
+
+      assert TraceContext.lisp_prelude_trace() == nil
     end
   end
 end

@@ -12,6 +12,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
 
   alias PtcRunner.Step
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
+  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunner.Turn
@@ -244,12 +245,16 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         prints: Keyword.fetch!(fields, :prints),
         tool_calls: turn_tool_calls(turn),
         fail: turn_fail(turn),
-        # Same provenance field session turns carry, but ONLY when the prelude
-        # was actually attached this turn (matches Session, which reads the
-        # step's prelude_trace — nil on attach failure). The agent's
-        # runtime_prelude is precomputed into state, so guard against reporting
-        # it on turns that never attached it.
-        preludes: turn_preludes(turn, Map.get(state, :prelude_trace)),
+        # The ACTUAL prelude trace from this turn's Lisp execution (nil when
+        # attach failed or no Lisp ran), captured onto the Turn at build time.
+        # This matches Session (which reads the step's `prelude_trace`) and —
+        # unlike inferring from `turn.program` — is correct for combined/
+        # text-mode `lisp_eval` (program nil but attached) and pre-attach
+        # failures like `:program_too_large` (program present but never
+        # attached). Reading it from the Turn (not the live slot) keeps it
+        # correct even when a continuation guard runs a nested SubAgent before
+        # this event is recorded.
+        preludes: TurnEvent.prelude_provenance(turn_prelude_trace(turn)),
         turn_type: turn_type
       }
       |> TurnEvent.build()
@@ -266,27 +271,10 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   defp turn_fail(%Turn{success?: false, result: result}), do: fail_from_result(result)
   defp turn_fail(_), do: nil
 
-  # Provenance only when the prelude was actually attached this turn. A configured
-  # runtime_prelude attaches inside Lisp.run AFTER the program is parsed, so an
-  # attached prelude implies a parsed program (`program != nil`) that did not
-  # fail attach. No-program turns (parse failure, text mode, LLM error) and
-  # attach-failure turns never attached it — they get `[]`, matching Session.
-  defp turn_preludes(turn, prelude_trace) do
-    if prelude_attached?(turn) do
-      TurnEvent.prelude_provenance(prelude_trace)
-    else
-      []
-    end
-  end
-
-  defp prelude_attached?(%Turn{program: program} = turn) when is_binary(program) do
-    case turn_fail(turn) do
-      %{reason: :prelude_attach_failed} -> false
-      _ -> true
-    end
-  end
-
-  defp prelude_attached?(_), do: false
+  # The prelude trace captured onto the Turn at build time (nil for a nil turn,
+  # i.e. an LLM error before any Turn was created).
+  defp turn_prelude_trace(%Turn{prelude_trace: trace}), do: trace
+  defp turn_prelude_trace(_), do: nil
 
   defp fail_from_result(%{reason: reason, message: message}),
     do: %{reason: reason, message: message}
@@ -439,6 +427,11 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       memory: memory,
       messages: messages,
       system_prompt: system_prompt,
+      # Capture the ACTUAL prelude trace from this turn's Lisp execution NOW —
+      # synchronously after `Lisp.run` and before any continuation-guard / nested
+      # SubAgent run could clobber the shared per-turn slot. Binding it to the
+      # Turn makes the canonical event's provenance reentrancy-safe.
+      prelude_trace: TraceContext.lisp_prelude_trace(),
       type: turn_type
     }
 

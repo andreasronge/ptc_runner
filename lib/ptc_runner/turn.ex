@@ -44,6 +44,7 @@ defmodule PtcRunner.Turn do
     :success?,
     :messages,
     :system_prompt,
+    :prelude_trace,
     type: :normal
   ]
 
@@ -88,6 +89,7 @@ defmodule PtcRunner.Turn do
           success?: boolean(),
           messages: [message()] | nil,
           system_prompt: String.t() | nil,
+          prelude_trace: map() | nil,
           type: turn_type()
         }
 
@@ -141,6 +143,7 @@ defmodule PtcRunner.Turn do
       success?: true,
       messages: Map.get(params, :messages),
       system_prompt: Map.get(params, :system_prompt),
+      prelude_trace: Map.get(params, :prelude_trace),
       type: Map.get(params, :type, :normal)
     }
   end
@@ -191,6 +194,7 @@ defmodule PtcRunner.Turn do
       success?: false,
       messages: Map.get(params, :messages),
       system_prompt: Map.get(params, :system_prompt),
+      prelude_trace: Map.get(params, :prelude_trace),
       type: Map.get(params, :type, :normal)
     }
   end

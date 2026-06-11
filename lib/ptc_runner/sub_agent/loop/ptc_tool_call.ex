@@ -30,6 +30,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   alias PtcRunner.{Lisp, PtcToolProtocol, Step, Turn}
   alias PtcRunner.Lisp.Format
   alias PtcRunner.SubAgent.{BuiltinTools, Definition, KeyNormalizer}
+  alias PtcRunner.TraceContext
 
   alias PtcRunner.SubAgent.Loop
 
@@ -246,7 +247,12 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
     lisp_opts = build_lisp_opts(agent, state, exec_context, normalized_tools)
 
-    case Lisp.run(program, lisp_opts) do
+    lisp_result = Lisp.run(program, lisp_opts)
+    # Stash the ACTUAL attached prelude trace for the canonical turn event
+    # (nil when attach failed). `elem/2` reads the step from both {:ok|:error, step}.
+    TraceContext.put_lisp_prelude_trace(elem(lisp_result, 1).prelude_trace)
+
+    case lisp_result do
       {:ok, lisp_step} ->
         emit_pmap_telemetry(state, lisp_step)
         handle_lisp_success(program, native_call, assistant_content, lisp_step, agent, state)

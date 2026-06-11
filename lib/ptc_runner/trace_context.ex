@@ -40,6 +40,38 @@ defmodule PtcRunner.TraceContext do
   @span_stack_key :ptc_telemetry_span_stack
   @child_trace_key :last_child_trace_id
   @child_step_key :last_child_step
+  @lisp_prelude_trace_key :turn_lisp_prelude_trace
+
+  # --- Turn Lisp Prelude Trace ---
+  #
+  # The SubAgent loop runs each turn's `Lisp.run/2` and emits the canonical turn
+  # event in the SAME process, but the execution `Step` (which carries the
+  # ACTUAL attached prelude trace — nil when attach failed or no Lisp ran) does
+  # not flow to the emit site. The loop stashes `step.prelude_trace` here right
+  # after each `Lisp.run`, clears it at turn start (so no-program / no-Lisp turns
+  # read nil, never a stale value), and the turn-event builder reads it — giving
+  # the SubAgent driver the same actual-attachment provenance the Session driver
+  # gets from `step.prelude_trace` directly.
+
+  @doc "Stashes the just-executed turn's Lisp `prelude_trace` (or nil)."
+  @spec put_lisp_prelude_trace(map() | nil) :: :ok
+  def put_lisp_prelude_trace(trace) do
+    Process.put(@lisp_prelude_trace_key, trace)
+    :ok
+  end
+
+  @doc "Returns the current turn's stashed Lisp `prelude_trace`, or nil."
+  @spec lisp_prelude_trace() :: map() | nil
+  def lisp_prelude_trace do
+    Process.get(@lisp_prelude_trace_key)
+  end
+
+  @doc "Clears the stashed Lisp `prelude_trace` (called at turn start)."
+  @spec clear_lisp_prelude_trace() :: :ok
+  def clear_lisp_prelude_trace do
+    Process.delete(@lisp_prelude_trace_key)
+    :ok
+  end
 
   # --- Memory Sink Stack ---
 

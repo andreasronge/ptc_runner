@@ -8,6 +8,7 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
 
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.{Session, SubAgent, TraceLog}
+  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog.{Analyzer, MemorySink}
 
   @moduletag :tmp_dir
@@ -147,6 +148,39 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert Enum.any?(turns, &(&1["data"]["fail"]["reason"] == "prelude_attach_failed"))
       # Configured but never attached -> empty provenance (no false positive).
       assert Enum.all?(turns, &(&1["data"]["preludes"] == []))
+    end
+
+    test "outer turn keeps its own provenance when a continuation guard clobbers the slot",
+         %{tmp_dir: dir} do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns util "Pure helpers." {:visibility :prompt})
+        (defn add-one [x] (+ x 1))
+        """)
+
+      # Simulate a nested SubAgent run (e.g. via continuation_guard) clobbering
+      # the shared per-turn slot between the outer turn's Lisp.run and its emit.
+      # The provenance is captured onto the Turn at build time, so the outer
+      # event must still report the OUTER prelude, never the child's.
+      guard = fn _turn, _state, _next ->
+        TraceContext.put_lisp_prelude_trace(%{
+          source_hash: "child",
+          protected_namespaces: ["child"]
+        })
+
+        :continue
+      end
+
+      turns =
+        session_turn_events(dir, "reentrant", fn ->
+          agent = SubAgent.new(prompt: "Return", max_turns: 5, runtime_prelude: prelude)
+          SubAgent.run(agent, llm: mock_llm(["(+ 1 0)", "(return 1)"]), continuation_guard: guard)
+        end)
+
+      executed = Enum.reject(turns, &is_nil(&1["data"]["program"]))
+      assert executed != []
+      assert Enum.all?(executed, &match?([%{"namespaces" => ["util"]}], &1["data"]["preludes"]))
+      refute Enum.any?(turns, &match?([%{"namespaces" => ["child"]}], &1["data"]["preludes"]))
     end
 
     test "SubAgent failed turns carry fail reason; no-program turns keep raw_response",

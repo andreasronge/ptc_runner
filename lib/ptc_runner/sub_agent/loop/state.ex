@@ -112,12 +112,6 @@ defmodule PtcRunner.SubAgent.Loop.State do
     # `discovery_exec`, it is caller-owned and NOT inherited by child SubAgents.
     runtime: nil,
 
-    # Prelude trace summary (`Prelude.trace_summary/1`) of the agent's attached
-    # `runtime_prelude`, computed once (it's constant for the run). Stamped onto
-    # each canonical turn event's `preludes` provenance so SubAgent turns carry
-    # the same A/B-benchmark field session turns do (plan P2).
-    prelude_trace: nil,
-
     # Pluggable progress renderer state (opaque, owned by progress_fn)
     progress_state: nil,
 
@@ -213,8 +207,6 @@ defmodule PtcRunner.SubAgent.Loop.State do
           discovery_exec: (atom(), list() -> term()) | nil,
           # Optional upstream runtime handle (opaque; attach-time validation only)
           runtime: struct() | pid() | nil,
-          # Prelude trace summary of the agent's runtime_prelude (or nil)
-          prelude_trace: map() | nil,
           # Pluggable progress renderer state
           progress_state: term(),
           # Child steps

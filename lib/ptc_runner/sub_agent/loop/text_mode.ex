@@ -41,6 +41,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.SubAgent.ToolSchema
   alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.Tool
+  alias PtcRunner.TraceContext
 
   @lisp_eval_name "lisp_eval"
 
@@ -1126,6 +1127,10 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       build_lisp_opts(agent, state, exec_context, ptc_lisp_inventory)
 
     result = Lisp.run(program, lisp_opts)
+    # Stash the ACTUAL attached prelude trace for the canonical turn event
+    # (nil when attach failed). This combined/text-mode path builds the turn with
+    # `program: nil`, so the trace — not `turn.program` — is the sound signal.
+    TraceContext.put_lisp_prelude_trace(elem(result, 1).prelude_trace)
     duration_ms = System.monotonic_time(:millisecond) - start
 
     case result do

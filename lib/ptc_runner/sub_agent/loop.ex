@@ -62,7 +62,6 @@ defmodule PtcRunner.SubAgent.Loop do
   """
 
   alias PtcRunner.{Lisp, Step, Turn}
-  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
 
@@ -83,6 +82,7 @@ defmodule PtcRunner.SubAgent.Loop do
   }
 
   alias PtcRunner.SubAgent.{Compaction, KeyNormalizer, SystemPrompt, Telemetry}
+  alias PtcRunner.TraceContext
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -312,7 +312,6 @@ defmodule PtcRunner.SubAgent.Loop do
       tool_cache: run_opts.tool_cache,
       discovery_exec: run_opts.discovery_exec,
       runtime: run_opts.runtime,
-      prelude_trace: Prelude.trace_summary(Map.get(agent, :runtime_prelude)),
       agent_name: agent.name,
       agent_id: run_opts.agent_id,
       on_chunk: run_opts.on_chunk,
@@ -500,6 +499,11 @@ defmodule PtcRunner.SubAgent.Loop do
 
   # Set up state for a turn - compute turn phase and build telemetry metadata
   defp setup_turn(agent, state) do
+    # Reset the per-turn Lisp prelude-trace slot so a turn that runs no Lisp
+    # (parse failure, text/no-code, LLM error) reports no prelude, never a stale
+    # value from a prior turn. Set after each `Lisp.run`; read at turn-stop.
+    TraceContext.clear_lisp_prelude_trace()
+
     must_return_mode = state.work_turns_remaining <= 1
     in_retry_phase = state.work_turns_remaining <= 0
 
@@ -840,7 +844,12 @@ defmodule PtcRunner.SubAgent.Loop do
   defp execute_code_with_tools(code, response, agent, state, exec_context, all_tools) do
     lisp_opts = LispOpts.build(agent, state, exec_context, all_tools)
 
-    case Lisp.run(code, lisp_opts) do
+    lisp_result = Lisp.run(code, lisp_opts)
+    # Stash the ACTUAL attached prelude trace for the canonical turn event
+    # (nil when attach failed). `elem/2` reads the step from both {:ok|:error, step}.
+    TraceContext.put_lisp_prelude_trace(elem(lisp_result, 1).prelude_trace)
+
+    case lisp_result do
       {:ok, lisp_step} ->
         # Emit pmap/pcalls telemetry events if any
         # (pmap/pcalls record metadata in context; telemetry is only emitted post-sandbox)
