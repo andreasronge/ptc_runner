@@ -26,10 +26,10 @@ Data:
 
 Helpers:
 - Namespaces are fixed; no `require`/`import`.
-- `json/parse-string`, `json/generate-string`; `str/join`, `set/union`; `fail`.
-- Java-shaped: `Double/parseDouble`, `LocalDate/parse`, `System/currentTimeMillis`, String methods.
-- Discover: `apropos`, `dir`, `doc`, `meta`; `ns-publics` is local only.
-- Prefer core fns; use `pmap`/`pcalls` when useful.
+- `json/parse-string`, `json/parse-lines`, `json/generate-string`; `str/join`, `set/union`; `fail`.
+- Java: `Double/parseDouble`, `LocalDate/parse`, `System/currentTimeMillis`, String methods.
+- Discover: `apropos`, `dir`, `doc`, `meta`; `ns-publics` local only.
+- Prefer core fns; use `pmap`/`pcalls`.
 
 No: lazy/infinite seq producers; atoms/refs; futures/promises; try/catch/throw; transients; metadata; filesystem/network I/O; general Java interop.
 <!-- PTC_PROMPT_END -->

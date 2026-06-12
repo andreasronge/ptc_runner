@@ -369,6 +369,7 @@ Key-value associations:
 - **`return` value:** maps with non-string/non-keyword keys are **rejected** (the program errors).
 - **Tool-call arguments:** all keys are **stringified** (e.g. `1` → `"1"`, `[:a :b]` → its inspected form), never rejected.
 - **`json/generate-string`:** integer keys are stringified (`{1 "a"}` → `{"1":"a"}`), but vector/float keys (and even keyword keys) return `nil`.
+- **`json/parse-lines`:** line-delimited JSON helper; skips blank lines and parses each remaining line with `json/parse-string`.
 
 ```clojure
 {:name "Alice"}           ; OK - keyword key
@@ -378,6 +379,13 @@ Key-value associations:
 ```
 
 For predictable behavior, use keyword or string keys for any map you intend to return or pass to a tool.
+
+`json/parse-lines` is intentionally one-arity and shares `json/parse-string`'s recoverable failure signal. A malformed line and a valid JSON literal `null` line both yield `nil`:
+
+```clojure
+(json/parse-lines "{\"a\":1}\n\nnull\nnot json")
+; => [{"a" 1} nil nil]
+```
 
 **Maps as functions:** Maps can be invoked as functions to look up values by key:
 

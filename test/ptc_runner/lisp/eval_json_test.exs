@@ -32,6 +32,30 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
     end
   end
 
+  describe "json/parse-lines in PTC-Lisp programs" do
+    test "parses JSONL text into a vector" do
+      assert {:ok, %{return: [%{"a" => 1}, %{"b" => 2}]}} =
+               Lisp.run(~S|(json/parse-lines "{\"a\":1}\n{\"b\":2}\n")|)
+    end
+
+    test "skips blank lines and accepts scalar lines" do
+      assert {:ok, %{return: [1, [2, 3], true]}} =
+               Lisp.run(~S|(json/parse-lines "1\n\n[2,3]\ntrue")|)
+    end
+
+    test "bad line and null line both produce nil" do
+      assert {:ok, %{return: [nil, nil]}} = Lisp.run(~S|(json/parse-lines "null\nnot json")|)
+    end
+
+    test "one arity only" do
+      assert {:error, %{fail: %{message: msg}}} =
+               Lisp.run(~S|(json/parse-lines "{}" {:strict true})|)
+
+      assert msg =~ "parse_lines"
+      assert msg =~ "expects 1 argument"
+    end
+  end
+
   describe "json/generate-string in PTC-Lisp programs" do
     test "encodes a string-keyed map" do
       assert {:ok, %{return: result}} =
@@ -97,6 +121,7 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
       source = ~S|(json/foo "x")|
       assert {:error, %{fail: %{message: msg}}} = Lisp.run(source)
       assert msg =~ "json/foo is not available"
+      assert msg =~ "json/parse-lines"
       assert msg =~ "json/parse-string"
       assert msg =~ "json/generate-string"
     end

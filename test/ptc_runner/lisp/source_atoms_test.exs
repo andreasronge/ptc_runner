@@ -167,6 +167,7 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
       :remaining,
       :servers,
       :"parse-string",
+      :"parse-lines",
       :"generate-string",
       :between,
       :text,

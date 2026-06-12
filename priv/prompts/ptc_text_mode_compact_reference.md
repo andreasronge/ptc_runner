@@ -26,7 +26,7 @@ PTC-Lisp syntax:
 - Data literals: `nil`, bools, numbers, strings, keywords, vectors/maps/sets. JSON maps use string keys.
 - Context example: `{"orders":[...]}` -> `(count (filter #(= "paid" (get % "status")) data/orders))`. Use `data/orders`, not `(data/orders)`, `orders`, or bare `data`.
 - Namespaces are fixed; no `ns`, `require`, `refer`, or `import`.
-- Helpers include `json/parse-string`, `json/generate-string`, `str/join`, `set/union`, `Double/parseDouble`, `LocalDate/parse`.
+- Helpers include `json/parse-string`, `json/parse-lines`, `json/generate-string`, `str/join`, `set/union`, `Double/parseDouble`, `LocalDate/parse`.
 - No macros, lazy/infinite seqs, atoms/refs, futures/promises, try/catch/throw, transients, metadata, filesystem, or network.
 
 Inside PTC-Lisp, app tools are `(tool/name {...})`; only `lisp_eval` is native-callable in this mode.

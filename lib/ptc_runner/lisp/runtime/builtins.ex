@@ -301,6 +301,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       # JSON builtins (Plans/json-support.md §4)
       # ============================================================
       {:"json/parse-string", {:normal, &Runtime.Json.parse_string/1}},
+      {:"json/parse-lines", {:normal, &Runtime.Json.parse_lines/1}},
       {:"json/generate-string", {:normal, &Runtime.Json.generate_string/1}},
 
       # ============================================================

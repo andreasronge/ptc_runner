@@ -2247,6 +2247,30 @@
         "DIV-23: returns nil on invalid/non-binary input instead of raising. Safer for LLM-generated code (no try/catch — DIV-10). See docs/clojure-conformance-gaps.md."
     },
     %{
+      name: "json/parse-lines",
+      description: "Parse line-delimited JSON into a vector; blank lines are skipped.",
+      binding: :normal,
+      category: :json,
+      dispatch: :env,
+      signatures: ["(json/parse-lines s)"],
+      since: nil,
+      section: "JSON",
+      ptc_extension?: true,
+      examples: [
+        {
+          ~S"""
+          (json/parse-lines "{\"a\":1}\n[2,3]\n")
+          """,
+          ~S([{"a" 1} [2 3]])
+        }
+      ],
+      notes:
+        "Splits on newlines, skips blank/whitespace-only lines, and parses each remaining line with `json/parse-string`. Malformed lines and valid JSON literal `null` lines both produce nil.",
+      see_also: ["json/parse-string", "json/generate-string"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
       name: "keep",
       description: "Non-nil results of (f item). false is kept.",
       binding: :normal,

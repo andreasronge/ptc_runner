@@ -28,7 +28,7 @@ Data:
 
 Helpers:
 - collections, strings, sets, walk, regex, math.
-- JSON: `(json/parse-string s)` -> data or `nil`; `(json/generate-string v)`.
+- JSON: `json/parse-string`, `json/parse-lines`, `json/generate-string`.
 - Parallel: `(pmap f coll)`, `(pcalls f1 f2 ...)`.
 
 Java:

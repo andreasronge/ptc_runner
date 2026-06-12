@@ -2,9 +2,9 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   @moduledoc """
   JSON parsing and generation for PTC-Lisp.
 
-  Implements `(json/parse-string s)` and `(json/generate-string v)` —
-  Cheshire-shaped builtins. Both functions return `nil` on failure
-  rather than raising, matching the DIV-* convention (see
+  Implements `(json/parse-string s)`, `(json/parse-lines s)`, and
+  `(json/generate-string v)` — Cheshire-shaped builtins. Parse helpers
+  return `nil` on failure rather than raising, matching the DIV-* convention (see
   `docs/clojure-conformance-gaps.md` DIV-23, DIV-24): no try/catch
   in the sandbox means raising = unrecoverable program crash.
 
@@ -54,6 +54,39 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   end
 
   def parse_string(_), do: nil
+
+  @doc """
+  Parse line-delimited JSON into a list.
+
+  Blank or whitespace-only lines are skipped. Each remaining line is
+  parsed with `parse_string/1`, so malformed lines and valid JSON
+  literal `null` lines both produce `nil`.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.Runtime.Json.parse_lines("{\\"a\\":1}\\n[2,3]\\n")
+      [%{"a" => 1}, [2, 3]]
+
+      iex> PtcRunner.Lisp.Runtime.Json.parse_lines("null\\nnot json\\n")
+      [nil, nil]
+
+      iex> PtcRunner.Lisp.Runtime.Json.parse_lines("  \\n{\\"ok\\":true}\\n")
+      [%{"ok" => true}]
+
+      iex> PtcRunner.Lisp.Runtime.Json.parse_lines(42)
+      nil
+  """
+  @spec parse_lines(term()) :: [term()] | nil
+  def parse_lines(s) when is_binary(s) do
+    s
+    |> String.split(~r/\r\n|\n|\r/)
+    |> Enum.reject(&(String.trim(&1) == ""))
+    |> Enum.map(&parse_string/1)
+  rescue
+    _ -> nil
+  end
+
+  def parse_lines(_), do: nil
 
   @doc """
   Encode an Elixir value as a JSON string.
