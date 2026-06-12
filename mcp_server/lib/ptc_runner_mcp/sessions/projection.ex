@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   alias PtcRunnerMcp.Sessions.Limits
 
   @session_feedback_max_chars 2048
+  @collection_hint_min_items 20
 
   @doc "Render a session-start response."
   @spec start(map()) :: map()
@@ -34,7 +35,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "prints" => execution.prints,
       "feedback" =>
         execution.feedback
-        |> append_truncation_hint(execution.result_truncated, history_notices)
+        |> append_value_hints(execution.result_truncated, step, history_notices)
         |> append_history_notices(history_notices),
       "memory" => %{
         "changed_keys" => changed_keys(execution.memory.changed),
@@ -64,7 +65,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "prints" => execution.prints,
       "feedback" =>
         execution.feedback
-        |> append_truncation_hint(execution.result_truncated, history_notices)
+        |> append_value_hints(execution.result_truncated, step, history_notices)
         |> append_history_notices(history_notices),
       "memory" => %{
         "changed" => execution.memory.changed,
@@ -94,6 +95,38 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     execution
   end
 
+  # The collection hint (opt-in via --collection-hint) is more specific than
+  # the generic truncation hint, so it replaces it when both would apply.
+  defp append_value_hints(feedback, result_truncated, step, history_notices) do
+    value = Map.get(step, :return)
+
+    if Config.get().collection_hint and collection_of_maps?(value) and
+         not history_entry_capped?(history_notices) do
+      append_collection_hint(feedback, Enum.count(value))
+    else
+      append_truncation_hint(feedback, result_truncated, history_notices)
+    end
+  end
+
+  defp collection_of_maps?(value) when is_list(value) do
+    Enum.count(value) >= @collection_hint_min_items and
+      value |> Enum.take(3) |> Enum.all?(&(is_map(&1) and not is_struct(&1)))
+  end
+
+  defp collection_of_maps?(_value), do: false
+
+  defp append_collection_hint(feedback, count) do
+    hint =
+      "Result is a collection of #{count} maps. " <>
+        "`(describe *1 {:paths true})` summarizes field coverage across all of them."
+
+    cond do
+      String.contains?(feedback, hint) -> feedback
+      feedback == "" -> hint
+      true -> feedback <> "\n" <> hint
+    end
+  end
+
   defp append_truncation_hint(feedback, false, _history_notices), do: feedback
 
   defp append_truncation_hint(feedback, true, history_notices) do
@@ -106,7 +139,6 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   defp append_result_describe_hint(feedback) do
     hint = "Result truncated. Try `(describe *1)` or `(describe *1 {:paths true :depth 2})`."
-    feedback = feedback || ""
 
     cond do
       String.contains?(feedback, hint) -> feedback

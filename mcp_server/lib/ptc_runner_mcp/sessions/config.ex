@@ -23,6 +23,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_max_session_upstream_call_entries 50
   @default_max_session_upstream_call_bytes 128 * 1024
   @default_max_session_preview_chars 512
+  @default_collection_hint false
 
   @typedoc "Process-wide sessions configuration."
   @type t :: %{
@@ -41,7 +42,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
           max_session_tool_call_bytes: pos_integer(),
           max_session_upstream_call_entries: pos_integer(),
           max_session_upstream_call_bytes: pos_integer(),
-          max_session_preview_chars: pos_integer()
+          max_session_preview_chars: pos_integer(),
+          collection_hint: boolean()
         }
 
   @doc "Default session config. Sessions are disabled by default."
@@ -63,7 +65,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
       max_session_tool_call_bytes: @default_max_session_tool_call_bytes,
       max_session_upstream_call_entries: @default_max_session_upstream_call_entries,
       max_session_upstream_call_bytes: @default_max_session_upstream_call_bytes,
-      max_session_preview_chars: @default_max_session_preview_chars
+      max_session_preview_chars: @default_max_session_preview_chars,
+      collection_hint: @default_collection_hint
     }
   end
 
@@ -195,7 +198,14 @@ defmodule PtcRunnerMcp.Sessions.Config do
          max_session_tool_call_bytes: max_session_tool_call_bytes,
          max_session_upstream_call_entries: max_session_upstream_call_entries,
          max_session_upstream_call_bytes: max_session_upstream_call_bytes,
-         max_session_preview_chars: max_session_preview_chars
+         max_session_preview_chars: max_session_preview_chars,
+         collection_hint:
+           read_bool(
+             args,
+             :collection_hint,
+             "PTC_RUNNER_MCP_COLLECTION_HINT",
+             defaults.collection_hint
+           )
        }}
     end
   end
@@ -273,6 +283,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
 
     Map.new(config, fn
       {:enabled, value} -> {:enabled, value == true}
+      {:collection_hint, value} -> {:collection_hint, value == true}
       {key, value} when is_integer(value) and value > 0 -> {key, value}
       {key, _value} -> {key, Map.fetch!(defaults, key)}
     end)

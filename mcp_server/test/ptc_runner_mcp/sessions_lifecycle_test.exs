@@ -764,6 +764,95 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       refute payload["feedback"] =~ "(describe *1)"
     end
 
+    test "eval_success adds collection hint for large map collections when enabled" do
+      Config.set(%{Config.get() | collection_hint: true})
+
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+      rows = for i <- 1..25, do: %{"id" => i, "v" => "x"}
+      step = %{return: rows, memory: %{}, prints: [], tool_calls: [], upstream_calls: []}
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["feedback"] =~ "collection of 25 maps"
+      assert payload["feedback"] =~ "(describe *1 {:paths true})"
+      # the collection hint replaces the generic truncation hint — one hint only
+      assert length(String.split(payload["feedback"], "describe *1")) == 2
+    end
+
+    test "collection hint fires even when the result preview is not truncated" do
+      Config.set(%{Config.get() | collection_hint: true, max_session_preview_chars: 100_000})
+
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+      rows = for i <- 1..25, do: %{"id" => i}
+      step = %{return: rows, memory: %{}, prints: [], tool_calls: [], upstream_calls: []}
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["truncated"] == false
+      assert payload["feedback"] =~ "collection of 25 maps"
+    end
+
+    test "no collection hint below threshold, for non-map items, or when disabled" do
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+
+      Config.set(%{Config.get() | collection_hint: true, max_session_preview_chars: 100_000})
+
+      small = %{
+        return: for(i <- 1..5, do: %{"id" => i}),
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      refute Projection.eval_success(previous, committed, small, [])["feedback"] =~
+               "collection of"
+
+      scalars = %{
+        return: Enum.to_list(1..50),
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      refute Projection.eval_success(previous, committed, scalars, [])["feedback"] =~
+               "collection of"
+
+      Config.set(%{Config.get() | collection_hint: false})
+
+      rows = %{
+        return: for(i <- 1..25, do: %{"id" => i}),
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      refute Projection.eval_success(previous, committed, rows, [])["feedback"] =~ "collection of"
+    end
+
+    test "no collection hint when history stores a preview marker instead of the value" do
+      Config.set(%{Config.get() | collection_hint: true})
+
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+      rows = for i <- 1..25, do: %{"id" => i}
+      step = %{return: rows, memory: %{}, prints: [], tool_calls: [], upstream_calls: []}
+
+      history_notices = [
+        %{reason: "max_history_entry_bytes", message: "*1 stored as preview"}
+      ]
+
+      payload = Projection.eval_success(previous, committed, step, history_notices)
+
+      refute payload["feedback"] =~ "collection of"
+      refute payload["feedback"] =~ "(describe *1"
+    end
+
     test "eval_success does not add result describe hint when history stores a preview marker" do
       Config.set(%{Config.get() | max_session_preview_chars: 20})
       previous = %{memory: %{}}
@@ -871,6 +960,18 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       opts = Session.lisp_opts(snapshot, "(+ 1 2)", %{setup_max_heap: 123_456})
       assert Keyword.fetch!(opts, :setup_max_heap) == 123_456
     end
+  end
+
+  defp collection_hint_committed do
+    %{
+      id: "sess-coll",
+      turn: 1,
+      memory: %{},
+      turn_history: [],
+      prints: [],
+      tool_calls: [],
+      upstream_calls: []
+    }
   end
 
   defp call(name, args) do

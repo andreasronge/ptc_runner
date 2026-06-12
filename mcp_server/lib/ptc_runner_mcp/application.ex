@@ -251,6 +251,7 @@ defmodule PtcRunnerMcp.Application do
           max_session_upstream_call_entries: :integer,
           max_session_upstream_call_bytes: :integer,
           max_session_preview_chars: :integer,
+          collection_hint: :boolean,
           log_level: :string,
           trace_dir: :string,
           trace_payloads: :string,
