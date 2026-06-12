@@ -35,7 +35,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "prints" => execution.prints,
       "feedback" =>
         execution.feedback
-        |> append_value_hints(execution.result_truncated, step, history_notices)
+        |> append_value_hints(execution.result_truncated, previous, step, history_notices)
         |> append_history_notices(history_notices),
       "memory" => %{
         "changed_keys" => changed_keys(execution.memory.changed),
@@ -65,7 +65,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "prints" => execution.prints,
       "feedback" =>
         execution.feedback
-        |> append_value_hints(execution.result_truncated, step, history_notices)
+        |> append_value_hints(execution.result_truncated, previous, step, history_notices)
         |> append_history_notices(history_notices),
       "memory" => %{
         "changed" => execution.memory.changed,
@@ -97,15 +97,43 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   # The collection hint (opt-in via --collection-hint) is more specific than
   # the generic truncation hint, so it replaces it when both would apply.
-  defp append_value_hints(feedback, result_truncated, step, history_notices) do
+  # Two triggers: the eval result itself is a large collection of maps
+  # (reachable as *1 unless history stored only a preview), or this eval
+  # changed a session binding holding one (reachable by name, hinted only on
+  # the defining eval so it does not repeat every turn).
+  defp append_value_hints(feedback, result_truncated, previous, step, history_notices) do
     value = Map.get(step, :return)
 
-    if Config.get().collection_hint and collection_of_maps?(value) and
-         not history_entry_capped?(history_notices) do
-      append_collection_hint(feedback, Enum.count(value))
-    else
-      append_truncation_hint(feedback, result_truncated, history_notices)
+    cond do
+      not Config.get().collection_hint ->
+        append_truncation_hint(feedback, result_truncated, history_notices)
+
+      collection_of_maps?(value) and not history_entry_capped?(history_notices) ->
+        append_collection_hint(feedback, "*1", Enum.count(value))
+
+      binding = changed_collection_binding(previous, step) ->
+        # The binding hint describes a different value than the eval result,
+        # so a result-truncation hint (about *1) must still be preserved.
+        {name, count} = binding
+
+        feedback
+        |> append_truncation_hint(result_truncated, history_notices)
+        |> append_collection_hint(name, count)
+
+      true ->
+        append_truncation_hint(feedback, result_truncated, history_notices)
     end
+  end
+
+  defp changed_collection_binding(previous, step) do
+    prev = Map.get(previous || %{}, :memory) || %{}
+
+    (Map.get(step, :memory) || %{})
+    |> Enum.filter(fn {key, value} ->
+      collection_of_maps?(value) and Map.get(prev, key) != value
+    end)
+    |> Enum.map(fn {key, value} -> {to_string(key), Enum.count(value)} end)
+    |> Enum.max_by(fn {_key, count} -> count end, fn -> nil end)
   end
 
   defp collection_of_maps?(value) when is_list(value) do
@@ -115,10 +143,12 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   defp collection_of_maps?(_value), do: false
 
-  defp append_collection_hint(feedback, count) do
+  defp append_collection_hint(feedback, name, count) do
+    subject = if name == "*1", do: "Result", else: "Binding `#{name}`"
+
     hint =
-      "Result is a collection of #{count} maps. " <>
-        "`(describe *1 {:paths true})` summarizes field coverage across all of them."
+      "#{subject} is a collection of #{count} maps. " <>
+        "`(describe #{name} {:paths true})` summarizes field coverage across all of them."
 
     cond do
       String.contains?(feedback, hint) -> feedback

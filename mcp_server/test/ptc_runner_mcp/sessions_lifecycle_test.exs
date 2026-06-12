@@ -835,6 +835,83 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       refute Projection.eval_success(previous, committed, rows, [])["feedback"] =~ "collection of"
     end
 
+    test "lisp_session_eval end-to-end: def of a large collection triggers named hint" do
+      Config.set(%{Config.get() | collection_hint: true})
+      sid = SoakHelpers.start_session()
+
+      envelope =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(def rows (mapv (fn [i] {:id i :v \"x\"}) (range 30))) (count rows)"
+        })
+
+      feedback = envelope["structuredContent"]["feedback"] || ""
+      assert feedback =~ "Binding `rows` is a collection of 30 maps"
+      assert feedback =~ "(describe rows {:paths true})"
+    end
+
+    test "collection hint fires by name when an eval defs a large map collection" do
+      Config.set(%{Config.get() | collection_hint: true, max_session_preview_chars: 100_000})
+
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+      rows = for i <- 1..30, do: %{"id" => i}
+
+      step = %{
+        return: "#'rows",
+        memory: %{"rows" => rows},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["feedback"] =~ "Binding `rows` is a collection of 30 maps"
+      assert payload["feedback"] =~ "(describe rows {:paths true})"
+    end
+
+    test "binding hint preserves the result truncation hint when both apply" do
+      Config.set(%{Config.get() | collection_hint: true, max_session_preview_chars: 20})
+
+      previous = %{memory: %{}}
+      committed = collection_hint_committed()
+      rows = for i <- 1..30, do: %{"id" => i}
+
+      step = %{
+        return: String.duplicate("a", 200),
+        memory: %{"rows" => rows},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["feedback"] =~ "(describe *1)"
+      assert payload["feedback"] =~ "Binding `rows` is a collection of 30 maps"
+    end
+
+    test "no repeated binding hint when the binding did not change this eval" do
+      Config.set(%{Config.get() | collection_hint: true, max_session_preview_chars: 100_000})
+
+      rows = for i <- 1..30, do: %{"id" => i}
+      previous = %{memory: %{"rows" => rows}}
+      committed = collection_hint_committed()
+
+      step = %{
+        return: 42,
+        memory: %{"rows" => rows},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      refute payload["feedback"] =~ "collection of"
+    end
+
     test "no collection hint when history stores a preview marker instead of the value" do
       Config.set(%{Config.get() | collection_hint: true})
 
