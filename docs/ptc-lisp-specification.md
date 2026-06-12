@@ -2621,6 +2621,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `ifn?` | Is invokable via direct call? (functions, keywords, maps, sets — NOT vectors). Note: maps/sets are invokable as `(my-map :key)` but cannot be passed directly to HOFs like `mapv`; wrap in a lambda: `(mapv #(my-map %) coll)` |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
 | `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`. For `nil`, returns `nil` (not `:nil`). |
+| `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
 
 ```clojure
 ;; coll? returns true for vectors, maps, and sets

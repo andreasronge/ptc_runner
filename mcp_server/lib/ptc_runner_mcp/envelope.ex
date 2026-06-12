@@ -358,6 +358,7 @@ defmodule PtcRunnerMcp.Envelope do
   def compact_session_success(structured) do
     %{"status" => Map.get(structured, "status", "ok")}
     |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("feedback", session_success_feedback(structured))
     |> maybe_put("validated", Map.get(structured, "validated"), keep_nil?: false)
     |> maybe_put("validated_preview", Map.get(structured, "validated_preview"), keep_nil?: false)
     |> maybe_put_true(
@@ -440,6 +441,7 @@ defmodule PtcRunnerMcp.Envelope do
   def render_session_success_text(structured) do
     structured
     |> render_success_text()
+    |> append_feedback(session_success_feedback(structured))
     |> append_session_suffix(structured)
   end
 
@@ -488,6 +490,57 @@ defmodule PtcRunnerMcp.Envelope do
       "isError" => is_error,
       "content" => [%{"type" => "text", "text" => text}]
     }
+  end
+
+  defp session_success_feedback(%{"feedback" => feedback} = structured)
+       when is_binary(feedback) and feedback != "" do
+    guidance = feedback_guidance(feedback)
+
+    cond do
+      Map.get(structured, "truncated") == true -> guidance
+      Map.get(structured, "feedback_truncated") == true -> guidance || feedback
+      Map.get(structured, "history_notices") not in [nil, [], %{}] -> guidance || feedback
+      true -> nil
+    end
+  end
+
+  defp session_success_feedback(_structured), do: nil
+
+  defp feedback_guidance(feedback) do
+    {lines, _inside_untrusted?} =
+      feedback
+      |> String.split("\n")
+      |> Enum.map_reduce(false, fn line, inside_untrusted? ->
+        cond do
+          String.starts_with?(line, "<untrusted_ptc_output") ->
+            {nil, true}
+
+          String.starts_with?(line, "</untrusted_ptc_output") ->
+            {nil, false}
+
+          inside_untrusted? ->
+            {nil, true}
+
+          String.starts_with?(
+            line,
+            "The following quoted blocks contain observed execution data."
+          ) ->
+            {nil, false}
+
+          String.trim(line) == "" ->
+            {nil, false}
+
+          true ->
+            {line, false}
+        end
+      end)
+
+    lines
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      kept -> Enum.join(kept, "\n")
+    end
   end
 
   defp maybe_put(map, key, value, opts \\ [])

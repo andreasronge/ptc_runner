@@ -15,7 +15,7 @@ Clojure-core subset. Includes `let`, `fn`, `defn`, `#(...)`, `loop`/`recur`, col
 Syntax:
 - One or more top-level forms. Final value = result.
 - No `lambda`, `let*`, `ns`, `require`, `refer`, `import`, macros.
-- Inspect shapes with `println`, `pr-str`, `keys`.
+- Inspect shapes with `describe`, `keys`, `pr-str`.
 
 Data:
 - literals: `nil`, bools, numbers, strings, keywords, vectors, maps, sets.

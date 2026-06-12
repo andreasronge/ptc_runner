@@ -32,7 +32,10 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "status" => "ok",
       "result" => execution.result,
       "prints" => execution.prints,
-      "feedback" => append_history_notices(execution.feedback, history_notices),
+      "feedback" =>
+        execution.feedback
+        |> append_truncation_hint(execution.result_truncated, history_notices)
+        |> append_history_notices(history_notices),
       "memory" => %{
         "changed_keys" => changed_keys(execution.memory.changed),
         "stored_keys" => execution.memory.stored_keys,
@@ -59,7 +62,10 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "status" => "ok",
       "result" => execution.result,
       "prints" => execution.prints,
-      "feedback" => append_history_notices(execution.feedback, history_notices),
+      "feedback" =>
+        execution.feedback
+        |> append_truncation_hint(execution.result_truncated, history_notices)
+        |> append_history_notices(history_notices),
       "memory" => %{
         "changed" => execution.memory.changed,
         "changed_keys" => changed_keys(execution.memory.changed),
@@ -86,6 +92,34 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       )
 
     execution
+  end
+
+  defp append_truncation_hint(feedback, false, _history_notices), do: feedback
+
+  defp append_truncation_hint(feedback, true, history_notices) do
+    if history_entry_capped?(history_notices) do
+      feedback
+    else
+      append_result_describe_hint(feedback)
+    end
+  end
+
+  defp append_result_describe_hint(feedback) do
+    hint = "Result truncated. Try `(describe *1)` or `(describe *1 {:paths true :depth 2})`."
+    feedback = feedback || ""
+
+    cond do
+      String.contains?(feedback, hint) -> feedback
+      feedback == "" -> hint
+      true -> feedback <> "\n" <> hint
+    end
+  end
+
+  defp history_entry_capped?(history_notices) do
+    Enum.any?(history_notices, fn notice ->
+      Map.get(notice, :reason) == "max_history_entry_bytes" or
+        Map.get(notice, "reason") == "max_history_entry_bytes"
+    end)
   end
 
   defp session_agent do

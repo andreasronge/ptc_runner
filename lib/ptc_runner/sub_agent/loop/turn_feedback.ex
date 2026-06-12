@@ -194,6 +194,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
     names (string-keyed). Fallback orientation hint when nothing changed or
     previews were truncated.
   - `:memory.truncated` — `true` if any memory preview was truncated.
+  - `:result_truncated` — `true` if the result preview was truncated.
   - `:visible_truncated` — `true` if `prints` or `result` was truncated
     (excludes memory). Used by the MCP one-shot renderer where the
     memory field is omitted entirely (issue #879) — without this the
@@ -211,6 +212,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
             stored_keys: [String.t()],
             truncated: boolean()
           },
+          result_truncated: boolean(),
           visible_truncated: boolean(),
           truncated: boolean()
         }
@@ -273,6 +275,7 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
         stored_keys: stored_keys(lisp_step),
         truncated: memory_truncated?
       },
+      result_truncated: result_truncated?,
       visible_truncated: visible_truncated?,
       truncated: truncated?
     }

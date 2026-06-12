@@ -2335,6 +2335,31 @@
       divergences: nil
     },
     %{
+      name: "describe",
+      description:
+        "Summarize data shape, types, key coverage, examples, and optional nested paths.",
+      binding: :multi_arity,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(describe x)", "(describe x opts)"],
+      since: nil,
+      section: "Core",
+      ptc_extension?: true,
+      examples: [
+        {
+          ~S"""
+          (describe [{"event" "turn"} {"event" "done" "ok" true}])
+          """,
+          ~S({:type "vector" :count 2 :scanned 2 :item_types {"map" 2} :keys {"event" {:present 2 :pct 100.0 :types {"string" 2} :examples ["turn" "done"] :distinct_count 2} "ok" {:present 1 :pct 50.0 :types {"boolean" 1} :examples [true] :distinct_count 1}} :key_types {"string" 3}})
+        }
+      ],
+      notes:
+        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count.",
+      see_also: ["keys", "type", "json/parse-lines"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
       name: "keyword",
       description: "Type coercion (string to keyword)",
       binding: :normal,

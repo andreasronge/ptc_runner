@@ -66,6 +66,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert sc["memory"]["changed_keys"] == ["x", "y"]
       assert sc["memory"]["stored_keys"] == ["x", "y"]
       assert sc["session"]["turn"] == 1
+      refute Map.has_key?(sc, "feedback")
 
       # Every inspect view must shape distinctly and stay authorized.
       for view <- ~w(overview memory prints tool_calls history limits) do
@@ -663,6 +664,137 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert payload["truncated"] == true
       assert String.length(payload["result"]) < 120
       assert payload["feedback"] =~ "truncated"
+      assert payload["feedback"] =~ "(describe *1)"
+      assert payload["feedback"] =~ "(describe *1 {:paths true :depth 2})"
+      assert length(String.split(payload["feedback"], "(describe *1)")) == 2
+    end
+
+    test "lisp_session_eval envelope surfaces result truncation describe hint" do
+      Config.set(%{Config.get() | max_session_preview_chars: 20})
+      sid = SoakHelpers.start_session()
+
+      envelope =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~s("#{String.duplicate("a", 200)}")
+        })
+
+      assert envelope["structuredContent"]["truncated"] == true
+      assert envelope["structuredContent"]["feedback"] =~ "(describe *1)"
+
+      refute envelope["structuredContent"]["feedback"] =~ "<untrusted_ptc_output"
+
+      text = get_in(envelope, ["content", Access.at(0), "text"])
+
+      assert text =~ "(describe *1)"
+      assert length(String.split(text, "user=>")) == 2
+      refute text =~ "<untrusted_ptc_output"
+    end
+
+    test "slim lisp_session_eval non-truncated success does not duplicate feedback" do
+      ResponseProfile.set(:slim)
+      sid = SoakHelpers.start_session()
+
+      envelope =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(+ 1 2)"
+        })
+
+      text = get_in(envelope, ["content", Access.at(0), "text"])
+
+      refute Map.has_key?(envelope, "structuredContent")
+      assert text =~ "user=> 3"
+      assert length(String.split(text, "user=> 3")) == 2
+      refute text =~ "<result>"
+    end
+
+    test "eval_success does not add describe hint without truncation" do
+      previous = %{memory: %{}}
+
+      committed = %{
+        id: "sess-preview",
+        turn: 1,
+        memory: %{},
+        turn_history: [],
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      step = %{
+        return: "short",
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["truncated"] == false
+      refute payload["feedback"] =~ "(describe *1)"
+    end
+
+    test "eval_success does not add result describe hint for print-only truncation" do
+      previous = %{memory: %{}}
+
+      committed = %{
+        id: "sess-preview",
+        turn: 1,
+        memory: %{},
+        turn_history: [],
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      step = %{
+        return: "short",
+        memory: %{},
+        prints: [String.duplicate("p", 3_000)],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      payload = Projection.eval_success(previous, committed, step, [])
+
+      assert payload["truncated"] == true
+      assert payload["feedback"] =~ "truncated"
+      refute payload["feedback"] =~ "(describe *1)"
+    end
+
+    test "eval_success does not add result describe hint when history stores a preview marker" do
+      Config.set(%{Config.get() | max_session_preview_chars: 20})
+      previous = %{memory: %{}}
+
+      committed = %{
+        id: "sess-preview",
+        turn: 1,
+        memory: %{},
+        turn_history: [],
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      step = %{
+        return: String.duplicate("a", 200),
+        memory: %{},
+        prints: [],
+        tool_calls: [],
+        upstream_calls: []
+      }
+
+      history_notices = [
+        %{reason: "max_history_entry_bytes", message: "*1 stored as preview"}
+      ]
+
+      payload = Projection.eval_success(previous, committed, step, history_notices)
+
+      assert payload["truncated"] == true
+      refute payload["feedback"] =~ "(describe *1)"
+      assert payload["feedback"] =~ "*1 stored as preview"
     end
   end
 

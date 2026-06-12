@@ -22,7 +22,7 @@ PTC-Lisp syntax:
 - One or more top-level forms. Final value = result; `(return value)` also terminates with success.
 - Use `(let [name value ...] body)`, `(fn [x] body)`, or `#(...)`. No `let*`, `lambda`, `equal?`, or `length`.
 - Core includes `def`, `defn`, `if`, `loop`/`recur`, collections, strings, sets, regex, math, parse functions.
-- Use `count`, `filter`, `map`, `reduce`, `get`, `get-in`; use `println`, `pr-str`, `keys` to inspect shapes.
+- Use `count`, `filter`, `map`, `reduce`, `get`, `get-in`; use `describe`, `keys`, `pr-str` to inspect shapes.
 - Data literals: `nil`, bools, numbers, strings, keywords, vectors/maps/sets. JSON maps use string keys.
 - Context example: `{"orders":[...]}` -> `(count (filter #(= "paid" (get % "status")) data/orders))`. Use `data/orders`, not `(data/orders)`, `orders`, or bare `data`.
 - Namespaces are fixed; no `ns`, `require`, `refer`, or `import`.

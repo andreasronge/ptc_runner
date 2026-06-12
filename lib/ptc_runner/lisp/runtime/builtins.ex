@@ -142,6 +142,8 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:constantly, {:normal, &Runtime.constantly/1}},
       {:"every-pred", {:collect, &Runtime.every_pred_variadic/1}},
       {:"some-fn", {:collect, &Runtime.some_fn_variadic/1}},
+      {:describe,
+       {:multi_arity, :describe, {&Runtime.Describe.describe/1, &Runtime.Describe.describe/2}}},
 
       # ============================================================
       # Arithmetic — variadic with identity

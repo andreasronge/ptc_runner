@@ -11,7 +11,7 @@
 
 <!-- PTC_PROMPT_START -->
 Upstream discovery snapshot below. Live: `(tool/servers)`, `(apropos "query" {:limit 8})`, `(dir "server" {:limit 20})`, `(doc "server/tool")`.
-Discovery inspects upstream schemas only; `dir` lists names/descriptions, `doc` shows args/result. Execute: `(tool/call {:server "server" :tool "tool" :args {...}})` -> `Result<T>`: `{:ok true :value T}` or `{:ok false :reason kw :message text}`. Check `:ok`; `:raw` optional.
+Discovery uses schemas; `dir` lists names/descriptions, `doc` shows args/result. Execute: `(tool/call {:server "server" :tool "tool" :args {...}})` -> `Result<T>`: `{:ok true :value T}` or `{:ok false :reason kw :message text}`. Check `:ok`; `:raw` optional.
 
 PTC-Lisp against committed session memory
 - `def`/`defn` persist for later evals in the same session
@@ -19,5 +19,5 @@ PTC-Lisp against committed session memory
 - `output_schema` validates result; mismatch rejects the commit.
 
 Use `(map tool/call calls)` for batches. Raw schema/debug: `(meta "server/tool")`.
-Unknown result shape: inspect `(keys (:value r))` or `(pr-str (:value r))`; use `(fail (:message r))` for unhandled faults.
+Unknown/truncated shape: use `(describe (:value r))` or `(describe (:value r) {:paths true :depth 2})`; fail with `(:message r)`.
 <!-- PTC_PROMPT_END -->

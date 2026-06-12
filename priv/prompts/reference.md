@@ -27,7 +27,7 @@ Data:
 - JSON parse maps use string keys.
 
 Helpers:
-- collections, strings, sets, walk, regex, math.
+- collections, strings, sets, walk, regex, math; inspect with `describe`.
 - JSON: `json/parse-string`, `json/parse-lines`, `json/generate-string`.
 - Parallel: `(pmap f coll)`, `(pcalls f1 f2 ...)`.
 
