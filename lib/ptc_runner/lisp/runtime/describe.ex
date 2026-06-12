@@ -249,7 +249,7 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
       types: histogram_by(values, &type_name/1),
       examples: examples(values, opts.sample)
     }
-    |> put_if(:non_empty, non_empty_count(values), &(&1 > 0))
+    |> put_non_empty(values)
     |> put_range(values)
     |> put_distinct(values)
   end
@@ -287,6 +287,22 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
     |> Format.to_clojure(printable_limit: @max_example_chars)
     |> elem(0)
   end
+
+  # `non_empty: 0` is the absence signal this profiler exists to surface, so
+  # the field is emitted whenever the values are countable at all — only
+  # fields with no countable values (e.g. all integers) omit it.
+  defp put_non_empty(summary, values) do
+    if Enum.any?(values, &countable?/1) do
+      Map.put(summary, :non_empty, non_empty_count(values))
+    else
+      summary
+    end
+  end
+
+  defp countable?(value) when is_binary(value) or is_list(value), do: true
+  defp countable?(%MapSet{}), do: true
+  defp countable?(value) when is_map(value) and not is_struct(value), do: true
+  defp countable?(_), do: false
 
   defp non_empty_count(values) do
     Enum.count(values, fn

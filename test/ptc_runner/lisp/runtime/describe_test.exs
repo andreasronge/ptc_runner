@@ -102,6 +102,18 @@ defmodule PtcRunner.Lisp.Runtime.DescribeTest do
   end
 
   describe "describe/1 collections" do
+    test "reports non_empty: 0 for collection fields that are always empty" do
+      rows = [
+        %{"limits" => [], "n" => 1},
+        %{"limits" => [], "n" => 2}
+      ]
+
+      result = Describe.describe(rows)
+
+      assert result.keys["limits"].non_empty == 0
+      refute Map.has_key?(result.keys["n"], :non_empty)
+    end
+
     test "caps set scans without materializing the whole set as a list" do
       result = Describe.describe(MapSet.new(1..1001))
 
