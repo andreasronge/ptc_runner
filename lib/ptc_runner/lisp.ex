@@ -406,6 +406,7 @@ defmodule PtcRunner.Lisp do
       journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
+      max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       strict_data: Keyword.get(opts, :strict_data, false),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       link: Keyword.get(opts, :link, false)
@@ -683,6 +684,7 @@ defmodule PtcRunner.Lisp do
       tool_cache: tool_cache,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
+      max_tool_call_result_bytes: max_tool_call_result_bytes,
       strict_data: strict_data,
       discovery_exec: discovery_exec
     } = opts
@@ -716,6 +718,7 @@ defmodule PtcRunner.Lisp do
         tool_cache: tool_cache,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
+        max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
         discovery_exec: discovery_exec,
         prelude: prelude

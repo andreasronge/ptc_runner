@@ -15,10 +15,25 @@ defmodule PtcRunner.Lisp.Eval.Context do
   |-------|---------|----------|---------|
   | `loop_limit` | 1,000 | 10,000 | Max loop/recur jumps |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
+  | `max_tool_call_result_bytes` | 16,384 | — | Per-entry cap on the `:result` retained in the in-eval tool ledger |
   | `pmap_max_concurrency` | `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
+
+  ## Tool-ledger retention
+
+  `tool_calls` records every call's `:result` and `:args` for post-eval
+  telemetry/envelope rendering. To stop a long-running or looping tool use
+  (e.g. a paginated read fold) from accumulating full payloads in live eval
+  state, `append_tool_call/2` bounds each entry's `:result` to a preview once
+  it exceeds `max_tool_call_result_bytes`, marking the entry with
+  `:result_truncated`. Only the LEDGER copy is bounded — the value returned to
+  the program and any `tool_cache` entry keep the full result (they are built
+  separately in `record_tool_call`). `:args` is left intact (it is tiny in the
+  fold case and `TurnEvent.tool_call_summary/1` needs the raw map for upstream
+  identity + the canonical args hash), as are `:child_trace_id`/`:child_step`.
   """
 
   @default_print_length 2000
+  @default_tool_call_result_bytes 16_384
 
   @default_pmap_timeout 5_000
   @default_pmap_max_concurrency System.schedulers_online() * 2
@@ -38,6 +53,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     loop_limit: 1000,
     max_print_length: @default_print_length,
     max_tool_calls: nil,
+    max_tool_call_result_bytes: @default_tool_call_result_bytes,
     pmap_timeout: @default_pmap_timeout,
     pmap_max_concurrency: @default_pmap_max_concurrency,
     # Absolute monotonic-time deadline (ms) shared by an in-progress
@@ -187,6 +203,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           iteration_count: integer(),
           loop_limit: integer(),
           max_tool_calls: pos_integer() | nil,
+          max_tool_call_result_bytes: pos_integer(),
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
           pmap_max_concurrency: pos_integer(),
@@ -260,6 +277,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       discovery_exec: Keyword.get(opts, :discovery_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
+      max_tool_call_result_bytes:
+        Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
       pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
       pmap_max_concurrency:
@@ -321,10 +340,131 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   @doc """
   Appends a tool call record to the context.
+
+  The entry's `:result` and `:args` are bounded to a preview when they exceed
+  `max_tool_call_result_bytes`, so a looping/large tool use cannot accumulate
+  full payloads in live eval state. See the "Tool-ledger retention" moduledoc
+  section. Only the ledger copy is bounded; callers keep the full result for
+  the program return and cache separately.
   """
   @spec append_tool_call(t(), tool_call()) :: t()
-  def append_tool_call(%__MODULE__{tool_calls: tool_calls} = context, tool_call) do
-    %{context | tool_calls: [tool_call | tool_calls]}
+  def append_tool_call(
+        %__MODULE__{tool_calls: tool_calls, max_tool_call_result_bytes: cap} = context,
+        tool_call
+      ) do
+    %{context | tool_calls: [compact_ledger_entry(tool_call, cap) | tool_calls]}
+  end
+
+  # Bound the LEDGER copy of :result only. Preserves every other field,
+  # including a nil :result (failed call), :child_trace_id / :child_step
+  # (trace-hierarchy metadata), and — critically — the raw :args map.
+  # `:args` is NOT truncated: `TurnEvent.tool_call_summary/1` reads it to
+  # extract the upstream server/tool and compute the canonical args hash for
+  # duplicate-fetch detection, and args are tiny in the fold use case anyway.
+  # Small results pass through identically so existing entries are byte-for-
+  # byte unchanged.
+  defp compact_ledger_entry(%{result: result} = tool_call, cap)
+       when is_integer(cap) and cap > 0 and not is_nil(result) do
+    case retained_size(result, cap) do
+      size when is_integer(size) and size <= cap ->
+        tool_call
+
+      size ->
+        tool_call
+        |> Map.put(:result, preview(result, cap))
+        |> Map.put(:result_truncated, true)
+        |> Map.put(:result_bytes, size)
+    end
+  end
+
+  defp compact_ledger_entry(tool_call, _cap), do: tool_call
+
+  @word_bytes :erlang.system_info(:wordsize)
+
+  # Retained-HEAP estimate, conservative (never under-counts), in the same units
+  # the sandbox bills (`max_heap`). Two parts:
+  #
+  #   * the term's flat heap size (`:erts_debug.flat_size/1`, words → bytes):
+  #     cons cells, tuples, boxed terms. NOT the serialized encoding —
+  #     `:erlang.external_size/1` is ~16× smaller for int-heavy lists (a 16k-int
+  #     list encodes to ~16 KB but occupies ~256 KB of heap), which would let it
+  #     slip under the cap; and
+  #   * the parent size of any refc binary reachable in the term
+  #     (`:binary.referenced_byte_size/1`). flat_size counts only a binary's
+  #     ProcBin header, not its shared bytes (which the sandbox DOES bill), and a
+  #     sub-binary keeps its whole parent alive.
+  #
+  # The two parts are SUMMED, not maxed: the sandbox bills the heap structure
+  # AND the shared binary bytes, so a mixed `{rows, raw_chunk}` result retains
+  # both. (flat_size already includes each binary's small ProcBin header, a
+  # negligible and conservative double-count.) Short-circuit: only walk binaries
+  # when the flat heap is already under the cap — if it alone exceeds the cap we
+  # truncate regardless, and the sum would only be larger.
+  defp retained_size(value, cap) do
+    case heap_size(value) do
+      :oversized -> :oversized
+      heap when heap > cap -> heap
+      heap -> heap + referenced_binary_size(value)
+    end
+  end
+
+  defp heap_size(value) do
+    :erts_debug.flat_size(value) * @word_bytes
+  rescue
+    # Defensive: treat an unsizeable term as oversized so it is previewed.
+    _ -> :oversized
+  end
+
+  # Sum of underlying parent byte sizes of binaries reachable in the term.
+  # Over-counts when sub-binaries share a parent — safe (biases toward
+  # truncation, never under toward retention).
+  defp referenced_binary_size(value) when is_binary(value),
+    do: :binary.referenced_byte_size(value)
+
+  defp referenced_binary_size(value) when is_list(value),
+    do: Enum.reduce(value, 0, &(referenced_binary_size(&1) + &2))
+
+  defp referenced_binary_size(value) when is_map(value),
+    do:
+      Enum.reduce(value, 0, fn {k, v}, acc ->
+        acc + referenced_binary_size(k) + referenced_binary_size(v)
+      end)
+
+  defp referenced_binary_size(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> referenced_binary_size()
+
+  defp referenced_binary_size(_value), do: 0
+
+  defp preview(value, cap) do
+    # Bump only the inspect budget so a tiny cap still yields a usable render;
+    # the retained preview is truncated to the exact `cap` byte budget. `limit`
+    # is kept low: only ~cap bytes survive, so rendering many elements just
+    # enlarges the transient inspect string.
+    value
+    |> inspect(limit: 10, printable_limit: max(cap, 32))
+    |> truncate_bytes(cap)
+  end
+
+  # Bound by BYTES (the cap is a byte budget), UTF-8 safely: take at most
+  # `max_bytes` bytes, then drop any incomplete trailing codepoint. The final
+  # slice is COPIED — `binary_part/3` returns a sub-binary that would otherwise
+  # pin the whole (possibly large) inspect output, defeating the very bound
+  # this function enforces.
+  defp truncate_bytes(binary, max_bytes) when byte_size(binary) <= max_bytes, do: binary
+
+  defp truncate_bytes(binary, max_bytes) do
+    binary
+    |> binary_part(0, max_bytes)
+    |> drop_incomplete_trailing()
+    |> :binary.copy()
+  end
+
+  defp drop_incomplete_trailing(binary) do
+    if String.valid?(binary) or binary == "" do
+      binary
+    else
+      drop_incomplete_trailing(binary_part(binary, 0, byte_size(binary) - 1))
+    end
   end
 
   @doc """

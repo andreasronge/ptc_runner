@@ -733,6 +733,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         max_heap: eval_context.max_heap,
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
+        max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
         discovery_exec: eval_context.discovery_exec
       )
 
@@ -1064,6 +1065,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             tool_calls: caller_ctx.tool_calls,
             pmap_calls: caller_ctx.pmap_calls,
             tool_cache: caller_ctx.tool_cache,
+            # Propagate the ledger cap so tool calls inside a closure (e.g. the
+            # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
+            # caller's cap instead of resetting to the struct default.
+            max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes,
             summaries: caller_ctx.summaries,
             journal: caller_ctx.journal,
             discovery_exec: caller_ctx.discovery_exec,
