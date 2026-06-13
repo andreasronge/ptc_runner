@@ -4322,7 +4322,10 @@ Every execution produces a log entry:
   memory_before: %{high_paid: [...]},
   ctx: %{user_id: "user-123"},
 
-  # Execution trace
+  # Execution trace. A call's recorded `result` is bounded: results larger than
+  # `max_tool_call_result_bytes` (§16.8) are stored as a preview with
+  # `result_truncated: true` and `result_bytes: <retained size>`. `args` are
+  # kept verbatim (telemetry needs them for upstream identity + dedup hashing).
   tool_calls: [
     %{tool: "get-orders", args: %{ids: [1, 2, 3]},
       result_size: 42, duration_ms: 150}
@@ -4346,6 +4349,7 @@ Every execution produces a log entry:
 | `timeout_ms` | 1,000 | Max execution time per program |
 | `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
 | `max_tool_calls` | unlimited (`nil`) | Max tool invocations per program; no limit unless explicitly set |
+| `max_tool_call_result_bytes` | 16,384 | Per-call cap on the tool result **retained in the in-eval ledger** (`tool_calls`). A result whose retained heap size exceeds this is stored as a bounded preview, so a looping/paginated tool fold cannot accumulate full payloads in eval memory. Does **not** affect the value returned to the program — only what the audit ledger keeps (see §16.7). |
 
 *Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 
