@@ -464,6 +464,59 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "large upstream pages are usable by the program while the in-eval tool ledger is bounded" do
+    script = write_large_page_stdio_fixture!()
+    config = stdio_fixture_config(script)
+
+    {:ok, runtime} = Runtime.start_link(config: config, catalog_snapshot_mode: :frozen)
+
+    program = """
+    (reduce
+      +
+      0
+      (map
+        (fn [i]
+          (let [r (tool/call 'fixture/page {:page i})]
+            (if (r :ok)
+              (count (get (r :value) "rows"))
+              0)))
+        (range 20)))
+    """
+
+    try do
+      {{:ok, step}, records} =
+        Eval.run_lisp_with_records(runtime, program,
+          max_tool_call_result_bytes: 300,
+          max_heap: 350_000
+        )
+
+      assert step.return == 100_000
+
+      assert length(step.tool_calls) == 20
+      assert Enum.all?(step.tool_calls, &(&1[:name] == "call"))
+      assert Enum.all?(step.tool_calls, &(&1[:result_truncated] == true))
+
+      assert Enum.all?(
+               step.tool_calls,
+               &(is_binary(&1[:result]) and byte_size(&1[:result]) <= 300)
+             )
+
+      assert length(records) == 20
+
+      assert Enum.all?(
+               records,
+               &match?(%{"server" => "fixture", "tool" => "page", "status" => "ok"}, &1)
+             )
+
+      assert Enum.all?(
+               records,
+               &(get_in(&1, ["result_overview", "shape"]) == "map keys=[\"rows\"] count=1")
+             )
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "root runtime can call an MCP HTTP upstream" do
     {:ok, server} = start_mcp_http_fixture()
 
@@ -1210,6 +1263,60 @@ defmodule PtcRunner.UpstreamRuntimeTest do
           "tools/call" ->
             args = get_in(frame, ["params", "arguments"]) || %{}
             %{"jsonrpc" => "2.0", "id" => id, "result" => %{"structuredContent" => %{"echo" => args}}}
+        end
+
+      if response do
+        IO.puts(Jason.encode!(response))
+      end
+    end
+    ''')
+
+    path
+  end
+
+  defp write_large_page_stdio_fixture! do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc_runner_mcp_large_page_fixture_#{System.unique_integer([:positive])}.exs"
+      )
+
+    File.write!(path, ~S'''
+    tools = [
+      %{
+        "name" => "page",
+        "description" => "Return one large numeric page",
+        "inputSchema" => %{
+          "type" => "object",
+          "required" => ["page"],
+          "properties" => %{"page" => %{"type" => "integer"}}
+        }
+      }
+    ]
+
+    page_rows = Enum.to_list(1..5_000)
+
+    for line <- IO.stream(:stdio, :line) do
+      {:ok, frame} = Jason.decode(String.trim(line))
+      id = frame["id"]
+
+      response =
+        case frame["method"] do
+          "initialize" ->
+            %{"jsonrpc" => "2.0", "id" => id, "result" => %{"capabilities" => %{}}}
+
+          "notifications/initialized" ->
+            nil
+
+          "tools/list" ->
+            %{"jsonrpc" => "2.0", "id" => id, "result" => %{"tools" => tools}}
+
+          "tools/call" ->
+            %{
+              "jsonrpc" => "2.0",
+              "id" => id,
+              "result" => %{"structuredContent" => %{"rows" => page_rows}}
+            }
         end
 
       if response do
