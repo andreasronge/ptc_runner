@@ -53,23 +53,50 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
     test "expose sessions, turns, programs, and tool calls over a source" do
       tools = Introspection.tools(recorded_events())
 
-      assert [summary] = tools["log_sessions"].(%{})
+      assert %{"items" => [summary], "has_more" => false, "next_cursor" => nil} =
+               tools["log_sessions"].(%{})
+
       assert summary["correlation_id"] == "investigation"
       assert summary["driver"] == "session"
       assert summary["turns"] == 3
       assert summary["committed"] == 2
       assert summary["failed"] == 1
 
-      turns = tools["log_turns"].(%{"session-id" => "investigation"})
+      assert %{"items" => turns} = tools["log_turns"].(%{"session-id" => "investigation"})
       assert length(turns) == 3
       assert Enum.map(turns, & &1["program"]) == ["(def x 1)", "(no-such-fn 1)", "(inc x)"]
 
-      assert tools["log_programs"].(%{"session-id" => "investigation"}) ==
-               ["(def x 1)", "(no-such-fn 1)", "(inc x)"]
+      assert %{"items" => ["(def x 1)", "(no-such-fn 1)", "(inc x)"]} =
+               tools["log_programs"].(%{"session-id" => "investigation"})
 
       # Unknown / missing session id is empty, not an error.
-      assert tools["log_turns"].(%{"session-id" => "nope"}) == []
-      assert tools["log_turns"].(%{}) == []
+      assert %{"items" => []} = tools["log_turns"].(%{"session-id" => "nope"})
+      assert %{"items" => []} = tools["log_turns"].(%{})
+    end
+
+    test "page all projections with one cursor envelope" do
+      tools = Introspection.tools(recorded_events())
+
+      assert %{"items" => first_turn, "has_more" => true, "next_cursor" => "1", "limit" => 1} =
+               tools["log_turns"].(%{"session-id" => "investigation", "limit" => 1})
+
+      assert Enum.map(first_turn, & &1["program"]) == ["(def x 1)"]
+
+      assert %{"items" => next_turns, "has_more" => false, "next_cursor" => nil} =
+               tools["log_turns"].(%{
+                 "session-id" => "investigation",
+                 "limit" => 10,
+                 "cursor" => "1"
+               })
+
+      assert Enum.map(next_turns, & &1["program"]) == ["(no-such-fn 1)", "(inc x)"]
+    end
+
+    test "clamps zero limits so cursor pagination always makes progress" do
+      tools = Introspection.tools(recorded_events())
+
+      assert %{"items" => [_], "has_more" => true, "next_cursor" => "1", "limit" => 1} =
+               tools["log_turns"].(%{"session-id" => "investigation", "limit" => 0})
     end
   end
 
@@ -78,9 +105,9 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
       events = recorded_events()
 
       program = """
-      [(count (log/sessions))
-       (count (log/turns "investigation"))
-       (log/programs "investigation")]
+      [(count (get (log/sessions) "items"))
+       (count (get (log/turns "investigation") "items"))
+       (get (log/programs "investigation") "items")]
       """
 
       assert {:ok, %Step{} = step} =
@@ -101,7 +128,7 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
 
       # The model writes the analysis; the Elixir surface only hands it data.
       program = """
-      (def turns (log/turns "investigation"))
+      (def turns (get (log/turns "investigation") "items"))
       (count (filter (fn [t] (= (get t "committed") false)) turns))
       """
 
@@ -116,7 +143,7 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
       events = recorded_tool_events()
 
       program = """
-      (def calls (log/tool-calls "dupes"))
+      (def calls (get (log/tool-calls "dupes") "items"))
       (def grouped
         (group-by
           (fn [c] [(get c "tool") (get c "args_hash")])
@@ -133,7 +160,7 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
 
     test "fails closed when the host does not grant the introspection tools" do
       assert {:error, %Step{} = step} =
-               Lisp.run("(log/sessions)",
+               Lisp.run(~S|(log/sessions)|,
                  prelude: Introspection.prelude_source(),
                  tools: %{}
                )
@@ -156,7 +183,7 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
         )
 
       assert {:ok, %Step{return: ["(def y 2)"]}} =
-               Lisp.run(~S|(log/programs "from-file")|,
+               Lisp.run(~S|(get (log/programs "from-file") "items")|,
                  prelude: Introspection.prelude_source(),
                  tools: Introspection.tools(path)
                )

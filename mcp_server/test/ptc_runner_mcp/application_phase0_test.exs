@@ -21,7 +21,8 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       max_sessions: System.get_env("PTC_RUNNER_MCP_MAX_SESSIONS"),
       max_session_preview_chars: System.get_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS"),
       max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
-      turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
+      turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR"),
+      prelude: System.get_env("PTC_RUNNER_MCP_PRELUDE")
     }
 
     on_exit(fn ->
@@ -36,6 +37,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       )
 
       restore_env("PTC_RUNNER_MCP_TURN_LOG_DIR", original.turn_log_dir)
+      restore_env("PTC_RUNNER_MCP_PRELUDE", original.prelude)
 
       Limits.set(Limits.defaults())
       SessionsConfig.reset()
@@ -49,6 +51,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     System.delete_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS")
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
+    System.delete_env("PTC_RUNNER_MCP_PRELUDE")
     :ok
   end
 
@@ -79,6 +82,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     test "accepts --turn-log-dir" do
       args = Application.parse_args(["--turn-log-dir", "/tmp/ptc-turns"])
       assert args[:turn_log_dir] == "/tmp/ptc-turns"
+    end
+
+    test "accepts --prelude" do
+      args = Application.parse_args(["--prelude", "/tmp/session-prelude.clj"])
+      assert args[:prelude] == "/tmp/session-prelude.clj"
     end
 
     test "accepts --max-session-preview-chars" do
@@ -181,6 +189,44 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
                      Application.apply_sessions_config(%{max_session_preview_chars: 0})
                    end
     end
+
+    test "loads prelude source from CLI path" do
+      path = write_prelude!("cli")
+
+      assert :ok = Application.apply_sessions_config(%{prelude: path})
+      assert SessionsConfig.get().prelude_path == path
+      assert SessionsConfig.prelude_source() =~ "(ns smoke"
+    end
+
+    test "prelude CLI path overrides env var" do
+      env_path = write_prelude!("env")
+      cli_path = write_prelude!("cli")
+      System.put_env("PTC_RUNNER_MCP_PRELUDE", env_path)
+
+      assert :ok = Application.apply_sessions_config(%{prelude: cli_path})
+      assert SessionsConfig.get().prelude_path == cli_path
+      assert SessionsConfig.prelude_source() =~ "cli"
+    end
+
+    test "manual config updates recompile runtime prelude from source" do
+      assert :ok = Application.apply_sessions_config(%{prelude: write_prelude!("first")})
+      first_hash = SessionsConfig.runtime_prelude().source_hash
+
+      updated_source = prelude_source!("second")
+      SessionsConfig.set(Map.put(SessionsConfig.get(), :prelude_source, updated_source))
+
+      assert SessionsConfig.prelude_source() == updated_source
+      assert SessionsConfig.runtime_prelude().source_hash != first_hash
+      assert SessionsConfig.runtime_prelude().source_hash == source_hash(updated_source)
+    end
+
+    test "rejects unreadable prelude path" do
+      missing = Path.join(System.tmp_dir!(), "ptc_runner_missing_prelude.clj")
+
+      assert_raise RuntimeError, ~r/--prelude .* could not be read/, fn ->
+        Application.apply_sessions_config(%{prelude: missing})
+      end
+    end
   end
 
   describe "apply_turn_log_config/1" do
@@ -213,4 +259,27 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   # Re-run the same apply path Application.start/2 uses. Phase 0
   # exposes `apply_limits/1` as a `@doc false` seam for this test.
   defp run_apply_limits(args), do: PtcRunnerMcp.Application.apply_limits(args)
+
+  defp write_prelude!(label) do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc_runner_mcp_#{label}_#{System.unique_integer([:positive])}.clj"
+      )
+
+    File.write!(path, prelude_source!(label))
+
+    path
+  end
+
+  defp prelude_source!(label) do
+    """
+    (ns smoke {:visibility :prompt})
+    (defn label [] "#{label}")
+    """
+  end
+
+  defp source_hash(source) do
+    :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
+  end
 end

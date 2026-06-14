@@ -332,13 +332,13 @@ alias PtcRunner.TraceLog.Introspection
 
 # `source` is a MemorySink pid, a JSONL path, or a list of event maps.
 PtcRunner.Lisp.run(
-  ~S|(count (log/turns "investigation"))|,
+  ~S|(count (get (log/turns "investigation") "items"))|,
   prelude: Introspection.prelude_source(),
   tools: Introspection.tools(source)
 )
 ```
 
-The exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
+The exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) return page maps with `"items"`, `"next_cursor"`, `"has_more"`, and `"limit"`. Call them with no opts for the default first page, or pass `{:limit n :cursor c}` and follow `"next_cursor"` for large logs. The `*-all` helpers are explicit eager scans for small local logs. All exports fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
 
 ### REPL
 
@@ -348,7 +348,7 @@ The exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) fail
 ptc> (def x 1)
 ptc> :turns
   <id> (session): 1 turns, 1 committed, 0 failed, 0 tool calls
-ptc> (log/programs "<id>")
+ptc> (get (log/programs "<id>") "items")
 ```
 
 ## Telemetry Events

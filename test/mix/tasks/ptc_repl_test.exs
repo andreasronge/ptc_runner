@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           "-e",
           "(def x 1)",
           "-e",
-          ~S|(log/programs (get (first (log/sessions)) "correlation_id"))|
+          ~S|(get (log/programs (get (first (get (log/sessions) "items")) "correlation_id")) "items")|
         ])
       end)
 

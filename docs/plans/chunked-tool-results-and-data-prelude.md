@@ -1,5 +1,14 @@
 # Paginated Reads and Data Prelude — Plan
 
+**Status (2026-06-14): partially implemented / still relevant.** The first
+core blocker is shipped: in-eval tool-call ledger compaction landed in
+`209b4bdf`, with large paged-result coverage in `bd7dba65`. A concrete
+large-file MCP smoke path also exists through
+`examples/large_file_log_introspection/` and e2e tests. What remains is the
+general `data/` prelude, page-source conventions as a reusable API, M2 A/B
+measurement, and a rooted/chunk-capable file source suitable for benchmark
+integrity.
+
 ## Context
 
 The planted-anomaly pilot (`~/ptc-bench-comparison/notes/planted-pilot-results-2026-06-13.md`)
@@ -14,8 +23,8 @@ killed the design we first reached for:
 - A 540 KB JSONL file parses to ~1.6 MB of maps; eager `json/parse-lines` of the
   whole content blows the 10 MB sandbox max_heap. **You cannot read a large
   result whole.**
-- The first design tried to hold the raw result *off-budget* as a refc binary
-  and slice it. **That is false against the code:** the sandbox arms
+- The first design tried to hold a raw result *off-budget* and slice it later.
+  **That is false against the code:** the sandbox arms
   `max_heap_size` with `include_shared_binaries: true`
   (`lib/ptc_runner/sandbox.ex:181`), so binaries acquired *during* eval are
   billed to the eval; the rebaseline only exempts data present *before* eval
@@ -24,33 +33,33 @@ killed the design we first reached for:
   binary bytes included. Plus the transport already decodes and caps responses
   at 2 MiB (`lib/ptc_runner/upstream/runtime.ex:14`), and the evaluator records
   every tool result in `eval_ctx.tool_calls` — so hiding it from the return
-  value is not enough. Host-side capture + cursor + slicing is a large, risky
-  change built on a wrong assumption.
+  value is not enough.
 
-So this plan does **not** add a generic cursor/`tool/next`/result-capture
-mechanism. Pagination is a **tool concern**: read a large source through a
-paginated upstream tool, and fold over the pages in PTC-Lisp.
+Therefore pagination is a **tool concern**: read a large source through a
+paginated upstream tool, and fold over the pages in PTC-Lisp. Page position is
+ordinary program data: an offset, chunk index, or continuation token passed in
+the next `tool/call`.
 
-A second codex review (round 2) caught the matching retention bug on the
-fold side and is the reason this plan needs **one** core change: `(tool/call
-...)` stores the **full result value** of every call in the in-eval tool ledger
+The matching retention bug on the fold side was caught before implementation:
+`(tool/call ...)` stores the **full result value** of every call in the in-eval tool ledger
 (`tool_call = %{..., result: result}`, `lib/ptc_runner/lisp/eval.ex:1216`,
 appended to `eval_ctx.tool_calls`). So a fold "discards" a page from its
 variables but the ledger keeps it — N pages become O(total bytes) of live eval
 state, billed to max_heap. Paging does not bound memory until the ledger stops
-retaining full values (see "The one core change"). Everything else is pure
-tool-arg threading.
+retaining full values. That core change is now shipped; everything else in this
+plan is pure tool-arg threading plus Prelude V1 library code.
 
 This is the M2 candidate for
 [`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md):
 a human-written prelude should pay for itself before P4 derivation starts.
 
-## The one core change: bound the in-eval tool ledger
+## Shipped core change: bound the in-eval tool ledger
 
-The in-eval `eval_ctx.tool_calls` ledger retains every call's full result value
-(`eval.ex:1216`) and is only compacted *after* the eval (for the response
+The in-eval `eval_ctx.tool_calls` ledger used to retain every call's full
+result value (`eval.ex:1216`) and is only compacted *after* the eval (for the response
 envelope). Fatal for a page fold: each page stays live in the ledger. The
-change: **compact the ledger as it grows** — past a per-eval bytes/entries cap,
+change, now shipped in `209b4bdf`: **compact the ledger as it grows** — past
+a per-eval bytes/entries cap,
 keep each call's metadata (name, args hash, outcome, duration) and a bounded
 preview, and drop the full result value **and large `:args`**. The program holds
 the value as the `tool/call` return, so the ledger never needed it.
@@ -74,11 +83,10 @@ not blanket-dropped:
   metadata** (needed for the trace hierarchy) while dropping bulk result bytes.
 
 This is a **public `Step.tool_calls` contract change**: `call.result` may now be
-a bounded preview, not the full value. Acceptable in 0.x, but update the tests
-and envelope expectations that assume full `result`. Byte accounting must be
+a bounded preview, not the full value. The matching tests and envelope
+expectations were updated with the shipped change. Byte accounting must remain
 real (e.g. `:erlang.external_size/1` over result + args + previews + list
-overhead), not "bounded in name only." Likely site: `EvalContext.append_tool_call`,
-reusing the existing `max_session_tool_call_bytes`/`_entries` budgets in-eval.
+overhead), not "bounded in name only."
 
 ## Core design: paginate at the tool, fold in Lisp
 
@@ -94,10 +102,9 @@ whole — read it a page at a time through a paginated tool.**
 3. The whole parsed population never exists. Each page's result is small —
    well under the 2 MiB transport cap and well under max_heap when parsed.
 
-The "cursor" is **ordinary program state the fold carries** (the next offset, or
-the continuation token from the previous page). There is **no host-side cursor,
-no `tool/next`, no result capture, no off-budget hold.** Each page is a normal
-upstream tool call.
+The page position is ordinary program state the fold carries: the next offset,
+chunk index, or continuation token from the previous page. Each page is a
+normal upstream tool call.
 
 A program that ignores this and reads the whole source fails closed at max_heap
 (demonstrated) — and that fail-closed teaches the model to use the paginated
@@ -117,21 +124,35 @@ The one gap for the M2 benchmark: the default filesystem MCP server
 (`@modelcontextprotocol/server-filesystem`) has only `head`/`tail`, **no
 offset** — it cannot forward-page. So M2 needs **one** chunk-capable line-read
 tool that returns a bounded page per call (offset/limit, or a chunk-index +
-lines-per-chunk equivalent). Such MCP servers exist off the shelf — a probe of
-one (chunk-index + lines-per-chunk, total-chunks/total-lines in every page so
-the fold bounds its loop exactly and `:done` is trivial) confirmed the
-paginated-read + Lisp-fold design works end to end. It is a bounded tool, not
-host infrastructure, and authority stays behind the normal tool grant.
+lines-per-chunk equivalent). `@willianpinho/large-file-mcp` provides this
+shape through `read_large_file_chunk` (`filePath`, `chunkIndex`,
+`linesPerChunk`) plus file search/navigation helpers. The repo now has an e2e
+smoke path using that server for turn-log introspection, confirming the
+paginated-read + Lisp-fold design works end to end. It is a bounded upstream
+tool, not host infrastructure, and authority stays behind the normal tool
+grant.
 
 **Hard integrity requirement: the read tool must be rooted to the corpus.**
-The probed server took unrestricted absolute paths (it read `/etc/hosts`),
+`large-file-mcp` takes absolute paths and the probe read outside the corpus,
 which would let an agent read the manifests/scorer by path and defeat the A/B.
 The chosen tool must confine reads to the corpus directory (like
 `server-filesystem`'s allowed-dir), or be wrapped/sandboxed to it.
 
+## Relationship to P3b large-file `log/` backend
+
+[`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md)'s
+P3b is the narrow proving lane for this architecture. It keeps the existing
+semantic `log/` API and swaps only the backend: instead of the host-bound
+`TraceLog.Introspection.tools/1` backend, an example prelude reads turn-log
+JSONL pages through `@willianpinho/large-file-mcp` and projects
+`log/sessions`, `log/programs`, and `log/tool-calls` in PTC-Lisp.
+
+This plan is the generalization: a reusable `data/` prelude over paginated
+sources. There is no conflict. P3b should avoid growing one-off paging helpers
+that cannot later be factored into the `data/` source-spec/fold conventions.
+
 ## Non-Goals
 
-- No generic cursor / `tool/next` / host-held result buffer.
 - No capture of full tool results off-budget (the sandbox bills them anyway).
 - No change to ordinary `(tool/call ...)` *call* semantics or the 2 MiB
   transport cap. (The one core change is to ledger *retention*, not call
@@ -175,8 +196,8 @@ each call.
 
 ## Page size — the central tuning knob
 
-With no host cursor, **each page is a real upstream call**, so page size trades
-two limits against each other:
+Each page is a real upstream call, so page size trades two limits against each
+other:
 
 - **Too small** → many calls. Two ceilings, and the timeout is the tighter one:
   the per-eval upstream-call cap (default 50, the upstream `RunContext` cap at
@@ -198,14 +219,12 @@ prelude can size pages **adaptively** — `linesPerChunk ≈ ceil(totalLines / N
 for a target page count N under the call cap, capped so a parsed page fits
 max_heap — rather than a fixed default.
 
-This is the honest cost of dropping the host cursor: pagination is N upstream
-round-trips per fold, bounded by the call-cap and (more tightly) the 1 s
-timeout. Lean to **few large pages**, not many small ones. Fine for the
-benchmark sizes if a parsed page fits max_heap; the scaling limit for very large
-sources. Mitigations if needed: raise the per-fold call cap and/or the eval
-timeout for paged reads, or a host-side cached paginated source (deferred — that
-is where a host cursor would re-enter, and it needs the off-budget accounting the
-sandbox does not give mid-eval today).
+Pagination is N upstream round-trips per fold, bounded by the call cap and
+(more tightly) the 1 s timeout. Lean to **few large pages**, not many small
+ones. Fine for the benchmark sizes if a parsed page fits max_heap; this is the
+scaling limit for very large sources. Mitigations if needed: raise the per-fold
+call cap and/or the eval timeout for paged reads, or move a specific workload
+to a specialized upstream that performs more aggregation server-side.
 
 ## Data Prelude
 
@@ -367,18 +386,15 @@ rediscover the page-fold pattern from recorded runs.
 ## Sequencing
 
 1. **Chunk-capable read-lines tool.** Use an existing chunked-read MCP server
-   (offset/limit or chunk-index + lines-per-chunk; off-the-shelf ones exist —
-   one was probed and works). **Must be rooted to the corpus** (the probed one
-   was not — integrity requirement above). Gates everything else (the default
-   fileserver cannot page). Note the page envelope may be double-wrapped (MCP
-   text block holding a JSON string whose field holds the `\n`-joined lines), so
-   the prelude's row extraction is: unwrap → `json/parse-string` → take the
-   lines field → `json/parse-lines`.
-2. **Core change: bound the in-eval tool ledger** (drop full result values past
-   a bytes/entries cap, keep metadata + preview). Without this, paging does not
-   bound memory — the ledger retains every page. Smallest, highest-leverage
-   item; also a latent-bug fix for any tool-heavy eval. Test: a fold of many
-   page calls stays within max_heap (it does not today).
+   (offset/limit or chunk-index + lines-per-chunk). The e2e smoke uses
+   `@willianpinho/large-file-mcp`, but the benchmark source must be rooted to
+   the corpus or wrapped/sandboxed before M2. Note the page envelope may be
+   double-wrapped (MCP text block holding a JSON string whose field holds the
+   `\n`-joined lines), so the prelude's row extraction is: unwrap →
+   `json/parse-string` → take the lines field → `json/parse-lines`.
+2. **Done: bound the in-eval tool ledger** (drop full result values past a
+   bytes/entries cap, keep metadata + preview). This landed in `209b4bdf`, with
+   large paged-result coverage in `bd7dba65`.
 3. **`data/` prelude** (fold + offset/token conventions in `:args` + field-first
    helpers), tested against a fake paginated tool. Authority is runtime-enforced
    (call fails closed if the tool is not granted), not attach-proven, for the
@@ -395,7 +411,7 @@ rediscover the page-fold pattern from recorded runs.
 
 **Verified sound (rounds 2–3):**
 
-- No host-side cursor/capture is added.
+- Page position is ordinary upstream/tool state threaded through `:args`.
 - The in-eval ledger retains full result values (`eval.ex:1216`); **no in-eval
   code re-reads them** (result returned directly at `eval.ex:1264`; ledger is
   side-effect state at `context.ex:326`) — so the compaction is
@@ -412,23 +428,22 @@ rediscover the page-fold pattern from recorded runs.
 - Dynamic `(tool/call (page-call ...))` is not attach-proven (literal-only
   inference, `compiler.ex:814`).
 
-**Still unproven (resolve during implementation):**
+**Still unproven / remaining (resolve during implementation):**
 
 - That a fold of the needed page count fits the 1 s timeout for the benchmark's
   local stdio tool — **measure before relying on it.**
 - That a chosen page size keeps every parsed page under max_heap for the corpus
   (depends on parse-expansion ratio) — measure; it fails closed if wrong.
-- That the in-eval ledger bound, once added, fully bounds a long fold's memory —
-  test with a many-page fold over a multi-MB source.
-- That metadata + preview is enough for every `Step.tool_calls` consumer — this
-  is a **public contract change** (`call.result` may be a preview); update tests
-  and envelope expectations. `tool_cache` and `child_step` retain full data via
-  separate paths and are out of scope / preserved respectively.
+- That the in-eval ledger bound fully bounds the intended M2 data-prelude fold
+  under realistic page sizes and stdio latency. The core mechanism is covered;
+  the benchmark workload still needs measurement.
+- That metadata + preview is enough for every downstream `Step.tool_calls`
+  consumer outside the tests already updated. `tool_cache` and `child_step`
+  retain full data via separate paths and are out of scope / preserved
+  respectively.
 
 ## Explicitly deferred
 
-- Host-side cached paginated source (would re-introduce a host cursor and needs
-  off-budget mid-eval accounting the sandbox does not give today).
 - Approximate-state structures and host-side accumulator spill for O(n)
   analyses.
 - Raising the per-fold upstream-call cap for very large sources (only if a real

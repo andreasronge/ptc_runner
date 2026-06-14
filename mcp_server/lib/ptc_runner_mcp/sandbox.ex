@@ -55,6 +55,7 @@ defmodule PtcRunnerMcp.Sandbox do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.PtcToolProtocol
   alias PtcRunnerMcp.{Envelope, Limits}
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   @typedoc """
   Outcome of a single `tools/call` PTC-Lisp execution.
@@ -210,6 +211,8 @@ defmodule PtcRunnerMcp.Sandbox do
          max_heap: max_heap_words,
          strict_data: true
        ] ++ parallel_limit_opts(max_heap_words))
+      |> maybe_put(:prelude, SessionsConfig.prelude_source())
+      |> maybe_put(:runtime, Keyword.get(opts, :runtime))
       |> then(fn opts ->
         if discovery_exec, do: Keyword.put(opts, :discovery_exec, discovery_exec), else: opts
       end)
@@ -232,6 +235,9 @@ defmodule PtcRunnerMcp.Sandbox do
       base
     end
   end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
 
   # ----------------------------------------------------------------
   # Renderers — produce {:ok | :error, payload} tuples

@@ -23,6 +23,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--turn-log-dir` | `PTC_RUNNER_MCP_TURN_LOG_DIR` | unset | Directory for the canonical stateful-session turn log. When set, all accepted `lisp_session_eval` attempts write `event: "turn"` records to one JSONL file. |
+| `--prelude` | `PTC_RUNNER_MCP_PRELUDE` | unset | Path to a Capability Prelude source file attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task` run. The file is read once at boot; attach-time `requires` still fail closed against configured upstreams and granted tools. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
 | `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |

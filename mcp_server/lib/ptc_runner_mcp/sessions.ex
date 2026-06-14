@@ -726,6 +726,7 @@ defmodule PtcRunnerMcp.Sessions do
       opts
       |> Map.put(:tools, eval_opts[:tools])
       |> Map.put(:discovery_exec, eval_opts[:discovery_exec])
+      |> Map.put(:runtime, RootUpstreamRuntime.runtime())
       |> Map.put(:profile, :mcp_aggregator)
 
     drain = fn ->

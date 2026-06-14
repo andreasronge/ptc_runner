@@ -16,7 +16,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   alias PtcRunnerMcp.Limits, as: McpLimits
   alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sandbox
-  alias PtcRunnerMcp.Sessions.{Limits, Owner, Projection, Registry}
+  alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Registry}
   alias PtcRunnerMcp.TurnLogConfig
   alias PtcRunnerMcp.UpstreamResultFeedback
 
@@ -889,7 +889,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
        strict_data: true,
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
+    |> maybe_put(:prelude, Config.prelude_source())
     |> maybe_put(:discovery_exec, Map.get(opts, :discovery_exec))
+    |> maybe_put(:runtime, Map.get(opts, :runtime))
   end
 
   defp maybe_put(opts, _key, nil), do: opts

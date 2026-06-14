@@ -51,6 +51,32 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   end
 
   describe "full lifecycle via Tools.call" do
+    test "configured prelude is attached to session evals" do
+      Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
+      sid = SoakHelpers.start_session()
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(smoke/plus-one 41)"
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["status"] == "ok"
+      assert eval["structuredContent"]["result"] == "user=> 42"
+    end
+
+    test "configured prelude is attached to one-shot lisp_eval" do
+      Config.set(%{enabled: false, prelude_source: test_prelude_source()})
+
+      eval =
+        Tools.call(%{"name" => "lisp_eval", "arguments" => %{"program" => "(smoke/plus-one 4)"}})
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["status"] == "ok"
+      assert eval["structuredContent"]["result"] == "user=> 5"
+    end
+
     test "start -> eval -> inspect(all views) -> forget -> list -> close" do
       sid = SoakHelpers.start_session()
 
@@ -303,7 +329,8 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert summary.failed == 2
       assert summary.tool_calls == 1
 
-      log_program = ~s|[(count (log/turns "#{sid}")) (log/programs "#{sid}")]|
+      log_program =
+        ~s|[(count (get (log/turns "#{sid}") "items")) (get (log/programs "#{sid}") "items")]|
 
       assert {:ok,
               %{return: [3, ["(tool/fetch {:id 1})", "(no-such-fn 1)", "\"not-an-integer\""]]}} =
@@ -1053,6 +1080,13 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
   defp call(name, args) do
     Tools.call(%{"name" => name, "arguments" => args})
+  end
+
+  defp test_prelude_source do
+    """
+    (ns smoke {:visibility :prompt})
+    (defn plus-one "Increment a number." [x] (+ x 1))
+    """
   end
 
   defp inspect_view(sid, view) do

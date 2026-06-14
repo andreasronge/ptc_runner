@@ -8,6 +8,7 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
   alias PtcRunnerMcp.Agentic
   alias PtcRunnerMcp.Agentic.{CapabilitySummary, Planner}
   alias PtcRunnerMcp.AgenticConfig
+  alias PtcRunnerMcp.Sessions.Config
 
   # ---------------------------------------------------------------------------
   # Stub planners (the `:agentic_planner` seam at agentic.ex:385)
@@ -76,14 +77,31 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
     end
   end
 
+  defmodule PreludeStubPlanner do
+    @moduledoc false
+    def call(model, prompt, _opts) do
+      {:ok, "(return (obs/answer))",
+       %{
+         "model" => model,
+         "duration_ms" => 2,
+         "prompt_bytes" => byte_size(prompt),
+         "completion_bytes" => 21,
+         "tokens" => %{}
+       }}
+    end
+  end
+
   setup do
     original = Application.get_env(:ptc_runner_mcp, :agentic_planner)
+    original_config = Config.get()
 
     on_exit(fn ->
       case original do
         nil -> Application.delete_env(:ptc_runner_mcp, :agentic_planner)
         value -> Application.put_env(:ptc_runner_mcp, :agentic_planner, value)
       end
+
+      Config.set(original_config)
     end)
 
     :ok
@@ -98,6 +116,19 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
   end
 
   defp structured(envelope), do: Map.fetch!(envelope, "structuredContent")
+
+  defp test_prelude_source do
+    """
+    (ns obs
+      "Observation helpers."
+      {:visibility :prompt})
+
+    (defn answer
+      "Return a stable test answer."
+      []
+      41)
+    """
+  end
 
   describe "run_validated/2 success projection via stub planner" do
     test "literal PTC-Lisp program executes in-VM and yields answer 3" do
@@ -115,6 +146,20 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
       assert sc["upstream_calls"] == []
       # No upstream runtime configured -> no upstream_results key.
       refute Map.has_key?(sc, "upstream_results")
+    end
+
+    test "configured MCP prelude is attached to lisp_task SubAgent execution" do
+      install_planner(PreludeStubPlanner)
+
+      Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
+
+      envelope = Agentic.run_validated(validated(), request_id: "req-prelude")
+      sc = structured(envelope)
+
+      assert envelope["isError"] == false
+      assert sc["status"] == "ok"
+      assert sc["answer"] == "41"
+      assert sc["structured_result"] == 41
     end
 
     test "planner block reports the single planner call and its meta" do

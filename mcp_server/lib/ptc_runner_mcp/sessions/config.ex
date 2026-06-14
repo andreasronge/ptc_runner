@@ -8,6 +8,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
   resolves CLI-shaped args from an empty map plus environment variables.
   """
 
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+
   @default_max_sessions 64
   @default_max_sessions_per_owner 16
   @default_session_ttl_ms 30 * 60 * 1000
@@ -24,6 +26,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_max_session_upstream_call_bytes 128 * 1024
   @default_max_session_preview_chars 512
   @default_collection_hint false
+  @default_prelude_path nil
+  @default_prelude_source nil
+  @default_runtime_prelude nil
 
   @typedoc "Process-wide sessions configuration."
   @type t :: %{
@@ -43,7 +48,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
           max_session_upstream_call_entries: pos_integer(),
           max_session_upstream_call_bytes: pos_integer(),
           max_session_preview_chars: pos_integer(),
-          collection_hint: boolean()
+          collection_hint: boolean(),
+          prelude_path: String.t() | nil,
+          prelude_source: String.t() | nil,
+          runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
 
   @doc "Default session config. Sessions are disabled by default."
@@ -66,7 +74,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
       max_session_upstream_call_entries: @default_max_session_upstream_call_entries,
       max_session_upstream_call_bytes: @default_max_session_upstream_call_bytes,
       max_session_preview_chars: @default_max_session_preview_chars,
-      collection_hint: @default_collection_hint
+      collection_hint: @default_collection_hint,
+      prelude_path: @default_prelude_path,
+      prelude_source: @default_prelude_source,
+      runtime_prelude: @default_runtime_prelude
     }
   end
 
@@ -180,7 +191,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
              :max_session_preview_chars,
              "PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS",
              defaults.max_session_preview_chars
-           ) do
+           ),
+         {:ok, prelude_path, prelude_source, runtime_prelude} <- read_prelude(args, defaults) do
       {:ok,
        %{
          enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
@@ -205,7 +217,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
              :collection_hint,
              "PTC_RUNNER_MCP_COLLECTION_HINT",
              defaults.collection_hint
-           )
+           ),
+         prelude_path: prelude_path,
+         prelude_source: prelude_source,
+         runtime_prelude: runtime_prelude
        }}
     end
   end
@@ -248,6 +263,14 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @spec enabled?() :: boolean()
   def enabled?, do: get().enabled == true
 
+  @doc "Configured process-wide prelude source, or nil when no prelude is attached."
+  @spec prelude_source() :: String.t() | nil
+  def prelude_source, do: get().prelude_source
+
+  @doc "Configured process-wide compiled prelude artifact for SubAgent-backed evals."
+  @spec runtime_prelude() :: PtcRunner.Lisp.Prelude.t() | nil
+  def runtime_prelude, do: get().runtime_prelude
+
   @doc "Return only the per-session persisted-state limit keys."
   @spec session_limits() :: map()
   def session_limits do
@@ -284,9 +307,55 @@ defmodule PtcRunnerMcp.Sessions.Config do
     Map.new(config, fn
       {:enabled, value} -> {:enabled, value == true}
       {:collection_hint, value} -> {:collection_hint, value == true}
+      {:prelude_path, value} when is_binary(value) -> {:prelude_path, value}
+      {:prelude_source, value} when is_binary(value) -> {:prelude_source, value}
+      {:runtime_prelude, %PtcRunner.Lisp.Prelude{} = value} -> {:runtime_prelude, value}
+      {:prelude_path, _value} -> {:prelude_path, defaults.prelude_path}
+      {:prelude_source, _value} -> {:prelude_source, defaults.prelude_source}
+      {:runtime_prelude, _value} -> {:runtime_prelude, defaults.runtime_prelude}
       {key, value} when is_integer(value) and value > 0 -> {key, value}
       {key, _value} -> {key, Map.fetch!(defaults, key)}
     end)
+    |> compile_runtime_prelude_from_source()
+  end
+
+  defp read_prelude(args, defaults) do
+    case env_or(args, :prelude, "PTC_RUNNER_MCP_PRELUDE") do
+      nil ->
+        {:ok, defaults.prelude_path, defaults.prelude_source, defaults.runtime_prelude}
+
+      path when is_binary(path) ->
+        with {:ok, source} <- File.read(path),
+             {:ok, runtime_prelude} <- compile_prelude(source, path) do
+          {:ok, path, source, runtime_prelude}
+        else
+          {:error, %PtcRunner.Lisp.Prelude.ValidationError{} = error} ->
+            {:error, "--prelude / PTC_RUNNER_MCP_PRELUDE is invalid: #{path} (#{error.message})"}
+
+          {:error, reason} ->
+            {:error, "--prelude / PTC_RUNNER_MCP_PRELUDE could not be read: #{path} (#{reason})"}
+        end
+
+      value ->
+        {:error, "--prelude / PTC_RUNNER_MCP_PRELUDE must be a file path, got: #{inspect(value)}"}
+    end
+  end
+
+  defp compile_runtime_prelude_from_source(%{prelude_source: source} = config)
+       when is_binary(source) do
+    case compile_prelude(source, Map.get(config, :prelude_path)) do
+      {:ok, runtime_prelude} ->
+        %{config | runtime_prelude: runtime_prelude}
+
+      {:error, %PtcRunner.Lisp.Prelude.ValidationError{} = error} ->
+        raise ArgumentError, "invalid prelude source: #{error.message}"
+    end
+  end
+
+  defp compile_runtime_prelude_from_source(config), do: config
+
+  defp compile_prelude(source, _path) do
+    PreludeCompiler.compile(source)
   end
 
   defp read_int(args, key, env_name, default) do

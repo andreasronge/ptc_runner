@@ -167,7 +167,11 @@ Wire the coding agent to PtcRunner:
         "start",
         "--sessions",
         "--upstreams-config",
-        "/absolute/path/to/upstreams.json"
+        "/absolute/path/to/upstreams.json",
+        "--prelude",
+        "/absolute/path/to/analysis-prelude.clj",
+        "--turn-log-dir",
+        "/absolute/path/to/turn-log"
       ],
       "env": {
         "API_SERVICE_TOKEN": "..."
@@ -176,6 +180,12 @@ Wire the coding agent to PtcRunner:
   }
 }
 ```
+
+`--prelude` is optional. When supplied, the file is read once at server boot
+and attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task`
+run. This is the recommended way to run a verified analysis prelude in
+Codex/Claude Code: start a fresh MCP server process with the prelude attached,
+record the run with `--turn-log-dir`, and analyze those logs in a later session.
 
 Ask the agent, or use the REPL, to smoke-test discovery and one call:
 

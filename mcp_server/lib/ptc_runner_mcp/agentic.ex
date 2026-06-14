@@ -14,6 +14,7 @@ defmodule PtcRunnerMcp.Agentic do
     PayloadMetrics,
     PromptRegistry,
     RootUpstreamRuntime,
+    Sessions.Config,
     UpstreamResultFeedback
   }
 
@@ -103,7 +104,8 @@ defmodule PtcRunnerMcp.Agentic do
       completion_mode: :explicit,
       output: :ptc_lisp,
       timeout: Limits.program_timeout_ms(),
-      max_heap: Limits.program_memory_limit_bytes()
+      max_heap: Limits.program_memory_limit_bytes(),
+      runtime_prelude: Config.runtime_prelude()
     )
   end
 

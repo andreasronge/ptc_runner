@@ -55,25 +55,48 @@ defmodule PtcRunner.TraceLog.Introspection do
      instructions."
     {:visibility :prompt})
 
+  (defn- first-opts [opts]
+    (or (first opts) {}))
+
   (defn sessions
-    "List recorded session summaries: correlation id, driver, and turn/commit counts."
+    "Page recorded session summaries: correlation id, driver, and turn/commit counts."
+    [& opts]
+    (tool/log_sessions (first-opts opts)))
+
+  (defn sessions-all
+    "List all recorded session summaries. Prefer `sessions` with limit/cursor for large logs."
     []
-    (tool/log_sessions {}))
+    (get (tool/log_sessions {:all true}) "items"))
 
   (defn turns
-    "Turn records for one recorded session, by correlation id (from `sessions`)."
+    "Page turn records for one recorded session, by correlation id (from `sessions`)."
+    [session-id & opts]
+    (tool/log_turns (merge {:session-id session-id} (first-opts opts))))
+
+  (defn turns-all
+    "List all turn records for one recorded session. Prefer `turns` with limit/cursor for large logs."
     [session-id]
-    (tool/log_turns {:session-id session-id}))
+    (get (tool/log_turns {:session-id session-id :all true}) "items"))
 
   (defn programs
-    "Program sources from one recorded session's turns, in order."
+    "Page program sources from one recorded session's turns, in order."
+    [session-id & opts]
+    (tool/log_programs (merge {:session-id session-id} (first-opts opts))))
+
+  (defn programs-all
+    "List all program sources for one recorded session. Prefer `programs` with limit/cursor for large logs."
     [session-id]
-    (tool/log_programs {:session-id session-id}))
+    (get (tool/log_programs {:session-id session-id :all true}) "items"))
 
   (defn tool-calls
-    "Tool/upstream calls recorded across one session's turns."
+    "Page tool/upstream calls recorded across one session's turns."
+    [session-id & opts]
+    (tool/log_tool_calls (merge {:session-id session-id} (first-opts opts))))
+
+  (defn tool-calls-all
+    "List all tool/upstream calls for one recorded session. Prefer `tool-calls` with limit/cursor for large logs."
     [session-id]
-    (tool/log_tool_calls {:session-id session-id}))
+    (get (tool/log_tool_calls {:session-id session-id :all true}) "items"))
   """
 
   @doc """
@@ -98,18 +121,18 @@ defmodule PtcRunner.TraceLog.Introspection do
     owner = build_owner(source, opts)
 
     %{
-      "log_sessions" => fn _args -> run_query(owner, &list_sessions/1) end,
+      "log_sessions" => fn args -> run_query(owner, &list_sessions(&1, args)) end,
       "log_turns" => fn args ->
         sid = session_id_arg(args)
-        run_query(owner, &list_turns(&1, sid))
+        run_query(owner, &list_turns(&1, sid, args))
       end,
       "log_programs" => fn args ->
         sid = session_id_arg(args)
-        run_query(owner, &list_programs(&1, sid))
+        run_query(owner, &list_programs(&1, sid, args))
       end,
       "log_tool_calls" => fn args ->
         sid = session_id_arg(args)
-        run_query(owner, &list_tool_calls(&1, sid))
+        run_query(owner, &list_tool_calls(&1, sid, args))
       end
     }
   end
@@ -142,29 +165,95 @@ defmodule PtcRunner.TraceLog.Introspection do
 
   # --- projections (boring by design; run inside the sink/holder) ---
 
-  defp list_sessions(events) do
+  defp list_sessions(events, args) do
     events
     |> Analyzer.sessions()
     |> Enum.map(&stringify_summary/1)
+    |> page(args)
   end
 
-  defp list_turns(events, session_id) do
+  defp list_turns(events, session_id, args) do
     events
     |> session_turns(session_id)
     |> Enum.map(&project_turn/1)
+    |> page(args)
   end
 
-  defp list_programs(events, session_id) do
+  defp list_programs(events, session_id, args) do
     events
     |> session_turns(session_id)
     |> Enum.map(&get_in(&1, ["data", "program"]))
+    |> page(args)
   end
 
-  defp list_tool_calls(events, session_id) do
+  defp list_tool_calls(events, session_id, args) do
     events
     |> session_turns(session_id)
     |> Enum.flat_map(fn turn -> get_in(turn, ["data", "tool_calls"]) || [] end)
+    |> page(args)
   end
+
+  defp page(items, args) do
+    all? = bool_arg(args, "all", false)
+    offset = cursor_arg(args)
+    limit = if all?, do: length(items), else: limit_arg(args)
+    paged = items |> Enum.drop(offset) |> Enum.take(limit)
+    next_offset = offset + length(paged)
+    has_more? = next_offset < length(items)
+
+    %{
+      "items" => paged,
+      "next_cursor" => if(has_more?, do: Integer.to_string(next_offset), else: nil),
+      "has_more" => has_more?,
+      "limit" => limit
+    }
+  end
+
+  defp limit_arg(args), do: args |> int_arg("limit", 100) |> max(1)
+
+  defp cursor_arg(args) do
+    case args |> string_arg("cursor", "0") |> Integer.parse() do
+      {offset, ""} -> max(offset, 0)
+      _ -> 0
+    end
+  end
+
+  defp int_arg(args, key, default) when is_map(args) do
+    case Map.get(args, key) || Map.get(args, String.to_atom(key)) do
+      value when is_integer(value) ->
+        value
+
+      value when is_binary(value) ->
+        case Integer.parse(value) do
+          {parsed, ""} -> parsed
+          _ -> default
+        end
+
+      _ ->
+        default
+    end
+  end
+
+  defp int_arg(_args, _key, default), do: default
+
+  defp string_arg(args, key, default) when is_map(args) do
+    case Map.get(args, key) || Map.get(args, String.to_atom(key)) do
+      value when is_binary(value) -> value
+      value when is_integer(value) -> Integer.to_string(value)
+      _ -> default
+    end
+  end
+
+  defp string_arg(_args, _key, default), do: default
+
+  defp bool_arg(args, key, default) when is_map(args) do
+    case Map.get(args, key) || Map.get(args, String.to_atom(key)) do
+      value when is_boolean(value) -> value
+      _ -> default
+    end
+  end
+
+  defp bool_arg(_args, _key, default), do: default
 
   defp session_turns(_events, nil), do: []
 

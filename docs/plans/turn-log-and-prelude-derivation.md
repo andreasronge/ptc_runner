@@ -333,11 +333,92 @@ the explicit declaration.
 **Verify.** A session (REPL-driven) can answer "what did my previous session
 do, and where did it waste turns?" using only prelude exports.
 
+### P3b — Upstream-backed `log/` backend (large-file MCP smoke)
+
+**Status: partially implemented as an example + opt-in e2e smoke.** This is a
+backend extension to P3, not a new user-facing namespace. The public API should
+remain the semantic `log/` surface shipped in P3:
+
+```clojure
+(log/sessions)
+(log/sessions {:limit 100 :cursor "..."})
+(log/turns session-id)
+(log/turns session-id {:limit 100 :cursor "..."})
+(log/programs session-id)
+(log/programs session-id {:limit 100 :cursor "..."})
+(log/tool-calls session-id)
+(log/tool-calls session-id {:limit 100 :cursor "..."})
+```
+
+All four functions return the same page envelope:
+
+```clojure
+{"items" [...]
+ "next_cursor" "..."
+ "has_more" true
+ "limit" 100}
+```
+
+The `*-all` helpers are explicit eager scans for small/local logs only.
+
+P3's shipped backend is host-bound: `PtcRunner.TraceLog.Introspection.tools/1`
+wraps an in-memory sink, JSONL path, or loaded event list with local
+`tool/log_*` closures. That is still the reference implementation because it
+uses `TraceLog.Analyzer` directly and can serve exact turn-log projections
+cheaply.
+
+P3b adds an alternate backend for the same `log/` API: a configured upstream
+file reader, initially a real third-party large-file MCP server
+(`@willianpinho/large-file-mcp`) reached through the existing `mcp_stdio` /
+`mcp_http` upstream runtime. The example prelude in
+`examples/large_file_log_introspection/` reads turn-log JSONL files via
+`tool/call`, parses pages with `json/parse-lines`, and projects the same
+fields as the host-bound backend. This validates that recorded sessions can be
+analyzed as ordinary upstream data and gives disk/remote logs a portable path
+without adding a special `turn_log` transport.
+
+**Change.**
+
+- A file-backed example prelude exists. Next, optionally add a generated source
+  function such as `TraceLog.Introspection.large_file_prelude_source/1`. Both
+  should emit the same `log/` exports but back them with
+  `(tool/call {:server "<logs>" ...})`. Required options should be explicit:
+  upstream server name, one or more JSONL paths, and page/chunk bounds. Do not
+  make `mix ptc.repl` or MCP guess a default `./turn-log` directory.
+- Keep the implementation read-only and path-scoped. Directory
+  enumeration can wait: `large-file-mcp` reads/searches known files but does not
+  provide a directory listing surface, so a caller or host config must pass the
+  file paths for v1.
+- Preserve return-shape parity for the core projections (`sessions`, `turns`,
+  `programs`, `tool-calls`) against the P3 backend. Where a large-file server
+  returns overlapping chunks, normalize by line numbers before parsing so
+  callers see stable logical pages.
+- Use cursor options for all large-corpus access. The host-bound Analyzer path
+  and the large-file prelude share the same page envelope, so callers can start
+  with `(log/programs sid)` and continue with
+  `(log/programs sid {:cursor c :limit n})` without switching APIs.
+- Keep `Introspection.tools/1` as the local memory/path backend for REPL and
+  exact Analyzer queries. The large-file backend is a portability/control lane,
+  not a replacement.
+
+**Verify.** Opt-in smoke tests (`:e2e`) start `@willianpinho/large-file-mcp`
+as an `mcp_stdio` upstream, attach the file-backed `log/` prelude, read paged
+JSONL with `json/parse-lines`, and exercise paged `log/sessions`,
+`log/programs`, and `log/tool-calls`. Keep/add a parity test over a
+tiny canonical turn-log JSONL fixture: host-bound `Introspection.tools(path)`
+and the large-file-backed prelude return the same `log/programs` and
+`log/tool-calls` results. A second opt-in local-corpus smoke over
+`/Users/andreasronge/ptc-bench-comparison/agent-runs/planted-ptc/run-logs/turn-log`
+when that scratch workspace is present; sample several real planted PTC
+turn-log files and compare paged `log/sessions`, `log/programs`, and
+`log/tool-calls` against the host-bound Analyzer backend. Record
+page size and `max_tool_calls` together: realistic multi-file scans can hit the
+default upstream call cap before they hit heap limits.
+
 ### Gate between P3 and P4 — measure before automating (M1, M2)
 
-> Setup work packages for these gates (MCP turn-log recording, fixture
-> extraction, bench harness) are specified in
-> [`m1-m2-bench-setup.md`](m1-m2-bench-setup.md).
+> Setup work packages for these gates covered MCP turn-log recording, fixture
+> extraction, and the bench harness.
 >
 > **M1: PASSED** (2026-06-11). Six recorded sessions, prelude-only
 > introspection identified recurring duplicated/wasted work: 45% of upstream
@@ -346,9 +427,9 @@ do, and where did it waste turns?" using only prelude exports.
 > paid an identical 2-turn parameter-guess tax. Findings W1–W5 (prelude
 > candidates for M2's human author) and introspection-surface gaps F1–F4
 > (fix before M2; notably the default `max_heap` killing ordinary analysis
-> programs) are summarized in `m1-m2-bench-setup.md` and in full in
-> `~/ptc-mcp-sandbox/M1-findings.md`. M2 awaits the MCP `--prelude`
-> follow-up.
+> programs) are summarized in full in `~/ptc-mcp-sandbox/M1-findings.md`. M2
+> depends on the MCP `--prelude` hook so coding-agent sessions can run with a
+> verified prelude attached.
 
 P4 is the most interesting phase and the easiest place to overfit to the
 spend-spike example. It does not start until two cheap, falsifiable
@@ -396,6 +477,68 @@ pick a different workload. Either way P1–P3 remain useful on their own
   ptc_runner prompts.
 - Because the derivation agent's own run is turn-logged by the same
   substrate, the loop is self-applicable: the analyzer can be analyzed.
+
+**Host-orchestrated coding-agent loop.** The intended operational shape is an
+outer loop run by the host, not a single live agent mutating its own tools:
+
+1. Start `ptc_runner_mcp` with turn logging enabled and run a baseline
+   Codex/Claude Code analysis session over some log-analysis questions.
+2. Start a separate MCP session with access to the baseline logs (host-bound
+   `Introspection.tools/1`, or a file-server upstream plus the `log/`
+   prelude) and ask a coding agent to inspect the run and propose a reusable
+   prelude or loop config.
+3. The host compiles and verifies the proposed prelude in a fresh scratch
+   session. The proposing agent does not silently install its own generated
+   capability into later runs.
+4. Start a new Codex/Claude Code analysis session with the verified prelude
+   attached, on fresh/unseen questions or logs, and record that run too.
+5. Repeat: analyze the improved run, compare metrics, and either promote,
+   revise, or discard the candidate.
+
+This preserves D4's two-grant rule while still allowing self-improvement:
+every analysis run, meta-analysis run, and verification run is itself a turn-log
+artifact available to the next iteration. The missing ergonomic pieces are the
+small harness that records artifacts between stages, and leakage-aware
+train/eval splits so derived preludes cannot simply memorize prior answers. The
+MCP `--prelude`/config hook is the current boot-time attachment mechanism for
+the verified prelude in step 4.
+
+**Deferred operational improvement: prelude registry + per-run selection.**
+The restart requirement is an artifact of today's MCP configuration surface,
+not a core prelude constraint. Core PTC already accepts prelude source/artifacts
+per run; the MCP server currently only exposes one process-wide `--prelude`
+file that is read at boot. A better later shape is:
+
+```text
+Prelude Store        durable source/artifacts, likely file-backed
+Prelude Registry     list/get/put/validate/promote/resolve
+Prelude Bundle       compiled, hashed, approved attachment artifact
+MCP session start    accepts prelude names, freezes bundle per session
+SubAgent run         accepts prelude names/bundle, freezes bundle per run
+```
+
+In that model, `ptc_runner_mcp` stays running. A new `lisp_session_start`
+request can select approved preludes:
+
+```clojure
+{:preludes ["log" "data" "derived/cost-audit"]}
+```
+
+The host resolves those names through a prelude-aware registry, validates and
+compiles the selected sources, records hashes/provenance, and freezes the
+bundle for that session's lifetime. Existing sessions are not hot-mutated. The
+same abstraction should be available to SubAgent runs, e.g. `preludes: [...]`
+or an explicit `PreludeBundle`, so MCP sessions and library-hosted SubAgents
+share attachment, provenance, and validation semantics.
+
+The registry can be backed by an external file-server MCP or ordinary files,
+but should not expose raw filesystem access as the authority boundary. Prelude
+artifacts are executable capability wrappers, so the thin wrapper needs to
+enforce rooting, namespace policy, source size, validation, `requires`,
+approval state, provenance, and benchmark leakage checks. A derivation agent may
+write draft preludes through this surface, but promotion to attachable status
+remains host-gated. Child SubAgents should not inherit preludes implicitly;
+inheritance should be explicit to avoid authority laundering.
 
 **Verify.** End-to-end: record sessions against a fixture upstream → derive
 → host-verify → attach → a fresh session solves a *new task instance* with
@@ -543,6 +686,53 @@ P1-P3 so implementation does not rediscover settled boundaries.
   `tool:call`), and dynamic upstream dispatch that attaches only with explicit
   metadata.
 
+### P3b implementation notes
+
+- Treat `PtcRunner.TraceLog.Introspection.prelude_source/0` as the public API
+  contract for names and return shapes, not as the only backend. Start with a
+  checked-in example prelude to prove the shape; if the config substitution
+  proves useful, add a second generated source function rather than changing the
+  existing host-bound prelude:
+
+  ```elixir
+  PtcRunner.TraceLog.Introspection.large_file_prelude_source(
+    server: "logs",
+    paths: ["/abs/path/turns.jsonl"],
+    lines_per_page: 500
+  )
+  ```
+
+- The generated prelude can embed static config constants because Prelude V1 is
+  intentionally static. Keep paths host-supplied and absolute in tests; do not
+  let model-authored code discover arbitrary filesystem roots through this
+  helper.
+- Use the existing upstream bridge only: `PtcRunner.Upstream.Runtime` already
+  supports `mcp_stdio`/`mcp_http`, and `Upstream.Eval.run_lisp/3` already merges
+  caller tools with the synthetic `"call"` tool and passes the selected runtime
+  into prelude attach validation. Do not add a native `turn_log` upstream
+  transport for P3b.
+- Literal calls inside the generated prelude infer
+  `upstream:<server>/read_large_file_chunk`. This is desirable: attach should
+  fail closed when the configured large-file upstream does not expose the
+  expected tool.
+- Factor projection helpers only where they are genuinely shared. Host-bound
+  `Introspection.project_turn/1` runs in Elixir over already-decoded events;
+  the large-file backend will initially project in PTC-Lisp over parsed JSONL.
+  Parity tests are the important reuse boundary.
+- The first implementation should not promise unbounded all-file loading.
+  Either keep all-results exports for small/test logs only, or add options
+  before exposing the backend in MCP workflows. Remote logs need explicit page
+  bounds so one `(log/turns sid)` does not become an accidental full scan.
+- The local `ptc-bench-comparison` planted-log smoke is useful as an operational
+  check, not as a benchmark claim. It currently needs a higher upstream call
+  cap than the default (`max_tool_calls: 200` in the e2e smoke with small
+  5-line pages), which argues for exposing page size and call budget clearly in
+  any future generated-prelude workflow.
+- Keep the `:e2e` large-file smoke out of default `mix test`: it shells out to
+  `npx -y @willianpinho/large-file-mcp` and may touch network/npm cache on a
+  fresh machine. Default tests should use existing stdio fixtures or the
+  host-bound Analyzer path.
+
 ## Open questions
 
 - Prelude composition: collision policy and deterministic attach order when
@@ -557,7 +747,29 @@ P1-P3 so implementation does not rediscover settled boundaries.
   shapes during a transition?
 - The scratch-session verification API the host uses in P4 (shape of
   "candidate in, evidence out").
+- Shape of a prelude registry and per-run selection API: MCP
+  `lisp_session_start {:preludes [...]}`, SubAgent `preludes:` or
+  `PreludeBundle`, draft/validated/approved lifecycle, source hashing,
+  collision rules, and explicit non-inheritance for child SubAgents.
 - Which loop-config knobs are worth deriving beyond response profile and
   docs-at-start (e.g. per-upstream sample limits, feedback verbosity).
 - Namespace name for the introspection prelude (`log/`, `session/`,
   `runs/`) and how its exports merge into `apropos`/`dir` discovery.
+
+From an external review (2026-06-12) of this plan:
+
+- **`program_hash` on turn events.** Cheap, consistent with the existing
+  tool-call and prelude `source_hash` hashing, and enables the query
+  patterns P5 wants anyway (same prelude / different program, same
+  program / different prelude).
+- **Prompt-assembly provenance, SubAgent driver only.** Record template
+  id/version and a hash of the rendered feedback per turn, so "what did
+  the model actually see" is re-derivable for the one driver that
+  assembles the prompt. The MCP session driver's external LLM context is
+  invisible by construction (D1) — no equivalent exists there.
+- **Replay fidelity vs. bounded values.** Turn events store bounded
+  previews because M1 needs wasted-work visibility, not byte-perfect
+  replay. If replay/counterfactual re-runs ever become a goal (currently
+  deferred with the control plane, D4), the answer is content-addressed
+  payload storage (hash in the event, payload in a CAS with its own
+  retention) — not raising the bounds.

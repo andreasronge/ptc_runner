@@ -726,6 +726,7 @@ defmodule PtcRunnerMcp.Tools do
           [
             tools: eval_opts[:tools],
             discovery_exec: eval_opts[:discovery_exec],
+            runtime: runtime,
             profile: :mcp_aggregator
           ] ++
             sandbox_opts

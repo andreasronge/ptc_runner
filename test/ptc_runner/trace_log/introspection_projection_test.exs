@@ -38,12 +38,12 @@ defmodule PtcRunner.TraceLog.IntrospectionProjectionTest do
   end
 
   describe "sandbox cost tracks result size, not log size" do
-    test "a ~30MB event-list grant answers (count (log/sessions)) at ALL default limits" do
+    test "a ~30MB event-list grant answers a paged session count at ALL default limits" do
       events = big_events(30)
       tools = Introspection.tools(events)
 
       assert {:ok, step} =
-               Lisp.run("(count (log/sessions))",
+               Lisp.run(~S|(count (get (log/sessions) "items"))|,
                  prelude: Introspection.prelude_source(),
                  tools: tools,
                  max_heap: @default_max_heap,
@@ -62,8 +62,8 @@ defmodule PtcRunner.TraceLog.IntrospectionProjectionTest do
       # One projection call per session — the shape that was quadratic-ish
       # pre-P2 (each call copied/traversed the full log in-sandbox).
       program = """
-      (mapv (fn [s] (count (log/tool-calls (get s "correlation_id"))))
-            (log/sessions))
+      (mapv (fn [s] (count (get (log/tool-calls (get s "correlation_id")) "items")))
+            (get (log/sessions) "items"))
       """
 
       assert {:ok, step} =
@@ -106,7 +106,8 @@ defmodule PtcRunner.TraceLog.IntrospectionProjectionTest do
       assert_receive {:grant, tools, holder}, 5_000
 
       # Grant works while its owner lives...
-      assert is_list(tools["log_sessions"].(%{}))
+      assert %{"items" => sessions} = tools["log_sessions"].(%{})
+      assert is_list(sessions)
 
       holder_ref = Process.monitor(holder)
       send(owner, :exit)

@@ -1,6 +1,22 @@
 # Programmable Agent Loop — Discussion Notes
 
-**Status:** exploratory discussion notes, not a plan or requirements document.
+**Status (2026-06-14): historical/exploratory discussion notes.** This is not
+a current implementation plan. Several motivating pieces have since shipped in
+more concrete forms (Capability Prelude V1, `runtime_prelude:`, `mix ptc.repl
+--prelude`, `--log-prelude`, turn logs, progress checklists with
+`progress_fn:`, pressure-triggered trim compaction, and the `:tool_call`
+transport). Other parts were deliberately superseded by the
+turn-log/prelude-derivation direction: improve agents by deriving and testing
+preludes between runs, not by letting a live mission rewrite its own loop
+policy.
+
+**Current read:** keep this doc as an idea backlog for **coarse, host-gated loop
+policy**. Do not implement a broad hook framework now. The still-interesting
+parts are narrow: traceable feedback/progress renderers, prompt-section
+rendering, context projection, and slow-loop promotion of prelude/policy
+artifacts. Compaction floors, budgets, capability boundaries, exactly-once
+mechanics, and live session control remain host-owned.
+
 Companion to
 [`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
 (runtime control surface) and
@@ -10,6 +26,73 @@ policy layer** programmable from preludes, so humans — and eventually LLMs
 through a gated workflow — can adapt prompt rendering, feedback, compaction,
 context projection, and plan/progress vocabulary per domain without forking the
 loop.
+
+## Disposition After P1-P3 and the Benchmark Series
+
+This note predates the 2026-06 turn-log/prelude work and should be read through
+that lens.
+
+### Shipped Elsewhere
+
+- **Capability preludes are real.** Prelude V1 shipped with protected
+  namespaces, curated exports, `requires`, discovery, prompt inventory,
+  `runtime_prelude:`, REPL support, and `step.prelude_trace`. This covers the
+  "human-curated library injected into the loop" part without a hook system.
+- **Turn logs and `log/` introspection shipped.** The substrate for slow-loop
+  policy improvement is now concrete: sessions/runs produce queryable records,
+  and a `log/` prelude can analyze them.
+- **Progress vocabulary became a supported API.** `plan:` and
+  `(step-done ...)` render a checklist between turns; `progress_fn:` lets the
+  host customize progress rendering today. This satisfies a useful slice of the
+  "plan/progress vocabulary" idea without Lisp-authored hooks.
+- **Compaction exists as host-owned trim.** Pressure-triggered compaction is
+  opt-in and host-controlled. That is consistent with this doc's boundary rule:
+  compaction trigger/floor stays mechanism, not policy.
+- **Native tool-call transport exists.** `ptc_transport: :tool_call` gives a
+  second way to ship PTC programs, but benchmark docs now warn it is not a free
+  speedup. This reduces the need for hook-shaped live loop control.
+
+### Rejected Or Superseded
+
+- **Broad live hook framework.** Not a near-term target. It would add a second
+  policy execution path, more attribution burden, and more failure modes before
+  a concrete workload demands it.
+- **LLM live self-modification.** Superseded by the slow-loop derivation plan:
+  traces -> proposed prelude/policy diff -> host verification -> benchmark ->
+  human promotion.
+- **Hook-owned failure recovery.** Rejected by the boundary rule and reinforced
+  by later work. Anything needed when the model/tooling is already failing must
+  remain host-owned with deterministic fallback.
+- **Compaction-as-Lisp-hook.** Still possible later, but not a first move. The
+  safe version would let a hook propose pins/summaries while the host enforces
+  the trigger, floor, byte budget, and fallback.
+
+### Still Worth Exploring
+
+These are small enough to revisit when two real domains need them:
+
+1. **Feedback renderer hook.** A curated, schema-validated renderer for failed
+   turns or tool-call feedback. Highest value, lowest authority, easy fallback.
+2. **Prompt-section renderer.** Prelude/profile-selected cards for domain
+   vocabulary or workflow instructions, bounded and trace-attributed.
+3. **Context projection hook.** A pure function that selects samples/keys from
+   bounded context. Useful only if the projection contract is explicit and
+   redacted.
+4. **Policy artifacts in the derivation loop.** P4 should be able to propose
+   not only helper functions but also host-reviewed loop config or renderers,
+   if M2 proves that human-written preludes pay for themselves.
+
+## Decision Rule For Reviving This
+
+Do not build hooks because they are elegant. Revive a specific hook only when:
+
+- two independent domains need the same policy seam;
+- the input projection and output schema can be bounded and redacted;
+- the host has a deterministic fallback;
+- the hook's identity, source hash, input summary, output summary, and fallback
+  status appear in traces;
+- a benchmark shows the hook improves turns/tokens/quality over the host-owned
+  default.
 
 ## Why This Exists
 

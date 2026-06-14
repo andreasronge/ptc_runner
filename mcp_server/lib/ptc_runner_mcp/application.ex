@@ -18,6 +18,7 @@ defmodule PtcRunnerMcp.Application do
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
     * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
     * `--turn-log-dir <path>` / `PTC_RUNNER_MCP_TURN_LOG_DIR`
+    * `--prelude <path>` / `PTC_RUNNER_MCP_PRELUDE`
     * `--agentic-max-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS`
     * `--agentic-retry-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS`
     * `--agentic-allow-writes` / `PTC_RUNNER_MCP_AGENTIC_ALLOW_WRITES`
@@ -257,6 +258,7 @@ defmodule PtcRunnerMcp.Application do
           trace_payloads: :string,
           trace_max_files: :integer,
           turn_log_dir: :string,
+          prelude: :string,
           # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
           debug_tool: :boolean,
           debug_ring_size: :integer,

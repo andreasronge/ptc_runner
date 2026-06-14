@@ -1,13 +1,14 @@
 defmodule PtcRunner.UpstreamRuntimeTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.TraceLog.Introspection
+  alias PtcRunner.TraceLog.{Analyzer, Introspection}
   alias PtcRunner.Upstream.Credentials
   alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.RunContext
   alias PtcRunner.Upstream.Runtime
 
   @schema Path.expand("../../mcp_server/test/fixtures/openapi/observatory.openapi.json", __DIR__)
+  @bench_planted_turn_log_dir "/Users/andreasronge/ptc-bench-comparison/agent-runs/planted-ptc/run-logs/turn-log"
 
   # The hand-rolled TCP fixtures read requests with a bounded recv timeout. Keep
   # it well above the client's `call_timeout_ms` (5s) so that under heavy parallel
@@ -47,7 +48,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
     try do
       assert {:ok, step} =
-               Eval.run_lisp(runtime, ~S|(log/programs "sess")|,
+               Eval.run_lisp(runtime, ~S|(get (log/programs "sess") "items")|,
                  prelude: Introspection.prelude_source(),
                  tools: Introspection.tools(events)
                )
@@ -56,7 +57,7 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
       # The tuple-list `tools:` shape `Lisp.run/2` accepts must merge too.
       assert {:ok, list_step} =
-               Eval.run_lisp(runtime, ~S|(log/programs "sess")|,
+               Eval.run_lisp(runtime, ~S|(get (log/programs "sess") "items")|,
                  prelude: Introspection.prelude_source(),
                  tools: Map.to_list(Introspection.tools(events))
                )
@@ -514,6 +515,236 @@ defmodule PtcRunner.UpstreamRuntimeTest do
              )
     after
       Runtime.stop(runtime)
+    end
+  end
+
+  @tag :e2e
+  test "large-file MCP upstream can back the log introspection prelude API" do
+    first_path =
+      write_jsonl_file!("ptc_runner_large_file_logs_a", [
+        turn_event("session-a", 1, "(tool/servers)", []),
+        turn_event("session-a", 2, ~S|(doc "observatory/list-traces")|, []),
+        turn_event("session-a", 3, ~S|(tool/call 'observatory/list-traces {:limit 2})|, [
+          %{"server" => "observatory", "tool" => "list-traces", "outcome" => "ok"}
+        ]),
+        turn_event("session-a", 4, ~S|(tool/call 'observatory/get-trace {:id "t1"})|, [
+          %{"server" => "observatory", "tool" => "get-trace", "outcome" => "ok"}
+        ])
+      ])
+
+    second_path =
+      write_jsonl_file!("ptc_runner_large_file_logs_b", [
+        turn_event("session-b", 1, "(tool/servers)", []),
+        turn_event("session-b", 2, ~S|(dir "observatory")|, []),
+        turn_event("session-c", 1, ~S|(tool/call 'observatory/batch {})|, [
+          %{"server" => "observatory", "tool" => "first", "outcome" => "ok"},
+          %{"server" => "observatory", "tool" => "second", "outcome" => "ok"},
+          %{"server" => "observatory", "tool" => "third", "outcome" => "ok"}
+        ])
+      ])
+
+    {:ok, runtime} =
+      Runtime.start_link(config: large_file_mcp_config(), catalog_snapshot_mode: :frozen)
+
+    program = ~S"""
+    (let [sessions-page (log/sessions {:limit 10})
+          sessions (get sessions-page "items")
+          programs-page (log/programs "session-a" {:limit 10})
+          programs (get programs-page "items")
+          calls-page (log/tool-calls "session-a" {:limit 10})
+          calls (get calls-page "items")
+          final-turns-page (log/turns "session-a" {:limit 4})
+          final-calls-page (log/tool-calls "session-a" {:limit 2})
+          chunked-calls-page (log/tool-calls "session-c" {:limit 2})
+          chunked-calls-next-page (log/tool-calls "session-c" {:limit 2 :cursor (get chunked-calls-page "next_cursor")})
+          turn-page (log/turns-page "session-a" 1 2)
+          empty-turn-page (log/turns-page "session-a" 2 2)]
+      {"sessions" sessions
+       "programs" programs
+       "callTools" (map (fn [call] (get call "tool")) calls)
+       "finalTurnsHasMore" (get final-turns-page "has_more")
+       "finalCallsHasMore" (get final-calls-page "has_more")
+       "chunkedCallTools" [(map (fn [call] (get call "tool")) (get chunked-calls-page "items"))
+                           (map (fn [call] (get call "tool")) (get chunked-calls-next-page "items"))]
+       "turnPage" (map (fn [turn] [(get turn "turn") (get turn "program")]) turn-page)
+       "emptyTurnPage" empty-turn-page})
+    """
+
+    try do
+      assert {:ok, step} =
+               Eval.run_lisp(runtime, program,
+                 prelude: large_file_log_example_prelude_source([first_path, second_path]),
+                 max_response_bytes: 1_000_000,
+                 max_tool_call_result_bytes: 600
+               )
+
+      assert step.return["sessions"] == [
+               %{
+                 "committed" => 4,
+                 "correlation_id" => "session-a",
+                 "driver" => "session",
+                 "failed" => 0,
+                 "tool_calls" => 2,
+                 "turns" => 4
+               },
+               %{
+                 "committed" => 2,
+                 "correlation_id" => "session-b",
+                 "driver" => "session",
+                 "failed" => 0,
+                 "tool_calls" => 0,
+                 "turns" => 2
+               },
+               %{
+                 "committed" => 1,
+                 "correlation_id" => "session-c",
+                 "driver" => "session",
+                 "failed" => 0,
+                 "tool_calls" => 3,
+                 "turns" => 1
+               }
+             ]
+
+      assert step.return["programs"] == [
+               "(tool/servers)",
+               ~S|(doc "observatory/list-traces")|,
+               ~S|(tool/call 'observatory/list-traces {:limit 2})|,
+               ~S|(tool/call 'observatory/get-trace {:id "t1"})|
+             ]
+
+      assert step.return["callTools"] == ["list-traces", "get-trace"]
+      assert step.return["finalTurnsHasMore"] == true
+      assert step.return["finalCallsHasMore"] == true
+      assert step.return["chunkedCallTools"] == [["first", "second"], ["third"]]
+
+      assert step.return["turnPage"] == [
+               [3, ~S|(tool/call 'observatory/list-traces {:limit 2})|],
+               [4, ~S|(tool/call 'observatory/get-trace {:id "t1"})|]
+             ]
+
+      assert step.return["emptyTurnPage"] == []
+
+      assert length(step.tool_calls) > 4
+      assert Enum.all?(step.tool_calls, &(&1[:name] == "call"))
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  @tag :e2e
+  test "large-file log tool-call pages stop when the page is full" do
+    path =
+      write_jsonl_file!(
+        "ptc_runner_large_file_tool_calls_bounded",
+        [
+          turn_event("sparse", 1, "(+ 1 1)", []),
+          turn_event("bounded", 1, "(tool/call 'x/a {})", [
+            %{"server" => "x", "tool" => "a", "outcome" => "ok"},
+            %{"server" => "x", "tool" => "b", "outcome" => "ok"},
+            %{"server" => "x", "tool" => "c", "outcome" => "ok"}
+          ])
+          | Enum.map(2..20, fn turn -> turn_event("bounded", turn, "(+ 1 1)", []) end)
+        ]
+      )
+
+    {:ok, runtime} =
+      Runtime.start_link(config: large_file_mcp_config(), catalog_snapshot_mode: :frozen)
+
+    program = ~S"""
+    (let [turn-page (log/turns "sparse" {:limit 1})
+          page (log/tool-calls "bounded" {:limit 2})
+          next-page (log/tool-calls "bounded" {:limit 1 :cursor (get page "next_cursor")})]
+      {"tools" (map (fn [call] (get call "tool")) (get page "items"))
+       "hasMore" (get page "has_more")
+       "nextCursor" (get page "next_cursor")
+       "nextTools" (map (fn [call] (get call "tool")) (get next-page "items"))
+       "sparseTurns" (map (fn [turn] (get turn "turn")) (get turn-page "items"))
+       "sparseHasMore" (get turn-page "has_more")
+       "sparseNextCursor" (get turn-page "next_cursor")})
+    """
+
+    try do
+      assert {:ok, step} =
+               Eval.run_lisp(runtime, program,
+                 prelude: large_file_log_example_prelude_source([path], lines_per_page: 1),
+                 max_tool_calls: 12,
+                 max_response_bytes: 1_000_000,
+                 max_tool_call_result_bytes: 600
+               )
+
+      assert step.return == %{
+               "tools" => ["a", "b"],
+               "hasMore" => true,
+               "nextCursor" => "0:0:0:2",
+               "nextTools" => ["c"],
+               "sparseTurns" => [1],
+               "sparseHasMore" => true,
+               "sparseNextCursor" => "0:1:0"
+             }
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  @tag :e2e
+  test "large-file log prelude can inspect realistic ptc-bench-comparison turn logs" do
+    paths = realistic_bench_turn_log_paths()
+
+    if paths == [] do
+      IO.puts("Skipping local corpus smoke: #{@bench_planted_turn_log_dir} is unavailable")
+    else
+      events = Enum.flat_map(paths, &Analyzer.load/1)
+      host_tools = Introspection.tools(events)
+      expected_sessions = get_in(host_tools["log_sessions"].(%{}), ["items"])
+      first_session_id = List.first(expected_sessions)["correlation_id"]
+
+      expected_programs =
+        get_in(host_tools["log_programs"].(%{"session-id" => first_session_id}), ["items"])
+
+      expected_calls =
+        get_in(host_tools["log_tool_calls"].(%{"session-id" => first_session_id}), ["items"])
+
+      {:ok, runtime} =
+        Runtime.start_link(config: large_file_mcp_config(), catalog_snapshot_mode: :frozen)
+
+      program = """
+      (let [sessions-page (log/sessions {:limit 20})
+            sessions (get sessions-page "items")
+            sid "#{first_session_id}"
+            programs (log/programs-page sid 0 4)
+            calls (log/tool-calls-page sid 0 6)]
+        {"sessionCount" (count sessions)
+         "firstSession" (first sessions)
+         "programs" programs
+         "callCount" (count calls)
+         "callTools" (map (fn [call] (get call "tool")) calls)})
+      """
+
+      try do
+        assert {:ok, step} =
+                 Eval.run_lisp(runtime, program,
+                   prelude: large_file_log_example_prelude_source(paths, lines_per_page: 5),
+                   max_heap: 20_000_000,
+                   max_response_bytes: 2_000_000,
+                   max_tool_calls: 200,
+                   max_tool_call_result_bytes: 250_000
+                 )
+
+        assert step.return["sessionCount"] > 0
+        assert step.return["sessionCount"] <= min(length(expected_sessions), 20)
+        assert is_map(step.return["firstSession"])
+        assert is_binary(step.return["firstSession"]["correlation_id"])
+        assert step.return["programs"] == Enum.take(expected_programs, 4)
+        assert step.return["callCount"] > 0
+        assert step.return["callCount"] <= min(length(expected_calls), 6)
+
+        assert step.return["callTools"] ==
+                 expected_calls
+                 |> Enum.take(step.return["callCount"])
+                 |> Enum.map(&Map.get(&1, "tool"))
+      after
+        Runtime.stop(runtime)
+      end
     end
   end
 
@@ -1326,6 +1557,63 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     ''')
 
     path
+  end
+
+  defp write_jsonl_file!(prefix, rows) do
+    path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}.jsonl")
+    File.write!(path, Enum.map_join(rows, "\n", &Jason.encode!/1) <> "\n")
+    path
+  end
+
+  defp turn_event(session_id, turn, program, tool_calls) do
+    %{
+      "event" => "turn",
+      "driver" => "session",
+      "session_id" => session_id,
+      "turn" => turn,
+      "attempt" => turn,
+      "committed" => true,
+      "status" => "ok",
+      "data" => %{
+        "program" => program,
+        "result_preview" => "ok",
+        "tool_calls" => tool_calls
+      }
+    }
+  end
+
+  defp large_file_mcp_config do
+    %{
+      "upstreams" => %{
+        "logs" => %{
+          "transport" => "mcp_stdio",
+          "command" => System.find_executable("npx"),
+          "args" => ["-y", "@willianpinho/large-file-mcp"],
+          "env" => %{"OVERLAP_LINES" => "0", "CACHE_ENABLED" => "false"},
+          "handshake_timeout_ms" => 60_000,
+          "description" => "Large-file MCP server for paged JSONL log smoke tests"
+        }
+      }
+    }
+  end
+
+  defp realistic_bench_turn_log_paths do
+    Path.wildcard(Path.join(@bench_planted_turn_log_dir, "*.jsonl"))
+    |> Enum.sort_by(fn path -> File.stat!(path).size end, :desc)
+    |> Enum.take(6)
+  end
+
+  defp large_file_log_example_prelude_source(paths, opts \\ []) do
+    paths_source = inspect(paths, charlists: :as_lists)
+    lines_per_page = Keyword.get(opts, :lines_per_page, 2)
+
+    Path.expand(
+      "../../examples/large_file_log_introspection/large_file_log_introspection.clj",
+      __DIR__
+    )
+    |> File.read!()
+    |> String.replace(~S(["__REPLACE_WITH_ABSOLUTE_TURN_LOG_JSONL_PATH__"]), paths_source)
+    |> String.replace("(def lines-per-page 500)", "(def lines-per-page #{lines_per_page})")
   end
 
   defp stdio_fixture_config(script) do
