@@ -11,6 +11,8 @@ session; P5's methodology is piloted manually in M2. Companion docs:
 (authority model),
 [`capability-kernel-runtime.md`](capability-kernel-runtime.md)
 (closed-context guard / RunEnv boundary),
+[`live-prelude-evolution.md`](live-prelude-evolution.md)
+(future PreludeEnv/session/SubAgent/MCP mutation and promotion surface),
 [`future-directions.md`](future-directions.md) (idea backlog).
 
 ## Motivation: evidence from a real session
@@ -433,6 +435,22 @@ default upstream call cap before they hit heap limits.
 > programs) are summarized in full in `~/ptc-mcp-sandbox/M1-findings.md`. M2
 > depends on the MCP `--prelude` hook so coding-agent sessions can run with a
 > verified prelude attached.
+>
+> **M2 candidate smoke: positive, not complete** (2026-06-15). A
+> human-written `paged/` prelude in `examples/paged_data_prelude/` was tested
+> against a realistic Claude Code + `ptc_runner_mcp` session over
+> `/Users/andreasronge/ptc-bench-comparison` using
+> `@willianpinho/large-file-mcp` as a chunked JSONL reader. Initial runs either
+> chose the wrong field (`duration` vs `duration_min`) or hit the 20-turn cap
+> while source-spelunking. A second model inspected the failed logs and
+> suggested improving the public prelude contract: add `paged/inspect`, make
+> `paged/profile` return `row_count`, and put source/opts shape examples in
+> `doc paged/profile`. After that change, a fresh Claude run used
+> `doc paged/profile` → `paged/inspect` → `paged/profile`, finished in 7 turns,
+> and returned the expected metrics (`line_count` 3178, missing
+> `end_station_id` 248, string `duration_min` 264, collision count 103). This
+> validates the M2 value hypothesis on one realistic instance, but the formal
+> leakage-aware A/B over fresh planted instances is still pending.
 
 P4 is the most interesting phase and the easiest place to overfit to the
 spend-spike example. It does not start until two cheap, falsifiable
@@ -506,18 +524,30 @@ train/eval splits so derived preludes cannot simply memorize prior answers. The
 MCP `--prelude`/config hook is the current boot-time attachment mechanism for
 the verified prelude in step 4.
 
-**Deferred operational improvement: prelude registry + per-run selection.**
-The restart requirement is an artifact of today's MCP configuration surface,
-not a core prelude constraint. Core PTC already accepts prelude source/artifacts
-per run; the MCP server currently only exposes one process-wide `--prelude`
-file that is read at boot. A better later shape is:
+The 2026-06-15 `paged/profile` smoke proved this loop manually: a worker run
+failed/wasted turns, a separate analysis pass over the logs produced a concrete
+prelude change, tests and a fresh worker run verified it, and the resulting
+prelude docs changed the next model's behavior. See
+[`live-prelude-evolution.md`](live-prelude-evolution.md) for the planned
+`PreludeEnv`/artifact/store API that removes the restart requirement while
+keeping fresh model context and host-approved promotion.
+
+**Deferred operational improvement: no-restart (scratch/A-B) prelude env +
+registry + per-run selection.** The restart requirement is an artifact of
+today's MCP configuration surface, not a core prelude constraint. Core PTC
+already accepts prelude source/artifacts per run; the MCP server currently only
+exposes one process-wide `--prelude` file that is read at boot. A better later
+shape, expanded in [`live-prelude-evolution.md`](live-prelude-evolution.md), is:
 
 ```text
-Prelude Store        durable source/artifacts, likely file-backed
-Prelude Registry     list/get/put/validate/promote/resolve
+PreludeCandidate     source + compiled %Prelude{} + checksum + provenance
+PreludeEnv           session/run-local stage/source/replace/compile bundle
+                     (compile/provenance only; never a second attach path)
+Prelude Store        durable source/candidates, likely file-backed first
+Prelude Registry     list/get/put/promote/resolve + source/policy validation
 Prelude Bundle       compiled, hashed, approved attachment artifact
-MCP session start    accepts prelude names, freezes bundle per session
-SubAgent run         accepts prelude names/bundle, freezes bundle per run
+MCP session tools    thin wrappers over core Session/PreludeEnv APIs
+SubAgent run         accepts PreludeEnv/bundle, opt-in edit tools
 ```
 
 In that model, `ptc_runner_mcp` stays running. A new `lisp_session_start`
@@ -527,18 +557,27 @@ request can select approved preludes:
 {:preludes ["log" "data" "derived/cost-audit"]}
 ```
 
-The host resolves those names through a prelude-aware registry, validates and
-compiles the selected sources, records hashes/provenance, and freezes the
-bundle for that session's lifetime. Existing sessions are not hot-mutated. The
-same abstraction should be available to SubAgent runs, e.g. `preludes: [...]`
-or an explicit `PreludeBundle`, so MCP sessions and library-hosted SubAgents
-share attachment, provenance, and validation semantics.
+The host resolves those names through a prelude-aware registry, which validates
+**source policy and compile-time facts only** (rooting, namespace policy, source
+size, approval state, leakage checks) and compiles the selected sources,
+recording hashes/provenance, then freezes the bundle for that session's
+lifetime. Capability `requires` are **not** validated here: they are
+consumer-bound, checked at session/run attach against that run's own
+`tools`/`runtime` grants, never against the registry's or the authoring agent's
+grants. Session-local replacement may be useful for experiments, but the LLM's
+context is not automatically updated by changing the Lisp runtime; verification
+should start a fresh model/session or explicitly inject a compact prelude-change
+card. The same abstraction should be available
+to SubAgent runs, e.g. `prelude_env:` or an explicit `PreludeBundle`, so MCP
+sessions and library-hosted SubAgents share attachment, provenance, and
+validation semantics.
 
 The registry can be backed by an external file-server MCP or ordinary files,
 but should not expose raw filesystem access as the authority boundary. Prelude
-artifacts are executable capability wrappers, so the thin wrapper needs to
-enforce rooting, namespace policy, source size, validation, `requires`,
-approval state, provenance, and benchmark leakage checks. A derivation agent may
+artifacts are executable capability wrappers, so the registry surface enforces
+rooting, namespace policy, source size, compile validity, approval state,
+provenance, and benchmark leakage checks. It does **not** discharge `requires`:
+that grant check is consumer-bound at attach (above). A derivation agent may
 write draft preludes through this surface, but promotion to attachable status
 remains host-gated. Child SubAgents should not inherit preludes implicitly;
 inheritance should be explicit to avoid authority laundering.
@@ -745,10 +784,13 @@ P1-P3 so implementation does not rediscover settled boundaries.
   shapes during a transition?
 - The scratch-session verification API the host uses in P4 (shape of
   "candidate in, evidence out").
-- Shape of a prelude registry and per-run selection API: MCP
-  `lisp_session_start {:preludes [...]}`, SubAgent `preludes:` or
-  `PreludeBundle`, draft/validated/approved lifecycle, source hashing,
-  collision rules, and explicit non-inheritance for child SubAgents.
+- Prelude registry / per-run selection API: the overall shape (candidate,
+  env, store, registry, bundle, MCP/SubAgent selection) is now sketched in
+  [`live-prelude-evolution.md`](live-prelude-evolution.md); what remains open
+  here is the narrower set its Open Questions list — namespace-scoped vs
+  multi-namespace atomic replace, collision/attach-order rules across multiple
+  selected preludes, and how much of the post-replacement discovery card
+  `lisp_session_start` should return.
 - Which loop-config knobs are worth deriving beyond response profile and
   docs-at-start (e.g. per-upstream sample limits, feedback verbosity).
 - Namespace name for the introspection prelude (`log/`, `session/`,
