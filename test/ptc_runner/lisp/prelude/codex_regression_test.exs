@@ -291,6 +291,30 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
         {:error, err} -> refute err.reason == :qualified_self_reference
       end
     end
+
+    test "a self-reference hidden in a short-fn gets the clear error, not a generic one" do
+      # The self-ref check must descend into `#(...)` too — otherwise the helpful
+      # "call the sibling by its bare name" error degrades to a generic analyze
+      # failure. (It is still rejected either way; this pins the error quality.)
+      source = """
+      (ns crm "C." {:visibility :prompt})
+      (defn- helper [x] (str "sib:" x))
+      (defn use-it [xs] (map #(crm/helper %) xs))
+      """
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :qualified_self_reference
+      assert err.message =~ "helper"
+    end
+
+    test "a self-reference hidden in a set literal gets the clear error" do
+      source =
+        ~S|(ns crm "C." {:visibility :prompt}) (defn- helper [x] x) (defn use-it [x] #{(crm/helper x)})|
+
+      assert {:error, err} = Compiler.compile(source)
+      assert err.reason == :qualified_self_reference
+      assert err.message =~ "helper"
+    end
   end
 
   describe "map-destructured locals are not false dependencies (codex re-review)" do

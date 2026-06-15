@@ -312,6 +312,26 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       refute Map.has_key?(run_return("(ns-publics 'crm)", prelude), "normalize-id")
     end
 
+    test "renders reader-macro literals (#(), #\"re\", 'sym) in a body without crashing compile" do
+      # The source precompute renders the captured body form via Formatter. A body
+      # using #() / #"re" / 'sym must not crash compilation (Formatter lacked
+      # clauses for these raw nodes).
+      {:ok, prelude} = Compiler.compile(reader_macro_source())
+
+      src = run_source("(source 'lit/transform)", prelude)
+      assert src =~ "#(* % 2)"
+      assert src =~ ~S(#"ab")
+      assert src =~ "'flag"
+    end
+
+    test "a private helper reached only through a #() short-fn is reachable" do
+      # The call graph must descend into short-fn bodies; otherwise a live private
+      # called only inside #() is wrongly treated as dead (and its requires would
+      # not propagate to the public export).
+      {:ok, prelude} = Compiler.compile(short_fn_reach_source())
+      assert run_source("(source 'lit/double-it)", prelude) =~ "(defn- double-it"
+    end
+
     test "an unreferenced (dead) private helper is NOT source-addressable (oracle guard)" do
       {:ok, prelude} = Compiler.compile(dead_private_source())
 
@@ -492,6 +512,34 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
     (def limit 42)
 
     (def answer "The answer." 42)
+    """
+  end
+
+  defp reader_macro_source do
+    """
+    (ns lit
+      "Literal-bearing helpers."
+      {:visibility :prompt})
+
+    (defn transform
+      "Body uses reader-macro literals."
+      [xs]
+      [#"ab" 'flag (map #(* % 2) xs)])
+    """
+  end
+
+  defp short_fn_reach_source do
+    """
+    (ns lit
+      "Short-fn reachability."
+      {:visibility :prompt})
+
+    (defn- double-it "Private, called only inside a short-fn." [x] (* x 2))
+
+    (defn transform
+      "Reaches the private helper only via a #() short-fn."
+      [xs]
+      (map #(double-it %) xs))
     """
   end
 

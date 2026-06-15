@@ -386,6 +386,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp self_ref({:map, pairs}, ns),
     do: Enum.find_value(pairs, fn {k, v} -> self_ref(k, ns) || self_ref(v, ns) end)
 
+  # `#(...)` short-fn and `#{...}` set bodies can hide a qualified self-ref too.
+  # A short-fn is an implicit application, so descend as a list (which keeps the
+  # quote-skipping logic); a set is a value sequence. Without these, a self-ref
+  # in `#(crm/helper %)` slips past this check and degrades to a generic analyze
+  # error instead of the helpful "call the sibling by its bare name" message.
+  defp self_ref({:short_fn, body}, ns) when is_list(body), do: self_ref({:list, body}, ns)
+
+  defp self_ref({:set, items}, ns) when is_list(items),
+    do: Enum.find_value(items, &self_ref(&1, ns))
+
   defp self_ref(_other, _ns), do: nil
 
   defp require_current_ns(%{current_ns: nil}, name_ast) do
@@ -690,6 +700,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         collect_tool_names_raw(v, collect_tool_names_raw(k, a))
       end)
 
+  defp collect_tool_names_raw({:short_fn, body}, acc) when is_list(body),
+    do: collect_tool_names_raw({:list, body}, acc)
+
+  defp collect_tool_names_raw({:set, items}, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_tool_names_raw/2)
+
   defp collect_tool_names_raw(_other, acc), do: acc
 
   # Upstream ids reachable from `sym`: its own plus those of every helper it
@@ -796,6 +812,17 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     s = to_string(name)
     if s in bound, do: acc, else: [s | acc]
   end
+
+  # `#(...)` short-fn and `#{...}` set bodies carry calls/refs too (e.g. a helper
+  # or `tool/<name>` inside `(map #(helper %) xs)`). A short-fn is an implicit
+  # application, so reconstruct the call (`{:list, body}`) to reuse the
+  # binder-aware list logic; `%`-args never collide with a sibling helper name. A
+  # set is a value sequence, so descend element-wise.
+  defp collect_refs({:short_fn, body}, bound, acc) when is_list(body),
+    do: collect_refs({:list, body}, bound, acc)
+
+  defp collect_refs({:set, items}, bound, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_refs(&1, bound, &2))
 
   defp collect_refs(_other, _bound, acc), do: acc
 
@@ -942,6 +969,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     Enum.flat_map(pairs, fn {k, v} ->
       literal_tool_calls(k) ++ literal_tool_calls(v)
     end)
+  end
+
+  # `#(f a)` is an implicit application: the raw short-fn body is a flat element
+  # list, so reconstruct the call (`{:list, body}`) before matching — otherwise a
+  # `#(tool/call ...)` head is a bare ns_symbol and the upstream id is missed.
+  defp literal_tool_calls({:short_fn, body}) when is_list(body),
+    do: literal_tool_calls({:list, body})
+
+  defp literal_tool_calls({:set, items}) when is_list(items) do
+    Enum.flat_map(items, &literal_tool_calls/1)
   end
 
   defp literal_tool_calls(_), do: []

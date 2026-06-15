@@ -44,6 +44,14 @@ defmodule PtcRunner.Lisp.Formatter do
     "(#{format_list(elems)})"
   end
 
+  # Reader-macro literals (raw parser AST): `#(...)`, `#"re"`, `'sym`, `#'sym`.
+  # These can appear verbatim in a captured prelude body, so `(source ...)` must
+  # render them.
+  def format({:short_fn, elems}), do: "#(#{format_list(elems)})"
+  def format({:regex_literal, pattern}), do: ~s(#"#{pattern}")
+  def format({:quoted_symbol, name}), do: "'#{name}"
+  def format({:var, name}), do: "#'#{name}"
+
   # --- Helpers ---
 
   defp format_list(elems) do

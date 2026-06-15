@@ -35,6 +35,38 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert export.effect == :read
     end
 
+    test "a typed tool call inside #() is inferred (no fail-open through short-fn)" do
+      [export] =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn fetch-all "doc" [ids] (map #(tool/get_thing {:id %}) ids))
+        """).exports
+
+      assert "tool:get_thing" in export.requires
+      assert "get_thing" in export.tool_refs
+    end
+
+    test "a literal (tool/call ...) inside #() carries the upstream: id (fail-closed)" do
+      [export] =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn fetch-all "doc" [ids]
+          (map #(tool/call {:server "svc" :tool "op" :args {:id %}}) ids))
+        """).exports
+
+      assert "upstream:svc/op" in export.requires
+    end
+
+    test "a typed tool call inside a set literal #{} is inferred" do
+      [export] =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn f "doc" [x] \#{(tool/get_thing {:x x})})
+        """).exports
+
+      assert "tool:get_thing" in export.requires
+    end
+
     test "a helper-backed tool is carried transitively by the public export" do
       # `report` reaches `tool/secret_tool` ONLY through the private helper
       # `dig`; the requirement must still surface on the public export.

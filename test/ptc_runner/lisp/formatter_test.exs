@@ -281,4 +281,32 @@ defmodule PtcRunner.Lisp.FormatterTest do
       assert Formatter.format(parsed) == formatted
     end
   end
+
+  # These raw reader-macro nodes can appear verbatim in a prelude body, so the
+  # `(source ...)` precompute (Formatter over the captured body form) must render
+  # them. They were never exercised by the generated roundtrip property.
+  describe "reader-macro literals (raw parser AST)" do
+    test "anonymous short-fn #() roundtrips" do
+      assert Formatter.format({:short_fn, [{:symbol, :*}, {:symbol, "%"}, 2]}) == "#(* % 2)"
+      {:ok, parsed} = Parser.parse("#(* % 2)")
+      assert Formatter.format(parsed) == "#(* % 2)"
+    end
+
+    test "regex literal #\"...\" roundtrips" do
+      assert Formatter.format({:regex_literal, "ab+"}) == ~S(#"ab+")
+      {:ok, parsed} = Parser.parse(~S(#"ab+"))
+      assert Formatter.format(parsed) == ~S(#"ab+")
+    end
+
+    test "quoted symbol 'sym roundtrips" do
+      assert Formatter.format({:quoted_symbol, "flag"}) == "'flag"
+      {:ok, parsed} = Parser.parse("'flag")
+      assert Formatter.format(parsed) == "'flag"
+    end
+
+    test "var-quote #'sym roundtrips" do
+      {:ok, parsed} = Parser.parse("#'inc")
+      assert Formatter.format(parsed) == "#'inc"
+    end
+  end
 end
