@@ -323,6 +323,16 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
                "no source available for crm/dead-helper"
     end
 
+    test "a doseq/for loop variable colliding with a dead private does not expose it (oracle guard)" do
+      # Codex P2: collect_refs must model for/doseq bindings. A public body that
+      # binds a loop variable named like a dead private must NOT make that
+      # private's source addressable — the loop var is bound, not a call edge.
+      {:ok, prelude} = Compiler.compile(loop_shadow_source())
+
+      assert run_source("(source 'crm/ghost)", prelude) =~
+               "no source available for crm/ghost"
+    end
+
     test "renders a bare constant and a documented constant" do
       {:ok, prelude} = Compiler.compile(const_source())
 
@@ -431,6 +441,22 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
     (defn- dead-helper "Never referenced by a public export." [x] (str x))
 
     (defn get-user "Return a CRM user by id." [id] (live-helper id))
+    """
+  end
+
+  defp loop_shadow_source do
+    # `ghost` is a dead private (never CALLED), but a public export binds a
+    # doseq loop variable named `ghost`. Without modeling for/doseq bindings the
+    # reachability pass would treat that loop var as a call and expose `ghost`.
+    """
+    (ns crm "CRM helpers." {:visibility :prompt})
+
+    (defn- ghost "Never called by any public export." [x] (str x))
+
+    (defn list-ids
+      "List ids."
+      [xs]
+      (doseq [ghost xs] (println ghost)))
     """
   end
 

@@ -730,6 +730,19 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     Enum.reduce(body, acc2, &collect_refs(&1, inner, &2))
   end
 
+  # (for [bindings] body...) / (doseq [bindings] body...) — loop variables and
+  # :let names shadow, exactly like `let`, but the binding vector also carries
+  # :when/:while/:let modifiers. Modeling them precisely matters twice over: an
+  # unmodeled loop var would forge a false same-namespace call edge (inflating
+  # requires/tool_refs) AND, in the `source` index, mark an unreferenced private
+  # reachable — defeating the reachable-only privacy guard (D4).
+  defp collect_refs({:list, [{:symbol, iter}, {:vector, bindings} | body]}, bound, acc)
+       when iter in [:for, "for", :doseq, "doseq"] do
+    {names, acc2} = collect_for_bindings(bindings, bound, acc)
+    inner = bound ++ names
+    Enum.reduce(body, acc2, &collect_refs(&1, inner, &2))
+  end
+
   # Non-executed forms (`(comment ...)`, `(quote ...)`) introduce no real calls.
   defp collect_refs({:list, [{:symbol, head} | _]}, _bound, acc)
        when head in [:comment, "comment", :quote, "quote"],
@@ -788,6 +801,41 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {names, collect_refs(val, bound ++ names, a)}
     end)
   end
+
+  # Walk a for/doseq binding vector left-to-right, threading bound names through
+  # the modifiers (Clojure scoping: an expression sees the names bound before
+  # it). Returns {introduced_names, acc}. Defensive on shape: an unexpected
+  # trailing token is walked as a plain ref and binds nothing, so the
+  # pre-validation `transitive_backing` caller never crashes on a malformed
+  # vector (the post-validation source index only ever sees well-formed ones).
+  defp collect_for_bindings(tokens, bound, acc), do: do_for_bindings(tokens, bound, [], acc)
+
+  defp do_for_bindings([], _bound, names, acc), do: {names, acc}
+
+  # `:let [n v ...]` — its bindings shadow subsequent expressions and the body.
+  defp do_for_bindings([{:keyword, lk}, {:vector, lb} | rest], bound, names, acc)
+       when lk in [:let, "let"] do
+    {let_names, acc2} = collect_let_bindings(lb, bound ++ names, acc)
+    do_for_bindings(rest, bound, names ++ let_names, acc2)
+  end
+
+  # `:when` / `:while` predicate — walk it as refs; it binds nothing.
+  defp do_for_bindings([{:keyword, mk}, expr | rest], bound, names, acc)
+       when mk in [:when, "when", :while, "while"] do
+    acc2 = collect_refs(expr, bound ++ names, acc)
+    do_for_bindings(rest, bound, names, acc2)
+  end
+
+  # `binding coll` pair — walk the collection (prior names shadowed), then the
+  # binding target's names become bound for what follows.
+  defp do_for_bindings([binding, coll | rest], bound, names, acc) do
+    acc2 = collect_refs(coll, bound ++ names, acc)
+    do_for_bindings(rest, bound, names ++ pattern_names(binding), acc2)
+  end
+
+  # Lone trailing token (malformed): walk it, bind nothing.
+  defp do_for_bindings([single], bound, names, acc),
+    do: {names, collect_refs(single, bound ++ names, acc)}
 
   defp param_names({:vector, params}), do: Enum.flat_map(params, &pattern_names/1)
   defp param_names(_), do: []
