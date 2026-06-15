@@ -298,6 +298,21 @@ defmodule PtcRunner.Lisp.FormatterTest do
       assert Formatter.format(parsed) == ~S(#"ab+")
     end
 
+    test "regex literal with escape-significant chars round-trips at the AST level" do
+      # The body must be escaped with the parser's inverse, or these produce
+      # malformed source. A quote inside a regex is the case codex flagged
+      # (`#"a\"b"` parses to `a"b`); rendering it raw yields `#"a"b"` (unclosed).
+      # `\n`/`\t` and a trailing backslash are the same class.
+      for input <- [~S(#"a\"b"), ~S(#"\d+"), ~S(#"a\\"), ~S(#"line\n"), ~S(#"\t\d")] do
+        {:ok, ast} = Parser.parse(input)
+        rendered = Formatter.format(ast)
+        assert {:ok, reparsed} = Parser.parse(rendered)
+
+        assert reparsed == ast,
+               "regex #{input} did not round-trip: rendered #{rendered}, reparsed #{inspect(reparsed)}"
+      end
+    end
+
     test "quoted symbol 'sym roundtrips" do
       assert Formatter.format({:quoted_symbol, "flag"}) == "'flag"
       {:ok, parsed} = Parser.parse("'flag")
