@@ -6,9 +6,12 @@ core blocker is shipped: in-eval tool-call ledger compaction landed in
 large-file MCP smoke path also exists through
 `examples/large_file_log_introspection/` and e2e tests. That smoke path is a
 backend-specific adapter for one third-party MCP server, not a core dependency.
-What remains is the general `data/` prelude, page-source conventions as a
-reusable API, M2 A/B measurement, and a rooted/chunk-capable file source
-suitable for benchmark integrity.
+An experimental human-written `paged/` prelude now exists in
+`examples/paged_data_prelude/` with a fake-tool smoke test; it uses `paged`
+because `data` is still a reserved host namespace. What remains is deciding
+whether/how to promote that shape into the reserved `data/` namespace,
+hardening page-source conventions as a reusable API, M2 A/B measurement, and a
+rooted/chunk-capable file source suitable for benchmark integrity.
 
 ## Context
 
@@ -259,6 +262,11 @@ upstream op or explicit `requires` metadata — deferred.)
 (data/key-collisions source fields)     ; records sharing a composite key
 (data/sample source n)
 ```
+
+The checked-in experimental artifact exposes the same shape as `paged/...`
+while `data` remains reserved by the host. Promotion options are: make `data/`
+a host-shipped protected prelude namespace, relax the reservation for deployment
+preludes, or keep the user-facing namespace as `paged/`.
 
 One call, one turn — the fold loops the paginated tool internally:
 

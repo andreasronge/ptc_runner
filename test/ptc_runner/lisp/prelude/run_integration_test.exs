@@ -12,6 +12,13 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step
 
+  @paged_data_source File.read!(
+                       Path.expand(
+                         "../../../../examples/paged_data_prelude/paged_data.clj",
+                         __DIR__
+                       )
+                     )
+
   # A prelude where the public export `get-user` wraps a literal upstream
   # `(tool/call ...)` and delegates to a PRIVATE helper `normalize-id` that
   # user code must not be able to reach by qualified symbol.
@@ -257,5 +264,190 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
 
       assert step.fail.reason in [:invalid_form, :analysis_error]
     end
+  end
+
+  describe "Paged data prelude smoke" do
+    setup do
+      {:ok, prelude} = Compiler.compile(@paged_data_source)
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+      %{prelude: prelude, agent: agent}
+    end
+
+    test "folds offset pages through a dynamic upstream source", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{"trip_id" => "t1", "vendor" => "a", "amount" => 10},
+        %{"trip_id" => "t2", "vendor" => "a", "amount" => 12},
+        %{"trip_id" => "t2", "vendor" => "b", "amount" => 12},
+        %{"trip_id" => "t3", "vendor" => "", "amount" => nil},
+        %{"trip_id" => "t4", "amount" => 7}
+      ]
+
+      tools = paged_stub_tools(agent, rows)
+
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page {:mode :offset
+                :limit 2
+                :offset-arg :offset
+                :limit-arg :limit
+                :rows-at [:value "rows"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return
+        {:sample (paged/sample source 3)
+         :presence (paged/field-presence source)
+         :vendors (paged/group-count source ["vendor"])
+         :collisions (paged/key-collisions source ["trip_id"])})
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: tools)
+
+      assert step.return ==
+               {:__ptc_return__,
+                %{
+                  "sample" => Enum.take(rows, 3),
+                  "presence" => %{
+                    "amount" => %{"missing" => 1, "present" => 4},
+                    "trip_id" => %{"missing" => 0, "present" => 5},
+                    "vendor" => %{"missing" => 2, "present" => 3}
+                  },
+                  "vendors" => %{
+                    "[\"a\"]" => 2,
+                    "[\"b\"]" => 1,
+                    "[\"\"]" => 1,
+                    "[null]" => 1
+                  },
+                  "collisions" => [["[\"t2\"]", 2]]
+                }}
+
+      calls = Agent.get(agent, &Enum.reverse/1)
+
+      assert Enum.map(calls, &get_in(&1, ["args", "offset"])) == [
+               0,
+               2,
+               0,
+               2,
+               4,
+               0,
+               2,
+               4,
+               0,
+               2,
+               4
+             ]
+
+      assert Enum.all?(calls, &(get_in(&1, ["args", "limit"]) == 2))
+    end
+
+    test "profile fuses common summaries into one paged scan", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{
+          "trip_id" => "t1",
+          "bike_id" => "b1",
+          "start_time" => "2026-04-01T10:00:00",
+          "duration_min" => 10.0,
+          "end_station_id" => "s1"
+        },
+        %{
+          "trip_id" => "t2",
+          "bike_id" => "b1",
+          "start_time" => "2026-04-01T10:00:00",
+          "duration_min" => "11.0"
+        },
+        %{
+          "trip_id" => "t3",
+          "bike_id" => "b2",
+          "start_time" => "2026-04-01T11:00:00",
+          "duration_min" => "12.0",
+          "end_station_id" => ""
+        },
+        %{
+          "trip_id" => "t4",
+          "bike_id" => "b3",
+          "start_time" => "2026-04-01T12:00:00",
+          "duration_min" => 13.0,
+          "end_station_id" => "s2"
+        },
+        %{
+          "trip_id" => "t5",
+          "bike_id" => "b3",
+          "start_time" => "2026-04-01T12:00:00",
+          "duration_min" => 14.0,
+          "end_station_id" => "s3"
+        }
+      ]
+
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page {:mode :offset
+                :limit 2
+                :offset-arg :offset
+                :limit-arg :limit
+                :rows-at [:value "rows"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return
+        (paged/profile
+          source
+          {:sample 3
+           :presence-fields ["end_station_id"]
+           :string-fields ["duration_min"]
+           :collision-fields ["bike_id" "start_time"]}))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: paged_stub_tools(agent, rows))
+
+      assert step.return ==
+               {:__ptc_return__,
+                %{
+                  "sample" => Enum.take(rows, 3),
+                  "presence" => %{
+                    "end_station_id" => %{"missing" => 2, "present" => 3}
+                  },
+                  "string_counts" => %{"duration_min" => 2},
+                  "collision_count" => 2
+                }}
+
+      calls = Agent.get(agent, &Enum.reverse/1)
+      assert Enum.map(calls, &get_in(&1, ["args", "offset"])) == [0, 2, 4]
+    end
+  end
+
+  defp paged_stub_tools(agent, rows) do
+    %{
+      "call" => fn args ->
+        Agent.update(agent, fn calls -> [args | calls] end)
+
+        offset = get_in(args, ["args", "offset"]) || get_in(args, [:args, :offset]) || 0
+        limit = get_in(args, ["args", "limit"]) || get_in(args, [:args, :limit]) || 100
+
+        %{
+          ok: true,
+          value: %{
+            "rows" => rows |> Enum.drop(offset) |> Enum.take(limit),
+            "offset" => offset,
+            "limit" => limit
+          },
+          reason: nil
+        }
+      end
+    }
   end
 end
