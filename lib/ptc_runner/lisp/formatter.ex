@@ -55,6 +55,9 @@ defmodule PtcRunner.Lisp.Formatter do
   def format({:regex_literal, pattern}), do: ~s(#"#{escape_string(pattern)}")
   def format({:quoted_symbol, name}), do: "'#{name}"
   def format({:var, name}), do: "#'#{name}"
+  # Recent-result refs `*1`/`*2`/`*3` (`{:turn_history, n}`) are valid in a body
+  # the parser accepts, so `(source ...)` must render them too.
+  def format({:turn_history, n}), do: "*#{n}"
 
   # --- Helpers ---
 

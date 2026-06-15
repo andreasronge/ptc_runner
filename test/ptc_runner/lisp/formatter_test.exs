@@ -323,5 +323,12 @@ defmodule PtcRunner.Lisp.FormatterTest do
       {:ok, parsed} = Parser.parse("#'inc")
       assert Formatter.format(parsed) == "#'inc"
     end
+
+    test "recent-result refs *1/*2/*3 roundtrip" do
+      for ref <- ["*1", "*2", "*3"] do
+        {:ok, parsed} = Parser.parse(ref)
+        assert Formatter.format(parsed) == ref
+      end
+    end
   end
 end
