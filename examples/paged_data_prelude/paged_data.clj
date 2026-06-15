@@ -62,6 +62,14 @@
   [source]
   (or (opt (page-spec source) :token-at nil) [:value "next_cursor"]))
 
+(defn- total-pages-at
+  [source]
+  (or (opt (page-spec source) :total-pages-at nil) [:value "totalChunks"]))
+
+(defn- start-line-at
+  [source]
+  (or (opt (page-spec source) :start-line-at nil) [:value "startLine"]))
+
 (defn- parse-mode
   [source]
   (opt (page-spec source) :parse :value))
@@ -101,20 +109,30 @@
     rows))
 
 (defn- page-rows
-  [source page]
-  (parse-rows source (or (get-path page (rows-at source)) [])))
+  [source page pos]
+  (let [rows (parse-rows source (or (get-path page (rows-at source)) []))]
+    (if (= (page-mode source) :chunk-index)
+      (let [start-line (get-path page (start-line-at source))
+            target-line (+ 1 (* pos (source-limit source)))
+            drop-count (max 0 (- target-line (or start-line target-line)))]
+        (drop drop-count rows))
+      rows)))
 
 (defn- next-pos
   [source page pos row-count]
-  (if (= (page-mode source) :token)
-    (get-path page (token-at source))
-    (+ pos row-count)))
+  (let [mode (page-mode source)]
+    (cond
+      (= mode :token) (get-path page (token-at source))
+      (= mode :chunk-index) (+ pos 1)
+      :else (+ pos row-count))))
 
 (defn- done?
   [source page rows next]
-  (if (= (page-mode source) :token)
-    (not next)
-    (< (count rows) (source-limit source))))
+  (let [mode (page-mode source)]
+    (cond
+      (= mode :token) (not next)
+      (= mode :chunk-index) (>= next (or (get-path page (total-pages-at source)) next))
+      :else (< (count rows) (source-limit source)))))
 
 (defn- too-many-entries!
   [source acc]
@@ -152,7 +170,7 @@
     (if (>= pages (source-max-pages source))
       (fail {:reason "max_pages_exceeded" :max_pages (source-max-pages source)})
       (let [page (read-page! source pos)
-            rows (page-rows source page)
+            rows (page-rows source page pos)
             acc2 (reduce step acc rows)
             next (next-pos source page pos (count rows))]
         (if (done? source page rows next)
@@ -171,7 +189,7 @@
         (if (>= pages (source-max-pages source))
           (fail {:reason "max_pages_exceeded" :max_pages (source-max-pages source)})
           (let [page (read-page! source pos)
-                rows (page-rows source page)
+                rows (page-rows source page pos)
                 acc2 (take limit (concat acc rows))
                 next (next-pos source page pos (count rows))]
             (if (or (>= (count acc2) limit) (done? source page rows next))

@@ -30,6 +30,34 @@ tool result:
 The page position is written into `:args`; only `:server`, `:tool`, and `:args`
 are sent to `tool/call`.
 
+Supported modes:
+
+- `:offset` increments the position by the number of returned rows.
+- `:token` reads the next cursor from `:token-at`.
+- `:chunk-index` increments the position by one chunk and stops at
+  `:total-pages-at`. If the backend returns overlapping chunk boundaries,
+  provide `:start-line-at`; rows before the expected start line are dropped.
+
+For `@willianpinho/large-file-mcp`, the source shape is backend-specific but
+does not require changing the prelude:
+
+```clojure
+(def trips
+  {:server "files"
+   :tool "read_large_file_chunk"
+   :args {:filePath "/absolute/path/to/trips.jsonl"}
+   :page {:mode :chunk-index
+          :limit 250
+          :offset-arg :chunkIndex
+          :limit-arg :linesPerChunk
+          :rows-at [:value "content"]
+          :parse :jsonl
+          :total-pages-at [:value "totalChunks"]
+          :start-line-at [:value "startLine"]
+          :max-pages 100
+          :max-entries 10000}})
+```
+
 ## API
 
 ```clojure

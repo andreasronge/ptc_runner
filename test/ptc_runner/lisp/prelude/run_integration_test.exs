@@ -428,6 +428,54 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       calls = Agent.get(agent, &Enum.reverse/1)
       assert Enum.map(calls, &get_in(&1, ["args", "offset"])) == [0, 2, 4]
     end
+
+    test "folds chunk-index pages through a dynamic upstream source", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{"id" => "a", "kind" => "trip"},
+        %{"id" => "b", "kind" => "trip"},
+        %{"id" => "c", "kind" => "station"},
+        %{"id" => "d", "kind" => "trip"},
+        %{"id" => "e", "kind" => "station"}
+      ]
+
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_chunk"
+         :args {}
+         :page {:mode :chunk-index
+                :limit 2
+                :offset-arg :chunkIndex
+                :limit-arg :linesPerChunk
+                :rows-at [:value "rows"]
+                :total-pages-at [:value "totalChunks"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return
+        (paged/group-count source ["kind"]))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program,
+                 prelude: prelude,
+                 tools: chunk_index_stub_tools(agent, rows)
+               )
+
+      assert step.return ==
+               {:__ptc_return__,
+                %{
+                  "[\"trip\"]" => 3,
+                  "[\"station\"]" => 2
+                }}
+
+      calls = Agent.get(agent, &Enum.reverse/1)
+      assert Enum.map(calls, &get_in(&1, ["args", "chunkIndex"])) == [0, 1, 2]
+      assert Enum.all?(calls, &(get_in(&1, ["args", "linesPerChunk"]) == 2))
+    end
   end
 
   defp paged_stub_tools(agent, rows) do
@@ -444,6 +492,32 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
             "rows" => rows |> Enum.drop(offset) |> Enum.take(limit),
             "offset" => offset,
             "limit" => limit
+          },
+          reason: nil
+        }
+      end
+    }
+  end
+
+  defp chunk_index_stub_tools(agent, rows) do
+    %{
+      "call" => fn args ->
+        Agent.update(agent, fn calls -> [args | calls] end)
+
+        chunk_index = get_in(args, ["args", "chunkIndex"]) || 0
+        lines_per_chunk = get_in(args, ["args", "linesPerChunk"]) || 100
+        start_index = if chunk_index == 0, do: 0, else: chunk_index * lines_per_chunk - 1
+        chunk_size = if chunk_index == 0, do: lines_per_chunk, else: lines_per_chunk + 1
+        returned_rows = rows |> Enum.drop(start_index) |> Enum.take(chunk_size)
+
+        %{
+          ok: true,
+          value: %{
+            "rows" => returned_rows,
+            "chunkIndex" => chunk_index,
+            "linesPerChunk" => lines_per_chunk,
+            "startLine" => start_index + 1,
+            "totalChunks" => ceil(length(rows) / lines_per_chunk)
           },
           reason: nil
         }
