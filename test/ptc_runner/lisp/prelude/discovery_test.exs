@@ -13,6 +13,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step
 
@@ -58,6 +59,14 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
   # `(doc ...)` prints and returns nil (clojure.repl/doc semantics, P1): the
   # rendered docstring lands in `step.prints`, not the result channel.
   defp run_doc(program, prelude) do
+    assert {:ok, %Step{} = step} = PtcRunner.Lisp.run(program, prelude: prelude)
+    assert step.return == nil
+    Enum.join(step.prints, "\n")
+  end
+
+  # `(source ...)` mirrors `doc`: prints the rendered form (or the miss notice)
+  # and returns nil, so the rendered text lands in `step.prints`.
+  defp run_source(program, prelude) do
     assert {:ok, %Step{} = step} = PtcRunner.Lisp.run(program, prelude: prelude)
     assert step.return == nil
     Enum.join(step.prints, "\n")
@@ -229,6 +238,222 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert run_return("(meta crm/get-user)", prelude) ==
                run_return("(meta 'crm/get-user)", prelude)
     end
+  end
+
+  describe "source" do
+    test "dispatches to discovery — `source` is not an undefined variable (L3 P1 guard)",
+         %{prelude: prelude} do
+      # Without the SourceAtoms registration, `source` stays a binary and the
+      # analyzer never reaches the discovery clause: the call would fail as an
+      # undefined-variable / unknown-call. This pins the wiring.
+      assert {:ok, %Step{return: nil}} =
+               PtcRunner.Lisp.run("(source crm/get-user)", prelude: prelude)
+    end
+
+    test "renders the defining form with the effective header and returns nil",
+         %{prelude: prelude} do
+      src = run_source("(source 'crm/get-user)", prelude)
+
+      # Effective-metadata header (visibility ns-inherited :prompt — get-user
+      # carries NO defn metadata, so visibility surfaces only via this header).
+      assert src =~ ";; crm/get-user"
+      assert src =~ "visibility: prompt"
+      assert src =~ "(effective)"
+      # Faithful defining form: head, docstring, params, body.
+      assert src =~ "(defn get-user"
+      assert src =~ ~s("Return a CRM user by id.")
+      assert src =~ "[id]"
+      assert src =~ "normalize-id"
+    end
+
+    test "quoted, unquoted, and string refs are byte-identical (macro-like parity)",
+         %{prelude: prelude} do
+      quoted = run_source("(source 'crm/get-user)", prelude)
+      unquoted = run_source("(source crm/get-user)", prelude)
+      string = run_source(~s|(source "crm/get-user")|, prelude)
+
+      assert quoted == unquoted
+      assert quoted == string
+    end
+
+    test "renders author-literal metadata distinct from the effective header",
+         %{prelude: prelude} do
+      # `list-users` carries `{:visibility :discoverable}` ON the defn, so the
+      # rendered FORM contains that author map — separate from the header line.
+      src = run_source("(source 'crm/list-users)", prelude)
+
+      assert src =~ "{:visibility :discoverable}"
+      assert src =~ "(defn list-users"
+    end
+
+    test "preserves multi-key author metadata and key order via metadata_form" do
+      {:ok, prelude} = Compiler.compile(meta_order_source())
+      src = run_source("(source 'crm/search-users)", prelude)
+
+      # The raw metadata map renders Formatter-faithfully with ORIGINAL key
+      # order (the normalized `metadata` map is order-destroying). `:since` is a
+      # non-interpreted key — proves arbitrary metadata round-trips, not just the
+      # bounded enums the export pipeline reads.
+      assert src =~ ~s({:visibility :discoverable :since "1.0"})
+    end
+
+    test "a reachable private helper is source-addressable but stays out of doc/ns-publics",
+         %{prelude: prelude} do
+      # `normalize-id` is a `defn-` referenced by the public `get-user`, so it is
+      # transitively reachable → in the index, rendered with `defn-`.
+      src = run_source("(source 'crm/normalize-id)", prelude)
+      assert src =~ "(defn- normalize-id"
+      assert src =~ "visibility: private"
+
+      # But it remains invisible to doc/ns-publics (no %Export{}).
+      assert {:error, %Step{}} =
+               PtcRunner.Lisp.run("(doc 'crm/normalize-id)", prelude: prelude)
+
+      refute Map.has_key?(run_return("(ns-publics 'crm)", prelude), "normalize-id")
+    end
+
+    test "an unreferenced (dead) private helper is NOT source-addressable (oracle guard)" do
+      {:ok, prelude} = Compiler.compile(dead_private_source())
+
+      # Reachable private → available.
+      assert run_source("(source 'crm/live-helper)", prelude) =~ "(defn- live-helper"
+
+      # Dead private → unavailable, even though it exists in the source text.
+      assert run_source("(source 'crm/dead-helper)", prelude) =~
+               "no source available for crm/dead-helper"
+    end
+
+    test "renders a bare constant and a documented constant" do
+      {:ok, prelude} = Compiler.compile(const_source())
+
+      bare = run_source("(source 'cfg/limit)", prelude)
+      assert bare =~ "(def limit 42)"
+
+      documented = run_source("(source 'cfg/answer)", prelude)
+      assert documented =~ ~s[(def answer "The answer." 42)]
+    end
+
+    test "a local binding shadows the discovery form", %{prelude: prelude} do
+      # The local `source` fn is called instead of discovery; the keyword
+      # `:shadowed` evaluates to its string value, confirming the local won.
+      assert run_return("(let [source (fn [_] :shadowed)] (source 1))", prelude) == "shadowed"
+    end
+
+    test "wrong arity is an analyzer error", %{prelude: prelude} do
+      assert {:error, %Step{} = none} = PtcRunner.Lisp.run("(source)", prelude: prelude)
+      assert none.fail.reason == :invalid_arity
+
+      assert {:error, %Step{} = two} =
+               PtcRunner.Lisp.run("(source 'crm/get-user 'crm/list-users)", prelude: prelude)
+
+      assert two.fail.reason == :invalid_arity
+    end
+
+    test "an unknown ref prints `no source available` and returns nil, never raising",
+         %{prelude: prelude} do
+      # A core builtin and a missing namespace both land on the uniform miss
+      # shape — no tool-discovery fallthrough.
+      assert run_source("(source map)", prelude) =~ "no source available for map"
+
+      assert run_source("(source 'missing/ns)", prelude) =~
+               "no source available for missing/ns"
+    end
+
+    test "never falls through to a configured discovery backend (no MCP source in V1)",
+         %{prelude: prelude} do
+      # With a discovery_exec stub that would RAISE if invoked, an unknown source
+      # ref must still resolve to the local miss shape (plan D2).
+      exploding = fn _op, _args -> raise "discovery_exec must not be called for source" end
+
+      assert {:ok, %Step{return: nil, prints: prints}} =
+               PtcRunner.Lisp.run("(source 'missing/ns)",
+                 prelude: prelude,
+                 discovery_exec: exploding
+               )
+
+      assert Enum.join(prints, "\n") =~ "no source available for missing/ns"
+    end
+
+    test "unavailable when no prelude is attached" do
+      assert {:ok, %Step{return: nil, prints: prints}} =
+               PtcRunner.Lisp.run("(source crm/get-user)")
+
+      assert Enum.join(prints, "\n") =~ "no source available for crm/get-user"
+    end
+
+    test "the rendered form (minus the header) re-parses and metadata survives",
+         %{prelude: prelude} do
+      src = run_source("(source 'crm/list-users)", prelude)
+
+      # Drop the leading `;;` provenance header; the remainder is real Lisp.
+      [_header | form_lines] = String.split(src, "\n")
+      form_text = Enum.join(form_lines, "\n")
+
+      assert {:ok, _ast} = Parser.parse(form_text)
+      assert form_text =~ "{:visibility :discoverable}"
+    end
+
+    test "an oversized form truncates at :max_print_length and is full when the cap is raised" do
+      {:ok, prelude} = Compiler.compile(oversize_source_const())
+
+      assert {:ok, %Step{return: nil, prints: [capped]}} =
+               PtcRunner.Lisp.run("(source 'cfg/blob)", prelude: prelude)
+
+      assert capped =~ "(2000/"
+      refute capped =~ "TAIL-MARKER"
+
+      assert {:ok, %Step{return: nil, prints: [full]}} =
+               PtcRunner.Lisp.run("(source 'cfg/blob)", prelude: prelude, max_print_length: 6000)
+
+      assert full =~ "TAIL-MARKER"
+      refute full =~ "chars)"
+    end
+  end
+
+  defp meta_order_source do
+    """
+    (ns crm "CRM helpers." {:visibility :prompt})
+
+    (defn search-users
+      "Search users by query."
+      {:visibility :discoverable :since "1.0"}
+      [query]
+      (tool/call {:server "crm" :tool "search_users" :args {:q query}}))
+    """
+  end
+
+  defp dead_private_source do
+    """
+    (ns crm "CRM helpers." {:visibility :prompt})
+
+    (defn- live-helper "Reachable." [x] (str x))
+
+    (defn- dead-helper "Never referenced by a public export." [x] (str x))
+
+    (defn get-user "Return a CRM user by id." [id] (live-helper id))
+    """
+  end
+
+  defp const_source do
+    """
+    (ns cfg "Config." {:visibility :prompt})
+
+    (def limit 42)
+
+    (def answer "The answer." 42)
+    """
+  end
+
+  defp oversize_source_const do
+    # A constant whose rendered string blows past the 2000 default print cap but
+    # fits a raised 6000 cap, ending in a unique tail marker.
+    body = String.duplicate("padding ", 300)
+
+    """
+    (ns cfg "Config." {:visibility :prompt})
+
+    (def blob "HEAD-MARKER #{body} TAIL-MARKER")
+    """
   end
 
   describe "dir" do

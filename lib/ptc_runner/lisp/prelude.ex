@@ -24,6 +24,14 @@ defmodule PtcRunner.Lisp.Prelude do
       (evaluator threading) depends on.
     * `source_hash` — sha256 hex digest of the prelude source (plan §12
       traceability).
+    * `source_index` — precomputed `%{full-ref => rendered-source}` map for the
+      `(source ns/name)` discovery form (issue #1095). Keyed by full ref for
+      public exports PLUS the private helpers transitively reachable from some
+      public export; unreferenced privates stay out. Values are rendered strings
+      (a labeled effective-metadata header + the Formatter-rendered defining
+      form), so this cache leaks no captured closure or raw parser AST. NOTE: it
+      exposes export IMPLEMENTATION, not just contract — deployments must keep
+      secrets/credentials out of prelude bodies, not just docstrings.
     * `metadata` — small map of namespace-level facts for traces/debugging,
       e.g. per-namespace docstring and default visibility.
 
@@ -55,6 +63,7 @@ defmodule PtcRunner.Lisp.Prelude do
           exports: [Export.t()],
           private_env: %{String.t() => %{String.t() => term()}},
           source_hash: String.t(),
+          source_index: %{String.t() => String.t()},
           metadata: map()
         }
 
@@ -63,6 +72,7 @@ defmodule PtcRunner.Lisp.Prelude do
             exports: [],
             private_env: %{},
             source_hash: nil,
+            source_index: %{},
             metadata: %{}
 
   @doc "The declared (protected) namespace names, sorted."

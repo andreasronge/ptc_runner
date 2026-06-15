@@ -8,6 +8,13 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
   Not part of the public prelude artifact — it carries the raw parser forms
   (`params_form`, `body_form`) that the compiler needs to both build export
   metadata and reconstruct definition forms for env capture (fact #6).
+
+  `metadata_form` is the **raw** `{:map, pairs}` parser node captured from a
+  `defn`/`defn-` before `normalize_meta/1` flattens it into the (lossy,
+  order-destroying) `metadata` map. It exists so `source` discovery can render
+  the author's metadata Formatter-faithfully with original key order; `metadata`
+  (normalized) still drives everything else. Always `nil` for constants — `(def
+  ...)` carries no metadata syntax.
   """
 
   @type t :: %__MODULE__{
@@ -17,6 +24,7 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
           arity: non_neg_integer() | :variadic,
           doc: String.t() | nil,
           metadata: map(),
+          metadata_form: {:map, [term()]} | nil,
           params_form: term() | nil,
           body_form: [term()]
         }
@@ -28,6 +36,7 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
             arity: nil,
             doc: nil,
             metadata: %{},
+            metadata_form: nil,
             params_form: nil,
             body_form: []
 end

@@ -64,7 +64,8 @@ defmodule PtcRunner.Lisp.Analyze do
                       :meta,
                       :"all-ns",
                       :"ns-name",
-                      :"ns-publics"
+                      :"ns-publics",
+                      :source
                     ])
 
   @type error_reason ::
@@ -140,6 +141,7 @@ defmodule PtcRunner.Lisp.Analyze do
       :dir,
       :doc,
       :meta,
+      :source,
       :"ns-publics",
       :"all-ns",
       :"ns-name",
@@ -493,6 +495,17 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :meta}, args, _list, _tail?) do
     {:error,
      {:invalid_arity, :meta, "(meta tool-ref) requires exactly 1 argument, got #{length(args)}"}}
+  end
+
+  defp dispatch_list_form({:symbol, :source}, [ref_ast], _list, _tail?) do
+    with {:ok, ref} <- analyze_discovery_ref(ref_ast) do
+      {:ok, {:repl_discovery, :source, [ref]}}
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :source}, args, _list, _tail?) do
+    {:error,
+     {:invalid_arity, :source, "(source ref) requires exactly 1 argument, got #{length(args)}"}}
   end
 
   defp dispatch_list_form({:symbol, :"ns-publics"}, [ns_ast], _list, _tail?) do

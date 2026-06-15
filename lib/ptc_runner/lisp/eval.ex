@@ -1738,6 +1738,9 @@ defmodule PtcRunner.Lisp.Eval do
       :meta ->
         invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_meta/3, &local_meta/2)
 
+      :source ->
+        invoke_source_discovery(eval_ctx, args)
+
       :ns_publics ->
         invoke_ns_publics_discovery(eval_ctx, operation, args)
 
@@ -1933,6 +1936,31 @@ defmodule PtcRunner.Lisp.Eval do
   # and programmer faults raise upstream and never reach here.)
   defp route_doc_to_prints({:ok, _other, %EvalContext{} = eval_ctx}) do
     {:ok, nil, eval_ctx}
+  end
+
+  # `(source ns/name)` resolves ONLY against the attached prelude's
+  # `source_index` — no local/MCP fallthrough, never a `discovery_exec` call
+  # (plan D2). It mirrors `doc` only on the SUCCESS path (render → print → nil,
+  # the `:max_print_length` cap applying as for any print); the MISS path is its
+  # own: print "no source available" and return nil rather than raise. A
+  # malformed ref still raises (programmer fault), like the sibling forms.
+  defp invoke_source_discovery(%EvalContext{prelude: prelude} = eval_ctx, [ref]) do
+    case Discovery.prelude_source(prelude, ref) do
+      {:ok, src} ->
+        {:ok, nil, EvalContext.append_print(eval_ctx, src)}
+
+      :unknown ->
+        {:ok, nil, EvalContext.append_print(eval_ctx, "no source available for #{ref}")}
+
+      {:programmer_fault, message} ->
+        raise ExecutionError, reason: :runtime_error, message: message
+    end
+  end
+
+  defp invoke_source_discovery(_eval_ctx, args) do
+    raise ExecutionError,
+      reason: :runtime_error,
+      message: "source requires a single ref, got #{inspect(args)}"
   end
 
   defp invoke_ref_discovery(%EvalContext{} = eval_ctx, operation, [ref | rest] = args, local_fun) do

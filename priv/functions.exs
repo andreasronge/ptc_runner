@@ -5158,6 +5158,32 @@
       divergences: nil
     },
     %{
+      name: "source",
+      description: "Print the defining form of an attached-prelude reference (returns nil)",
+      binding: nil,
+      category: :mcp,
+      dispatch: :analyze,
+      signatures: ["(source ref)"],
+      since: nil,
+      section: "Discovery",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Like clojure.repl/source, prints the rendered defining form and returns nil, so the " <>
+          "(multi-line) source flows through the print budget (capped at :max_print_length) rather " <>
+          "than the result channel. Resolves ONLY against the attached prelude — unlike doc/meta " <>
+          "there is no local/MCP fallthrough; an unknown ref prints \"no source available\" and " <>
+          "returns nil instead of raising. Covers public exports plus the private helpers " <>
+          "transitively reachable from a public export, so a reachable defn- helper is " <>
+          "source-visible even though it stays invisible to doc/meta/ns-publics. Reveals " <>
+          "implementation, not just contract: deployments must keep secrets out of prelude bodies. " <>
+          "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a quoted " <>
+          "symbol ('crm/get-user), or a string (\"crm/get-user\").",
+      see_also: ["doc", "meta", "ns-publics"],
+      clojure_var: "source",
+      divergences: nil
+    },
+    %{
       name: "step-done",
       description: "",
       binding: nil,

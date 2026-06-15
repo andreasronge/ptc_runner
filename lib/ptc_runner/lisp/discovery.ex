@@ -243,6 +243,34 @@ defmodule PtcRunner.Lisp.Discovery do
   end
 
   @doc """
+  Rendered defining-form source for an exact prelude ref (e.g.
+  `"crm/get-user"`), or `:unknown` when the ref is not in the prelude's
+  `source_index`.
+
+  Resolves ONLY against the attached prelude — unlike `prelude_doc`/`prelude_meta`
+  there is no local/MCP fallthrough (plan D2). The index covers public exports
+  plus the private helpers transitively reachable from a public export, so a
+  reachable `defn-` helper is `source`-visible even though it has no `%Export{}`
+  (and so stays invisible to `doc`/`meta`/`ns-publics`/`apropos`).
+  """
+  @spec prelude_source(Prelude.t() | nil, term()) ::
+          {:ok, String.t()} | :unknown | {:programmer_fault, String.t()}
+  def prelude_source(prelude, ref) do
+    with {:ok, name} <- normalize_ref(ref, "source") do
+      case prelude do
+        %Prelude{source_index: idx} ->
+          case Map.fetch(idx, name) do
+            {:ok, src} -> {:ok, src}
+            :error -> :unknown
+          end
+
+        _ ->
+          :unknown
+      end
+    end
+  end
+
+  @doc """
   Compact metadata map for an exact prelude export ref, or `:unknown`.
   """
   @spec prelude_meta(Prelude.t() | nil, term()) ::
