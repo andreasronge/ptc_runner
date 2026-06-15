@@ -93,6 +93,11 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert Map.has_key?(publics, "get-user")
     end
 
+    test "accepts an unquoted namespace symbol (Clojure-style)", %{prelude: prelude} do
+      publics = run_return("(ns-publics crm)", prelude)
+      assert Map.has_key?(publics, "get-user")
+    end
+
     test "an unknown prelude namespace still errors", %{prelude: prelude} do
       assert {:error, %Step{} = step} = PtcRunner.Lisp.run("(ns-publics 'nope)", prelude: prelude)
       assert step.fail.reason in [:runtime_error, :analysis_error]
@@ -112,6 +117,23 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       doc = run_doc("(doc 'crm/list-users)", prelude)
       assert doc =~ "crm/list-users"
       assert doc =~ "List CRM users."
+    end
+
+    test "accepts an unquoted namespaced symbol (Clojure-style, issue #1094)",
+         %{prelude: prelude} do
+      # `(doc crm/get-user)` must not evaluate the symbol to its closure first;
+      # the docstring matches the quoted form exactly.
+      assert run_doc("(doc crm/get-user)", prelude) ==
+               run_doc("(doc 'crm/get-user)", prelude)
+    end
+
+    test "a non-symbol arg still evaluates — the runtime-computed-ref escape hatch",
+         %{prelude: prelude} do
+      # Auto-quoting is intentionally limited to bare/namespaced *symbols*
+      # (Clojure macro semantics). Any other form — here a computed string —
+      # still evaluates, so a ref can be built at runtime.
+      assert run_doc(~s|(doc (str "crm/" "get-user"))|, prelude) ==
+               run_doc("(doc 'crm/get-user)", prelude)
     end
 
     test "a private helper is not user-visible through doc", %{prelude: prelude} do
@@ -201,6 +223,12 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       assert meta[:doc] == "Return a CRM user by id."
       assert meta[:arglists] == ["(get-user id)"]
     end
+
+    test "accepts an unquoted namespaced symbol (Clojure-style, issue #1094)",
+         %{prelude: prelude} do
+      assert run_return("(meta crm/get-user)", prelude) ==
+               run_return("(meta 'crm/get-user)", prelude)
+    end
   end
 
   describe "dir" do
@@ -220,6 +248,10 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
       # The private helper has no export record and must NOT appear.
       refute Enum.any?(lines, &String.contains?(&1, "normalize-id"))
+    end
+
+    test "accepts an unquoted namespace symbol (Clojure-style)", %{prelude: prelude} do
+      assert run_return("(dir crm)", prelude) == run_return("(dir 'crm)", prelude)
     end
   end
 
@@ -255,6 +287,10 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
     test "accepts a string ref", %{prelude: prelude} do
       assert run_return(~s|(ns-name "crm")|, prelude) == "crm"
+    end
+
+    test "accepts an unquoted namespace symbol (Clojure-style)", %{prelude: prelude} do
+      assert run_return("(ns-name crm)", prelude) == "crm"
     end
   end
 

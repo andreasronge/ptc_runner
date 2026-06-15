@@ -435,6 +435,12 @@ search across catalogs, or read a tool's full input schema.
 | `meta` | `(meta ref)` | Structured local or upstream metadata. Known local refs win; unknown refs fall through to upstream tool refs. |
 | `ns-publics` | `(ns-publics ns)` | Local-only map of public names to compact metadata for PTC/Clojure namespaces. Java classes and upstream servers are not supported. |
 
+`dir`, `doc`, `meta`, and `ns-publics` are macro-like over their `ref`/`ns`
+argument: a bare symbol or namespaced symbol is auto-quoted, so `(doc github/search)`
+and `(dir clojure.string)` look the reference up instead of evaluating it first.
+Quoted symbols (`'github/search`) and string refs (`"github/search"`) are equivalent;
+use a string ref when the reference must be computed at runtime.
+
 `apropos` ranks each candidate with a deterministic
 lexical score: `query` tokens are matched against the tokenized
 server/tool names (boosted) and the tokenized

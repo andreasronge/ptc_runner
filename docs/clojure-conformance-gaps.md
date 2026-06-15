@@ -2461,11 +2461,18 @@ and single-character delimiters (char-equivalent) continue to work unchanged.
 (apropos "map")       ;=> returns a seq of matching symbols
 
 ;; PTC-Lisp
-(doc 'str)            ;=> prints docs, returns nil          (conformant)
-(dir 'clojure.string) ;=> returns a vector of member lines  (DIV)
+(doc str)             ;=> prints docs, returns nil          (conformant)
+(dir clojure.string)  ;=> returns a vector of member lines  (DIV)
 (apropos "map")       ;=> returns a vector of match lines    (close)
-(meta 'str)           ;=> returns a metadata map             (DIV)
+(meta str)            ;=> returns a metadata map             (DIV)
 ```
+
+`doc`, `meta`, `dir`, `ns-publics`, and `ns-name` are macro-like over their ref
+argument (issue #1094): a bare symbol or namespaced symbol is auto-quoted, so
+`(doc paged/profile)` and `(dir clojure.string)` look the symbol up instead of
+evaluating it to a closure/builtin value first. Quoted symbols (`'str`) and
+string refs (`"str"`) keep working unchanged. The remaining divergence is only
+the print-vs-data channel choice below, not the quoting.
 
 **Decision:** DIV (split). `doc` is brought into line with `clojure.repl/doc`:
 it routes the rendered documentation through the **print** channel and returns

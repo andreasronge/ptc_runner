@@ -3377,7 +3377,9 @@ Programs can inspect executable PTC-Lisp capabilities through REPL-style discove
 | `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
 | `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for a prelude-export namespace or a local PTC/Clojure namespace. Java classes and MCP servers are not supported. |
 | `all-ns` | `(all-ns)` | Sorted list of curated Lisp-facing namespace-name strings plus any attached prelude namespaces. Never leaks BEAM internals, Java classes, or implementation-only namespaces. |
-| `ns-name` | `(ns-name ns)` | Namespace-name string for a known curated or prelude namespace. Accepts a quoted symbol (`'crm`) or a string (`"crm"`). |
+| `ns-name` | `(ns-name ns)` | Namespace-name string for a known curated or prelude namespace. Accepts an unquoted symbol (`crm`), a quoted symbol (`'crm`), or a string (`"crm"`). |
+
+The ref-taking forms (`dir`, `doc`, `meta`, `ns-publics`, `ns-name`) are macro-like over their reference argument (`clojure.repl/doc` style): a bare symbol or namespaced symbol is auto-quoted, so `(doc paged/profile)` and `(dir clojure.string)` look the symbol up instead of evaluating it to a closure/builtin value first. Quoted symbols and string refs are equivalent. Use a string ref (e.g. `(doc (str "crm/" name))`) when the reference must be computed at runtime.
 
 Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compatibility aliases, discovery returns executable refs such as `Integer/parseInt`, `System/currentTimeMillis`, `Math/abs`, and `java.time.LocalDate/parse`; it does not advertise unsupported fully-qualified `java.lang.*` call forms.
 

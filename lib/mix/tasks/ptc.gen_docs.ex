@@ -226,28 +226,29 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       command: "`(dir ref)`",
       status: "supported",
       scope: "local + MCP discovery",
-      notes: "List members for a local namespace/curated Java class, or tools for an MCP server."
+      notes:
+        "List members for a local namespace/curated Java class, or tools for an MCP server. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
     },
     %{
       command: "`(doc ref)`",
       status: "supported",
       scope: "local + MCP discovery",
       notes:
-        "Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs."
+        "Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
     },
     %{
       command: "`(meta ref)`",
       status: "supported",
       scope: "local + MCP discovery",
       notes:
-        "Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs."
+        "Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
     },
     %{
       command: "`(ns-publics ns)`",
       status: "supported",
       scope: "local discovery",
       notes:
-        "Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported."
+        "Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported. The ns is macro-like: an unquoted symbol, a quoted symbol, or a string."
     },
     %{
       command: "`(quote symbol)`, `'symbol`",

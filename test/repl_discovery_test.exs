@@ -95,6 +95,23 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert Map.has_key?(publics_step.return, "replace")
     end
 
+    test "discovery forms accept unquoted Clojure-style symbols (issue #1094)" do
+      # `(doc map)` / `(dir clojure.string)` must auto-quote the bare symbol
+      # instead of evaluating it (the builtin value / unbound var) first.
+      assert {:ok, doc_step} = Lisp.run("(doc Integer/parseInt)")
+      assert doc_step.return == nil
+      assert Enum.join(doc_step.prints, "\n") =~ "Integer/parseInt"
+
+      assert {:ok, meta_step} = Lisp.run("(meta java.time.Duration/between)")
+      assert meta_step.return.kind in ["java-interop", "ptc-builtin"]
+
+      assert {:ok, string_dir} = Lisp.run("(dir clojure.string)")
+      assert Enum.any?(string_dir.return, &String.starts_with?(&1, "replace"))
+
+      assert {:ok, publics_step} = Lisp.run("(ns-publics clojure.string)")
+      assert Map.has_key?(publics_step.return, "replace")
+    end
+
     test "local discovery does not expose non-executable fully-qualified java.lang refs" do
       assert {:error, step} = Lisp.run("(doc 'java.lang.Integer/parseInt)")
       assert step.fail.message =~ "REPL discovery forms are only available"

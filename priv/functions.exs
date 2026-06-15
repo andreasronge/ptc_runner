@@ -4711,7 +4711,9 @@
       section: "Discovery",
       ptc_extension?: true,
       examples: [],
-      notes: "MCP-backed in aggregator mode; accepts quoted symbols or strings.",
+      notes:
+        "Macro-like over the ref argument: accepts an unquoted symbol (clojure.string), " <>
+          "a quoted symbol ('clojure.string), or a string. MCP-backed in aggregator mode.",
       see_also: ["apropos", "doc", "meta", "tool/servers"],
       clojure_var: "dir",
       divergences: nil
@@ -4748,7 +4750,8 @@
         "Like clojure.repl/doc, prints the rendered documentation and returns nil, so doc text " <>
           "flows through the (larger) print budget rather than the result channel. Sibling " <>
           "discovery forms dir/apropos/meta return structured data instead of printing. " <>
-          "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
+          "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a " <>
+          "quoted symbol ('github/search), or a string (\"github/search\"). MCP-backed in aggregator mode.",
       see_also: ["apropos", "dir", "meta"],
       clojure_var: "doc",
       divergences: nil
@@ -4944,7 +4947,8 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "MCP-backed in aggregator mode; accepts tool refs like 'github/search or \"github/search\".",
+        "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a " <>
+          "quoted symbol ('github/search), or a string (\"github/search\"). MCP-backed in aggregator mode.",
       see_also: ["doc", "dir", "apropos"],
       clojure_var: "meta",
       divergences: nil
@@ -4978,7 +4982,8 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Returns a map keyed by public symbol strings. Resolves prelude-export namespaces and local Clojure/PTC namespaces; Java classes and MCP servers are not supported.",
+        "Returns a map keyed by public symbol strings. Resolves prelude-export namespaces and local Clojure/PTC namespaces; Java classes and MCP servers are not supported. " <>
+          "Macro-like over the namespace argument: accepts an unquoted symbol (crm), a quoted symbol ('crm), or a string (\"crm\").",
       see_also: ["dir", "doc", "meta", "apropos", "all-ns", "ns-name"],
       clojure_var: "ns-publics",
       divergences: nil
@@ -5013,7 +5018,7 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Accepts a quoted symbol ('crm) or a string (\"crm\"). Returns the namespace name as a string for curated and prelude namespaces.",
+        "Macro-like over the namespace argument: accepts an unquoted symbol (crm), a quoted symbol ('crm), or a string (\"crm\"). Returns the namespace name as a string for curated and prelude namespaces.",
       see_also: ["all-ns", "ns-publics"],
       clojure_var: "ns-name",
       divergences:

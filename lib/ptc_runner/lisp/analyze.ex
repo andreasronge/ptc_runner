@@ -456,13 +456,13 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, :dir}, [server_ast], _list, _tail?) do
-    with {:ok, server} <- do_analyze(server_ast, false) do
+    with {:ok, server} <- analyze_discovery_ref(server_ast) do
       {:ok, {:repl_discovery, :dir, [server]}}
     end
   end
 
   defp dispatch_list_form({:symbol, :dir}, [server_ast, opts_ast], _list, _tail?) do
-    with {:ok, server} <- do_analyze(server_ast, false),
+    with {:ok, server} <- analyze_discovery_ref(server_ast),
          {:ok, opts} <- do_analyze(opts_ast, false) do
       {:ok, {:repl_discovery, :dir, [server, opts]}}
     end
@@ -474,7 +474,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, :doc}, [tool_ref_ast], _list, _tail?) do
-    with {:ok, tool_ref} <- do_analyze(tool_ref_ast, false) do
+    with {:ok, tool_ref} <- analyze_discovery_ref(tool_ref_ast) do
       {:ok, {:repl_discovery, :doc, [tool_ref]}}
     end
   end
@@ -485,7 +485,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, :meta}, [tool_ref_ast], _list, _tail?) do
-    with {:ok, tool_ref} <- do_analyze(tool_ref_ast, false) do
+    with {:ok, tool_ref} <- analyze_discovery_ref(tool_ref_ast) do
       {:ok, {:repl_discovery, :meta, [tool_ref]}}
     end
   end
@@ -496,7 +496,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, :"ns-publics"}, [ns_ast], _list, _tail?) do
-    with {:ok, ns_ref} <- do_analyze(ns_ast, false) do
+    with {:ok, ns_ref} <- analyze_discovery_ref(ns_ast) do
       {:ok, {:repl_discovery, :ns_publics, [ns_ref]}}
     end
   end
@@ -515,7 +515,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, :"ns-name"}, [ns_ast], _list, _tail?) do
-    with {:ok, ns_ref} <- do_analyze(ns_ast, false) do
+    with {:ok, ns_ref} <- analyze_discovery_ref(ns_ast) do
       {:ok, {:repl_discovery, :ns_name, [ns_ref]}}
     end
   end
@@ -795,6 +795,16 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_quote(other) do
     {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
+
+  # REPL discovery forms (`doc`, `meta`, `dir`, `ns-publics`, `ns-name`) take a
+  # reference, not a value. They are macro-like (clojure.repl/doc style, issue
+  # #1094): a bare symbol or namespaced symbol in ref position is auto-quoted to
+  # a `{:symbol_ref, _}` so `(doc paged/profile)` looks the symbol up instead of
+  # evaluating it to a prelude closure. Quoted symbols, strings, and any other
+  # computed expression keep evaluating normally via `do_analyze/2`.
+  defp analyze_discovery_ref({:symbol, name}), do: {:ok, {:symbol_ref, to_string(name)}}
+  defp analyze_discovery_ref({:ns_symbol, ns, name}), do: {:ok, {:symbol_ref, "#{ns}/#{name}"}}
+  defp analyze_discovery_ref(other), do: do_analyze(other, false)
 
   defp analyze_list_of_patterns(patterns),
     do: Patterns.collect_results(patterns, &analyze_pattern/1)
