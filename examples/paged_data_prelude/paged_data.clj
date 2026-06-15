@@ -14,6 +14,35 @@
   [source]
   (or (get source :page) (get source "page") {}))
 
+(defn- has-page-spec?
+  [source]
+  (or (contains? source :page) (contains? source "page")))
+
+(defn- misplaced-page-keys
+  [source]
+  (filter
+    (fn [k] (or (contains? source k) (contains? source (name k))))
+    [:page-mode :mode :limit :offset-arg :limit-arg :token-arg :rows-at :token-at
+     :total-pages-at :start-line-at :parse :max-pages :max-entries]))
+
+(defn- validate-source!
+  [source]
+  (let [keys (misplaced-page-keys source)]
+    (if (and (not (has-page-spec? source)) (seq keys))
+      (fail {:reason "paged_source_config_error"
+             :message "Pagination options must be nested under :page."
+             :misplaced_keys (map name keys)
+             :example {:server (or (get source :server) (get source "server"))
+                       :tool (or (get source :tool) (get source "tool"))
+                       :args (or (get source :args) (get source "args"))
+                       :page {:mode (or (source :page-mode) (source :mode))
+                              :limit (source :limit)
+                              :offset-arg (source :offset-arg)
+                              :limit-arg (source :limit-arg)
+                              :rows-at (source :rows-at)
+                              :parse (source :parse)}}})
+      source)))
+
 (defn- source-args
   [source]
   (or (get source :args) (get source "args") {}))
@@ -164,23 +193,25 @@
 (defn fold-pages
   "Fold rows from a paginated source without materializing the full input."
   [source init step]
-  (loop [pos (if (= (page-mode source) :token) nil 0)
+  (let [source (validate-source! source)]
+    (loop [pos (if (= (page-mode source) :token) nil 0)
          pages 0
          acc init]
-    (if (>= pages (source-max-pages source))
-      (fail {:reason "max_pages_exceeded" :max_pages (source-max-pages source)})
-      (let [page (read-page! source pos)
-            rows (page-rows source page pos)
-            acc2 (reduce step acc rows)
-            next (next-pos source page pos (count rows))]
-        (if (done? source page rows next)
-          acc2
-          (recur next (+ pages 1) acc2))))))
+      (if (>= pages (source-max-pages source))
+        (fail {:reason "max_pages_exceeded" :max_pages (source-max-pages source)})
+        (let [page (read-page! source pos)
+              rows (page-rows source page pos)
+              acc2 (reduce step acc rows)
+              next (next-pos source page pos (count rows))]
+          (if (done? source page rows next)
+            acc2
+            (recur next (+ pages 1) acc2)))))))
 
 (defn sample
   "Return at most n rows from a paginated source."
   [source n]
-  (let [limit (max 0 n)]
+  (let [source (validate-source! source)
+        limit (max 0 n)]
     (loop [pos (if (= (page-mode source) :token) nil 0)
            pages 0
            acc []]

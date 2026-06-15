@@ -58,6 +58,27 @@ does not require changing the prelude:
           :max-entries 10000}})
 ```
 
+Pagination options must be nested under `:page`. A flattened source like this
+is rejected before the upstream is called:
+
+```clojure
+{:server "files"
+ :tool "read_large_file_chunk"
+ :args {:filePath "/absolute/path/to/trips.jsonl"}
+ :page-mode :chunk-index
+ :limit 250
+ :rows-at [:value "content"]}
+```
+
+The diagnostic uses a recoverable PTC-Lisp fail signal:
+
+```clojure
+{:reason "paged_source_config_error"
+ :message "Pagination options must be nested under :page."
+ :misplaced_keys ["page-mode" "limit" "rows-at"]
+ :example {:server "files" :tool "read_large_file_chunk" :args {...} :page {...}}}
+```
+
 ## API
 
 ```clojure

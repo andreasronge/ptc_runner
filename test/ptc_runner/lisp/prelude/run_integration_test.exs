@@ -429,6 +429,47 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       assert Enum.map(calls, &get_in(&1, ["args", "offset"])) == [0, 2, 4]
     end
 
+    test "rejects page options flattened onto the source map", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page-mode :chunk-index
+         :limit 2
+         :offset-arg :chunkIndex
+         :limit-arg :linesPerChunk
+         :rows-at [:value "rows"]
+         :parse :jsonl
+         :total-pages-at [:value "totalChunks"]
+         :start-line-at [:value "startLine"]
+         :max-pages 10
+         :max-entries 20})
+
+      (return
+        (paged/profile
+          source
+          {:sample 3
+           :presence-fields ["end_station_id"]
+           :string-fields ["duration_min"]
+           :collision-fields ["bike_id" "start_time"]}))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: paged_stub_tools(agent, []))
+
+      assert {:__ptc_fail__, details} = step.return
+      assert details["reason"] == "paged_source_config_error"
+      assert details["message"] == "Pagination options must be nested under :page."
+      assert "page-mode" in details["misplaced_keys"]
+      assert "rows-at" in details["misplaced_keys"]
+
+      assert Agent.get(agent, & &1) == []
+    end
+
     test "folds chunk-index pages through a dynamic upstream source", %{
       prelude: prelude,
       agent: agent
