@@ -576,7 +576,8 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp session_eval_payload?(payload) when is_map(payload) do
-    Map.has_key?(payload, "result") and is_map(Map.get(payload, "session"))
+    Map.get(payload, "status") == "ok" and is_map(Map.get(payload, "session")) and
+      is_map(Map.get(payload, "memory")) and Map.has_key?(payload, "history_notices")
   end
 
   defp pop_debug_structured(response) when is_map(response) do

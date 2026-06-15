@@ -1239,6 +1239,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp build_source_index(specs, exports) do
     export_by_ref = Map.new(exports, &{&1.ref, &1})
     reachable = reachable_private_symbols(specs)
+    dependencies_by_ref = source_dependencies(specs, reachable)
 
     specs
     |> Enum.filter(fn %Spec{} = spec ->
@@ -1247,8 +1248,56 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     |> Map.new(fn %Spec{} = spec ->
       ref = ref(spec.namespace, spec.symbol)
       header = source_header(ref, spec, Map.get(export_by_ref, ref))
-      {ref, header <> "\n" <> render_source_body(spec)}
+      dependencies = Map.get(dependencies_by_ref, ref, [])
+      {ref, header <> "\n" <> source_dependency_hint(dependencies) <> render_source_body(spec)}
     end)
+  end
+
+  defp source_dependency_hint([]), do: ""
+
+  defp source_dependency_hint(dependencies) do
+    forms = Enum.map_join(dependencies, ", ", &"(source #{&1})")
+    ";; depends-on: #{forms}\n"
+  end
+
+  defp source_dependencies(specs, reachable_private) do
+    public_symbols =
+      specs
+      |> Enum.reject(& &1.private?)
+      |> MapSet.new(fn %Spec{} = spec -> {spec.namespace, spec.symbol} end)
+
+    indexable_symbols = MapSet.union(public_symbols, reachable_private)
+
+    specs
+    |> Enum.group_by(& &1.namespace)
+    |> Enum.flat_map(fn {ns, ns_specs} ->
+      ns_symbols = Enum.map(ns_specs, & &1.symbol)
+
+      calls =
+        Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
+          refs =
+            body
+            |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
+            |> Enum.uniq()
+            |> Enum.filter(&(&1 in ns_symbols))
+
+          {sym, refs}
+        end)
+
+      Enum.map(ns_specs, fn %Spec{} = spec ->
+        deps =
+          calls
+          |> Map.get(spec.symbol, [])
+          |> Enum.reject(&(&1 == spec.symbol))
+          |> Enum.uniq()
+          |> Enum.filter(&MapSet.member?(indexable_symbols, {ns, &1}))
+          |> Enum.map(&ref(ns, &1))
+          |> Enum.sort()
+
+        {ref(spec.namespace, spec.symbol), deps}
+      end)
+    end)
+    |> Map.new()
   end
 
   # `source` is a discovery convenience, so a Formatter gap must NEVER take down

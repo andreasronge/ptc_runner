@@ -358,6 +358,7 @@ defmodule PtcRunnerMcp.Envelope do
   def compact_session_success(structured) do
     %{"status" => Map.get(structured, "status", "ok")}
     |> maybe_put("result", Map.get(structured, "result"))
+    |> maybe_put("prints", Map.get(structured, "prints"), keep_nil?: false)
     |> maybe_put("feedback", session_success_feedback(structured))
     |> maybe_put("validated", Map.get(structured, "validated"), keep_nil?: false)
     |> maybe_put("validated_preview", Map.get(structured, "validated_preview"), keep_nil?: false)

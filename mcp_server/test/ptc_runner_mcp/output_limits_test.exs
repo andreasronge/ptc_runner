@@ -96,6 +96,22 @@ defmodule PtcRunnerMcp.OutputLimitsTest do
     refute text =~ "lisp_debug"
   end
 
+  test "structured session success keeps print-only nil results visible" do
+    envelope =
+      %{
+        "status" => "ok",
+        "prints" => ["(defn profile [source opts] ...)"],
+        "feedback" => "",
+        "session" => %{"session_id" => "s1", "turn" => 2}
+      }
+      |> Envelope.ptc_lisp_session_success(response_profile: :structured)
+
+    assert envelope["structuredContent"]["prints"] == ["(defn profile [source opts] ...)"]
+
+    assert get_in(envelope, ["content", Access.at(0), "text"]) =~
+             "(defn profile [source opts] ...)"
+  end
+
   test "session error text marks rollback and turn-local upstream calls" do
     text =
       Envelope.render_session_error_text(%{

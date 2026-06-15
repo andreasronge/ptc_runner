@@ -312,6 +312,15 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       refute Map.has_key?(run_return("(ns-publics 'crm)", prelude), "normalize-id")
     end
 
+    test "public source advertises source-addressable same-namespace dependencies",
+         %{prelude: prelude} do
+      src = run_source("(source 'crm/get-user)", prelude)
+
+      assert src =~ ";; depends-on: (source crm/normalize-id)"
+      assert src =~ "(defn get-user"
+      refute src =~ "dead-helper"
+    end
+
     test "renders reader-macro literals (#(), #\"re\", 'sym) in a body without crashing compile" do
       # The source precompute renders the captured body form via Formatter. A body
       # using #() / #"re" / 'sym must not crash compilation (Formatter lacked

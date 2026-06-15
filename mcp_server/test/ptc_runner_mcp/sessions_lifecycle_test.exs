@@ -113,6 +113,23 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["structuredContent"]["result"] == "user=> 42"
     end
 
+    test "configured prelude source discovery is visible in session eval output" do
+      Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
+      sid = SoakHelpers.start_session()
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(source smoke/plus-one)"
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["status"] == "ok"
+      assert [source] = eval["structuredContent"]["prints"]
+      assert source =~ "(defn plus-one"
+      assert get_in(eval, ["content", Access.at(0), "text"]) =~ "(defn plus-one"
+    end
+
     test "configured prelude is attached to one-shot lisp_eval" do
       Config.set(%{enabled: false, prelude_source: test_prelude_source()})
 
