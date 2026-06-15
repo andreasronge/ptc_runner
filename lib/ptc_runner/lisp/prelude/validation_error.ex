@@ -39,6 +39,7 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
           | :invalid_signature
           | :parse_error
           | :compile_error
+          | :unrecognized_node
           | :prelude_attach_failed
 
   @type t :: %__MODULE__{

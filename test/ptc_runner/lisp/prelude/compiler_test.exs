@@ -320,4 +320,50 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       assert is_binary(export.symbol)
     end
   end
+
+  # ============================================================
+  # Fail-closed raw-AST guard (issue #1095 hardening)
+  # ============================================================
+
+  describe "leaf_node?/1 classifies the canonical raw-AST node set" do
+    test "every terminal node (and scalar) is a leaf — these never false-close" do
+      terminals = [
+        {:string, "s"},
+        {:keyword, "k"},
+        {:symbol, "x"},
+        {:ns_symbol, "crm", "get-user"},
+        {:quoted_symbol, "flag"},
+        {:regex_literal, "a+"},
+        {:var, "inc"},
+        {:turn_history, 1},
+        42,
+        1.5,
+        true,
+        false,
+        nil,
+        :infinity,
+        :negative_infinity,
+        :nan
+      ]
+
+      for node <- terminals do
+        assert Compiler.leaf_node?(node), "expected #{inspect(node)} to be a leaf"
+      end
+    end
+
+    test "containers and any unrecognized tagged node are NOT leaves (descend or fail closed)" do
+      for node <- [
+            {:list, []},
+            {:vector, []},
+            {:map, []},
+            {:set, []},
+            {:short_fn, []},
+            # A hypothetical future parser node: absent from @leaf_tags by
+            # construction, so the inference walkers fail closed on it.
+            {:future_reader_macro, "x"}
+          ] do
+        refute Compiler.leaf_node?(node), "expected #{inspect(node)} to be a non-leaf"
+      end
+    end
+  end
 end

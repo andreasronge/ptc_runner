@@ -74,6 +74,17 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          metadata: %{namespaces: ns_meta}
        }}
     end
+  catch
+    # The raw-AST walkers fail CLOSED on an unrecognized node (see
+    # `leaf_or_reject/2`). Convert that throw into the prelude's normal error
+    # channel — the contract is "compile failures are RETURNED, never raised".
+    {:unrecognized_prelude_node, tag} ->
+      {:error,
+       ValidationError.new(
+         :unrecognized_node,
+         "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
+           "compile because its tool/upstream requirements cannot be safely determined (fail-closed)"
+       )}
   end
 
   # ============================================================
@@ -396,7 +407,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp self_ref({:set, items}, ns) when is_list(items),
     do: Enum.find_value(items, &self_ref(&1, ns))
 
-  defp self_ref(_other, _ns), do: nil
+  defp self_ref(node, _ns), do: leaf_or_reject(node, nil)
 
   defp require_current_ns(%{current_ns: nil}, name_ast) do
     {:error,
@@ -706,7 +717,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp collect_tool_names_raw({:set, items}, acc) when is_list(items),
     do: Enum.reduce(items, acc, &collect_tool_names_raw/2)
 
-  defp collect_tool_names_raw(_other, acc), do: acc
+  defp collect_tool_names_raw(node, acc), do: leaf_or_reject(node, acc)
 
   # Upstream ids reachable from `sym`: its own plus those of every helper it
   # transitively calls. `visited` guards mutual-recursion cycles.
@@ -824,7 +835,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp collect_refs({:set, items}, bound, acc) when is_list(items),
     do: Enum.reduce(items, acc, &collect_refs(&1, bound, &2))
 
-  defp collect_refs(_other, _bound, acc), do: acc
+  defp collect_refs(node, _bound, acc), do: leaf_or_reject(node, acc)
 
   # Walk `let`/`loop` binding pairs left-to-right: each value sees the names
   # bound before it; the accumulated names then shadow the body.
@@ -981,7 +992,47 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     Enum.flat_map(items, &literal_tool_calls/1)
   end
 
-  defp literal_tool_calls(_), do: []
+  defp literal_tool_calls(node), do: leaf_or_reject(node, [])
+
+  # ============================================================
+  # Fail-closed raw-AST guard (issue #1095 hardening)
+  # ============================================================
+
+  # Terminal raw parser nodes — they carry NO nested sub-AST, so the inference
+  # walkers and the self-ref check correctly extract nothing from them. Mirrors
+  # the exhaustive set in `PtcRunner.Lisp.SymbolCounter`. A `:symbol`/`:ns_symbol`
+  # is listed here as a defensive backstop even though each walker matches it
+  # explicitly first (it IS a value, with no children to descend into).
+  @leaf_tags ~w(string keyword symbol ns_symbol quoted_symbol regex_literal var turn_history)a
+
+  @doc false
+  # Whether `node` is a terminal raw-AST node (no nested forms to walk). Public
+  # only so the fail-closed contract is unit-testable.
+  def leaf_node?(node)
+      when is_number(node) or is_boolean(node) or is_nil(node)
+      when node in [:infinity, :negative_infinity, :nan],
+      do: true
+
+  def leaf_node?(node) when is_tuple(node) and tuple_size(node) >= 1,
+    do: elem(node, 0) in @leaf_tags
+
+  def leaf_node?(_), do: false
+
+  # The catch-all for every raw-AST walker. A terminal node contributes nothing
+  # (`empty`); ANY other tagged node is an unrecognized container/wrapper whose
+  # children we'd otherwise silently drop — a fail-OPEN authority hole (the `#()`
+  # bug). Fail CLOSED instead: throw a tagged value that `compile/1` converts to
+  # a `ValidationError`. This is self-maintaining — a future parser node is, by
+  # construction, absent from `@leaf_tags`, so it trips this the moment a prelude
+  # uses it, turning a silent under-declaration of authority into a loud refusal.
+  defp leaf_or_reject(node, empty) do
+    if leaf_node?(node) do
+      empty
+    else
+      tag = if is_tuple(node) and tuple_size(node) >= 1, do: elem(node, 0), else: node
+      throw({:unrecognized_prelude_node, tag})
+    end
+  end
 
   defp literal_string({:string, s}) when is_binary(s), do: {:ok, s}
   defp literal_string(_), do: :error
@@ -1196,9 +1247,20 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     |> Map.new(fn %Spec{} = spec ->
       ref = ref(spec.namespace, spec.symbol)
       header = source_header(ref, spec, Map.get(export_by_ref, ref))
-      body = Formatter.format(spec_to_source_form(spec))
-      {ref, header <> "\n" <> body}
+      {ref, header <> "\n" <> render_source_body(spec)}
     end)
+  end
+
+  # `source` is a discovery convenience, so a Formatter gap must NEVER take down
+  # compilation of the whole capability prelude — it degrades that one export's
+  # `(source ...)` to a placeholder instead (fail-soft for cosmetics; the
+  # complement of the fail-closed authority guard). Note: an unrecognized node
+  # has already failed compilation in `build_exports`, so this only catches a
+  # printer that lacks a clause for an otherwise-recognized node.
+  defp render_source_body(%Spec{} = spec) do
+    Formatter.format(spec_to_source_form(spec))
+  rescue
+    _ -> ";; (source rendering unavailable for this export)"
   end
 
   # A single labeled effective-metadata provenance line ahead of the rendered

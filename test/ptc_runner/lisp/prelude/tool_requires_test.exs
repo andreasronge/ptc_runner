@@ -35,6 +35,56 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert export.effect == :read
     end
 
+    # Kitchen-sink: a distinct typed tool inside EVERY container/wrapper. This is
+    # the positive fail-open contract — a "doesn't crash" test would pass on a
+    # walker that silently drops a container, so we assert each sentinel tool is
+    # actually EXTRACTED. The day the grammar grows a container without updating
+    # the walkers, a new sentinel goes missing and this fails loudly.
+    test "tool inference descends into every container/wrapper (let/vector/map/set/short-fn/for)" do
+      [export] =
+        compile!(~S"""
+        (ns kit "Kitchen sink." {:visibility :prompt})
+        (defn everything
+          "Embeds a distinct typed tool in each container."
+          [xs]
+          (let [a (tool/sentinel_let {})]
+            [a
+             (tool/sentinel_vec {})
+             {(tool/sentinel_mapkey {}) (tool/sentinel_mapval {})}
+             #{(tool/sentinel_set {})}
+             (map #(tool/sentinel_shortfn %) xs)
+             (for [x xs] (tool/sentinel_for {}))]))
+        """).exports
+
+      for sentinel <- ~w(
+            sentinel_let sentinel_vec sentinel_mapkey sentinel_mapval
+            sentinel_set sentinel_shortfn sentinel_for
+          ) do
+        assert sentinel in export.tool_refs,
+               "#{sentinel} was dropped — a container is not being walked (fail-open)"
+
+        assert "tool:#{sentinel}" in export.requires
+      end
+    end
+
+    test "a syntactically valid prelude using all reader forms compiles + renders source" do
+      prelude =
+        compile!(~S"""
+        (ns kit "All reader forms." {:visibility :prompt})
+        (defn formy
+          "Uses every reader form in one body."
+          [xs]
+          [(map #(inc %) xs) #"a+" 'flag #'inc #{1 2} *1])
+        """)
+
+      src = prelude.source_index["kit/formy"]
+      refute src =~ "rendering unavailable"
+      assert src =~ "#(inc %)"
+      assert src =~ ~S(#"a+")
+      assert src =~ "'flag"
+      assert src =~ "*1"
+    end
+
     test "a typed tool call inside #() is inferred (no fail-open through short-fn)" do
       [export] =
         compile!("""
