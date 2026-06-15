@@ -911,6 +911,11 @@ defmodule PtcRunnerMcp.Sessions do
         "session" => %{"type" => "object"},
         "count" => %{"type" => "integer"},
         "sessions" => %{"type" => "array"},
+        "preludes" => %{
+          "type" => "array",
+          "description" =>
+            "Prompt-visible attached prelude namespaces with compact docs and discovery forms."
+        },
         "limits" => %{"type" => "object"},
         "memory" => %{"type" => "object"},
         "result" => %{"type" => "string"},

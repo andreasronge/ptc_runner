@@ -22,7 +22,7 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
       prompt-visible exports than the cap;
     * a discovery hint noting that additional `:discoverable` exports (omitted
       from the inventory by design) can be found through `doc`/`dir`/`apropos`/
-      `ns-publics`;
+      `ns-publics`, and that `source` renders an export's defining form;
     * a compact existing-ledger summary (`Tool calls made` / `Tool call
       errors`) when ledger data is supplied.
 
@@ -161,7 +161,8 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
 
   defp discovery_hint do
     ";; More prelude exports may be available than shown here. " <>
-      "Use (ns-publics 'ns), (dir 'ns), (doc 'ns/name), or (apropos \"...\") to discover them."
+      "Use (ns-publics 'ns), (dir 'ns), (doc 'ns/name), or (apropos \"...\") to discover them, " <>
+      "and (source 'ns/name) to read an export's defining form (incl. reachable private helpers)."
   end
 
   defp ledger_lines(nil), do: nil

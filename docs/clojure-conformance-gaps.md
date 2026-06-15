@@ -2489,9 +2489,18 @@ mine discovery output), so data-returning forms are the design goal. Only `doc`
 is a pure human-facing render with no useful structured form, so only `doc`
 prints.
 
-**Fix:** None — by design. Hosts that attach preludes with long docstrings tune
-the per-entry print cap via `:max_print_length` (default 2000) and align it with
-their envelope print budget.
+`source` (issue #1095) joins `doc` in the print-and-return-nil camp, matching
+`clojure.repl/source` on the success path — a rendered defining form has no
+useful structured shape and is multi-line, so it routes through the print
+channel. Two deliberate divergences from `clojure.repl/source`: (1) it is
+**prelude-only** in V1 — there is no builtin/core/upstream source, and (2) an
+unknown ref prints `"no source available"` and returns `nil` rather than
+raising, so it never falls through to a discovery backend (`doc`/`meta` do).
+
+**Fix:** None — by design. Hosts that attach preludes with long docstrings (or
+that want full-body `source` output) tune the per-entry print cap via
+`:max_print_length` (default 2000) and align it with their envelope print
+budget.
 
 ### GAP-S116: `clojure.string` helpers accept character arguments Clojure rejects
 

@@ -3188,6 +3188,7 @@ Programs have access to data and functions through **namespaced symbols** and **
 | `budget/` | Budget introspection | Query remaining budget (turns, tokens, depth) |
 | `tool/servers` | REPL discovery | List configured upstream servers (requires a discovery backend) |
 | `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery | Inspect local PTC-Lisp builtins, prelude exports, and configured upstream tools (when a discovery backend is configured) |
+| `source` | REPL discovery | Print an attached-prelude export's defining form (prelude-only; no upstream/builtin source) |
 | `*1`, `*2`, `*3` | Recent results | Previous turn results (for debugging) |
 
 ### 9.2 Persistent Values — User Namespace symbols
@@ -3375,11 +3376,19 @@ Programs can inspect executable PTC-Lisp capabilities through REPL-style discove
 | `dir` | `(dir ref)` / `(dir ref opts)` | List of members for a local namespace/curated Java class, or tools for one upstream server. `opts`: `:limit` (1..200, default 50) and `:offset` (≥ 0, default 0). |
 | `doc` | `(doc ref)` | Detailed documentation for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
 | `meta` | `(meta ref)` | Structured metadata for an executable local ref or MCP tool. Exact prelude-export refs win first, then known local refs; unknown refs fall through to MCP when available. |
+| `source` | `(source ref)` | Prints the rendered defining form of an attached-prelude ref and returns `nil` (`clojure.repl/source` style). **Prelude-only**, with no local/MCP fallthrough: an unknown ref prints `"no source available"` and returns `nil` (never raises, never hits a discovery backend). Covers public exports plus the private helpers transitively reachable from a public export. |
 | `ns-publics` | `(ns-publics ns)` | Map of public names to compact metadata for a prelude-export namespace or a local PTC/Clojure namespace. Java classes and MCP servers are not supported. |
 | `all-ns` | `(all-ns)` | Sorted list of curated Lisp-facing namespace-name strings plus any attached prelude namespaces. Never leaks BEAM internals, Java classes, or implementation-only namespaces. |
 | `ns-name` | `(ns-name ns)` | Namespace-name string for a known curated or prelude namespace. Accepts an unquoted symbol (`crm`), a quoted symbol (`'crm`), or a string (`"crm"`). |
 
-The ref-taking forms (`dir`, `doc`, `meta`, `ns-publics`, `ns-name`) are macro-like over their reference argument (`clojure.repl/doc` style): a bare symbol or namespaced symbol is auto-quoted, so `(doc paged/profile)` and `(dir clojure.string)` look the symbol up instead of evaluating it to a closure/builtin value first. Quoted symbols and string refs are equivalent. Use a string ref (e.g. `(doc (str "crm/" name))`) when the reference must be computed at runtime.
+The ref-taking forms (`dir`, `doc`, `meta`, `source`, `ns-publics`, `ns-name`) are macro-like over their reference argument (`clojure.repl/doc` style): a bare symbol or namespaced symbol is auto-quoted, so `(doc paged/profile)` and `(dir clojure.string)` look the symbol up instead of evaluating it to a closure/builtin value first. Quoted symbols and string refs are equivalent. Use a string ref (e.g. `(doc (str "crm/" name))`) when the reference must be computed at runtime.
+
+**`source` exposes implementation, not just contract.** `doc`/`meta` surface an export's signature and docstring; `source` renders its whole body. Two consequences for deployments:
+
+- A hardcoded threshold, path, or constant in a prelude body becomes visible to the model. Keep secrets and credentials out of prelude bodies, not just out of docstrings.
+- Same-namespace private (`defn-`) helpers that a public export reaches are addressable by `(source ns/helper)` even though they never appear in `doc`/`meta`/`ns-publics`/`apropos`. Only *reachable* privates are exposed — an unreferenced private stays hidden, so probing a guessed name is not an existence oracle.
+
+The rendered form is a *normalized* rendering: author structure is preserved (macros un-expanded) and metadata key order is preserved, but original comments and whitespace are not (the reader discards them). A leading `;;` header carries the resolved (effective) visibility/effect/arity ahead of the verbatim author form. Source flows through the print channel (capped per entry at `:max_print_length`, default 2000), so raise that cap to read very large exports.
 
 Discovery only reports executable PTC-Lisp capabilities. For Java-shaped compatibility aliases, discovery returns executable refs such as `Integer/parseInt`, `System/currentTimeMillis`, `Math/abs`, and `java.time.LocalDate/parse`; it does not advertise unsupported fully-qualified `java.lang.*` call forms.
 
@@ -3507,7 +3516,8 @@ metadata, then defines exports with `defn` (public) and `defn-` (private):
   {:visibility :prompt})
 
 (defn- normalize-id
-  "Private helper — not user-visible, not discoverable."
+  "Private helper — not callable by user code, absent from doc/meta/ns-publics
+  (but its source is readable via (source crm/normalize-id) since get-user reaches it)."
   [raw]
   (str "norm:" raw))
 
@@ -3520,9 +3530,12 @@ metadata, then defines exports with `defn` (public) and `defn-` (private):
 Public exports become resolvable namespaced calls (`(crm/get-user id)`) and
 appear in discovery (`(ns-publics 'crm)`, `(doc 'crm/get-user)`,
 `(meta 'crm/get-user)`). `defn-` helpers are captured privately: a public
-export may call them, but user code cannot resolve or discover them by
-qualified symbol. Export visibility is `:prompt` (in the prompt inventory and
-discoverable) or `:discoverable` (discovery-only).
+export may call them, but user code cannot **resolve** (call) them by qualified
+symbol, and they never appear in `doc`/`meta`/`ns-publics`/`apropos`. The one
+exception is `source`: a private helper transitively reachable from a public
+export is addressable by `(source crm/normalize-id)` (read-only — it renders the
+body, it does not make the helper callable). Export visibility is `:prompt` (in
+the prompt inventory and discoverable) or `:discoverable` (discovery-only).
 
 Prelude exports wrap the existing tool surfaces unchanged. A wrapper around
 `(tool/call ...)` is **recoverable-by-default**: it returns the same `:ok` /

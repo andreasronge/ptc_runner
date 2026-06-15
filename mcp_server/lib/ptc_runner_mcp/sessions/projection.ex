@@ -4,6 +4,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   """
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.SubAgent.Loop.TurnFeedback
   alias PtcRunner.SubAgent.Namespace.{ExecutionHistory, User}
   alias PtcRunnerMcp.Sessions.Config
@@ -21,6 +22,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
+    |> maybe_put("preludes", prelude_discovery(Config.runtime_prelude()))
   end
 
   @doc "Render a successful eval response."
@@ -94,6 +96,55 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
     execution
   end
+
+  defp prelude_discovery(nil), do: nil
+
+  defp prelude_discovery(%Prelude{} = prelude) do
+    prelude
+    |> Prelude.prompt_exports()
+    |> Enum.group_by(& &1.namespace)
+    |> Enum.sort_by(fn {namespace, _exports} -> namespace end)
+    |> Enum.map(fn {namespace, exports} ->
+      doc =
+        prelude.metadata
+        |> Map.get(:namespaces, %{})
+        |> Map.get(namespace, %{})
+        |> Map.get(:doc)
+
+      %{
+        "namespace" => namespace,
+        "doc" => compact_doc(doc),
+        "discover" => "(ns-publics '#{namespace})"
+      }
+      |> maybe_put("source", source_hint(namespace, exports))
+    end)
+    |> case do
+      [] -> nil
+      namespaces -> namespaces
+    end
+  end
+
+  # A representative `(source ns/sym)` hint for the namespace, pointing at its
+  # first prompt export (sorted for determinism). It is only a hint — the model
+  # uses `ns-publics` for the full list and `(source ns/name)` on any ref it
+  # reads. Omitted if the namespace somehow has no prompt export.
+  defp source_hint(namespace, exports) do
+    case exports |> Enum.map(& &1.symbol) |> Enum.sort() do
+      [symbol | _] -> "(source #{namespace}/#{symbol})"
+      [] -> nil
+    end
+  end
+
+  defp compact_doc(nil), do: nil
+
+  defp compact_doc(doc) when is_binary(doc) do
+    doc
+    |> String.split()
+    |> Enum.join(" ")
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # The collection hint (opt-in via --collection-hint) is more specific than
   # the generic truncation hint, so it replaces it when both would apply.

@@ -85,6 +85,10 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
       assert context_prompt =~ "(get-user id)"
       assert context_prompt =~ "Return a CRM user by id."
 
+      # The discovery hint advertises `source` for inspecting defining forms
+      # (issue #1095); absent when no runtime_prelude is attached (next test).
+      assert context_prompt =~ "(source 'ns/name)"
+
       # Inserted AFTER the data/ and tools sections.
       data_idx = index_of(context_prompt, "=== data/ ===")
       prelude_idx = index_of(context_prompt, "=== prelude capabilities ===")

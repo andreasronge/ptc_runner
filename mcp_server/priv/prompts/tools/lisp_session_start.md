@@ -9,5 +9,5 @@
 <!-- mcp-profiles: mcp_session_start_description -->
 
 <!-- PTC_PROMPT_START -->
-Creates a new empty stateful PTC-Lisp session. Use the returned `session_id` with `lisp_session_eval`.
+Creates a new empty stateful PTC-Lisp session. Use the returned `session_id` with `lisp_session_eval`. If attached prompt-visible preludes exist, the response includes compact namespace docs and discovery forms.
 <!-- PTC_PROMPT_END -->

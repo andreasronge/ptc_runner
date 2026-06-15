@@ -51,6 +51,53 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   end
 
   describe "full lifecycle via Tools.call" do
+    test "start response lists prompt-visible prelude namespaces with discovery forms" do
+      Config.set(
+        Map.put(Config.get(), :prelude_source, """
+        (ns smoke
+          "Smoke helpers with extra whitespace."
+          {:visibility :prompt})
+
+        (defn plus-one "Increment a number." [x] (+ x 1))
+
+        (ns hidden
+          "Hidden helpers."
+          {:visibility :discoverable})
+
+        (defn secret [] 42)
+        """)
+      )
+
+      start = call("lisp_session_start", %{})
+
+      assert start["isError"] == false
+      assert start["structuredContent"]["status"] == "ok"
+
+      assert start["structuredContent"]["preludes"] == [
+               %{
+                 "namespace" => "smoke",
+                 "doc" => "Smoke helpers with extra whitespace.",
+                 "discover" => "(ns-publics 'smoke)",
+                 "source" => "(source smoke/plus-one)"
+               }
+             ]
+    end
+
+    test "start response omits preludes when no prompt-visible exports exist" do
+      Config.set(
+        Map.put(Config.get(), :prelude_source, """
+        (ns hidden "Hidden helpers." {:visibility :discoverable})
+        (defn secret [] 42)
+        """)
+      )
+
+      start = call("lisp_session_start", %{})
+
+      assert start["isError"] == false
+      assert start["structuredContent"]["status"] == "ok"
+      refute Map.has_key?(start["structuredContent"], "preludes")
+    end
+
     test "configured prelude is attached to session evals" do
       Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
       sid = SoakHelpers.start_session()

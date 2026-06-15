@@ -186,6 +186,14 @@ and attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task`
 run. This is the recommended way to run a verified analysis prelude in
 Codex/Claude Code: start a fresh MCP server process with the prelude attached,
 record the run with `--turn-log-dir`, and analyze those logs in a later session.
+When a stateful session starts, `lisp_session_start` returns a compact
+`preludes` list for namespaces that contain prompt-visible exports. Each entry
+includes the namespace docstring, a discovery form such as `(ns-publics 'paged)`,
+and a representative `source` hint such as `(source paged/profile)`;
+discoverable-only exports remain available through `(all-ns)`, `(ns-publics ...)`,
+`(doc ...)`, and `(apropos ...)`. `(source ns/name)` prints an export's defining
+form (prelude-only) to help repair incorrect usage when the docstring is not
+enough.
 
 Ask the agent, or use the REPL, to smoke-test discovery and one call:
 

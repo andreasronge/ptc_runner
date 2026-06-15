@@ -129,6 +129,8 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
       refute out =~ "List CRM users."
       # But the inventory hints that more is discoverable via ns-publics/doc.
       assert out =~ "ns-publics"
+      # ...and that `source` renders an export's defining form (issue #1095).
+      assert out =~ "(source 'ns/name)"
     end
 
     test "the private helper never appears", %{prelude: prelude} do

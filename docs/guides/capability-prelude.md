@@ -261,11 +261,17 @@ tools. Namespace refs accept a quoted symbol (`'crm`) or a string (`"crm"`):
 (dir 'crm)               ; member lines (honors {:limit :offset})
 (doc 'crm/get-user)      ; docstring
 (meta 'crm/get-user)     ; structured metadata (arity, effect, provider, ...)
+(source 'crm/get-user)   ; prints the rendered defining form, returns nil
 (apropos "user")         ; fuzzy search across prelude + local + MCP
 ```
 
 Exact prelude-export refs resolve through the prelude first; private helpers
-have no export record and never appear.
+have no export record, so they never appear in `doc`/`meta`/`ns-publics`/
+`apropos` and are not callable by qualified symbol. The one exception is
+`source`: a private helper a public export reaches is readable via
+`(source 'crm/<helper>)` (read-only — it shows the body, it does not make the
+helper callable). `source` is prelude-only: an unknown ref prints
+`"no source available"` and returns `nil`.
 
 ---
 

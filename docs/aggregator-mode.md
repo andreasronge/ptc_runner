@@ -361,6 +361,12 @@ Configured upstream servers:
   Use them to choose a tool, not to infer schemas.
 - **`doc`**: shows args, required args, the call form, and the
   Clojure-ish `Result<...>` payload shape.
+- **`source`** (attached preludes only): prints an export's rendered
+  defining form and returns `nil`. Prelude-scoped — there is no upstream
+  or builtin source — so an unknown ref prints `"no source available"`
+  and never falls through to the catalog. Use it to repair incorrect
+  prelude usage when `doc` is not enough; it also reaches the private
+  helpers a public export calls.
 - **Args in `doc`**: `:name type` for required, `:name type?` for
   optional. The optional `?` is the LLM's signal to omit the arg or pass
   `nil`.
