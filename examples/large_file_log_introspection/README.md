@@ -7,6 +7,21 @@ large-file MCP server instead of host-bound Elixir tools.
 The upstream server is expected to be named `logs` and provide the
 `read_large_file_chunk` tool from `@willianpinho/large-file-mcp`.
 
+## Backend Specificity
+
+This is a backend-specific adapter prelude, not a generic MCP file-server
+integration. It is written for `@willianpinho/large-file-mcp` and depends on
+that server's `read_large_file_chunk` tool name, arguments (`filePath`,
+`chunkIndex`, `linesPerChunk`), and result shape (`content`, `startLine`,
+`totalChunks`, and related metadata).
+
+`ptc_runner` does not depend on this MCP server and does not treat its API as a
+core contract. Other MCP file servers should provide their own adapter prelude
+that exposes the same user-facing `log/` functions while translating private
+page reads to that server's tool schema. Promote this into core only after
+defining a small generic page-source contract, not by baking this server into
+`PtcRunner.TraceLog.Introspection`.
+
 Example upstream config:
 
 ```json
@@ -121,5 +136,7 @@ them through the large-file MCP upstream, and compares the resulting `log/`
 projections against `PtcRunner.TraceLog.Introspection.tools/1` over the same
 events. If the directory is missing, the test skips the local-corpus assertions.
 
-This is intentionally a prelude-only experiment. If this shape proves useful,
-`ptc_runner` can later generate the same prelude from Elixir options.
+This is intentionally a backend-specific prelude-only experiment. If this shape
+proves useful, a future core helper should first define a generic page-source
+contract or generate backend-specific adapter preludes outside the core
+`Introspection` API.

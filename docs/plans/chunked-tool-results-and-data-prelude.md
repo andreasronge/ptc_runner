@@ -4,10 +4,11 @@
 core blocker is shipped: in-eval tool-call ledger compaction landed in
 `209b4bdf`, with large paged-result coverage in `bd7dba65`. A concrete
 large-file MCP smoke path also exists through
-`examples/large_file_log_introspection/` and e2e tests. What remains is the
-general `data/` prelude, page-source conventions as a reusable API, M2 A/B
-measurement, and a rooted/chunk-capable file source suitable for benchmark
-integrity.
+`examples/large_file_log_introspection/` and e2e tests. That smoke path is a
+backend-specific adapter for one third-party MCP server, not a core dependency.
+What remains is the general `data/` prelude, page-source conventions as a
+reusable API, M2 A/B measurement, and a rooted/chunk-capable file source
+suitable for benchmark integrity.
 
 ## Context
 
@@ -125,12 +126,13 @@ The one gap for the M2 benchmark: the default filesystem MCP server
 offset** — it cannot forward-page. So M2 needs **one** chunk-capable line-read
 tool that returns a bounded page per call (offset/limit, or a chunk-index +
 lines-per-chunk equivalent). `@willianpinho/large-file-mcp` provides this
-shape through `read_large_file_chunk` (`filePath`, `chunkIndex`,
+shape through its own `read_large_file_chunk` schema (`filePath`, `chunkIndex`,
 `linesPerChunk`) plus file search/navigation helpers. The repo now has an e2e
 smoke path using that server for turn-log introspection, confirming the
 paginated-read + Lisp-fold design works end to end. It is a bounded upstream
 tool, not host infrastructure, and authority stays behind the normal tool
-grant.
+grant. Core code should depend on the generic page-source shape, not this
+server's exact MCP API.
 
 **Hard integrity requirement: the read tool must be rooted to the corpus.**
 `large-file-mcp` takes absolute paths and the probe read outside the corpus,
@@ -143,8 +145,8 @@ The chosen tool must confine reads to the corpus directory (like
 [`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md)'s
 P3b is the narrow proving lane for this architecture. It keeps the existing
 semantic `log/` API and swaps only the backend: instead of the host-bound
-`TraceLog.Introspection.tools/1` backend, an example prelude reads turn-log
-JSONL pages through `@willianpinho/large-file-mcp` and projects
+`TraceLog.Introspection.tools/1` backend, a backend-specific example prelude
+reads turn-log JSONL pages through `@willianpinho/large-file-mcp` and projects
 `log/sessions`, `log/programs`, and `log/tool-calls` in PTC-Lisp.
 
 This plan is the generalization: a reusable `data/` prelude over paginated
@@ -387,8 +389,9 @@ rediscover the page-fold pattern from recorded runs.
 
 1. **Chunk-capable read-lines tool.** Use an existing chunked-read MCP server
    (offset/limit or chunk-index + lines-per-chunk). The e2e smoke uses
-   `@willianpinho/large-file-mcp`, but the benchmark source must be rooted to
-   the corpus or wrapped/sandboxed before M2. Note the page envelope may be
+   `@willianpinho/large-file-mcp` as one backend-specific probe, but the
+   benchmark source must be rooted to the corpus or wrapped/sandboxed before
+   M2. Note the page envelope may be
    double-wrapped (MCP text block holding a JSON string whose field holds the
    `\n`-joined lines), so the prelude's row extraction is: unwrap →
    `json/parse-string` → take the lines field → `json/parse-lines`.

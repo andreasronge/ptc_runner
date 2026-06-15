@@ -368,27 +368,30 @@ uses `TraceLog.Analyzer` directly and can serve exact turn-log projections
 cheaply.
 
 P3b adds an alternate backend for the same `log/` API: a configured upstream
-file reader, initially a real third-party large-file MCP server
-(`@willianpinho/large-file-mcp`) reached through the existing `mcp_stdio` /
-`mcp_http` upstream runtime. The example prelude in
+file reader reached through the existing `mcp_stdio` / `mcp_http` upstream
+runtime. The current proof uses a real third-party large-file MCP server
+(`@willianpinho/large-file-mcp`) as one backend-specific adapter, not as a
+generic MCP file-server contract. The example prelude in
 `examples/large_file_log_introspection/` reads turn-log JSONL files via
 `tool/call`, parses pages with `json/parse-lines`, and projects the same
 fields as the host-bound backend. This validates that recorded sessions can be
 analyzed as ordinary upstream data and gives disk/remote logs a portable path
-without adding a special `turn_log` transport.
+without adding a special `turn_log` transport or making `ptc_runner` depend on
+that server's tool schema.
 
 **Change.**
 
-- A file-backed example prelude exists. Next, optionally add a generated source
-  function such as `TraceLog.Introspection.large_file_prelude_source/1`. Both
-  should emit the same `log/` exports but back them with
-  `(tool/call {:server "<logs>" ...})`. Required options should be explicit:
+- A file-backed example prelude exists, but it is backend-specific to
+  `@willianpinho/large-file-mcp`. Do not promote that exact server/tool schema
+  into `PtcRunner.TraceLog.Introspection`. If generation becomes useful, first
+  define a small generic page-source contract, or keep generated sources as
+  backend-specific adapter examples. Required options should be explicit:
   upstream server name, one or more JSONL paths, and page/chunk bounds. Do not
   make `mix ptc.repl` or MCP guess a default `./turn-log` directory.
 - Keep the implementation read-only and path-scoped. Directory
-  enumeration can wait: `large-file-mcp` reads/searches known files but does not
-  provide a directory listing surface, so a caller or host config must pass the
-  file paths for v1.
+  enumeration can wait: the current example server reads/searches known files
+  but does not provide a directory listing surface, so a caller or host config
+  must pass the file paths for v1.
 - Preserve return-shape parity for the core projections (`sessions`, `turns`,
   `programs`, `tool-calls`) against the P3 backend. Where a large-file server
   returns overlapping chunks, normalize by line numbers before parsing so
@@ -689,32 +692,27 @@ P1-P3 so implementation does not rediscover settled boundaries.
 ### P3b implementation notes
 
 - Treat `PtcRunner.TraceLog.Introspection.prelude_source/0` as the public API
-  contract for names and return shapes, not as the only backend. Start with a
-  checked-in example prelude to prove the shape; if the config substitution
-  proves useful, add a second generated source function rather than changing the
-  existing host-bound prelude:
+  contract for names and return shapes, not as the only backend. Start with
+  checked-in backend-specific adapter preludes to prove the shape. Do not add
+  `TraceLog.Introspection.large_file_prelude_source/1` for
+  `@willianpinho/large-file-mcp` alone; a core generator is appropriate only
+  after a generic page-source contract exists. Until then, keep
+  backend-specific generation/examples outside the core host-bound
+  `Introspection` API.
 
-  ```elixir
-  PtcRunner.TraceLog.Introspection.large_file_prelude_source(
-    server: "logs",
-    paths: ["/abs/path/turns.jsonl"],
-    lines_per_page: 500
-  )
-  ```
-
-- The generated prelude can embed static config constants because Prelude V1 is
-  intentionally static. Keep paths host-supplied and absolute in tests; do not
-  let model-authored code discover arbitrary filesystem roots through this
-  helper.
+- Backend adapter preludes can embed static config constants because Prelude V1
+  is intentionally static. Keep paths host-supplied and absolute in tests; do
+  not let model-authored code discover arbitrary filesystem roots through these
+  adapters.
 - Use the existing upstream bridge only: `PtcRunner.Upstream.Runtime` already
   supports `mcp_stdio`/`mcp_http`, and `Upstream.Eval.run_lisp/3` already merges
   caller tools with the synthetic `"call"` tool and passes the selected runtime
   into prelude attach validation. Do not add a native `turn_log` upstream
   transport for P3b.
-- Literal calls inside the generated prelude infer
+- Literal calls inside a backend-specific adapter infer that backend's upstream
+  requirement. For the current example, that is
   `upstream:<server>/read_large_file_chunk`. This is desirable: attach should
-  fail closed when the configured large-file upstream does not expose the
-  expected tool.
+  fail closed when the configured upstream does not expose the expected tool.
 - Factor projection helpers only where they are genuinely shared. Host-bound
   `Introspection.project_turn/1` runs in Elixir over already-decoded events;
   the large-file backend will initially project in PTC-Lisp over parsed JSONL.
