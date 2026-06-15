@@ -333,6 +333,15 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
                "no source available for crm/ghost"
     end
 
+    test "a shadowed for/doseq is treated as a call, keeping a referenced private reachable" do
+      # Codex P2 (2nd round): when a local binds `for`, `(for [helper []])` is an
+      # ordinary call to that local — `helper` is a real same-namespace ref, not
+      # a loop binding — so the private `helper` must stay source-addressable.
+      {:ok, prelude} = Compiler.compile(shadowed_for_source())
+
+      assert run_source("(source 'crm/helper)", prelude) =~ "(defn- helper"
+    end
+
     test "renders a bare constant and a documented constant" do
       {:ok, prelude} = Compiler.compile(const_source())
 
@@ -457,6 +466,22 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
       "List ids."
       [xs]
       (doseq [ghost xs] (println ghost)))
+    """
+  end
+
+  defp shadowed_for_source do
+    # `run` binds a param named `for`, so `(for [helper []])` is a CALL to that
+    # local with `helper` as a value ref — not a comprehension. `helper` must
+    # therefore count as a reachable same-namespace reference.
+    """
+    (ns crm "CRM helpers." {:visibility :prompt})
+
+    (defn- helper "Referenced through a shadowed for-call." [x] (str x))
+
+    (defn run
+      "Apply the supplied fn to a one-element vector."
+      [for]
+      (for [helper []]))
     """
   end
 

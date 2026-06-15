@@ -736,11 +736,23 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # unmodeled loop var would forge a false same-namespace call edge (inflating
   # requires/tool_refs) AND, in the `source` index, mark an unreferenced private
   # reachable — defeating the reachable-only privacy guard (D4).
-  defp collect_refs({:list, [{:symbol, iter}, {:vector, bindings} | body]}, bound, acc)
+  #
+  # But `for`/`doseq` are shadowable (analyzer @shadowable_forms): if a local
+  # binds the name, `(for [...])` is an ordinary call to that local, and its
+  # first arg is a real value, NOT a comprehension binding vector. Parsing it as
+  # bindings there would DROP same-namespace refs (a tool-guard hole). So when
+  # shadowed, fall through to the plain call walk. (The sibling fn/let/loop/defn
+  # clauses share this same pre-existing limitation under shadowing.)
+  defp collect_refs({:list, [{:symbol, iter}, {:vector, bindings} | body]} = form, bound, acc)
        when iter in [:for, "for", :doseq, "doseq"] do
-    {names, acc2} = collect_for_bindings(bindings, bound, acc)
-    inner = bound ++ names
-    Enum.reduce(body, acc2, &collect_refs(&1, inner, &2))
+    if to_string(iter) in bound do
+      {:list, items} = form
+      Enum.reduce(items, acc, &collect_refs(&1, bound, &2))
+    else
+      {names, acc2} = collect_for_bindings(bindings, bound, acc)
+      inner = bound ++ names
+      Enum.reduce(body, acc2, &collect_refs(&1, inner, &2))
+    end
   end
 
   # Non-executed forms (`(comment ...)`, `(quote ...)`) introduce no real calls.
