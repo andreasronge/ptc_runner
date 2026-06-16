@@ -1,5 +1,13 @@
 (ns paged
-  "Bounded analysis helpers over paginated upstream sources."
+  "Bounded analysis helpers over paginated upstream sources.
+
+  Workflow:
+    1. (paged/inspect source {:sample 5}) to discover exact row field names.
+    2. (paged/profile source opts) for one-pass row_count, field presence,
+       string counts, and composite-key collisions.
+
+  Source maps use :server, :tool, :args, and nested :page keys. See
+  (doc paged/profile) for the full source and opts shape."
   {:visibility :prompt})
 
 (def default-limit 1000)
@@ -9,6 +17,14 @@
 (defn- opt
   [m k fallback]
   (or (get m k) (get m (name k)) fallback))
+
+(defn- option-name
+  [value]
+  (if (keyword? value) (name value) value))
+
+(defn- option=
+  [actual expected]
+  (= (option-name actual) (option-name expected)))
 
 (defn- page-spec
   [source]
@@ -105,7 +121,7 @@
 
 (defn- get-path
   [m path]
-  (reduce (fn [acc k] (if acc (get acc k) nil)) m path))
+  (get-in m path))
 
 (defn- unwrap!
   [r]
@@ -118,7 +134,7 @@
   (let [mode (page-mode source)
         limit (source-limit source)
         args (source-args source)
-        paged-args (if (= mode :token)
+        paged-args (if (option= mode :token)
                      (if pos
                        (assoc args (limit-arg source) limit (token-arg source) pos)
                        (assoc args (limit-arg source) limit))
@@ -133,14 +149,14 @@
 
 (defn- parse-rows
   [source rows]
-  (if (= (parse-mode source) :jsonl)
+  (if (option= (parse-mode source) :jsonl)
     (json/parse-lines rows)
     rows))
 
 (defn- page-rows
   [source page pos]
   (let [rows (parse-rows source (or (get-path page (rows-at source)) []))]
-    (if (= (page-mode source) :chunk-index)
+    (if (option= (page-mode source) :chunk-index)
       (let [start-line (get-path page (start-line-at source))
             target-line (+ 1 (* pos (source-limit source)))
             drop-count (max 0 (- target-line (or start-line target-line)))]
@@ -151,16 +167,16 @@
   [source page pos row-count]
   (let [mode (page-mode source)]
     (cond
-      (= mode :token) (get-path page (token-at source))
-      (= mode :chunk-index) (+ pos 1)
+      (option= mode :token) (get-path page (token-at source))
+      (option= mode :chunk-index) (+ pos 1)
       :else (+ pos row-count))))
 
 (defn- done?
   [source page rows next]
   (let [mode (page-mode source)]
     (cond
-      (= mode :token) (not next)
-      (= mode :chunk-index) (>= next (or (get-path page (total-pages-at source)) next))
+      (option= mode :token) (not next)
+      (option= mode :chunk-index) (>= next (or (get-path page (total-pages-at source)) next))
       :else (< (count rows) (source-limit source)))))
 
 (defn- too-many-entries!
@@ -194,7 +210,7 @@
   "Fold rows from a paginated source without materializing the full input."
   [source init step]
   (let [source (validate-source! source)]
-    (loop [pos (if (= (page-mode source) :token) nil 0)
+    (loop [pos (if (option= (page-mode source) :token) nil 0)
          pages 0
          acc init]
       (if (>= pages (source-max-pages source))
@@ -212,7 +228,7 @@
   [source n]
   (let [source (validate-source! source)
         limit (max 0 n)]
-    (loop [pos (if (= (page-mode source) :token) nil 0)
+    (loop [pos (if (option= (page-mode source) :token) nil 0)
            pages 0
            acc []]
       (if (>= (count acc) limit)
@@ -226,6 +242,15 @@
             (if (or (>= (count acc2) limit) (done? source page rows next))
               acc2
               (recur next (+ pages 1) acc2))))))))
+
+(defn inspect
+  "Inspect before profiling: return sample rows and describe summary so exact row field names can be chosen for :presence-fields, :string-fields, and :collision-fields."
+  [source opts]
+  (let [opts-map (or opts {})
+        sample-size (max 0 (or (get opts-map :sample) (get opts-map "sample") 5))
+        rows (sample source sample-size)]
+    {"sample" rows
+     "description" (describe rows)}))
 
 (defn- present?
   [value]
@@ -345,21 +370,55 @@
             (inc-count (get acc "key_counts") (json/generate-string (key-for-loop row collision-fields))))]
     (too-many-entries! source key-counts)
     {"sample" (if (< (count sample) sample-size) (conj sample row) sample)
+     "row_count" (+ 1 (or (get acc "row_count") 0))
      "presence" presence
      "string_counts" string-counts
      "key_counts" key-counts
      "collision_count" (+ (get acc "collision_count") (if (= prior-key-count 1) 1 0))}))
 
 (defn profile
-  "Compute sample, field presence, string-type counts, and one exact composite-key collision count in one pass."
+  "Profile exact row field names in one pass.
+
+  Use (paged/inspect source {:sample 5}) first when field names are unknown.
+
+  Returns:
+    {\"sample\" up to :sample rows
+     \"row_count\" total rows processed
+     \"presence\" field -> {\"present\" n \"missing\" n}
+     \"string_counts\" field -> rows where that field value is a string
+     \"collision_count\" composite keys with at least one duplicate row}
+
+  Source shape, with keyword or string keys accepted:
+    {:server \"pages\"
+     :tool \"read_large_file_chunk\"
+     :args {:filePath \"/data/trips.jsonl\"}
+     :page {:mode :chunk-index
+            :limit 500
+            :offset-arg :chunkIndex
+            :limit-arg :linesPerChunk
+            :rows-at [:value \"content\"]
+            :parse :jsonl
+            :total-pages-at [:value \"totalChunks\"]
+            :start-line-at [:value \"startLine\"]
+            :max-pages 20
+            :max-entries 10000}}
+
+  Opts shape:
+    {:sample 3
+     :presence-fields [\"end_station_id\"]
+     :string-fields [\"duration_min\"]
+     :collision-fields [\"bike_id\" \"start_time\"]}
+
+  Use \"row_count\" as line_count when each parsed row is one input line."
   [source opts]
   (let [opts-map (profile-opts opts)
         folded
           (fold-pages
             source
-            {"sample" [] "presence" {} "string_counts" {} "key_counts" {} "collision_count" 0}
+            {"sample" [] "row_count" 0 "presence" {} "string_counts" {} "key_counts" {} "collision_count" 0}
             (fn [acc row] (add-profile-row source opts-map acc row)))]
     {"sample" (get folded "sample")
+     "row_count" (get folded "row_count")
      "presence" (get folded "presence")
      "string_counts" (get folded "string_counts")
      "collision_count" (get folded "collision_count")}))

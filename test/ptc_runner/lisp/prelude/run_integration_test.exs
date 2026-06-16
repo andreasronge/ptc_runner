@@ -418,6 +418,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
                {:__ptc_return__,
                 %{
                   "sample" => Enum.take(rows, 3),
+                  "row_count" => 5,
                   "presence" => %{
                     "end_station_id" => %{"missing" => 2, "present" => 3}
                   },
@@ -427,6 +428,126 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
 
       calls = Agent.get(agent, &Enum.reverse/1)
       assert Enum.map(calls, &get_in(&1, ["args", "offset"])) == [0, 2, 4]
+    end
+
+    test "inspect describes a bounded sample so callers can choose profile fields", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{
+          "trip_id" => "t1",
+          "bike_id" => "b1",
+          "start_time" => "2026-04-01T10:00:00",
+          "duration_min" => 10.0,
+          "end_station_id" => "s1"
+        },
+        %{
+          "trip_id" => "t2",
+          "bike_id" => "b2",
+          "start_time" => "2026-04-01T11:00:00",
+          "duration_min" => "11.0"
+        },
+        %{
+          "trip_id" => "t3",
+          "bike_id" => "b3",
+          "start_time" => "2026-04-01T12:00:00",
+          "duration_min" => 12.0,
+          "end_station_id" => ""
+        }
+      ]
+
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page {:mode :offset
+                :limit 2
+                :offset-arg :offset
+                :limit-arg :limit
+                :rows-at [:value "rows"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return (paged/inspect source {:sample 2}))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: paged_stub_tools(agent, rows))
+
+      assert {:__ptc_return__, result} = step.return
+      assert result["sample"] == Enum.take(rows, 2)
+
+      description = result["description"]
+      encoded = inspect(description)
+
+      assert encoded =~ "duration_min"
+      assert encoded =~ "end_station_id"
+      assert encoded =~ "string"
+    end
+
+    test "missing string path segments that are invalid keyword names return empty rows", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page {:mode :offset
+                :limit 2
+                :offset-arg :offset
+                :limit-arg :limit
+                :rows-at [:value "@odata.nextLink"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return (paged/sample source 2))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: paged_stub_tools(agent, []))
+
+      assert step.return == {:__ptc_return__, []}
+    end
+
+    test "profile counts each colliding composite key once", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{"bike_id" => "b1", "start_time" => "2026-04-01T10:00:00"},
+        %{"bike_id" => "b1", "start_time" => "2026-04-01T10:00:00"},
+        %{"bike_id" => "b1", "start_time" => "2026-04-01T10:00:00"}
+      ]
+
+      program = """
+      (def source
+        {:server "fixture"
+         :tool "read_rows"
+         :args {}
+         :page {:mode :offset
+                :limit 2
+                :offset-arg :offset
+                :limit-arg :limit
+                :rows-at [:value "rows"]
+                :max-pages 10
+                :max-entries 20}})
+
+      (return
+        (paged/profile
+          source
+          {:collision-fields ["bike_id" "start_time"]}))
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program, prelude: prelude, tools: paged_stub_tools(agent, rows))
+
+      assert {:__ptc_return__, result} = step.return
+      assert result["row_count"] == 3
+      assert result["collision_count"] == 1
     end
 
     test "rejects page options flattened onto the source map", %{
@@ -517,6 +638,80 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       assert Enum.map(calls, &get_in(&1, ["args", "chunkIndex"])) == [0, 1, 2]
       assert Enum.all?(calls, &(get_in(&1, ["args", "linesPerChunk"]) == 2))
     end
+
+    test "profiles jsonl chunk pages with string source config from MCP boundaries", %{
+      prelude: prelude,
+      agent: agent
+    } do
+      rows = [
+        %{
+          "trip_id" => "t1",
+          "bike_id" => "b1",
+          "start_time" => "2026-04-01T10:00:00",
+          "duration_min" => 10.0
+        },
+        %{
+          "trip_id" => "t2",
+          "bike_id" => "b1",
+          "start_time" => "2026-04-01T10:00:00",
+          "duration_min" => "11.0",
+          "end_station_id" => "s2"
+        },
+        %{
+          "trip_id" => "t3",
+          "bike_id" => "b2",
+          "start_time" => "2026-04-01T11:00:00",
+          "duration_min" => "12.0"
+        }
+      ]
+
+      program = """
+      (def source
+        {"server" "fixture"
+         "tool" "read_chunk"
+         "args" {}
+         "page" {"mode" "chunk-index"
+                 "limit" 2
+                 "offset-arg" "chunkIndex"
+                 "limit-arg" "linesPerChunk"
+                 "rows-at" ["value" "content"]
+                 "parse" "jsonl"
+                 "total-pages-at" ["value" "totalChunks"]
+                 "start-line-at" ["value" "startLine"]
+                 "max-pages" 10
+                 "max-entries" 20}})
+
+      (def inspection (paged/inspect source {:sample 2}))
+      (def profile
+        (paged/profile
+          source
+          {:sample 2
+           :presence-fields ["end_station_id"]
+           :string-fields ["duration_min"]
+           :collision-fields ["bike_id" "start_time"]}))
+
+      (return {"inspection" inspection "profile" profile})
+      """
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run(program,
+                 prelude: prelude,
+                 tools: jsonl_chunk_stub_tools(agent, rows)
+               )
+
+      assert {:__ptc_return__, result} = step.return
+      assert get_in(result, ["inspection", "sample"]) == Enum.take(rows, 2)
+
+      assert result["profile"] == %{
+               "sample" => Enum.take(rows, 2),
+               "row_count" => 3,
+               "presence" => %{
+                 "end_station_id" => %{"missing" => 2, "present" => 1}
+               },
+               "string_counts" => %{"duration_min" => 2},
+               "collision_count" => 1
+             }
+    end
   end
 
   defp paged_stub_tools(agent, rows) do
@@ -558,6 +753,32 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
             "chunkIndex" => chunk_index,
             "linesPerChunk" => lines_per_chunk,
             "startLine" => start_index + 1,
+            "totalChunks" => ceil(length(rows) / lines_per_chunk)
+          },
+          reason: nil
+        }
+      end
+    }
+  end
+
+  defp jsonl_chunk_stub_tools(agent, rows) do
+    %{
+      "call" => fn args ->
+        Agent.update(agent, fn calls -> [args | calls] end)
+
+        chunk_index = get_in(args, ["args", "chunkIndex"]) || 0
+        lines_per_chunk = get_in(args, ["args", "linesPerChunk"]) || 100
+
+        returned_rows =
+          rows |> Enum.drop(chunk_index * lines_per_chunk) |> Enum.take(lines_per_chunk)
+
+        %{
+          ok: true,
+          value: %{
+            "content" => Enum.map_join(returned_rows, "\n", &Jason.encode!/1),
+            "chunkIndex" => chunk_index,
+            "linesPerChunk" => lines_per_chunk,
+            "startLine" => chunk_index * lines_per_chunk + 1,
             "totalChunks" => ceil(length(rows) / lines_per_chunk)
           },
           reason: nil

@@ -84,6 +84,7 @@ The diagnostic uses a recoverable PTC-Lisp fail signal:
 ```clojure
 (paged/fold-pages source init step-fn)
 (paged/sample source n)
+(paged/inspect source opts)
 (paged/field-presence source)
 (paged/group-count source fields)
 (paged/key-collisions source fields)
@@ -94,12 +95,37 @@ The diagnostic uses a recoverable PTC-Lisp fail signal:
 domain-blind analysis primitives intended for smoke testing the next `data/`
 prelude shape. Prefer `paged/profile` when several summaries are needed from
 the same source: it fuses sampling, selected field-presence counts,
-string-field counts, and one exact composite-key collision count into one page
-scan.
+string-field counts, total row count, and one exact count of composite keys
+with collisions into one page scan.
+
+Use `paged/inspect` first when the exact row field names are not already known.
+It reads a bounded sample and runs the built-in `describe` over that sample, so
+the caller can choose exact field names before profiling:
+
+```clojure
+(paged/inspect trips {:sample 5})
+```
+
+Then pass those exact field names to `paged/profile`:
 
 Example:
 
 ```clojure
+(def trips
+  {:server "pages"
+   :tool "read_large_file_chunk"
+   :args {:filePath "/data/trips.jsonl"}
+   :page {:mode :chunk-index
+          :limit 500
+          :offset-arg :chunkIndex
+          :limit-arg :linesPerChunk
+          :rows-at [:value "content"]
+          :parse :jsonl
+          :total-pages-at [:value "totalChunks"]
+          :start-line-at [:value "startLine"]
+          :max-pages 20
+          :max-entries 10000}})
+
 (paged/profile
   trips
   {:sample 3
@@ -107,6 +133,9 @@ Example:
    :string-fields ["duration_min"]
    :collision-fields ["bike_id" "start_time"]})
 ```
+
+`paged/profile` returns `row_count`; use it as `line_count` for JSONL sources
+where each parsed row is one input line.
 
 ## Bounds
 
