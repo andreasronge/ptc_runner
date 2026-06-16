@@ -66,10 +66,14 @@ defmodule PtcRunner.Tool do
   - `cache` - Enable result caching by `{tool_name, args}` (default: `false`)
   - `expose` - Exposure layer for combined text/PTC mode: `:native | :ptc_lisp | :both`
     (default: `nil`, resolved per-mode by `PtcRunner.SubAgent.Exposure`)
-  - `native_result` - Native preview metadata (keyword list or `nil`).
-    Only valid when `expose: :both` AND `cache: true`. See
-    `PtcRunner.SubAgent.Validator` for the validation contract and
-    `PtcRunner.SubAgent.Exposure` for resolution semantics.
+   - `native_result` - Native preview metadata (keyword list or `nil`).
+     Only valid when `expose: :both` AND `cache: true`. See
+     `PtcRunner.SubAgent.Validator` for the validation contract and
+     `PtcRunner.SubAgent.Exposure` for resolution semantics.
+   - `visibility` - Tool visibility, `:public` or `:private` (default:
+     `:public`). Private tools are hidden from LLM-facing discovery and may
+     only be called by an active prelude export that declared the tool in its
+     inferred `tool_refs`.
 
   ## Result Caching
 
@@ -123,6 +127,7 @@ defmodule PtcRunner.Tool do
           | {(map() -> term()), String.t()}
           | {(map() -> term()), keyword()}
           | {(map() -> term()), :skip}
+          | t()
 
   @type expose_layer :: :native | :ptc_lisp | :both
 
@@ -134,7 +139,8 @@ defmodule PtcRunner.Tool do
           type: :native | :llm | :subagent,
           cache: boolean(),
           expose: expose_layer() | nil,
-          native_result: keyword() | nil
+          native_result: keyword() | nil,
+          visibility: :public | :private
         }
 
   defstruct [
@@ -145,6 +151,7 @@ defmodule PtcRunner.Tool do
     :type,
     :expose,
     :native_result,
+    visibility: :public,
     cache: false
   ]
 
@@ -201,7 +208,21 @@ defmodule PtcRunner.Tool do
     end
   end
 
+  @doc "Whether a normalized tool is private to host/prelude authority."
+  @spec private?(t()) :: boolean()
+  def private?(%__MODULE__{visibility: :private}), do: true
+  def private?(%__MODULE__{}), do: false
+
   # Normalize different input formats
+  defp normalize_format(_name, %__MODULE__{visibility: visibility})
+       when visibility not in [:public, :private] do
+    {:error, {:invalid_visibility, visibility}}
+  end
+
+  defp normalize_format(name, %__MODULE__{} = tool) do
+    {:ok, %{tool | name: tool.name || name}}
+  end
+
   defp normalize_format(name, function) when is_function(function) do
     # Bare function - try to extract @doc and @spec
     {signature, description} = extract_metadata(function)
@@ -252,18 +273,24 @@ defmodule PtcRunner.Tool do
     # current agent mode; missing here means "use mode default."
     expose = Keyword.get(options, :expose)
     native_result = Keyword.get(options, :native_result)
+    visibility = Keyword.get(options, :visibility, :public)
 
-    {:ok,
-     %__MODULE__{
-       name: name,
-       function: function,
-       signature: signature,
-       description: description,
-       type: :native,
-       cache: cache,
-       expose: expose,
-       native_result: native_result
-     }}
+    if visibility in [:public, :private] do
+      {:ok,
+       %__MODULE__{
+         name: name,
+         function: function,
+         signature: signature,
+         description: description,
+         type: :native,
+         cache: cache,
+         expose: expose,
+         native_result: native_result,
+         visibility: visibility
+       }}
+    else
+      {:error, {:invalid_visibility, visibility}}
+    end
   end
 
   defp normalize_format(name, %PtcRunner.SubAgent.LLMTool{} = tool) do

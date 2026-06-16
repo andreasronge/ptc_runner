@@ -675,8 +675,11 @@ defmodule PtcRunner.SubAgent do
     # Tool schemas - extract from resolved tools
     tool_schemas =
       resolved_tools
-      |> Enum.map(fn {name, format} ->
+      |> Enum.flat_map(fn {name, format} ->
         case PtcRunner.Tool.new(name, format) do
+          {:ok, %PtcRunner.Tool{visibility: :private}} ->
+            []
+
           {:ok, tool} ->
             schema = %{name: tool.name}
 
@@ -688,11 +691,14 @@ defmodule PtcRunner.SubAgent do
                 do: Map.put(schema, :description, tool.description),
                 else: schema
 
-            schema
+            [schema]
+
+          {:error, {:invalid_visibility, _}} ->
+            []
 
           {:error, _} ->
             # Fallback for tools that fail normalization
-            %{name: name}
+            [%{name: name}]
         end
       end)
 

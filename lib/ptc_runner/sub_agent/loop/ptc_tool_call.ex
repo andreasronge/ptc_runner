@@ -243,7 +243,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       end
 
     tools = BuiltinTools.effective_tools(agent)
-    normalized_tools = ToolNormalizer.normalize(tools, state, agent)
+    normalized_tools = ToolNormalizer.normalize(tools, state, agent, include_private: true)
 
     lisp_opts = build_lisp_opts(agent, state, exec_context, normalized_tools)
 

@@ -39,7 +39,8 @@ defmodule PtcRunner.Lisp.Eval do
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
   @type env :: %{atom() => term()}
-  @type tool_executor :: (String.t(), map() -> term())
+  @type tool_executor ::
+          (String.t(), map() -> term()) | (String.t(), map(), map() | nil -> term())
 
   @type value ::
           nil
@@ -75,6 +76,7 @@ defmodule PtcRunner.Lisp.Eval do
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           {:ok, value(), EvalContext.t()} | {:error, runtime_error()}
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
+    tool_executor = normalize_tool_executor(tool_executor)
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
     try do
@@ -83,6 +85,13 @@ defmodule PtcRunner.Lisp.Eval do
       {:return_signal, value, ctx} -> {:ok, {:return_signal, value}, ctx}
       {:fail_signal, value, ctx} -> {:ok, {:fail_signal, value}, ctx}
     end
+  end
+
+  defp normalize_tool_executor(tool_executor) when is_function(tool_executor, 3),
+    do: tool_executor
+
+  defp normalize_tool_executor(tool_executor) when is_function(tool_executor, 2) do
+    fn name, args, _origin -> tool_executor.(name, args) end
   end
 
   # ============================================================
@@ -223,8 +232,9 @@ defmodule PtcRunner.Lisp.Eval do
   # Opts may contain :docstring which is merged into closure metadata for functions
   defp do_eval({:def, name, value_ast, opts}, %EvalContext{} = eval_ctx) do
     with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-      # Merge docstring into closure metadata if value is a closure
-      value = merge_docstring_into_closure(value, opts)
+      # Merge docstring into closure metadata if value is a closure, but never
+      # persist ephemeral private-tool authority from a value-position prelude ref.
+      value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
 
       new_user_ns =
         eval_ctx2.user_ns
@@ -248,7 +258,7 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, %Var{name: name}, eval_ctx}
     else
       with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-        value = merge_docstring_into_closure(value, opts)
+        value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
         new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
         {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
       end
@@ -735,6 +745,7 @@ defmodule PtcRunner.Lisp.Eval do
           # Cache miss - evaluate and commit on success
           # If body throws (fail_signal or crash), it propagates without committing
           with {:ok, value, eval_ctx2} <- do_eval(body_ast, eval_ctx) do
+            value = strip_prelude_tool_authority(value)
             updated_journal = Map.put(eval_ctx2.journal, id, value)
             {:ok, value, %{eval_ctx2 | journal: updated_journal}}
           end
@@ -784,8 +795,11 @@ defmodule PtcRunner.Lisp.Eval do
          %EvalContext{prelude_exports: exports} = eval_ctx
        ) do
     case Map.fetch(exports, ref) do
-      {:ok, {callable, _ns_env}} -> {:ok, bind_prelude_ref(callable, prelude_ns(ref)), eval_ctx}
-      :error -> {:error, {:unbound_var, ref}}
+      {:ok, {callable, _ns_env, export}} ->
+        {:ok, bind_prelude_ref(callable, export), eval_ctx}
+
+      :error ->
+        {:error, {:unbound_var, ref}}
     end
   end
 
@@ -797,11 +811,11 @@ defmodule PtcRunner.Lisp.Eval do
   # the wrapped `(tool/call ...)` records exactly once in the existing ledger.
   defp do_eval({:prelude_call, ref, arg_asts}, %EvalContext{prelude_exports: exports} = eval_ctx) do
     case Map.fetch(exports, ref) do
-      {:ok, {callable, ns_env}} ->
+      {:ok, {callable, ns_env, export}} ->
         with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
           case callable do
             {:closure, _params, _body, _env, _th, _meta} ->
-              invoke_prelude_export(callable, arg_vals, ns_env, prelude_ns(ref), eval_ctx2)
+              invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx2)
 
             # A constant export (`def name value`) captures a plain value, not a
             # closure. The analyzer only admits a zero-arg call here, which
@@ -811,7 +825,7 @@ defmodule PtcRunner.Lisp.Eval do
               {:ok, value, eval_ctx2}
 
             _ ->
-              invoke_prelude_export(callable, arg_vals, ns_env, prelude_ns(ref), eval_ctx2)
+              invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx2)
           end
         end
 
@@ -830,8 +844,23 @@ defmodule PtcRunner.Lisp.Eval do
             # Convert to string for backward compatibility with tool_exec
             tool_name_str = to_string(tool_name)
             # Check if this tool has caching enabled
-            cacheable? = get_in(eval_ctx2.tools_meta, [tool_name_str, :cache]) == true
-            record_tool_call(tool_name_str, args_map, tool_exec, eval_ctx2, cacheable?)
+            tool_meta = Map.get(eval_ctx2.tools_meta, tool_name_str, %{})
+
+            cacheable? =
+              Map.get(tool_meta, :cache) == true and Map.get(tool_meta, :visibility) != :private
+
+            origin = EvalContext.current_origin(eval_ctx2)
+            private_tool? = Map.get(tool_meta, :visibility) == :private
+
+            record_tool_call(
+              tool_name_str,
+              args_map,
+              tool_exec,
+              eval_ctx2,
+              cacheable?,
+              origin,
+              private_tool?
+            )
 
           {:error, _} = err ->
             err
@@ -854,15 +883,24 @@ defmodule PtcRunner.Lisp.Eval do
   # the env keeps private helper names/bodies out of user-visible Step data while
   # giving value-position exports the same isolation as a direct `(crm/export …)`
   # call. Non-closure callables (e.g. a `def` constant) are returned unchanged.
-  defp bind_prelude_ref({:closure, params, body, captured_env, turn_history, meta}, ns_name)
+  defp bind_prelude_ref({:closure, params, body, captured_env, turn_history, meta}, export) do
+    meta =
+      meta
+      |> Map.put(:prelude_ns, Map.fetch!(export, :namespace))
+      |> Map.put(:prelude_ref, Map.fetch!(export, :ref))
+      |> Map.put(:prelude_tool_refs, Map.get(export, :tool_refs, []))
+
+    {:closure, params, body, captured_env, turn_history, meta}
+  end
+
+  defp bind_prelude_ref(callable, _export), do: callable
+
+  defp tag_prelude_ns({:closure, params, body, captured_env, turn_history, meta}, ns_name)
        when is_binary(ns_name) do
     {:closure, params, body, captured_env, turn_history, Map.put(meta, :prelude_ns, ns_name)}
   end
 
-  defp bind_prelude_ref(callable, _ns_name), do: callable
-
-  # Namespace name of a prelude export ref (`"crm/get-user"` -> `"crm"`).
-  defp prelude_ns(ref) when is_binary(ref), do: ref |> String.split("/", parts: 2) |> hd()
+  defp tag_prelude_ns(value, _ns_name), do: value
 
   # Invoke a captured prelude export closure against its OWN namespace's private
   # env.
@@ -876,8 +914,13 @@ defmodule PtcRunner.Lisp.Eval do
   # ledger. On return, the accumulators flow back onto the caller's context and
   # the caller's own `user_ns` is restored unchanged: a prelude export cannot
   # mutate user memory, and user code cannot reach the private env.
-  defp invoke_prelude_export(callable, args, ns_env, ns_name, %EvalContext{} = caller_ctx) do
-    export_ctx = %{caller_ctx | user_ns: ns_env}
+  defp invoke_prelude_export(callable, args, ns_env, export, %EvalContext{} = caller_ctx) do
+    ns_name = Map.fetch!(export, :namespace)
+
+    export_ctx =
+      caller_ctx
+      |> Map.put(:user_ns, ns_env)
+      |> EvalContext.push_prelude_origin(export)
 
     try do
       case Apply.apply_fun(callable, args, export_ctx, &do_eval/2) do
@@ -886,7 +929,7 @@ defmodule PtcRunner.Lisp.Eval do
           # x)))`), tag it with the prelude namespace name so its private-helper
           # references still resolve when the caller applies it later. Non-closure
           # results pass through unchanged.
-          {:ok, bind_prelude_ref(result, ns_name), merge_export_effects(caller_ctx, final_ctx)}
+          {:ok, tag_prelude_ns(result, ns_name), merge_export_effects(caller_ctx, final_ctx)}
 
         {:error, _} = err ->
           err
@@ -899,7 +942,7 @@ defmodule PtcRunner.Lisp.Eval do
       # the user's own bindings survive.
       {:return_signal, value, %EvalContext{} = thrown_ctx} ->
         throw(
-          {:return_signal, bind_prelude_ref(value, ns_name),
+          {:return_signal, tag_prelude_ns(value, ns_name),
            merge_export_effects(caller_ctx, thrown_ctx)}
         )
 
@@ -1011,6 +1054,38 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp merge_docstring_into_closure(value, _opts), do: value
+
+  defp strip_prelude_tool_authority({:closure, params, body, env, turn_history, metadata}) do
+    env = strip_prelude_tool_authority(env)
+    turn_history = strip_prelude_tool_authority(turn_history)
+    metadata = Map.drop(metadata, [:prelude_ref, :prelude_tool_refs])
+    {:closure, params, body, env, turn_history, metadata}
+  end
+
+  defp strip_prelude_tool_authority(values) when is_list(values) do
+    Enum.map(values, &strip_prelude_tool_authority/1)
+  end
+
+  defp strip_prelude_tool_authority(%MapSet{} = values) do
+    values
+    |> Enum.map(&strip_prelude_tool_authority/1)
+    |> MapSet.new()
+  end
+
+  defp strip_prelude_tool_authority(values) when is_map(values) and not is_struct(values) do
+    Map.new(values, fn {key, value} ->
+      {strip_prelude_tool_authority(key), strip_prelude_tool_authority(value)}
+    end)
+  end
+
+  defp strip_prelude_tool_authority(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&strip_prelude_tool_authority/1)
+    |> List.to_tuple()
+  end
+
+  defp strip_prelude_tool_authority(value), do: value
 
   # Build args map from a list of evaluated arguments for tool calls.
   # Tools require named arguments (maps). Returns {:ok, map} or {:error, reason}.
@@ -1135,17 +1210,41 @@ defmodule PtcRunner.Lisp.Eval do
   #
   # Also handles SubAgentTool results that may be wrapped with child_trace_id metadata.
   # The wrapper is unwrapped here so the Lisp interpreter only sees the actual value.
-  defp record_tool_call(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
+  defp record_tool_call(
+         tool_name,
+         args_map,
+         tool_exec,
+         eval_ctx,
+         cacheable?,
+         origin,
+         private_tool?
+       ) do
     case EvalContext.check_tool_call_limit(eval_ctx) do
       {:error, :tool_call_limit_exceeded} ->
         {:error, {:tool_call_limit_exceeded, eval_ctx.max_tool_calls}}
 
       :ok ->
-        record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?)
+        record_tool_call_inner(
+          tool_name,
+          args_map,
+          tool_exec,
+          eval_ctx,
+          cacheable?,
+          origin,
+          private_tool?
+        )
     end
   end
 
-  defp record_tool_call_inner(tool_name, args_map, tool_exec, eval_ctx, cacheable?) do
+  defp record_tool_call_inner(
+         tool_name,
+         args_map,
+         tool_exec,
+         eval_ctx,
+         cacheable?,
+         origin,
+         private_tool?
+       ) do
     # Tier 3.5 Fix 3d: only compute the canonical cache key when the call
     # is actually cacheable. Avoids the cost of canonicalization for
     # every non-cacheable tool call.
@@ -1155,15 +1254,17 @@ defmodule PtcRunner.Lisp.Eval do
     if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
       cached = Map.get(eval_ctx.tool_cache, cache_key)
 
-      tool_call = %{
-        name: tool_name,
-        args: args_map,
-        result: cached.result,
-        error: nil,
-        timestamp: DateTime.utc_now(),
-        duration_ms: 0,
-        cached: true
-      }
+      tool_call =
+        %{
+          name: tool_name,
+          args: args_map,
+          result: cached.result,
+          error: nil,
+          timestamp: DateTime.utc_now(),
+          duration_ms: 0,
+          cached: true
+        }
+        |> maybe_put_tool_origin(origin, private_tool?)
 
       # Restore child_step and child_trace_id from cache for TraceTree
       tool_call =
@@ -1179,17 +1280,35 @@ defmodule PtcRunner.Lisp.Eval do
       eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
       {:ok, cached.result, eval_ctx2}
     else
-      record_tool_call_execute(tool_name, args_map, tool_exec, eval_ctx, cacheable?, cache_key)
+      record_tool_call_execute(
+        tool_name,
+        args_map,
+        tool_exec,
+        eval_ctx,
+        cacheable?,
+        cache_key,
+        origin,
+        private_tool?
+      )
     end
   end
 
-  defp record_tool_call_execute(tool_name, args_map, tool_exec, eval_ctx, cacheable?, cache_key) do
+  defp record_tool_call_execute(
+         tool_name,
+         args_map,
+         tool_exec,
+         eval_ctx,
+         cacheable?,
+         cache_key,
+         origin,
+         private_tool?
+       ) do
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
 
     {raw_result, error, error_child_step, error_child_trace_id} =
       try do
-        {tool_exec.(tool_name, args_map), nil, nil, nil}
+        {tool_exec.(tool_name, args_map, origin), nil, nil, nil}
       rescue
         e in ExecutionError ->
           if e.child_step do
@@ -1215,14 +1334,16 @@ defmodule PtcRunner.Lisp.Eval do
     child_trace_id = child_trace_id || error_child_trace_id
     child_step = child_step || error_child_step
 
-    tool_call = %{
-      name: tool_name,
-      args: args_map,
-      result: result,
-      error: error,
-      timestamp: timestamp,
-      duration_ms: duration_ms
-    }
+    tool_call =
+      %{
+        name: tool_name,
+        args: args_map,
+        result: result,
+        error: error,
+        timestamp: timestamp,
+        duration_ms: duration_ms
+      }
+      |> maybe_put_tool_origin(origin, private_tool?)
 
     # Add child_trace_id if present (from SubAgentTool execution)
     tool_call =
@@ -1273,6 +1394,17 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp format_execution_error(%ExecutionError{} = e), do: Exception.message(e)
+
+  defp maybe_put_tool_origin(tool_call, %{type: :prelude_export, ref: ref}, private_tool?) do
+    tool_call
+    |> Map.put(:origin, %{type: :prelude_export, ref: ref})
+    |> maybe_put_private_tool(private_tool?)
+  end
+
+  defp maybe_put_tool_origin(tool_call, _origin, _private_tool?), do: tool_call
+
+  defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
+  defp maybe_put_private_tool(tool_call, false), do: tool_call
 
   # Unwrap SubAgentTool results that contain child_trace_id and child_step metadata.
   # Returns {actual_result, child_trace_id, child_step} or {result, nil, nil} if not wrapped.
@@ -1593,12 +1725,13 @@ defmodule PtcRunner.Lisp.Eval do
       ctx =
         EvalContext.new(
           eval_ctx.ctx,
-          eval_ctx.user_ns,
+          pcalls_user_ns(eval_ctx, metadata),
           closure_env,
           eval_ctx.tool_exec,
           eval_ctx.turn_history
         )
         |> EvalContext.inherit_prelude(eval_ctx)
+        |> maybe_push_prelude_origin(metadata)
 
       ctx = %{
         ctx
@@ -1617,6 +1750,7 @@ defmodule PtcRunner.Lisp.Eval do
           worker_max_heap: eval_ctx.worker_max_heap,
           parallel_budget: eval_ctx.parallel_budget,
           pmap_deadline: eval_ctx.pmap_deadline,
+          tools_meta: eval_ctx.tools_meta,
           discovery_exec: eval_ctx.discovery_exec
       }
 
@@ -1650,6 +1784,25 @@ defmodule PtcRunner.Lisp.Eval do
   defp pcalls_fn_to_erlang(value, %EvalContext{}) do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
   end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{
+         prelude_ref: ref,
+         prelude_tool_refs: tool_refs
+       })
+       when is_binary(ref) and is_list(tool_refs) do
+    EvalContext.push_prelude_origin(context, %{ref: ref, tool_refs: tool_refs})
+  end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta), do: context
+
+  defp pcalls_user_ns(%EvalContext{prelude: %{private_env: private_env}, user_ns: user_ns}, %{
+         prelude_ns: ns
+       })
+       when is_binary(ns) do
+    Map.get(private_env, ns, user_ns)
+  end
+
+  defp pcalls_user_ns(%EvalContext{user_ns: user_ns}, _metadata), do: user_ns
 
   # A nested pmap/pcalls failure (heap kill, deadline, exhausted worker
   # budget) raises structured so a surrounding worker re-surfaces the

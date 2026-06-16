@@ -734,6 +734,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
         max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
+        tools_meta: eval_context.tools_meta,
         discovery_exec: eval_context.discovery_exec
       )
 
@@ -746,6 +747,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           pmap_deadline: eval_context.pmap_deadline
       }
       |> EvalContext.inherit_prelude(eval_context)
+      |> maybe_push_prelude_origin(metadata)
 
     # A `(return …)`/`(fail …)` inside a value-position prelude export throws the
     # export context (user_ns = private prelude env). Catch it here — at the HOF
@@ -965,6 +967,16 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp prelude_ns_tag(%{prelude_ns: ns}), do: ns
   defp prelude_ns_tag(_meta), do: nil
 
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{
+         prelude_ref: ref,
+         prelude_tool_refs: tool_refs
+       })
+       when is_binary(ref) and is_list(tool_refs) do
+    EvalContext.push_prelude_origin(context, %{ref: ref, tool_refs: tool_refs})
+  end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta), do: context
+
   # Tag a value RETURNED by a value-position export with its originating prelude
   # namespace, so a returned closure (e.g. `(defn make [] (fn [x] (helper x)))`)
   # still resolves its private sibling helpers when the caller applies it later.
@@ -1046,34 +1058,37 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # `locals` is rebuilt from the closure's lexical capture + this invocation's
         # arg bindings + (for named fns) the fn's own name. Builtins no longer live
         # in `env`, so the `:var` resolver falls through to Env.builtin? for them.
-        closure_ctx = %{
-          closure_ctx
-          | locals: closure_locals(meta, bindings),
-            loop_limit: caller_ctx.loop_limit,
-            prints: caller_ctx.prints,
-            max_print_length: caller_ctx.max_print_length,
-            pmap_timeout: caller_ctx.pmap_timeout,
-            pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
-            # Security H1: propagate the heap caps + shared worker-slot
-            # budget into nested closure evaluation so a nested
-            # pmap/pcalls caps and counts its workers, and the shared
-            # deadline so nested calls share one wall clock.
-            max_heap: caller_ctx.max_heap,
-            worker_max_heap: caller_ctx.worker_max_heap,
-            parallel_budget: caller_ctx.parallel_budget,
-            pmap_deadline: caller_ctx.pmap_deadline,
-            tool_calls: caller_ctx.tool_calls,
-            pmap_calls: caller_ctx.pmap_calls,
-            tool_cache: caller_ctx.tool_cache,
-            # Propagate the ledger cap so tool calls inside a closure (e.g. the
-            # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
-            # caller's cap instead of resetting to the struct default.
-            max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes,
-            summaries: caller_ctx.summaries,
-            journal: caller_ctx.journal,
-            discovery_exec: caller_ctx.discovery_exec,
-            catalog_ops: caller_ctx.catalog_ops
-        }
+        closure_ctx =
+          %{
+            closure_ctx
+            | locals: closure_locals(meta, bindings),
+              loop_limit: caller_ctx.loop_limit,
+              prints: caller_ctx.prints,
+              max_print_length: caller_ctx.max_print_length,
+              pmap_timeout: caller_ctx.pmap_timeout,
+              pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
+              # Security H1: propagate the heap caps + shared worker-slot
+              # budget into nested closure evaluation so a nested
+              # pmap/pcalls caps and counts its workers, and the shared
+              # deadline so nested calls share one wall clock.
+              max_heap: caller_ctx.max_heap,
+              worker_max_heap: caller_ctx.worker_max_heap,
+              parallel_budget: caller_ctx.parallel_budget,
+              pmap_deadline: caller_ctx.pmap_deadline,
+              tool_calls: caller_ctx.tool_calls,
+              pmap_calls: caller_ctx.pmap_calls,
+              tool_cache: caller_ctx.tool_cache,
+              tools_meta: caller_ctx.tools_meta,
+              # Propagate the ledger cap so tool calls inside a closure (e.g. the
+              # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
+              # caller's cap instead of resetting to the struct default.
+              max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes,
+              summaries: caller_ctx.summaries,
+              journal: caller_ctx.journal,
+              discovery_exec: caller_ctx.discovery_exec,
+              catalog_ops: caller_ctx.catalog_ops
+          }
+          |> maybe_push_prelude_origin(meta)
 
         case do_eval_fn.(body, closure_ctx) do
           {:ok, result, final_ctx} ->
@@ -1092,7 +1107,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
                final_ctx
                | env: caller_ctx.env,
                  locals: caller_ctx.locals,
-                 user_ns: restored_user_ns(restore_user_ns, final_ctx)
+                 user_ns: restored_user_ns(restore_user_ns, final_ctx),
+                 origin_stack: caller_ctx.origin_stack
              }}
 
           {:error, _} = err ->

@@ -265,4 +265,213 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
                Lisp.run(~S|(cap/fetch "x")|, prelude: compile!(@cap), tools: tools)
     end
   end
+
+  describe "private tool authority" do
+    @cap """
+    (ns cap "Cap." {:visibility :prompt})
+    (defn fetch "doc" [id] (tool/private_fetch {:id id}))
+    """
+
+    test "direct user calls to private tools fail closed" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(~S|(tool/private_fetch {:id "x"})|, tools: tools)
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "a current prelude export may call its declared private tools" do
+      tools = %{
+        "private_fetch" =>
+          {fn args -> %{"id" => args["id"], "ok" => true} end,
+           signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(cap/fetch "x")|, prelude: compile!(@cap), tools: tools)
+
+      assert step.return == %{"id" => "x", "ok" => true}
+      assert [%{private: true, origin: %{ref: "cap/fetch"}}] = step.tool_calls
+    end
+
+    test "a value-position HOF use of an export may call its declared private tools" do
+      tools = %{
+        "private_fetch" =>
+          {fn args -> %{"id" => args["id"], "ok" => true} end,
+           signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(map cap/fetch ["x"])|, prelude: compile!(@cap), tools: tools)
+
+      assert step.return == [%{"id" => "x", "ok" => true}]
+      assert [%{private: true, origin: %{ref: "cap/fetch"}}] = step.tool_calls
+    end
+
+    test "a value-position pcalls use of an export may call its declared private tools" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn fetch-zero "doc" [] (tool/private_fetch {:id "x"}))
+        """)
+
+      tools = %{
+        "private_fetch" =>
+          {fn args -> %{"id" => args["id"], "ok" => true} end,
+           signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(pcalls cap/fetch-zero)|, prelude: prelude, tools: tools)
+
+      assert step.return == [%{"id" => "x", "ok" => true}]
+    end
+
+    test "pcalls prelude exports resolve private helper functions" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn- fetch-helper [] (tool/private_fetch {:id "x"}))
+        (defn fetch-zero "doc" [] (fetch-helper))
+        """)
+
+      tools = %{
+        "private_fetch" =>
+          {fn args -> %{"id" => args["id"], "ok" => true} end,
+           signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(pcalls cap/fetch-zero)|, prelude: prelude, tools: tools)
+
+      assert step.return == [%{"id" => "x", "ok" => true}]
+    end
+
+    test "value-position export authority is restored after the call returns" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(let [f cap/fetch] (f "x") (tool/private_fetch {:id "y"}))|,
+                 prelude: compile!(@cap),
+                 tools: tools
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "public tools called from prelude exports keep origin without private marker" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn ping "doc" [] (tool/public_ping {}))
+        """)
+
+      tools = %{"public_ping" => fn _args -> "pong" end}
+
+      assert {:ok, %Step{} = step} = Lisp.run(~S|(cap/ping)|, prelude: prelude, tools: tools)
+
+      assert step.return == "pong"
+      assert [%{origin: %{ref: "cap/ping"}} = call] = step.tool_calls
+      refute Map.get(call, :private)
+    end
+
+    test "private tool args are signature validated before execution" do
+      tools = %{
+        "private_fetch" =>
+          {fn _args -> flunk("private tool should not execute with invalid args") end,
+           signature: "(id :int) -> :map", visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(~S|(cap/fetch "not-int")|, prelude: compile!(@cap), tools: tools)
+
+      assert step.fail.reason == :private_tool_args_error
+      assert step.fail.message =~ "private_fetch"
+      assert step.fail.message =~ "expected int"
+    end
+
+    test "escaped prelude closures do not retain private tool authority" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(~S|(def f cap/fetch) (f "x")|, prelude: compile!(@cap), tools: tools)
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "escaped prelude closures nested in collections do not retain private tool authority" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(def boxed [cap/fetch]) ((first boxed) "x")|,
+                 prelude: compile!(@cap),
+                 tools: tools
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "escaped wrapper closures do not retain captured private tool authority" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(def wrapper (let [f cap/fetch] (fn [id] (f id)))) (wrapper "x")|,
+                 prelude: compile!(@cap),
+                 tools: tools
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "task journaled prelude closures do not retain private tool authority" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(let [f (task "stored-export" cap/fetch)] (f "x"))|,
+                 prelude: compile!(@cap),
+                 tools: tools,
+                 journal: %{}
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+    end
+
+    test "private tool calls do not seed a cache entry usable by direct callers" do
+      tools = %{
+        "private_fetch" => {fn _args -> "secret" end, visibility: :private, cache: true}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(cap/fetch "x") (tool/private_fetch {:id "x"})|,
+                 prelude: compile!(@cap),
+                 tools: tools
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+    end
+  end
 end

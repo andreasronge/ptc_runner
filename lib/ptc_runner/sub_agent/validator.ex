@@ -106,20 +106,34 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   # Only the `{function, keyword_options}` shape can carry `expose:` or
-  # `native_result:`. Other shapes (bare function, `{f, sig_string}`,
-  # `{f, :skip}`, LLMTool, SubAgentTool, builtin atoms) cannot.
+  # `native_result:`. `%Tool{}` structs may carry `visibility:` directly. Other
+  # shapes (bare function, `{f, sig_string}`, `{f, :skip}`, LLMTool,
+  # SubAgentTool, builtin atoms) cannot.
   defp validate_tool_exposure_entry!(name, {function, options})
        when is_function(function) and is_list(options) do
     expose = Keyword.get(options, :expose)
     cache = Keyword.get(options, :cache, false)
     native_result = Keyword.get(options, :native_result)
+    visibility = Keyword.get(options, :visibility, :public)
 
+    validate_visibility_value!(name, visibility)
     validate_expose_value!(name, expose)
     validate_native_result!(name, native_result, expose, cache)
     :ok
   end
 
+  defp validate_tool_exposure_entry!(name, %PtcRunner.Tool{visibility: visibility}) do
+    validate_visibility_value!(name, visibility)
+  end
+
   defp validate_tool_exposure_entry!(_name, _format), do: :ok
+
+  defp validate_visibility_value!(_name, value) when value in [:public, :private], do: :ok
+
+  defp validate_visibility_value!(name, value) do
+    raise ArgumentError,
+          "tool #{inspect(name)}: invalid visibility: #{inspect(value)} — accepted values are :public, :private"
+  end
 
   defp validate_expose_value!(_name, nil), do: :ok
   defp validate_expose_value!(_name, value) when value in [:native, :ptc_lisp, :both], do: :ok

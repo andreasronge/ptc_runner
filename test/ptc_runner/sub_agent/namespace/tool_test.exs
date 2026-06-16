@@ -47,6 +47,18 @@ defmodule PtcRunner.SubAgent.Namespace.ToolTest do
                ";; === tools ===\ntool/dynamic() -> any\n;; Call with named args: (tool/name {:key value})"
     end
 
+    test "private tools are hidden from namespace rendering" do
+      tools = %{
+        "public" => make_tool("public", "-> :string"),
+        "secret" => %PtcRunner.Tool{name: "secret", signature: "-> :string", visibility: :private}
+      }
+
+      result = Tool.render(tools)
+
+      assert result =~ "tool/public"
+      refute result =~ "secret"
+    end
+
     test "signature with no params renders correctly" do
       tools = %{"get-time" => make_tool("get-time", "-> :map")}
       result = Tool.render(tools)

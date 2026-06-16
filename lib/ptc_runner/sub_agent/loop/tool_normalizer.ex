@@ -31,6 +31,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.{LLMTool, SubAgentTool, Telemetry}
   alias PtcRunner.SubAgent.Runner
+  alias PtcRunner.Tool
 
   @doc """
   Normalize tools map to convert SubAgentTool instances into executable functions.
@@ -49,40 +50,80 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
   @spec normalize(map(), map(), Definition.t()) :: map()
   def normalize(tools, state, agent) when is_map(tools) do
+    normalize(tools, state, agent, [])
+  end
+
+  @spec normalize(map(), map(), Definition.t(), keyword()) :: map()
+  def normalize(tools, state, agent, opts) when is_map(tools) and is_list(opts) do
     agent_id = Map.get(state, :agent_id)
+    include_private? = Keyword.get(opts, :include_private, false)
 
-    Map.new(tools, fn
-      {name, :builtin_grep} ->
-        wrapped = wrap_builtin_grep()
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
+    tools
+    |> Enum.reduce(%{}, fn
+      {name, format}, acc ->
+        case tool_visibility_status(name, format) do
+          :invalid ->
+            acc
 
-      {name, :builtin_grep_n} ->
-        wrapped = wrap_builtin_grep_n()
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
+          :private when not include_private? ->
+            acc
 
-      {name, :builtin_llm_query} ->
-        wrapped = wrap_builtin_llm_query(name, state)
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
-
-      {name, %LLMTool{} = tool} ->
-        wrapped = wrap_llm_tool(name, tool, state)
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
-
-      {name, %SubAgentTool{} = tool} ->
-        wrapped = wrap_sub_agent_tool(name, tool, state)
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
-
-      {name, func} when is_function(func, 1) ->
-        wrapped = wrap_return(name, func)
-        {name, wrap_with_telemetry(name, wrapped, agent, agent_id)}
-
-      {name, {func, opts}} when is_function(func, 1) and is_list(opts) ->
-        wrapped = wrap_return(name, func)
-        {name, {wrap_with_telemetry(name, wrapped, agent, agent_id), opts}}
-
-      {name, other} ->
-        {name, other}
+          _status ->
+            Map.put(acc, name, normalize_tool(name, format, state, agent, agent_id))
+        end
     end)
+  end
+
+  defp normalize_tool(name, :builtin_grep, _state, agent, agent_id) do
+    wrapped = wrap_builtin_grep()
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, :builtin_grep_n, _state, agent, agent_id) do
+    wrapped = wrap_builtin_grep_n()
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, :builtin_llm_query, state, agent, agent_id) do
+    wrapped = wrap_builtin_llm_query(name, state)
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, %LLMTool{} = tool, state, agent, agent_id) do
+    wrapped = wrap_llm_tool(name, tool, state)
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, %SubAgentTool{} = tool, state, agent, agent_id) do
+    wrapped = wrap_sub_agent_tool(name, tool, state)
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, func, _state, agent, agent_id) when is_function(func, 1) do
+    wrapped = wrap_return(name, func)
+    wrap_with_telemetry(name, wrapped, agent, agent_id)
+  end
+
+  defp normalize_tool(name, {func, opts}, _state, agent, agent_id)
+       when is_function(func, 1) and is_list(opts) do
+    wrapped = wrap_return(name, func)
+    {wrap_with_telemetry(name, wrapped, agent, agent_id), opts}
+  end
+
+  defp normalize_tool(_name, other, _state, _agent, _agent_id), do: other
+
+  defp tool_visibility_status(_name, %Tool{visibility: :private}), do: :private
+
+  defp tool_visibility_status(_name, %Tool{visibility: visibility})
+       when visibility not in [:public, :private],
+       do: :invalid
+
+  defp tool_visibility_status(name, format) do
+    case Tool.new(to_string(name), format) do
+      {:ok, tool} -> if Tool.private?(tool), do: :private, else: :public
+      {:error, {:invalid_visibility, _}} -> :invalid
+      {:error, _} -> :public
+    end
   end
 
   @doc """

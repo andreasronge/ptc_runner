@@ -96,6 +96,46 @@ defmodule PtcRunner.SubAgent.ToolSchemaTest do
       names = Enum.map(defs, & &1["function"]["name"]) |> Enum.sort()
       assert names == ["a", "b", "c"]
     end
+
+    test "private tools are hidden from LLM tool schemas" do
+      tools = %{
+        "public" => fn _ -> :ok end,
+        "secret" => {fn _ -> :ok end, visibility: :private}
+      }
+
+      defs = ToolSchema.to_tool_definitions(tools)
+      names = Enum.map(defs, & &1["function"]["name"]) |> Enum.sort()
+
+      assert names == ["public"]
+    end
+
+    test "private Tool structs are hidden from LLM tool schemas" do
+      tools = %{
+        "public" => fn _ -> :ok end,
+        "secret" => %PtcRunner.Tool{
+          name: "secret",
+          function: fn _ -> :ok end,
+          visibility: :private
+        }
+      }
+
+      defs = ToolSchema.to_tool_definitions(tools)
+      names = Enum.map(defs, & &1["function"]["name"]) |> Enum.sort()
+
+      assert names == ["public"]
+    end
+
+    test "invalid visibility is hidden from LLM tool schemas" do
+      tools = %{
+        "public" => fn _ -> :ok end,
+        "secret" => {fn _ -> :ok end, visibility: "private"}
+      }
+
+      defs = ToolSchema.to_tool_definitions(tools)
+      names = Enum.map(defs, & &1["function"]["name"]) |> Enum.sort()
+
+      assert names == ["public"]
+    end
   end
 
   describe "to_tool_definition/1" do

@@ -43,6 +43,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :user_ns,
     :env,
     :tool_exec,
+    :origin_stack,
     :discovery_exec,
     :turn_history,
     :budget,
@@ -193,7 +194,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           ctx: map(),
           user_ns: map(),
           env: map(),
-          tool_exec: (String.t(), map() -> term()),
+          tool_exec: (String.t(), map(), map() | nil -> term()),
+          origin_stack: [map()],
           discovery_exec: (atom(), list() -> term()) | nil,
           turn_history: list(),
           budget: map() | nil,
@@ -274,6 +276,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
+      origin_stack: Keyword.get(opts, :origin_stack, []),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
@@ -312,7 +315,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   defp prelude_exports(%PtcRunner.Lisp.Prelude{exports: exports, private_env: env}) do
     Map.new(exports, fn export ->
       ns_env = Map.get(env, export.namespace, %{})
-      {export.ref, {Map.get(ns_env, export.symbol), ns_env}}
+      {export.ref, {Map.get(ns_env, export.symbol), ns_env, export}}
     end)
   end
 
@@ -533,9 +536,28 @@ defmodule PtcRunner.Lisp.Eval.Context do
     %{
       context
       | prelude_exports: source.prelude_exports,
-        prelude: source.prelude
+        prelude: source.prelude,
+        origin_stack: source.origin_stack
     }
   end
+
+  @doc "Pushes a prelude-export origin for private tool authorization."
+  @spec push_prelude_origin(t(), map()) :: t()
+  def push_prelude_origin(%__MODULE__{origin_stack: stack} = context, %{ref: ref} = export)
+      when is_binary(ref) do
+    origin = %{
+      type: :prelude_export,
+      ref: ref,
+      tool_refs: Map.get(export, :tool_refs, [])
+    }
+
+    %{context | origin_stack: [origin | stack]}
+  end
+
+  @doc "Returns the current evaluator origin, if any."
+  @spec current_origin(t()) :: map() | nil
+  def current_origin(%__MODULE__{origin_stack: [origin | _]}), do: origin
+  def current_origin(%__MODULE__{}), do: nil
 
   @doc """
   Increments the iteration count and checks against the limit.

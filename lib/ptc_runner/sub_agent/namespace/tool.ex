@@ -40,7 +40,7 @@ defmodule PtcRunner.SubAgent.Namespace.Tool do
     sorted_tools =
       tools
       |> Enum.map(fn {name, format} -> {name, normalize_tool(name, format)} end)
-      |> Enum.reject(fn {_name, tool} -> is_nil(tool) end)
+      |> Enum.reject(fn {_name, tool} -> is_nil(tool) or Tool.private?(tool) end)
       |> Enum.sort_by(fn {name, _} -> name end)
 
     lines = Enum.map(sorted_tools, fn {_name, tool} -> format_tool(tool) end)

@@ -683,6 +683,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
 
     ptc_callable =
       Exposure.filter_by_expose(tool_structs, agent, [:ptc_lisp, :both])
+      |> Enum.reject(&Tool.private?/1)
       |> Enum.sort_by(& &1.name)
 
     case ptc_callable do

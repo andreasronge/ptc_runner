@@ -445,12 +445,14 @@ defmodule PtcRunner.Lisp do
     with :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
          {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
-      tool_executor = fn name, args ->
-        execute_tool(normalized_tools, name, args)
+      tool_executor = fn name, args, origin ->
+        execute_tool(normalized_tools, name, args, origin)
       end
 
       tools_meta =
-        Map.new(normalized_tools, fn {name, tool} -> {name, %{cache: tool.cache}} end)
+        Map.new(normalized_tools, fn {name, tool} ->
+          {name, %{cache: tool.cache, visibility: tool.visibility}}
+        end)
 
       opts =
         Map.merge(params, %{
@@ -909,6 +911,17 @@ defmodule PtcRunner.Lisp do
   def format_error({:unknown_tool, name, available}),
     do: "Unknown tool: #{name}. Available tools: #{Enum.join(available, ", ")}"
 
+  def format_error({:private_tool_unauthorized, name, %{origin: nil}}),
+    do: "Private tool '#{name}' cannot be called directly"
+
+  def format_error({:private_tool_unauthorized, name, %{origin: origin, allowed_tools: allowed}}),
+    do:
+      "Private tool '#{name}' is not authorized for prelude export #{origin}; " <>
+        "declared private tools: #{Enum.join(allowed, ", ")}"
+
+  def format_error({:private_tool_args_error, name, details}),
+    do: "Private tool '#{name}' arguments failed validation: #{details}"
+
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
   def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
   # Handle other 3-tuple error formats from Eval: {type, message, data}
@@ -1290,24 +1303,90 @@ defmodule PtcRunner.Lisp do
 
   defp collect_prelude_refs(_other, acc), do: acc
 
-  defp execute_tool(normalized_tools, name, args) do
+  defp execute_tool(normalized_tools, name, args, origin) do
     case Map.fetch(normalized_tools, name) do
-      {:ok, %Tool{function: fun}} ->
-        case fun.(args) do
-          {:ok, value} ->
-            value
-
-          {:error, reason} ->
-            raise ExecutionError, reason: :tool_error, message: name, data: reason
-
-          value ->
-            value
+      {:ok, %Tool{} = tool} ->
+        with :ok <- authorize_tool_call(tool, origin),
+             :ok <- validate_private_tool_args(tool, args) do
+          execute_tool_function(tool, args)
         end
 
       :error ->
-        available = Map.keys(normalized_tools) |> Enum.sort()
+        available =
+          normalized_tools
+          |> Enum.reject(fn {_name, tool} -> Tool.private?(tool) end)
+          |> Enum.map(fn {tool_name, _tool} -> tool_name end)
+          |> Enum.sort()
+
         raise ExecutionError, reason: :unknown_tool, message: name, data: available
     end
+  end
+
+  defp execute_tool_function(%Tool{name: name, function: fun}, args) do
+    case fun.(args) do
+      {:ok, value} ->
+        value
+
+      {:error, reason} ->
+        raise ExecutionError, reason: :tool_error, message: name, data: reason
+
+      value ->
+        value
+    end
+  end
+
+  defp authorize_tool_call(%Tool{visibility: :public}, _origin), do: :ok
+
+  defp authorize_tool_call(%Tool{name: name, visibility: :private}, %{
+         type: :prelude_export,
+         ref: ref,
+         tool_refs: tool_refs
+       })
+       when is_list(tool_refs) do
+    if name in tool_refs do
+      :ok
+    else
+      raise ExecutionError,
+        reason: :private_tool_unauthorized,
+        message: name,
+        data: %{origin: ref, allowed_tools: tool_refs}
+    end
+  end
+
+  defp authorize_tool_call(%Tool{name: name, visibility: :private}, _origin) do
+    raise ExecutionError,
+      reason: :private_tool_unauthorized,
+      message: name,
+      data: %{origin: nil}
+  end
+
+  defp validate_private_tool_args(%Tool{visibility: :public}, _args), do: :ok
+  defp validate_private_tool_args(%Tool{signature: nil}, _args), do: :ok
+
+  defp validate_private_tool_args(%Tool{name: name, signature: signature}, args) do
+    with {:ok, parsed} <- Signature.parse(signature),
+         :ok <- Signature.validate_input(parsed, args) do
+      :ok
+    else
+      {:error, errors} when is_list(errors) ->
+        raise ExecutionError,
+          reason: :private_tool_args_error,
+          message: name,
+          data: format_signature_errors(errors)
+
+      {:error, error} ->
+        raise ExecutionError,
+          reason: :private_tool_args_error,
+          message: name,
+          data: error
+    end
+  end
+
+  defp format_signature_errors(errors) do
+    Enum.map_join(errors, "; ", fn
+      %{path: path, message: message} -> "#{Enum.join(path, ".")}: #{message}"
+      other -> inspect(other)
+    end)
   end
 
   # Normalize tools from various formats to Tool structs

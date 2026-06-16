@@ -58,6 +58,19 @@ defmodule PtcRunner.ToolTest do
       assert tool.type == :native
     end
 
+    test "normalizes private visibility from keyword options" do
+      {:ok, tool} =
+        PtcRunner.Tool.new("secret", {fn _args -> :ok end, visibility: :private})
+
+      assert tool.visibility == :private
+      assert PtcRunner.Tool.private?(tool)
+    end
+
+    test "rejects invalid visibility values" do
+      assert {:error, {:invalid_visibility, :hidden}} =
+               PtcRunner.Tool.new("secret", {fn _args -> :ok end, visibility: :hidden})
+    end
+
     test "returns error when format is not a function or valid tuple" do
       assert {:error, :invalid_tool_format} = PtcRunner.Tool.new("bad", "not_a_function")
       assert {:error, :invalid_tool_format} = PtcRunner.Tool.new("bad", 123)

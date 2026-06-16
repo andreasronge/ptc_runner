@@ -26,10 +26,13 @@ defmodule PtcRunner.SubAgent.ToolSchema do
   """
   @spec to_tool_definitions(map()) :: [map()]
   def to_tool_definitions(tools) when is_map(tools) do
-    Enum.map(tools, fn {name, format} ->
+    tools
+    |> Enum.flat_map(fn {name, format} ->
       case Tool.new(name, format) do
-        {:ok, tool} -> to_tool_definition(tool)
-        {:error, _} -> build_definition(to_string(name), nil, nil)
+        {:ok, %Tool{visibility: :private}} -> []
+        {:ok, tool} -> [to_tool_definition(tool)]
+        {:error, {:invalid_visibility, _}} -> []
+        {:error, _} -> [build_definition(to_string(name), nil, nil)]
       end
     end)
   end

@@ -201,6 +201,45 @@ defmodule PtcRunner.SubAgent.ValidatorTest do
     end
   end
 
+  describe "tool visibility validation" do
+    test "accepts public and private visibility metadata" do
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{
+            "public" => {fn _ -> :ok end, visibility: :public},
+            "secret" => {fn _ -> :ok end, visibility: :private}
+          }
+        )
+
+      assert map_size(agent.tools) == 2
+    end
+
+    test "rejects invalid visibility metadata" do
+      assert_raise ArgumentError, ~r/invalid visibility: "private"/, fn ->
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{"secret" => {fn _ -> :ok end, visibility: "private"}}
+        )
+      end
+    end
+
+    test "rejects invalid Tool struct visibility" do
+      assert_raise ArgumentError, ~r/invalid visibility: "private"/, fn ->
+        SubAgent.new(
+          prompt: "Test",
+          tools: %{
+            "secret" => %PtcRunner.Tool{
+              name: "secret",
+              function: fn _ -> :ok end,
+              visibility: "private"
+            }
+          }
+        )
+      end
+    end
+  end
+
   describe "text mode all-params-used validation" do
     test "rejects text mode with unused signature params" do
       assert_raise ArgumentError,

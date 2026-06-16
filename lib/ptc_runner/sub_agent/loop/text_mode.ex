@@ -442,7 +442,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     |> Enum.filter(fn name ->
       case Map.get(tools_meta, name) do
         %Tool{} = tool ->
-          Exposure.effective_expose(tool, agent) in [:native, :both]
+          not Tool.private?(tool) and Exposure.effective_expose(tool, agent) in [:native, :both]
 
         _ ->
           # Unnormalizable / non-Tool entries (rare in practice) keep
@@ -990,7 +990,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     if Map.has_key?(state.normalized_tools_map, resolved_name) do
       case state.tools_meta && Map.get(state.tools_meta, resolved_name) do
         %Tool{} = tool ->
-          Exposure.effective_expose(tool, agent) == :ptc_lisp
+          Tool.private?(tool) or Exposure.effective_expose(tool, agent) == :ptc_lisp
 
         _ ->
           false
@@ -1368,8 +1368,11 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       effective_tools
       |> Enum.filter(fn {name, _} ->
         case build_tools_meta(effective_tools) |> Map.get(name) do
-          %Tool{} = tool -> Exposure.effective_expose(tool, agent) in [:ptc_lisp, :both]
-          _ -> false
+          %Tool{} = tool ->
+            Tool.private?(tool) or Exposure.effective_expose(tool, agent) in [:ptc_lisp, :both]
+
+          _ ->
+            false
         end
       end)
       |> Enum.map(fn {name, _} -> name end)
@@ -1381,7 +1384,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       |> Map.new()
 
     filtered
-    |> ToolNormalizer.normalize(state, agent)
+    |> ToolNormalizer.normalize(state, agent, include_private: true)
     |> Map.new(fn
       {name, func} when is_function(func, 1) ->
         {name, wrap_ptc_lisp_telemetry(name, func, state)}

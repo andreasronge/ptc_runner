@@ -821,7 +821,7 @@ defmodule PtcRunner.SubAgent.Loop do
     tools = BuiltinTools.effective_tools(agent)
 
     # Normalize SubAgentTool instances to functions with telemetry
-    normalized_tools = ToolNormalizer.normalize(tools, state, agent)
+    normalized_tools = ToolNormalizer.normalize(tools, state, agent, include_private: true)
 
     execute_code_with_tools(code, response, agent, state, exec_context, normalized_tools)
   end
