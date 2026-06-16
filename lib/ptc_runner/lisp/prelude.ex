@@ -127,6 +127,8 @@ defmodule PtcRunner.Lisp.Prelude do
     * `host_policy_hash` — host policy hash/id when available; `nil` in V1
       (no first-class host policy yet).
     * `exports` — one `export_summary` per PUBLIC export (no callables/env).
+    * `components` — selected source component provenance when the artifact was
+      produced by `PtcRunner.Lisp.Prelude.Bundle`; otherwise `[]`.
   """
   @type export_summary :: %{
           ref: String.t(),
@@ -145,7 +147,8 @@ defmodule PtcRunner.Lisp.Prelude do
           artifact_hash: String.t(),
           protected_namespaces: [String.t()],
           host_policy_hash: String.t() | nil,
-          exports: [export_summary()]
+          exports: [export_summary()],
+          components: [map()]
         }
 
   @doc """
@@ -169,7 +172,8 @@ defmodule PtcRunner.Lisp.Prelude do
       artifact_hash: artifact_hash(prelude.namespaces, export_summaries),
       protected_namespaces: prelude.namespaces,
       host_policy_hash: nil,
-      exports: export_summaries
+      exports: export_summaries,
+      components: Map.get(prelude.metadata, :components, [])
     }
   end
 

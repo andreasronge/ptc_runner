@@ -110,18 +110,36 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   @doc """
   Slims a prelude trace summary (`PtcRunner.Lisp.Prelude.trace_summary/1`) to the
   turn-event `preludes` provenance shape — `[%{"source_hash" => ...,
-  "namespaces" => ...}]`, or `[]` when no prelude was attached.
+  "namespaces" => ..., "components" => [...]}]`, or `[]` when no prelude was
+  attached. The `components` key is omitted for single-source prelude artifacts.
 
   Shared by both drivers so the provenance field (the single field that makes
   A/B benchmarking and derivation provenance trivial, per the plan) reads
   identically whether a session or a SubAgent turn produced it.
   """
   @spec prelude_provenance(map() | nil) :: [map()]
-  def prelude_provenance(%{source_hash: hash, protected_namespaces: namespaces}) do
-    [%{"source_hash" => hash, "namespaces" => namespaces}]
+  def prelude_provenance(%{source_hash: hash, protected_namespaces: namespaces} = summary) do
+    provenance = %{"source_hash" => hash, "namespaces" => namespaces}
+
+    case Map.get(summary, :components, []) do
+      [] -> [provenance]
+      components -> [Map.put(provenance, "components", stringify_component_keys(components))]
+    end
   end
 
   def prelude_provenance(_), do: []
+
+  defp stringify_component_keys(components) when is_list(components) do
+    Enum.map(components, fn
+      component when is_map(component) ->
+        Map.new(component, fn {key, value} -> {stringify(key), value} end)
+
+      other ->
+        other
+    end)
+  end
+
+  defp stringify_component_keys(_), do: []
 
   @doc """
   Computes a memory diff (`changed_keys` + bounded `values`) between the

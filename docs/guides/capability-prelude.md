@@ -355,6 +355,22 @@ mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
 `--prelude` is separate from `-l/--load` (which loads ordinary user code).
 `--help` is side-effect-free — it never loads the prelude.
 
+Hosts that already have multiple prelude sources can compose them in process
+without a store:
+
+```elixir
+PtcRunner.Lisp.run(program,
+  prelude: [
+    %{id: "log", source: log_source, origin: :memory},
+    %{id: "paged", source: paged_source, origin: {:file, "priv/paged.clj"}}
+  ]
+)
+```
+
+Selections are concatenated in explicit order, duplicate namespaces fail closed,
+and the aggregate is compiled once into the same `%PtcRunner.Lisp.Prelude{}`
+artifact used by the single-prelude path.
+
 ---
 
 ## 9. Traceability
@@ -364,6 +380,8 @@ summary so a run's capability environment is reproducible from traces:
 
 - prelude source hash and compiled-artifact hash,
 - selected protected namespaces,
+- component ids, hashes, namespaces, and origins when the prelude was composed
+  from multiple selected sources,
 - the public export records (ref, namespace, symbol, arity, params, visibility,
   effect, provider, requires).
 

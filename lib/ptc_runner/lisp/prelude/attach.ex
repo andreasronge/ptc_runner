@@ -63,6 +63,7 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.AttachContext
+  alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.ValidationError
@@ -88,10 +89,11 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
     * the source fails compile-time validation (any compile reason), or
     * attach-time `requires` validation fails (`:prelude_attach_failed`).
 
-  Raises `ArgumentError` for genuine programmer misuse: a value that is
-  neither a `%PtcRunner.Lisp.Prelude{}` nor prelude source (binary).
+  Raises `ArgumentError` for genuine programmer misuse: a value that is neither
+  a `%PtcRunner.Lisp.Prelude{}`, prelude source (binary), nor a list of
+  source-bearing prelude selections.
   """
-  @spec attach(Prelude.t() | String.t(), AttachContext.t()) ::
+  @spec attach(Prelude.t() | String.t() | [Bundle.selection()], AttachContext.t()) ::
           {:ok, Prelude.t()} | {:error, ValidationError.t()}
   def attach(%Prelude{} = prelude, %AttachContext{} = context) do
     with :ok <- validate_requires(prelude, context) do
@@ -105,9 +107,16 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
     end
   end
 
+  def attach(selections, %AttachContext{} = context) when is_list(selections) do
+    with {:ok, prelude} <- Bundle.compile(selections) do
+      attach(prelude, context)
+    end
+  end
+
   def attach(other, %AttachContext{}) do
     raise ArgumentError,
-          "prelude must be a %PtcRunner.Lisp.Prelude{} artifact or prelude source string, got: " <>
+          "prelude must be a %PtcRunner.Lisp.Prelude{} artifact, prelude source string, " <>
+            "or a list of source-bearing prelude selections, got: " <>
             inspect(other, limit: 5)
   end
 

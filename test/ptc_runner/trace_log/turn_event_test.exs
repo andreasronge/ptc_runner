@@ -235,5 +235,42 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
 
       assert TurnEvent.prelude_provenance(nil) == []
     end
+
+    test "preserves component-level provenance when a bundle supplies it" do
+      summary = %{
+        source_hash: "aggregate",
+        protected_namespaces: ["log", "paged"],
+        components: [
+          %{id: "log", source_hash: "log-hash", namespaces: ["log"], origin: "memory"},
+          %{
+            id: "paged",
+            source_hash: "paged-hash",
+            namespaces: ["paged"],
+            origin: "file:priv/paged.clj"
+          }
+        ]
+      }
+
+      assert TurnEvent.prelude_provenance(summary) == [
+               %{
+                 "source_hash" => "aggregate",
+                 "namespaces" => ["log", "paged"],
+                 "components" => [
+                   %{
+                     "id" => "log",
+                     "source_hash" => "log-hash",
+                     "namespaces" => ["log"],
+                     "origin" => "memory"
+                   },
+                   %{
+                     "id" => "paged",
+                     "source_hash" => "paged-hash",
+                     "namespaces" => ["paged"],
+                     "origin" => "file:priv/paged.clj"
+                   }
+                 ]
+               }
+             ]
+    end
   end
 end

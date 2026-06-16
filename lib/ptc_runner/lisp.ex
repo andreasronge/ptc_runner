@@ -123,14 +123,16 @@ defmodule PtcRunner.Lisp do
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
-    - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact or prelude
-      SOURCE string to attach before user code (Capability Prelude V1). Source
-      is compiled first; the attached prelude's protected namespaces and public
-      export table are consulted by the analyzer/evaluator so qualified prelude
-      calls (e.g. `crm/get-user`) resolve, while private helpers stay
-      user-invisible. Compile/attach failures return `{:error, Step}`. When a
-      `:runtime` is also supplied, attach-time `requires` validation runs first.
-      (default: nil)
+    - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
+      SOURCE string, or a list of source-bearing selections accepted by
+      `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code
+      (Capability Prelude V1). Source selections are concatenated and compiled
+      once in explicit order after duplicate namespace rejection. The attached
+      prelude's protected namespaces and public export table are consulted by
+      the analyzer/evaluator so qualified prelude calls (e.g. `crm/get-user`)
+      resolve, while private helpers stay user-invisible. Compile/attach
+      failures return `{:error, Step}`. When a `:runtime` is also supplied,
+      attach-time `requires` validation runs first. (default: nil)
     - `:runtime` - Selected upstream runtime handle used for attach-time prelude
       `requires` validation. When `nil`, prelude `requires` are not validated
       against any upstream (the configured `:tools` map still guards actual tool
