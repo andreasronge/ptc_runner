@@ -1,17 +1,39 @@
 # Paginated Reads and Data Prelude — Plan
 
-**Status (2026-06-14): partially implemented / still relevant.** The first
-core blocker is shipped: in-eval tool-call ledger compaction landed in
-`209b4bdf`, with large paged-result coverage in `bd7dba65`. A concrete
-large-file MCP smoke path also exists through
-`examples/large_file_log_introspection/` and e2e tests. That smoke path is a
-backend-specific adapter for one third-party MCP server, not a core dependency.
-An experimental human-written `paged/` prelude now exists in
-`examples/paged_data_prelude/` with a fake-tool smoke test; it uses `paged`
-because `data` is still a reserved host namespace. What remains is deciding
-whether/how to promote that shape into the reserved `data/` namespace,
-hardening page-source conventions as a reusable API, M2 A/B measurement, and a
-rooted/chunk-capable file source suitable for benchmark integrity.
+**Status (2026-06-15): implemented as an experimental `paged/` prelude with
+positive smoke evidence; full M2 A/B still pending.** The first core blocker is
+shipped: in-eval tool-call ledger compaction landed in `209b4bdf`, with large
+paged-result coverage in `bd7dba65`. A concrete large-file MCP smoke path also
+exists through `examples/large_file_log_introspection/` and e2e tests. That
+smoke path is a backend-specific adapter for one third-party MCP server, not a
+core dependency.
+
+The human-written `paged/` prelude in `examples/paged_data_prelude/` now has
+integration coverage for offset pages, chunk-index pages, JSONL page parsing,
+string/keyword boundary normalization, `paged/inspect`, and fused
+`paged/profile` with `row_count`. It uses `paged` because `data` is still a
+reserved host namespace. A realistic Claude Code smoke over
+`/Users/andreasronge/ptc-bench-comparison` and
+`@willianpinho/large-file-mcp` succeeded after the prelude exposed a better
+public contract:
+
+```json
+{
+  "sample_count": 3,
+  "line_count": 3178,
+  "missing_end_station_id": 248,
+  "string_duration_count": 264,
+  "collision_count": 103
+}
+```
+
+The successful run used `doc paged/profile` → `paged/inspect` →
+`paged/profile` and finished in 7 turns. Earlier runs without the improved
+contract hit the 20-turn cap or returned the wrong duration field, so this is
+evidence for the M2 value hypothesis, but not yet the full leakage-aware A/B.
+What remains is deciding whether/how to promote this shape into the reserved
+`data/` namespace, broader M2 measurement, and a rooted/chunk-capable file
+source suitable for benchmark integrity.
 
 ## Context
 
@@ -356,15 +378,23 @@ impossible to express safely as a bounded page fold.
 
 Prelude/runtime tests (against a fake paginated tool):
 
-- `data/fold-pages` folds across pages without holding all rows, for both
-  `:offset` and `:token` conventions;
-- `:done` detection: short/empty page (offset) and absent token (token);
-- `data/field-presence`, `data/group-count`, `data/key-collisions` correct;
+- `paged/fold-pages` folds across pages without holding all rows, for
+  `:offset` and chunk-index conventions; token coverage remains useful if/when
+  token-paged sources become an M2 fixture;
+- `:done` detection: short/empty page (offset), `totalChunks` bounds
+  (chunk-index), and absent token (future token fixture);
+- `paged/inspect` returns a bounded sample plus `describe` so callers can
+  choose exact field names;
+- `paged/profile` fuses sample, `row_count`, selected field presence,
+  selected string counts, and exact composite-key collision count;
+- JSONL chunk pages parse correctly when source config crosses MCP/JSON
+  boundaries as strings (`"jsonl"`, `"chunk-index"`, `["value" "content"]`);
+- `paged/field-presence`, `paged/group-count`, `paged/key-collisions` correct;
 - accumulator-size and max-distinct-keys caps fail closed;
 - max-pages backstop fails closed (e.g. a token loop);
 - a fold over a source several× the program budget stays within max_heap (the
   probe's failing whole-read case now passes via paging);
-- attach fails without the paginated `tool:<name>` grant;
+- attach/runtime fails without the paginated tool grant;
 - leakage audit passes on prelude names/docstrings.
 
 Integration / M2 tests:
@@ -373,7 +403,8 @@ Integration / M2 tests:
 - bare PTC (must hand-roll paging) vs PTC + `data/` prelude;
 - measure eval count, turns, cost, hard failures, heap/limit failures, judge
   score;
-- adoption metric: whether the agent calls `data/` helpers;
+- adoption metric: whether the agent calls `paged/` helpers (or `data/` after
+  namespace promotion);
 - expected: same-or-better discovery quality, fewer turns/tokens, no heap-
   avoidance behavior.
 
@@ -383,10 +414,12 @@ Integration / M2 tests:
 > pressure on planted audit tasks without reducing finding quality, because it
 > replaces the per-session paging boilerplate agents already hand-roll.
 
-First A/B: A = PTC baseline; B = PTC + `data/` prelude, both over the
-chunk-capable read-lines tool. Same model, seeds, judge; no scorer/rubric/
-prelude-name leakage. Primary process metrics: eval count, turns, cost,
-heap/limit failures. Guardrail: discovery score must not regress.
+First A/B: A = PTC baseline; B = PTC + `paged/`/future-`data/` prelude, both
+over the chunk-capable read-lines tool. Same model, seeds, judge; no
+scorer/rubric/prelude-name leakage. Primary process metrics: eval count, turns,
+cost, heap/limit failures. Guardrail: discovery score must not regress. The
+2026-06-15 smoke is a positive single-instance adoption check (7-turn success
+after prior 20-turn failures), not a substitute for this A/B.
 
 If B does not reduce turns/tokens or is not adopted, this M2 candidate fails and
 P4 derivation must not use it as the gold standard. If B pays for itself, it
@@ -406,17 +439,18 @@ rediscover the page-fold pattern from recorded runs.
 2. **Done: bound the in-eval tool ledger** (drop full result values past a
    bytes/entries cap, keep metadata + preview). This landed in `209b4bdf`, with
    large paged-result coverage in `bd7dba65`.
-3. **`data/` prelude** (fold + offset/token conventions in `:args` + field-first
-   helpers), tested against a fake paginated tool. Authority is runtime-enforced
-   (call fails closed if the tool is not granted), not attach-proven, for the
-   dynamic `source` fold.
+3. **`paged/` prelude** (fold + offset/chunk-index conventions in `:args` +
+   field-first helpers), tested against fake paginated tools and a realistic
+   large-file smoke. Authority is runtime-enforced (call fails closed if the
+   tool is not granted), not attach-proven, for the dynamic `source` fold.
 4. **Page-size defaults** measured against max_heap **and** the 1 s timeout
    (round-trip latency × pages); confirm the benchmark's local stdio tool is
    fast enough for the needed page count, or raise the timeout/cap for paged
    reads.
 5. **Teaching signal** on the whole-read heap kill (recoverable "use paged
    read").
-6. **M2 A/B** on the planted harness.
+6. **M2 A/B** on the planted harness. The first positive smoke should seed the
+   A/B design, but the eval set still needs fresh/unseen planted instances.
 
 ## Verified against code (codex round 2) vs unproven
 
@@ -462,8 +496,10 @@ rediscover the page-fold pattern from recorded runs.
 
 ## Open Questions
 
-- The exact source-spec shape (`:page` conventions, `:rows-at`/`:token-at`
-  addressing) — keep minimal for V1 (offset/limit + token).
+- Whether to freeze the current `paged/` source-spec shape as the future
+  `data/` contract. The current working shape uses `:server`, `:tool`, `:args`,
+  and nested `:page` options with `:mode`, `:limit`, `:rows-at`, optional
+  `:parse :jsonl`, and chunk/offset/token-specific cursors.
 - Default page size: measure against max_heap (parsed-page fit) and the 1 s
   timeout (round-trips per fold).
 - Whether to expose a small `(data/fold-pages ...)` power-user path in V1 or

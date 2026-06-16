@@ -12,7 +12,7 @@ session; P5's methodology is piloted manually in M2. Companion docs:
 [`capability-kernel-runtime.md`](capability-kernel-runtime.md)
 (closed-context guard / RunEnv boundary),
 [`live-prelude-evolution.md`](live-prelude-evolution.md)
-(future PreludeEnv/session/SubAgent/MCP mutation and promotion surface),
+(future PreludeStore/session/SubAgent/MCP selection and versioning surface),
 [`future-directions.md`](future-directions.md) (idea backlog).
 
 ## Motivation: evidence from a real session
@@ -529,58 +529,59 @@ failed/wasted turns, a separate analysis pass over the logs produced a concrete
 prelude change, tests and a fresh worker run verified it, and the resulting
 prelude docs changed the next model's behavior. See
 [`live-prelude-evolution.md`](live-prelude-evolution.md) for the planned
-`PreludeEnv`/artifact/store API that removes the restart requirement while
-keeping fresh model context and host-approved promotion.
+`PreludeStore`/artifact API that removes the restart requirement while
+keeping fresh model context and policy-controlled default selection.
 
-**Deferred operational improvement: no-restart (scratch/A-B) prelude env +
-registry + per-run selection.** The restart requirement is an artifact of
+**Deferred operational improvement: no-restart (scratch/A-B) prelude store +
+per-run selection.** The restart requirement is an artifact of
 today's MCP configuration surface, not a core prelude constraint. Core PTC
 already accepts prelude source/artifacts per run; the MCP server currently only
 exposes one process-wide `--prelude` file that is read at boot. A better later
 shape, expanded in [`live-prelude-evolution.md`](live-prelude-evolution.md), is:
 
 ```text
-PreludeCandidate     source + compiled %Prelude{} + checksum + provenance
-PreludeEnv           session/run-local stage/source/replace/compile bundle
-                     (compile/provenance only; never a second attach path)
-Prelude Store        durable source/candidates, likely file-backed first
-Prelude Registry     list/get/put/promote/resolve + source/policy validation
-Prelude Bundle       compiled, hashed, approved attachment artifact
-MCP session tools    thin wrappers over core Session/PreludeEnv APIs
-SubAgent run         accepts PreludeEnv/bundle, opt-in edit tools
+PreludeCandidate     version + source + compiled %Prelude{} + provenance
+PreludeStore         list/read/write versioned candidates; compile-on-write
+Attach selection     selected refs -> one frozen %Prelude{} bundle
+Default policy       optional later set_default/history + host config policy
+MCP session start    accepts prelude ids/version refs and freezes bundle
+SubAgent run         accepts PreludeStore + prelude ids/version refs
 ```
 
 In that model, `ptc_runner_mcp` stays running. A new `lisp_session_start`
-request can select approved preludes:
+request can select preludes:
 
 ```clojure
 {:preludes ["log" "data" "derived/cost-audit"]}
 ```
 
-The host resolves those names through a prelude-aware registry, which validates
-**source policy and compile-time facts only** (rooting, namespace policy, source
-size, approval state, leakage checks) and compiles the selected sources,
-recording hashes/provenance, then freezes the bundle for that session's
-lifetime. Capability `requires` are **not** validated here: they are
-consumer-bound, checked at session/run attach against that run's own
-`tools`/`runtime` grants, never against the registry's or the authoring agent's
-grants. Session-local replacement may be useful for experiments, but the LLM's
-context is not automatically updated by changing the Lisp runtime; verification
-should start a fresh model/session or explicitly inject a compact prelude-change
-card. The same abstraction should be available
-to SubAgent runs, e.g. `prelude_env:` or an explicit `PreludeBundle`, so MCP
-sessions and library-hosted SubAgents share attachment, provenance, and
-validation semantics.
+The host selects those names through a prelude-aware store and attach path. The
+store handles source policy and compile-time facts only (rooting, namespace
+policy, source size, version limits, compile validity, provenance, and deployment
+policy). It returns candidates; the attach path composes the selected candidates
+into one frozen `%PtcRunner.Lisp.Prelude{}` bundle for that session's lifetime.
+Capability `requires` are **not** discharged by storage, write, or name
+resolution: they are consumer-bound and must be checked by `Lisp.run/2` against
+that run's own `tools`/`runtime` grants on every eval, never against the store's
+or authoring agent's grants. Writes are compile-checked and stored as new
+versions in the shared store; a verifier session explicitly selects the
+version/checksum. The
+LLM's context is not automatically updated by changing store state, so
+verification should start a fresh model/session or explicitly inject a compact
+prelude-change card. The same abstraction should be available to SubAgent runs,
+e.g. `prelude_store:` plus `preludes: [...]`, so MCP sessions and
+library-hosted SubAgents share attachment, provenance, and validation semantics.
 
-The registry can be backed by an external file-server MCP or ordinary files,
-but should not expose raw filesystem access as the authority boundary. Prelude
-artifacts are executable capability wrappers, so the registry surface enforces
-rooting, namespace policy, source size, compile validity, approval state,
-provenance, and benchmark leakage checks. It does **not** discharge `requires`:
-that grant check is consumer-bound at attach (above). A derivation agent may
-write draft preludes through this surface, but promotion to attachable status
-remains host-gated. Child SubAgents should not inherit preludes implicitly;
-inheritance should be explicit to avoid authority laundering.
+The store can be backed by an external file-server MCP or ordinary files, but
+should not expose raw filesystem access as the authority boundary. Prelude
+artifacts are executable capability wrappers, so moving a default
+reference in a persistent/shared store is an explicit policy decision that
+records the exact checksum selected. In an MCP deployment, stricter default
+selection policy belongs next to the
+existing upstream endpoint selection in JSON/config; SubAgent hosts set the
+equivalent policy directly in Elixir. Child SubAgents should not inherit
+preludes implicitly; inheritance should be explicit to avoid authority
+laundering.
 
 **Verify.** End-to-end: record sessions against a fixture upstream → derive
 → host-verify → attach → a fresh session solves a *new task instance* with
@@ -784,13 +785,13 @@ P1-P3 so implementation does not rediscover settled boundaries.
   shapes during a transition?
 - The scratch-session verification API the host uses in P4 (shape of
   "candidate in, evidence out").
-- Prelude registry / per-run selection API: the overall shape (candidate,
-  env, store, registry, bundle, MCP/SubAgent selection) is now sketched in
+- Prelude store / per-run selection API: the overall shape (candidate, store,
+  attach bundle, MCP/SubAgent selection) is now sketched in
   [`live-prelude-evolution.md`](live-prelude-evolution.md); what remains open
-  here is the narrower set its Open Questions list — namespace-scoped vs
-  multi-namespace atomic replace, collision/attach-order rules across multiple
-  selected preludes, and how much of the post-replacement discovery card
-  `lisp_session_start` should return.
+  here is the narrower set its Open Questions list — collision/attach-order
+  rules across multiple selected preludes, version pinning/default selection,
+  and how much of the selected-prelude discovery card `lisp_session_start`
+  should return.
 - Which loop-config knobs are worth deriving beyond response profile and
   docs-at-start (e.g. per-upstream sample limits, feedback verbosity).
 - Namespace name for the introspection prelude (`log/`, `session/`,

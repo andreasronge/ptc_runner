@@ -1,13 +1,22 @@
 # Prelude Source Discovery — Plan
 
-**Status:** implementation-ready (codex rounds 1–3; round 3 clean — no P1/P2). Scopes GitHub
-issue #1095 (add a `source` REPL discovery form for attached preludes). Builds
-directly on the macro-like discovery-form machinery shipped in #1094
+**Status:** shipped and validated in paged-prelude smoke runs. Originally
+scoped GitHub issue #1095 (add a `source` REPL discovery form for attached
+preludes). Builds directly on the macro-like discovery-form machinery shipped in #1094
 (`doc`/`meta`/`dir`/`ns-publics`/`ns-name` accept unquoted symbols via
 `analyze_discovery_ref/1`). This plan folds in a code-verified design review:
 the raw-AST renderer this feature needs already exists, so the work is source
 *retention* and *wiring*, not building a printer. See "Review log" for the
 round-1 corrections.
+
+**Post-implementation lesson (2026-06-15):** `source` is a necessary repair
+escape hatch, but it is not the ideal happy path. In the `paged/profile` smoke,
+agents with only weak public docs overused `source` and burned the turn budget
+reading private helpers. After `doc paged/profile` included return shape,
+source-map shape, opts shape, and `row_count`, a fresh agent used public docs,
+`paged/inspect`, and `paged/profile` directly and finished in 7 turns. Keep
+`source` for debugging; make curated `doc` strings good enough that agents do
+not need it for normal use.
 
 ## Motivation
 
