@@ -45,7 +45,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.ProtectedNamespaces
-  alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.Sandbox
 
   @default_visibility :prompt
@@ -313,7 +312,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp add_def(acc, name_ast, doc, metadata, metadata_form, params_ast, body, private?) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
-         :ok <- reject_builtin_name(symbol),
          :ok <- reject_qualified_self_refs(body, ns),
          {:ok, arity} <- params_arity(params_ast) do
       spec = %Spec{
@@ -335,7 +333,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp add_const(acc, name_ast, doc, value_ast) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
-         :ok <- reject_builtin_name(symbol),
          :ok <- reject_qualified_self_refs([value_ast], ns) do
       spec = %Spec{
         namespace: ns,
@@ -349,23 +346,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       }
 
       {:ok, %{acc | specs: [spec | acc.specs]}}
-    end
-  end
-
-  # A prelude definition name must not collide with a bounded built-in or
-  # special form (e.g. `count`, `map`, `if`). Such names intern to ATOMS, while
-  # prelude defs are captured under STRING keys, so a bare same-namespace
-  # reference would silently resolve to the built-in instead of the prelude def.
-  # Reject fail-closed; prelude exports should use distinct kebab-case names.
-  defp reject_builtin_name(symbol) do
-    if is_atom(SourceAtoms.intern(symbol)) do
-      {:error,
-       ValidationError.new(
-         :reserved_name,
-         "prelude definition `#{symbol}` collides with a built-in name; choose a distinct (kebab-case) name"
-       )}
-    else
-      :ok
     end
   end
 

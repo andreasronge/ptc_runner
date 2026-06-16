@@ -62,6 +62,8 @@ defmodule PtcRunner.PreludeStoreTest do
     assert %Prelude{} = candidate.compiled
 
     assert PreludeCandidate.public_view(candidate).source == @paged_v1
+    assert PreludeCandidate.public_view(candidate).source_bytes == byte_size(@paged_v1)
+    assert PreludeCandidate.public_view(candidate).source_truncated == false
     assert PreludeCandidate.public_view(candidate).origin == "memory"
     refute Map.has_key?(PreludeCandidate.public_view(candidate), :compiled)
   end
@@ -160,6 +162,8 @@ defmodule PtcRunner.PreludeStoreTest do
     view = PreludeCandidate.public_view(candidate, max_source_bytes: 8)
 
     assert byte_size(view.source) == 8
+    assert view.source_bytes == byte_size(@paged_v1)
+    assert view.source_truncated == true
     refute Map.has_key?(view, :compiled)
   end
 

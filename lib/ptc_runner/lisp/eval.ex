@@ -978,7 +978,16 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp resolve_user_ns(name, user_ns, eval_ctx) do
-    if Map.has_key?(user_ns, name), do: {:ok, Map.get(user_ns, name), eval_ctx}, else: :error
+    cond do
+      Map.has_key?(user_ns, name) ->
+        {:ok, Map.get(user_ns, name), eval_ctx}
+
+      is_atom(name) and Map.has_key?(user_ns, Atom.to_string(name)) ->
+        {:ok, Map.get(user_ns, Atom.to_string(name)), eval_ctx}
+
+      true ->
+        :error
+    end
   end
 
   defp resolve_env(name, env, eval_ctx) do
@@ -1257,7 +1266,7 @@ defmodule PtcRunner.Lisp.Eval do
       tool_call =
         %{
           name: tool_name,
-          args: args_map,
+          args: ledger_tool_args(args_map, private_tool?),
           result: cached.result,
           error: nil,
           timestamp: DateTime.utc_now(),
@@ -1337,7 +1346,7 @@ defmodule PtcRunner.Lisp.Eval do
     tool_call =
       %{
         name: tool_name,
-        args: args_map,
+        args: ledger_tool_args(args_map, private_tool?),
         result: result,
         error: error,
         timestamp: timestamp,
@@ -1405,6 +1414,32 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
   defp maybe_put_private_tool(tool_call, false), do: tool_call
+
+  defp ledger_tool_args(args, false), do: args
+  defp ledger_tool_args(args, true), do: redact_source_args(args)
+
+  defp redact_source_args(%{} = map) when not is_struct(map) do
+    Map.new(map, fn
+      {key, source} when key in ["source", :source] and is_binary(source) ->
+        {key, source_arg_summary(source)}
+
+      {key, value} ->
+        {key, redact_source_args(value)}
+    end)
+  end
+
+  defp redact_source_args(values) when is_list(values),
+    do: Enum.map(values, &redact_source_args/1)
+
+  defp redact_source_args(value), do: value
+
+  defp source_arg_summary(source) do
+    %{
+      "redacted" => true,
+      "bytes" => byte_size(source),
+      "sha256" => :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
+    }
+  end
 
   # Unwrap SubAgentTool results that contain child_trace_id and child_step metadata.
   # Returns {actual_result, child_trace_id, child_step} or {result, nil, nil} if not wrapped.

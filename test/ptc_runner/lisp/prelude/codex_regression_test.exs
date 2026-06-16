@@ -536,28 +536,34 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "prelude def names cannot shadow builtins (codex re-review)" do
-    test "a public def named like a builtin is rejected" do
+  describe "prelude def names may shadow builtins within their namespace" do
+    test "a public def named like a builtin shadows that builtin at runtime" do
       source = """
       (ns crm "C." {:visibility :prompt})
       (defn count [xs] 42)
+      (defn call-count [xs] (count xs))
       """
 
-      # `count` interns to an atom (builtin); a prelude def is string-keyed, so a
-      # bare sibling reference would silently hit the builtin. Reject fail-closed.
-      assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :reserved_name
-      assert err.message =~ "count"
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, %Step{return: 42}} =
+               PtcRunner.Lisp.run("(crm/count [1 2 3])", prelude: prelude)
+
+      assert {:ok, %Step{return: 42}} =
+               PtcRunner.Lisp.run("(crm/call-count [1 2 3])", prelude: prelude)
     end
 
-    test "a private helper named like a builtin is also rejected" do
+    test "a private helper named like a builtin shadows that builtin for sibling exports" do
       source = """
       (ns crm "C." {:visibility :prompt})
       (defn- map [f xs] xs)
+      (defn passthrough [xs] (map inc xs))
       """
 
-      assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :reserved_name
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, %Step{return: [1, 2, 3]}} =
+               PtcRunner.Lisp.run("(crm/passthrough [1 2 3])", prelude: prelude)
     end
   end
 

@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.Export
@@ -77,6 +78,20 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       [export] = prelude.exports
       assert export.symbol == "get-user"
       refute export.symbol =~ "_"
+    end
+
+    test "allows qualified prelude exports whose bare name is a built-in at runtime" do
+      source = """
+      (ns prelude "Prelude helpers." {:visibility :prompt})
+      (defn list "List items." [] "prelude-list")
+      (defn call-list "Call list." [] (list))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert Enum.map(prelude.exports, & &1.ref) == ~w(prelude/list prelude/call-list)
+      assert {:ok, %{return: "prelude-list"}} = Lisp.run("(prelude/list)", prelude: prelude)
+      assert {:ok, %{return: "prelude-list"}} = Lisp.run("(prelude/call-list)", prelude: prelude)
     end
   end
 

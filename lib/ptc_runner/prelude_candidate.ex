@@ -51,11 +51,14 @@ defmodule PtcRunner.PreludeCandidate do
   @spec public_view(t(), keyword()) :: map()
   def public_view(%__MODULE__{} = candidate, opts \\ []) do
     max_source_bytes = byte_bound(opts, :max_source_bytes, @default_source_bytes)
+    source = truncate_binary(candidate.source, max_source_bytes)
 
     %{
       id: candidate.id,
       version: candidate.version,
       checksum: checksum(candidate),
+      source_bytes: byte_size(candidate.source),
+      source_truncated: byte_size(source) < byte_size(candidate.source),
       namespaces: candidate.compiled.namespaces,
       exports: export_names(candidate),
       origin:
@@ -67,7 +70,7 @@ defmodule PtcRunner.PreludeCandidate do
           max_metadata_bytes: byte_bound(opts, :max_metadata_bytes, @default_metadata_bytes)
         ),
       created_at: candidate.created_at,
-      source: truncate_binary(candidate.source, max_source_bytes)
+      source: source
     }
   end
 
