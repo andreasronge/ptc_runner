@@ -371,6 +371,22 @@ Selections are concatenated in explicit order, duplicate namespaces fail closed,
 and the aggregate is compiled once into the same `%PtcRunner.Lisp.Prelude{}`
 artifact used by the single-prelude path.
 
+For in-process prelude iteration, hosts can use the volatile core store:
+
+```elixir
+{:ok, store} = PtcRunner.PreludeStore.new()
+{:ok, write} = PtcRunner.PreludeStore.write(store, "paged", paged_source)
+{:ok, candidate} = PtcRunner.PreludeStore.read(store, %{id: "paged", version: write.version})
+
+candidate.compiled
+```
+
+`PreludeStore` is append-only and compile-on-write. A bare id reads the current
+version, `"paged@7"` pins an explicit version, and `%{id:, version:, checksum:}`
+adds a checksum assertion. Stored source and metadata are untrusted prompt
+surfaces; use `PtcRunner.PreludeCandidate.public_view/1` for model-facing
+projections.
+
 ---
 
 ## 9. Traceability

@@ -313,6 +313,27 @@ defmodule PtcRunner.Lisp.Discovery do
   end
 
   @doc """
+  Curated Lisp-facing namespace-name strings exposed by `(all-ns)` without an
+  attached prelude.
+  """
+  @spec curated_namespaces() :: [String.t()]
+  def curated_namespaces, do: @curated_namespaces
+
+  @doc """
+  Namespace-like names reserved by local discovery.
+
+  Prelude stores use this to reject candidate ids that would collide with
+  built-in Clojure/JSON namespaces or curated Java interop aliases, including
+  names that are intentionally omitted from `(all-ns)`.
+  """
+  @spec reserved_namespace_names() :: [String.t()]
+  def reserved_namespace_names do
+    (@curated_namespaces ++ Map.keys(@namespace_aliases) ++ Map.keys(@class_aliases))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  @doc """
   Sorted list of curated Lisp-facing namespace-name strings (plan §8), with the
   attached prelude's declared namespaces merged in. Never leaks BEAM internals,
   Java classes, or implementation-only namespaces.

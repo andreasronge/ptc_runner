@@ -1,0 +1,265 @@
+defmodule PtcRunner.PreludeStoreTest do
+  use ExUnit.Case, async: true
+
+  alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.PreludeCandidate
+  alias PtcRunner.PreludeStore
+
+  @paged_v1 """
+  (ns paged "Paged helpers.")
+
+  (defn inspect [] {:version 1})
+  """
+
+  @paged_v2 """
+  (ns paged "Paged helpers.")
+
+  (defn inspect [] {:version 2})
+  (defn profile [] {:ok true})
+  """
+
+  test "write/list/read store versioned compiled candidates" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, result} =
+             PreludeStore.write(store, "paged", @paged_v1, %{
+               "reason" => "initial",
+               "ignored" => "not public"
+             })
+
+    assert result.id == "paged"
+    assert result.version == 1
+    assert result.checksum =~ ~r/\A[0-9a-f]{64}\z/
+    assert result.namespaces == ["paged"]
+    assert result.exports == ["inspect"]
+    assert result.metadata == %{"reason" => "initial"}
+    refute Map.has_key?(Map.from_struct(store), :table)
+
+    assert [
+             %{
+               id: "paged",
+               current_version: 1,
+               latest_version: 1,
+               versions_count: 1,
+               checksum: checksum,
+               namespaces: ["paged"],
+               exports: ["inspect"],
+               metadata: %{"reason" => "initial"},
+               origin: "memory",
+               created_at: %DateTime{},
+               updated_at: %DateTime{}
+             }
+           ] = PreludeStore.list(store)
+
+    assert checksum == result.checksum
+
+    assert {:ok, %PreludeCandidate{} = candidate} = PreludeStore.read(store, "paged")
+    assert candidate.id == "paged"
+    assert candidate.version == 1
+    assert PreludeCandidate.checksum(candidate) == result.checksum
+    assert candidate.source == @paged_v1
+    assert candidate.metadata == %{"reason" => "initial", "ignored" => "not public"}
+    assert %Prelude{} = candidate.compiled
+
+    assert PreludeCandidate.public_view(candidate).source == @paged_v1
+    assert PreludeCandidate.public_view(candidate).origin == "memory"
+    refute Map.has_key?(PreludeCandidate.public_view(candidate), :compiled)
+  end
+
+  test "writes assign monotonic versions and bare reads resolve current latest" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    assert first.version == 1
+    assert second.version == 2
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert current.version == 2
+
+    assert {:ok, pinned} = PreludeStore.read(store, "paged@1")
+    assert pinned.version == 1
+
+    assert {:ok, checked} =
+             PreludeStore.read(store, %{id: "paged", version: 1, checksum: first.checksum})
+
+    assert checked.version == 1
+
+    assert {:error, %{reason: :checksum_mismatch}} =
+             PreludeStore.read(store, %{id: "paged", version: 1, checksum: second.checksum})
+  end
+
+  test "write rejects wrong namespace, invalid ids, and curated namespace collisions" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :prelude_namespace_violation, message: id_message}} =
+             PreludeStore.write(store, "bad@id", @paged_v1)
+
+    assert id_message =~ "invalid prelude id"
+
+    assert {:error, %{reason: :prelude_namespace_violation, message: mismatch_message}} =
+             PreludeStore.write(store, "other", @paged_v1)
+
+    assert mismatch_message =~ "compiled namespaces must be exactly [\"other\"]"
+
+    curated = """
+    (ns clojure.string)
+    (defn trim2 [x] x)
+    """
+
+    assert {:error, %{reason: :prelude_namespace_violation, message: curated_message}} =
+             PreludeStore.write(store, "clojure.string", curated)
+
+    assert curated_message =~ "reserved or curated"
+
+    java = """
+    (ns Math)
+    (defn plus-one [x] x)
+    """
+
+    assert {:error, %{reason: :prelude_namespace_violation, message: java_message}} =
+             PreludeStore.write(store, "Math", java)
+
+    assert java_message =~ "reserved or curated"
+  end
+
+  test "stale parent checksum fails without storing a new version" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, _second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    assert {:error, %{reason: :stale_base}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{"parent_checksum" => first.checksum})
+
+    assert [%{versions_count: 2, latest_version: 2}] = PreludeStore.list(store)
+  end
+
+  test "source byte bounds and compile failures return store error maps" do
+    {:ok, store} = PreludeStore.new(max_source_bytes: 10)
+
+    assert {:error, %{reason: :source_too_large, limit_bytes: 10}} =
+             PreludeStore.write(store, "paged", @paged_v1)
+
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :prelude_compile_error, compile_reason: :parse_error}} =
+             PreludeStore.write(store, "paged", "(ns paged")
+  end
+
+  test "version limits and public view source bounds are enforced" do
+    {:ok, store} = PreludeStore.new(max_versions: 1)
+
+    assert {:ok, _first} = PreludeStore.write(store, "paged", @paged_v1)
+
+    assert {:error, %{reason: :version_limit_exceeded, limit: 1}} =
+             PreludeStore.write(store, "paged", @paged_v2)
+
+    assert {:ok, candidate} = PreludeStore.read(store, "paged")
+    view = PreludeCandidate.public_view(candidate, max_source_bytes: 8)
+
+    assert byte_size(view.source) == 8
+    refute Map.has_key?(view, :compiled)
+  end
+
+  test "invalid store bounds fail at construction instead of crashing later" do
+    for opts <- [
+          [max_source_bytes: "10"],
+          [max_versions: nil],
+          [compile_timeout: 0],
+          [compile_max_heap: -1]
+        ] do
+      assert {:error, %{reason: :invalid_config}} = PreludeStore.new(opts)
+    end
+  end
+
+  test "public origin projection is bounded and serializable" do
+    {:ok, store} = PreludeStore.new(origin: {:memory, self()})
+    assert {:ok, _} = PreludeStore.write(store, "paged", @paged_v1)
+    assert [%{origin: "memory"}] = PreludeStore.list(store)
+
+    {:ok, store} = PreludeStore.new(origin: {:upstream, {:secret, String.duplicate("x", 200)}})
+    assert {:ok, _} = PreludeStore.write(store, "paged", @paged_v1)
+    assert [%{origin: origin}] = PreludeStore.list(store)
+
+    assert is_binary(origin)
+    assert byte_size(origin) <= 128
+    assert {:ok, _} = Jason.encode(%{origin: origin})
+  end
+
+  test "public projections keep bounds even with bad options and preserve utf-8" do
+    source = """
+    (ns paged)
+    (defn emoji [] "🙂")
+    """
+
+    {:ok, store} =
+      PreludeStore.new(
+        origin: {:upstream, "αβγ"},
+        max_source_bytes: 1_000
+      )
+
+    assert {:ok, _} =
+             PreludeStore.write(store, "paged", source, %{
+               "reason" => "🙂🙂",
+               "private" => "secret"
+             })
+
+    assert {:ok, candidate} = PreludeStore.read(store, "paged")
+
+    bad_opts_view =
+      PreludeCandidate.public_view(candidate,
+        max_source_bytes: nil,
+        max_metadata_bytes: "4",
+        max_origin_bytes: :bad
+      )
+
+    assert byte_size(bad_opts_view.source) <= 64 * 1024
+    assert bad_opts_view.metadata == %{"reason" => "🙂🙂"}
+    assert String.valid?(bad_opts_view.origin)
+
+    utf8_view =
+      PreludeCandidate.public_view(candidate,
+        max_source_bytes: byte_size("(ns paged)\n(defn emoji [] \"") + 1,
+        max_metadata_bytes: 5,
+        max_origin_bytes: 12
+      )
+
+    assert String.valid?(utf8_view.source)
+    assert String.valid?(utf8_view.metadata["reason"])
+    assert String.valid?(utf8_view.origin)
+  end
+
+  test "unknown reads return not_found errors" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged")
+    assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged@1")
+  end
+
+  test "same-id concurrent writes produce contiguous versions" do
+    {:ok, store} = PreludeStore.new()
+
+    versions =
+      1..10
+      |> Task.async_stream(
+        fn n ->
+          source = """
+          (ns paged)
+          (defn v [] #{n})
+          """
+
+          {:ok, result} = PreludeStore.write(store, "paged", source)
+          result.version
+        end,
+        max_concurrency: 10,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, version} -> version end)
+      |> Enum.sort()
+
+    assert versions == Enum.to_list(1..10)
+    assert [%{latest_version: 10, versions_count: 10}] = PreludeStore.list(store)
+  end
+end
