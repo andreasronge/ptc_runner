@@ -21,12 +21,16 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
           | %{
               required(:source) => String.t(),
               optional(:id) => String.t(),
+              optional(:version) => pos_integer(),
+              optional(:checksum) => String.t(),
               optional(:origin) => origin()
             }
           | map()
 
   @type component :: %{
           id: String.t() | nil,
+          version: pos_integer() | nil,
+          checksum: String.t() | nil,
           source_hash: String.t(),
           namespaces: [String.t()],
           origin: String.t() | nil
@@ -61,12 +65,15 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
     selections
     |> Enum.reduce_while({:ok, []}, fn selection, {:ok, acc} ->
       with {:ok, normalized} <- normalize_selection(selection),
-           {:ok, %Prelude{} = prelude} <- Compiler.compile(normalized.source) do
+           {:ok, %Prelude{} = prelude} <- Compiler.compile(normalized.source),
+           :ok <- validate_checksum(normalized.checksum, prelude.source_hash) do
         component = %{
           source: normalized.source,
           prelude: prelude,
           provenance: %{
             id: normalized.id,
+            version: normalized.version,
+            checksum: normalized.checksum || prelude.source_hash,
             source_hash: prelude.source_hash,
             namespaces: prelude.namespaces,
             origin: normalize_origin(normalized.origin)
@@ -85,16 +92,18 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   end
 
   defp normalize_selection(source) when is_binary(source) do
-    {:ok, %{id: nil, source: source, origin: nil}}
+    {:ok, %{id: nil, source: source, version: nil, checksum: nil, origin: nil}}
   end
 
   defp normalize_selection({id, source}) when is_binary(id) and is_binary(source) do
-    {:ok, %{id: id, source: source, origin: nil}}
+    {:ok, %{id: id, source: source, version: nil, checksum: nil, origin: nil}}
   end
 
   defp normalize_selection(selection) when is_map(selection) do
     source = Map.get(selection, :source) || Map.get(selection, "source")
     id = Map.get(selection, :id) || Map.get(selection, "id")
+    version = Map.get(selection, :version) || Map.get(selection, "version")
+    checksum = Map.get(selection, :checksum) || Map.get(selection, "checksum")
     origin = Map.get(selection, :origin) || Map.get(selection, "origin")
 
     cond do
@@ -105,8 +114,19 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
         {:error,
          ValidationError.new(:compile_error, "prelude bundle selection id must be a string")}
 
+      not (is_nil(version) or (is_integer(version) and version > 0)) ->
+        {:error,
+         ValidationError.new(
+           :compile_error,
+           "prelude bundle selection version must be a positive integer"
+         )}
+
+      not (is_nil(checksum) or is_binary(checksum)) ->
+        {:error,
+         ValidationError.new(:compile_error, "prelude bundle selection checksum must be a string")}
+
       true ->
-        {:ok, %{id: id, source: source, origin: origin}}
+        {:ok, %{id: id, source: source, version: version, checksum: checksum, origin: origin}}
     end
   end
 
@@ -115,6 +135,18 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
      ValidationError.new(
        :compile_error,
        "unsupported prelude bundle selection: #{inspect(other, limit: 5)}"
+     )}
+  end
+
+  defp validate_checksum(nil, _source_hash), do: :ok
+  defp validate_checksum(source_hash, source_hash), do: :ok
+
+  defp validate_checksum(checksum, source_hash) do
+    {:error,
+     ValidationError.new(
+       :compile_error,
+       "prelude bundle selection checksum #{inspect(checksum)} does not match source hash " <>
+         inspect(source_hash)
      )}
   end
 

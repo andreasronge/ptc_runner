@@ -7,7 +7,7 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.{Session, SubAgent, TraceLog}
+  alias PtcRunner.{PreludeStore, Session, SubAgent, TraceLog}
   alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog.{Analyzer, MemorySink}
 
@@ -156,6 +156,32 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       # No-program turns never reached Lisp attach, so no provenance (matches
       # Session, which reads the step's prelude_trace).
       assert Enum.all?(no_program, &(&1["data"]["preludes"] == []))
+    end
+
+    test "Session turns include store-selected component provenance", %{tmp_dir: dir} do
+      {:ok, store} = PreludeStore.new()
+
+      source = """
+      (ns util "Pure helpers." {:visibility :prompt})
+      (defn add-one [x] (+ x 1))
+      """
+
+      {:ok, write} = PreludeStore.write(store, "util", source)
+
+      turns =
+        session_turn_events(dir, "session-store-prelude", fn ->
+          session =
+            Session.new(session_id: "sess-store", prelude_store: store, preludes: ["util"])
+
+          {{:ok, _}, _session} = Session.eval(session, "(util/add-one 1)")
+        end)
+
+      assert [turn] = turns
+      assert [%{"components" => [component]}] = turn["data"]["preludes"]
+      assert component["id"] == "util"
+      assert component["version"] == 1
+      assert component["checksum"] == write.checksum
+      assert component["origin"] == "memory"
     end
 
     test "an attach-failure turn reports no prelude even when one is configured", %{tmp_dir: dir} do

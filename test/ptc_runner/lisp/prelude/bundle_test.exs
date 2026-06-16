@@ -32,12 +32,16 @@ defmodule PtcRunner.Lisp.Prelude.BundleTest do
     assert Prelude.trace_summary(prelude).components == [
              %{
                id: "math",
+               version: nil,
+               checksum: source_hash(@math_source),
                source_hash: source_hash(@math_source),
                namespaces: ["mathx"],
                origin: "file:priv/math.clj"
              },
              %{
                id: "text",
+               version: nil,
+               checksum: source_hash(@text_source),
                source_hash: source_hash(@text_source),
                namespaces: ["textx"],
                origin: "memory"
@@ -60,6 +64,16 @@ defmodule PtcRunner.Lisp.Prelude.BundleTest do
     assert error.reason == :invalid_namespace
     assert error.namespace == "mathx"
     assert error.message =~ "declared by more than one selected prelude"
+  end
+
+  test "rejects supplied component checksums that do not match source" do
+    assert {:error, %ValidationError{} = error} =
+             Bundle.compile([
+               %{id: "math", source: @math_source, checksum: "fake"}
+             ])
+
+    assert error.reason == :compile_error
+    assert error.message =~ "does not match source hash"
   end
 
   test "Lisp.run accepts a list of selected prelude sources" do

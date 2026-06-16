@@ -387,6 +387,14 @@ adds a checksum assertion. Stored source and metadata are untrusted prompt
 surfaces; use `PtcRunner.PreludeCandidate.public_view/1` for model-facing
 projections.
 
+`PtcRunner.Session` can resolve store refs once at session start and freeze the
+compiled bundle for that session:
+
+```elixir
+session = PtcRunner.Session.new(prelude_store: store, preludes: ["paged"])
+{{:ok, step}, session} = PtcRunner.Session.eval(session, "(paged/inspect)")
+```
+
 ---
 
 ## 9. Traceability
