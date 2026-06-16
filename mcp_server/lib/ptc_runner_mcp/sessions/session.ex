@@ -34,12 +34,14 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :eval,
     :limits,
     :registry,
+    :runtime_prelude,
     ttl_timer: nil,
     idle_timer: nil,
     turn: 0,
     attempts: 0,
     memory: %{},
     turn_history: [],
+    preludes: [],
     prints: [],
     tool_calls: [],
     upstream_calls: []
@@ -60,6 +62,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
           prints: [String.t()],
           tool_calls: [map()],
           upstream_calls: [map()],
+          preludes: [map()],
+          runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
           eval: nil | map(),
           limits: Limits.t()
         }
@@ -99,6 +103,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
       created_at: now,
       updated_at: now,
       expires_at: expires_at,
+      runtime_prelude: Keyword.get(opts, :runtime_prelude),
+      preludes: Keyword.get(opts, :preludes, []),
       limits: limits,
       registry: Keyword.get(opts, :registry, Registry)
     }
@@ -156,6 +162,12 @@ defmodule PtcRunnerMcp.Sessions.Session do
   @spec summary(GenServer.server(), Owner.t()) :: {:ok, map()} | {:error, map()}
   def summary(pid, owner) do
     GenServer.call(pid, {:summary, owner})
+  end
+
+  @doc "Return frozen prelude refs selected for this session."
+  @spec list_preludes(GenServer.server(), Owner.t()) :: {:ok, map()} | {:error, map()}
+  def list_preludes(pid, owner) do
+    GenServer.call(pid, {:list_preludes, owner})
   end
 
   @doc "Forget bindings and/or clear bounded histories."
@@ -302,6 +314,13 @@ defmodule PtcRunnerMcp.Sessions.Session do
     end
   end
 
+  def handle_call({:list_preludes, owner}, _from, state) do
+    case Owner.check(state.owner, owner) do
+      :ok -> {:reply, {:ok, Projection.list_preludes(state)}, touch(state)}
+      {:error, reason} -> {:reply, {:error, owner_error(reason)}, state}
+    end
+  end
+
   def handle_call({:forget, owner, opts}, _from, state) do
     with :ok <- Owner.check(state.owner, owner),
          :ok <- ensure_not_busy(state),
@@ -380,7 +399,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
         turn: state.turn,
         attempts: state.attempts,
         mode: state.mode,
-        limits: state.limits
+        limits: state.limits,
+        runtime_prelude: state.runtime_prelude
       }
 
       eval = %{
@@ -889,10 +909,13 @@ defmodule PtcRunnerMcp.Sessions.Session do
        strict_data: true,
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
-    |> maybe_put(:prelude, Config.prelude_source())
+    |> maybe_put(:prelude, snapshot_prelude(snapshot))
     |> maybe_put(:discovery_exec, Map.get(opts, :discovery_exec))
     |> maybe_put(:runtime, Map.get(opts, :runtime))
   end
+
+  defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude}), do: prelude
+  defp snapshot_prelude(_snapshot), do: Config.runtime_prelude() || Config.prelude_source()
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

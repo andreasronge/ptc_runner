@@ -20,6 +20,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp
+  alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
   alias PtcRunnerMcp.{ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Session}
@@ -111,6 +112,217 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["isError"] == false
       assert eval["structuredContent"]["status"] == "ok"
       assert eval["structuredContent"]["result"] == "user=> 42"
+    end
+
+    test "start accepts selected preludes and freezes them for eval and list" do
+      {:ok, store} = PreludeStore.new()
+
+      v1 = """
+      (ns picked "Selected helpers." {:visibility :prompt})
+      (defn value [] 1)
+      """
+
+      v2 = """
+      (ns picked "Selected helpers." {:visibility :prompt})
+      (defn value [] 2)
+      """
+
+      {:ok, first} = PreludeStore.write(store, "picked", v1)
+      Config.set(Config.get() |> Map.put(:prelude_store, store))
+
+      start = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+
+      assert start["structuredContent"]["prelude_refs"] == [
+               %{
+                 "id" => "picked",
+                 "version" => 1,
+                 "checksum" => first.checksum,
+                 "origin" => "memory"
+               }
+             ]
+
+      assert start["structuredContent"]["preludes"] == [
+               %{
+                 "namespace" => "picked",
+                 "doc" => "Selected helpers.",
+                 "discover" => "(ns-publics 'picked)",
+                 "source" => "(source picked/value)"
+               }
+             ]
+
+      {:ok, _second} = PreludeStore.write(store, "picked", v2)
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(picked/value)"
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["result"] == "user=> 1"
+
+      listed = call("lisp_session_list_preludes", %{"session_id" => sid})
+
+      assert listed["isError"] == false
+
+      assert listed["structuredContent"]["prelude_refs"] ==
+               start["structuredContent"]["prelude_refs"]
+    end
+
+    test "selected preludes can be pinned by version and checksum" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, first} =
+        PreludeStore.write(store, "picked", """
+        (ns picked)
+        (defn value [] 1)
+        """)
+
+      {:ok, _second} =
+        PreludeStore.write(store, "picked", """
+        (ns picked)
+        (defn value [] 2)
+        """)
+
+      Config.set(Config.get() |> Map.put(:prelude_store, store))
+
+      start =
+        call("lisp_session_start", %{
+          "preludes" => [%{"id" => "picked", "version" => 1, "checksum" => first.checksum}]
+        })
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(picked/value)"
+        })
+
+      assert eval["structuredContent"]["result"] == "user=> 1"
+
+      mismatch =
+        call("lisp_session_start", %{
+          "preludes" => [%{"id" => "picked", "version" => 1, "checksum" => "bad"}]
+        })
+
+      assert mismatch["isError"] == true
+      assert mismatch["structuredContent"]["reason"] == "session_args_error"
+      assert mismatch["structuredContent"]["message"] =~ "checksum"
+    end
+
+    test "direct start_session resolves selected preludes before registry startup" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, first} =
+        PreludeStore.write(store, "picked", """
+        (ns picked)
+        (defn value [] 1)
+        """)
+
+      Config.set(Config.get() |> Map.put(:prelude_store, store))
+
+      assert {:ok, %{"session_id" => sid, "prelude_refs" => refs}} =
+               Sessions.start_session(nil, %{preludes: ["picked"]})
+
+      assert refs == [
+               %{
+                 "id" => "picked",
+                 "version" => 1,
+                 "checksum" => first.checksum,
+                 "origin" => "memory"
+               }
+             ]
+
+      assert {:ok, %{"prelude_refs" => ^refs}} = Sessions.list_preludes(sid, nil)
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(picked/value)"
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["result"] == "user=> 1"
+    end
+
+    test "start rejects selected preludes when a configured prelude is already attached" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _candidate} =
+        PreludeStore.write(store, "picked", """
+        (ns picked)
+        (defn value [] 1)
+        """)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:prelude_source, test_prelude_source())
+      )
+
+      rejected = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert rejected["isError"] == true
+      assert rejected["structuredContent"]["reason"] == "session_args_error"
+      assert rejected["structuredContent"]["message"] =~ "mutually exclusive"
+    end
+
+    test "start rejects preludes without configured store and malformed preludes arg" do
+      missing_store = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert missing_store["isError"] == true
+      assert missing_store["structuredContent"]["reason"] == "session_args_error"
+      assert missing_store["structuredContent"]["message"] =~ ":prelude_store is required"
+
+      malformed = call("lisp_session_start", %{"preludes" => "picked"})
+
+      assert malformed["isError"] == true
+      assert malformed["structuredContent"]["reason"] == "session_args_error"
+      assert malformed["structuredContent"]["message"] =~ "preludes must be an array"
+
+      leaked =
+        call("lisp_session_start", %{
+          "preludes" => [
+            %{
+              "id" => "picked",
+              "version" => 1,
+              "source" => "(ns secret) (def token \"do-not-echo\")"
+            }
+          ]
+        })
+
+      assert leaked["isError"] == true
+      assert leaked["structuredContent"]["reason"] == "session_args_error"
+      assert leaked["structuredContent"]["message"] =~ "preludes[0]"
+      refute leaked["structuredContent"]["message"] =~ "do-not-echo"
+
+      string_leak =
+        call("lisp_session_start", %{
+          "preludes" => ["(ns secret) (def token \"do-not-echo\")"]
+        })
+
+      assert string_leak["isError"] == true
+      assert string_leak["structuredContent"]["reason"] == "session_args_error"
+      assert string_leak["structuredContent"]["message"] =~ "preludes[0]"
+      refute string_leak["structuredContent"]["message"] =~ "do-not-echo"
+
+      {:ok, store} = PreludeStore.new()
+      Config.set(Config.get() |> Map.put(:prelude_store, store))
+
+      string_leak_with_store =
+        call("lisp_session_start", %{
+          "preludes" => ["(ns secret) (def token \"do-not-echo\")"]
+        })
+
+      assert string_leak_with_store["isError"] == true
+      assert string_leak_with_store["structuredContent"]["reason"] == "session_args_error"
+      assert string_leak_with_store["structuredContent"]["message"] =~ "preludes[0]"
+      refute string_leak_with_store["structuredContent"]["message"] =~ "do-not-echo"
     end
 
     test "configured prelude source discovery is visible in session eval output" do
@@ -267,6 +479,40 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert env["structuredContent"]["reason"] == "session_closed"
     end
 
+    test "list_preludes reports unknown, closed, and malformed requests" do
+      unknown = call("lisp_session_list_preludes", %{"session_id" => "ptcs_does_not_exist"})
+
+      assert unknown["isError"] == true
+      assert unknown["structuredContent"]["reason"] == "session_not_found"
+
+      missing = call("lisp_session_list_preludes", %{})
+
+      assert missing["isError"] == true
+      assert missing["structuredContent"]["reason"] == "session_args_error"
+      assert missing["structuredContent"]["message"] =~ "session_id"
+
+      malformed = call("lisp_session_list_preludes", %{"session_id" => "x", "extra" => true})
+
+      assert malformed["isError"] == true
+      assert malformed["structuredContent"]["reason"] == "session_args_error"
+      assert malformed["structuredContent"]["message"] =~ "extra"
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+      {:ok, meta} = SessionsRegistry.lookup(sid)
+      ref = Process.monitor(meta.pid)
+
+      call("lisp_session_close", %{"session_id" => sid})
+
+      assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 1_000
+      await_names_pruned(sid)
+      drain_registry()
+
+      closed = call("lisp_session_list_preludes", %{"session_id" => sid})
+
+      assert closed["isError"] == true
+      assert closed["structuredContent"]["reason"] == "session_closed"
+    end
+
     test "lisp_session_list rejects any argument" do
       env = call("lisp_session_list", %{"session_id" => "x"})
       assert env["isError"] == true
@@ -298,6 +544,11 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert response["reason"] == "session_owner_mismatch"
     end
 
+    test "list_preludes by a non-owner is rejected", %{sid: sid} do
+      assert {:error, response} = Sessions.list_preludes(sid, %{owner: @forged_owner})
+      assert response["reason"] == "session_owner_mismatch"
+    end
+
     test "close by a non-owner is rejected and the session stays live", %{sid: sid} do
       assert {:error, response} = Sessions.close(sid, %{owner: @forged_owner}, "x")
       assert response["reason"] == "session_owner_mismatch"
@@ -316,6 +567,15 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert env["isError"] == true
       assert env["structuredContent"]["reason"] == "session_owner_mismatch"
+
+      prelude_env =
+        call("lisp_session_list_preludes", %{
+          "session_id" => sid,
+          "owner" => %{"transport" => "stdio", "instance_id" => "forged_via_tools"}
+        })
+
+      assert prelude_env["isError"] == true
+      assert prelude_env["structuredContent"]["reason"] == "session_owner_mismatch"
     end
   end
 
@@ -565,8 +825,12 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       Config.set(%{enabled: false})
       SoakHelpers.stop_sessions_processes()
 
-      for name <- ~w(lisp_session_start lisp_session_list) do
-        env = call(name, %{})
+      for {name, args} <- [
+            {"lisp_session_start", %{}},
+            {"lisp_session_list", %{}},
+            {"lisp_session_list_preludes", %{"session_id" => "ptcs_any"}}
+          ] do
+        env = call(name, args)
         assert env["isError"] == true
         assert env["structuredContent"]["reason"] == "sessions_disabled"
       end
@@ -579,6 +843,14 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert d.enabled == false
       assert d.max_sessions == 64
       assert d.max_sessions_per_owner == 16
+    end
+
+    test "resolve/1 preserves an explicit prelude store" do
+      {:ok, store} = PreludeStore.new()
+
+      assert {:ok, config} = Config.resolve(%{sessions: true, prelude_store: store})
+      assert config.enabled == true
+      assert config.prelude_store == store
     end
 
     test "resolve/1 honors CLI keys and parses integer strings" do

@@ -221,6 +221,8 @@ defmodule PtcRunnerMcp.Sessions.Registry do
         limits: Config.session_limits(),
         registry: self()
       ]
+      |> maybe_put(:runtime_prelude, Map.get(opts, :runtime_prelude))
+      |> maybe_put(:preludes, Map.get(opts, :preludes))
       |> maybe_put_name(state.names_registry, id, Map.put(meta, :registry_pid, self()))
 
     case Supervisor.start_session(child_opts, state.session_supervisor) do
@@ -259,6 +261,9 @@ defmodule PtcRunnerMcp.Sessions.Registry do
   defp maybe_put_name(child_opts, names_registry, id, meta) do
     Keyword.put(child_opts, :name, {:via, Elixir.Registry, {names_registry, id, meta}})
   end
+
+  defp maybe_put(child_opts, _key, nil), do: child_opts
+  defp maybe_put(child_opts, key, value), do: Keyword.put(child_opts, key, value)
 
   defp default_names_registry(__MODULE__), do: @names_registry
   defp default_names_registry(_name), do: nil

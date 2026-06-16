@@ -22,7 +22,8 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
-    |> maybe_put("preludes", prelude_discovery(Config.runtime_prelude()))
+    |> maybe_put("prelude_refs", selected_preludes_or_nil(state))
+    |> maybe_put("preludes", prelude_discovery(session_runtime_prelude(state)))
   end
 
   @doc "Render a successful eval response."
@@ -96,6 +97,22 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
     execution
   end
+
+  defp selected_preludes(%{preludes: preludes}) when is_list(preludes) do
+    Enum.map(preludes, &stringify_keys/1)
+  end
+
+  defp selected_preludes(_state), do: []
+
+  defp selected_preludes_or_nil(state) do
+    case selected_preludes(state) do
+      [] -> nil
+      refs -> refs
+    end
+  end
+
+  defp session_runtime_prelude(%{runtime_prelude: %Prelude{} = prelude}), do: prelude
+  defp session_runtime_prelude(_state), do: Config.runtime_prelude()
 
   defp prelude_discovery(nil), do: nil
 
@@ -294,6 +311,16 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "status" => "ok",
       "count" => length(sessions),
       "sessions" => sessions
+    }
+  end
+
+  @doc "Render frozen prelude refs for one live session."
+  @spec list_preludes(map()) :: map()
+  def list_preludes(state) do
+    %{
+      "status" => "ok",
+      "session_id" => state.id,
+      "prelude_refs" => selected_preludes(state)
     }
   end
 

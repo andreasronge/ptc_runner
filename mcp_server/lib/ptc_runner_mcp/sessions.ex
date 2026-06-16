@@ -9,6 +9,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   import Kernel, except: [inspect: 1]
 
+  alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Upstream.{Eval, RunContext}
 
   alias PtcRunnerMcp.{
@@ -30,6 +31,7 @@ defmodule PtcRunnerMcp.Sessions do
   @sync_tool_names [
     "lisp_session_start",
     "lisp_session_list",
+    "lisp_session_list_preludes",
     "lisp_session_inspect",
     "lisp_session_forget",
     "lisp_session_close"
@@ -94,6 +96,7 @@ defmodule PtcRunnerMcp.Sessions do
       [
         session_start_tool(),
         session_list_tool(),
+        session_list_preludes_tool(),
         session_eval_tool(),
         session_inspect_tool(),
         session_forget_tool(),
@@ -123,6 +126,12 @@ defmodule PtcRunnerMcp.Sessions do
   def call(%{"name" => "lisp_session_list", "arguments" => args}) when is_map(args) do
     args
     |> list_session_args()
+    |> envelope()
+  end
+
+  def call(%{"name" => "lisp_session_list_preludes", "arguments" => args}) when is_map(args) do
+    args
+    |> list_preludes_args()
     |> envelope()
   end
 
@@ -186,6 +195,27 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
+  @doc "Return the frozen prelude refs selected when the session was started."
+  @spec list_preludes(String.t(), map() | keyword() | nil) :: response()
+  def list_preludes(session_id, owner_context \\ nil)
+
+  def list_preludes(session_id, owner_context) when is_binary(session_id) do
+    with :ok <- enabled(),
+         :ok <- ensure_started(),
+         {:ok, owner} <- Owner.from_context(owner_context),
+         {:ok, meta} <- Registry.lookup(session_id) do
+      Session.list_preludes(meta.pid, owner)
+    else
+      :disabled -> {:error, disabled_error()}
+      {:error, reason} when is_atom(reason) -> {:error, registry_error(reason)}
+      {:error, response} when is_map(response) -> {:error, response}
+    end
+  end
+
+  def list_preludes(_session_id, _owner_context) do
+    {:error, Projection.error(:session_args_error, "session_id must be a non-empty string")}
+  end
+
   @doc "Validate `lisp_session_eval` arguments before acquiring the global eval gate."
   @spec validate_eval(map()) :: {:ok, map()} | {:error, map()}
   def validate_eval(args) when is_map(args) do
@@ -227,13 +257,22 @@ defmodule PtcRunnerMcp.Sessions do
     with :ok <- enabled(),
          :ok <- ensure_started(),
          {:ok, owner} <- Owner.from_context(owner_context),
-         {:ok, meta} <- Registry.start_session(owner, opts),
+         {:ok, start_opts} <- prepare_start_opts(opts),
+         {:ok, meta} <- Registry.start_session(owner, start_opts),
          {:ok, response} <- Session.start_response(meta.pid, owner) do
       {:ok, response}
     else
-      :disabled -> {:error, disabled_error()}
-      {:error, reason} when is_atom(reason) -> {:error, registry_error(reason)}
-      {:error, response} when is_map(response) -> {:error, response}
+      :disabled ->
+        {:error, disabled_error()}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, registry_error(reason)}
+
+      {:error, response} when is_map(response) ->
+        {:error, response}
+
+      {:error, message} when is_binary(message) ->
+        {:error, Projection.error(:session_args_error, message)}
     end
   end
 
@@ -602,6 +641,7 @@ defmodule PtcRunnerMcp.Sessions do
           %{}
           |> maybe_put(:title, Map.get(args, "title"))
           |> maybe_put(:ttl_ms, Map.get(args, "ttl_ms"))
+          |> maybe_put(:preludes, Map.get(args, "preludes"))
 
         start_session(owner_context(args), opts)
 
@@ -621,6 +661,16 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
+  defp list_preludes_args(args) do
+    case validate_list_preludes_args(args) do
+      :ok ->
+        list_preludes(Map.get(args, "session_id"), owner_context(args))
+
+      {:error, message} ->
+        {:error, Projection.error(:session_args_error, message)}
+    end
+  end
+
   defp owner_context(args) when is_map(args) do
     # Internal/test override for ownership simulation. Public clients should
     # rely on transport-derived ownership and should not send this field.
@@ -634,8 +684,149 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  defp start_arg_key?(key) when key in ["title", "ttl_ms", "owner", :owner], do: true
+  defp prepare_start_opts(opts) when is_map(opts) or is_list(opts) do
+    opts = Map.new(opts)
+
+    case Map.get(opts, :preludes) || Map.get(opts, "preludes") do
+      nil ->
+        {:ok, Map.delete(opts, "preludes")}
+
+      refs when is_list(refs) ->
+        with {:ok, refs} <- normalize_prelude_refs(refs),
+             {:ok, selected} <- resolve_start_preludes(refs, opts) do
+          start_opts =
+            opts
+            |> Map.delete("preludes")
+            |> Map.delete(:preludes)
+            |> maybe_put(:runtime_prelude, Map.get(selected, :runtime_prelude))
+            |> maybe_put(:preludes, Map.get(selected, :preludes))
+
+          {:ok, start_opts}
+        end
+
+      _other ->
+        {:error, "preludes must be an array when supplied"}
+    end
+  end
+
+  defp prepare_start_opts(_opts), do: {:error, "session start options must be an object"}
+
+  defp resolve_start_preludes(refs, opts) do
+    case Selection.resolve!(Config.prelude_store(), refs, configured_prelude_opts(opts)) do
+      {nil, []} ->
+        {:ok, %{}}
+
+      {runtime_prelude, resolved} ->
+        {:ok, %{runtime_prelude: runtime_prelude, preludes: resolved}}
+    end
+  rescue
+    error in ArgumentError -> {:error, Exception.message(error)}
+  end
+
+  defp normalize_prelude_refs(refs) do
+    refs
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {ref, index}, {:ok, acc} ->
+      case normalize_prelude_ref(ref, index) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        {:error, message} -> {:halt, {:error, message}}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      {:error, _message} = error -> error
+    end
+  end
+
+  defp normalize_prelude_ref(ref, index) when is_binary(ref) do
+    case String.split(ref, "@", parts: 2) do
+      [id] ->
+        validate_prelude_ref_id(id, index, ref)
+
+      [id, version] ->
+        with {:ok, _id} <- validate_prelude_ref_id(id, index, ref),
+             {int, ""} when int > 0 <- Integer.parse(version) do
+          {:ok, ref}
+        else
+          _ -> {:error, "preludes[#{index}] must be a valid prelude id or id@version ref"}
+        end
+    end
+  end
+
+  defp normalize_prelude_ref(ref, index) when is_map(ref) do
+    with :ok <- validate_prelude_ref_keys(ref, index),
+         {:ok, id} <- prelude_ref_string(ref, "id", index),
+         {:ok, version} <- prelude_ref_version(ref, index),
+         {:ok, checksum} <- prelude_ref_optional_string(ref, "checksum", index) do
+      normalized = %{id: id, version: version}
+      {:ok, maybe_put(normalized, :checksum, checksum)}
+    end
+  end
+
+  defp normalize_prelude_ref(_ref, index) do
+    {:error, "preludes[#{index}] must be a non-empty string or ref object"}
+  end
+
+  defp validate_prelude_ref_id(id, index, _original) do
+    if id == "" or not Regex.match?(~r/\A[A-Za-z][A-Za-z0-9_.-]*\z/, id) do
+      {:error, "preludes[#{index}] must be a valid prelude id or id@version ref"}
+    else
+      {:ok, id}
+    end
+  end
+
+  defp validate_prelude_ref_keys(ref, index) do
+    allowed = MapSet.new(["id", "version", "checksum", :id, :version, :checksum])
+
+    case Enum.find(Map.keys(ref), &(not MapSet.member?(allowed, &1))) do
+      nil -> :ok
+      _key -> {:error, "preludes[#{index}] contains an unexpected field"}
+    end
+  end
+
+  defp prelude_ref_string(ref, key, index) do
+    case Map.get(ref, key) || Map.get(ref, String.to_existing_atom(key)) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, "preludes[#{index}].#{key} must be a non-empty string"}
+    end
+  end
+
+  defp prelude_ref_version(ref, index) do
+    case Map.get(ref, "version") || Map.get(ref, :version) do
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      _other -> {:error, "preludes[#{index}].version must be a positive integer"}
+    end
+  end
+
+  defp prelude_ref_optional_string(ref, key, index) do
+    case Map.get(ref, key) || Map.get(ref, String.to_existing_atom(key)) do
+      nil -> {:ok, nil}
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _other -> {:error, "preludes[#{index}].#{key} must be a non-empty string when supplied"}
+    end
+  end
+
+  defp start_arg_key?(key) when key in ["title", "ttl_ms", "preludes", "owner", :owner],
+    do: true
+
   defp start_arg_key?(_key), do: false
+
+  defp validate_list_preludes_args(args) do
+    case Enum.find(Map.keys(args), &(not list_preludes_arg_key?(&1))) do
+      nil -> :ok
+      key -> {:error, "unexpected lisp_session_list_preludes argument: #{key}"}
+    end
+  end
+
+  defp list_preludes_arg_key?(key) when key in ["session_id", "owner", :owner], do: true
+  defp list_preludes_arg_key?(_key), do: false
+
+  defp configured_prelude_opts(opts) do
+    case Map.get(opts, :runtime_prelude) || Config.runtime_prelude() do
+      nil -> []
+      runtime_prelude -> [runtime_prelude: runtime_prelude]
+    end
+  end
 
   defp summary_updated_at(%{"updated_at" => updated_at}) when is_binary(updated_at) do
     case DateTime.from_iso8601(updated_at) do
@@ -752,7 +943,25 @@ defmodule PtcRunnerMcp.Sessions do
         "type" => "object",
         "properties" => %{
           "title" => %{"type" => "string"},
-          "ttl_ms" => %{"type" => "integer", "minimum" => 1}
+          "ttl_ms" => %{"type" => "integer", "minimum" => 1},
+          "preludes" => %{
+            "type" => "array",
+            "items" => %{
+              "oneOf" => [
+                %{"type" => "string"},
+                %{
+                  "type" => "object",
+                  "required" => ["id", "version"],
+                  "properties" => %{
+                    "id" => %{"type" => "string"},
+                    "version" => %{"type" => "integer", "minimum" => 1},
+                    "checksum" => %{"type" => "string"}
+                  },
+                  "additionalProperties" => false
+                }
+              ]
+            }
+          }
         },
         "additionalProperties" => false
       },
@@ -770,6 +979,22 @@ defmodule PtcRunnerMcp.Sessions do
         "additionalProperties" => false
       },
       "outputSchema" => session_output_schema(["status", "count", "sessions"])
+    }
+  end
+
+  defp session_list_preludes_tool do
+    %{
+      "name" => "lisp_session_list_preludes",
+      "description" => PromptRegistry.render(:mcp_session_list_preludes_description, []),
+      "inputSchema" => %{
+        "type" => "object",
+        "required" => ["session_id"],
+        "properties" => %{
+          "session_id" => %{"type" => "string"}
+        },
+        "additionalProperties" => false
+      },
+      "outputSchema" => session_output_schema(["status", "session_id", "prelude_refs"])
     }
   end
 
@@ -916,6 +1141,21 @@ defmodule PtcRunnerMcp.Sessions do
           "type" => "array",
           "description" =>
             "Prompt-visible attached prelude namespaces with compact docs and discovery forms."
+        },
+        "prelude_refs" => %{
+          "type" => "array",
+          "description" => "Frozen store prelude references attached to this session.",
+          "items" => %{
+            "type" => "object",
+            "required" => ["id", "version", "checksum", "origin"],
+            "properties" => %{
+              "id" => %{"type" => "string"},
+              "version" => %{"type" => "integer", "minimum" => 1},
+              "checksum" => %{"type" => "string"},
+              "origin" => %{"type" => ["string", "null"]}
+            },
+            "additionalProperties" => true
+          }
         },
         "limits" => %{"type" => "object"},
         "memory" => %{"type" => "object"},

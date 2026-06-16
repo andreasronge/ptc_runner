@@ -25,6 +25,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     lisp_session_forget: "tools/lisp_session_forget.md",
     lisp_session_inspect: "tools/lisp_session_inspect.md",
     lisp_session_list: "tools/lisp_session_list.md",
+    lisp_session_list_preludes: "tools/lisp_session_list_preludes.md",
     lisp_session_start: "tools/lisp_session_start.md",
     lisp_task: "tools/lisp_task.md"
   }
@@ -52,6 +53,7 @@ defmodule PtcRunnerMcp.PromptRegistry do
     :lisp_session_eval_description,
     :mcp_session_inspect_description,
     :mcp_session_list_description,
+    :mcp_session_list_preludes_description,
     :mcp_session_forget_description,
     :mcp_session_close_description,
     :lisp_task_description,
@@ -256,6 +258,10 @@ defmodule PtcRunnerMcp.PromptRegistry do
   defp render_card(:mcp_agentic_final_recap), do: agentic_final_recap()
   defp render_card(:mcp_session_inspect_description), do: tool_prompt(:lisp_session_inspect)
   defp render_card(:mcp_session_list_description), do: tool_prompt(:lisp_session_list)
+
+  defp render_card(:mcp_session_list_preludes_description),
+    do: tool_prompt(:lisp_session_list_preludes)
+
   defp render_card(:mcp_session_forget_description), do: tool_prompt(:lisp_session_forget)
   defp render_card(:mcp_session_close_description), do: tool_prompt(:lisp_session_close)
   defp render_card(:lisp_task_description), do: tool_prompt(:lisp_task)

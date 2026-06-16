@@ -23,6 +23,7 @@ defmodule PtcRunnerMcp.DebugRecorder do
     "lisp_session_eval",
     "lisp_session_inspect",
     "lisp_session_list",
+    "lisp_session_list_preludes",
     "lisp_session_forget",
     "lisp_session_close"
   ]
