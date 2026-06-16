@@ -10,6 +10,8 @@ defmodule PtcRunner.SubAgent.Definition do
   or the DSL macros instead.
   """
 
+  alias PtcRunner.PreludeStore.Selection
+
   @typedoc """
   Language spec for system prompts.
 
@@ -279,6 +281,19 @@ defmodule PtcRunner.SubAgent.Definition do
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
     alias PtcRunner.SubAgent.{Signature, Validator}
+
+    {prelude_store, opts} = Keyword.pop(opts, :prelude_store)
+    {prelude_refs, opts} = Keyword.pop(opts, :preludes)
+
+    {runtime_prelude, _resolved_preludes} =
+      Selection.resolve!(prelude_store, prelude_refs, opts)
+
+    opts =
+      case runtime_prelude do
+        nil -> opts
+        prelude -> Keyword.put(opts, :runtime_prelude, prelude)
+      end
+
     Validator.validate!(opts)
 
     # Parse signature if provided (cached for loop return validation)

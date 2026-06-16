@@ -38,6 +38,7 @@ defmodule PtcRunner.SubAgent do
   - [Phoenix Streaming](guides/phoenix-streaming.md) - Real-time streaming in LiveView
   """
 
+  alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Runner
 
@@ -117,6 +118,8 @@ defmodule PtcRunner.SubAgent do
   - `llm_query` - Boolean enabling LLM query mode (default: false)
   - `builtin_tools` - List of builtin tool families to enable (default: []). Available: `:grep` (adds grep and grep-n tools)
   - `plan` - List of plan steps (strings, `{id, description}` tuples, or keyword list)
+  - `runtime_prelude` - Compiled `%PtcRunner.Lisp.Prelude{}` artifact attached to every run of this agent
+  - `prelude_store` / `preludes` - Resolve versioned store refs during construction and freeze the compiled bundle into `runtime_prelude`
 
   ## Returns
 
@@ -186,6 +189,11 @@ defmodule PtcRunner.SubAgent do
     - `retryable_errors` - List of error types to retry (default: `[:rate_limit, :timeout, :server_error]`)
   - `collect_messages` - Capture full conversation history in Step.messages (default: false).
     When enabled, messages are in OpenAI format: `[%{role: :system | :user | :assistant, content: String.t()}]`
+  - `prelude_store` / `preludes` - For string prompts or `%SubAgent{}` structs,
+    resolve versioned store refs for this invocation. String prompts freeze the
+    bundle into the constructed agent; struct runs use a per-run copy and leave
+    the original struct unchanged. Child `SubAgentTool`s do not implicitly inherit
+    a parent's selected bundle; select preludes on the child definition when needed.
   - Other options from agent definition can be overridden
 
   ## LLM Registry
@@ -271,7 +279,10 @@ defmodule PtcRunner.SubAgent do
         :max_tool_calls,
         :plan,
         :journaling,
-        :completion_mode
+        :completion_mode,
+        :runtime_prelude,
+        :prelude_store,
+        :preludes
       ])
       |> Keyword.put(:prompt, mission)
 
@@ -310,7 +321,10 @@ defmodule PtcRunner.SubAgent do
         :max_tool_calls,
         :plan,
         :journaling,
-        :completion_mode
+        :completion_mode,
+        :runtime_prelude,
+        :prelude_store,
+        :preludes
       ])
 
     Runner.run(agent, runtime_opts)
@@ -318,6 +332,24 @@ defmodule PtcRunner.SubAgent do
 
   # Main implementation with SubAgent struct - delegates to the internal runner
   def run(%Definition{} = agent, opts) do
+    {prelude_store, opts} = Keyword.pop(opts, :prelude_store)
+    {prelude_refs, opts} = Keyword.pop(opts, :preludes)
+
+    selection_opts =
+      case agent.runtime_prelude do
+        nil -> opts
+        runtime_prelude -> Keyword.put_new(opts, :runtime_prelude, runtime_prelude)
+      end
+
+    {runtime_prelude, _resolved_preludes} =
+      Selection.resolve!(prelude_store, prelude_refs, selection_opts)
+
+    agent =
+      case runtime_prelude do
+        nil -> agent
+        prelude -> %{agent | runtime_prelude: prelude}
+      end
+
     Runner.run(agent, opts)
   end
 

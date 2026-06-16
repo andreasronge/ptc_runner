@@ -11,6 +11,7 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.PreludeStore
   alias PtcRunner.SubAgent.Loop.LispOpts
   alias PtcRunner.SubAgent.Loop.State
   alias PtcRunner.SubAgent.SystemPrompt
@@ -24,6 +25,11 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
     "Return a CRM user by id."
     [id]
     (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+  """
+
+  @pure_prelude """
+  (ns greet "Greeting helpers." {:visibility :prompt})
+  (defn hello [name] (str "hi " name))
   """
 
   setup do
@@ -46,6 +52,161 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
       assert_raise ArgumentError, fn ->
         PtcRunner.SubAgent.new(prompt: "x", runtime_prelude: %{not: :a_prelude})
       end
+    end
+
+    test "resolves prelude_store and preludes into a frozen runtime prelude" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, written} = PreludeStore.write(store, "greet", @pure_prelude)
+
+      agent =
+        PtcRunner.SubAgent.new(
+          prompt: "Greet {{name}}",
+          signature: "(name :string) -> {msg :string}",
+          prelude_store: store,
+          preludes: ["greet"],
+          max_turns: 1
+        )
+
+      assert agent.runtime_prelude.namespaces == ["greet"]
+      assert [component] = agent.runtime_prelude.metadata.components
+      assert component.id == "greet"
+      assert component.version == 1
+      assert component.checksum == written.checksum
+
+      llm = fn _ -> {:ok, ~S|(return {:msg (greet/hello data/name)})|} end
+      assert {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, context: %{name: "ada"})
+      assert step.return["msg"] == "hi ada"
+    end
+
+    test "string convenience accepts prelude_store and preludes" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, _written} = PreludeStore.write(store, "greet", @pure_prelude)
+
+      llm = fn _ -> {:ok, ~S|(return {:msg (greet/hello data/name)})|} end
+
+      assert {:ok, step} =
+               PtcRunner.SubAgent.run("Greet {{name}}",
+                 signature: "(name :string) -> {msg :string}",
+                 prelude_store: store,
+                 preludes: ["greet"],
+                 max_turns: 1,
+                 llm: llm,
+                 context: %{name: "ada"}
+               )
+
+      assert step.return["msg"] == "hi ada"
+    end
+
+    test "struct run accepts prelude_store and preludes as per-run selection" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, _written} = PreludeStore.write(store, "greet", @pure_prelude)
+
+      agent =
+        PtcRunner.SubAgent.new(
+          prompt: "Greet {{name}}",
+          signature: "(name :string) -> {msg :string}",
+          max_turns: 1
+        )
+
+      llm = fn _ -> {:ok, ~S|(return {:msg (greet/hello data/name)})|} end
+
+      assert {:ok, step} =
+               PtcRunner.SubAgent.run(agent,
+                 prelude_store: store,
+                 preludes: ["greet"],
+                 llm: llm,
+                 context: %{name: "ada"}
+               )
+
+      assert step.return["msg"] == "hi ada"
+      assert agent.runtime_prelude == nil
+    end
+
+    test "prelude selection rejects missing store and runtime_prelude overrides", %{
+      prelude: prelude
+    } do
+      assert_raise ArgumentError, ~r/:prelude_store is required/, fn ->
+        PtcRunner.SubAgent.new(prompt: "x", preludes: ["greet"])
+      end
+
+      {:ok, store} = PreludeStore.new()
+      {:ok, _written} = PreludeStore.write(store, "greet", @pure_prelude)
+
+      assert_raise ArgumentError, ~r/mutually exclusive/, fn ->
+        PtcRunner.SubAgent.new(
+          prompt: "x",
+          runtime_prelude: prelude,
+          prelude_store: store,
+          preludes: ["greet"]
+        )
+      end
+
+      assert_raise ArgumentError, ~r/mutually exclusive/, fn ->
+        PtcRunner.SubAgent.run("Greet {{name}}",
+          runtime_prelude: prelude,
+          prelude_store: store,
+          preludes: ["greet"],
+          llm: fn _ -> {:ok, ~S|(return {:msg "unused"})|} end
+        )
+      end
+
+      agent = PtcRunner.SubAgent.new(prompt: "Greet {{name}}", runtime_prelude: prelude)
+
+      assert_raise ArgumentError, ~r/mutually exclusive/, fn ->
+        PtcRunner.SubAgent.run(agent,
+          prelude_store: store,
+          preludes: ["greet"],
+          llm: fn _ -> {:ok, ~S|(return {:msg "unused"})|} end
+        )
+      end
+    end
+
+    test "child SubAgentTools do not inherit the parent's selected prelude" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, _written} = PreludeStore.write(store, "greet", @pure_prelude)
+
+      child =
+        PtcRunner.SubAgent.new(
+          prompt: "Child greet {{name}}",
+          description: "Child greeter",
+          signature: "(name :string) -> {msg :string}",
+          max_turns: 1
+        )
+
+      parent =
+        PtcRunner.SubAgent.new(
+          prompt: "Call child",
+          tools: %{"child" => PtcRunner.SubAgent.as_tool(child)},
+          prelude_store: store,
+          preludes: ["greet"],
+          max_turns: 2
+        )
+
+      test_pid = self()
+
+      llm = fn input ->
+        content = input |> Map.fetch!(:messages) |> List.last() |> Map.fetch!(:content)
+
+        case Map.get(input, :turn) do
+          2 ->
+            send(test_pid, {:parent_feedback, content})
+            {:ok, ~S|(return {:done true})|}
+
+          nil ->
+            {:ok, ~S|(return {:msg (greet/hello data/name)})|}
+
+          _turn ->
+            assert content =~ "<mission>\nCall child"
+            {:ok, ~S|(tool/child {:name "ada"})|}
+        end
+      end
+
+      assert {:ok, step} = PtcRunner.SubAgent.run(parent, llm: llm)
+      assert step.return["done"] == true
+
+      assert_receive {:parent_feedback, feedback}
+      assert feedback =~ "greet"
+      refute feedback =~ "hi ada"
     end
   end
 
@@ -138,11 +299,6 @@ defmodule PtcRunner.SubAgent.RuntimePreludeTest do
   end
 
   describe "end-to-end SubAgent execution resolves prelude exports (codex round 5 #2)" do
-    @pure_prelude """
-    (ns greet "Greeting helpers." {:visibility :prompt})
-    (defn hello [name] (str "hi " name))
-    """
-
     test "the single-shot fast path (max_turns: 1) attaches the prelude" do
       {:ok, prelude} = Compiler.compile(@pure_prelude)
 

@@ -26,9 +26,7 @@ defmodule PtcRunner.Session do
       2
   """
 
-  alias PtcRunner.Lisp.Prelude.Bundle
-  alias PtcRunner.PreludeCandidate
-  alias PtcRunner.PreludeStore
+  alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Step
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent
@@ -98,7 +96,7 @@ defmodule PtcRunner.Session do
     {prelude_refs, run_opts} = Keyword.pop(opts, :preludes)
 
     {compiled_prelude, resolved_preludes} =
-      resolve_preludes!(prelude_store, prelude_refs, run_opts)
+      Selection.resolve!(prelude_store, prelude_refs, run_opts)
 
     run_opts = maybe_put_prelude(run_opts, compiled_prelude)
 
@@ -211,70 +209,6 @@ defmodule PtcRunner.Session do
   defp trim_history(history, history_depth) when is_list(history) and is_integer(history_depth) do
     history
     |> Enum.take(-max(history_depth, 0))
-  end
-
-  defp resolve_preludes!(_store, nil, _run_opts), do: {nil, []}
-  defp resolve_preludes!(_store, [], _run_opts), do: {nil, []}
-
-  defp resolve_preludes!(nil, prelude_refs, _run_opts) do
-    raise ArgumentError,
-          ":prelude_store is required when :preludes is supplied, got preludes: " <>
-            inspect(prelude_refs, limit: 5)
-  end
-
-  defp resolve_preludes!(%PreludeStore{} = store, prelude_refs, run_opts) do
-    if Keyword.has_key?(run_opts, :prelude) do
-      raise ArgumentError, ":prelude and :preludes are mutually exclusive"
-    end
-
-    refs = List.wrap(prelude_refs)
-
-    candidates =
-      Enum.map(refs, fn ref ->
-        case PreludeStore.read(store, ref) do
-          {:ok, candidate} ->
-            candidate
-
-          {:error, error} ->
-            raise ArgumentError,
-                  "failed to resolve prelude #{inspect(ref, limit: 5)}: " <>
-                    "#{Map.get(error, :message, inspect(error))}"
-        end
-      end)
-
-    selections = Enum.map(candidates, &candidate_selection/1)
-
-    case Bundle.compile(selections) do
-      {:ok, prelude} ->
-        {prelude, Enum.map(candidates, &candidate_ref/1)}
-
-      {:error, error} ->
-        raise ArgumentError, "failed to compile selected preludes: #{error.message}"
-    end
-  end
-
-  defp resolve_preludes!(store, _prelude_refs, _run_opts) do
-    raise ArgumentError,
-          ":prelude_store must be a %PtcRunner.PreludeStore{}, got: #{inspect(store)}"
-  end
-
-  defp candidate_selection(%PreludeCandidate{} = candidate) do
-    %{
-      id: candidate.id,
-      version: candidate.version,
-      checksum: PreludeCandidate.checksum(candidate),
-      source: candidate.source,
-      origin: PreludeCandidate.public_origin(candidate.origin)
-    }
-  end
-
-  defp candidate_ref(%PreludeCandidate{} = candidate) do
-    %{
-      id: candidate.id,
-      version: candidate.version,
-      checksum: PreludeCandidate.checksum(candidate),
-      origin: PreludeCandidate.public_origin(candidate.origin)
-    }
   end
 
   defp maybe_put_prelude(run_opts, nil), do: run_opts
