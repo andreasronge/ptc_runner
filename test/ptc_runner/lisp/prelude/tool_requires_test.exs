@@ -398,6 +398,105 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert step.fail.message =~ "expected int"
     end
 
+    test "user closures applied inside a prelude export do not inherit private tool authority" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn run "doc" [f]
+          (do
+            (tool/private_fetch {:id "export"})
+            (f)))
+        """)
+
+      parent = self()
+
+      tools = %{
+        "private_fetch" =>
+          {fn args ->
+             send(parent, {:private_fetch, args["id"]})
+             %{"id" => args["id"], "ok" => true}
+           end, signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(
+                 ~S|(cap/run (fn [] (tool/private_fetch {:id "user"})))|,
+                 prelude: prelude,
+                 tools: tools
+               )
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+      assert_received {:private_fetch, "export"}
+      refute_received {:private_fetch, "user"}
+    end
+
+    test "escaped prelude closures applied inside another export do not inherit its authority" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn make "doc" []
+          (fn [] (tool/private_fetch {:id "escaped"})))
+        (defn run "doc" [f]
+          (do
+            (tool/private_fetch {:id "export"})
+            (f)))
+        """)
+
+      parent = self()
+
+      tools = %{
+        "private_fetch" =>
+          {fn args ->
+             send(parent, {:private_fetch, args["id"]})
+             %{"id" => args["id"], "ok" => true}
+           end, signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:error, %Step{} = step} =
+               Lisp.run(~S|(cap/run (cap/make))|, prelude: prelude, tools: tools)
+
+      assert step.fail.reason == :private_tool_unauthorized
+      assert step.fail.message =~ "private_fetch"
+      assert_received {:private_fetch, "export"}
+      refute_received {:private_fetch, "escaped"}
+    end
+
+    test "anonymous closures authored inside a prelude export keep that export's authority" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn run "doc" []
+          (map (fn [id] (tool/private_fetch {:id id})) ["inner"]))
+        """)
+
+      tools = %{
+        "private_fetch" =>
+          {fn args -> %{"id" => args["id"], "ok" => true} end,
+           signature: "(id :string) -> :map", visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(cap/run)|, prelude: prelude, tools: tools)
+
+      assert step.return == [%{"id" => "inner", "ok" => true}]
+      assert [%{private: true, origin: %{ref: "cap/run"}}] = step.tool_calls
+    end
+
+    test "user closures applied inside a prelude export do not see private helpers" do
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn- count [xs] 99)
+        (defn run "doc" [f] (f))
+        """)
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(cap/run (fn [] (count [1 2])))|, prelude: prelude)
+
+      assert step.return == 2
+    end
+
     test "escaped prelude closures do not retain private tool authority" do
       tools = %{
         "private_fetch" => {fn _args -> "secret" end, visibility: :private}

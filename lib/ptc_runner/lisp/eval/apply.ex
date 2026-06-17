@@ -713,7 +713,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     closure_user_ns =
       case prelude_ns do
-        nil -> eval_context.user_ns
+        nil -> EvalContext.current_prelude_caller_user_ns(eval_context) || eval_context.user_ns
         ns -> prelude_ns_env(eval_context.prelude, ns)
       end
 
@@ -747,7 +747,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           pmap_deadline: eval_context.pmap_deadline
       }
       |> EvalContext.inherit_prelude(eval_context)
-      |> maybe_push_prelude_origin(metadata)
+      |> maybe_push_prelude_origin(metadata, eval_context)
 
     # A `(return …)`/`(fail …)` inside a value-position prelude export throws the
     # export context (user_ns = private prelude env). Catch it here — at the HOF
@@ -951,7 +951,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp prelude_run_scope(%{prelude_ns: ns}, _user_ns, caller_ctx),
     do: {prelude_ns_env(caller_ctx.prelude, ns), caller_ctx.user_ns}
 
-  defp prelude_run_scope(_meta, user_ns, _caller_ctx), do: {user_ns, :keep}
+  defp prelude_run_scope(_meta, user_ns, caller_ctx) do
+    case EvalContext.current_prelude_caller_user_ns(caller_ctx) do
+      nil -> {user_ns, :keep}
+      caller_user_ns -> {caller_user_ns, user_ns}
+    end
+  end
 
   defp restored_user_ns(:keep, final_ctx), do: final_ctx.user_ns
   defp restored_user_ns(ns, _final_ctx), do: ns
@@ -960,22 +965,61 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # The closure carries only the (public) namespace NAME, never the env itself,
   # so private helpers stay out of user-visible values.
   defp prelude_ns_env(nil, _ns), do: %{}
-  defp prelude_ns_env(prelude, ns), do: Map.get(prelude.private_env, ns, %{})
+
+  defp prelude_ns_env(prelude, ns) do
+    prelude.private_env
+    |> Map.get(ns, %{})
+    |> tag_prelude_ns_env(ns)
+  end
+
+  defp tag_prelude_ns_env(env, ns) do
+    Map.new(env, fn {name, value} -> {name, tag_prelude_internal(value, ns)} end)
+  end
 
   # The prelude namespace name a closure was tagged with (value-position export),
   # or `nil` for an ordinary user closure.
   defp prelude_ns_tag(%{prelude_ns: ns}), do: ns
   defp prelude_ns_tag(_meta), do: nil
 
-  defp maybe_push_prelude_origin(%EvalContext{} = context, %{
-         prelude_ref: ref,
-         prelude_tool_refs: tool_refs
-       })
-       when is_binary(ref) and is_list(tool_refs) do
-    EvalContext.push_prelude_origin(context, %{ref: ref, tool_refs: tool_refs})
+  defp maybe_push_prelude_origin(
+         %EvalContext{} = context,
+         %{
+           prelude_ref: ref,
+           prelude_ns: ns,
+           prelude_tool_refs: tool_refs
+         },
+         %EvalContext{} = caller_ctx
+       )
+       when is_binary(ref) and is_binary(ns) and is_list(tool_refs) do
+    caller_user_ns = EvalContext.current_prelude_caller_user_ns(caller_ctx) || caller_ctx.user_ns
+
+    context
+    |> EvalContext.push_prelude_caller_user_ns(caller_user_ns)
+    |> EvalContext.push_prelude_origin(%{ref: ref, namespace: ns, tool_refs: tool_refs})
   end
 
-  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta), do: context
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_internal: true}, _caller_ctx) do
+    context
+  end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do
+    EvalContext.push_user_origin(context)
+  end
+
+  # Tag private namespace entries as internal prelude code. Internal helpers keep
+  # the active export's origin while resolving sibling helpers, but escaped
+  # namespace-only closures intentionally do not.
+  defp tag_prelude_internal({:closure, params, body, env, th, meta}, ns)
+       when is_binary(ns) do
+    meta =
+      meta
+      |> Map.put(:prelude_ns, ns)
+      |> Map.put(:prelude_internal, true)
+
+    {:closure, params, body, env, th, meta}
+  end
+
+  defp tag_prelude_internal(value, _ns), do: value
 
   # Tag a value RETURNED by a value-position export with its originating prelude
   # namespace, so a returned closure (e.g. `(defn make [] (fn [x] (helper x)))`)
@@ -984,8 +1028,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # mirroring `Eval.bind_prelude_ref/2` on the direct `(crm/export …)` path.
   defp tag_prelude_ns(value, nil), do: value
 
-  defp tag_prelude_ns({:closure, params, body, env, th, meta}, ns) when is_binary(ns),
-    do: {:closure, params, body, env, th, Map.put(meta, :prelude_ns, ns)}
+  defp tag_prelude_ns({:closure, params, body, env, th, meta}, ns) when is_binary(ns) do
+    meta =
+      meta
+      |> Map.delete(:prelude_internal)
+      |> Map.put(:prelude_ns, ns)
+
+    {:closure, params, body, env, th, meta}
+  end
 
   defp tag_prelude_ns(value, _ns), do: value
 
@@ -1088,7 +1138,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               discovery_exec: caller_ctx.discovery_exec,
               catalog_ops: caller_ctx.catalog_ops
           }
-          |> maybe_push_prelude_origin(meta)
+          |> maybe_push_prelude_origin(meta, caller_ctx)
 
         case do_eval_fn.(body, closure_ctx) do
           {:ok, result, final_ctx} ->

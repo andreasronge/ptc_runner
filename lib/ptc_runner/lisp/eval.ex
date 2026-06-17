@@ -393,14 +393,17 @@ defmodule PtcRunner.Lisp.Eval do
     # fallback in (:var ...), so carrying them in the closure would inflate
     # session memory by ~18 KB per closure.
     {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, params, body)
-    meta = locals_meta(captured_locals, %{})
+    meta = captured_locals |> locals_meta(%{}) |> maybe_mark_prelude_internal(eval_ctx)
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
   # Named fn: (fn name [params] body) — name is bound inside body for self-recursion
   defp do_eval({:fn, name, params, body}, %EvalContext{} = eval_ctx) do
     {captured_env, captured_locals} = capture_lexical_scope(eval_ctx, params, body, [name])
-    meta = locals_meta(captured_locals, %{fn_name: name})
+
+    meta =
+      captured_locals |> locals_meta(%{fn_name: name}) |> maybe_mark_prelude_internal(eval_ctx)
+
     {:ok, {:closure, params, body, captured_env, [], meta}, eval_ctx}
   end
 
@@ -898,7 +901,12 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp tag_prelude_ns({:closure, params, body, captured_env, turn_history, meta}, ns_name)
        when is_binary(ns_name) do
-    {:closure, params, body, captured_env, turn_history, Map.put(meta, :prelude_ns, ns_name)}
+    meta =
+      meta
+      |> Map.delete(:prelude_internal)
+      |> Map.put(:prelude_ns, ns_name)
+
+    {:closure, params, body, captured_env, turn_history, meta}
   end
 
   defp tag_prelude_ns(value, _ns_name), do: value
@@ -917,10 +925,12 @@ defmodule PtcRunner.Lisp.Eval do
   # mutate user memory, and user code cannot reach the private env.
   defp invoke_prelude_export(callable, args, ns_env, export, %EvalContext{} = caller_ctx) do
     ns_name = Map.fetch!(export, :namespace)
+    callable = bind_prelude_ref(callable, export)
 
     export_ctx =
       caller_ctx
-      |> Map.put(:user_ns, ns_env)
+      |> Map.put(:user_ns, tag_prelude_ns_env(ns_env, ns_name))
+      |> EvalContext.push_prelude_caller_user_ns(caller_ctx.user_ns)
       |> EvalContext.push_prelude_origin(export)
 
     try do
@@ -1773,7 +1783,7 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx.turn_history
         )
         |> EvalContext.inherit_prelude(eval_ctx)
-        |> maybe_push_prelude_origin(metadata)
+        |> maybe_push_prelude_origin(metadata, eval_ctx)
 
       ctx = %{
         ctx
@@ -1827,24 +1837,77 @@ defmodule PtcRunner.Lisp.Eval do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
   end
 
-  defp maybe_push_prelude_origin(%EvalContext{} = context, %{
-         prelude_ref: ref,
-         prelude_tool_refs: tool_refs
-       })
-       when is_binary(ref) and is_list(tool_refs) do
-    EvalContext.push_prelude_origin(context, %{ref: ref, tool_refs: tool_refs})
+  defp maybe_push_prelude_origin(
+         %EvalContext{} = context,
+         %{
+           prelude_ref: ref,
+           prelude_ns: ns,
+           prelude_tool_refs: tool_refs
+         },
+         %EvalContext{} = caller_ctx
+       )
+       when is_binary(ref) and is_binary(ns) and is_list(tool_refs) do
+    caller_user_ns = EvalContext.current_prelude_caller_user_ns(caller_ctx) || caller_ctx.user_ns
+
+    context
+    |> EvalContext.push_prelude_caller_user_ns(caller_user_ns)
+    |> EvalContext.push_prelude_origin(%{ref: ref, namespace: ns, tool_refs: tool_refs})
   end
 
-  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta), do: context
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_internal: true}, _caller_ctx) do
+    context
+  end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do
+    EvalContext.push_user_origin(context)
+  end
 
   defp pcalls_user_ns(%EvalContext{prelude: %{private_env: private_env}, user_ns: user_ns}, %{
          prelude_ns: ns
        })
        when is_binary(ns) do
-    Map.get(private_env, ns, user_ns)
+    private_env
+    |> Map.get(ns, user_ns)
+    |> tag_prelude_ns_env(ns)
   end
 
-  defp pcalls_user_ns(%EvalContext{user_ns: user_ns}, _metadata), do: user_ns
+  defp pcalls_user_ns(%EvalContext{} = eval_ctx, _metadata) do
+    EvalContext.current_prelude_caller_user_ns(eval_ctx) || eval_ctx.user_ns
+  end
+
+  defp tag_prelude_ns_env(env, ns) when is_map(env) do
+    Map.new(env, fn {name, value} -> {name, tag_prelude_internal(value, ns)} end)
+  end
+
+  # Tag private namespace entries as internal prelude code. Internal helpers keep
+  # the active export's origin while resolving sibling helpers, but escaped
+  # namespace-only closures intentionally do not.
+  defp tag_prelude_internal({:closure, params, body, env, turn_history, meta}, ns)
+       when is_binary(ns) do
+    meta =
+      meta
+      |> Map.put(:prelude_ns, ns)
+      |> Map.put(:prelude_internal, true)
+
+    {:closure, params, body, env, turn_history, meta}
+  end
+
+  defp tag_prelude_internal(value, _ns), do: value
+
+  defp maybe_mark_prelude_internal(meta, %EvalContext{} = eval_ctx) do
+    case EvalContext.current_origin(eval_ctx) do
+      %{type: :prelude_export, namespace: ns} when is_binary(ns) ->
+        meta
+        |> Map.put(:prelude_ns, ns)
+        |> Map.put(:prelude_internal, true)
+
+      %{type: :prelude_export} ->
+        Map.put(meta, :prelude_internal, true)
+
+      _origin ->
+        meta
+    end
+  end
 
   # A nested pmap/pcalls failure (heap kill, deadline, exhausted worker
   # budget) raises structured so a surrounding worker re-surfaces the

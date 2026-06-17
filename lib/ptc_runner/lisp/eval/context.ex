@@ -44,6 +44,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :env,
     :tool_exec,
     :origin_stack,
+    :prelude_caller_user_ns_stack,
     :discovery_exec,
     :turn_history,
     :budget,
@@ -196,6 +197,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           env: map(),
           tool_exec: (String.t(), map(), map() | nil -> term()),
           origin_stack: [map()],
+          prelude_caller_user_ns_stack: [map()],
           discovery_exec: (atom(), list() -> term()) | nil,
           turn_history: list(),
           budget: map() | nil,
@@ -278,6 +280,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       env: env,
       tool_exec: tool_exec,
       origin_stack: Keyword.get(opts, :origin_stack, []),
+      prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
@@ -538,7 +541,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       context
       | prelude_exports: source.prelude_exports,
         prelude: source.prelude,
-        origin_stack: source.origin_stack
+        origin_stack: source.origin_stack,
+        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }
   end
 
@@ -549,11 +553,35 @@ defmodule PtcRunner.Lisp.Eval.Context do
     origin = %{
       type: :prelude_export,
       ref: ref,
+      namespace: Map.get(export, :namespace),
       tool_refs: Map.get(export, :tool_refs, [])
     }
 
     %{context | origin_stack: [origin | stack]}
   end
+
+  @doc "Pushes a user-code origin that masks inherited prelude-export authority."
+  @spec push_user_origin(t()) :: t()
+  def push_user_origin(%__MODULE__{origin_stack: stack} = context) do
+    %{context | origin_stack: [%{type: :user_closure} | stack]}
+  end
+
+  @doc "Saves the user namespace active before entering a prelude export."
+  @spec push_prelude_caller_user_ns(t(), map()) :: t()
+  def push_prelude_caller_user_ns(
+        %__MODULE__{prelude_caller_user_ns_stack: stack} = context,
+        user_ns
+      )
+      when is_map(user_ns) do
+    %{context | prelude_caller_user_ns_stack: [user_ns | stack]}
+  end
+
+  @doc "Returns the user namespace active before the current prelude export, if any."
+  @spec current_prelude_caller_user_ns(t()) :: map() | nil
+  def current_prelude_caller_user_ns(%__MODULE__{prelude_caller_user_ns_stack: [ns | _]}),
+    do: ns
+
+  def current_prelude_caller_user_ns(%__MODULE__{}), do: nil
 
   @doc "Returns the current evaluator origin, if any."
   @spec current_origin(t()) :: map() | nil
