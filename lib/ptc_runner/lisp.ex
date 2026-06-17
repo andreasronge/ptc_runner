@@ -124,7 +124,7 @@ defmodule PtcRunner.Lisp do
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
-      SOURCE string, or a list of source-bearing selections accepted by
+      SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code
       (Capability Prelude V1). Source selections are concatenated and compiled
       once in explicit order after duplicate namespace rejection. The attached

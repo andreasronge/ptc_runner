@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   Deterministic source-level composition for selected capability preludes.
 
   This is the selection-only helper for live prelude evolution. It does not
-  introduce storage or version policy: callers pass source-bearing selections,
+  introduce storage or version policy: callers pass source-bearing selection maps,
   the helper validates each component, rejects duplicate namespaces, concatenates
   the sources in selection order, and compiles the aggregate source once into the
   normal `%PtcRunner.Lisp.Prelude{}` artifact accepted by `Lisp.run/2`.
@@ -16,15 +16,13 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   @type origin :: String.t() | atom() | {:file, Path.t()} | {:memory, term()} | nil
 
   @type selection ::
-          String.t()
-          | {String.t(), String.t()}
-          | %{
-              required(:source) => String.t(),
-              optional(:id) => String.t(),
-              optional(:version) => pos_integer(),
-              optional(:checksum) => String.t(),
-              optional(:origin) => origin()
-            }
+          %{
+            required(:source) => String.t(),
+            optional(:id) => String.t(),
+            optional(:version) => pos_integer(),
+            optional(:checksum) => String.t(),
+            optional(:origin) => origin()
+          }
           | map()
 
   @type component :: %{
@@ -139,14 +137,6 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
       {:ok, components} -> {:ok, Enum.reverse(components)}
       {:error, _} = error -> error
     end
-  end
-
-  defp normalize_selection(source) when is_binary(source) do
-    {:ok, %{id: nil, source: source, version: nil, checksum: nil, origin: nil}}
-  end
-
-  defp normalize_selection({id, source}) when is_binary(id) and is_binary(source) do
-    {:ok, %{id: id, source: source, version: nil, checksum: nil, origin: nil}}
   end
 
   defp normalize_selection(selection) when is_map(selection) do

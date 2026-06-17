@@ -91,7 +91,7 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
 
   Raises `ArgumentError` for genuine programmer misuse: a value that is neither
   a `%PtcRunner.Lisp.Prelude{}`, prelude source (binary), nor a list of
-  source-bearing prelude selections.
+  source-bearing prelude selection maps.
   """
   @spec attach(Prelude.t() | String.t() | [Bundle.selection()], AttachContext.t()) ::
           {:ok, Prelude.t()} | {:error, ValidationError.t()}
@@ -116,7 +116,7 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   def attach(other, %AttachContext{}) do
     raise ArgumentError,
           "prelude must be a %PtcRunner.Lisp.Prelude{} artifact, prelude source string, " <>
-            "or a list of source-bearing prelude selections, got: " <>
+            "or a list of source-bearing prelude selection maps, got: " <>
             inspect(other, limit: 5)
   end
 
