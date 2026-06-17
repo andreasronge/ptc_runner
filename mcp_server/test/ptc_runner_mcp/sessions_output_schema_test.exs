@@ -37,6 +37,22 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
   end
 
   describe "output_schema on lisp_session_eval" do
+    test "session start tool advertises mode because additionalProperties is false" do
+      tool =
+        Tools.list()["tools"]
+        |> Enum.find(&(&1["name"] == "lisp_session_start"))
+
+      schema = tool["inputSchema"]
+      props = schema["properties"]
+
+      assert schema["additionalProperties"] == false
+
+      assert props["mode"] == %{
+               "type" => "string",
+               "enum" => ["read_only", "write_capable"]
+             }
+    end
+
     test "matching return value is committed and surfaces a `validated` field" do
       session_id = start_session()
 

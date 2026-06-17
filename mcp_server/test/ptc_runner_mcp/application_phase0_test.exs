@@ -22,7 +22,8 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       max_session_preview_chars: System.get_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS"),
       max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
       turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR"),
-      prelude: System.get_env("PTC_RUNNER_MCP_PRELUDE")
+      prelude: System.get_env("PTC_RUNNER_MCP_PRELUDE"),
+      prelude_store_seed: System.get_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
     }
 
     on_exit(fn ->
@@ -38,6 +39,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
 
       restore_env("PTC_RUNNER_MCP_TURN_LOG_DIR", original.turn_log_dir)
       restore_env("PTC_RUNNER_MCP_PRELUDE", original.prelude)
+      restore_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED", original.prelude_store_seed)
 
       Limits.set(Limits.defaults())
       SessionsConfig.reset()
@@ -52,6 +54,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     System.delete_env("PTC_RUNNER_MCP_PRELUDE")
+    System.delete_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
     :ok
   end
 
@@ -227,6 +230,22 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
         Application.apply_sessions_config(%{prelude: missing})
       end
     end
+
+    test "prelude store seed derives id from compiled namespace, not comment text" do
+      path =
+        write_prelude!("seeded", """
+        ; (ns wrong)
+        (ns seeded {:visibility :prompt})
+        (defn label [] "seeded")
+        """)
+
+      args = Application.maybe_seed_prelude_store(%{prelude_store_seed: path})
+
+      assert %{prelude_store: store} = args
+      assert {:ok, candidate} = PtcRunner.PreludeStore.read(store, "seeded")
+      assert candidate.id == "seeded"
+      assert {:error, %{reason: :not_found}} = PtcRunner.PreludeStore.read(store, "wrong")
+    end
   end
 
   describe "apply_turn_log_config/1" do
@@ -260,14 +279,14 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   # exposes `apply_limits/1` as a `@doc false` seam for this test.
   defp run_apply_limits(args), do: PtcRunnerMcp.Application.apply_limits(args)
 
-  defp write_prelude!(label) do
+  defp write_prelude!(label, source \\ nil) do
     path =
       Path.join(
         System.tmp_dir!(),
         "ptc_runner_mcp_#{label}_#{System.unique_integer([:positive])}.clj"
       )
 
-    File.write!(path, prelude_source!(label))
+    File.write!(path, source || prelude_source!(label))
 
     path
   end

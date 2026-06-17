@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   use GenServer
 
+  alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
   alias PtcRunner.PtcToolProtocol
   alias PtcRunner.TraceLog.Collector
   alias PtcRunner.TraceLog.TurnEvent
@@ -899,7 +900,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        memory: snapshot.memory,
        turn_history: snapshot.turn_history,
        context: Map.get(opts, :context, %{}),
-       tools: Map.get(opts, :tools, []),
+       tools: session_eval_tools(snapshot, Map.get(opts, :tools, [])),
        tool_cache: %{},
        caller: :mcp,
        profile: Map.get(opts, :profile, :mcp_no_tools),
@@ -916,6 +917,28 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude}), do: prelude
   defp snapshot_prelude(_snapshot), do: Config.runtime_prelude() || Config.prelude_source()
+
+  # A write_capable session (gated by --sessions-allow-prelude-write) is granted
+  # the private prelude_store_* backing tools so the attached `prelude/`
+  # capability can author into the configured store. Read-only sessions get the
+  # base tool set unchanged.
+  defp session_eval_tools(%{mode: :write_capable}, base) do
+    if Config.allow_prelude_write?() do
+      case Config.prelude_store() do
+        nil -> base
+        store -> PreludeStoreTools.tools(store, base_tools: as_tool_map(base))
+      end
+    else
+      base
+    end
+  end
+
+  defp session_eval_tools(_snapshot, base), do: base
+
+  defp as_tool_map(nil), do: %{}
+  defp as_tool_map(base) when is_map(base), do: base
+  defp as_tool_map(base) when is_list(base), do: Map.new(base)
+  defp as_tool_map(base), do: Map.new(base)
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

@@ -170,6 +170,8 @@ Wire the coding agent to PtcRunner:
         "/absolute/path/to/upstreams.json",
         "--prelude",
         "/absolute/path/to/analysis-prelude.clj",
+        "--prelude-store-seed",
+        "/absolute/path/to/preludes",
         "--turn-log-dir",
         "/absolute/path/to/turn-log"
       ],
@@ -194,6 +196,14 @@ discoverable-only exports remain available through `(all-ns)`, `(ns-publics ...)
 `(doc ...)`, and `(apropos ...)`. `(source ns/name)` prints an export's defining
 form (prelude-only) to help repair incorrect usage when the docstring is not
 enough.
+
+For store-backed prelude selection, use `--prelude-store-seed <file-or-dir>` to
+seed the server's volatile in-memory store at boot. A stateful session can then
+start with `preludes: ["id", "id@version"]`; those refs are frozen for the
+session and can be inspected with `lisp_session_list_preludes`. To allow an
+editor session to call `(prelude/write ...)`, also pass
+`--sessions-allow-prelude-write` and start that session with
+`mode: "write_capable"`. Leave this flag off for verifier/read-only sessions.
 
 Ask the agent, or use the REPL, to smoke-test discovery and one call:
 

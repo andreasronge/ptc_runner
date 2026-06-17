@@ -26,6 +26,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_max_session_upstream_call_bytes 128 * 1024
   @default_max_session_preview_chars 512
   @default_collection_hint false
+  @default_allow_prelude_write false
   @default_prelude_path nil
   @default_prelude_source nil
   @default_runtime_prelude nil
@@ -50,6 +51,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
           max_session_upstream_call_bytes: pos_integer(),
           max_session_preview_chars: pos_integer(),
           collection_hint: boolean(),
+          allow_prelude_write: boolean(),
           prelude_path: String.t() | nil,
           prelude_source: String.t() | nil,
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
@@ -77,6 +79,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
       max_session_upstream_call_bytes: @default_max_session_upstream_call_bytes,
       max_session_preview_chars: @default_max_session_preview_chars,
       collection_hint: @default_collection_hint,
+      allow_prelude_write: @default_allow_prelude_write,
       prelude_path: @default_prelude_path,
       prelude_source: @default_prelude_source,
       runtime_prelude: @default_runtime_prelude,
@@ -222,6 +225,13 @@ defmodule PtcRunnerMcp.Sessions.Config do
              "PTC_RUNNER_MCP_COLLECTION_HINT",
              defaults.collection_hint
            ),
+         allow_prelude_write:
+           read_bool(
+             args,
+             :sessions_allow_prelude_write,
+             "PTC_RUNNER_MCP_SESSIONS_ALLOW_PRELUDE_WRITE",
+             defaults.allow_prelude_write
+           ),
          prelude_path: prelude_path,
          prelude_source: prelude_source,
          runtime_prelude: runtime_prelude,
@@ -267,6 +277,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @doc "True when stateful session tools should be exposed."
   @spec enabled?() :: boolean()
   def enabled?, do: get().enabled == true
+
+  @doc "True when write_capable sessions may author into the configured prelude store."
+  @spec allow_prelude_write?() :: boolean()
+  def allow_prelude_write?, do: get().allow_prelude_write == true
 
   @doc "Configured process-wide prelude source, or nil when no prelude is attached."
   @spec prelude_source() :: String.t() | nil
@@ -316,6 +330,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
     Map.new(config, fn
       {:enabled, value} -> {:enabled, value == true}
       {:collection_hint, value} -> {:collection_hint, value == true}
+      {:allow_prelude_write, value} -> {:allow_prelude_write, value == true}
       {:prelude_path, value} when is_binary(value) -> {:prelude_path, value}
       {:prelude_source, value} when is_binary(value) -> {:prelude_source, value}
       {:runtime_prelude, %PtcRunner.Lisp.Prelude{} = value} -> {:runtime_prelude, value}

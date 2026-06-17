@@ -642,6 +642,7 @@ defmodule PtcRunnerMcp.Sessions do
           |> maybe_put(:title, Map.get(args, "title"))
           |> maybe_put(:ttl_ms, Map.get(args, "ttl_ms"))
           |> maybe_put(:preludes, Map.get(args, "preludes"))
+          |> maybe_put(:mode, Map.get(args, "mode"))
 
         start_session(owner_context(args), opts)
 
@@ -687,6 +688,24 @@ defmodule PtcRunnerMcp.Sessions do
   defp prepare_start_opts(opts) when is_map(opts) or is_list(opts) do
     opts = Map.new(opts)
 
+    case validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")) do
+      {:ok, :write_capable} ->
+        prepare_write_capable_start_opts(opts)
+
+      {:ok, mode} ->
+        opts
+        |> Map.delete("mode")
+        |> Map.put(:mode, mode)
+        |> prepare_read_only_start_opts()
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  defp prepare_start_opts(_opts), do: {:error, "session start options must be an object"}
+
+  defp prepare_read_only_start_opts(opts) do
     case Map.get(opts, :preludes) || Map.get(opts, "preludes") do
       nil ->
         {:ok, Map.delete(opts, "preludes")}
@@ -709,7 +728,53 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  defp prepare_start_opts(_opts), do: {:error, "session start options must be an object"}
+  # A write_capable session attaches the host-shipped `prelude/` capability so
+  # the model can author into the configured store via `(prelude/write …)`. It
+  # is gated behind `--sessions-allow-prelude-write` (off by default) and a
+  # configured store. Combining the write capability with attached data preludes
+  # is not yet supported, so write_capable sessions start with no data preludes;
+  # the private backing store tools are granted per-eval in `Session.lisp_opts/3`.
+  defp prepare_write_capable_start_opts(opts) do
+    cond do
+      not Config.allow_prelude_write?() ->
+        {:error,
+         "write_capable sessions are disabled; start the server with --sessions-allow-prelude-write"}
+
+      Config.prelude_store() == nil ->
+        {:error, "write_capable sessions require a configured prelude store"}
+
+      (Map.get(opts, :preludes) || Map.get(opts, "preludes")) not in [nil, []] ->
+        {:error,
+         "write_capable sessions cannot also attach data preludes yet; " <>
+           "start a read_only session to attach them"}
+
+      true ->
+        case PtcRunner.PreludeStore.Tools.prelude() do
+          {:ok, capability} ->
+            start_opts =
+              opts
+              |> Map.delete("preludes")
+              |> Map.delete(:preludes)
+              |> Map.delete("mode")
+              |> Map.put(:mode, :write_capable)
+              |> Map.put(:runtime_prelude, capability)
+
+            {:ok, start_opts}
+
+          {:error, error} ->
+            {:error, "failed to compile prelude write capability: #{inspect(error)}"}
+        end
+    end
+  end
+
+  defp validate_mode(nil), do: {:ok, :read_only}
+  defp validate_mode("read_only"), do: {:ok, :read_only}
+  defp validate_mode(:read_only), do: {:ok, :read_only}
+  defp validate_mode("write_capable"), do: {:ok, :write_capable}
+  defp validate_mode(:write_capable), do: {:ok, :write_capable}
+
+  defp validate_mode(other),
+    do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{inspect(other)}"}
 
   defp resolve_start_preludes(refs, opts) do
     case Selection.resolve!(Config.prelude_store(), refs, configured_prelude_opts(opts)) do
@@ -806,7 +871,7 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  defp start_arg_key?(key) when key in ["title", "ttl_ms", "preludes", "owner", :owner],
+  defp start_arg_key?(key) when key in ["title", "ttl_ms", "preludes", "mode", "owner", :owner],
     do: true
 
   defp start_arg_key?(_key), do: false
@@ -944,6 +1009,10 @@ defmodule PtcRunnerMcp.Sessions do
         "properties" => %{
           "title" => %{"type" => "string"},
           "ttl_ms" => %{"type" => "integer", "minimum" => 1},
+          "mode" => %{
+            "type" => "string",
+            "enum" => ["read_only", "write_capable"]
+          },
           "preludes" => %{
             "type" => "array",
             "items" => %{

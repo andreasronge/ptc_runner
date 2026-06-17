@@ -46,6 +46,8 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+
   alias PtcRunnerMcp.{
     AgenticConfig,
     AggregatorConfig,
@@ -85,6 +87,7 @@ defmodule PtcRunnerMcp.Application do
     apply_debug_config(args)
     apply_response_profile(args)
     apply_limits(args, aggregator?: root_runtime_opts != nil)
+    args = maybe_seed_prelude_store(args)
     apply_sessions_config(args)
     {:ok, http_config} = Config.resolve(args)
     Application.put_env(:ptc_runner_mcp, :http_config, http_config)
@@ -236,7 +239,9 @@ defmodule PtcRunnerMcp.Application do
           agentic_capability_summary_max_bytes: :integer,
           agentic_capability_summary: :string,
           upstreams_config: :string,
+          prelude_store_seed: :string,
           sessions: :boolean,
+          sessions_allow_prelude_write: :boolean,
           max_sessions: :integer,
           max_sessions_per_owner: :integer,
           session_ttl_ms: :integer,
@@ -622,6 +627,88 @@ defmodule PtcRunnerMcp.Application do
     case SessionsConfig.resolve(args) do
       {:ok, config} -> SessionsConfig.set(config)
       {:error, message} -> raise message
+    end
+  end
+
+  # `--prelude-store-seed <path>` / `PTC_RUNNER_MCP_PRELUDE_STORE_SEED` boots a
+  # volatile in-memory `PreludeStore`, writes each seed `.clj` into it (the
+  # store id is taken from the prelude's own `(ns ...)`, since the store
+  # enforces namespace == id), and threads the store handle into `args` so
+  # `SessionsConfig.resolve/1` installs it. With a store configured,
+  # `lisp_session_start(preludes: [...])` resolves and freezes the bundle.
+  # No-op (args unchanged) when the flag/env is absent. Fails closed at boot
+  # if a seed cannot be read or written.
+  @doc false
+  @spec maybe_seed_prelude_store(map()) :: map()
+  def maybe_seed_prelude_store(args) when is_map(args) do
+    case env_or(args, :prelude_store_seed, "PTC_RUNNER_MCP_PRELUDE_STORE_SEED", nil) do
+      nil ->
+        args
+
+      "" ->
+        args
+
+      path ->
+        store = seed_prelude_store!(path)
+        Map.put(args, :prelude_store, store)
+    end
+  end
+
+  defp seed_prelude_store!(path) do
+    files = prelude_seed_files!(path)
+
+    {:ok, store} = PtcRunner.PreludeStore.new()
+
+    Enum.each(files, fn file ->
+      source = File.read!(file)
+      id = prelude_namespace!(source, file)
+
+      case PtcRunner.PreludeStore.write(store, id, source, %{
+             "reason" => "boot seed",
+             "origin_path" => Path.relative_to_cwd(file)
+           }) do
+        {:ok, _} ->
+          Log.log(:info, "prelude_store_seeded", %{id: id, path: file})
+
+        {:error, error} ->
+          raise "failed to seed prelude `#{id}` from #{file}: " <>
+                  Map.get(error, :message, inspect(error))
+      end
+    end)
+
+    store
+  end
+
+  defp prelude_seed_files!(path) do
+    cond do
+      File.dir?(path) ->
+        case Path.wildcard(Path.join(path, "*.clj")) |> Enum.sort() do
+          [] -> raise "no *.clj preludes found in seed directory #{path}"
+          files -> files
+        end
+
+      File.regular?(path) ->
+        [path]
+
+      true ->
+        raise "prelude store seed path does not exist: #{path}"
+    end
+  end
+
+  # The store requires the compiled namespace to equal the id, so derive the id
+  # from the compiler result rather than the filename or raw source text.
+  defp prelude_namespace!(source, file) do
+    case PreludeCompiler.compile(source) do
+      {:ok, %{namespaces: [ns]}} ->
+        ns
+
+      {:ok, %{namespaces: namespaces}} ->
+        raise "seed prelude #{file} must declare exactly one namespace, got: " <>
+                inspect(namespaces)
+
+      {:error, error} ->
+        raise "failed to compile seed prelude #{file}: " <>
+                Map.get(error, :message, inspect(error))
     end
   end
 

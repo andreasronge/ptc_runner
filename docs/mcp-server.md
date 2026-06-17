@@ -202,6 +202,7 @@ tools:
 - `lisp_session_eval`
 - `lisp_session_inspect`
 - `lisp_session_list`
+- `lisp_session_list_preludes`
 - `lisp_session_forget`
 - `lisp_session_close`
 
@@ -215,6 +216,15 @@ bounded histories.
 `lisp_session_list` returns metadata-only live sessions for the current
 owner. It does not render stored binding values or refresh session idle
 timers.
+
+When the server starts with `--prelude-store-seed`, session starts can freeze
+stored prelude refs with `preludes: ["id", "id@version"]`; the selected bundle
+is pinned to the session and reported by `lisp_session_list_preludes`.
+`mode` defaults to `"read_only"`. If the operator also enables
+`--sessions-allow-prelude-write`, a session may start with
+`mode: "write_capable"` to attach the host `prelude/` authoring wrapper and
+write new prelude versions through `(prelude/write ...)`. Write-capable
+sessions require a configured store and cannot also attach data preludes yet.
 
 Sessions are in-memory, owner-scoped, disabled by default, TTL/idle
 bounded, and allow at most one eval in a given session at a time.

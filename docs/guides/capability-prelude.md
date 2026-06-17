@@ -14,9 +14,11 @@ the specification; for the discovery forms see
 
 > **V1 scope.** A prelude is **stateless**: it defines namespaces, constants,
 > functions, docstrings, and metadata, but holds no hidden mutable state. There
-> is no authoring DSL, no LLM-authored preludes, and no generic capability
-> catalog yet — see `docs/plans/archive/capability-prelude-discovery.md` for the
-> deferred work.
+> is no generic capability catalog yet. The optional `PreludeStore` authoring
+> surface records new source versions, but it is host-gated, compile-checked,
+> volatile in-memory state; stored preludes still do not mint credentials or
+> tool authority. See `docs/plans/archive/capability-prelude-discovery.md` for
+> the deferred catalog/profile work.
 
 ---
 
@@ -423,7 +425,11 @@ public scalar keys; private backing-tool ledgers summarize source args and
 filter metadata before traces or `step.tool_calls` retain them.
 
 Editor sessions can attach the host-shipped `prelude/` wrapper over private
-store tools. The model-visible API includes:
+store tools. In the MCP server this is available only when the operator starts
+with `--sessions-allow-prelude-write`, a prelude store is configured, and the
+session starts with `mode: "write_capable"`. Read-only sessions do not see the
+`prelude/` namespace or the private `prelude_store_*` backing tools. The
+model-visible API includes:
 
 ```clojure
 (prelude/list)

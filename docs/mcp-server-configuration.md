@@ -24,6 +24,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--turn-log-dir` | `PTC_RUNNER_MCP_TURN_LOG_DIR` | unset | Directory for the canonical stateful-session turn log. When set, all accepted `lisp_session_eval` attempts write `event: "turn"` records to one JSONL file. |
 | `--prelude` | `PTC_RUNNER_MCP_PRELUDE` | unset | Path to a Capability Prelude source file attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task` run. The file is read once at boot; attach-time `requires` still fail closed against configured upstreams and granted tools. |
+| `--prelude-store-seed` | `PTC_RUNNER_MCP_PRELUDE_STORE_SEED` | unset | File or directory of `.clj` Capability Prelude sources used to seed a volatile in-memory `PreludeStore` at boot. Each file's id is derived from its compiled namespace, not its filename. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
 | `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
 | `--agentic-model` | `PTC_RUNNER_MCP_AGENTIC_MODEL` | `gemini-flash-lite` | Planner model alias or provider-qualified model id. |
@@ -40,6 +41,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `lisp_task` capability summary. |
 | `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `lisp_task`. |
 | `--sessions` | `PTC_RUNNER_MCP_SESSIONS` | `false` | Expose opt-in stateful PTC-Lisp session tools. |
+| `--sessions-allow-prelude-write` | `PTC_RUNNER_MCP_SESSIONS_ALLOW_PRELUDE_WRITE` | `false` | Permit `lisp_session_start` with `mode: "write_capable"` when a prelude store is configured. The session attaches the host `prelude/` wrapper and grants private `prelude_store_*` backing tools only for that session's evals. |
 | `--max-sessions` | `PTC_RUNNER_MCP_MAX_SESSIONS` | `64` | Maximum live sessions per MCP server process. |
 | `--max-sessions-per-owner` | `PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER` | `16` | Maximum live sessions per owner. |
 | `--session-ttl-ms` | `PTC_RUNNER_MCP_SESSION_TTL_MS` | `1800000` (30 min) | Maximum lifetime for a session. |
