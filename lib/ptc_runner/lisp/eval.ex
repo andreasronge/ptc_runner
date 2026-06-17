@@ -32,6 +32,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
+  alias PtcRunner.PreludeCandidate
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.TraceContext
@@ -1267,7 +1268,7 @@ defmodule PtcRunner.Lisp.Eval do
         %{
           name: tool_name,
           args: ledger_tool_args(args_map, private_tool?),
-          result: cached.result,
+          result: ledger_tool_result(cached.result, private_tool?),
           error: nil,
           timestamp: DateTime.utc_now(),
           duration_ms: 0,
@@ -1347,7 +1348,7 @@ defmodule PtcRunner.Lisp.Eval do
       %{
         name: tool_name,
         args: ledger_tool_args(args_map, private_tool?),
-        result: result,
+        result: ledger_tool_result(result, private_tool?),
         error: error,
         timestamp: timestamp,
         duration_ms: duration_ms
@@ -1418,10 +1419,16 @@ defmodule PtcRunner.Lisp.Eval do
   defp ledger_tool_args(args, false), do: args
   defp ledger_tool_args(args, true), do: redact_source_args(args)
 
+  defp ledger_tool_result(result, false), do: result
+  defp ledger_tool_result(result, true), do: redact_source_args(result)
+
   defp redact_source_args(%{} = map) when not is_struct(map) do
     Map.new(map, fn
       {key, source} when key in ["source", :source] and is_binary(source) ->
         {key, source_arg_summary(source)}
+
+      {key, metadata} when key in ["metadata", :metadata] ->
+        {key, PreludeCandidate.public_metadata(metadata, complex: :drop)}
 
       {key, value} ->
         {key, redact_source_args(value)}

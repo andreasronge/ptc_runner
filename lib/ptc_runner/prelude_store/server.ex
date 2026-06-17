@@ -22,6 +22,9 @@ defmodule PtcRunner.PreludeStore.Server do
   @spec list(PreludeStore.t()) :: [map()]
   def list(%PreludeStore{pid: pid}), do: GenServer.call(pid, :list, @call_timeout)
 
+  @spec history(PreludeStore.t(), String.t()) :: {:ok, [map()]} | {:error, map()}
+  def history(%PreludeStore{pid: pid}, id), do: GenServer.call(pid, {:history, id}, @call_timeout)
+
   @spec read(PreludeStore.t(), map()) :: {:ok, PreludeCandidate.t()} | {:error, map()}
   def read(%PreludeStore{pid: pid}, ref), do: GenServer.call(pid, {:read, ref}, @call_timeout)
 
@@ -29,6 +32,11 @@ defmodule PtcRunner.PreludeStore.Server do
           {:ok, map()} | {:error, map()}
   def append(%PreludeStore{pid: pid}, candidate, parent_checksum) do
     GenServer.call(pid, {:append, candidate, parent_checksum}, @call_timeout)
+  end
+
+  @spec set_default(PreludeStore.t(), map(), map()) :: {:ok, map()} | {:error, map()}
+  def set_default(%PreludeStore{pid: pid}, ref, metadata) do
+    GenServer.call(pid, {:set_default, ref, metadata}, @call_timeout)
   end
 
   @impl true
@@ -65,6 +73,19 @@ defmodule PtcRunner.PreludeStore.Server do
     {:reply, result, state}
   end
 
+  def handle_call({:history, id}, _from, state) do
+    result =
+      case latest_version(state.table, id) do
+        0 ->
+          {:error, %{reason: :not_found, message: "prelude `#{id}` not found"}}
+
+        latest ->
+          {:ok, Enum.map(1..latest, &history_row(state.table, id, &1))}
+      end
+
+    {:reply, result, state}
+  end
+
   def handle_call({:append, %PreludeCandidate{} = candidate, parent_checksum}, _from, state) do
     result =
       with :ok <- recheck_parent(state.table, candidate.id, parent_checksum),
@@ -75,10 +96,25 @@ defmodule PtcRunner.PreludeStore.Server do
     {:reply, result, state}
   end
 
+  def handle_call({:set_default, %{id: id} = ref, metadata}, _from, state) do
+    selected_at = DateTime.utc_now()
+
+    result =
+      with {:ok, version} <- resolve_version(state.table, ref),
+           {:ok, candidate} <- lookup_version(state.table, id, version),
+           :ok <- verify_checksum(candidate, Map.get(ref, :checksum)) do
+        set_current(state.table, id, version, selected_at, metadata)
+        {:ok, selection_row(state.table, candidate, selected_at, metadata)}
+      end
+
+    {:reply, result, state}
+  end
+
   defp list_row(table, id) do
     {:ok, current_version} = resolve_version(table, %{id: id})
     {:ok, current} = lookup_version(table, id, current_version)
     latest_version = latest_version(table, id)
+    current_entry = current_entry(table, id)
 
     %{
       id: id,
@@ -90,8 +126,40 @@ defmodule PtcRunner.PreludeStore.Server do
       exports: PreludeCandidate.export_names(current),
       origin: PreludeCandidate.public_origin(current.origin),
       metadata: PreludeCandidate.public_metadata(current.metadata),
+      default_metadata: PreludeCandidate.public_metadata(current_entry.metadata),
       created_at: first_created_at(table, id),
-      updated_at: current.created_at
+      updated_at: current_entry.updated_at
+    }
+  end
+
+  defp history_row(table, id, version) do
+    {:ok, candidate} = lookup_version(table, id, version)
+    current_version = current_version(table, id)
+
+    %{
+      id: id,
+      version: version,
+      current: version == current_version,
+      latest: version == latest_version(table, id),
+      checksum: PreludeCandidate.checksum(candidate),
+      namespaces: candidate.compiled.namespaces,
+      exports: PreludeCandidate.export_names(candidate),
+      origin: PreludeCandidate.public_origin(candidate.origin),
+      metadata: PreludeCandidate.public_metadata(candidate.metadata),
+      created_at: candidate.created_at
+    }
+  end
+
+  defp selection_row(table, candidate, selected_at, metadata) do
+    %{
+      id: candidate.id,
+      current_version: candidate.version,
+      latest_version: latest_version(table, candidate.id),
+      checksum: PreludeCandidate.checksum(candidate),
+      namespaces: candidate.compiled.namespaces,
+      exports: PreludeCandidate.export_names(candidate),
+      metadata: PreludeCandidate.public_metadata(metadata),
+      updated_at: selected_at
     }
   end
 
@@ -103,9 +171,9 @@ defmodule PtcRunner.PreludeStore.Server do
   end
 
   defp resolve_version(table, %{id: id}) do
-    case :ets.lookup(table, {:current, id}) do
-      [{{:current, ^id}, version}] -> {:ok, version}
-      [] -> {:error, %{reason: :not_found, message: "prelude `#{id}` not found"}}
+    case current_version(table, id) do
+      0 -> {:error, %{reason: :not_found, message: "prelude `#{id}` not found"}}
+      version -> {:ok, version}
     end
   end
 
@@ -170,7 +238,8 @@ defmodule PtcRunner.PreludeStore.Server do
     candidate = %{candidate | version: version, created_at: DateTime.utc_now()}
 
     :ets.insert(table, {{:version, candidate.id, version}, candidate})
-    :ets.insert(table, {{:current, candidate.id}, version})
+    :ets.insert(table, {{:latest, candidate.id}, version})
+    set_current(table, candidate.id, version, candidate.created_at, candidate.metadata)
 
     {:ok,
      %{
@@ -184,10 +253,35 @@ defmodule PtcRunner.PreludeStore.Server do
   end
 
   defp latest_version(table, id) do
-    case :ets.lookup(table, {:current, id}) do
-      [{{:current, ^id}, version}] -> version
-      [] -> 0
+    case :ets.lookup(table, {:latest, id}) do
+      [{{:latest, ^id}, version}] ->
+        version
+
+      [] ->
+        current_version(table, id)
     end
+  end
+
+  defp current_version(table, id), do: current_entry(table, id).version
+
+  defp current_entry(table, id) do
+    case :ets.lookup(table, {:current, id}) do
+      [{{:current, ^id}, %{version: version, updated_at: updated_at, metadata: metadata}}] ->
+        %{version: version, updated_at: updated_at, metadata: metadata}
+
+      [{{:current, ^id}, version}] when is_integer(version) ->
+        %{version: version, updated_at: nil, metadata: %{}}
+
+      [] ->
+        %{version: 0, updated_at: nil, metadata: %{}}
+    end
+  end
+
+  defp set_current(table, id, version, updated_at, metadata) do
+    :ets.insert(
+      table,
+      {{:current, id}, %{version: version, updated_at: updated_at, metadata: metadata}}
+    )
   end
 
   defp first_created_at(table, id) do

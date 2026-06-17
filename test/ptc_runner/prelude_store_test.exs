@@ -92,6 +92,90 @@ defmodule PtcRunner.PreludeStoreTest do
              PreludeStore.read(store, %{id: "paged", version: 1, checksum: second.checksum})
   end
 
+  test "set_default pins bare reads while history remains append-only" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, _second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    v3 = """
+    (ns paged "Paged helpers.")
+
+    (defn inspect [] {:version 3})
+    """
+
+    assert {:ok, third} = PreludeStore.write(store, "paged", v3)
+
+    assert {:ok, selected} =
+             PreludeStore.set_default(store, "paged", 1, %{
+               "reason" => "verifier preferred the smaller helper",
+               "ignored" => "not public"
+             })
+
+    assert selected.id == "paged"
+    assert selected.current_version == 1
+    assert selected.latest_version == 3
+    assert selected.checksum == first.checksum
+    assert selected.metadata == %{"reason" => "verifier preferred the smaller helper"}
+    assert %DateTime{} = selected.updated_at
+
+    assert [%{current_version: 1, latest_version: 3, versions_count: 3, checksum: checksum}] =
+             PreludeStore.list(store)
+
+    assert checksum == first.checksum
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert current.version == 1
+
+    assert {:ok, latest} = PreludeStore.read(store, "paged@3")
+    assert latest.version == third.version
+
+    assert {:ok,
+            [
+              %{version: 1, current: true, checksum: first_checksum},
+              %{version: 2, current: false},
+              %{version: 3, current: false, checksum: third_checksum}
+            ]} = PreludeStore.history(store, "paged")
+
+    assert first_checksum == first.checksum
+    assert third_checksum == third.checksum
+  end
+
+  test "set_default rejects missing versions and checksum mismatches" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    assert {:error, %{reason: :not_found}} = PreludeStore.set_default(store, "paged", 3)
+
+    assert {:error, %{reason: :checksum_mismatch}} =
+             PreludeStore.set_default(store, %{id: "paged", version: 1, checksum: second.checksum})
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert current.version == 2
+
+    assert {:ok, selected} =
+             PreludeStore.set_default(store, %{
+               id: "paged",
+               version: 1,
+               checksum: first.checksum
+             })
+
+    assert selected.current_version == 1
+  end
+
+  test "history validates ids and unknown ids return not_found" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :not_found}} = PreludeStore.history(store, "paged")
+
+    assert {:error, %{reason: :prelude_namespace_violation}} =
+             PreludeStore.history(store, "bad@id")
+
+    assert {:error, %{reason: :invalid_ref}} = PreludeStore.set_default(store, "paged")
+  end
+
   test "write rejects wrong namespace, invalid ids, and curated namespace collisions" do
     {:ok, store} = PreludeStore.new()
 

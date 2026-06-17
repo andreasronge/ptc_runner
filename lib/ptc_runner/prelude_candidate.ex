@@ -86,7 +86,10 @@ defmodule PtcRunner.PreludeCandidate do
       key = normalize_key(key)
 
       if key in @public_metadata_keys do
-        Map.put(acc, key, public_metadata_value(value, max_bytes))
+        case public_metadata_value(value, max_bytes, Keyword.get(opts, :complex, :inspect)) do
+          :drop -> acc
+          public_value -> Map.put(acc, key, public_value)
+        end
       else
         acc
       end
@@ -124,15 +127,17 @@ defmodule PtcRunner.PreludeCandidate do
     _ -> inspect(value, limit: 10)
   end
 
-  defp public_metadata_value(value, max_bytes) when is_binary(value) do
+  defp public_metadata_value(value, max_bytes, _complex) when is_binary(value) do
     truncate_binary(value, max_bytes)
   end
 
-  defp public_metadata_value(value, _max_bytes)
+  defp public_metadata_value(value, _max_bytes, _complex)
        when is_integer(value) or is_float(value) or is_boolean(value) or is_nil(value),
        do: value
 
-  defp public_metadata_value(value, max_bytes),
+  defp public_metadata_value(_value, _max_bytes, :drop), do: :drop
+
+  defp public_metadata_value(value, max_bytes, _complex),
     do: value |> inspect(limit: 20) |> truncate_binary(max_bytes)
 
   defp byte_bound(opts, key, default) when is_list(opts) do

@@ -22,17 +22,20 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert Prelude.namespaces(prelude) == ["prelude"]
 
     assert Enum.map(prelude.exports, & &1.ref) ==
-             ~w(prelude/list prelude/read prelude/source prelude/write)
+             ~w(prelude/list prelude/history prelude/read prelude/source prelude/write prelude/set-default)
 
-    for ref <- ~w(prelude/list prelude/read prelude/source prelude/write) do
+    for ref <-
+          ~w(prelude/list prelude/history prelude/read prelude/source prelude/write prelude/set-default) do
       assert Prelude.export_tool_refs(prelude, ref) != []
     end
 
     effects = Map.new(prelude.exports, &{&1.ref, &1.effect})
     assert effects["prelude/list"] == :read
+    assert effects["prelude/history"] == :read
     assert effects["prelude/read"] == :read
     assert effects["prelude/source"] == :read
     assert effects["prelude/write"] == :write
+    assert effects["prelude/set-default"] == :write
   end
 
   test "private backing tools are hidden from native schema and prompt namespace projections" do
@@ -106,6 +109,59 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert {:ok, %Step{return: @paged_source}} =
              Lisp.run(~S|(prelude/source "paged")|, prelude: prelude, tools: Tools.tools(store))
+  end
+
+  test "public wrappers expose history and explicit default selection" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+
+    paged_v2 = """
+    (ns paged "Paged helpers.")
+
+    (defn inspect [] {:version 2})
+    """
+
+    assert {:ok, _} = PreludeStore.write(store, "paged", @paged_source)
+    assert {:ok, second} = PreludeStore.write(store, "paged", paged_v2)
+
+    assert {:ok, %Step{return: before_history}} =
+             Lisp.run(~S|(prelude/history "paged")|, prelude: prelude, tools: Tools.tools(store))
+
+    assert Enum.map(before_history, & &1["version"]) == [1, 2]
+    assert Enum.map(before_history, & &1["current"]) == [false, true]
+
+    assert {:ok, %Step{return: selected}} =
+             Lisp.run(
+               ~S|(prelude/set-default {:id "paged" :version 1 :metadata {:reason "rollback after verification"}})|,
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert selected["status"] == "ok"
+    assert selected["current_version"] == 1
+    assert selected["latest_version"] == 2
+    assert selected["metadata"] == %{"reason" => "rollback after verification"}
+
+    assert {:ok, %Step{return: [listed]}} =
+             Lisp.run(~S|(prelude/list)|, prelude: prelude, tools: Tools.tools(store))
+
+    assert listed["current_version"] == 1
+    assert listed["latest_version"] == 2
+
+    assert {:ok, %Step{return: after_history}} =
+             Lisp.run(~S|(prelude/history "paged")|, prelude: prelude, tools: Tools.tools(store))
+
+    assert Enum.map(after_history, & &1["current"]) == [true, false]
+
+    assert {:ok, %Step{return: mismatch}} =
+             Lisp.run(
+               ~s|(prelude/set-default {"id" "paged" "version" 1 "checksum" "#{second.checksum}"})|,
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert mismatch["status"] == "error"
+    assert mismatch["reason"] == "checksum_mismatch"
   end
 
   test "source wrapper propagates read errors" do
@@ -203,6 +259,95 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     projection = TurnEvent.tool_call_summary(call)
     refute inspect(projection) =~ @paged_source
     assert projection["args_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+  end
+
+  test "private set-default metadata is public-filtered before tool ledger and traces" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+    assert {:ok, _} = PreludeStore.write(store, "paged", @paged_source)
+
+    assert {:ok, %Step{} = step} =
+             Lisp.run(
+               ~S|(prelude/set-default {:id "paged" :version 1 :metadata {:reason "verified" :private "secret"}})|,
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert [%{name: "prelude_store_set_default", private: true} = call] = step.tool_calls
+    assert call.args["metadata"] == %{"reason" => "verified"}
+    refute inspect(step.tool_calls) =~ "secret"
+
+    projection = TurnEvent.tool_call_summary(call)
+    refute inspect(projection) =~ "secret"
+    assert projection["args_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+  end
+
+  test "private non-map metadata is removed before tool ledger and traces" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+
+    assert {:ok, %Step{} = write_step} =
+             Lisp.run(
+               ~S|(prelude/write {:id "paged" :source data/source :metadata "secret"})|,
+               context: %{source: @paged_source},
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert [%{name: "prelude_store_write", private: true} = write_call] =
+             write_step.tool_calls
+
+    assert write_call.args["metadata"] == %{}
+    refute inspect(write_step.tool_calls) =~ "secret"
+    refute inspect(TurnEvent.tool_call_summary(write_call)) =~ "secret"
+
+    assert {:ok, %Step{} = set_default_step} =
+             Lisp.run(
+               ~S|(prelude/set-default {:id "paged" :version 1 :metadata ["secret"]})|,
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert [%{name: "prelude_store_set_default", private: true} = set_default_call] =
+             set_default_step.tool_calls
+
+    assert set_default_call.args["metadata"] == %{}
+    refute inspect(set_default_step.tool_calls) =~ "secret"
+    refute inspect(TurnEvent.tool_call_summary(set_default_call)) =~ "secret"
+  end
+
+  test "private nested metadata is removed before tool ledger and traces" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+
+    assert {:ok, %Step{} = write_step} =
+             Lisp.run(
+               ~S|(prelude/write {:id "paged" :source data/source :metadata {:reason {:private "secret"}}})|,
+               context: %{source: @paged_source},
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert [%{name: "prelude_store_write", private: true} = write_call] =
+             write_step.tool_calls
+
+    assert write_call.args["metadata"] == %{}
+    refute inspect(write_step.tool_calls) =~ "secret"
+    refute inspect(TurnEvent.tool_call_summary(write_call)) =~ "secret"
+
+    assert {:ok, %Step{} = set_default_step} =
+             Lisp.run(
+               ~S|(prelude/set-default {:id "paged" :version 1 :metadata {:reason {:private "secret"}}})|,
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert [%{name: "prelude_store_set_default", private: true} = set_default_call] =
+             set_default_step.tool_calls
+
+    assert set_default_call.args["metadata"] == %{}
+    refute inspect(set_default_step.tool_calls) =~ "secret"
+    refute inspect(TurnEvent.tool_call_summary(set_default_call)) =~ "secret"
   end
 
   defp sha256(source) do

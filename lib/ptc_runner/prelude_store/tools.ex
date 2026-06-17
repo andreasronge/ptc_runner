@@ -13,9 +13,11 @@ defmodule PtcRunner.PreludeStore.Tools do
   alias PtcRunner.PreludeStore
 
   @list_tool "prelude_store_list"
+  @history_tool "prelude_store_history"
   @read_tool "prelude_store_read"
   @write_tool "prelude_store_write"
-  @reserved_names [@list_tool, @read_tool, @write_tool]
+  @set_default_tool "prelude_store_set_default"
+  @reserved_names [@list_tool, @history_tool, @read_tool, @write_tool, @set_default_tool]
 
   @prelude_source """
   (ns prelude
@@ -26,6 +28,11 @@ defmodule PtcRunner.PreludeStore.Tools do
     "List editable preludes in the connected store."
     []
     (tool/prelude_store_list {}))
+
+  (defn history
+    "List version history for one editable prelude id."
+    [id]
+    (tool/prelude_store_history {:id id}))
 
   (defn read
     "Read a bounded public view of a prelude candidate by id or id@version."
@@ -49,10 +56,25 @@ defmodule PtcRunner.PreludeStore.Tools do
     "Write a full namespace source candidate with optional metadata."
     {:effect :write}
     [candidate]
-    (tool/prelude_store_write
-      {:id (get candidate "id")
-       :source (get candidate "source")
-       :metadata (get candidate "metadata" {})}))
+    (let [metadata (get candidate "metadata" {})]
+      (tool/prelude_store_write
+        {:id (get candidate "id")
+         :source (get candidate "source")
+         :metadata (if (map? metadata) metadata {})})))
+
+  (defn set-default
+    "Move the bare-id default to an existing version, optionally checksum-pinned."
+    {:effect :write}
+    [selection]
+    (let [metadata (get selection "metadata" {})
+          base {:id (get selection "id")
+                :version (get selection "version")
+                :metadata (if (map? metadata) metadata {})}
+          checksum (get selection "checksum")]
+      (tool/prelude_store_set_default
+        (if checksum
+          (assoc base :checksum checksum)
+          base))))
   """
 
   @doc "Reserved private backing tool names."
@@ -102,6 +124,12 @@ defmodule PtcRunner.PreludeStore.Tools do
          description: "List editable prelude candidates.",
          expose: :ptc_lisp,
          visibility: :private},
+      @history_tool =>
+        {fn args -> history_tool(store, args) end,
+         signature: "(id :string) -> [:map]",
+         description: "List version history for an editable prelude candidate.",
+         expose: :ptc_lisp,
+         visibility: :private},
       @read_tool =>
         {fn args -> read_tool(store, args) end,
          signature: "(id :string) -> :map",
@@ -112,6 +140,12 @@ defmodule PtcRunner.PreludeStore.Tools do
         {fn args -> write_tool(store, args) end,
          signature: "(id :string, source :string, metadata :map) -> :map",
          description: "Write a versioned prelude candidate.",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @set_default_tool =>
+        {fn args -> set_default_tool(store, args) end,
+         signature: "(id :string, version :int, checksum :string?, metadata :map) -> :map",
+         description: "Move the editable prelude default to an existing version.",
          expose: :ptc_lisp,
          visibility: :private}
     }
@@ -127,6 +161,24 @@ defmodule PtcRunner.PreludeStore.Tools do
     kind, reason -> store_error({kind, reason})
   end
 
+  defp history_tool(store, %{"id" => id}) when is_binary(id) do
+    case PreludeStore.history(store, id) do
+      {:ok, rows} -> public_map(rows)
+      {:error, error} -> public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp history_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_history requires a string id field"
+    })
+  end
+
   defp read_tool(store, %{"id" => id}) do
     case PreludeStore.read(store, id) do
       {:ok, candidate} -> public_candidate(candidate)
@@ -140,8 +192,7 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp write_tool(store, %{"id" => id, "source" => source} = args)
        when is_binary(id) and is_binary(source) do
-    metadata = Map.get(args, "metadata", %{})
-    metadata = if is_map(metadata), do: metadata, else: %{}
+    metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
 
     case PreludeStore.write(store, id, source, metadata) do
       {:ok, result} -> public_map(Map.put(result, :status, :ok))
@@ -158,6 +209,37 @@ defmodule PtcRunner.PreludeStore.Tools do
       reason: :invalid_argument,
       message: "prelude_store_write requires string id and source fields"
     })
+  end
+
+  defp set_default_tool(store, %{"id" => id, "version" => version} = args)
+       when is_binary(id) and is_integer(version) do
+    metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
+
+    ref =
+      case Map.get(args, "checksum") do
+        checksum when is_binary(checksum) -> %{id: id, version: version, checksum: checksum}
+        _ -> %{id: id, version: version}
+      end
+
+    case PreludeStore.set_default(store, ref, metadata) do
+      {:ok, result} -> public_map(Map.put(result, :status, :ok))
+      {:error, error} -> public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp set_default_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_set_default requires string id and integer version fields"
+    })
+  end
+
+  defp store_tool_metadata(metadata) do
+    PreludeCandidate.public_metadata(metadata, complex: :drop)
   end
 
   defp public_candidate(%PreludeCandidate{} = candidate) do

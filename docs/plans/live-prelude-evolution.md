@@ -1,7 +1,8 @@
 # Prelude Evolution and Versioning — Plan
 
-**Status:** design plan, not yet implemented. This is the implementation-facing
-plan. Detailed rationale and review history live in
+**Status:** implementation in progress. E1–E5 and in-memory E6a
+default/history controls are implemented; durable persistence remains deferred.
+This is the implementation-facing plan. Detailed rationale and review history live in
 [`live-prelude-evolution-review.md`](live-prelude-evolution-review.md).
 
 Companion docs:
@@ -468,8 +469,8 @@ aggregate source hash.
 
 ### E6. Persistent Defaults / Policy
 
-- Add `set_default/history` only after versioned writes and verifier sessions
-  have proven useful.
+- Add in-memory `set_default/history` after versioned writes and verifier
+  sessions have proven useful.
 - Add filesystem or other persistence.
 - Keep default changes explicit and auditable for persistent/shared stores.
 
@@ -515,10 +516,11 @@ with review gates where authority, provenance, or transport surfaces change.
    Run `codex-review` in `review` mode if the diff touches MCP ownership,
    lifecycle, or output envelope code.
 
-7. **Persistent policy later.**
-   Add `set_default`, history, filesystem/upstream persistence, and review
-   policy only after the in-memory versioned loop has produced useful verifier
-   runs. Treat this as a separate design/implementation cycle.
+7. **Explicit defaults and history.**
+   Add in-memory `set_default` and `history` first so verifier-approved
+   versions can be promoted without deleting later candidates. Keep
+   filesystem/upstream persistence and review policy as a separate
+   design/implementation cycle.
 
 ## Integration Tests
 

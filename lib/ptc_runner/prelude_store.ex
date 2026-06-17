@@ -3,9 +3,9 @@ defmodule PtcRunner.PreludeStore do
   In-memory versioned store for source-bearing capability preludes.
 
   V1 is deliberately prelude-specific and volatile: it provides `list/1`,
-  `read/2`, and compile-on-write `write/4` over a small handle backed by a
-  single owner process and ETS rows. Persistent defaults, history listing, MCP
-  projection, and private editing tools are later plan chunks.
+  `history/2`, `read/2`, compile-on-write `write/4`, and explicit
+  `set_default/4` over a small handle backed by a single owner process and ETS
+  rows. Filesystem persistence remains a later plan chunk.
   """
 
   alias PtcRunner.Lisp.Discovery
@@ -60,6 +60,14 @@ defmodule PtcRunner.PreludeStore do
   @spec list(t()) :: [map()]
   def list(%__MODULE__{} = store), do: Server.list(store)
 
+  @doc "Returns bounded summary rows for all versions of one prelude id."
+  @spec history(t(), String.t()) :: {:ok, [map()]} | {:error, map()}
+  def history(%__MODULE__{} = store, id) do
+    with :ok <- validate_id(id) do
+      Server.history(store, id)
+    end
+  end
+
   @doc """
   Reads a candidate by bare id, `id@version`, or `%{id, version, checksum}` ref.
   """
@@ -110,6 +118,58 @@ defmodule PtcRunner.PreludeStore do
   def write(%__MODULE__{}, _id, _source, _metadata) do
     {:error,
      error(:invalid_argument, "write/4 requires string id, string source, and map metadata")}
+  end
+
+  @doc """
+  Moves the bare-id default/current pointer to an existing version.
+
+  `id` + `version` is the preferred explicit form. `id@version` or a
+  `%{id, version, checksum}` ref are also accepted for checksum-pinned default
+  changes.
+  """
+  @spec set_default(t(), String.t() | map()) :: {:ok, map()} | {:error, map()}
+  def set_default(store, ref), do: set_default(store, ref, %{})
+
+  @spec set_default(t(), String.t(), pos_integer()) :: {:ok, map()} | {:error, map()}
+  def set_default(%__MODULE__{} = store, id, version)
+      when is_binary(id) and is_integer(version) and version > 0,
+      do: set_default(store, id, version, %{})
+
+  @spec set_default(t(), String.t() | map(), map()) :: {:ok, map()} | {:error, map()}
+  def set_default(%__MODULE__{} = store, ref, metadata) when is_map(metadata) do
+    case parse_ref(ref) do
+      {:ok, %{version: version} = parsed} when is_integer(version) ->
+        Server.set_default(store, parsed, metadata)
+
+      {:ok, %{id: id}} ->
+        {:error, error(:invalid_ref, "set_default requires an explicit version for `#{id}`")}
+
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error, error(:invalid_ref, "invalid prelude ref #{inspect(ref, limit: 5)}")}
+    end
+  end
+
+  def set_default(%__MODULE__{}, _ref, _metadata) do
+    {:error, error(:invalid_argument, "set_default/3 requires map metadata")}
+  end
+
+  @spec set_default(t(), String.t(), pos_integer(), map()) :: {:ok, map()} | {:error, map()}
+  def set_default(%__MODULE__{} = store, id, version, metadata)
+      when is_binary(id) and is_integer(version) and version > 0 and is_map(metadata) do
+    with :ok <- validate_id(id) do
+      Server.set_default(store, %{id: id, version: version}, metadata)
+    end
+  end
+
+  def set_default(%__MODULE__{}, _id, _version, _metadata) do
+    {:error,
+     error(
+       :invalid_argument,
+       "set_default/4 requires string id, positive integer version, and map metadata"
+     )}
   end
 
   @doc false
