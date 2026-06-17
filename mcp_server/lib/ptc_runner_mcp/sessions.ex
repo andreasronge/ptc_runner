@@ -776,9 +776,9 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp validate_prelude_ref_keys(ref, index) do
-    allowed = MapSet.new(["id", "version", "checksum", :id, :version, :checksum])
+    allowed = ["id", "version", "checksum", :id, :version, :checksum]
 
-    case Enum.find(Map.keys(ref), &(not MapSet.member?(allowed, &1))) do
+    case Enum.find(Map.keys(ref), &(&1 not in allowed)) do
       nil -> :ok
       _key -> {:error, "preludes[#{index}] contains an unexpected field"}
     end

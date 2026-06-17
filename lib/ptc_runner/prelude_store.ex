@@ -146,9 +146,6 @@ defmodule PtcRunner.PreludeStore do
 
       {:error, _} = error ->
         error
-
-      _ ->
-        {:error, error(:invalid_ref, "invalid prelude ref #{inspect(ref, limit: 5)}")}
     end
   end
 

@@ -19,7 +19,7 @@ defmodule PtcRunner.PreludeCandidate do
 
   @type t :: %__MODULE__{
           id: String.t(),
-          version: pos_integer(),
+          version: non_neg_integer(),
           source: String.t(),
           compiled: Prelude.t(),
           origin: origin(),

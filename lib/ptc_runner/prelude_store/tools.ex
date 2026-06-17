@@ -256,10 +256,6 @@ defmodule PtcRunner.PreludeStore.Tools do
     |> public_map()
   end
 
-  defp public_error(other) do
-    public_error(%{reason: :prelude_store_error, message: inspect(other, limit: 5)})
-  end
-
   defp store_error(error) do
     public_error(%{reason: :prelude_store_error, message: Exception.message(error)})
   rescue

@@ -127,6 +127,11 @@ defmodule PtcRunner.Tool do
           | {(map() -> term()), String.t()}
           | {(map() -> term()), keyword()}
           | {(map() -> term()), :skip}
+          | :builtin_grep
+          | :builtin_grep_n
+          | :builtin_llm_query
+          | PtcRunner.SubAgent.LLMTool.t()
+          | PtcRunner.SubAgent.SubAgentTool.t()
           | t()
 
   @type expose_layer :: :native | :ptc_lisp | :both
