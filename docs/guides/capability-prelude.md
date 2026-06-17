@@ -375,17 +375,68 @@ For in-process prelude iteration, hosts can use the volatile core store:
 
 ```elixir
 {:ok, store} = PtcRunner.PreludeStore.new()
-{:ok, write} = PtcRunner.PreludeStore.write(store, "paged", paged_source)
-{:ok, candidate} = PtcRunner.PreludeStore.read(store, %{id: "paged", version: write.version})
+{:ok, v1} = PtcRunner.PreludeStore.write(store, "paged", paged_source_v1)
+{:ok, v2} = PtcRunner.PreludeStore.write(store, "paged", paged_source_v2)
+
+{:ok, candidate} =
+  PtcRunner.PreludeStore.read(store, %{id: "paged", version: v2.version})
 
 candidate.compiled
 ```
 
-`PreludeStore` is append-only and compile-on-write. A bare id reads the current
-version, `"paged@7"` pins an explicit version, and `%{id:, version:, checksum:}`
-adds a checksum assertion. Stored source and metadata are untrusted prompt
-surfaces; use `PtcRunner.PreludeCandidate.public_view/1` for model-facing
-projections.
+`PreludeStore` is append-only and compile-on-write. Every successful
+`write/4` creates a new version and makes it the current/default version for
+that id. A bare id reads the current/default version, `"paged@7"` pins an
+explicit version, and `%{id:, version:, checksum:}` adds a checksum assertion.
+
+The store keeps explicit default selection separate from newest-version
+tracking:
+
+```elixir
+{:ok, _selection} =
+  PtcRunner.PreludeStore.set_default(store, "paged", v1.version, %{
+    "reason" => "verifier preferred v1"
+  })
+
+{:ok, current} = PtcRunner.PreludeStore.read(store, "paged")
+current.version
+# => 1
+
+[%{current_version: 1, latest_version: 2}] = PtcRunner.PreludeStore.list(store)
+{:ok, history} = PtcRunner.PreludeStore.history(store, "paged")
+```
+
+Use `history/2` to audit all versions for one id. Use `set_default/4` only for
+an explicit host-owned promotion or rollback after verification; it does not
+delete later versions.
+
+Stored source and metadata are untrusted prompt surfaces. Use
+`PtcRunner.PreludeCandidate.public_view/1` for model-facing projections.
+Model-facing store tools keep source bounded and filter metadata to documented
+public scalar keys; private backing-tool ledgers summarize source args and
+filter metadata before traces or `step.tool_calls` retain them.
+
+Editor sessions can attach the host-shipped `prelude/` wrapper over private
+store tools. The model-visible API includes:
+
+```clojure
+(prelude/list)
+(prelude/history "paged")
+(prelude/read "paged@2")
+(prelude/source "paged")
+(prelude/write {:id "paged" :source new-source :metadata {:reason "add profile"}})
+(prelude/set-default {:id "paged" :version 1 :metadata {:reason "rollback"}})
+```
+
+`prelude/set-default` accepts an optional checksum:
+
+```clojure
+(prelude/set-default
+  {:id "paged"
+   :version 1
+   :checksum "..."
+   :metadata {:reason "verified candidate"}})
+```
 
 `PtcRunner.Session` can resolve store refs once at session start and freeze the
 compiled bundle for that session:

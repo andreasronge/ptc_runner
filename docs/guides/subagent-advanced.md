@@ -309,6 +309,26 @@ The same compiled artifact also drives the REPL
 (`PtcRunner.Lisp.run(program, prelude: prelude)`), so behavior is identical
 across surfaces.
 
+For live prelude iteration, a SubAgent can also resolve versioned store refs at
+startup and freeze the selected bundle for that run:
+
+```elixir
+{:ok, store} = PtcRunner.PreludeStore.new()
+{:ok, _} = PtcRunner.PreludeStore.write(store, "crm", prelude_source)
+
+agent =
+  PtcRunner.SubAgent.new(
+    prompt: "Look up the requested user",
+    prelude_store: store,
+    preludes: ["crm"],
+    llm: llm
+  )
+```
+
+Use `runtime_prelude:` when the host already has a compiled artifact. Use
+`prelude_store:` + `preludes:` when you want fresh SubAgent runs to pick a
+specific current or pinned store version such as `"crm"` or `"crm@3"`.
+
 For a full walkthrough — authoring a prelude file, visibility and `requires`,
 attaching across surfaces, discovery, and troubleshooting — see the
 [Capability Preludes authoring & deploying guide](capability-prelude.md).

@@ -251,6 +251,47 @@ directory:
 mix ptc.viewer --trace-dir /tmp/ptc-traces
 ```
 
+## 6. Stateful sessions with selected preludes
+
+The one-shot `lisp_eval` tool does not retain definitions or selected preludes
+between calls. For multi-turn PTC-Lisp work, use the session tools. A session
+resolves selected prelude refs once at start and freezes that compiled bundle
+for the session lifetime:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "lisp_session_list_preludes",
+    "arguments": {}
+  }
+}
+```
+
+The returned rows show each editable prelude id, its `current_version`,
+`latest_version`, checksum, namespaces, exports, and public metadata. Start a
+session with the current default version of `paged`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "lisp_session_start",
+    "arguments": {
+      "preludes": ["paged"]
+    }
+  }
+}
+```
+
+Use `"paged@3"` to pin an explicit version. The MCP layer only projects the core
+session/store behavior: it lists, resolves, and freezes selected preludes; it
+does not compile, diff, promote defaults, or persist preludes itself.
+
 ## What's next
 
 - [`docs/mcp-server.md`](../mcp-server.md) — security model, comparison
