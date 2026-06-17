@@ -2,6 +2,8 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.PreludeStore
+  alias PtcRunner.Session
 
   @moduledoc """
   Sandbox heap re-baseline (docs/plans/sandbox-heap-rebaseline.md, P1+P3):
@@ -156,5 +158,59 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       # blows straight past it.
       assert baseline <= 30 * source_bytes + 2_000_000
     end
+
+    test "selected PreludeStore refs do not retain store history in the sandbox baseline" do
+      lean_baseline = selected_prelude_baseline(0)
+      bloated_baseline = selected_prelude_baseline(40)
+
+      # If session/prelude selection accidentally captures the handle-backed
+      # store or its retained ETS history, this grows with the historical
+      # candidate payloads below. The selected pinned prelude itself is the
+      # same small version in both runs, so only fixed sandbox noise is allowed.
+      assert bloated_baseline <= lean_baseline + 1_000_000
+    end
+  end
+
+  defp selected_prelude_baseline(history_versions) do
+    {:ok, store} =
+      PreludeStore.new(
+        max_versions: max(history_versions + 1, 1),
+        max_total_bytes: 12 * 1024 * 1024,
+        compile_max_heap: 5_000_000
+      )
+
+    first_source = """
+    (ns helper "Small selected helper.")
+    (defn answer [] 1)
+    """
+
+    assert {:ok, first} = PreludeStore.write(store, "helper", first_source)
+
+    for version <- 2..(history_versions + 1)//1 do
+      assert {:ok, _candidate} =
+               PreludeStore.write(store, "helper", historical_prelude_source(version))
+    end
+
+    session =
+      Session.new(
+        prelude_store: store,
+        preludes: [%{id: "helper", version: 1, checksum: first.checksum}]
+      )
+
+    {{:ok, step}, _session} = Session.eval(session, "(helper/answer)", timeout: 5_000)
+
+    assert step.return == 1
+    assert is_integer(step.usage.baseline_bytes)
+
+    step.usage.baseline_bytes
+  end
+
+  defp historical_prelude_source(version) do
+    doc = String.duplicate("history payload #{version} ", 4_000)
+
+    """
+    (ns helper "#{doc}")
+    (defn answer [] #{version})
+    """
   end
 end

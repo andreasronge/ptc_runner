@@ -1,7 +1,9 @@
 # Paginated Reads and Data Prelude — Plan
 
 **Status (2026-06-15): implemented as an experimental `paged/` prelude with
-positive smoke evidence; full M2 A/B still pending.** The first core blocker is
+positive smoke evidence; full M2 A/B still pending (protocol now specified in
+`~/ptc-bench-comparison/notes/store-backed-prelude-self-improvement-plan-2026-06-17.md`).**
+The first core blocker is
 shipped: in-eval tool-call ledger compaction landed in `209b4bdf`, with large
 paged-result coverage in `bd7dba65`. A concrete large-file MCP smoke path also
 exists through `examples/large_file_log_introspection/` and e2e tests. That
@@ -409,6 +411,13 @@ Integration / M2 tests:
   avoidance behavior.
 
 ## Benchmark Decision Rule (M2 value hypothesis)
+
+> The detailed, store-backed protocol for this A/B and the P4 derivation loop
+> below — arms, pre-registered differential predictions, adoption-rate mediator,
+> decision rules, and the MCP store wiring — now lives in
+> `~/ptc-bench-comparison/notes/store-backed-prelude-self-improvement-plan-2026-06-17.md`
+> (Experiment 1 = this M2 A/B; Experiment 2 = P4 derivation). The store mechanism
+> it exercises shipped in `live-prelude-evolution` E1–E5.
 
 > A human-written paginating data prelude reduces eval turns, tokens, and heap
 > pressure on planted audit tasks without reducing finding quality, because it
