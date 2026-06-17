@@ -58,14 +58,26 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     end
   end
 
-  test "direct private store tool calls fail closed" do
+  test "direct private store tool calls fail during analysis" do
     {:ok, store} = PreludeStore.new()
+    test_pid = self()
+
+    tools =
+      Tools.tools(store,
+        base_tools: %{
+          "visible" => fn _args ->
+            send(test_pid, :visible_tool_ran)
+            "ok"
+          end
+        }
+      )
 
     assert {:error, %Step{} = step} =
-             Lisp.run(~S|(tool/prelude_store_list {})|, tools: Tools.tools(store))
+             Lisp.run(~S|(do (tool/visible {}) (tool/prelude_store_list {}))|, tools: tools)
 
     assert step.fail.reason == :private_tool_unauthorized
     assert step.fail.message =~ "prelude_store_list"
+    refute_received :visible_tool_ran
   end
 
   test "public wrappers write, list, read, and source stored candidates" do

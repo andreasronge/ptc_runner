@@ -196,5 +196,125 @@ defmodule PtcRunner.Lisp.EvalTaskTest do
       assert step2.return == "sent_to_bob_done"
       assert step2.journal == %{"email" => "sent_to_bob"}
     end
+
+    test "task-reset prevents compile-time cache pruning for later task bodies" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|(do (task-reset "cached") (task "cached" (tool/nonexistent {:x 1})))|,
+                 journal: %{"cached" => 42}
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "nonexistent"
+    end
+
+    test "task-reset in let binding prevents pruning for the let body before side effects run" do
+      test_pid = self()
+
+      tools = %{
+        "visible" => fn _args ->
+          send(test_pid, :visible_tool_ran)
+          "ok"
+        end
+      }
+
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|(do (tool/visible {}) (let [_ (task-reset "cached")] (task "cached" (tool/nonexistent {:x 1}))))|,
+                 journal: %{"cached" => 42},
+                 tools: tools
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "nonexistent"
+      refute_received :visible_tool_ran
+    end
+
+    test "short-circuited tasks do not create compile-time cache facts before side effects" do
+      test_pid = self()
+
+      tools = %{
+        "ok" => fn _args -> "ok" end,
+        "side" => fn _args ->
+          send(test_pid, :side_tool_ran)
+          "side"
+        end
+      }
+
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|(do (and false (task "cached" (tool/ok {}))) (tool/side {}) (task "cached" (tool/missing {})))|,
+                 journal: %{},
+                 tools: tools
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "missing"
+      refute_received :side_tool_ran
+    end
+
+    test "closure task-reset drops compile-time cache facts before later side effects" do
+      test_pid = self()
+
+      tools = %{
+        "side" => fn _args ->
+          send(test_pid, :side_tool_ran)
+          "side"
+        end
+      }
+
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|(do ((fn [] (task-reset "cached"))) (tool/side {}) (task "cached" (tool/missing {})))|,
+                 journal: %{"cached" => 42},
+                 tools: tools
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "missing"
+      refute_received :side_tool_ran
+    end
+
+    test "task-reset only invalidates matching cached literal task ids" do
+      assert {:ok, step} =
+               Lisp.run(
+                 ~S|(do (task-reset "other") (task "cached" (tool/nonexistent {:x 1})))|,
+                 journal: %{"cached" => 42, "other" => :stale}
+               )
+
+      assert step.return == 42
+      assert step.journal == %{"cached" => 42}
+    end
+
+    test "non-string journal keys do not trigger compile-time cache pruning" do
+      assert {:error, step} =
+               Lisp.run(~S|(task "cached" (tool/nonexistent {:x 1}))|,
+                 journal: %{cached: 42}
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "nonexistent"
+    end
+
+    test "dynamic cached task ids keep body visible to compile-time tool guard" do
+      assert {:error, step} =
+               Lisp.run(~S|(def task-id "cached") (task task-id (tool/nonexistent {:x 1}))|,
+                 journal: %{"cached" => 42}
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "nonexistent"
+    end
+
+    test "cached task bodies inside function literals remain visible to the tool guard" do
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|(def cached-fn (fn [] (task "cached" (tool/nonexistent {:x 1}))))|,
+                 journal: %{"cached" => 42}
+               )
+
+      assert step.fail.reason == :unknown_tool
+      assert step.fail.message =~ "nonexistent"
+    end
   end
 end

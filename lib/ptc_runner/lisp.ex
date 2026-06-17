@@ -592,6 +592,13 @@ defmodule PtcRunner.Lisp do
     # references against `max_heap` at spawn — by design (the closure is the
     # workload), so the grant must not ride along.
     tool_names = Map.keys(normalized_tools)
+
+    public_tool_names =
+      normalized_tools
+      |> Enum.reject(fn {_name, tool} -> Tool.private?(tool) end)
+      |> Enum.map(fn {name, _tool} -> name end)
+
+    cached_task_ids = cached_task_ids(journal)
     memory_keys = Map.keys(memory)
 
     compile_fn = fn ->
@@ -599,7 +606,14 @@ defmodule PtcRunner.Lisp do
            :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude),
            :ok <- check_undefined_vars(core_ast, memory_keys),
-           :ok <- check_undefined_tools(core_ast, tool_names, prelude) do
+           :ok <-
+             check_undefined_tools(
+               core_ast,
+               public_tool_names,
+               tool_names,
+               prelude,
+               cached_task_ids
+             ) do
         {:ok, core_ast}
       end
     end
@@ -1143,36 +1157,246 @@ defmodule PtcRunner.Lisp do
   # toolset, preventing partial execution where early tool calls succeed before
   # a later unknown tool call crashes.
   # Takes tool NAMES (not the tools map) so the compile sandbox closure never
-  # captures the tool closures and their granted environments.
-  defp check_undefined_tools(_core_ast, [], _prelude), do: :ok
+  # captures the tool closures and their granted environments. Direct user
+  # references are checked against public names only; private names are admitted
+  # only when they are reached through a prelude export's declared tool refs, and
+  # runtime origin checks still enforce that same boundary at call time.
+  defp check_undefined_tools(core_ast, public_tool_names, tool_names, prelude, cached_task_ids) do
+    reachable_core_ast = prune_cached_task_bodies(core_ast, cached_task_ids)
 
-  defp check_undefined_tools(core_ast, tool_names, prelude) do
     # CoreAST tool names are atoms, tool_names entries are strings — convert to strings
     direct =
-      core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
+      reachable_core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
 
     # A prelude export wraps tools in its captured body, invisible to the AST
     # walk above; union in the tools any referenced export will invoke so a
     # missing wrapped tool fails BEFORE an earlier tool can run (side-effect guard).
-    referenced = MapSet.union(direct, collect_prelude_tool_refs(core_ast, prelude))
-
+    prelude_refs = collect_prelude_tool_refs(reachable_core_ast, prelude)
     available = MapSet.new(tool_names)
+    public_available = MapSet.new(public_tool_names)
+    private_available = MapSet.difference(available, public_available)
+    private_direct = MapSet.intersection(direct, private_available)
+    referenced = MapSet.union(direct, prelude_refs)
     undefined = MapSet.difference(referenced, available)
 
-    if MapSet.size(undefined) == 0 do
-      :ok
-    else
-      names = undefined |> MapSet.to_list() |> Enum.sort()
-      label = if length(names) == 1, do: "Unknown tool", else: "Unknown tools"
+    cond do
+      MapSet.size(private_direct) > 0 ->
+        names = private_direct |> MapSet.to_list() |> Enum.sort()
+        label = if length(names) == 1, do: "Private tool", else: "Private tools"
 
-      hint =
-        case MapSet.to_list(available) |> Enum.sort() do
-          [] -> "No tools available."
-          tools -> "Available tools: #{Enum.join(tools, ", ")}"
-        end
+        {:error,
+         Step.error(
+           :private_tool_unauthorized,
+           "#{label} may only be called by authorized prelude exports: #{Enum.join(names, ", ")}",
+           %{}
+         )}
 
-      {:error, Step.error(:unknown_tool, "#{label}: #{Enum.join(names, ", ")}. #{hint}", %{})}
+      MapSet.size(undefined) > 0 ->
+        names = undefined |> MapSet.to_list() |> Enum.sort()
+        label = if length(names) == 1, do: "Unknown tool", else: "Unknown tools"
+
+        hint =
+          case MapSet.to_list(public_available) |> Enum.sort() do
+            [] -> "No tools available."
+            tools -> "Available tools: #{Enum.join(tools, ", ")}"
+          end
+
+        {:error, Step.error(:unknown_tool, "#{label}: #{Enum.join(names, ", ")}. #{hint}", %{})}
+
+      true ->
+        :ok
     end
+  end
+
+  defp cached_task_ids(journal) when is_map(journal) do
+    journal
+    |> Map.keys()
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp cached_task_ids(_journal), do: MapSet.new()
+
+  defp prune_cached_task_bodies(ast, cached_task_ids) do
+    ast
+    |> prune_cached_task_bodies_with_cache(cached_task_ids)
+    |> elem(0)
+  end
+
+  defp prune_cached_task_bodies_with_cache({:task, id, body}, cached_task_ids) do
+    if MapSet.member?(cached_task_ids, to_string(id)) do
+      {{:task, id, nil}, cached_task_ids}
+    else
+      {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
+      {{:task, id, body}, cached_task_ids}
+    end
+  end
+
+  defp prune_cached_task_bodies_with_cache({:do, exprs}, cached_task_ids) do
+    {exprs, cached_task_ids} =
+      Enum.map_reduce(exprs, cached_task_ids, fn expr, cache ->
+        prune_cached_task_bodies_with_cache(expr, cache)
+      end)
+
+    {{:do, exprs}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:let, bindings, body}, cached_task_ids) do
+    {bindings, cached_task_ids} =
+      Enum.map_reduce(bindings, cached_task_ids, fn {:binding, pattern, value}, cache ->
+        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
+        {{:binding, pattern, value}, cache}
+      end)
+
+    {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
+    {{:let, bindings, body}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:loop, bindings, body}, cached_task_ids) do
+    {bindings, cached_task_ids} =
+      Enum.map_reduce(bindings, cached_task_ids, fn {:binding, pattern, value}, cache ->
+        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
+        {{:binding, pattern, value}, cache}
+      end)
+
+    {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
+    {{:loop, bindings, body}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache(
+         {:if, condition, then_branch, else_branch},
+         cached_task_ids
+       ) do
+    {condition, cached_task_ids} = prune_cached_task_bodies_with_cache(condition, cached_task_ids)
+    {then_branch, then_cache} = prune_cached_task_bodies_with_cache(then_branch, cached_task_ids)
+    {else_branch, else_cache} = prune_cached_task_bodies_with_cache(else_branch, cached_task_ids)
+
+    {{:if, condition, then_branch, else_branch}, MapSet.intersection(then_cache, else_cache)}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:and, exprs}, cached_task_ids) do
+    {exprs, cached_task_ids} = prune_short_circuit_exprs(exprs, cached_task_ids)
+    {{:and, exprs}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:or, exprs}, cached_task_ids) do
+    {exprs, cached_task_ids} = prune_short_circuit_exprs(exprs, cached_task_ids)
+    {{:or, exprs}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:call, target, args}, cached_task_ids) do
+    {target, cached_task_ids} = prune_cached_task_bodies_with_cache(target, cached_task_ids)
+
+    {args, _cached_task_ids} =
+      Enum.map_reduce(args, cached_task_ids, fn arg, cache ->
+        prune_cached_task_bodies_with_cache(arg, cache)
+      end)
+
+    {{:call, target, args}, MapSet.new()}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:prelude_call, ref, args}, cached_task_ids) do
+    {args, _cached_task_ids} =
+      Enum.map_reduce(args, cached_task_ids, fn arg, cache ->
+        prune_cached_task_bodies_with_cache(arg, cache)
+      end)
+
+    {{:prelude_call, ref, args}, MapSet.new()}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:def, name, value, meta}, cached_task_ids) do
+    {value, cached_task_ids} = prune_cached_task_bodies_with_cache(value, cached_task_ids)
+    {{:def, name, value, meta}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:defonce, name, value, meta}, cached_task_ids) do
+    {value, cached_task_ids} = prune_cached_task_bodies_with_cache(value, cached_task_ids)
+    {{:defonce, name, value, meta}, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:fn, _params, _body} = fun, cached_task_ids) do
+    {fun, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:fn, _name, _params, _body} = fun, cached_task_ids) do
+    {fun, cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:task_dynamic, id, body}, cached_task_ids) do
+    # Dynamic ids are runtime values, so static cache pruning is intentionally
+    # limited to literal task ids whose journal key can be proven here.
+    {id, cached_task_ids} = prune_cached_task_bodies_with_cache(id, cached_task_ids)
+    {body, body_cache} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
+
+    {{:task_dynamic, id, body}, MapSet.intersection(cached_task_ids, body_cache)}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:task_reset, {:string, id}}, cached_task_ids) do
+    {{:task_reset, {:string, id}}, MapSet.delete(cached_task_ids, id)}
+  end
+
+  defp prune_cached_task_bodies_with_cache({:task_reset, id}, cached_task_ids) do
+    # A dynamic reset may invalidate any cached literal task id; subsequent task
+    # bodies must therefore remain visible to the static tool guard.
+    {id, _cached_task_ids} = prune_cached_task_bodies_with_cache(id, cached_task_ids)
+    {{:task_reset, id}, MapSet.new()}
+  end
+
+  defp prune_cached_task_bodies_with_cache(tuple, cached_task_ids) when is_tuple(tuple) do
+    {items, cached_task_ids} =
+      tuple
+      |> Tuple.to_list()
+      |> Enum.map_reduce(cached_task_ids, fn item, cache ->
+        prune_cached_task_bodies_with_cache(item, cache)
+      end)
+
+    {List.to_tuple(items), cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache(list, cached_task_ids) when is_list(list) do
+    Enum.map_reduce(list, cached_task_ids, fn item, cache ->
+      prune_cached_task_bodies_with_cache(item, cache)
+    end)
+  end
+
+  defp prune_cached_task_bodies_with_cache(%MapSet{} = set, cached_task_ids) do
+    {values, cached_task_ids} =
+      set
+      |> MapSet.to_list()
+      |> Enum.map_reduce(cached_task_ids, fn item, cache ->
+        prune_cached_task_bodies_with_cache(item, cache)
+      end)
+
+    {MapSet.new(values), cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache(map, cached_task_ids) when is_map(map) do
+    {pairs, cached_task_ids} =
+      Enum.map_reduce(map, cached_task_ids, fn {key, value}, cache ->
+        {key, cache} = prune_cached_task_bodies_with_cache(key, cache)
+        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
+        {{key, value}, cache}
+      end)
+
+    {Map.new(pairs), cached_task_ids}
+  end
+
+  defp prune_cached_task_bodies_with_cache(other, cached_task_ids), do: {other, cached_task_ids}
+
+  defp prune_short_circuit_exprs([], cached_task_ids), do: {[], cached_task_ids}
+
+  defp prune_short_circuit_exprs(exprs, cached_task_ids) do
+    {exprs, _prefix_cache, possible_caches} =
+      Enum.reduce(exprs, {[], cached_task_ids, []}, fn expr, {pruned, cache, possible} ->
+        {expr, cache} = prune_cached_task_bodies_with_cache(expr, cache)
+        {[expr | pruned], cache, [cache | possible]}
+      end)
+
+    guaranteed_cache =
+      possible_caches
+      |> Enum.reduce(cached_task_ids, &MapSet.intersection/2)
+
+    {Enum.reverse(exprs), guaranteed_cache}
   end
 
   # Collect all tool names referenced in the CoreAST

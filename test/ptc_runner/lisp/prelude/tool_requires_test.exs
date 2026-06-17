@@ -396,7 +396,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert step.fail.message =~ "expected int"
     end
 
-    test "user closures applied inside a prelude export do not inherit private tool authority" do
+    test "user closures passed to a prelude export cannot reference private tools" do
       prelude =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
@@ -425,7 +425,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
 
       assert step.fail.reason == :private_tool_unauthorized
       assert step.fail.message =~ "private_fetch"
-      assert_received {:private_fetch, "export"}
+      refute_received {:private_fetch, "export"}
       refute_received {:private_fetch, "user"}
     end
 
