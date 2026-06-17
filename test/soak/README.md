@@ -27,6 +27,9 @@ MIX_ENV=test mix test --only soak test/soak/mcp_stdio_soak_test.exs
 |-------------------------------------------------|--------------|
 | `closure_capture_soak_test.exs`                 | Host-process accumulation across `Lisp.run/2` calls; refc-binary pinning by returned closures |
 | `tracer_soak_test.exs`                          | `PtcRunner.Tracer` bounded-list cap; refc-binaries in entry payloads |
+| `atom_leak_soak_test.exs`                       | `Lisp.run/2` parser atom interning on novel var/keyword/ns-symbol names (#953) |
+| `prelude_compile_atom_leak_soak_test.exs`       | `Prelude.Compiler.compile/1` atom interning on novel namespace/export/helper/keyword names |
+| `prelude_store_churn_soak_test.exs`             | `PreludeStore` retention bounds: ETS + byte-accounting prune in lockstep over write/`set_default` churn; distinct-version pinning fails closed at `max_total_bytes` |
 | `mcp_server/.../session_churn_soak_test.exs`    | `Sessions.Registry` + DynamicSupervisor cleanup over many start/eval/close cycles |
 | `mcp_server/.../many_turns_soak_test.exs`       | Per-turn projection state growth; atom-table growth on user-supplied var names |
 | `mcp_server/.../mcp_stdio_soak_test.exs`        | Built release driven over real stdio with repeated stateless eval calls |
