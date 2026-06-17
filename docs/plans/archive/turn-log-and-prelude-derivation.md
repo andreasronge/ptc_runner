@@ -5,15 +5,15 @@ discussion (2026-06-11) around a real analysis session. Phases P1–P3 are
 implementation-ready in shape; P4 is **gated** behind two measured
 milestones (M1/M2, below) to avoid overfitting automation to one observed
 session; P5's methodology is piloted manually in M2. Companion docs:
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 (the broader exploratory control surface — most of it stays deferred),
 [`capability-prelude-discovery.md`](capability-prelude-discovery.md)
 (authority model),
-[`capability-kernel-runtime.md`](capability-kernel-runtime.md)
+[`capability-kernel-runtime.md`](../capability-kernel-runtime.md)
 (closed-context guard / RunEnv boundary),
 [`live-prelude-evolution.md`](live-prelude-evolution.md)
 (future PreludeStore/session/SubAgent/MCP selection and versioning surface),
-[`future-directions.md`](future-directions.md) (idea backlog).
+[`future-directions.md`](../future-directions.md) (idea backlog).
 
 ## Motivation: evidence from a real session
 
@@ -264,7 +264,7 @@ cannot be declared via `requires` until the grammar grows a second shape.
 Scope it minimally: a `tool:<name>` requirement resolved against the run's
 granted `tools:` map, fail-closed like the upstream shape. A full capability
 grant registry / distinct binding surface is **not** built here — that waits
-for the `RunEnv` work ([`capability-kernel-runtime.md`](capability-kernel-runtime.md))
+for the `RunEnv` work ([`capability-kernel-runtime.md`](../capability-kernel-runtime.md))
 to give it a committed reason to exist.
 
 Two mechanics that must be specified up front, not discovered mid-PR:

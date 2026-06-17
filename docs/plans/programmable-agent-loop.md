@@ -20,7 +20,7 @@ mechanics, and live session control remain host-owned.
 Companion to
 [`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
 (runtime control surface) and
-[`capability-prelude-discovery.md`](capability-prelude-discovery.md)
+[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md)
 (authority model). This doc explores a third axis: making the **SubAgent loop's
 policy layer** programmable from preludes, so humans — and eventually LLMs
 through a gated workflow — can adapt prompt rendering, feedback, compaction,
@@ -191,7 +191,7 @@ Hook contracts the host enforces:
 - **Input:** a bounded, redacted projection of loop state (never raw
   credentials, never unscrubbed upstream payloads). Designing this projection
   is most of the work; it should reuse the descriptor/trace-safety rules from
-  [`capability-prelude-discovery.md`](capability-prelude-discovery.md).
+  [`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md).
 - **Output:** data validated against a per-hook schema (`PtcRunner.Schema`
   exists). Malformed output ⇒ fallback, recorded.
 - **Execution:** one sandboxed eval per hook call, no tools, no discovery,
@@ -302,7 +302,7 @@ forms, and evolvable through the slow loop.
 
 ## Relationship to Other Plan Docs
 
-- [`capability-prelude-discovery.md`](capability-prelude-discovery.md) —
+- [`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md) —
   authority side. Hook installation is profile/host policy; hooks are curated
   exports with metadata (`:visibility :hidden`, future grants). The
   LLM-authored proposal workflow defined there is the slow loop's gate.

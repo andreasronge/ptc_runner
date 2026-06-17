@@ -12,7 +12,7 @@ client transports, `Catalog`, `Credentials`, `RunContext`, `Collector`,
 capability-runtime design surface stays in
 [`docs/plans/capability-kernel-runtime.md`](capability-kernel-runtime.md); the
 broader capability-profile/provider direction stays in
-[`docs/plans/capability-prelude-discovery.md`](capability-prelude-discovery.md).
+[`docs/plans/archive/capability-prelude-discovery.md`](archive/capability-prelude-discovery.md).
 The MCP ledger hardening sequence (§4.2) has shipped and is retained here
 as historical context. The remaining forward-looking work is the Phase 2 facade
 plus optional Phase 3b ledger retirement ([§3](#3-subagent-bridge-future),
@@ -190,7 +190,7 @@ facade must get right:
 Phase 2 may also add a run-scoped `upstreams: config` convenience for selecting or
 owning a runtime for the run's duration. It must not pre-empt the broader
 profile/provider design in
-[`capability-prelude-discovery.md`](capability-prelude-discovery.md), and the
+[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md), and the
 bridge still does **not** need `:runtime` lifecycle ownership inside the loop.
 
 ### 3.2 Section-4 target-boundary principle

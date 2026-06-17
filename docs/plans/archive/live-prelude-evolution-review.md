@@ -1,6 +1,6 @@
 # Review — Prelude Evolution and Versioning Plan
 
-**Reviews:** `docs/plans/live-prelude-evolution.md`
+**Reviews:** `docs/plans/archive/live-prelude-evolution.md`
 **Method:** multi-agent review — 7 track-finders (BEAM/Store-Identity, security/authority,
 compiler integration, API/core-first, phasing/YAGNI, testability, cross-plan consistency),
 adversarial per-finding verification (every finding re-opened against source), lead synthesis.

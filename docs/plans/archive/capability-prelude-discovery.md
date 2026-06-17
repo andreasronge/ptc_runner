@@ -4,7 +4,7 @@
 capability profiles/credentials/providers.
 
 V1 capability preludes have SHIPPED; see the guide
-[`docs/guides/capability-prelude.md`](../guides/capability-prelude.md)
+[`docs/guides/capability-prelude.md`](../../guides/capability-prelude.md)
 (implemented under `lib/ptc_runner/lisp/prelude/*`). This doc covers the next
 design step: how to evolve from "preludes wrap configured upstream tools" toward
 a more general capability model without blurring the security boundary.
@@ -337,7 +337,7 @@ ordinary programs.
 
 ## Relationship to Conversation Control Plane
 
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 explores the runtime UX side: using PTC-Lisp to inspect and operate REPL
 sessions, LLM chats, SubAgent runs, and historical debug artifacts.
 

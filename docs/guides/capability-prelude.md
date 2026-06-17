@@ -15,7 +15,7 @@ the specification; for the discovery forms see
 > **V1 scope.** A prelude is **stateless**: it defines namespaces, constants,
 > functions, docstrings, and metadata, but holds no hidden mutable state. There
 > is no authoring DSL, no LLM-authored preludes, and no generic capability
-> catalog yet — see `docs/plans/capability-prelude-discovery.md` for the
+> catalog yet — see `docs/plans/archive/capability-prelude-discovery.md` for the
 > deferred work.
 
 ---

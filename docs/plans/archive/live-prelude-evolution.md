@@ -1,7 +1,13 @@
 # Prelude Evolution and Versioning — Plan
 
-**Status:** implementation in progress. E1–E5 and in-memory E6a
-default/history controls are implemented; durable persistence remains deferred.
+**Status:** E1–E5 plus in-memory E6 default/history controls are implemented
+and tested (`PreludeCandidate`, handle-backed `PreludeStore`, `Session`/SubAgent
+attach, `visibility: :private` authority kernel, `prelude_store_*` tools, the
+host-shipped `prelude/` prelude, and the MCP `lisp_session_list_preludes` /
+`lisp_session_start(preludes: …)` projection). Two items remain open: durable
+(filesystem/upstream) persistence for the store, and the export-scoped
+`prelude/source-with-deps` helper — the shipped `prelude/` prelude exposes only
+`list`/`source`/`write`.
 This is the implementation-facing plan. Detailed rationale and review history live in
 [`live-prelude-evolution-review.md`](live-prelude-evolution-review.md).
 

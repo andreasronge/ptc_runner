@@ -76,7 +76,7 @@ retaining full values. That core change is now shipped; everything else in this
 plan is pure tool-arg threading plus Prelude V1 library code.
 
 This is the M2 candidate for
-[`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md):
+[`turn-log-and-prelude-derivation.md`](archive/turn-log-and-prelude-derivation.md):
 a human-written prelude should pay for itself before P4 derivation starts.
 
 ## Shipped core change: bound the in-eval tool ledger
@@ -167,7 +167,7 @@ The chosen tool must confine reads to the corpus directory (like
 
 ## Relationship to P3b large-file `log/` backend
 
-[`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md)'s
+[`turn-log-and-prelude-derivation.md`](archive/turn-log-and-prelude-derivation.md)'s
 P3b is the narrow proving lane for this architecture. It keeps the existing
 semantic `log/` API and swaps only the backend: instead of the host-bound
 `TraceLog.Introspection.tools/1` backend, a backend-specific example prelude

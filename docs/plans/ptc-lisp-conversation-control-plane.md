@@ -133,7 +133,7 @@ lifecycle-bearing providers justify it.
 
 ## Relationship to Capability Profiles
 
-[`capability-prelude-discovery.md`](capability-prelude-discovery.md) explores
+[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md) explores
 the authority/model side: capability profiles, providers, runtimes, grants,
 effects, and descriptors.
 
@@ -489,7 +489,7 @@ SubAgent inspect or inherit? A likely answer is explicit projection:
 
 ## Historical Sessions and Debug Artifacts
 
-See [`turn-log-and-prelude-derivation.md`](turn-log-and-prelude-derivation.md)
+See [`turn-log-and-prelude-derivation.md`](archive/turn-log-and-prelude-derivation.md)
 for the committed first slice of this idea: driver-agnostic turn-log events,
 an in-memory sink, and read-only introspection capabilities exported from a
 prelude. The `run/*` and `session/from-run` surfaces below remain deferred.

@@ -2452,7 +2452,7 @@ and single-character delimiters (char-equivalent) continue to work unchanged.
 |-------|-------|
 | **Priority** | P2 |
 | **Status** | **by design (DIV)** |
-| **Source** | Plan `docs/plans/turn-log-and-prelude-derivation.md` (P1) |
+| **Source** | Plan `docs/plans/archive/turn-log-and-prelude-derivation.md` (P1) |
 
 ```clojure
 ;; Clojure (clojure.repl)
