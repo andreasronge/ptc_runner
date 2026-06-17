@@ -369,9 +369,6 @@ defmodule PtcRunner.PreludeStore.Server do
       [{{:current, ^id}, %{version: version, updated_at: updated_at, metadata: metadata}}] ->
         %{version: version, updated_at: updated_at, metadata: metadata}
 
-      [{{:current, ^id}, version}] when is_integer(version) ->
-        %{version: version, updated_at: nil, metadata: %{}}
-
       [] ->
         %{version: 0, updated_at: nil, metadata: %{}}
     end
