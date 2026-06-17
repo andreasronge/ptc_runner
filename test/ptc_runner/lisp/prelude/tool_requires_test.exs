@@ -17,11 +17,9 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
   end
 
   defp ctx(opts), do: AttachContext.new(opts)
-
   # ============================================================
   # Compile-time inference: tool_refs -> tool: requires (union)
   # ============================================================
-
   describe "tool: requires inference" do
     test "a typed tool call promotes to a tool: requirement" do
       [export] =
