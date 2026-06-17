@@ -437,7 +437,7 @@ defmodule PtcRunner.PreludeStoreTest do
     assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged@1")
   end
 
-  test "same-id concurrent writes produce contiguous versions" do
+  test "same-id concurrent writes produce contiguous versions and leave bare reads on latest" do
     {:ok, store} = PreludeStore.new()
 
     versions =
@@ -459,6 +459,45 @@ defmodule PtcRunner.PreludeStoreTest do
       |> Enum.sort()
 
     assert versions == Enum.to_list(1..10)
-    assert [%{latest_version: 10, versions_count: 10}] = PreludeStore.list(store)
+
+    assert [%{current_version: 10, latest_version: 10, versions_count: 10}] =
+             PreludeStore.list(store)
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert current.version == 10
+  end
+
+  test "same-parent concurrent writes allow one append and reject stale contenders" do
+    {:ok, store} = PreludeStore.new()
+    assert {:ok, base} = PreludeStore.write(store, "paged", @paged_v1)
+
+    results =
+      2..8
+      |> Task.async_stream(
+        fn n ->
+          source = """
+          (ns paged)
+          (defn v [] #{n})
+          """
+
+          PreludeStore.write(store, "paged", source, %{"parent_checksum" => base.checksum})
+        end,
+        max_concurrency: 7,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    successes = Enum.filter(results, &match?({:ok, _}, &1))
+    stale_errors = Enum.filter(results, &match?({:error, %{reason: :stale_base}}, &1))
+
+    assert [{:ok, written}] = successes
+    assert length(stale_errors) == 6
+    assert written.version == 2
+
+    assert [%{current_version: 2, latest_version: 2, versions_count: 2}] =
+             PreludeStore.list(store)
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert current.version == 2
   end
 end
