@@ -128,51 +128,43 @@ defmodule PtcRunner.PreludeStore.Server do
     latest_version = latest_version(table, id)
     current_entry = current_entry(table, id)
 
-    %{
-      id: id,
+    current
+    |> candidate_fields()
+    |> Map.merge(%{
       current_version: current_version,
       latest_version: latest_version,
       versions_count: retained_version_count(table, id),
-      checksum: PreludeCandidate.checksum(current),
-      namespaces: current.compiled.namespaces,
-      exports: PreludeCandidate.export_names(current),
       origin: PreludeCandidate.public_origin(current.origin),
-      metadata: PreludeCandidate.public_metadata(current.metadata),
       default_metadata: PreludeCandidate.public_metadata(current_entry.metadata),
       created_at: first_created_at(table, id),
       updated_at: current_entry.updated_at
-    }
+    })
   end
 
   defp history_row(table, id, version) do
     {:ok, candidate} = lookup_version(table, id, version)
     current_version = current_version(table, id)
 
-    %{
-      id: id,
+    candidate
+    |> candidate_fields()
+    |> Map.merge(%{
       version: version,
       current: version == current_version,
       latest: version == latest_version(table, id),
-      checksum: PreludeCandidate.checksum(candidate),
-      namespaces: candidate.compiled.namespaces,
-      exports: PreludeCandidate.export_names(candidate),
       origin: PreludeCandidate.public_origin(candidate.origin),
-      metadata: PreludeCandidate.public_metadata(candidate.metadata),
       created_at: candidate.created_at
-    }
+    })
   end
 
   defp selection_row(table, candidate, selected_at, metadata) do
-    %{
-      id: candidate.id,
+    candidate
+    |> candidate_fields()
+    |> Map.merge(%{
       current_version: candidate.version,
       latest_version: latest_version(table, candidate.id),
-      checksum: PreludeCandidate.checksum(candidate),
-      namespaces: candidate.compiled.namespaces,
-      exports: PreludeCandidate.export_names(candidate),
       metadata: PreludeCandidate.public_metadata(metadata),
       updated_at: selected_at
-    }
+    })
   end
 
   defp resolve_version(table, %{id: id, version: version}) when is_integer(version) do
@@ -290,16 +282,18 @@ defmodule PtcRunner.PreludeStore.Server do
           latest_bytes: Map.put(state.latest_bytes, candidate.id, latest_row_bytes)
       }
 
-      {{:ok,
-        %{
-          id: candidate.id,
-          version: candidate.version,
-          checksum: PreludeCandidate.checksum(candidate),
-          namespaces: candidate.compiled.namespaces,
-          exports: PreludeCandidate.export_names(candidate),
-          metadata: PreludeCandidate.public_metadata(candidate.metadata)
-        }}, state}
+      {{:ok, Map.put(candidate_fields(candidate), :version, candidate.version)}, state}
     end
+  end
+
+  defp candidate_fields(%PreludeCandidate{} = candidate) do
+    %{
+      id: candidate.id,
+      checksum: PreludeCandidate.checksum(candidate),
+      namespaces: candidate.compiled.namespaces,
+      exports: PreludeCandidate.export_names(candidate),
+      metadata: PreludeCandidate.public_metadata(candidate.metadata)
+    }
   end
 
   defp prunable_versions(state, id, new_version) do
