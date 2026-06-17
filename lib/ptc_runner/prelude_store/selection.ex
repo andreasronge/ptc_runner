@@ -30,7 +30,7 @@ defmodule PtcRunner.PreludeStore.Selection do
 
     candidates
     |> Enum.map(&candidate_selection/1)
-    |> Bundle.compile()
+    |> Bundle.compile_precompiled()
     |> case do
       {:ok, prelude} ->
         {prelude, Enum.map(candidates, &candidate_ref/1)}
@@ -63,6 +63,7 @@ defmodule PtcRunner.PreludeStore.Selection do
       version: candidate.version,
       checksum: PreludeCandidate.checksum(candidate),
       source: candidate.source,
+      prelude: candidate.compiled,
       origin: PreludeCandidate.public_origin(candidate.origin)
     }
   end
