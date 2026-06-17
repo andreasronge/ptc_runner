@@ -6,6 +6,13 @@ defmodule PtcRunner.PreludeStore do
   `history/2`, `read/2`, compile-on-write `write/4`, and explicit
   `set_default/4` over a small handle backed by a single owner process and ETS
   rows. Filesystem persistence remains a later plan chunk.
+
+  Bounds are fail-closed. `:max_versions` is the retained version window per
+  id, not a lifetime write count; version numbers remain monotonic while old
+  superseded rows may be pruned. A version selected with `set_default/4` is
+  retained alongside the latest-version window.
+  `:max_ids`, `:max_total_bytes`, and `:max_metadata_bytes` cap node-lifetime
+  store growth.
   """
 
   alias PtcRunner.Lisp.Discovery
@@ -18,6 +25,9 @@ defmodule PtcRunner.PreludeStore do
   alias PtcRunner.Sandbox
 
   @default_max_source_bytes 1_000_000
+  @default_max_metadata_bytes 8 * 1024
+  @default_max_ids 1_000
+  @default_max_total_bytes 10 * 1024 * 1024
   @default_compile_timeout 5_000
   @default_compile_max_heap 1_250_000
 
@@ -42,6 +52,9 @@ defmodule PtcRunner.PreludeStore do
     [
       {:max_source_bytes, @default_max_source_bytes},
       {:max_versions, 1_000},
+      {:max_ids, @default_max_ids},
+      {:max_total_bytes, @default_max_total_bytes},
+      {:max_metadata_bytes, @default_max_metadata_bytes},
       {:compile_timeout, @default_compile_timeout},
       {:compile_max_heap, @default_compile_max_heap}
     ]
@@ -60,7 +73,7 @@ defmodule PtcRunner.PreludeStore do
   @spec list(t()) :: [map()]
   def list(%__MODULE__{} = store), do: Server.list(store)
 
-  @doc "Returns bounded summary rows for all versions of one prelude id."
+  @doc "Returns bounded summary rows for retained versions of one prelude id."
   @spec history(t(), String.t()) :: {:ok, [map()]} | {:error, map()}
   def history(%__MODULE__{} = store, id) do
     with :ok <- validate_id(id) do
@@ -96,6 +109,11 @@ defmodule PtcRunner.PreludeStore do
            check_source_bound(
              source,
              Keyword.get(opts, :max_source_bytes, @default_max_source_bytes)
+           ),
+         :ok <-
+           check_metadata_bound(
+             metadata,
+             Keyword.get(opts, :max_metadata_bytes, @default_max_metadata_bytes)
            ),
          {:ok, parent_checksum} <- parent_checksum(metadata),
          :ok <- check_parent(store, id, parent_checksum),
@@ -137,15 +155,21 @@ defmodule PtcRunner.PreludeStore do
 
   @spec set_default(t(), String.t() | map(), map()) :: {:ok, map()} | {:error, map()}
   def set_default(%__MODULE__{} = store, ref, metadata) when is_map(metadata) do
-    case parse_ref(ref) do
-      {:ok, %{version: version} = parsed} when is_integer(version) ->
-        Server.set_default(store, parsed, metadata)
+    with :ok <-
+           check_metadata_bound(
+             metadata,
+             Keyword.get(store.opts, :max_metadata_bytes, @default_max_metadata_bytes)
+           ) do
+      case parse_ref(ref) do
+        {:ok, %{version: version} = parsed} when is_integer(version) ->
+          Server.set_default(store, parsed, metadata)
 
-      {:ok, %{id: id}} ->
-        {:error, error(:invalid_ref, "set_default requires an explicit version for `#{id}`")}
+        {:ok, %{id: id}} ->
+          {:error, error(:invalid_ref, "set_default requires an explicit version for `#{id}`")}
 
-      {:error, _} = error ->
-        error
+        {:error, _} = error ->
+          error
+      end
     end
   end
 
@@ -156,7 +180,12 @@ defmodule PtcRunner.PreludeStore do
   @spec set_default(t(), String.t(), pos_integer(), map()) :: {:ok, map()} | {:error, map()}
   def set_default(%__MODULE__{} = store, id, version, metadata)
       when is_binary(id) and is_integer(version) and version > 0 and is_map(metadata) do
-    with :ok <- validate_id(id) do
+    with :ok <- validate_id(id),
+         :ok <-
+           check_metadata_bound(
+             metadata,
+             Keyword.get(store.opts, :max_metadata_bytes, @default_max_metadata_bytes)
+           ) do
       Server.set_default(store, %{id: id, version: version}, metadata)
     end
   end
@@ -217,6 +246,21 @@ defmodule PtcRunner.PreludeStore do
        message: "prelude source is #{byte_size(source)} bytes; limit is #{max_bytes}",
        limit_bytes: max_bytes
      }}
+  end
+
+  defp check_metadata_bound(metadata, max_bytes) do
+    bytes = :erlang.external_size(metadata)
+
+    if bytes <= max_bytes do
+      :ok
+    else
+      {:error,
+       %{
+         reason: :metadata_too_large,
+         message: "prelude metadata is #{bytes} bytes; limit is #{max_bytes}",
+         limit_bytes: max_bytes
+       }}
+    end
   end
 
   defp parent_checksum(metadata) do

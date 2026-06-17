@@ -92,7 +92,7 @@ defmodule PtcRunner.PreludeStoreTest do
              PreludeStore.read(store, %{id: "paged", version: 1, checksum: second.checksum})
   end
 
-  test "set_default pins bare reads while history remains append-only" do
+  test "set_default pins bare reads while latest tracking remains monotonic" do
     {:ok, store} = PreludeStore.new()
 
     assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
@@ -234,13 +234,79 @@ defmodule PtcRunner.PreludeStoreTest do
              PreludeStore.write(store, "paged", "(ns paged")
   end
 
-  test "version limits and public view source bounds are enforced" do
+  test "version retention prunes superseded rows instead of blocking writes" do
+    {:ok, store} = PreludeStore.new(max_versions: 2)
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    v3 = """
+    (ns paged "Paged helpers.")
+
+    (defn inspect [] {:version 3})
+    """
+
+    assert {:ok, third} = PreludeStore.write(store, "paged", v3)
+
+    assert first.version == 1
+    assert second.version == 2
+    assert third.version == 3
+
+    assert [%{latest_version: 3, versions_count: 2}] = PreludeStore.list(store)
+    assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged@1")
+
+    assert {:ok, [%{version: 2}, %{version: 3, latest: true}]} =
+             PreludeStore.history(store, "paged")
+
+    assert {:ok, candidate} = PreludeStore.read(store, "paged")
+    assert candidate.version == 3
+
     {:ok, store} = PreludeStore.new(max_versions: 1)
 
     assert {:ok, _first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, second} = PreludeStore.write(store, "paged", @paged_v2)
 
-    assert {:error, %{reason: :version_limit_exceeded, limit: 1}} =
-             PreludeStore.write(store, "paged", @paged_v2)
+    assert [%{latest_version: 2, versions_count: 1}] = PreludeStore.list(store)
+    assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged@1")
+    assert {:ok, [%{version: 2}]} = PreludeStore.history(store, "paged")
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert PreludeCandidate.checksum(current) == second.checksum
+  end
+
+  test "version retention preserves an explicitly pinned older default" do
+    {:ok, store} = PreludeStore.new(max_versions: 1)
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, _selected} = PreludeStore.set_default(store, "paged", 1)
+    assert {:ok, _second} = PreludeStore.write(store, "paged", @paged_v2)
+
+    v3 = """
+    (ns paged "Paged helpers.")
+
+    (defn inspect [] {:version 3})
+    """
+
+    assert {:ok, third} = PreludeStore.write(store, "paged", v3)
+
+    assert [%{current_version: 3, latest_version: 3, versions_count: 2}] =
+             PreludeStore.list(store)
+
+    assert {:ok, current} = PreludeStore.read(store, "paged")
+    assert PreludeCandidate.checksum(current) == third.checksum
+
+    assert {:ok, pinned} = PreludeStore.read(store, "paged@1")
+    assert PreludeCandidate.checksum(pinned) == first.checksum
+
+    assert {:error, %{reason: :not_found}} = PreludeStore.read(store, "paged@2")
+
+    assert {:ok, [%{version: 1, current: false}, %{version: 3, current: true, latest: true}]} =
+             PreludeStore.history(store, "paged")
+  end
+
+  test "public view source bounds are enforced" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:ok, _first} = PreludeStore.write(store, "paged", @paged_v1)
 
     assert {:ok, candidate} = PreludeStore.read(store, "paged")
     view = PreludeCandidate.public_view(candidate, max_source_bytes: 8)
@@ -255,11 +321,46 @@ defmodule PtcRunner.PreludeStoreTest do
     for opts <- [
           [max_source_bytes: "10"],
           [max_versions: nil],
+          [max_ids: 0],
+          [max_total_bytes: :infinity],
+          [max_metadata_bytes: -1],
           [compile_timeout: 0],
           [compile_max_heap: -1]
         ] do
       assert {:error, %{reason: :invalid_config}} = PreludeStore.new(opts)
     end
+  end
+
+  test "store id, total byte, and metadata bounds fail closed" do
+    {:ok, store} = PreludeStore.new(max_ids: 1)
+
+    assert {:ok, _} = PreludeStore.write(store, "paged", @paged_v1)
+
+    other = """
+    (ns other)
+    (defn inspect [] {:version 1})
+    """
+
+    assert {:error, %{reason: :id_limit_exceeded, limit: 1}} =
+             PreludeStore.write(store, "other", other)
+
+    assert [%{id: "paged"}] = PreludeStore.list(store)
+
+    {:ok, store} = PreludeStore.new(max_total_bytes: 1)
+
+    assert {:error, %{reason: :store_bytes_exceeded, limit_bytes: 1}} =
+             PreludeStore.write(store, "paged", @paged_v1)
+
+    assert PreludeStore.list(store) == []
+
+    {:ok, store} = PreludeStore.new(max_metadata_bytes: 8)
+
+    assert {:error, %{reason: :metadata_too_large, limit_bytes: 8}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{
+               "reason" => String.duplicate("x", 100)
+             })
+
+    assert PreludeStore.list(store) == []
   end
 
   test "public origin projection is bounded and serializable" do

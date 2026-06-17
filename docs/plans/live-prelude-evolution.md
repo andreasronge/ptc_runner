@@ -47,11 +47,13 @@ capability prelude.
 - **Store id is one namespace.** Store-managed entries are keyed by one
   namespace id such as `"log"`, `"paged"`, or `"prelude"`. A store write is
   accepted only if compiled namespaces are exactly `[id]`.
-- **Every successful write is a version.** Versions are append-only.
+- **Every successful write is a version.** Version numbers are monotonic;
+  retained rows are bounded to the latest-version window plus explicitly
+  selected versions, and may be pruned.
 - **Candidates and bundles are values.** Individual `%PreludeCandidate{}` values
   and frozen attach bundles are copied by value.
-- **The live store is handle-backed.** The growing collection of all versions is
-  not captured into tool closures. Store tools capture a small handle.
+- **The live store is handle-backed.** Retained version rows are not captured
+  into tool closures. Store tools capture a small handle.
 - **Composition is concatenate-then-compile.** Selected candidate sources are
   concatenated and compiled once into the single `%PtcRunner.Lisp.Prelude{}`
   artifact accepted by `Lisp.run/2`.
@@ -148,10 +150,12 @@ data for a caller or Lisp prelude to decide whether to read next:
 ```
 
 `current_version` is what bare-name selection resolves to. `latest_version` is
-the newest successful write. They are usually equal in a scratch memory store,
-but may differ later when persistent/shared stores add review policy. Full
-history listing is deferred to E6 or to an evolved `prelude/` helper built on
-explicit version reads.
+the newest successful write. `versions_count` is the number of retained version
+rows, not necessarily the latest version number. They are usually equal in a
+scratch memory store, but may differ when explicit defaults or retention
+pruning are in play. Full durable history is deferred to E6 or to an evolved
+backend; the volatile in-memory store prunes superseded rows outside its
+latest-version retention window unless they were explicitly selected.
 
 Elixir `read/2` returns `{:ok, candidate}` / `{:error, map}`. The candidate
 contains the compiled artifact and is Elixir-only. Lisp-facing tools must return
@@ -177,20 +181,22 @@ Error taxonomy:
 - `:prelude_namespace_violation` — wrong namespace id, invalid id syntax, or
   protected/built-in/curated namespace collision.
 - `:stale_base` — supplied `parent_checksum` does not match the stored parent.
-- bounds errors — source bytes, compile timeout, heap cap, version count, TTL.
+- bounds errors — source bytes, metadata bytes, id count, retained store bytes,
+  compile timeout, heap cap.
 
 Writes must wrap the whole compile in store-side bounds. `Compiler.compile/1`
 runs parse/spec/source-index/hash work in the caller process; only prelude
 constant evaluation is sandbox-bounded.
 
-Stored source and metadata are untrusted prompt surfaces. Public views must
-bound source bytes, bound metadata bytes, allow only documented metadata keys,
-and preserve provenance tags. Generated comments/docstrings are not authority.
+Stored source and metadata are untrusted prompt surfaces. Writes must reject
+oversized metadata before storing it. Public views must bound source bytes,
+bound metadata bytes, allow only documented metadata keys, and preserve
+provenance tags. Generated comments/docstrings are not authority.
 
 ### Store Backing
 
 Use a supervised single-owner `PreludeStore.Server` with an ETS table of
-append-only version rows.
+bounded retained version rows.
 
 - The store server/table is owned by the derivation harness, embedding app, or
   MCP server and outlives any one session.

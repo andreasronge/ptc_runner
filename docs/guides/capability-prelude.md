@@ -384,10 +384,14 @@ For in-process prelude iteration, hosts can use the volatile core store:
 candidate.compiled
 ```
 
-`PreludeStore` is append-only and compile-on-write. Every successful
-`write/4` creates a new version and makes it the current/default version for
-that id. A bare id reads the current/default version, `"paged@7"` pins an
-explicit version, and `%{id:, version:, checksum:}` adds a checksum assertion.
+`PreludeStore` is compile-on-write with bounded in-memory retention. Every
+successful `write/4` creates a new monotonic version and makes it the
+current/default version for that id. A bare id reads the current/default
+version, `"paged@7"` reads an explicit retained version, and
+`%{id:, version:, checksum:}` adds a checksum assertion. Older superseded
+versions may be pruned once the per-id retention window is full. An explicit
+version selected with `set_default/4` is retained alongside that latest-version
+window, even if later writes move the default back to the newest version.
 
 The store keeps explicit default selection separate from newest-version
 tracking:
@@ -406,9 +410,11 @@ current.version
 {:ok, history} = PtcRunner.PreludeStore.history(store, "paged")
 ```
 
-Use `history/2` to audit all versions for one id. Use `set_default/4` only for
-an explicit host-owned promotion or rollback after verification; it does not
-delete later versions.
+Use `history/2` to inspect retained versions for one id. Use `set_default/4`
+only for an explicit host-owned promotion or rollback after verification; it
+does not delete later versions, but normal retention pruning may still remove
+superseded rows that are neither explicitly selected nor inside the retained
+latest-version window.
 
 Stored source and metadata are untrusted prompt surfaces. Use
 `PtcRunner.PreludeCandidate.public_view/1` for model-facing projections.

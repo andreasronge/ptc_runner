@@ -251,7 +251,7 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp public_error(error) when is_map(error) do
     error
-    |> Map.take([:reason, :message, :compile_reason, :namespace, :ref, :limit_bytes])
+    |> Map.take([:reason, :message, :compile_reason, :namespace, :ref, :limit, :limit_bytes])
     |> Map.put(:status, :error)
     |> public_map()
   end
