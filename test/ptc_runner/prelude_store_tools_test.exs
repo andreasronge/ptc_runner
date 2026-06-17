@@ -176,6 +176,26 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert details["message"] =~ "missing"
   end
 
+  test "public wrapper error messages are bounded" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+    huge_id = "bad@" <> String.duplicate("x", 200_000)
+
+    assert {:ok, %Step{return: result}} =
+             Lisp.run(
+               ~S|(prelude/read data/id)|,
+               context: %{id: huge_id},
+               prelude: prelude,
+               tools: Tools.tools(store)
+             )
+
+    assert result["status"] == "error"
+    assert result["reason"] == "invalid_ref"
+    assert byte_size(result["message"]) <= 1_024
+    assert result["message"] =~ "truncated"
+    refute result["message"] =~ String.duplicate("x", 2_048)
+  end
+
   test "source wrapper fails closed instead of returning truncated source text" do
     {:ok, store} = PreludeStore.new()
     {:ok, prelude} = Tools.prelude()

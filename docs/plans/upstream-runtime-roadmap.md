@@ -10,7 +10,7 @@ and lives in `lib/ptc_runner/upstream/` (`Runtime`, `Eval`, `OpenApi`, the MCP
 client transports, `Catalog`, `Credentials`, `RunContext`, `Collector`,
 `CallTool`, `Discovery`, `Effect`, `SideEffectGuard`). The kernel-level RunEnv /
 capability-runtime design surface stays in
-[`docs/plans/capability-kernel-runtime.md`](capability-kernel-runtime.md); the
+[`docs/plans/future/capability-kernel-runtime.md`](future/capability-kernel-runtime.md); the
 broader capability-profile/provider direction stays in
 [`docs/plans/archive/capability-prelude-discovery.md`](archive/capability-prelude-discovery.md).
 The MCP ledger hardening sequence (§4.2) has shipped and is retained here
@@ -82,7 +82,7 @@ Standing non-goals for the host/core split:
 
 These are the open core-runtime design items that remain after the upstream
 subsystem extraction. The RunEnv struct/contract *design surface itself* lives in
-[`capability-kernel-runtime.md`](capability-kernel-runtime.md) — link there as
+[`capability-kernel-runtime.md`](future/capability-kernel-runtime.md) — link there as
 the kernel-mechanics source rather than duplicating it here.
 
 ### 2.1 RunEnv typed projection

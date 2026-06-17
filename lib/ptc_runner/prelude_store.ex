@@ -30,6 +30,7 @@ defmodule PtcRunner.PreludeStore do
   @default_max_total_bytes 10 * 1024 * 1024
   @default_compile_timeout 5_000
   @default_compile_max_heap 1_250_000
+  @reserved_store_ids ~w(prelude)
 
   @type t :: %__MODULE__{
           pid: GenServer.server(),
@@ -348,7 +349,8 @@ defmodule PtcRunner.PreludeStore do
   end
 
   defp protected_or_curated?(id) do
-    ProtectedNamespaces.reserved?(id) or id in Discovery.reserved_namespace_names()
+    id in @reserved_store_ids or ProtectedNamespaces.reserved?(id) or
+      id in Discovery.reserved_namespace_names()
   end
 
   defp parse_ref(id) when is_binary(id) do

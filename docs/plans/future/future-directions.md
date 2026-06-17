@@ -5,9 +5,9 @@ material: a problem worth solving, a mechanism sketch grounded in what already
 exists in the source, and open questions. None of this is committed work.
 Companion docs:
 [`programmable-agent-loop.md`](programmable-agent-loop.md) (loop policy hooks),
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 (control surface),
-[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md)
+[`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md)
 (authority model),
 [`function-passing-between-subagents.md`](function-passing-between-subagents.md)
 (closure passing).
@@ -40,7 +40,7 @@ race: "in `pmap`, two parallel branches may both miss the cache and execute"
 per-mission **call ledger** in a separate process — the same durability move
 the upstream subsystem already made with its separate-process `Collector`,
 and the same design as the deferred Phase 3b attempt-records in
-[`upstream-runtime-roadmap.md` §4.1](upstream-runtime-roadmap.md#41-phase-3b--core-attempt-record-ledger--mcp-ledger-retirement-defer)
+[`upstream-runtime-roadmap.md` §4.1](../upstream-runtime-roadmap.md#41-phase-3b--core-attempt-record-ledger--mcp-ledger-retirement-defer)
 (a loop-level consumer of such records is literally that section's trigger
 no. 1). Sketch:
 
@@ -161,7 +161,7 @@ captures most of this). Two replay tiers:
    tooling rather than single-run claims.
 
 This composes with the historical-artifact design in
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 — the same durable artifact serves debugging (fork-before-failed-turn) and
 regression (replay corpus). Define the artifact once for both consumers.
 
@@ -186,7 +186,7 @@ missions), rendered for review via `CoreToSource` → benchmarked against the
 incumbent prelude → human approves → the helper lands in a versioned prelude
 with provenance metadata. This is the LLM-authored-prelude proposal workflow
 already on the deferred list in
-[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md), pointed
+[`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md), pointed
 at function accumulation, and it is the "slow loop" of
 [`programmable-agent-loop.md`](programmable-agent-loop.md) applied to domain
 helpers instead of loop policy.
@@ -255,7 +255,7 @@ pure defn ⊂ prelude export ⊂ tool ⊂ llm-query ⊂ single-shot agent ⊂ mu
 in → validated value out), one descriptor shape (name, params, returns,
 docstring, effects/`requires`), one discovery surface (`doc` / `meta` /
 `apropos` over all of them — the descriptor registry direction in
-[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md)).
+[`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md)).
 
 `SubAgent`'s option list sorts into three buckets, mirroring the eval-input vs
 sibling-policy discipline of
@@ -286,7 +286,7 @@ refs:
 Because the value references granted capabilities by name, it cannot
 escalate: a child can only name tools and model aliases the enclosing profile
 grants. That dissolves the "`agent/run` as escape hatch" concern in
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 — authority is answered by profiles, not by the agent API.
 
 Two further unifications fall out:

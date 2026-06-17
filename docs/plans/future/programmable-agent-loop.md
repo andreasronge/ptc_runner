@@ -18,9 +18,9 @@ artifacts. Compaction floors, budgets, capability boundaries, exactly-once
 mechanics, and live session control remain host-owned.
 
 Companion to
-[`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+[`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
 (runtime control surface) and
-[`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md)
+[`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md)
 (authority model). This doc explores a third axis: making the **SubAgent loop's
 policy layer** programmable from preludes, so humans — and eventually LLMs
 through a gated workflow — can adapt prompt rendering, feedback, compaction,
@@ -134,7 +134,7 @@ worst moment to depend on model- or prelude-authored scaffolding. So:
   boundary and grants, effect classification, side-effect/continuation guards,
   the compaction *trigger and floor* (it WILL fire at the threshold; the
   result WILL fit), exactly-once mechanics (see
-  [`upstream-runtime-roadmap.md` §4](upstream-runtime-roadmap.md#4-mcp-ledger-boundary)
+  [`upstream-runtime-roadmap.md` §4](../upstream-runtime-roadmap.md#4-mcp-ledger-boundary)
   — a core pre-dispatch attempt ledger is *mechanism*, and a loop-policy
   consumer of records would be a Phase 3b trigger).
 - **Prelude-ownable policy:** prompt section rendering, feedback phrasing and
@@ -191,7 +191,7 @@ Hook contracts the host enforces:
 - **Input:** a bounded, redacted projection of loop state (never raw
   credentials, never unscrubbed upstream payloads). Designing this projection
   is most of the work; it should reuse the descriptor/trace-safety rules from
-  [`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md).
+  [`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md).
 - **Output:** data validated against a per-hook schema (`PtcRunner.Schema`
   exists). Malformed output ⇒ fallback, recorded.
 - **Execution:** one sandboxed eval per hook call, no tools, no discovery,
@@ -302,18 +302,18 @@ forms, and evolvable through the slow loop.
 
 ## Relationship to Other Plan Docs
 
-- [`capability-prelude-discovery.md`](archive/capability-prelude-discovery.md) —
+- [`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md) —
   authority side. Hook installation is profile/host policy; hooks are curated
   exports with metadata (`:visibility :hidden`, future grants). The
   LLM-authored proposal workflow defined there is the slow loop's gate.
 - [`capability-kernel-runtime.md`](capability-kernel-runtime.md) — a future
   `RunEnv` gains a second committed consumer here (hook invocation wants a
   typed, minimal eval-input surface).
-- [`ptc-lisp-conversation-control-plane.md`](ptc-lisp-conversation-control-plane.md)
+- [`ptc-lisp-conversation-control-plane.md`](../ptc-lisp-conversation-control-plane.md)
   — introspection: hooks should be discoverable (`doc`, `meta`, source
   inspection) like any export; historical traces are the slow loop's raw
   material.
-- [`upstream-runtime-roadmap.md`](upstream-runtime-roadmap.md) §4 — the
+- [`upstream-runtime-roadmap.md`](../upstream-runtime-roadmap.md) §4 — the
   mechanism counterpart: exactly-once / attempt recording is host mechanism
   (a pre-dispatch ledger), never hook policy. A loop-policy consumer of
   bridge records would constitute a Phase 3b trigger.

@@ -208,6 +208,16 @@ defmodule PtcRunner.PreludeStoreTest do
              PreludeStore.write(store, "Math", java)
 
     assert java_message =~ "reserved or curated"
+
+    prelude_wrapper = """
+    (ns prelude)
+    (defn list2 [] [])
+    """
+
+    assert {:error, %{reason: :prelude_namespace_violation, message: prelude_message}} =
+             PreludeStore.write(store, "prelude", prelude_wrapper)
+
+    assert prelude_message =~ "reserved or curated"
   end
 
   test "stale parent checksum fails without storing a new version" do

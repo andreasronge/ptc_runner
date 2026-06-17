@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   summarizing oversized records and evicting oldest records under byte pressure.
 - Bounded `TraceLog.Collector` enqueue pressure with a pre-cast event byte cap
   and mailbox-length shedding for overloaded file collectors.
+- Bounded PreludeStore public error strings and MCP session prelude discovery
+  docstrings so model-authored ids and docs cannot be reflected unbounded.
+- Rejected `prelude` as an editable PreludeStore id so stored candidates cannot
+  collide with the host-owned `prelude/` wrapper namespace.
 
 ## [0.12.0] - 2026-06-03
 

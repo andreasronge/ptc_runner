@@ -18,6 +18,7 @@ defmodule PtcRunner.PreludeStore.Tools do
   @write_tool "prelude_store_write"
   @set_default_tool "prelude_store_set_default"
   @reserved_names [@list_tool, @history_tool, @read_tool, @write_tool, @set_default_tool]
+  @max_public_error_string_bytes 1_024
 
   @prelude_source """
   (ns prelude
@@ -252,8 +253,39 @@ defmodule PtcRunner.PreludeStore.Tools do
   defp public_error(error) when is_map(error) do
     error
     |> Map.take([:reason, :message, :compile_reason, :namespace, :ref, :limit, :limit_bytes])
+    |> bound_public_error_strings()
     |> Map.put(:status, :error)
     |> public_map()
+  end
+
+  defp bound_public_error_strings(error) do
+    Map.new(error, fn
+      {key, value} when is_binary(value) ->
+        {key, bound_public_string(value, @max_public_error_string_bytes)}
+
+      entry ->
+        entry
+    end)
+  end
+
+  defp bound_public_string(value, max_bytes) when byte_size(value) <= max_bytes, do: value
+
+  defp bound_public_string(value, max_bytes) do
+    suffix = "... [truncated; #{byte_size(value)} bytes total]"
+    prefix_bytes = max(max_bytes - byte_size(suffix), 0)
+    truncate_utf8(value, prefix_bytes) <> suffix
+  end
+
+  defp truncate_utf8(_value, max_bytes) when max_bytes <= 0, do: ""
+
+  defp truncate_utf8(value, max_bytes) do
+    chunk = binary_part(value, 0, min(byte_size(value), max_bytes))
+
+    if String.valid?(chunk) do
+      chunk
+    else
+      truncate_utf8(value, max_bytes - 1)
+    end
   end
 
   defp store_error(error) do

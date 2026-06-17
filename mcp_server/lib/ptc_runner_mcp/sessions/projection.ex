@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   @session_feedback_max_chars 2048
   @collection_hint_min_items 20
+  @max_prelude_doc_bytes 1_024
 
   @doc "Render a session-start response."
   @spec start(map()) :: map()
@@ -158,6 +159,27 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     doc
     |> String.split()
     |> Enum.join(" ")
+    |> bound_doc(@max_prelude_doc_bytes)
+  end
+
+  defp bound_doc(doc, max_bytes) when byte_size(doc) <= max_bytes, do: doc
+
+  defp bound_doc(doc, max_bytes) do
+    suffix = "... [truncated; #{byte_size(doc)} bytes total]"
+    prefix_bytes = max(max_bytes - byte_size(suffix), 0)
+    truncate_utf8(doc, prefix_bytes) <> suffix
+  end
+
+  defp truncate_utf8(_value, max_bytes) when max_bytes <= 0, do: ""
+
+  defp truncate_utf8(value, max_bytes) do
+    chunk = binary_part(value, 0, min(byte_size(value), max_bytes))
+
+    if String.valid?(chunk) do
+      chunk
+    else
+      truncate_utf8(value, max_bytes - 1)
+    end
   end
 
   defp maybe_put(map, _key, nil), do: map

@@ -90,7 +90,7 @@ provider policy, model registries, MCP ownership, or persistence rules.
 ## Capability Boundary
 
 See also
-[`capability-kernel-runtime.md`](capability-kernel-runtime.md), which now
+[`capability-kernel-runtime.md`](future/capability-kernel-runtime.md), which now
 separates the immediate borrowed-closure lifetime guard from the deferred
 `RunEnv` typed-projection refactor. This control-plane document is downstream of
 both pieces: do not implement these Lisp-facing APIs until the closed-context
@@ -434,7 +434,7 @@ also be able to inspect it in a bounded, structured way.
 SubAgent should probably become invokable from PTC-Lisp as a core capability,
 not only as Elixir structs or JSON/MCP configuration.
 
-See [`future-directions.md`](future-directions.md) §7 for the consolidated
+See [`future-directions.md`](future/future-directions.md) §7 for the consolidated
 direction: agents as typed functions (`params -> returns` is already the
 signature grammar), agent definitions as pure data over granted capability
 refs, and the contract / capability-refs / policy bucket split for
