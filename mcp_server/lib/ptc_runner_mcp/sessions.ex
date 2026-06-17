@@ -762,7 +762,7 @@ defmodule PtcRunnerMcp.Sessions do
             {:ok, start_opts}
 
           {:error, error} ->
-            {:error, "failed to compile prelude write capability: #{inspect(error)}"}
+            {:error, "failed to compile prelude write capability: #{Kernel.inspect(error)}"}
         end
     end
   end
@@ -774,7 +774,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp validate_mode(:write_capable), do: {:ok, :write_capable}
 
   defp validate_mode(other),
-    do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{inspect(other)}"}
+    do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{Kernel.inspect(other)}"}
 
   defp resolve_start_preludes(refs, opts) do
     case Selection.resolve!(Config.prelude_store(), refs, configured_prelude_opts(opts)) do
