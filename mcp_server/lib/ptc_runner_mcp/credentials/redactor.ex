@@ -26,7 +26,7 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
   ## Plaintext, not hashes
 
   The redaction-set holds **plaintext bytes** keyed by themselves
-  (`{plaintext :: binary, true}`). A SHA-256 of the secret would not
+  (`{plaintext :: binary, metadata}`). A SHA-256 of the secret would not
   let us substring-match a log line containing the secret — we'd have
   to hash every candidate substring of every line, which is
   quadratic and absurd. See §7.5 of the spec.
@@ -132,8 +132,15 @@ defmodule PtcRunnerMcp.Credentials.Redactor do
           table
           |> :ets.tab2list()
           |> Enum.flat_map(fn
-            {plaintext, true} when is_binary(plaintext) and plaintext != "" -> [plaintext]
-            _ -> []
+            {plaintext, true} when is_binary(plaintext) and plaintext != "" ->
+              [plaintext]
+
+            {plaintext, %{bytes: bytes}}
+            when is_binary(plaintext) and plaintext != "" and is_integer(bytes) and bytes > 0 ->
+              [plaintext]
+
+            _ ->
+              []
           end)
           |> Enum.sort_by(&byte_size/1, :desc)
         rescue

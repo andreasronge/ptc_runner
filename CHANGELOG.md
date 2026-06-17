@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Bounded the MCP credential redaction ETS table by per-secret size, total
+  plaintext bytes, and per-binding rotation retention so rotated credentials no
+  longer accumulate for the lifetime of the node.
+- Bounded the `lisp_debug` in-memory ring by per-record and total stored bytes,
+  summarizing oversized records and evicting oldest records under byte pressure.
+
 ## [0.12.0] - 2026-06-03
 
 ### Breaking Changes

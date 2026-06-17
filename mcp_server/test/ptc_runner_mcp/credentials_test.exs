@@ -71,6 +71,13 @@ defmodule PtcRunnerMcp.CredentialsTest do
     :sys.get_state(server).table
   end
 
+  defp redaction_secrets(table) do
+    table
+    |> :ets.tab2list()
+    |> Enum.map(fn {secret, _meta} -> secret end)
+    |> Enum.sort()
+  end
+
   # ---- exposed module-level helpers -----------------------------------------
 
   describe "table_name/0" do
@@ -264,7 +271,11 @@ defmodule PtcRunnerMcp.CredentialsTest do
       # materialize/2 returns. If the GenServer didn't insert before
       # replying, this would be flaky. The point of the test is that
       # there's no flake — the contract guarantees the insert is done.
-      assert :ets.lookup(table, raw) == [{raw, true}]
+      assert [{^raw, %{scopes: scopes, bytes: bytes}}] =
+               :ets.lookup(table, raw)
+
+      assert bytes == byte_size(raw)
+      assert get_in(scopes, [{:binding, "b"}, :source]) == :literal
     end
 
     test "table is :protected — readable by other processes, not writable" do
@@ -275,8 +286,11 @@ defmodule PtcRunnerMcp.CredentialsTest do
       assert {:ok, %{raw: raw}} = Credentials.materialize(name, "b")
 
       # Another process can read.
-      assert Task.async(fn -> :ets.lookup(table, raw) end)
-             |> Task.await() == [{raw, true}]
+      assert [{^raw, %{scopes: scopes}}] =
+               Task.async(fn -> :ets.lookup(table, raw) end)
+               |> Task.await()
+
+      assert Map.has_key?(scopes, {:binding, "b"})
 
       # Another process cannot write — :ets.insert raises ArgumentError
       # under :protected access mode.
@@ -302,11 +316,39 @@ defmodule PtcRunnerMcp.CredentialsTest do
       assert {:ok, %{raw: r1}} = Credentials.materialize(name, "b")
       assert {:ok, %{raw: r2}} = Credentials.materialize(name, "b")
       assert r1 == r2
-      assert :ets.lookup(table, r1) == [{r1, true}]
+      assert [{^r1, %{scopes: scopes}}] = :ets.lookup(table, r1)
+      assert Map.has_key?(scopes, {:binding, "b"})
       assert :ets.tab2list(table) |> Enum.count(fn {k, _} -> k == r1 end) == 1
     end
 
-    test "rotated values both remain in the set (§7.5 'old rotated secrets remain redacted')" do
+    test "pruning one binding does not remove a shared secret still used by another binding" do
+      var = "PTC_TEST_CREDS_SHARED_#{:erlang.unique_integer([:positive])}"
+      System.put_env(var, "shared-secret-aaaaaa")
+      on_exit(fn -> System.delete_env(var) end)
+
+      %{name: name, pid: pid} =
+        start_creds(%{
+          "a" => literal_binding("a", "shared-secret-aaaaaa"),
+          "b" => env_binding("b", var)
+        })
+
+      table = redaction_table(pid)
+
+      assert {:ok, %{raw: shared}} = Credentials.materialize(name, "a")
+      assert {:ok, %{raw: ^shared}} = Credentials.materialize(name, "b")
+
+      System.put_env(var, "b-rotation-one-bbbbb")
+      assert {:ok, %{raw: _}} = Credentials.materialize(name, "b")
+
+      System.put_env(var, "b-rotation-two-ccccc")
+      assert {:ok, %{raw: _}} = Credentials.materialize(name, "b")
+
+      assert [{^shared, %{scopes: scopes}}] = :ets.lookup(table, shared)
+      assert Map.has_key?(scopes, {:binding, "a"})
+      refute Map.has_key?(scopes, {:binding, "b"})
+    end
+
+    test "rotated values keep only the current value plus one prior rotation" do
       var = "PTC_TEST_CREDS_ROT2_#{:erlang.unique_integer([:positive])}"
       System.put_env(var, "old-rotated-aaaaaaa")
       on_exit(fn -> System.delete_env(var) end)
@@ -318,8 +360,169 @@ defmodule PtcRunnerMcp.CredentialsTest do
       System.put_env(var, "new-rotated-bbbbbbb")
       assert {:ok, %{raw: new}} = Credentials.materialize(name, "b")
 
-      assert :ets.lookup(table, old) == [{old, true}]
-      assert :ets.lookup(table, new) == [{new, true}]
+      assert [_] = :ets.lookup(table, old)
+      assert [_] = :ets.lookup(table, new)
+
+      System.put_env(var, "third-rotated-cccccc")
+      assert {:ok, %{raw: third}} = Credentials.materialize(name, "b")
+
+      assert :ets.lookup(table, old) == []
+      assert redaction_secrets(table) == Enum.sort([new, third])
+    end
+
+    test "oversized resolved credentials fail before insertion" do
+      max = Credentials.max_redaction_secret_bytes()
+      value = String.duplicate("x", max + 1)
+      %{name: name, pid: pid} = start_creds(%{"b" => literal_binding("b", value)})
+      table = redaction_table(pid)
+
+      assert {:error, :resolution_failed, detail} = Credentials.materialize(name, "b")
+      assert detail =~ "exceeds #{max} bytes"
+      assert :ets.info(table, :size) == 0
+    end
+
+    test "manually registered redaction secrets are bounded by total secret bytes" do
+      %{name: name, pid: pid} = start_creds(%{})
+      table = redaction_table(pid)
+      max = Credentials.max_redaction_total_bytes()
+      chunk_size = div(Credentials.max_redaction_secret_bytes(), 2)
+      count = div(max, chunk_size) + 4
+
+      secrets =
+        for n <- 1..count do
+          Integer.to_string(n) <> ":" <> String.duplicate("x", chunk_size - 3)
+        end
+
+      :ok = Credentials.register_redaction_secrets(name, secrets)
+
+      total_bytes =
+        table
+        |> :ets.tab2list()
+        |> Enum.reduce(0, fn {secret, _meta}, acc -> acc + byte_size(secret) end)
+
+      assert total_bytes <= max
+      assert :ets.info(table, :size) < count
+    end
+
+    test "manual redaction pressure does not evict current binding values" do
+      %{name: name, pid: pid} =
+        start_creds(%{"b" => literal_binding("b", "active-binding-secret-aaaa")})
+
+      table = redaction_table(pid)
+      assert {:ok, %{raw: active}} = Credentials.materialize(name, "b")
+
+      max = Credentials.max_redaction_total_bytes()
+      chunk_size = div(Credentials.max_redaction_secret_bytes(), 2)
+      count = div(max, chunk_size) + 4
+
+      manual_secrets =
+        for n <- 1..count do
+          "manual-#{n}-" <> String.duplicate("x", chunk_size - byte_size("manual-#{n}-"))
+        end
+
+      :ok = Credentials.register_redaction_secrets(name, manual_secrets)
+
+      assert [{^active, %{scopes: scopes}}] = :ets.lookup(table, active)
+      assert Map.has_key?(scopes, {:binding, "b"})
+
+      total_bytes =
+        table
+        |> :ets.tab2list()
+        |> Enum.reduce(0, fn {secret, _meta}, acc -> acc + byte_size(secret) end)
+
+      assert total_bytes <= max
+    end
+
+    test "materialization fails instead of evicting an active binding when current values exceed total cap" do
+      max_secret = Credentials.max_redaction_secret_bytes()
+      max_total = Credentials.max_redaction_total_bytes()
+      successful_count = div(max_total, max_secret)
+      overflowing_name = "b#{successful_count + 1}"
+
+      bindings =
+        for n <- 1..(successful_count + 1), into: %{} do
+          name = "b#{n}"
+          value = name <> ":" <> String.duplicate("x", max_secret - byte_size(name) - 1)
+          {name, literal_binding(name, value)}
+        end
+
+      %{name: name, pid: pid} = start_creds(bindings)
+      table = redaction_table(pid)
+
+      materialized =
+        for n <- 1..successful_count do
+          binding_name = "b#{n}"
+          assert {:ok, %{raw: raw}} = Credentials.materialize(name, binding_name)
+          {binding_name, raw}
+        end
+
+      assert {:error, :resolution_failed, detail} =
+               Credentials.materialize(name, overflowing_name)
+
+      assert detail =~ "exceeds redaction table capacity"
+
+      for {_binding_name, raw} <- materialized do
+        assert [_] = :ets.lookup(table, raw)
+      end
+
+      overflowing_value =
+        bindings |> Map.fetch!(overflowing_name) |> Map.fetch!(:spec) |> Map.fetch!(:value)
+
+      assert :ets.lookup(table, overflowing_value) == []
+    end
+
+    test "failed capacity rollback restores rows pruned during the attempted materialization" do
+      max_secret = Credentials.max_redaction_secret_bytes()
+      max_total = Credentials.max_redaction_total_bytes()
+      successful_count = div(max_total, max_secret)
+      overflowing_name = "b#{successful_count + 1}"
+
+      bindings =
+        for n <- 1..(successful_count + 1), into: %{} do
+          name = "b#{n}"
+          value = name <> ":" <> String.duplicate("x", max_secret - byte_size(name) - 1)
+          {name, literal_binding(name, value)}
+        end
+
+      %{name: name, pid: pid} = start_creds(bindings)
+      table = redaction_table(pid)
+
+      for n <- 1..successful_count do
+        assert {:ok, %{raw: _raw}} = Credentials.materialize(name, "b#{n}")
+      end
+
+      manual = "manual-row-that-total-prune-would-delete"
+
+      :sys.replace_state(pid, fn state ->
+        :ets.insert(state.table, {
+          manual,
+          %{
+            bytes: byte_size(manual),
+            scopes: %{manual: %{source: :manual, inserted_at: 1}}
+          }
+        })
+
+        state
+      end)
+
+      overflowing_value =
+        bindings |> Map.fetch!(overflowing_name) |> Map.fetch!(:spec) |> Map.fetch!(:value)
+
+      assert {:error, :resolution_failed, _detail} =
+               Credentials.materialize(name, overflowing_name)
+
+      assert [_] = :ets.lookup(table, manual)
+      assert :ets.lookup(table, overflowing_value) == []
+    end
+
+    test "oversized manually registered redaction secrets are ignored" do
+      %{name: name, pid: pid} = start_creds(%{})
+      table = redaction_table(pid)
+      oversized = String.duplicate("x", Credentials.max_redaction_secret_bytes() + 1)
+
+      :ok = Credentials.register_redaction_secrets(name, [oversized])
+
+      assert :ets.info(table, :size) == 0
     end
   end
 end

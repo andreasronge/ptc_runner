@@ -29,14 +29,18 @@ defmodule PtcRunnerMcp.DebugConfig do
   @defaults %{
     enabled: false,
     ring_size: 500,
-    max_response_bytes: 65_536
+    max_response_bytes: 65_536,
+    max_record_bytes: 262_144,
+    max_total_bytes: 8 * 1024 * 1024
   }
 
   @typedoc "Debug-tool configuration stored in persistent_term."
   @type t :: %{
           enabled: boolean(),
           ring_size: pos_integer(),
-          max_response_bytes: pos_integer()
+          max_response_bytes: pos_integer(),
+          max_record_bytes: pos_integer(),
+          max_total_bytes: pos_integer()
         }
 
   @doc "Default debug-tool config."
@@ -76,6 +80,14 @@ defmodule PtcRunnerMcp.DebugConfig do
   @doc "Configured `--max-debug-response-bytes` cap."
   @spec max_response_bytes() :: pos_integer()
   def max_response_bytes, do: get().max_response_bytes
+
+  @doc "Configured per-record storage cap for `DebugBuffer`."
+  @spec max_record_bytes() :: pos_integer()
+  def max_record_bytes, do: get().max_record_bytes
+
+  @doc "Configured total storage cap for `DebugBuffer`."
+  @spec max_total_bytes() :: pos_integer()
+  def max_total_bytes, do: get().max_total_bytes
 
   @doc """
   Clamp a requested ring size to `[#{@ring_size_min}, #{@ring_size_max}]`.

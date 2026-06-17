@@ -96,3 +96,7 @@ records, or session history.
 When the MCP server embeds the root runtime, it also registers the
 runtime's secret set with the MCP server redactor so existing trace,
 debug, session, log, and agentic prompt scrub paths remain active.
+The MCP redaction table is bounded: individual secrets larger than 16
+KiB are rejected or ignored, the table is capped at 512 KiB of
+plaintext secret bytes, and each materialized binding keeps only the
+current value plus one prior rotation.

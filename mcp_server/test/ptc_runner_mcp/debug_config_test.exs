@@ -28,6 +28,8 @@ defmodule PtcRunnerMcp.DebugConfigTest do
     assert DebugConfig.enabled?() == false
     assert DebugConfig.ring_size() == 500
     assert DebugConfig.max_response_bytes() == 65_536
+    assert DebugConfig.max_record_bytes() == 262_144
+    assert DebugConfig.max_total_bytes() == 8 * 1024 * 1024
   end
 
   test "CLI flag enables the tool" do

@@ -51,6 +51,10 @@ The full flag reference lives in [mcp-server-configuration.md](mcp-server-config
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `lisp_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
 
+The ring also has internal memory bounds: one stored record is
+summarized above 256 KiB, and the whole ring is capped at 8 MiB of
+stored record data before oldest records are evicted.
+
 ## Interaction with response profiles
 
 `--debug-tool` implies `--response-profile debug` unless a profile is set explicitly. Combine `--debug-tool --response-profile slim` to keep client-facing responses slim while the `lisp_debug` recorder still receives the full pre-slim payload internally. See the response-profile section of [mcp-server-configuration.md](mcp-server-configuration.md) for the full profile matrix.

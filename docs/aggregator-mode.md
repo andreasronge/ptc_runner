@@ -220,7 +220,11 @@ need it. If a `transport: "mcp_http"` entry is configured but
 - The MCP server registers root upstream runtime secrets with its
   process-wide redaction stack so trace files, `lisp_debug`, session
   stores, logs, and agentic planner prompts share the same
-  defense-in-depth scrub set.
+  defense-in-depth scrub set. This scrub set is bounded: individual
+  secrets larger than 16 KiB are rejected/ignored, the MCP redaction
+  table is capped at 512 KiB of plaintext secret bytes, and each
+  materialized binding keeps only the current value plus one prior
+  rotation.
 - env / file bindings are resolved once when the root upstream
   runtime starts. Rotate an env var or replace a credential file
   by restarting the REPL or MCP server process.

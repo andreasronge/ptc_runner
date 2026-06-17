@@ -966,7 +966,14 @@ defmodule PtcRunnerMcp.Application do
 
   defp debug_children do
     if DebugConfig.enabled?() do
-      [{PtcRunnerMcp.DebugBuffer, [ring_size: DebugConfig.ring_size()]}]
+      [
+        {PtcRunnerMcp.DebugBuffer,
+         [
+           ring_size: DebugConfig.ring_size(),
+           max_record_bytes: DebugConfig.max_record_bytes(),
+           max_total_bytes: DebugConfig.max_total_bytes()
+         ]}
+      ]
     else
       []
     end

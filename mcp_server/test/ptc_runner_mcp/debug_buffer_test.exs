@@ -17,9 +17,15 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     :ok
   end
 
-  defp start_buffer(ring_size) do
+  defp start_buffer(ring_size, opts \\ []) do
     DebugConfig.set(%{enabled: true, ring_size: ring_size, max_response_bytes: 65_536})
-    {:ok, pid} = DebugBuffer.start_link(ring_size: ring_size, name: DebugBuffer)
+
+    buffer_opts =
+      opts
+      |> Keyword.put(:ring_size, ring_size)
+      |> Keyword.put(:name, DebugBuffer)
+
+    {:ok, pid} = DebugBuffer.start_link(buffer_opts)
     on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     pid
   end
@@ -40,6 +46,7 @@ defmodule PtcRunnerMcp.DebugBufferTest do
       signature_present?: false,
       protocol_version: "2025-11-25",
       upstream_calls: [],
+      ptc_metrics: nil,
       agentic: nil
     }
 
@@ -77,6 +84,56 @@ defmodule PtcRunnerMcp.DebugBufferTest do
     assert Enum.map(recent, & &1.request_id) == ["id-5", "id-4", "id-3"]
     assert DebugBuffer.get("id-1") == :not_found
     assert {:ok, _} = DebugBuffer.get("id-5")
+  end
+
+  test "oversized records are stored as compact summary records" do
+    pid = start_buffer(10, max_record_bytes: 2_000, max_total_bytes: 20_000)
+
+    record_sync(
+      pid,
+      rec(
+        request_id: "huge",
+        program: String.duplicate("p", 10_000),
+        context: %{"blob" => String.duplicate("c", 10_000)},
+        upstream_calls: [
+          %{"server" => "s", "tool" => "t", "status" => "ok", "duration_ms" => 1}
+        ],
+        ptc_metrics: %{"payload_reduction_ratio" => 2.0},
+        agentic: %{planner_status: :ok, planner_duration_ms: 1, planner_rejects: 0, retries: 0},
+        unexpected_large_field: String.duplicate("u", 10_000)
+      )
+    )
+
+    assert {:ok, stored} = DebugBuffer.get("huge")
+    assert stored.program["omitted"] == true
+    assert stored.program["reason"] == "debug_record_too_large"
+    assert stored.program["original_bytes"] > 2_000
+    assert stored.context["omitted"] == true
+    assert stored.upstream_calls == []
+    assert stored.ptc_metrics == nil
+    assert stored.agentic == nil
+    refute Map.has_key?(stored, :unexpected_large_field)
+  end
+
+  test "oversized records are dropped when even the fixed summary cannot fit the cap" do
+    pid = start_buffer(10, max_record_bytes: 100, max_total_bytes: 1_000)
+
+    record_sync(pid, rec(request_id: "too-small", program: String.duplicate("p", 10_000)))
+
+    assert DebugBuffer.count() == 0
+    assert DebugBuffer.get("too-small") == :not_found
+  end
+
+  test "byte pressure evicts oldest records even before ring_size is reached" do
+    pid = start_buffer(10, max_record_bytes: 10_000, max_total_bytes: 3_000)
+
+    Enum.each(1..5, fn i ->
+      record_sync(pid, rec(request_id: "byte-#{i}", program: String.duplicate("x", 2_000)))
+    end)
+
+    assert DebugBuffer.count() < 5
+    assert DebugBuffer.get("byte-1") == :not_found
+    assert {:ok, _} = DebugBuffer.get("byte-5")
   end
 
   test "recent: newest-first, limit, errors_only, since_seconds" do

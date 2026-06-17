@@ -17,6 +17,9 @@ defmodule PtcRunnerMcp.Credentials do
       Plaintext bytes are inserted into the table **before**
       `materialize/1` returns its first successful result for a given
       value (§7.5.2 first-emission-race rule).
+    * Keep that table bounded: each secret is capped at 16 KiB, the
+      table is capped at 512 KiB total secret bytes, and each binding
+      retains at most the current value plus one prior rotation.
 
   ## Why `:protected`?
 
@@ -51,6 +54,9 @@ defmodule PtcRunnerMcp.Credentials do
   import Bitwise, only: [&&&: 2]
 
   @table :credentials_redaction_set
+  @max_redaction_secret_bytes 16 * 1024
+  @max_redaction_total_bytes 512 * 1024
+  @redaction_rotation_window 2
 
   @type materialization :: %{
           raw: binary(),
@@ -334,6 +340,14 @@ defmodule PtcRunnerMcp.Credentials do
   @spec table_name() :: atom()
   def table_name, do: @table
 
+  @doc false
+  @spec max_redaction_secret_bytes() :: pos_integer()
+  def max_redaction_secret_bytes, do: @max_redaction_secret_bytes
+
+  @doc false
+  @spec max_redaction_total_bytes() :: pos_integer()
+  def max_redaction_total_bytes, do: @max_redaction_total_bytes
+
   # ---------------------------------------------------------------------------
   # GenServer callbacks
   # ---------------------------------------------------------------------------
@@ -360,8 +374,13 @@ defmodule PtcRunnerMcp.Credentials do
   def handle_call({:register_redaction_secrets, secrets}, _from, %{table: table} = state)
       when is_list(secrets) do
     secrets
-    |> Enum.filter(&(is_binary(&1) and byte_size(&1) > 0))
-    |> Enum.each(&:ets.insert(table, {&1, true}))
+    |> Enum.filter(fn secret ->
+      is_binary(secret) and byte_size(secret) > 0 and
+        byte_size(secret) <= @max_redaction_secret_bytes
+    end)
+    |> Enum.each(&insert_redaction_secret(table, &1, :manual, :manual))
+
+    prune_total_redaction_bytes(table)
 
     {:reply, :ok, state}
   end
@@ -393,21 +412,25 @@ defmodule PtcRunnerMcp.Credentials do
           {:ok, raw} ->
             # §7.5.2: register BEFORE returning so callers cannot see
             # a value that isn't yet in the redaction set.
-            :ets.insert(table, {raw, true})
+            case register_materialized_secret(table, name, b.source, raw) do
+              :ok ->
+                # `:_source` is an internal-only key that lets `materialize/2`
+                # tag the `:credentials, :resolve, :stop` telemetry with the
+                # binding's source atom (`:env | :file | :literal`) without
+                # forcing a second `Map.fetch/2` on the binding map. The
+                # leading underscore signals "not part of the documented
+                # `materialization()` shape" — `apply_emitter/2` ignores it.
+                {:ok,
+                 %{
+                   raw: raw,
+                   scheme_hint: b.scheme_hint || :raw,
+                   expires_at: :never,
+                   _source: b.source
+                 }}
 
-            # `:_source` is an internal-only key that lets `materialize/2`
-            # tag the `:credentials, :resolve, :stop` telemetry with the
-            # binding's source atom (`:env | :file | :literal`) without
-            # forcing a second `Map.fetch/2` on the binding map. The
-            # leading underscore signals "not part of the documented
-            # `materialization()` shape" — `apply_emitter/2` ignores it.
-            {:ok,
-             %{
-               raw: raw,
-               scheme_hint: b.scheme_hint || :raw,
-               expires_at: :never,
-               _source: b.source
-             }}
+              {:error, detail} ->
+                {:error, :resolution_failed, detail}
+            end
 
           {:error, detail} ->
             {:error, :resolution_failed, detail}
@@ -449,6 +472,155 @@ defmodule PtcRunnerMcp.Credentials do
     # Defensive: Binding.parse/2 already rejects `exec` at config
     # load. If a hand-built binding sneaks past, fail uniformly here.
     {:error, "exec source deferred to v1.1"}
+  end
+
+  defp register_materialized_secret(table, name, source, raw) when is_binary(raw) do
+    if byte_size(raw) <= @max_redaction_secret_bytes do
+      snapshot = :ets.tab2list(table)
+      _previous = insert_redaction_secret(table, raw, {:binding, name}, source)
+      prune_binding_redaction_entries(table, name)
+
+      case prune_total_redaction_bytes(table) do
+        :ok ->
+          :ok
+
+        {:error, :redaction_capacity_exceeded} ->
+          restore_redaction_table(table, snapshot)
+          {:error, "credential #{name} exceeds redaction table capacity"}
+      end
+    else
+      {:error, "credential #{name} resolved value exceeds #{@max_redaction_secret_bytes} bytes"}
+    end
+  end
+
+  defp insert_redaction_secret(table, raw, scope, source) do
+    previous = :ets.lookup(table, raw)
+
+    meta =
+      case previous do
+        [{^raw, %{scopes: scopes} = existing}] when is_map(scopes) ->
+          existing
+          |> Map.put(:bytes, byte_size(raw))
+          |> Map.put(:scopes, Map.put(scopes, scope, redaction_scope_meta(source)))
+
+        _other ->
+          redaction_meta(raw, scope, source)
+      end
+
+    :ets.insert(table, {raw, meta})
+    previous
+  end
+
+  defp restore_redaction_table(table, rows) do
+    :ets.delete_all_objects(table)
+    Enum.each(rows, &:ets.insert(table, &1))
+  end
+
+  defp redaction_meta(raw, scope, source) do
+    %{
+      bytes: byte_size(raw),
+      scopes: %{scope => redaction_scope_meta(source)}
+    }
+  end
+
+  defp redaction_scope_meta(source) do
+    %{source: source, inserted_at: System.unique_integer([:monotonic, :positive])}
+  end
+
+  defp prune_binding_redaction_entries(table, name) do
+    scope = {:binding, name}
+
+    table
+    |> redaction_entries()
+    |> Enum.flat_map(fn {secret, meta} ->
+      case get_in(meta, [:scopes, scope, :inserted_at]) do
+        inserted_at when is_integer(inserted_at) -> [{secret, meta, inserted_at}]
+        _other -> []
+      end
+    end)
+    |> Enum.sort_by(fn {_secret, _meta, inserted_at} -> inserted_at end, :desc)
+    |> Enum.drop(@redaction_rotation_window)
+    |> Enum.each(fn {secret, meta, _inserted_at} ->
+      scopes = meta |> Map.fetch!(:scopes) |> Map.delete(scope)
+
+      if map_size(scopes) == 0 do
+        :ets.delete(table, secret)
+      else
+        :ets.insert(table, {secret, Map.put(meta, :scopes, scopes)})
+      end
+    end)
+  end
+
+  defp prune_total_redaction_bytes(table) do
+    entries = redaction_entries(table)
+    total = Enum.reduce(entries, 0, fn {_secret, meta}, acc -> acc + Map.get(meta, :bytes, 0) end)
+
+    if total <= @max_redaction_total_bytes do
+      :ok
+    else
+      protected = current_binding_secrets(entries)
+
+      final_total =
+        entries
+        |> Enum.reject(fn {secret, _meta} -> MapSet.member?(protected, secret) end)
+        |> Enum.sort_by(fn {_secret, meta} -> earliest_scope_inserted_at(meta) end)
+        |> Enum.reduce_while(total, fn {secret, meta}, acc ->
+          if acc <= @max_redaction_total_bytes do
+            {:halt, acc}
+          else
+            :ets.delete(table, secret)
+            {:cont, acc - Map.get(meta, :bytes, 0)}
+          end
+        end)
+
+      if final_total <= @max_redaction_total_bytes do
+        :ok
+      else
+        {:error, :redaction_capacity_exceeded}
+      end
+    end
+  end
+
+  defp earliest_scope_inserted_at(%{scopes: scopes}) when is_map(scopes) do
+    scopes
+    |> Map.values()
+    |> Enum.map(&Map.get(&1, :inserted_at, 0))
+    |> Enum.min(fn -> 0 end)
+  end
+
+  defp current_binding_secrets(entries) do
+    entries
+    |> Enum.flat_map(fn {secret, %{scopes: scopes}} ->
+      Enum.flat_map(scopes, fn
+        {{:binding, name}, %{inserted_at: inserted_at}} when is_integer(inserted_at) ->
+          [{name, secret, inserted_at}]
+
+        _other ->
+          []
+      end)
+    end)
+    |> Enum.reduce(%{}, fn {name, secret, inserted_at}, acc ->
+      case Map.get(acc, name) do
+        {_secret, existing_at} when existing_at >= inserted_at -> acc
+        _other -> Map.put(acc, name, {secret, inserted_at})
+      end
+    end)
+    |> Map.values()
+    |> Enum.map(fn {secret, _inserted_at} -> secret end)
+    |> MapSet.new()
+  end
+
+  defp redaction_entries(table) do
+    table
+    |> :ets.tab2list()
+    |> Enum.flat_map(fn
+      {secret, %{bytes: bytes, scopes: scopes} = meta}
+      when is_binary(secret) and is_integer(bytes) and is_map(scopes) ->
+        [{secret, meta}]
+
+      _other ->
+        []
+    end)
   end
 
   # ---- apply_emitter/2 helpers ---------------------------------------------

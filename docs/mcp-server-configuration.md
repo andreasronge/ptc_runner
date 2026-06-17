@@ -61,6 +61,11 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--debug-ring-size` | `PTC_RUNNER_MCP_DEBUG_RING_SIZE` | `500` | In-memory ring-buffer capacity for `lisp_debug` (clamped to `[10, 5000]`). |
 | `--max-debug-response-bytes` | `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES` | `65536` (64 KiB) | Hard cap on a single `lisp_debug` response (raised to a 4 KiB floor if set lower); oversized responses are truncated and flagged. |
 
+The debug ring is also byte-bounded internally: individual records are
+summarized above 256 KiB, and the in-memory ring is capped at 8 MiB of
+stored record data before oldest records are evicted. These internal
+caps are independent of the response-size cap above.
+
 `--trace-dir` and `--turn-log-dir` are separate on purpose. Trace files are
 per-request MCP debug envelopes. The turn log is the cross-session record used
 by `PtcRunner.TraceLog.Analyzer` and the `log/` introspection prelude: it records

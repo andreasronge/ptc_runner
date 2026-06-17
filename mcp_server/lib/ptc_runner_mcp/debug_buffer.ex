@@ -15,7 +15,9 @@ defmodule PtcRunnerMcp.DebugBuffer do
   results — same graceful-degradation contract as a failed trace write.
 
   Records are stored already redacted per `--trace-payloads`; this
-  module never re-redacts. It is a dumb buffer + aggregator.
+  module never re-redacts. It is a dumb, bounded buffer + aggregator:
+  the ring count is a cap, not a sizing mechanism, and byte pressure
+  evicts oldest records even when the count cap is not reached.
   """
 
   use GenServer
@@ -163,16 +165,43 @@ defmodule PtcRunnerMcp.DebugBuffer do
   @impl GenServer
   def init(opts) do
     ring_size = Keyword.get(opts, :ring_size) || DebugConfig.ring_size()
+    max_record_bytes = Keyword.get(opts, :max_record_bytes) || DebugConfig.max_record_bytes()
+    requested_total = Keyword.get(opts, :max_total_bytes) || DebugConfig.max_total_bytes()
+    max_total_bytes = max(requested_total, max_record_bytes)
     table = :ets.new(@table_name, [:ordered_set, :private])
-    {:ok, %{table: table, ring_size: ring_size, seq: 0}}
+
+    {:ok,
+     %{
+       table: table,
+       ring_size: ring_size,
+       seq: 0,
+       total_bytes: 0,
+       max_record_bytes: max_record_bytes,
+       max_total_bytes: max_total_bytes
+     }}
   end
 
   @impl GenServer
   def handle_cast({:record, rec}, state) do
     seq = state.seq + 1
-    :ets.insert(state.table, {seq, rec})
-    evict_excess(state.table, state.ring_size)
-    {:noreply, %{state | seq: seq}}
+
+    total_bytes =
+      case bound_record(rec, state.max_record_bytes) do
+        {:ok, rec, bytes} ->
+          :ets.insert(state.table, {seq, rec, bytes})
+
+          evict_excess(
+            state.table,
+            state.ring_size,
+            state.total_bytes + bytes,
+            state.max_total_bytes
+          )
+
+        :drop ->
+          state.total_bytes
+      end
+
+    {:noreply, %{state | seq: seq, total_bytes: total_bytes}}
   rescue
     error ->
       Log.log(:warn, "debug_buffer_record_failed", %{
@@ -223,33 +252,106 @@ defmodule PtcRunnerMcp.DebugBuffer do
   # ETS helpers
   # ----------------------------------------------------------------
 
-  defp evict_excess(table, ring_size) do
-    over = :ets.info(table, :size) - ring_size
+  defp evict_excess(table, ring_size, total_bytes, max_total_bytes) do
+    if :ets.info(table, :size) <= ring_size and total_bytes <= max_total_bytes do
+      total_bytes
+    else
+      case :ets.first(table) do
+        :"$end_of_table" ->
+          0
 
-    if over > 0 do
-      _ =
-        Enum.reduce(1..over, :ets.first(table), fn _i, key ->
-          case key do
-            :"$end_of_table" ->
-              key
-
-            k ->
-              next = :ets.next(table, k)
-              :ets.delete(table, k)
-              next
-          end
-        end)
+        key ->
+          bytes = row_bytes(table, key)
+          :ets.delete(table, key)
+          evict_excess(table, ring_size, max(total_bytes - bytes, 0), max_total_bytes)
+      end
     end
-
-    :ok
   end
 
   # Oldest-first list of records.
   defp all_records(table) do
     :ets.tab2list(table)
-    |> Enum.sort_by(fn {seq, _rec} -> seq end)
-    |> Enum.map(fn {_seq, rec} -> rec end)
+    |> Enum.sort_by(fn
+      {seq, _rec, _bytes} -> seq
+      {seq, _rec} -> seq
+    end)
+    |> Enum.map(fn
+      {_seq, rec, _bytes} -> rec
+      {_seq, rec} -> rec
+    end)
   end
+
+  defp row_bytes(table, key) do
+    case :ets.lookup(table, key) do
+      [{^key, _rec, bytes}] when is_integer(bytes) and bytes >= 0 -> bytes
+      [{^key, rec}] -> record_bytes(rec)
+      _ -> 0
+    end
+  end
+
+  defp bound_record(rec, max_record_bytes) do
+    bytes = record_bytes(rec)
+
+    if bytes <= max_record_bytes do
+      {:ok, rec, bytes}
+    else
+      summarized = oversized_record(rec, bytes, max_record_bytes)
+      summarized_bytes = record_bytes(summarized)
+
+      if summarized_bytes <= max_record_bytes do
+        {:ok, summarized, summarized_bytes}
+      else
+        :drop
+      end
+    end
+  end
+
+  defp record_bytes(term), do: :erlang.external_size(term)
+
+  defp oversized_record(rec, original_bytes, max_record_bytes) do
+    marker = %{
+      "omitted" => true,
+      "reason" => "debug_record_too_large",
+      "original_bytes" => original_bytes,
+      "max_record_bytes" => max_record_bytes
+    }
+
+    %{
+      request_id: bounded_string(Map.get(rec, :request_id), 128),
+      ts: bounded_ts(Map.get(rec, :ts)),
+      tool: bounded_string(Map.get(rec, :tool), 64),
+      status: bounded_status(Map.get(rec, :status)),
+      is_error: Map.get(rec, :is_error) == true,
+      reason: "debug_record_too_large",
+      duration_ms: bounded_non_neg_integer(Map.get(rec, :duration_ms)),
+      program: marker,
+      context: marker,
+      result_bytes: bounded_optional_non_neg_integer(Map.get(rec, :result_bytes)),
+      prints_count: bounded_optional_non_neg_integer(Map.get(rec, :prints_count)),
+      signature_present?: Map.get(rec, :signature_present?) == true,
+      protocol_version: bounded_string(Map.get(rec, :protocol_version), 32),
+      upstream_calls: [],
+      ptc_metrics: nil,
+      agentic: nil
+    }
+  end
+
+  defp bounded_string(value, max_chars) when is_binary(value),
+    do: String.slice(value, 0, max_chars)
+
+  defp bounded_string(_value, _max_chars), do: nil
+
+  defp bounded_ts(%DateTime{} = ts), do: ts
+  defp bounded_ts(_value), do: DateTime.utc_now()
+
+  defp bounded_status(status) when status in [:ok, :error], do: status
+  defp bounded_status(_status), do: :error
+
+  defp bounded_non_neg_integer(value) when is_integer(value) and value >= 0, do: value
+  defp bounded_non_neg_integer(_value), do: 0
+
+  defp bounded_optional_non_neg_integer(value) when is_integer(value) and value >= 0, do: value
+  defp bounded_optional_non_neg_integer(_value), do: nil
 
   # Oldest-first list, filtered by `:since_seconds` and `:errors_only`.
   defp filtered_records(table, opts) do
