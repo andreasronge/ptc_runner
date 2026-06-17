@@ -119,6 +119,118 @@ defmodule PtcRunner.TraceLog.CollectorTest do
       assert last_event["event"] == "test"
       assert last_event["value"] == 42
     end
+
+    test "summarizes events that exceed the encoded event byte cap", %{tmp_dir: dir} do
+      with_app_env(:trace_collector_max_event_bytes, 768, fn ->
+        path = Path.join(dir, "test.jsonl")
+        {:ok, collector} = Collector.start_link(path: path)
+
+        Collector.write_event(collector, %{
+          "event" => "huge.payload",
+          "agent_id" => "agent-1",
+          "data" => %{"payload" => String.duplicate("x", 4_096)}
+        })
+
+        {:ok, ^path, 0} = Collector.stop(collector)
+
+        [_start, omitted, _stop] = decoded_lines(path)
+
+        assert omitted["event"] == "trace.event_omitted"
+        assert omitted["agent_id"] == "agent-1"
+        assert is_binary(omitted["trace_id"])
+        assert is_binary(omitted["timestamp"])
+        assert is_integer(omitted["seq"])
+        assert omitted["data"]["reason"] == "trace_event_too_large"
+        assert omitted["data"]["original_event"] == "huge.payload"
+        assert omitted["data"]["original_bytes"] > 768
+        refute inspect(omitted) =~ String.duplicate("x", 128)
+      end)
+    end
+
+    test "splits oversized agent_config before bounding the main event", %{tmp_dir: dir} do
+      with_app_env(:trace_collector_max_event_bytes, 768, fn ->
+        path = Path.join(dir, "test.jsonl")
+        {:ok, collector} = Collector.start_link(path: path)
+
+        Collector.write_event(collector, %{
+          "event" => "run.start",
+          "agent_id" => "agent-1",
+          "agent_name" => "planner",
+          "data" => %{
+            "small" => true,
+            "agent_config" => %{"system_prompt" => String.duplicate("x", 4_096)}
+          }
+        })
+
+        {:ok, ^path, 0} = Collector.stop(collector)
+
+        [_start, config, run_start, _stop] = decoded_lines(path)
+
+        assert config["event"] == "agent.config"
+        assert config["agent_id"] == "agent-1"
+        assert config["config"]["omitted"] == true
+        assert config["config"]["reason"] == "agent_config_too_large"
+
+        assert run_start["event"] == "run.start"
+        assert run_start["data"] == %{"small" => true}
+      end)
+    end
+
+    test "applies event byte cap after adding collector fields", %{tmp_dir: dir} do
+      with_app_env(:trace_collector_max_event_bytes, 512, fn ->
+        path = Path.join(dir, "test.jsonl")
+        {:ok, collector} = Collector.start_link(path: path)
+
+        Collector.write_event(collector, %{
+          "event" => "boundary.payload",
+          "data" => %{"payload" => String.duplicate("x", 420)}
+        })
+
+        {:ok, ^path, 0} = Collector.stop(collector)
+
+        [_start, bounded, _stop] = decoded_lines(path)
+
+        assert bounded["event"] == "trace.event_omitted"
+        assert bounded["data"]["original_event"] == "boundary.payload"
+
+        line =
+          path
+          |> File.read!()
+          |> String.split("\n", trim: true)
+          |> Enum.at(1)
+
+        assert byte_size(line) <= 512
+      end)
+    end
+
+    test "drops oversized events when the summary cannot fit the byte cap", %{tmp_dir: dir} do
+      with_app_env(:trace_collector_max_event_bytes, 64, fn ->
+        path = Path.join(dir, "test.jsonl")
+        {:ok, collector} = Collector.start_link(path: path)
+
+        Collector.write_event(collector, %{
+          "event" => "huge.payload",
+          "data" => %{"payload" => String.duplicate("x", 4_096)}
+        })
+
+        {:ok, ^path, 0} = Collector.stop(collector)
+
+        assert [%{"event" => "trace.start"}, %{"event" => "trace.stop"}] = decoded_lines(path)
+      end)
+    end
+
+    test "sheds events before enqueueing when collector mailbox is at the cap", %{tmp_dir: dir} do
+      with_app_env(:trace_collector_max_mailbox_len, 0, fn ->
+        path = Path.join(dir, "test.jsonl")
+        {:ok, collector} = Collector.start_link(path: path)
+
+        Collector.write_event(collector, %{"event" => "shed"})
+
+        {:ok, ^path, 0} = Collector.stop(collector)
+
+        assert [%{"event" => "trace.start"}, %{"event" => "trace.stop"}] = decoded_lines(path)
+      end)
+    end
   end
 
   describe "stop/1" do
@@ -383,6 +495,28 @@ defmodule PtcRunner.TraceLog.CollectorTest do
         end
 
       send(test_pid, {:log_event, level, message})
+    end
+  end
+
+  defp decoded_lines(path) do
+    path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
+
+  defp with_app_env(key, value, fun) do
+    previous = Application.get_env(:ptc_runner, key)
+    Application.put_env(:ptc_runner, key, value)
+
+    try do
+      fun.()
+    after
+      if is_nil(previous) do
+        Application.delete_env(:ptc_runner, key)
+      else
+        Application.put_env(:ptc_runner, key, previous)
+      end
     end
   end
 end

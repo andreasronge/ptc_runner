@@ -242,11 +242,15 @@ TraceLog sanitization limits are configurable via application config:
 | `:trace_max_string_size` | `65_536` | Max string size in bytes before truncation |
 | `:trace_max_list_size` | `100` | Max list length before summarizing |
 | `:trace_preserve_full_keys` | `["system_prompt"]` | Map keys whose strings are never truncated |
+| `:trace_collector_max_event_bytes` | `1_048_576` | Max approximate event term bytes accepted before enqueueing; written JSON lines above the same cap are replaced with a summary |
+| `:trace_collector_max_mailbox_len` | `1_000` | Collector mailbox length at which new trace events are shed before enqueueing |
 | `:trace_dir` | CWD | Default directory for trace JSONL files |
 
 ```elixir
 config :ptc_runner,
   trace_max_string_size: 128_000,
+  trace_collector_max_event_bytes: 1_048_576,
+  trace_collector_max_mailbox_len: 1_000,
   trace_dir: "traces"
 ```
 

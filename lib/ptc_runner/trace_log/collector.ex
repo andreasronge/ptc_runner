@@ -17,6 +17,8 @@ defmodule PtcRunner.TraceLog.Collector do
 
   @schema_version 2
   @trace_header_keys [:trace_kind, :producer, :trace_label, :model, :query]
+  @default_max_event_bytes 1_048_576
+  @default_max_mailbox_len 1_000
 
   defstruct [
     :file,
@@ -88,7 +90,42 @@ defmodule PtcRunner.TraceLog.Collector do
   """
   @spec write_event(GenServer.server(), map()) :: :ok
   def write_event(collector, event) when is_map(event) do
-    GenServer.cast(collector, {:write_event, event})
+    cond do
+      mailbox_full?(collector) ->
+        :ok
+
+      prepared = prepare_for_enqueue(event) ->
+        GenServer.cast(collector, {:write_event, prepared})
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  Returns the event byte cap applied before enqueueing and writing events.
+  """
+  @spec max_event_bytes() :: pos_integer()
+  def max_event_bytes do
+    configured = Application.get_env(:ptc_runner, :trace_collector_max_event_bytes)
+
+    case configured do
+      value when is_integer(value) and value > 0 -> value
+      _ -> @default_max_event_bytes
+    end
+  end
+
+  @doc """
+  Returns the collector mailbox length at which new events are shed.
+  """
+  @spec max_mailbox_len() :: non_neg_integer()
+  def max_mailbox_len do
+    configured = Application.get_env(:ptc_runner, :trace_collector_max_mailbox_len)
+
+    case configured do
+      value when is_integer(value) and value >= 0 -> value
+      _ -> @default_max_mailbox_len
+    end
   end
 
   @doc """
@@ -173,12 +210,18 @@ defmodule PtcRunner.TraceLog.Collector do
     {:noreply, %{state | write_errors: state.write_errors + 1}}
   end
 
-  def handle_cast({:write_event, event}, state) do
+  def handle_cast({:write_event, prepared}, state) do
     # Maybe emit agent.config before this event
-    state = maybe_emit_agent_config(event, state)
+    state = maybe_emit_agent_config(prepared.agent_config_event, state)
 
     # Assign seq and write
-    state = do_write_event(event, state)
+    state =
+      if prepared.event do
+        do_write_event(prepared.event, state)
+      else
+        state
+      end
+
     {:noreply, state}
   rescue
     error ->
@@ -230,15 +273,6 @@ defmodule PtcRunner.TraceLog.Collector do
   defp do_write_event(event, state) do
     {seq, state} = next_seq(state)
 
-    # Strip agent_config from data (it was used for agent.config emission)
-    event =
-      with %{"data" => %{} = data} <- event,
-           {:ok, _} <- Map.fetch(data, "agent_config") do
-        update_in(event, ["data"], &Map.delete(&1, "agent_config"))
-      else
-        _ -> event
-      end
-
     # Telemetry-sourced events already carry trace_id/timestamp; `write_to_active`
     # callers (e.g. session/SubAgent turn events) need not know the collector's
     # trace_id, so stamp ours when absent. `put_new` never overrides an
@@ -249,44 +283,205 @@ defmodule PtcRunner.TraceLog.Collector do
       |> Map.put_new_lazy("timestamp", fn -> DateTime.utc_now() |> DateTime.to_iso8601() end)
 
     event = Map.put(event, "seq", seq)
+    event = bound_final_event(event)
 
-    case Event.encode(event) do
-      {:ok, json} -> IO.puts(state.file, json)
-      {:error, _} -> :ok
+    if event do
+      case Event.encode(event) do
+        {:ok, json} -> IO.puts(state.file, json)
+        {:error, _} -> :ok
+      end
     end
 
     state
   end
 
-  # Emit agent.config if this event has an unseen agent_id with agent_config data
-  defp maybe_emit_agent_config(event, state) do
-    agent_id = event["agent_id"]
+  defp prepare_for_enqueue(event) do
+    max_bytes = max_event_bytes()
+    {event, agent_config_event} = split_agent_config(event, max_bytes)
 
+    case bound_unstamped_event(event, max_bytes) do
+      nil when is_nil(agent_config_event) -> nil
+      bounded_event -> %{event: bounded_event, agent_config_event: agent_config_event}
+    end
+  end
+
+  defp split_agent_config(event, max_bytes) do
     agent_config =
       case event do
         %{"data" => %{"agent_config" => config}} -> config
         _ -> nil
       end
 
-    if agent_id && agent_config && agent_id not in state.emitted_agent_ids do
-      {seq, state} = next_seq(state)
-
-      config_event = %{
-        "schema_version" => @schema_version,
-        "event" => "agent.config",
-        "trace_id" => state.trace_id,
-        "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
-        "seq" => seq,
-        "agent_id" => agent_id,
-        "agent_name" => event["agent_name"],
-        "config" => Event.sanitize(agent_config)
-      }
-
-      case Event.encode(config_event) do
-        {:ok, json} -> IO.puts(state.file, json)
-        {:error, _} -> :ok
+    stripped_event =
+      with %{"data" => %{} = data} <- event,
+           {:ok, _} <- Map.fetch(data, "agent_config") do
+        update_in(event, ["data"], &Map.delete(&1, "agent_config"))
+      else
+        _ -> event
       end
 
+    {stripped_event, prepare_agent_config_event(stripped_event, agent_config, max_bytes)}
+  end
+
+  defp prepare_agent_config_event(%{"agent_id" => agent_id} = event, agent_config, max_bytes)
+       when not is_nil(agent_id) and not is_nil(agent_config) do
+    config_event = %{
+      "schema_version" => @schema_version,
+      "event" => "agent.config",
+      "agent_id" => agent_id,
+      "agent_name" => event["agent_name"],
+      "config" => Event.sanitize(agent_config)
+    }
+
+    if :erlang.external_size(agent_config) > max_bytes do
+      compact_agent_config_event(event, max_bytes)
+    else
+      case approx_event_bytes(config_event) do
+        bytes when bytes <= max_bytes -> config_event
+        _ -> compact_agent_config_event(event, max_bytes)
+      end
+    end
+  end
+
+  defp prepare_agent_config_event(_event, _agent_config, _max_bytes), do: nil
+
+  defp compact_agent_config_event(event, max_bytes) do
+    config_event = %{
+      "schema_version" => @schema_version,
+      "event" => "agent.config",
+      "agent_id" => event["agent_id"],
+      "agent_name" => bounded_binary(event["agent_name"], 128),
+      "config" => %{
+        "omitted" => true,
+        "reason" => "agent_config_too_large",
+        "max_event_bytes" => max_bytes
+      }
+    }
+
+    bound_unstamped_event(config_event, max_bytes)
+  end
+
+  defp bound_unstamped_event(event, max_bytes) do
+    case approx_event_bytes(event) do
+      bytes when bytes <= max_bytes -> event
+      bytes -> summarize_oversized_event(event, bytes, max_bytes)
+    end
+  end
+
+  defp approx_event_bytes(event), do: :erlang.external_size(event)
+
+  defp bound_final_event(event) do
+    max_bytes = max_event_bytes()
+
+    case Event.encode(event) do
+      {:ok, json} when byte_size(json) <= max_bytes ->
+        event
+
+      {:ok, json} ->
+        summarize_oversized_event(event, byte_size(json), max_bytes)
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp summarize_oversized_event(event, original_bytes, max_bytes) do
+    summary =
+      %{
+        "schema_version" => @schema_version,
+        "event" => "trace.event_omitted",
+        "trace_id" => event["trace_id"],
+        "timestamp" => event["timestamp"],
+        "seq" => event["seq"],
+        "agent_id" => bounded_binary(event["agent_id"], 128),
+        "agent_name" => bounded_binary(event["agent_name"], 128),
+        "turn" => bounded_integer(event["turn"]),
+        "tool_name" => bounded_binary(event["tool_name"], 128),
+        "model" => bounded_binary(event["model"], 128),
+        "status" => bounded_binary(event["status"], 64),
+        "data" => %{
+          "reason" => "trace_event_too_large",
+          "original_event" => bounded_binary(event["event"], 128),
+          "original_bytes" => original_bytes,
+          "max_event_bytes" => max_bytes
+        }
+      }
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    case Event.encode(summary) do
+      {:ok, json} when byte_size(json) <= max_bytes -> summary
+      _ -> nil
+    end
+  end
+
+  defp bounded_binary(value, max_bytes) when is_binary(value) do
+    if byte_size(value) <= max_bytes do
+      value
+    else
+      truncate_utf8(value, max_bytes)
+    end
+  end
+
+  defp bounded_binary(value, max_bytes) when is_atom(value) do
+    value |> Atom.to_string() |> bounded_binary(max_bytes)
+  end
+
+  defp bounded_binary(value, max_bytes) when is_number(value) do
+    value |> to_string() |> bounded_binary(max_bytes)
+  end
+
+  defp bounded_binary(_value, _max_bytes), do: nil
+
+  defp truncate_utf8(_value, max_bytes) when max_bytes <= 0, do: ""
+
+  defp truncate_utf8(value, max_bytes) do
+    chunk = binary_part(value, 0, max_bytes)
+
+    if String.valid?(chunk) do
+      chunk
+    else
+      truncate_utf8(value, max_bytes - 1)
+    end
+  end
+
+  defp bounded_integer(value) when is_integer(value), do: value
+  defp bounded_integer(_value), do: nil
+
+  defp mailbox_full?(collector) do
+    with max_len <- max_mailbox_len(),
+         pid when is_pid(pid) <- collector_pid(collector),
+         true <- Process.alive?(pid),
+         {:message_queue_len, queue_len} <- Process.info(pid, :message_queue_len) do
+      if queue_len >= max_len do
+        true
+      else
+        false
+      end
+    else
+      _ -> false
+    end
+  end
+
+  defp collector_pid(pid) when is_pid(pid), do: pid
+  defp collector_pid(name) when is_atom(name), do: Process.whereis(name)
+  defp collector_pid({:global, name}), do: :global.whereis_name(name)
+
+  defp collector_pid({:via, registry, name}) do
+    if function_exported?(registry, :whereis_name, 1) do
+      registry.whereis_name(name)
+    end
+  end
+
+  defp collector_pid(_collector), do: nil
+
+  # Emit agent.config if this event has an unseen agent_id with agent_config data
+  defp maybe_emit_agent_config(nil, state), do: state
+
+  defp maybe_emit_agent_config(event, state) do
+    agent_id = event["agent_id"]
+
+    if agent_id && agent_id not in state.emitted_agent_ids do
+      state = do_write_event(event, state)
       %{state | emitted_agent_ids: MapSet.put(state.emitted_agent_ids, agent_id)}
     else
       state

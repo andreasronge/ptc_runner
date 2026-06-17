@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer accumulate for the lifetime of the node.
 - Bounded the `lisp_debug` in-memory ring by per-record and total stored bytes,
   summarizing oversized records and evicting oldest records under byte pressure.
+- Bounded `TraceLog.Collector` enqueue pressure with a pre-cast event byte cap
+  and mailbox-length shedding for overloaded file collectors.
 
 ## [0.12.0] - 2026-06-03
 
