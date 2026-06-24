@@ -7,15 +7,33 @@ See `Plans/ptc-runner-mcp-server.md` § 7.3 for the versioning
 policy that governs MCP `protocolVersion` floor and primary
 revisions.
 
-## Unreleased
+## 0.2.0 - 2026-06-24
+
+Bundles `ptc_runner` 0.13.0 — Capability Preludes, session turn logs, paged
+tool results, and new PTC-Lisp helpers (`describe`, `doc`, `parse-lines`). See
+the root changelog for details.
 
 ### Added
 
 - Human-facing PTC-Lisp REPL for Mix, Mac release, and Docker debugging.
+- Per-session prelude selection plus `(source ...)` discovery and a bundled
+  preludes list.
+- Opt-in `--collection-hint` session feedback when session bindings change.
+
+### Changed
+
+- **Breaking:** `lisp_task` success overviews no longer include the internal
+  turn and args-hash ledger fields.
+
+### Security
+
+- Redact upstream credentials from `lisp_task` success overviews.
+- Bound retained buffers (credential redaction, debug ring, prelude store) so
+  they cannot grow without limit.
 
 ### Packaging
 
-- Docker image build/publish support for GitHub Container Registry.
+- Docker image build and publish to GitHub Container Registry.
 
 ## 0.1.0 - 2026-05-25
 
