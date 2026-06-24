@@ -119,14 +119,14 @@ Use `paged/duplicate-records` when a near-unique identifier may hide repeated
 record content. It uses `paged/field-cardinality` to exclude near-unique fields
 from the default content key and reports duplicate groups plus `excess_rows`.
 
-Use `paged/reconcile-totals` when a declared or control summary should match a
-paginated detail source. It classifies grouped totals as `over`, `under`, or
-`match`. On overage, it emits an `overage_cue`: identifier uniqueness does not
-settle whether the detailed source is complete or inflated, so rule out repeated
-content before assigning blame. When a `[:sum field]` measure coerces
-string-typed numeric values, it also emits `coerced_measures`; a matching total
-then means the reconciliation used lenient numeric parsing, not that strict or
-non-coercing consumers are unaffected.
+Prefer `paged/reconcile-totals`, not hand-rolled summation, when a declared or
+control summary should match a paginated detail source. It classifies grouped
+totals as `over`, `under`, or `match`. On overage, it emits an `overage_cue`:
+identifier uniqueness does not settle whether the detailed source is complete
+or inflated, so rule out repeated content before assigning blame. When a `[:sum
+field]` measure coerces string-typed numeric values, it also emits
+`coerced_measures`; a matching total then means the reconciliation used lenient
+numeric parsing, not that strict or non-coercing consumers are unaffected.
 
 The same caution applies when reconciliation is hand-rolled with `fold-pages`.
 If detail rows exceed a declared/control total, do not treat the detail source

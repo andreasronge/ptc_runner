@@ -8,7 +8,10 @@
        string counts, and composite-key collisions.
     4. (paged/duplicate-records source {}) to find repeated content when a
        near-unique identifier hides duplicate rows.
-    5. (paged/reconcile-totals source opts) when declared/control totals exist.
+    5. Prefer (paged/reconcile-totals source opts), not hand-rolled summation,
+       when declared/control totals exist. It emits overage_cue for excess
+       detail rows and coerced_measures when [:sum field] parses string-typed
+       numeric values; a match with coerced_measures assumes a lenient consumer.
     6. If any reconciliation, built-in or hand-rolled, shows detail rows over a
        declared/control total, do not treat detail as authoritative until
        duplicate or inflated content under fresh identifiers is ruled out.
