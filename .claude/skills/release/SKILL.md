@@ -12,6 +12,9 @@ Release version **$ARGUMENTS** of PtcRunner. Follow every step in order. Stop an
 
 ## Prerequisites
 
+- This skill releases the **root `ptc_runner`** Hex package (`v*` tags). For the
+  MCP server (`ptc_runner_mcp`), use `mcp_server/RELEASING.md` (`mcp-v*` tags).
+  `docs/RELEASING.md` is the authoritative root release checklist.
 - `HEX_API_KEY` secret must be configured in GitHub repo settings
 - The `release.yml` GitHub Action handles publishing after push
 
@@ -34,15 +37,21 @@ Run these checks and stop on first failure:
 
 ## Step 3: Quality checks
 
-Run each and fix issues before proceeding:
+Run the authoritative local release gate from `docs/RELEASING.md` (the source of
+truth, together with `.github/workflows/release.yml`). Run each in order and fix
+all issues before proceeding:
 
-1. `mix format --check-formatted` - fix with `mix format` if needed
-2. `mix compile --warnings-as-errors`
-3. `mix credo --strict`
-4. `mix test`
-5. `cd demo && mix test` (demo tests)
-6. `mix docs` - verify no warnings in output
-7. `mix hex.build` - verify package builds
+1. `mix precommit` - format, compile (warnings-as-errors), credo, schema, spec, tests
+2. `mix prepush` - dialyzer, unused-deps
+3. `mix release.smoke` - deterministic root release checks, root + MCP soak,
+   `mix hex.build` package-content verification, schema/spec/bench baselines,
+   `mix docs --warnings-as-errors`, and the sibling `mcp_server` release smoke
+
+`mix release.smoke` publishes nothing and supersedes the standalone `mix docs` /
+`mix hex.build` steps (set `PTC_SOAK_ITERATIONS` to tune soak duration; default
+`3000`). After the release commit lands on `main`, run the `Release` workflow
+manually with `skip_llm: true` as a CI dry run before tagging - see
+`docs/RELEASING.md`.
 
 ## Step 4: Version bump
 
