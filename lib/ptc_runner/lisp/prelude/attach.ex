@@ -43,8 +43,8 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
 
     * `"upstream:<server>/<tool>"` — validated against the selected upstream
       runtime. `<server>` must be a configured upstream; `<tool>` must be
-      present in that upstream's tool list (mirroring
-      `PtcRunner.Upstream.CallTool` configured-tool checks). When an upstream's
+      present in that upstream's tool list (mirroring the upstream runtime's
+      configured-tool checks). When an upstream's
       tool list is not yet materialized (lazy MCP transports report `nil`
       tools), the specific tool cannot be checked and the requirement passes on
       the configured server alone. When **no** upstream runtime is configured

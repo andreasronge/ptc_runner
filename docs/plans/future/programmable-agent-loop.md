@@ -220,7 +220,7 @@ Researched against the source; this direction is incremental, not greenfield.
 | --- | --- | --- |
 | Prompt rendering | `system_prompt` already accepts a **function** (`fn default -> modified end`), map (`:prefix`/`:suffix`/`:language_spec`/`:output_format`), or string; `:language_spec` accepts a callback (`system_prompt.ex` moduledoc). Prompt cards have byte budgets (`PromptRegistry`, `priv/prompts/README.md`). | Hooks are Elixir-only and whole-prompt; no Lisp-implementable, section-level surface. Prompt cards are a natural *output contract* for a `render-prompt` hook. |
 | Turn feedback | Hardcoded in `SubAgent.Loop.TurnFeedback`. | No hook at all. Likely the highest-value first site: feedback phrasing is domain-sensitive and purely textual. |
-| Compaction | `compaction:` config with `token_counter: fun/1` (Elixir hook); Phase 1 = `:trim` only; custom strategies + `:summarize` deferred to the Phase 2 stub ([`pressure-triggered-context-compaction-phase-2.md`](pressure-triggered-context-compaction-phase-2.md)). | Strategy is host-module-only. A `compact` hook supplies *what to pin/summarize*; the trigger and size floor stay host-owned per the principle above. Phase 2's open questions (summary watermark/cache, state plumbing) apply to the hook variant unchanged. |
+| Compaction | `compaction:` config with `token_counter: fun/1` (Elixir hook); Phase 1 = `:trim` only; custom strategies + `:summarize` deferred to the Phase 2 stub (`pressure-triggered-context-compaction-phase-2.md`, planned/not yet authored). | Strategy is host-module-only. A `compact` hook supplies *what to pin/summarize*; the trigger and size floor stay host-owned per the principle above. Phase 2's open questions (summary watermark/cache, state plumbing) apply to the hook variant unchanged. |
 | Context projection | `filter_context` (AST-driven dataset filtering), `Exposure`, `ctx`-style sampling ideas in the control-plane doc. | Projection policy is not programmable; a pure `project-context` hook fits the existing data flow. |
 | Plan/progress | Journal capability: `(task ...)`, `(step-done ...)`, mission-log injection into prompts (`capability-journal.md`, `loop.ex`). | One global vocabulary; durability and authority issues are a separate *mechanism* discussion (ledger; roadmap §4). The prelude side here is only the *vocabulary* (`plan/*` verbs) and its rendering. |
 | Invoking Lisp hooks from the host | Already possible with the public API: `Lisp.run/2` with the prelude attached, hook-call source, `memory:`, and `tools: %{}` is a pure, sandboxed hook invocation. `RuntimeCallable` shows the pattern for context-bound callables if a direct-apply API is wanted later. | No first-class `apply_export/4`-style host API; per-call sandbox spawn is the V1 cost. If `PtcRunner.Lisp.RunEnv` ships ([`capability-kernel-runtime.md`](capability-kernel-runtime.md)), hook invocation is a clean second consumer for it. |
@@ -335,8 +335,8 @@ forms, and evolvable through the slow loop.
   declared in prelude/profile metadata?
 - How do hook results appear in traces — full input/output capture, or
   bounded summaries with the same payload policy as tool calls?
-- Should compaction Phase 2 (`:summarize`, custom strategies — see
-  [`pressure-triggered-context-compaction-phase-2.md`](pressure-triggered-context-compaction-phase-2.md))
+- Should compaction Phase 2 (`:summarize`, custom strategies — see the planned
+  `pressure-triggered-context-compaction-phase-2.md`, not yet authored)
   be implemented as the `compact` hook directly, skipping a parallel
   Elixir-module strategy API?
 - When child SubAgents run, do parent hooks apply to children, or must the

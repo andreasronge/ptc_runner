@@ -225,10 +225,11 @@ defmodule PtcRunner.Lisp do
 
   Exceeding limits returns an error:
   - `{:error, {:timeout, ms}}` - execution exceeded timeout
-  - `{:error, {:memory_exceeded, info}}` - heap limit exceeded; `info` is
-    `PtcRunner.Sandbox.memory_exceeded_info/0` diagnostics (`phase: :eval`
-    for a program over its budget, `phase: :setup` for a granted
-    environment over the setup ceiling), surfaced in `Step.fail.details`
+  - `{:error, {:memory_exceeded, info}}` - heap limit exceeded; `info` is a
+    diagnostics map (`:phase`, `:limit_bytes`, `:baseline_bytes`,
+    `:budget_bytes`) where `phase: :eval` marks a program over its budget and
+    `phase: :setup` a granted environment over the setup ceiling, surfaced in
+    `Step.fail.details`
 
   ## Context Filtering
 
