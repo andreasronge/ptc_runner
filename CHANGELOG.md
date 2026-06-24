@@ -7,19 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [0.13.0] - 2026-06-24
+
+### Breaking Changes
+
+- Slimmed the MCP `lisp_task` activity ledger (removed internal turn and
+  args-hash fields from the success overview).
+
+### Added
+
+- Capability Preludes (V1): define and deploy reusable, namespaced PTC-Lisp
+  capability libraries — including tool-backed exports — that programs and
+  SubAgents can call. Backed by a versioned prelude store with editing tools,
+  configurable defaults, and per-session prelude selection (root, MCP, and
+  SubAgent). See the authoring & deploying guide.
+- Session turn log and introspection: record per-turn session activity and
+  query it from PTC-Lisp via the `log/` prelude and `(source ...)` discovery.
+- Paged access to large tool results so programs can fold over big payloads
+  within the memory budget.
+- New PTC-Lisp helpers: `describe`, `doc`, and JSON `parse-lines`.
+- SubAgent-to-upstream bridge so SubAgents can call configured upstream tools
+  with fail-closed prelude requirements.
+- Opt-in session feedback (collection hints) and configurable session
+  preview/result caps.
+
+### Changed
+
+- Re-baselined sandbox heap accounting so granted environment data no longer
+  counts against a program's memory budget; programs that previously hit the
+  limit purely from large grants now run.
+- Upstream tool calls apply a default side-effect guard.
+
 ### Fixed
 
-- Bounded the MCP credential redaction ETS table by per-secret size, total
-  plaintext bytes, and per-binding rotation retention so rotated credentials no
-  longer accumulate for the lifetime of the node.
-- Bounded the `lisp_debug` in-memory ring by per-record and total stored bytes,
-  summarizing oversized records and evicting oldest records under byte pressure.
-- Bounded `TraceLog.Collector` enqueue pressure with a pre-cast event byte cap
-  and mailbox-length shedding for overloaded file collectors.
-- Bounded PreludeStore public error strings and MCP session prelude discovery
-  docstrings so model-authored ids and docs cannot be reflected unbounded.
-- Rejected `prelude` as an editable PreludeStore id so stored candidates cannot
-  collide with the host-owned `prelude/` wrapper namespace.
+- Hardened memory bounds so retained buffers (credential redaction, debug ring,
+  trace collector, prelude store) can no longer grow unbounded.
+- PTC-Lisp formatting/conformance fixes for regex literals, reader-macro forms,
+  and turn-history references (`*1`/`*2`/`*3`).
+- Fixed broken cross-references in the published API documentation.
 
 ## [0.12.0] - 2026-06-03
 
