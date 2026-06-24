@@ -2,17 +2,53 @@
   "Bounded analysis helpers over paginated upstream sources.
 
   Workflow:
-    1. (paged/inspect source {:sample 5}) to discover exact row field names.
-    2. (paged/profile source opts) for one-pass row_count, field presence,
+    1. (paged/offset-source server tool args opts) for offset + limit tools.
+    2. (paged/inspect source {:sample 5}) to discover exact row field names.
+    3. (paged/profile source opts) for one-pass row_count, field presence,
        string counts, and composite-key collisions.
+    4. (paged/duplicate-records source {}) to find repeated content when a
+       near-unique identifier hides duplicate rows.
+    5. (paged/reconcile-totals source opts) when declared/control totals exist.
+    6. If any reconciliation, built-in or hand-rolled, shows detail rows over a
+       declared/control total, do not treat detail as authoritative until
+       duplicate or inflated content under fresh identifiers is ruled out.
+       Identifier uniqueness alone does not prove excess rows are real; run
+       (paged/duplicate-records source {:ignore-fields [\"<id-field>\"]}) on
+       the relevant overage group before assigning source-direction blame.
 
   Source maps use :server, :tool, :args, and nested :page keys. See
   (doc paged/profile) for the full source and opts shape."
   {:visibility :prompt})
 
-(def default-limit 1000)
-(def default-max-pages 25)
-(def default-max-entries 5000)
+(defn- default-limit [] 1000)
+(defn- default-max-pages [] 25)
+(defn- default-max-entries [] 5000)
+(defn- default-id-ratio [] 0.99)
+(defn- default-abs-tolerance [] 0.01)
+(defn- default-rel-tolerance [] 1.0e-6)
+
+(defn- opts-get
+  [m k fallback]
+  (or (get m k) (get m (name k)) fallback))
+
+(defn offset-source
+  "Build a source map for upstream tools paged by offset and limit arguments.
+
+  Options: :limit, :offset-arg, :limit-arg, :rows-at, :parse, :max-pages,
+  :max-entries. Defaults use offset/limit argument names and bounded scans."
+  [server tool args opts]
+  (let [opts-map (or opts {})]
+    {:server server
+     :tool tool
+     :args (or args {})
+     :page {:mode :offset
+            :limit (opts-get opts-map :limit (default-limit))
+            :offset-arg (opts-get opts-map :offset-arg "offset")
+            :limit-arg (opts-get opts-map :limit-arg "limit")
+            :rows-at (opts-get opts-map :rows-at [:value "rows"])
+            :parse (opts-get opts-map :parse :value)
+            :max-pages (opts-get opts-map :max-pages (default-max-pages))
+            :max-entries (opts-get opts-map :max-entries (default-max-entries))}}))
 
 (defn- opt
   [m k fallback]
@@ -73,15 +109,15 @@
 
 (defn- source-limit
   [source]
-  (max 1 (or (opt (page-spec source) :limit nil) default-limit)))
+  (max 1 (or (opt (page-spec source) :limit nil) (default-limit))))
 
 (defn- source-max-pages
   [source]
-  (max 1 (or (opt (page-spec source) :max-pages nil) default-max-pages)))
+  (max 1 (or (opt (page-spec source) :max-pages nil) (default-max-pages))))
 
 (defn- source-max-entries
   [source]
-  (max 1 (or (opt (page-spec source) :max-entries nil) default-max-entries)))
+  (max 1 (or (opt (page-spec source) :max-entries nil) (default-max-entries))))
 
 (defn- page-mode
   [source]
@@ -207,7 +243,14 @@
   (assoc m k (+ 1 (or (get m k) 0))))
 
 (defn fold-pages
-  "Fold rows from a paginated source without materializing the full input."
+  "Fold a paginated source one row at a time without materializing the full input.
+
+  The step callback is invoked as (step acc row) for each parsed record in page
+  order. Despite the name, row is one record, not a page batch.
+
+  Examples:
+    (paged/fold-pages source 0 (fn [acc _row] (inc acc)))
+    (paged/fold-pages source [] (fn [acc row] (if (pred row) (conj acc row) acc)))"
   [source init step]
   (let [source (validate-source! source)]
     (loop [pos (if (option= (page-mode source) :token) nil 0)
@@ -318,6 +361,377 @@
       (fn [entry] (> (second entry) 1))
       counts)))
 
+(defn- value-fingerprint
+  [value]
+  (json/generate-string value))
+
+(defn- update-cardinality-field
+  [source stat value]
+  (let [current (or stat {"present" 0 "values" {} "capped" false})
+        present-count (+ 1 (get current "present"))]
+    (if (get current "capped")
+      (assoc current "present" present-count)
+      (let [values (assoc (get current "values") (value-fingerprint value) true)
+            capped (> (count values) (source-max-entries source))]
+        (if capped
+          {"present" present-count "values" {} "capped" true}
+          {"present" present-count "values" values "capped" false})))))
+
+(defn- add-cardinality-row
+  [source acc row]
+  (let [fields
+          (reduce
+            (fn [stats field]
+              (let [value (get row field)]
+                (if (present? value)
+                  (assoc stats field (update-cardinality-field source (get stats field) value))
+                  stats)))
+            (get acc "fields")
+            (keys row))]
+    {"row_count" (+ 1 (get acc "row_count"))
+     "fields" fields}))
+
+(defn- finalize-cardinality-field
+  [row-count stat]
+  (let [present-count (get stat "present")
+        distinct-count (if (get stat "capped")
+                         present-count
+                         (count (get stat "values")))
+        ratio (if (> present-count 0)
+                (/ distinct-count present-count)
+                0)]
+    {"present" present-count
+     "distinct" distinct-count
+     "ratio" ratio
+     "capped" (get stat "capped")}))
+
+(defn field-cardinality
+  "Report present, distinct, and distinct/present ratio for observed fields."
+  [source]
+  (let [folded
+          (fold-pages
+            source
+            {"row_count" 0 "fields" {}}
+            (fn [acc row] (add-cardinality-row source acc row)))
+        row-count (get folded "row_count")
+        fields (get folded "fields")]
+    {"row_count" row-count
+     "fields"
+       (reduce
+         (fn [acc field]
+           (assoc acc field (finalize-cardinality-field row-count (get fields field))))
+         {}
+         (keys fields))}))
+
+(defn- opts-list
+  [opts k]
+  (or (get opts k) (get opts (name k)) []))
+
+(defn- opts-number
+  [opts k fallback]
+  (or (get opts k) (get opts (name k)) fallback))
+
+(defn- list-set
+  [values]
+  (reduce (fn [acc value] (assoc acc value true)) {} values))
+
+(defn- in-set?
+  [m value]
+  (= true (get m value)))
+
+(defn- natural-key-fields
+  [cardinality opts]
+  (let [pinned (or (get opts :key-fields) (get opts "key-fields") (get opts "key_fields"))
+        ignore (list-set (opts-list opts :ignore-fields))
+        threshold (opts-number opts :id-ratio (default-id-ratio))
+        fields (get cardinality "fields")]
+    (if pinned
+      pinned
+      (vec
+        (filter
+          (fn [field]
+            (let [stats (get fields field)]
+              (and (not (in-set? ignore field))
+                   (< (get stats "ratio") threshold))))
+          (keys fields))))))
+
+(defn- duplicate-summary
+  [counts limit]
+  (let [dups (filter (fn [entry] (> (second entry) 1)) counts)
+        excess (reduce (fn [acc entry] (+ acc (- (second entry) 1))) 0 dups)]
+    {"groups" (count dups)
+     "excess_rows" excess
+     "examples" (take limit dups)}))
+
+(defn duplicate-records
+  "Find repeated record content while excluding near-unique identifier fields.
+
+  Options: :key-fields, :ignore-fields, :id-ratio, :limit. Returns key_fields,
+  excluded fields, duplicate group count, excess_rows, and example groups."
+  [source opts]
+  (let [opts-map (or opts {})
+        limit (opts-number opts-map :limit 10)
+        pinned (or (get opts-map :key-fields) (get opts-map "key-fields") (get opts-map "key_fields"))
+        cardinality (if pinned nil (field-cardinality source))
+        key-fields (if pinned pinned (natural-key-fields cardinality opts-map))
+        key-set (list-set key-fields)
+        excluded (if pinned
+                   []
+                   (vec
+                     (filter
+                       (fn [field] (not (in-set? key-set field)))
+                       (keys (get cardinality "fields")))))
+        counts (group-count source key-fields)
+        summary (duplicate-summary counts limit)]
+    {"key_fields" key-fields
+     "excluded" excluded
+     "groups" (get summary "groups")
+     "excess_rows" (get summary "excess_rows")
+     "examples" (get summary "examples")}))
+
+(defn- numeric-string?
+  [value]
+  (and (string? value) (re-matches #"-?\d+(\.\d+)?" value)))
+
+(defn- coerce-number
+  [value]
+  (cond
+    (number? value) value
+    (numeric-string? value) (Double/parseDouble value)
+    :else nil))
+
+(defn- abs-number
+  [value]
+  (if (< value 0) (- 0 value) value))
+
+(defn- within-tolerance?
+  [delta declared abs-tol rel-tol]
+  (<= (abs-number delta)
+      (max abs-tol (* rel-tol (abs-number declared)))))
+
+(defn- recon-status
+  [actual declared abs-tol rel-tol]
+  (let [delta (- actual declared)]
+    (cond
+      (within-tolerance? delta declared abs-tol rel-tol) "match"
+      (> delta 0) "over"
+      :else "under")))
+
+(defn- measure-value
+  [spec row]
+  (cond
+    (= spec :count) 1
+    (= spec "count") 1
+    (and (vector? spec) (= (first spec) :sum)) (or (coerce-number (get row (second spec))) 0)
+    (and (vector? spec) (= (first spec) "sum")) (or (coerce-number (get row (second spec))) 0)
+    :else 0))
+
+(defn- sum-measure?
+  [spec]
+  (and (vector? spec)
+       (or (= (first spec) :sum) (= (first spec) "sum"))))
+
+(defn- measure-coercion
+  [measure-name spec row]
+  (if (sum-measure? spec)
+    (let [field (second spec)
+          raw (get row field)]
+      (if (numeric-string? raw)
+        {measure-name {"field" field "coerced_rows" 1}}
+        {}))
+    {}))
+
+(defn- merge-measure-coercion
+  [acc entry]
+  (let [measure-name (first entry)
+        info (second entry)
+        current (or (get acc measure-name) {"field" (get info "field") "coerced_rows" 0})]
+    (assoc acc measure-name
+           {"field" (get current "field")
+            "coerced_rows" (+ (get current "coerced_rows") (get info "coerced_rows"))})))
+
+(defn- merge-coercions
+  [acc coercions]
+  (reduce merge-measure-coercion acc coercions))
+
+(defn- apply-measures
+  [acc measures row]
+  (reduce
+    (fn [next entry]
+      (let [measure-name (first entry)
+            spec (second entry)
+            measured (assoc next measure-name (+ (or (get next measure-name) 0) (measure-value spec row)))
+            row-coercions (measure-coercion measure-name spec row)]
+        (if (seq row-coercions)
+          (assoc measured "__coercions" (merge-coercions (or (get measured "__coercions") {}) row-coercions))
+          measured)))
+    acc
+    measures))
+
+(defn- group-direction
+  [group-measures]
+  (let [statuses (map (fn [entry] (get (second entry) "status")) group-measures)]
+    (cond
+      (some (fn [status] (= status "over")) statuses) "over"
+      (some (fn [status] (= status "under")) statuses) "under"
+      :else "match")))
+
+(defn- overage-cue
+  [over-keys id-field]
+  (if (seq over-keys)
+    (str
+      "Overage in " (count over-keys) " group(s): actuals exceed the declared "
+      "control total. An over-count in a detailed source is as consistent with "
+      "duplicate or inflated records carrying fresh ids as with a stale control "
+      "summary; identifier uniqueness alone does not resolve the direction. "
+      "Before treating the detailed source as the more complete one, run "
+      "(paged/duplicate-records source {:ignore-fields [\"" id-field "\"]}) "
+      "scoped to the over groups to rule out repeated content.")
+    nil))
+
+(defn- coercion-cue
+  [field count]
+  (str
+    "Measure field " field " included " count
+    " string-typed value(s) that were coerced to numbers; this reconciliation "
+    "assumes a lenient consumer. A strict or non-coercing consumer may reject "
+    "or mishandle these rows, so do not report the type inconsistency as "
+    "harmless to totals without checking the actual consumer."))
+
+(defn- reconcile-opts-map
+  [opts]
+  (or opts {}))
+
+(defn- reconcile-group-by
+  [opts]
+  (or (get opts :group-by) (get opts "group-by") (get opts "group_by")))
+
+(defn- reconcile-measures
+  [opts]
+  (or (get opts :measures) (get opts "measures") {"count" :count}))
+
+(defn- reconcile-declared
+  [opts]
+  (or (get opts :declared) (get opts "declared") {}))
+
+(defn- reconcile-id-field
+  [opts]
+  (or (get opts :id-field) (get opts "id-field") (get opts "id_field") "record_id"))
+
+(defn- reconcile-abs-tolerance
+  [opts]
+  (or (get opts :tolerance) (get opts "tolerance") (default-abs-tolerance)))
+
+(defn- reconcile-rel-tolerance
+  [opts]
+  (or (get opts :rel-tolerance) (get opts "rel-tolerance") (get opts "rel_tolerance") (default-rel-tolerance)))
+
+(defn- reconcile-actuals
+  [source group-by measures]
+  (fold-pages
+    source
+    {}
+    (fn [acc row]
+      (let [group-key (group-by row)]
+        (assoc acc group-key (apply-measures (or (get acc group-key) {}) measures row))))))
+
+(defn- add-group-coercion
+  [acc group-key entry]
+  (let [measure-name (first entry)
+        info (second entry)
+        current (or (get acc measure-name) {"field" (get info "field") "coerced_rows" 0 "groups" []})
+        next-count (+ (get current "coerced_rows") (get info "coerced_rows"))]
+    (assoc acc measure-name
+           {"field" (get current "field")
+            "coerced_rows" next-count
+            "groups" (conj (get current "groups") group-key)})))
+
+(defn- collect-coerced-measures
+  [actuals]
+  (reduce
+    (fn [acc group-key]
+      (reduce
+        (fn [next entry] (add-group-coercion next group-key entry))
+        acc
+        (get-in actuals [group-key "__coercions"])))
+    {}
+    (keys actuals)))
+
+(defn- add-coercion-cues
+  [coerced]
+  (reduce
+    (fn [acc entry]
+      (let [measure-name (first entry)
+            info (second entry)]
+        (assoc acc measure-name
+               (assoc info "cue" (coercion-cue (get info "field") (get info "coerced_rows"))))))
+    {}
+    coerced))
+
+(defn- reconcile-group
+  [actuals declared measures abs-tol rel-tol group-key]
+  (reduce
+    (fn [acc entry]
+      (let [measure-name (first entry)
+            actual (or (get-in actuals [group-key measure-name]) 0)
+            expected (or (get-in declared [group-key measure-name]) 0)
+            delta (- actual expected)]
+        (assoc acc measure-name {"actual" actual
+                                 "declared" expected
+                                 "delta" delta
+                                 "status" (recon-status actual expected abs-tol rel-tol)})))
+    {}
+    measures))
+
+(defn- add-direction-key
+  [acc groups group-key]
+  (let [direction (group-direction (get groups group-key))]
+    (update acc direction (fnil conj []) group-key)))
+
+(defn reconcile-totals
+  "Reconcile actual grouped totals from SOURCE against declared/control totals.
+
+  Opts:
+    :group-by fn row -> group key
+    :measures name -> :count or [:sum field]
+    :declared group key -> {measure name -> declared value}
+    :id-field near-unique identifier for the duplicate-records follow-up
+    :tolerance absolute numeric slack, default 0.01
+    :rel-tolerance relative numeric slack, default 1e-6
+
+  Returns groups, disjoint summary buckets for over/under/match, and an
+  overage_cue when actuals exceed declared totals. Direction is not settled by
+  an overage: rule out duplicate or inflated detailed records before treating
+  the detailed source as authoritative."
+  [source opts]
+  (let [opts-map (reconcile-opts-map opts)
+        group-by (reconcile-group-by opts-map)
+        measures (reconcile-measures opts-map)
+        declared (reconcile-declared opts-map)
+        id-field (reconcile-id-field opts-map)
+        abs-tol (reconcile-abs-tolerance opts-map)
+        rel-tol (reconcile-rel-tolerance opts-map)
+        actuals (reconcile-actuals source group-by measures)
+        coerced-measures (add-coercion-cues (collect-coerced-measures actuals))
+        group-keys (distinct (concat (keys actuals) (keys declared)))
+        groups
+          (reduce
+            (fn [acc group-key]
+              (assoc acc group-key (reconcile-group actuals declared measures abs-tol rel-tol group-key)))
+            {}
+            group-keys)
+        summary
+          (reduce
+            (fn [acc group-key] (add-direction-key acc groups group-key))
+            {"over" [] "under" [] "match" []}
+            group-keys)
+        over-keys (get summary "over")]
+    (cond->
+      {"groups" groups
+       "summary" summary}
+      (seq (keys coerced-measures)) (assoc "coerced_measures" coerced-measures)
+      (seq over-keys) (assoc "overage_cue" (overage-cue over-keys id-field)))))
+
 (defn- profile-opts
   [opts]
   (or opts {}))
@@ -388,10 +802,18 @@
      \"string_counts\" field -> rows where that field value is a string
      \"collision_count\" composite keys with at least one duplicate row}
 
-  Source shape, with keyword or string keys accepted:
+  collision_count only tests the caller-supplied :collision-fields. A zero
+  count on a near-unique identifier does not rule out repeated record content;
+  run (paged/duplicate-records source {}) for a record-level duplicate check.
+
+  For offset + limit tools, prefer:
+    (paged/offset-source \"pages\" \"read_lines\" {:path \"/data/events.jsonl\"}
+      {:rows-at [:value \"content\"] :parse :jsonl :limit 500})
+
+  Full source shape, with keyword or string keys accepted:
     {:server \"pages\"
      :tool \"read_large_file_chunk\"
-     :args {:filePath \"/data/trips.jsonl\"}
+     :args {:filePath \"/data/events.jsonl\"}
      :page {:mode :chunk-index
             :limit 500
             :offset-arg :chunkIndex
@@ -405,9 +827,9 @@
 
   Opts shape:
     {:sample 3
-     :presence-fields [\"end_station_id\"]
-     :string-fields [\"duration_min\"]
-     :collision-fields [\"bike_id\" \"start_time\"]}
+     :presence-fields [\"status\"]
+     :string-fields [\"amount\"]
+     :collision-fields [\"entity_id\" \"event_time\"]}
 
   Use \"row_count\" as line_count when each parsed row is one input line."
   [source opts]
