@@ -20,6 +20,8 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
   """
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
+
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.PromptInventory
@@ -71,7 +73,7 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
 
   setup do
     {:ok, agent} = Agent.start_link(fn -> [] end)
-    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+    on_exit(fn -> stop_quietly(agent) end)
     {:ok, prelude} = Compiler.compile(@crm_source)
     %{agent: agent, prelude: prelude}
   end

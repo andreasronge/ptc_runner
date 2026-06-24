@@ -1,11 +1,13 @@
 defmodule PtcRunner.TraceLog.MemorySinkTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
+
   alias PtcRunner.TraceLog.MemorySink
 
   defp start_sink(opts \\ []) do
     {:ok, sink} = MemorySink.start_link(opts)
-    on_exit(fn -> if Process.alive?(sink), do: GenServer.stop(sink) end)
+    on_exit(fn -> stop_quietly(sink) end)
     sink
   end
 

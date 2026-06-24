@@ -9,6 +9,8 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
   """
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
+
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step
 
@@ -61,7 +63,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
 
   setup do
     {:ok, agent} = Agent.start_link(fn -> [] end)
-    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+    on_exit(fn -> stop_quietly(agent) end)
     {:ok, prelude} = Compiler.compile(@crm_source)
     %{agent: agent, prelude: prelude}
   end
@@ -94,7 +96,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
 
     test "recoverable failure result is branchable", %{prelude: prelude} do
       {:ok, agent} = Agent.start_link(fn -> [] end)
-      on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+      on_exit(fn -> stop_quietly(agent) end)
 
       failing_tools = %{
         "call" => fn _args ->
@@ -270,7 +272,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
     setup do
       {:ok, prelude} = Compiler.compile(@paged_data_source)
       {:ok, agent} = Agent.start_link(fn -> [] end)
-      on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+      on_exit(fn -> stop_quietly(agent) end)
       %{prelude: prelude, agent: agent}
     end
 
