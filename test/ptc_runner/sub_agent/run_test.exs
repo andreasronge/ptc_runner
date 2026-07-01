@@ -2,6 +2,7 @@ defmodule PtcRunner.SubAgent.RunTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.SubAgent
+  import PtcRunner.TestSupport.PublicStepAssertions
 
   describe "run/2 - error cases" do
     test "returns error when llm is missing" do
@@ -54,6 +55,51 @@ defmodule PtcRunner.SubAgent.RunTest do
       assert step.return == %{"value" => 42}
       assert step.fail == nil
       assert step.usage.turns == 1
+    end
+
+    test "externalizes final memory while preserving multi-turn keyword state" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 2)
+
+      {:ok, responses} =
+        Agent.start_link(fn -> ["(def m {:page {:parse :jsonl}})", "(return :done)"] end)
+
+      llm = fn _input ->
+        Agent.get_and_update(responses, fn [response | rest] -> {{:ok, response}, rest} end)
+      end
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert_public_step!(step)
+      m = step.memory["m"]
+      page = m["page"] || m[:page]
+      parse = page["parse"] || page[:parse]
+
+      assert step.return == "done"
+      assert parse == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, parse)
+
+      final_turn = List.last(step.turns)
+      turn_m = final_turn.memory["m"]
+      turn_page = turn_m["page"] || turn_m[:page]
+      turn_parse = turn_page["parse"] || turn_page[:parse]
+      refute match?(%PtcRunner.Lisp.Keyword{}, turn_parse)
+    end
+
+    test "externalizes intermediate turn results" do
+      agent = SubAgent.new(prompt: "Test", max_turns: 2)
+
+      {:ok, responses} = Agent.start_link(fn -> ["```clojure\n:jsonl\n```", "(return :done)"] end)
+
+      llm = fn _input ->
+        Agent.get_and_update(responses, fn [response | rest] -> {{:ok, response}, rest} end)
+      end
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert_public_step!(step)
+      first_turn = List.first(step.turns)
+
+      assert step.return == "done"
+      assert first_turn.result == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, first_turn.result)
     end
 
     test "executes loop mode with tools" do

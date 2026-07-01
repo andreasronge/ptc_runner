@@ -28,6 +28,7 @@ defmodule PtcRunner.Session do
 
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Step
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunner.Upstream.Eval, as: UpstreamEval
@@ -125,11 +126,12 @@ defmodule PtcRunner.Session do
   remains the owner of REPL state. If the session was created with
   `:upstream_runtime`, evaluation goes through `PtcRunner.Upstream.Runtime`.
 
-  On success, the returned session stores `step.memory` and appends
-  `step.return` to the bounded history. On error, the returned session is the
-  original session, preserving the prior memory and history — but its `attempts`
-  counter still advances, since every attempt (including failed ones) is a
-  turn-log record.
+  On success, the returned session stores native continuation memory and appends
+  the native return value to bounded history. The returned `step` is rendered for
+  public observation; use the returned session, not `step.memory`, to continue a
+  REPL/session. On error, the returned session is the original session,
+  preserving the prior memory and history — but its `attempts` counter still
+  advances, since every attempt (including failed ones) is a turn-log record.
   """
   @spec eval(t(), String.t(), keyword()) :: eval_result()
   def eval(%__MODULE__{} = session, source, opts \\ [])
@@ -141,6 +143,7 @@ defmodule PtcRunner.Session do
       |> Keyword.merge(opts)
       |> Keyword.put(:memory, session.memory)
       |> Keyword.put(:turn_history, session.turn_history)
+      |> Keyword.put(:native_step, true)
 
     started_at = System.monotonic_time(:millisecond)
     attempt = session.attempts + 1
@@ -157,13 +160,13 @@ defmodule PtcRunner.Session do
         }
 
         emit_turn_event(session, updated, source, step, attempt, true, started_at)
-        {{:ok, step}, updated}
+        {{:ok, PublicStep.render(step, normalize_return_keys: false)}, updated}
 
       {:error, %Step{} = step} ->
         updated = %{session | attempts: attempt}
 
         emit_turn_event(session, updated, source, step, attempt, false, started_at)
-        {{:error, step}, updated}
+        {{:error, PublicStep.render(step, normalize_return_keys: false)}, updated}
     end
   end
 

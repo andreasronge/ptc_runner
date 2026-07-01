@@ -89,6 +89,31 @@ defmodule PtcRunner.Lisp do
   end
 
   @doc """
+  Converts native PTC-Lisp runtime values into the public Elixir/JSON-facing
+  representation used by `Step.return` and default `Step.memory`.
+
+  Stateful hosts may keep native values internally between turns, but should use
+  this at public observation boundaries such as final steps and trace events.
+  """
+  @spec externalize_value(term()) :: term()
+  def externalize_value(value), do: externalize_lisp_values(value)
+
+  @doc """
+  Converts a PTC-Lisp memory map into the public memory representation.
+
+  Unlike `externalize_value/1`, this also normalizes top-level `def` binding
+  keys through the bounded source vocabulary.
+  """
+  @spec externalize_memory(map()) :: map()
+  def externalize_memory(memory) when is_map(memory) do
+    memory
+    |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
+    |> Map.new(fn {k, v} ->
+      {externalize_memory_key(k), externalize_lisp_values(v)}
+    end)
+  end
+
+  @doc """
   Run a PTC-Lisp program.
 
   ## Parameters
@@ -138,6 +163,10 @@ defmodule PtcRunner.Lisp do
       against any upstream (the configured `:tools` map still guards actual tool
       surfaces). (default: nil)
     - `:trace_context` - Trace context for nested agent tracing (default: nil)
+    - `:native_step` - Return native PTC-Lisp runtime values in `step.return`
+      and `step.memory` instead of the default public representation. Stateful
+      internal hosts use this when they feed step state directly into a later
+      eval. Public callers should leave this as `false` (default).
     - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
       `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
       instrumentation: attached to `[:ptc_runner, :lisp, :execute, *]`
@@ -408,6 +437,7 @@ defmodule PtcRunner.Lisp do
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
+      native_step: Keyword.get(opts, :native_step, false),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       strict_data: Keyword.get(opts, :strict_data, false),
@@ -701,6 +731,7 @@ defmodule PtcRunner.Lisp do
       trace_context: trace_context,
       journal: journal,
       tool_cache: tool_cache,
+      native_step: native_step,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       max_tool_call_result_bytes: max_tool_call_result_bytes,
@@ -735,6 +766,7 @@ defmodule PtcRunner.Lisp do
         trace_context: trace_context,
         journal: journal,
         tool_cache: tool_cache,
+        native_step: native_step,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
@@ -1012,9 +1044,9 @@ defmodule PtcRunner.Lisp do
     cleaned_pmap_calls = Enum.map(reversed_pmap_calls, &Map.delete(&1, :child_steps))
 
     %Step{
-      return: value |> externalize_lisp_values() |> round_floats(precision),
+      return: return_for_step(value, ctx, precision),
       fail: nil,
-      memory: externalize_memory(ctx.user_ns),
+      memory: memory_for_step(ctx.user_ns, ctx),
       journal: ctx.journal,
       summaries: ctx.summaries,
       tool_cache: ctx.tool_cache,
@@ -1024,11 +1056,65 @@ defmodule PtcRunner.Lisp do
       prints: Enum.reverse(ctx.prints),
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      catalog_ops: Enum.reverse(ctx.catalog_ops),
+      catalog_ops: catalog_ops_for_step(ctx),
       child_traces: child_traces,
       child_steps: child_steps
     }
   end
+
+  defp catalog_ops_for_step(%EvalContext{native_step: true, catalog_ops: catalog_ops}) do
+    Enum.reverse(catalog_ops)
+  end
+
+  defp catalog_ops_for_step(%EvalContext{catalog_ops: catalog_ops}) do
+    catalog_ops
+    |> Enum.reverse()
+    |> externalize_value()
+  end
+
+  defp memory_for_step(memory, %EvalContext{native_step: true}), do: native_memory(memory)
+  defp memory_for_step(memory, %EvalContext{}), do: externalize_memory(memory)
+
+  defp return_for_step(value, %EvalContext{native_step: true}, precision) do
+    round_floats(value, precision)
+  end
+
+  defp return_for_step(value, %EvalContext{}, precision) do
+    value |> externalize_value() |> round_floats(precision)
+  end
+
+  defp native_memory(memory) when is_map(memory) do
+    memory
+    |> Enum.reject(fn {_k, v} -> match?(%RuntimeCallable{}, v) end)
+    |> Map.new(fn {k, v} -> {k, native_memory_value(v)} end)
+  end
+
+  defp native_memory_value(%RuntimeCallable{} = callable), do: RuntimeCallable.label(callable)
+
+  defp native_memory_value(value) when is_list(value) do
+    Enum.map(value, &native_memory_value/1)
+  end
+
+  defp native_memory_value(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} -> {native_memory_value(k), native_memory_value(v)} end)
+  end
+
+  defp native_memory_value({:__ptc_return__, inner}),
+    do: {:__ptc_return__, native_memory_value(inner)}
+
+  defp native_memory_value({:__ptc_fail__, inner}),
+    do: {:__ptc_fail__, native_memory_value(inner)}
+
+  defp native_memory_value({:closure, _params, _body, _env, _turn_history, _metadata} = closure),
+    do: closure
+
+  defp native_memory_value(%MapSet{} = set) do
+    set
+    |> Enum.map(&native_memory_value/1)
+    |> MapSet.new()
+  end
+
+  defp native_memory_value(value), do: value
 
   # Round floats recursively in nested structures
   defp round_floats(value, nil), do: value
@@ -1084,6 +1170,12 @@ defmodule PtcRunner.Lisp do
     Enum.map(value, &externalize_lisp_values/1)
   end
 
+  defp externalize_lisp_values(%MapSet{} = set) do
+    set
+    |> Enum.map(&externalize_lisp_values/1)
+    |> MapSet.new()
+  end
+
   defp externalize_lisp_values(value) when is_map(value) and not is_struct(value) do
     Map.new(value, fn {k, v} ->
       {externalize_lisp_values(k), externalize_lisp_values(v)}
@@ -1091,14 +1183,6 @@ defmodule PtcRunner.Lisp do
   end
 
   defp externalize_lisp_values(value), do: value
-
-  defp externalize_memory(memory) when is_map(memory) do
-    memory
-    |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
-    |> Map.new(fn {k, v} ->
-      {externalize_memory_key(k), externalize_lisp_values(v)}
-    end)
-  end
 
   # Memory keys are `def`-bound variable names. Externalize them through the
   # same bounded vocabulary as parsed symbols: builtin names remain atoms,

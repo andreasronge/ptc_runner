@@ -43,6 +43,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   that is where memory-diff values and prints get their byte bounds.
   """
 
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceLog.Event
 
@@ -98,7 +99,10 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   def preview(nil), do: "nil"
 
   def preview(value) do
-    rendered = inspect(value, limit: @preview_items, printable_limit: @preview_limit)
+    rendered =
+      value
+      |> PublicStep.value()
+      |> inspect(limit: @preview_items, printable_limit: @preview_limit)
 
     if String.length(rendered) > @preview_limit do
       String.slice(rendered, 0, @preview_limit - 3) <> "..."
@@ -163,7 +167,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
     else
       %{
         changed_keys: changed |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort(),
-        values: changed
+        values: PublicStep.memory(changed)
       }
     end
   end

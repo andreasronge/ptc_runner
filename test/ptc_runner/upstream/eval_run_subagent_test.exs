@@ -24,6 +24,8 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
   alias PtcRunner.Upstream.Eval
   alias PtcRunner.Upstream.Runtime
 
+  import PtcRunner.TestSupport.PublicStepAssertions
+
   @schema Path.expand(
             "../../../mcp_server/test/fixtures/openapi/observatory.openapi.json",
             __DIR__
@@ -67,6 +69,37 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
         # It genuinely hit HTTP through the bridge-enriched "call" tool.
         assert_receive {:http_fixture_request, request}, 1_000
         assert request =~ "org_id=acme"
+      after
+        Runtime.stop(runtime)
+      end
+    end
+
+    test "returns public step values while preserving internal native execution state" do
+      {:ok, runtime} = Runtime.start_link(config: config())
+
+      agent =
+        SubAgent.new(
+          prompt: "Remember parser.",
+          output: :ptc_lisp,
+          max_turns: 2
+        )
+
+      try do
+        {result, _records} =
+          Eval.run_subagent(runtime, agent,
+            llm:
+              sequenced_llm([
+                "(def m {:page {:parse :jsonl}})",
+                "(return :jsonl)"
+              ])
+          )
+
+        assert {:ok, step} = result
+        assert_public_step!(step)
+        assert step.return == "jsonl"
+
+        page = get_in(step.memory, ["m", "page"]) || get_in(step.memory, ["m", :page])
+        assert (page["parse"] || page[:parse]) == "jsonl"
       after
         Runtime.stop(runtime)
       end

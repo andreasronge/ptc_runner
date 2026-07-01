@@ -28,9 +28,8 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   """
 
   alias PtcRunner.Lisp.ExecutionError
-  alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.SubAgent.{LLMTool, SubAgentTool, Telemetry}
-  alias PtcRunner.SubAgent.Runner
+  alias PtcRunner.Step.Public, as: PublicStep
+  alias PtcRunner.SubAgent.{Definition, LLMTool, Runner, SubAgentTool, Telemetry}
   alias PtcRunner.Tool
 
   @doc """
@@ -487,21 +486,25 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
     case result do
       {:ok, step} ->
+        public_step = PublicStep.render(step)
+
         # Return wrapper with trace_id and child step so callers can collect them
         %{
           __child_trace_id__: child_trace_id,
-          __child_step__: prune_child_step(step),
-          value: step.return
+          __child_step__: prune_child_step(public_step),
+          value: public_step.return
         }
 
       {:error, step} ->
+        public_step = PublicStep.render(step)
+
         # Propagate child agent failure with child step for tree visibility
         raise PtcRunner.Lisp.ExecutionError,
           reason: :tool_error,
           message: name,
-          data: step.fail.message,
+          data: public_step.fail.message,
           child_trace_id: child_trace_id,
-          child_step: prune_child_step(step)
+          child_step: prune_child_step(public_step)
     end
   end
 
@@ -510,14 +513,17 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   defp execute_without_trace(name, agent, run_opts) do
     case Runner.run(agent, run_opts) do
       {:ok, step} ->
-        %{__child_step__: prune_child_step(step), value: step.return}
+        public_step = PublicStep.render(step)
+        %{__child_step__: prune_child_step(public_step), value: public_step.return}
 
       {:error, step} ->
+        public_step = PublicStep.render(step)
+
         raise PtcRunner.Lisp.ExecutionError,
           reason: :tool_error,
           message: name,
-          data: step.fail.message,
-          child_step: prune_child_step(step)
+          data: public_step.fail.message,
+          child_step: prune_child_step(public_step)
     end
   end
 

@@ -103,6 +103,7 @@ defmodule PtcRunner.SubAgent.Runner do
               opts
               |> Keyword.put(:context, context)
               |> Keyword.put(:llm, llm)
+              |> Keyword.put(:native_step_result, true)
               |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
 
             Loop.run(agent, updated_opts)
@@ -273,6 +274,7 @@ defmodule PtcRunner.SubAgent.Runner do
       opts
       |> Keyword.put(:context, context)
       |> Keyword.put(:llm, llm)
+      |> Keyword.put(:native_step_result, true)
       |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
 
     Loop.run(agent, updated_opts)
@@ -288,6 +290,7 @@ defmodule PtcRunner.SubAgent.Runner do
          opts
        ) do
     collect_messages = Keyword.get(opts, :collect_messages, false)
+    initial_memory = Keyword.get(opts, :initial_memory, %{})
 
     # Expand template in mission
     expanded_prompt = expand_template(agent.prompt, context)
@@ -298,7 +301,7 @@ defmodule PtcRunner.SubAgent.Runner do
     resolution_context = %{
       turn: 1,
       model: llm,
-      memory: %{},
+      memory: initial_memory,
       messages: messages
     }
 
@@ -334,8 +337,10 @@ defmodule PtcRunner.SubAgent.Runner do
               case PtcRunner.Lisp.run(code,
                      context: context,
                      tools: %{},
+                     memory: initial_memory,
                      float_precision: agent.float_precision,
-                     prelude: agent.runtime_prelude
+                     prelude: agent.runtime_prelude,
+                     native_step: true
                    ) do
                 {:ok, step} -> Definition.unwrap_sentinels(step)
                 other -> other

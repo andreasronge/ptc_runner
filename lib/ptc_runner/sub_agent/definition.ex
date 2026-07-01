@@ -11,6 +11,7 @@ defmodule PtcRunner.SubAgent.Definition do
   """
 
   alias PtcRunner.PreludeStore.Selection
+  alias PtcRunner.Step.Public, as: PublicStep
 
   @typedoc """
   Language spec for system prompts.
@@ -381,6 +382,8 @@ defmodule PtcRunner.SubAgent.Definition do
   end
 
   def unwrap_sentinels(%{return: {:__ptc_fail__, value}} = step) do
+    value = PublicStep.value(value)
+
     # Handle both structured and simple fail values
     {reason, message} =
       if is_map(value) do

@@ -82,6 +82,26 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedTurnHistoryTest do
       assert p2["status"] == "ok"
       assert p2["result"] == "user=> 3"
     end
+
+    test "keyword value pushed on intermediate remains keyword via *1" do
+      llm =
+        tool_calling_llm([
+          ptc_lisp_call("c1", ":jsonl"),
+          ptc_lisp_call("c2", "(keyword? *1)"),
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: %{}, max_turns: 5)
+      {:ok, step} = run_combined(agent, llm)
+
+      assert step.return == "done"
+
+      [p1, p2] = tool_payloads(step)
+      assert p1["status"] == "ok"
+      assert p1["result"] == "user=> :jsonl"
+      assert p2["status"] == "ok"
+      assert p2["result"] == "user=> true"
+    end
   end
 
   # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   """
 
   alias PtcRunner.Step
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
   alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog
@@ -305,7 +306,10 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   def build_result_preview(nil), do: "nil"
 
   def build_result_preview(result) do
-    preview = inspect(result, limit: :infinity, printable_limit: @max_result_preview_length)
+    preview =
+      result
+      |> PublicStep.value()
+      |> inspect(limit: :infinity, printable_limit: @max_result_preview_length)
 
     if String.length(preview) > @max_result_preview_length do
       String.slice(preview, 0, @max_result_preview_length - 3) <> "..."

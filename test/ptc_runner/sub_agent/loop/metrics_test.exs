@@ -1,6 +1,7 @@
 defmodule PtcRunner.SubAgent.Loop.MetricsTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.SubAgent.Loop.Metrics
 
   defp base_state(overrides \\ %{}) do
@@ -42,6 +43,17 @@ defmodule PtcRunner.SubAgent.Loop.MetricsTest do
       usage = Metrics.build_final_usage(base_state(), 100, 2_048)
 
       refute Map.has_key?(usage, :compaction)
+    end
+  end
+
+  describe "build_result_preview/1" do
+    test "externalizes native Lisp keyword values" do
+      assert Metrics.build_result_preview(%LispKeyword{name: "jsonl"}) == ~s("jsonl")
+    end
+
+    test "renders closure values as opaque function previews" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      assert Metrics.build_result_preview(closure) == ~s("#fn[x]")
     end
   end
 end

@@ -18,6 +18,11 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
 
   alias PtcRunner.SubAgent
 
+  defp nested_parse(memory) do
+    page = get_in(memory, ["m", "page"]) || get_in(memory, ["m", :page])
+    page["parse"] || page[:parse]
+  end
+
   # ============================================================
   # Success path / (return ...) / (fail ...)
   # ============================================================
@@ -110,6 +115,27 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
 
       assert {:ok, step} = SubAgent.run(agent, llm: llm)
       assert step.return == "just a string answer"
+    end
+
+    test "direct final answer externalizes memory preserved from prior lisp_eval" do
+      llm =
+        scripted_llm([
+          tool_call_response("(def m {:page {:parse :jsonl}})", id: "c1"),
+          content_response("done")
+        ])
+
+      agent =
+        SubAgent.new(prompt: "Test", ptc_transport: :tool_call, max_turns: 5)
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      parse = nested_parse(step.memory)
+      final_turn_parse = nested_parse(List.last(step.turns).memory)
+
+      assert step.return == "done"
+      assert parse == "jsonl"
+      assert final_turn_parse == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, parse)
+      refute match?(%PtcRunner.Lisp.Keyword{}, final_turn_parse)
     end
 
     test ":string signature: raw text returned" do
@@ -781,6 +807,24 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
 
       {:ok, step} = SubAgent.run(agent, llm: llm)
       assert step.return == 3
+    end
+
+    test "*1 preserves keyword return values from previous intermediate execution" do
+      llm =
+        scripted_llm([
+          tool_call_response(":jsonl", id: "c1"),
+          tool_call_response("(return (keyword? *1))", id: "c2")
+        ])
+
+      agent =
+        SubAgent.new(prompt: "Test", ptc_transport: :tool_call, max_turns: 5)
+
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+      first_turn = List.first(step.turns)
+
+      assert step.return == true
+      assert first_turn.result == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, first_turn.result)
     end
 
     test "direct-answer turns do NOT advance turn_history" do

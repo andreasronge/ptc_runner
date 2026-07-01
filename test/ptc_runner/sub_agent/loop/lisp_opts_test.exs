@@ -1,6 +1,7 @@
 defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.SubAgent.Loop.LispOpts
   alias PtcRunner.SubAgent.Loop.State
 
@@ -34,7 +35,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
   end
 
   describe "build/4" do
-    test "emits the canonical 14 keys in stable order" do
+    test "emits the canonical keys in stable order" do
       agent = agent_fixture()
       state = state_fixture()
       opts = LispOpts.build(agent, state, %{user: "u1"}, %{})
@@ -52,12 +53,45 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
                :budget,
                :trace_context,
                :journal,
-               :tool_cache
+               :tool_cache,
+               :native_step
              ]
 
       assert opts[:context] == %{user: "u1"}
       assert opts[:tools] == %{}
       assert opts[:float_precision] == 4
+      assert opts[:native_step] == true
+    end
+
+    test "preserves nested keyword values when memory is fed into the next turn" do
+      agent = agent_fixture()
+
+      first_opts =
+        LispOpts.build(agent, state_fixture(%{memory: %{}, tool_cache: %{}}), %{}, %{})
+
+      assert {:ok, first} = Lisp.run("(def m {:page {:parse :jsonl}})", first_opts)
+
+      second_opts =
+        LispOpts.build(agent, state_fixture(%{memory: first.memory, tool_cache: %{}}), %{}, %{})
+
+      assert {:ok, second} = Lisp.run("(keyword? (get (get m :page) :parse))", second_opts)
+      assert second.return == true
+    end
+
+    test "preserves keyword return values when turn_history is fed into the next turn" do
+      agent = agent_fixture()
+      state = state_fixture(%{memory: %{}, tool_cache: %{}})
+      opts = LispOpts.build(agent, state, %{}, %{})
+
+      assert {:ok, first} = Lisp.run(":jsonl", opts)
+
+      state =
+        state_fixture(%{memory: first.memory, tool_cache: %{}, turn_history: [first.return]})
+
+      opts = LispOpts.build(agent, state, %{}, %{})
+
+      assert {:ok, second} = Lisp.run("(keyword? *1)", opts)
+      assert second.return == true
     end
 
     test "appends :max_heap when state.max_heap is set, omits when nil" do

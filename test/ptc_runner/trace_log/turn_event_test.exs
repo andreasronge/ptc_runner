@@ -1,6 +1,7 @@
 defmodule PtcRunner.TraceLog.TurnEventTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.TraceLog.TurnEvent
 
   describe "build/1" do
@@ -98,6 +99,27 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
 
       # An unchanged nil binding is not a change.
       assert TurnEvent.memory_diff(%{"x" => nil}, %{"x" => nil}) == nil
+    end
+
+    test "externalizes native Lisp keywords in changed values" do
+      diff =
+        TurnEvent.memory_diff(%{}, %{
+          "m" => %{"page" => %{"parse" => %LispKeyword{name: "jsonl"}}}
+        })
+
+      assert diff == %{
+               changed_keys: ["m"],
+               values: %{"m" => %{"page" => %{"parse" => "jsonl"}}}
+             }
+    end
+
+    test "renders closures in changed values as opaque function previews" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+
+      assert TurnEvent.memory_diff(%{}, %{"f" => closure}) == %{
+               changed_keys: ["f"],
+               values: %{"f" => "#fn[x]"}
+             }
     end
 
     test "returns nil for non-map inputs" do
@@ -206,6 +228,15 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
   end
 
   describe "preview/1" do
+    test "externalizes native Lisp keyword values" do
+      assert TurnEvent.preview(%LispKeyword{name: "jsonl"}) == ~s("jsonl")
+    end
+
+    test "renders closure values as opaque function previews" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      assert TurnEvent.preview(closure) == ~s("#fn[x]")
+    end
+
     test "renders nil and bounds long values" do
       assert TurnEvent.preview(nil) == "nil"
       assert TurnEvent.preview([1, 2, 3]) == "[1, 2, 3]"

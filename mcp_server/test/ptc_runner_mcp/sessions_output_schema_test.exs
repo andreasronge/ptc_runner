@@ -237,6 +237,20 @@ defmodule PtcRunnerMcp.SessionsOutputSchemaTest do
       assert followup["result"] == "user=> 7"
     end
 
+    test "native keyword values validate then render as public JSON values" do
+      session_id = start_session()
+
+      assert {:ok, response} =
+               Sessions.eval(session_id, ":jsonl", nil, %{
+                 parsed_signature: {:signature, [], :keyword}
+               })
+
+      assert response["status"] == "ok"
+      assert response["validated"] == "jsonl"
+      assert response["result"] == "user=> :jsonl"
+      assert response["session"]["turn"] == 1
+    end
+
     test "legacy optional signature is rejected" do
       session_id = start_session()
 

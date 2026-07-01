@@ -239,7 +239,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         step_with_metrics = %{
           step
           | usage: Metrics.build_final_usage(state, duration_ms, 0),
-            turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+            turns:
+              Metrics.apply_trace_filter(
+                Enum.reverse(state.turns),
+                state.trace_mode,
+                true
+              ),
             messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt
@@ -343,7 +348,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         step_with_metrics = %{
           step
           | usage: usage,
-            turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+            turns:
+              Metrics.apply_trace_filter(
+                Enum.reverse(state.turns),
+                state.trace_mode,
+                true
+              ),
             messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt
@@ -618,7 +628,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         step_with_metrics = %{
           step
           | usage: Metrics.build_final_usage(state, duration_ms, 0),
-            turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+            turns:
+              Metrics.apply_trace_filter(
+                Enum.reverse(state.turns),
+                state.trace_mode,
+                true
+              ),
             messages: Shared.build_collected_messages(state, messages),
             prompt: state.expanded_prompt,
             original_prompt: state.original_prompt,
@@ -1449,7 +1464,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   defp fail_message_and_preview(fail_args) do
     {preview, _truncated} = Format.to_clojure(fail_args, limit: 50)
-    {inspect(fail_args), preview}
+    {inspect(Lisp.externalize_value(fail_args)), preview}
   end
 
   defp extract_program(%{args_error: error_msg}) when is_binary(error_msg) do
@@ -2361,7 +2376,12 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     step_with_metrics = %{
       step
       | usage: usage,
-        turns: Metrics.apply_trace_filter(Enum.reverse(state.turns), state.trace_mode, true),
+        turns:
+          Metrics.apply_trace_filter(
+            Enum.reverse(state.turns),
+            state.trace_mode,
+            true
+          ),
         messages: Shared.build_collected_messages(state, state.messages),
         prompt: state.expanded_prompt,
         original_prompt: state.original_prompt,

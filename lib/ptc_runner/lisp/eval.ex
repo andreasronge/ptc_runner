@@ -1780,7 +1780,8 @@ defmodule PtcRunner.Lisp.Eval do
           pcalls_user_ns(eval_ctx, metadata),
           closure_env,
           eval_ctx.tool_exec,
-          eval_ctx.turn_history
+          eval_ctx.turn_history,
+          native_step: eval_ctx.native_step
         )
         |> EvalContext.inherit_prelude(eval_ctx)
         |> maybe_push_prelude_origin(metadata, eval_ctx)

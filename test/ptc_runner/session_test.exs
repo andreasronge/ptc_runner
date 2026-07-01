@@ -1,8 +1,10 @@
 defmodule PtcRunner.SessionTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.PreludeStore
   alias PtcRunner.Session
+  import PtcRunner.TestSupport.PublicStepAssertions
 
   doctest PtcRunner.Session
 
@@ -19,6 +21,108 @@ defmodule PtcRunner.SessionTest do
         Session.eval(session, "(+ session_total 1)")
 
       assert step2.return == 42
+    end
+
+    test "preserves nested keyword values across evals" do
+      session = Session.new()
+
+      {{:ok, _step1}, session} =
+        Session.eval(session, "(def m2 {:page {:parse :jsonl}})")
+
+      {{:ok, _step2}, session} =
+        Session.eval(session, "(do (defn touch [x] x) (touch 1))")
+
+      {{:ok, step2}, _session} =
+        Session.eval(session, "(keyword? (get (get m2 :page) :parse))")
+
+      assert step2.return == true
+    end
+
+    test "returns externalized memory while storing native memory internally" do
+      session = Session.new()
+
+      {{:ok, step}, session} =
+        Session.eval(session, "(def m2 {:page {:parse :jsonl}})")
+
+      assert_public_step!(step)
+      page = get_in(step.memory, ["m2", "page"])
+
+      assert (page["parse"] || page[:parse]) == "jsonl"
+
+      page_key = %LispKeyword{name: "page"}
+      parse_value = %LispKeyword{name: "jsonl"}
+
+      assert get_in(session.memory, ["m2", page_key, :parse]) == parse_value
+    end
+
+    test "preserves keyword return values in turn history across evals" do
+      session = Session.new()
+
+      {{:ok, step1}, session} =
+        Session.eval(session, ":jsonl")
+
+      {{:ok, step2}, _session} =
+        Session.eval(session, "(keyword? *1)")
+
+      assert_public_step!(step1)
+      assert_public_step!(step2)
+      assert step1.return == "jsonl"
+      assert step2.return == true
+    end
+
+    test "does not persist a top-level runtime callable binding" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, step}, session} =
+        Session.eval(session, "(def f tool/echo)")
+
+      refute Map.has_key?(step.memory, "f")
+      refute Map.has_key?(session.memory, "f")
+    end
+
+    test "sanitizes nested runtime callables while preserving nested keywords" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, _step}, session} =
+        Session.eval(session, "(def m {:f tool/echo :xs [tool/echo] :parse :jsonl})")
+
+      {{:ok, step}, _session} =
+        Session.eval(
+          session,
+          "[(keyword? (get m :parse)) (= (get m :f) \"tool/echo\") (= (first (get m :xs)) \"tool/echo\")]"
+        )
+
+      assert step.return == [true, true, true]
+    end
+
+    test "preserves runtime callables captured by persisted closures" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, _step}, session} =
+        Session.eval(session, ~S|(def f (let [g tool/echo] (fn [xs] (map g xs))))|)
+
+      {{:ok, step}, _session} =
+        Session.eval(session, ~S|(f [{:x 7}])|)
+
+      assert step.return == [7]
+    end
+
+    test "returns public closure previews while storing native closures internally" do
+      session = Session.new()
+
+      {{:ok, step}, session} =
+        Session.eval(session, "(defn touch [x] x)")
+
+      assert_public_step!(step)
+      assert step.memory["touch"] == "#fn[x]"
+
+      assert match?(
+               {:closure, _params, _body, _env, _turn_history, _metadata},
+               session.memory["touch"]
+             )
     end
 
     test "*1 reads the most recent successful return" do

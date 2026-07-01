@@ -7,6 +7,7 @@ defmodule PtcRunner.Upstream.Eval do
   `discovery_exec:`), and runs PTC-Lisp programs against them.
   """
 
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.{Definition, Runner}
   alias PtcRunner.Upstream.{CallTool, Discovery, RunContext, SideEffectGuard}
 
@@ -144,9 +145,14 @@ defmodule PtcRunner.Upstream.Eval do
       # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).
       # Behaviour-preserving today: the %Definition{} clause of SubAgent.run/2 is a
       # pure forward to Runner.run/2.
-      Runner.run(enriched, run_opts)
+      enriched
+      |> Runner.run(run_opts)
+      |> render_subagent_result()
     end)
   end
+
+  defp render_subagent_result({:ok, step}), do: {:ok, PublicStep.render(step)}
+  defp render_subagent_result({:error, step}), do: {:error, PublicStep.render(step)}
 
   defp maybe_decorate(tools, nil), do: tools
 

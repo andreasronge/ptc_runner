@@ -419,6 +419,86 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert csc["session_id"] == sid
     end
 
+    test "session memory preserves nested keyword values across eval turns" do
+      sid = SoakHelpers.start_session()
+
+      first =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(def m2 {:page {:parse :jsonl}})"
+        })
+
+      assert first["isError"] == false
+
+      closure_call =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(do (defn touch [x] x) (touch 1))"
+        })
+
+      assert closure_call["isError"] == false
+
+      second =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(keyword? (get (get m2 :page) :parse))"
+        })
+
+      assert second["isError"] == false
+      assert second["structuredContent"]["result"] == "user=> true"
+    end
+
+    test "session turn history preserves keyword return values across eval turns" do
+      sid = SoakHelpers.start_session()
+
+      first =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ":jsonl"
+        })
+
+      assert first["isError"] == false
+      assert first["structuredContent"]["result"] == "user=> :jsonl"
+
+      second =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(keyword? *1)"
+        })
+
+      assert second["isError"] == false
+      assert second["structuredContent"]["result"] == "user=> true"
+    end
+
+    test "session memory sanitizes nested runtime callables across eval turns" do
+      sid = SoakHelpers.start_session()
+      owner = Owner.stdio()
+      {:ok, meta} = SessionsRegistry.lookup(sid)
+      request_id = make_ref()
+      program = "(def m {:f tool/echo :xs [tool/echo] :parse :jsonl})"
+
+      {:ok, snapshot} =
+        Session.begin_eval(meta.pid, owner, request_id, %{program: program})
+
+      result =
+        Sessions.run_snapshot(snapshot, program, %{
+          tools: %{"echo" => fn args -> args end}
+        })
+
+      assert {:ok, %{"status" => "ok"}} =
+               Session.commit_eval(meta.pid, owner, request_id, result, %{})
+
+      second =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" =>
+            "[(keyword? (get m :parse)) (= (get m :f) \"tool/echo\") (= (first (get m :xs)) \"tool/echo\")]"
+        })
+
+      assert second["isError"] == false
+      assert second["structuredContent"]["result"] == "user=> [true true true]"
+    end
+
     test "clear directive empties a history bucket but preserves memory" do
       sid = SoakHelpers.start_session()
       SoakHelpers.eval_ok!(sid, "(do (println \"a\") (def keep 1) keep)")
@@ -663,6 +743,24 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
                  prelude: Introspection.prelude_source(),
                  tools: Introspection.tools(path)
                )
+    end
+
+    @tag :tmp_dir
+    test "result previews externalize native keyword returns", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+
+      assert {:ok, response} = Sessions.eval(sid, ":jsonl")
+      assert response["status"] == "ok"
+
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert get_in(turn, ["data", "result_preview"]) == ~s("jsonl")
+      refute get_in(turn, ["data", "result_preview"]) =~ "PtcRunner.Lisp.Keyword"
     end
 
     @tag :tmp_dir
@@ -1198,7 +1296,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       refute Projection.eval_success(previous, committed, rows, [])["feedback"] =~ "collection of"
     end
 
-    test "lisp_session_eval end-to-end: def of a large collection triggers named hint" do
+    test "lisp_session_eval compact envelope omits non-truncated collection hint" do
       Config.set(%{Config.get() | collection_hint: true})
       sid = SoakHelpers.start_session()
 
@@ -1209,8 +1307,8 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
         })
 
       feedback = envelope["structuredContent"]["feedback"] || ""
-      assert feedback =~ "Binding `rows` is a collection of 30 maps"
-      assert feedback =~ "(describe rows {:paths true})"
+      refute feedback =~ "Binding `rows` is a collection of 30 maps"
+      refute feedback =~ "(describe rows {:paths true})"
     end
 
     test "collection hint fires by name when an eval defs a large map collection" do

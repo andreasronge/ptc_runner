@@ -1,6 +1,8 @@
 defmodule PtcRunner.SubAgent.ChatTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.PtcToolCallTestHelpers
+
   alias PtcRunner.SubAgent
 
   describe "chat/3 text mode" do
@@ -286,6 +288,106 @@ defmodule PtcRunner.SubAgent.ChatTest do
         )
 
       assert result2 == %{"value" => 43}
+    end
+
+    test "memory threading preserves nested keyword values across calls" do
+      agent =
+        SubAgent.new(
+          prompt: "placeholder",
+          output: :ptc_lisp,
+          system_prompt: "You are a helpful assistant."
+        )
+
+      llm1 = fn _input ->
+        {:ok,
+         %{
+           content: "(def m {:page {:parse :jsonl}})\n(return :stored)",
+           tokens: %{input: 10, output: 5}
+         }}
+      end
+
+      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+
+      llm2 = fn _input ->
+        {:ok,
+         %{
+           content: "(return (keyword? (get (get m :page) :parse)))",
+           tokens: %{input: 10, output: 5}
+         }}
+      end
+
+      assert {:ok, true, _messages2, _memory2} =
+               SubAgent.chat(agent, "Check parser",
+                 llm: llm2,
+                 messages: messages1,
+                 memory: memory1
+               )
+    end
+
+    test "single-shot memory threading preserves nested keyword values across calls" do
+      agent =
+        SubAgent.new(
+          prompt: "placeholder",
+          output: :ptc_lisp,
+          system_prompt: "You are a helpful assistant.",
+          max_turns: 1
+        )
+
+      llm1 = fn _input ->
+        {:ok,
+         %{
+           content: "(def m {:page {:parse :jsonl}})\n(return :stored)",
+           tokens: %{input: 10, output: 5}
+         }}
+      end
+
+      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+
+      llm2 = fn _input ->
+        {:ok,
+         %{
+           content: "(return (keyword? (get (get m :page) :parse)))",
+           tokens: %{input: 10, output: 5}
+         }}
+      end
+
+      assert {:ok, true, _messages2, _memory2} =
+               SubAgent.chat(agent, "Check parser",
+                 llm: llm2,
+                 messages: messages1,
+                 memory: memory1
+               )
+    end
+
+    test "tool-call chat direct final keeps returned memory native for the next call" do
+      agent =
+        SubAgent.new(
+          prompt: "placeholder",
+          output: :ptc_lisp,
+          ptc_transport: :tool_call,
+          system_prompt: "You are a helpful assistant.",
+          max_turns: 5
+        )
+
+      llm1 =
+        scripted_llm([
+          tool_call_response("(def m {:page {:parse :jsonl}})", id: "c1"),
+          content_response("stored")
+        ])
+
+      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+
+      llm2 =
+        scripted_llm([
+          tool_call_response("(return (keyword? (get (get m :page) :parse)))", id: "c2")
+        ])
+
+      assert {:ok, true, _messages2, _memory2} =
+               SubAgent.chat(agent, "Check parser",
+                 llm: llm2,
+                 messages: messages1,
+                 memory: memory1
+               )
     end
 
     test "history threading — initial_messages are prepended in PTC-Lisp mode" do

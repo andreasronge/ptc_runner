@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
   alias PtcRunner.PtcToolProtocol
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.TraceLog.Collector
   alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunnerMcp.Limits, as: McpLimits
@@ -729,7 +730,11 @@ defmodule PtcRunnerMcp.Sessions.Session do
   defp validate_return_value(_return, nil), do: :no_contract
 
   defp validate_return_value(return, {:signature, _params, return_type} = parsed_signature) do
-    typed = PtcToolProtocol.atomize_value(return, return_type)
+    typed =
+      return
+      |> PublicStep.value()
+      |> PtcToolProtocol.atomize_value(return_type)
+
     definition = %{parsed_signature: parsed_signature}
 
     case PtcToolProtocol.validate_return(definition, typed) do
@@ -902,6 +907,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        context: Map.get(opts, :context, %{}),
        tools: session_eval_tools(snapshot, Map.get(opts, :tools, [])),
        tool_cache: %{},
+       native_step: true,
        caller: :mcp,
        profile: Map.get(opts, :profile, :mcp_no_tools),
        timeout: Map.get(opts, :timeout, McpLimits.program_timeout_ms()),

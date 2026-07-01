@@ -28,12 +28,25 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Definition
 
+  import PtcRunner.TestSupport.PublicStepAssertions
   import PtcRunner.TestSupport.SubAgentTestHelpers, only: [tool_calling_llm: 1]
 
   defp into_combined(%Definition{} = agent), do: %{agent | ptc_transport: :tool_call}
 
-  defp run_combined(agent, llm) do
-    SubAgent.run(into_combined(agent), llm: llm, collect_messages: true)
+  defp run_combined(agent, llm, opts \\ []) do
+    base_opts = [llm: llm, collect_messages: true]
+    SubAgent.run(into_combined(agent), Keyword.merge(base_opts, opts))
+  end
+
+  defp nested_parse(memory) do
+    page_key = PtcRunner.Lisp.Keyword.new("page")
+    parse_key = PtcRunner.Lisp.Keyword.new("parse")
+
+    page =
+      get_in(memory, ["m", "page"]) || get_in(memory, ["m", :page]) ||
+        get_in(memory, ["m", page_key])
+
+    page["parse"] || page[:parse] || page[parse_key]
   end
 
   # ---------------------------------------------------------------------------
@@ -59,6 +72,74 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
       {:ok, step} = run_combined(agent, llm)
 
       assert step.return == "hello world"
+    end
+
+    test "final text externalizes memory preserved from lisp_eval" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "lisp_eval",
+                args: %{"program" => "(def m {:page {:parse :jsonl}})"}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: %{}, max_turns: 5)
+
+      {:ok, step} = run_combined(agent, llm)
+      assert_public_step!(step)
+      parse = nested_parse(step.memory)
+      turn_parse = nested_parse(List.last(step.turns).memory)
+
+      assert step.return == "done"
+      assert parse == "jsonl"
+      assert turn_parse == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, parse)
+      refute match?(%PtcRunner.Lisp.Keyword{}, turn_parse)
+    end
+
+    test "validation retry turns externalize memory preserved from lisp_eval" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "lisp_eval",
+                args: %{"program" => "(def m {:page {:parse :jsonl}})"}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "not-an-int", tokens: %{input: 1, output: 1}},
+          %{content: "42", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          output: :text,
+          signature: "() -> :int",
+          tools: %{},
+          max_turns: 5
+        )
+
+      {:ok, step} = run_combined(agent, llm)
+
+      retry_turn = Enum.find(step.turns, &(&1.success? == false))
+      retry_parse = nested_parse(retry_turn.memory)
+
+      assert step.return == 42
+      assert retry_parse == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, retry_parse)
     end
   end
 
@@ -278,6 +359,44 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedFinalOutputTest do
       # tool_cache is the combined-mode `%{}` (not nil — Loop.run sets it
       # via combined mode entry path).
       assert is_map(step.tool_cache)
+    end
+
+    test "{:map, ...} final externalizes memory preserved from lisp_eval" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "lisp_eval",
+                args: %{"program" => "(def m {:page {:parse :jsonl}})"}
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: ~s|{"answer": 7}|, tokens: %{input: 1, output: 1}}
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          output: :text,
+          signature: "() -> {answer :int}",
+          tools: %{},
+          max_turns: 5
+        )
+
+      {:ok, step} = run_combined(agent, llm)
+      assert_public_step!(step)
+      parse = nested_parse(step.memory)
+      turn_parse = nested_parse(List.last(step.turns).memory)
+
+      assert step.return == %{"answer" => 7}
+      assert parse == "jsonl"
+      assert turn_parse == "jsonl"
+      refute match?(%PtcRunner.Lisp.Keyword{}, parse)
+      refute match?(%PtcRunner.Lisp.Keyword{}, turn_parse)
     end
   end
 

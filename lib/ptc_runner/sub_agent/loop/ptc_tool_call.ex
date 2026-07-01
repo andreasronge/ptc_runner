@@ -504,7 +504,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
-    error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
+    error_step = Step.error(:failed, fail_message, lisp_step.memory)
 
     final_messages =
       state.messages ++
@@ -784,13 +784,14 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
   # caller, even when zero `lisp_eval` calls happened.
   defp complete_direct_final(value, raw_content, agent, state) do
     normalized_return = KeyNormalizer.normalize_keys(value)
+    final_memory = state.memory || %{}
 
     turn =
       Metrics.build_turn(state, raw_content, nil, normalized_return,
         success?: true,
         prints: [],
         tool_calls: [],
-        memory: state.memory,
+        memory: final_memory,
         type: state.current_turn_type || :normal
       )
 
@@ -800,7 +801,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
     final_step = %Step{
       return: normalized_return,
       fail: nil,
-      memory: state.memory || %{},
+      memory: final_memory,
       journal: state.journal,
       usage: Metrics.build_final_usage(state, duration_ms, 0),
       turns:
@@ -1105,7 +1106,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
 
   defp fail_message_and_preview(fail_args) do
     {preview, _truncated} = Format.to_clojure(fail_args, limit: 50)
-    {inspect(fail_args), preview}
+    {inspect(Lisp.externalize_value(fail_args)), preview}
   end
 
   # ----------------------------------------------------------------

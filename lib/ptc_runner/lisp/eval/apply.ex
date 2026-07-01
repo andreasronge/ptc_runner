@@ -733,6 +733,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         max_heap: eval_context.max_heap,
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
+        native_step: eval_context.native_step,
         max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
         tools_meta: eval_context.tools_meta,
         discovery_exec: eval_context.discovery_exec
@@ -1101,7 +1102,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         {closure_user_ns, restore_user_ns} = prelude_run_scope(meta, user_ns, caller_ctx)
 
         closure_ctx =
-          EvalContext.new(ctx, closure_user_ns, new_env, tool_exec, caller_ctx.turn_history)
+          EvalContext.new(ctx, closure_user_ns, new_env, tool_exec, caller_ctx.turn_history,
+            native_step: caller_ctx.native_step
+          )
           |> EvalContext.inherit_prelude(caller_ctx)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.

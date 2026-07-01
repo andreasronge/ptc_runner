@@ -62,6 +62,7 @@ defmodule PtcRunner.SubAgent.Loop do
   """
 
   alias PtcRunner.{Lisp, Step, Turn}
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
 
@@ -128,6 +129,7 @@ defmodule PtcRunner.SubAgent.Loop do
   """
   @spec run(Definition.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(%Definition{} = agent, opts) do
+    native_step_result? = Keyword.get(opts, :native_step_result, false)
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -168,59 +170,68 @@ defmodule PtcRunner.SubAgent.Loop do
     max_heap = Keyword.get(opts, :max_heap)
 
     # Check nesting depth limit before starting
-    if nesting_depth >= agent.max_depth do
-      step =
-        Step.error(
-          :max_depth_exceeded,
-          "Nesting depth limit exceeded: #{nesting_depth} >= #{agent.max_depth}",
-          %{}
-        )
-
-      {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}, name: agent.name}}
-    else
-      # Check turn budget before starting
-      if remaining_turns <= 0 do
+    result =
+      if nesting_depth >= agent.max_depth do
         step =
           Step.error(
-            :turn_budget_exhausted,
-            "Turn budget exhausted: #{agent.turn_budget - remaining_turns} turns used",
+            :max_depth_exceeded,
+            "Nesting depth limit exceeded: #{nesting_depth} >= #{agent.max_depth}",
             %{}
           )
 
         {:error, %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}, name: agent.name}}
       else
-        run_opts = %{
-          llm: llm,
-          context: context,
-          nesting_depth: nesting_depth,
-          remaining_turns: remaining_turns,
-          mission_deadline: mission_deadline,
-          llm_registry: llm_registry,
-          cache: cache,
-          debug: debug,
-          trace_mode: trace_mode,
-          llm_retry: llm_retry,
-          collect_messages: collect_messages,
-          received_field_descriptions: received_field_descriptions,
-          token_limit: token_limit,
-          on_budget_exceeded: on_budget_exceeded,
-          budget_callback: budget_callback,
-          continuation_guard: continuation_guard,
-          trace_context: trace_context,
-          max_heap: max_heap,
-          journal: journal,
-          tool_cache: tool_cache,
-          discovery_exec: discovery_exec,
-          runtime: runtime,
-          on_chunk: on_chunk,
-          initial_messages: initial_messages,
-          initial_memory: initial_memory
-        }
+        # Check turn budget before starting
+        if remaining_turns <= 0 do
+          step =
+            Step.error(
+              :turn_budget_exhausted,
+              "Turn budget exhausted: #{agent.turn_budget - remaining_turns} turns used",
+              %{}
+            )
 
-        run_with_telemetry(agent, run_opts)
+          {:error,
+           %{step | usage: %{duration_ms: 0, memory_bytes: 0, turns: 0}, name: agent.name}}
+        else
+          run_opts = %{
+            llm: llm,
+            context: context,
+            nesting_depth: nesting_depth,
+            remaining_turns: remaining_turns,
+            mission_deadline: mission_deadline,
+            llm_registry: llm_registry,
+            cache: cache,
+            debug: debug,
+            trace_mode: trace_mode,
+            llm_retry: llm_retry,
+            collect_messages: collect_messages,
+            received_field_descriptions: received_field_descriptions,
+            token_limit: token_limit,
+            on_budget_exceeded: on_budget_exceeded,
+            budget_callback: budget_callback,
+            continuation_guard: continuation_guard,
+            trace_context: trace_context,
+            max_heap: max_heap,
+            journal: journal,
+            tool_cache: tool_cache,
+            discovery_exec: discovery_exec,
+            runtime: runtime,
+            on_chunk: on_chunk,
+            initial_messages: initial_messages,
+            initial_memory: initial_memory
+          }
+
+          run_with_telemetry(agent, run_opts)
+        end
       end
-    end
+
+    render_loop_result(result, native_step_result?)
   end
+
+  defp render_loop_result(result, true), do: result
+  defp render_loop_result({:ok, %Step{} = step}, false), do: {:ok, PublicStep.render(step)}
+  defp render_loop_result({:error, %Step{} = step}, false), do: {:error, PublicStep.render(step)}
+  defp render_loop_result(result, false), do: result
 
   # Wrap execution with telemetry span
   defp run_with_telemetry(agent, run_opts) do
@@ -239,21 +250,25 @@ defmodule PtcRunner.SubAgent.Loop do
       stop_meta =
         case result do
           {:ok, step} ->
+            public_step = PublicStep.render(step)
+
             %{
               agent_name: agent.name,
               agent_id: agent_id,
-              step: step,
+              step: public_step,
               status: :ok,
-              return: step.return
+              return: public_step.return
             }
 
           {:error, step} ->
+            public_step = PublicStep.render(step)
+
             %{
               agent_name: agent.name,
               agent_id: agent_id,
-              step: step,
+              step: public_step,
               status: :error,
-              fail: step.fail
+              fail: public_step.fail
             }
         end
 
@@ -993,7 +1008,7 @@ defmodule PtcRunner.SubAgent.Loop do
       )
 
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
-    error_step = Step.error(:failed, inspect(fail_args), lisp_step.memory)
+    error_step = Step.error(:failed, inspect(Lisp.externalize_value(fail_args)), lisp_step.memory)
 
     final_messages =
       state.messages ++

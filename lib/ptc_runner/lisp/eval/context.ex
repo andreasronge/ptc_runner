@@ -84,6 +84,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     pmap_calls: [],
     catalog_ops: [],
     tool_cache: %{},
+    native_step: false,
     tools_meta: %{},
     locals: MapSet.new(),
     # When true, accessing `data/<key>` for a key that was not provided
@@ -297,6 +298,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
+      native_step: Keyword.get(opts, :native_step, false),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),

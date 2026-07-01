@@ -486,6 +486,8 @@ agent = PtcRunner.SubAgent.new(
 
 The `:memory` option seeds the PTC-Lisp environment with variables from a prior call, so the LLM can reference them without re-computing.
 
+Treat the returned `memory` value as opaque continuation state: pass it back unchanged on the next `SubAgent.chat/3` call. It may contain native PTC-Lisp runtime values for correct cross-call semantics.
+
 ### Streaming
 
 Streaming works via `on_chunk`:

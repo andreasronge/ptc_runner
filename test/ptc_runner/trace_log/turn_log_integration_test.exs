@@ -313,6 +313,28 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert turn["data"]["preludes"] == []
     end
 
+    test "memory diff values externalize native Lisp keywords", %{tmp_dir: dir} do
+      [turn] =
+        session_turn_events(dir, "keyword-memdiff", fn ->
+          session = Session.new(session_id: "sess-K")
+          {{:ok, _}, _} = Session.eval(session, "(def m {:page {:parse :jsonl}})")
+        end)
+
+      assert turn["data"]["memory_diff"]["changed_keys"] == ["m"]
+      assert turn["data"]["memory_diff"]["values"]["m"]["page"]["parse"] == "jsonl"
+    end
+
+    test "result previews externalize native Lisp keyword returns", %{tmp_dir: dir} do
+      [turn] =
+        session_turn_events(dir, "keyword-result-preview", fn ->
+          session = Session.new(session_id: "sess-keyword-preview")
+          {{:ok, _}, _} = Session.eval(session, ":jsonl")
+        end)
+
+      assert turn["data"]["result_preview"] == ~s("jsonl")
+      refute turn["data"]["result_preview"] =~ "PtcRunner.Lisp.Keyword"
+    end
+
     test "the default in-memory sink receives session turns" do
       {:ok, sink} = TraceLog.start_memory_sink()
 

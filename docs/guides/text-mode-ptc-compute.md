@@ -309,6 +309,11 @@ boundary.
 across `chat/3` turns. Cross-turn threading is fully deferred to a
 future `ChatState` API.
 
+For `output: :ptc_lisp`, `SubAgent.chat/3` can thread memory explicitly
+through its returned tuple and the next call's `:memory` option. That
+memory is native continuation state; pass it back unchanged rather than
+serializing or normalizing it.
+
 **Known wart (accepted, not fixed in v1).** A previous turn's
 `full_result_cached: true` + `cache_hint` references a cache key that
 no longer exists on the next `chat/3` call. The LLM following the hint

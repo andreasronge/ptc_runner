@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- Preserve native PTC-Lisp continuation state across session/SubAgent turns while rendering public outputs safely.
+
 ## [0.13.0] - 2026-06-24
 
 ### Breaking Changes

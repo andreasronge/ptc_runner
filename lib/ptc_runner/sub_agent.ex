@@ -39,6 +39,7 @@ defmodule PtcRunner.SubAgent do
   """
 
   alias PtcRunner.PreludeStore.Selection
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Runner
 
@@ -327,11 +328,37 @@ defmodule PtcRunner.SubAgent do
         :preludes
       ])
 
-    Runner.run(agent, runtime_opts)
+    agent
+    |> run_native_resolved(runtime_opts)
+    |> render_run_result()
   end
 
   # Main implementation with SubAgent struct - delegates to the internal runner
   def run(%Definition{} = agent, opts) do
+    agent
+    |> run_native_resolved(opts)
+    |> render_run_result()
+  end
+
+  # CompiledAgent execution - unified API
+  def run(%PtcRunner.SubAgent.CompiledAgent{} = compiled, opts) when is_list(opts) do
+    context = prepare_compiled_context(opts)
+
+    if compiled.llm_required? and not Keyword.has_key?(opts, :llm) do
+      {:error,
+       PtcRunner.Step.error(
+         :llm_required,
+         "llm required for CompiledAgent with SubAgentTools",
+         %{}
+       )}
+    else
+      step = compiled.execute.(context, opts)
+      result = if step.fail, do: {:error, step}, else: {:ok, step}
+      render_run_result(result)
+    end
+  end
+
+  defp run_native_resolved(%Definition{} = agent, opts) do
     {prelude_store, opts} = Keyword.pop(opts, :prelude_store)
     {prelude_refs, opts} = Keyword.pop(opts, :preludes)
 
@@ -353,22 +380,12 @@ defmodule PtcRunner.SubAgent do
     Runner.run(agent, opts)
   end
 
-  # CompiledAgent execution - unified API
-  def run(%PtcRunner.SubAgent.CompiledAgent{} = compiled, opts) when is_list(opts) do
-    context = prepare_compiled_context(opts)
+  defp render_run_result({:ok, %PtcRunner.Step{} = step}), do: {:ok, PublicStep.render(step)}
 
-    if compiled.llm_required? and not Keyword.has_key?(opts, :llm) do
-      {:error,
-       PtcRunner.Step.error(
-         :llm_required,
-         "llm required for CompiledAgent with SubAgentTools",
-         %{}
-       )}
-    else
-      step = compiled.execute.(context, opts)
-      if step.fail, do: {:error, step}, else: {:ok, step}
-    end
-  end
+  defp render_run_result({:error, %PtcRunner.Step{} = step}),
+    do: {:error, PublicStep.render(step)}
+
+  defp render_run_result(other), do: other
 
   @doc """
   Bang variant of `run/2` that raises on failure.
@@ -457,6 +474,9 @@ defmodule PtcRunner.SubAgent do
         agent, "Now use that result",
         llm: my_llm, messages: messages, memory: memory
       )
+
+      # The returned memory is native continuation state. Treat it as opaque and
+      # pass it back unchanged; it may contain internal PTC-Lisp runtime values.
   """
   @spec chat(t(), String.t(), keyword()) ::
           {:ok, term(), [map()], map()} | {:error, term()}
@@ -502,12 +522,14 @@ defmodule PtcRunner.SubAgent do
           |> Keyword.put(:initial_messages, initial_messages)
           |> Keyword.put(:initial_memory, memory)
 
-        case run(agent, run_opts) do
+        case run_native_resolved(agent, run_opts) do
           {:ok, step} ->
-            {:ok, step.return, step.messages, step.memory}
+            public_step = PublicStep.render(step, memory: :native, turns: :native)
+            {:ok, public_step.return, public_step.messages, step.memory}
 
           {:error, step} ->
-            {:error, step.fail || step}
+            public_step = PublicStep.render(step, memory: :native, turns: :native)
+            {:error, public_step.fail || public_step}
         end
     end
   end
