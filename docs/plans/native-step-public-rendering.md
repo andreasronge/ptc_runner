@@ -2,15 +2,17 @@
 
 ## Status
 
-Implemented on 2026-07-01 except for the optional continuation wrapper
+Part 1 implemented on 2026-07-01 except for the optional continuation wrapper
 follow-up. The current implementation introduces `PtcRunner.Step.Public`,
 keeps session/SubAgent loop execution native internally, renders public
 `SubAgent.run/2` and `PtcRunner.Session.eval/3` results at the API edge, and
 adds regression coverage for MCP session keyword validation.
 
-The immediate keyword-persistence bug can ship with this renderer refactor. The
-remaining long-term hardening is to wrap opaque chat/session continuation state
-in a dedicated struct so accidental JSON encoding fails loudly.
+The immediate keyword-persistence bug shipped with this renderer refactor.
+Part 2 (below) specs the remaining structural hardening: split the native and
+public step types, wrap chat continuation state in an opaque handle, funnel
+finalization, and retire the remaining representation flags. Part 2 is
+proposed and not started.
 
 ## Problem
 
@@ -278,3 +280,222 @@ confirming the lockfile change is expected for the current branch.
 - The original two-turn reproduction passes.
 - The public invariant scanner covers the mode matrix and would have caught the
   direct-final, turn-result, trace-preview, and combined-final misses.
+
+---
+
+# Part 2 — Make the Boundary Structural
+
+## Status
+
+Implemented in the current Part 2 change for the native/public step split,
+opaque chat continuation, and removal of `native_step` /
+`native_step_result` representation flags. Remaining follow-up: finish the
+single finalization funnel/render-once cleanup and document/test the
+parent↔child SubAgent boundary contract.
+
+## Problem
+
+Part 1 centralized *how* to render, but not *whether a given value has been
+rendered*. The native/public distinction is still a temporal invariant — "has
+`Step.Public.render/2` been called on this value yet?" — that is not
+observable from the data. The Part 1 review history is the diagnostic: every
+review round found the same defect class (a native step or value crossing a
+public edge unrendered) on yet another path, because no type or runtime check
+distinguishes the two representations.
+
+Before Part 2, five weaknesses remained. This change resolves items 1, 3, and
+4; item 2 is reduced by the native/public type split but still needs continued
+renderer/scanner discipline for any new value-carrying fields; item 5 remains
+as finalization/render-once cleanup.
+
+1. **Resolved: one struct, two meanings.** `Step.Public.from_native/2` now maps
+   `%PtcRunner.Step.Native{}` to public `%PtcRunner.Step{}`. Native/public
+   confusion is visible in pattern matches instead of being implicit temporal
+   state.
+
+2. **Field-enumeration renderer and scanner.** `%Step{}` has 24 fields;
+   `Step.Public.render/2` converts 10 of them and `PublicStepAssertions`
+   checks the same 10. Any future Step field that can carry a Lisp value
+   must be added to both lists by hand or it leaks silently — exactly how
+   `catalog_ops` was missed in Part 1 review.
+
+3. **Resolved: representation flags moved rather than disappeared.**
+   `native_step:` and `native_step_result:` are gone from ordinary flow.
+   Internal callers use native entry points (`Lisp.run_native/2`,
+   `Loop.run_native/2`), and public facades render at their edge. Direct
+   `Lisp.run/2` remains the documented compatibility exception that keeps
+   `step.memory` native continuation state.
+
+4. **Resolved: Step still doubles as chat continuation state.**
+   `SubAgent.chat/3` now returns `{:ok, result, %PtcRunner.SubAgent.Chat{}}`.
+   The chat handle carries messages plus native memory, has no `Jason.Encoder`,
+   and hides internals in `Inspect`.
+
+5. **Double rendering per run.** `Loop.run_with_telemetry/2` renders the
+   final step for telemetry stop metadata, then `render_loop_result/2` (or
+   the `SubAgent` facade) renders it again for the caller. The deep-walk cost
+   is paid twice on every run.
+
+One boundary decision is also currently implicit rather than documented:
+SubAgentTool child results are rendered publicly before entering the parent's
+native runtime (`ToolNormalizer`), so keyword identity does not survive
+parent↔child agent boundaries. That is probably the right contract — child
+results are external data, like any tool result — but it is decided per call
+site and stated nowhere.
+
+## Goal
+
+> A public `%Step{}` cannot exist without going through the renderer, and
+> continuation state cannot be JSON-encoded without a loud failure.
+
+Turn the Part 1 convention into structure: pattern matches and dialyzer
+enforce the boundary, so review no longer has to enumerate paths.
+
+## Non-Goals
+
+- Do not tag every Lisp value with an envelope struct. That would make
+  externalization local and total, but it touches the entire evaluator and
+  adds allocation to every operation. The type split gets most of the safety
+  at a fraction of the cost.
+- Do not preserve the `SubAgent.chat/3` four-tuple shape. This is a 0.x
+  library; prefer the clean contract (consistent with Part 1 non-goals).
+- Do not change what public payloads contain — only how their construction
+  is enforced.
+
+## Solution Outline
+
+### 2.1 Split the step type
+
+Introduce an internal native result type and reserve `%PtcRunner.Step{}` for
+the public shape:
+
+- `%PtcRunner.Step.Native{}` (working name) is what `Lisp.run` internals, the
+  SubAgent loop, session eval, and the upstream bridge produce and thread.
+  Same field names as today's step, so internal code changes are mechanical.
+- Rename `Step.Public.render/2` to `Step.Public.from_native/2` with the
+  signature `Step.Native.t() -> Step.t()`. It becomes the only constructor
+  of public `%Step{}` in the library.
+- Public code that pattern-matches `%Step{}` can no longer accept a native
+  step; passing native where public is expected is a match/dialyzer error.
+- Double-rendering becomes unrepresentable: `from_native/2` does not accept
+  an already-public `%Step{}`.
+
+Naming: the public struct keeps the `Step` name because it is the documented
+API type; the internal struct is then free to change shape without a public
+break.
+
+Alternative considered and rejected: a `rendered?: boolean` field on
+`%Step{}`. It is invisible to dialyzer, requires guards at every consumer,
+and reintroduces the flag pattern this plan removes.
+
+### 2.2 Opaque continuation handle for chat (completes Part 1 §4)
+
+Replaced the `{:ok, result, messages, memory}` tuple of `SubAgent.chat/3`:
+
+```elixir
+{:ok, result, %PtcRunner.SubAgent.Chat{}}
+```
+
+- `%Chat{}` holds `messages` plus native continuation memory, with room for
+  journal/tool_cache later without another shape change.
+- No `Jason.Encoder` implementation, and a custom `Inspect` that elides
+  internals — JSON-encoding continuation state fails loudly instead of
+  silently stringifying keywords.
+- `chat(agent, msg, chat: prior_chat)` replaces the separate `:messages` and
+  `:memory` options.
+- With no SubAgent/Session/MCP public Step carrying native memory, the
+  `native_step` and `native_step_result` flow-control flags are deleted.
+  Direct `Lisp.run/2` remains the compatibility exception: it renders return
+  values publicly but keeps `step.memory` as continuation state for callers
+  that feed it into a later direct Lisp eval.
+
+Breaking change, external-only: `demo/` and `mcp_server/` have no `chat/3`
+callers.
+
+### 2.3 One finalization funnel; render once (completes Part 1 §5)
+
+Status: partially implemented. The loop returns native and the
+`native_step_result:` option is gone; the full render-once telemetry/finalizer
+cleanup remains.
+
+- Funnel the final-step assembly sites in `Loop`, `TextMode`, `JsonHandler`,
+  and `PtcToolCall` (currently ~19 direct `%Step{}`/`Step.error` construction
+  points) through one native-step assembler: branch code computes native
+  result and control flow; the assembler builds the native step.
+- Render exactly once per run at the `Runner.run/2` boundary. Pass the
+  already-rendered public step into the telemetry stop metadata instead of
+  rendering separately inside `run_with_telemetry/2`.
+- Delete the `native_step_result:` option — the loop always returns native;
+  the facade boundary always renders.
+
+### 2.4 Single deep-walk owner; retire assembly-time externalization
+
+Status: implemented for assembly-time externalization and the `native_step:`
+flag. Continued field coverage remains part of renderer maintenance.
+
+- Internal step assembly in `lisp.ex` always builds native. Delete
+  `memory_for_step/2`, `return_for_step/3`, `catalog_ops_for_step/1`, and
+  the `native_step:` flag on `EvalContext`.
+- `PtcRunner.Lisp.run/2` is itself a public API and keeps its externalized
+  default — implemented by rendering at its own return edge via
+  `Step.Public`, not by a second assembly-time mechanism. Internal callers
+  (Session, loop, upstream bridge) use the native entry point.
+- Fold the two deep-walkers into one owned by `Step.Public`;
+  `Lisp.externalize_value/1` remains the value-level primitive it delegates
+  to. One walker means one place to handle a new native value kind.
+
+### 2.5 Document the child-boundary contract
+
+State explicitly (SubAgentTool moduledoc + subagent guide): child SubAgent
+results are external data; keyword identity is not preserved across
+parent↔child boundaries. Add a regression test asserting the contract so a
+future "fix" cannot silently change it.
+
+## Verification
+
+- Dialyzer passes with the split types; a deliberate native-into-public
+  misuse in a test fixture is rejected.
+- `Jason.encode!/1` on `%Chat{}` raises (regression test), and `inspect/1`
+  on `%Chat{}` does not dump native internals.
+- Render-once: telemetry stop metadata and the caller result are the same
+  rendered struct (assert identity, or probe the walker with a counter).
+- The Part 1 invariant scanner is retained as a backstop over the same mode
+  matrix and still passes.
+- The original two-turn keyword reproduction passes through both `Session`
+  and the new `chat/3` shape.
+- Child-boundary test: a child agent returning `{:parse :jsonl}` yields
+  externalized data in the parent runtime, per the documented contract.
+- Repository gates: `mix format --check-formatted`, `git diff --check`,
+  `mix test`, `(cd mcp_server && mix test)`, `mix precommit`.
+
+## Acceptance Criteria
+
+- Done: public `%Step{}` values reachable from `SubAgent.run/2`, `Session.eval/3`,
+  `SubAgent.chat/3`, MCP, and trace APIs are constructible only via
+  `Step.Public.from_native/2`.
+- Done: no `native_step` or `native_step_result` representation flags remain in
+  ordinary flow. The only remaining render option exception is direct
+  `Lisp.run/2` preserving `step.memory` as continuation state for backward
+  compatibility.
+- Done: `SubAgent.chat/3` returns an opaque `%Chat{}` continuation handle whose
+  JSON encoding fails loudly.
+- Remaining: final steps are assembled by one funnel and rendered exactly once
+  per run.
+- Remaining: one deep-walk implementation owns native→public conversion.
+- Remaining: child-boundary keyword semantics are documented and tested.
+
+## Sequencing and Risk
+
+1. **Done: 2.2 Chat handle** — removes the last public carrier of native
+   memory and the chat render options.
+2. **Remaining: 2.3 Funnel + render-once** — shrinks the number of render call sites,
+   preparing the type split.
+3. **Done: 2.1 Type split + most of 2.4** — native `%Step.Native{}` is internal
+   state and public `%Step{}` is rendered at API boundaries.
+4. **Remaining: 2.5 Contract docs/test** — document and pin child-boundary
+   keyword semantics.
+
+Main risk is churn in tests that construct `%Step{}` directly; mitigate by
+keeping field names identical between the native and public structs so most
+updates are alias changes. The `chat/3` shape change is the only public
+break and lands in the changelog under a minor 0.x bump.

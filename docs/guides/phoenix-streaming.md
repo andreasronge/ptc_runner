@@ -24,7 +24,7 @@ defmodule MyAppWeb.ChatLive do
   def mount(_params, _session, socket) do
     {:ok,
      assign(socket,
-       chat_messages: [],
+       chat: PtcRunner.SubAgent.Chat.new(),
        streaming: false,
        current_response: ""
      )
@@ -36,19 +36,19 @@ defmodule MyAppWeb.ChatLive do
     # Add user message to the display stream
     user_msg = %{id: System.unique_integer([:positive]), role: :user, content: message}
     lv_pid = self()
-    chat_messages = socket.assigns.chat_messages
+    chat = socket.assigns.chat
 
     Task.start(fn ->
       result =
         SubAgent.chat(@agent, message,
           llm: my_llm(),
-          messages: chat_messages,
+          chat: chat,
           on_chunk: fn %{delta: delta} -> send(lv_pid, {:chunk, delta}) end
         )
 
       case result do
-        {:ok, _reply, updated_messages, _memory} ->
-          send(lv_pid, {:chat_done, updated_messages})
+        {:ok, _reply, updated_chat} ->
+          send(lv_pid, {:chat_done, updated_chat})
 
         {:error, reason} ->
           send(lv_pid, {:chat_error, reason})
@@ -72,7 +72,7 @@ defmodule MyAppWeb.ChatLive do
   end
 
   @impl true
-  def handle_info({:chat_done, updated_messages}, socket) do
+  def handle_info({:chat_done, updated_chat}, socket) do
     assistant_msg = %{
       id: System.unique_integer([:positive]),
       role: :assistant,
@@ -81,7 +81,7 @@ defmodule MyAppWeb.ChatLive do
 
     {:noreply,
      socket
-     |> assign(streaming: false, current_response: "", chat_messages: updated_messages)
+     |> assign(streaming: false, current_response: "", chat: updated_chat)
      |> stream_insert(:messages, assistant_msg)
      |> push_event("stream-done", %{})}
   end

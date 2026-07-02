@@ -85,8 +85,8 @@ answer requires deterministic filtering, sorting, aggregation, or date math.
 Pass only bounded history through `context:`; don't append the full transcript
 forever.
 
-`SubAgent.chat/3` is available when you want PtcRunner to thread `messages` and
-PTC-Lisp `memory` between calls:
+`SubAgent.chat/3` is available when you want PtcRunner to thread conversation
+messages and PTC-Lisp memory between calls:
 
 ```elixir
 agent = PtcRunner.SubAgent.new(
@@ -95,9 +95,9 @@ agent = PtcRunner.SubAgent.new(
   system_prompt: "Answer concisely."
 )
 
-{:ok, reply, messages, memory} = PtcRunner.SubAgent.chat(agent, "Hello", llm: llm)
-{:ok, reply2, messages2, _memory2} =
-  PtcRunner.SubAgent.chat(agent, "Tell me more", llm: llm, messages: messages, memory: memory)
+{:ok, reply, chat} = PtcRunner.SubAgent.chat(agent, "Hello", llm: llm)
+{:ok, reply2, chat2} =
+  PtcRunner.SubAgent.chat(agent, "Tell me more", llm: llm, chat: chat)
 ```
 
 Even with `chat/3`, there is no `start` / `send_message` / `close` API. Your app

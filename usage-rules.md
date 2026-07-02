@@ -75,7 +75,7 @@ For most consumers these entry points are all you need:
 | `PtcRunner.SubAgent.new/1` | Build a reusable agent struct (separates definition from runtime) |
 | `PtcRunner.SubAgent.compile/2` | Bake the LLM-generated program into a deterministic Elixir function (max_turns: 1, ptc_lisp only) |
 | `PtcRunner.SubAgent.as_tool/2` | Wrap an agent so a parent agent can call it as a tool |
-| `PtcRunner.SubAgent.chat/3` | Multi-turn chat that threads `messages` (and `memory` in PTC-Lisp mode) |
+| `PtcRunner.SubAgent.chat/3` | Multi-turn chat that threads an opaque `%PtcRunner.SubAgent.Chat{}` continuation |
 | `PtcRunner.Lisp.run/2` | Execute a PTC-Lisp program **without** an LLM (data pipelines) |
 
 Don't reach into `PtcRunner.SubAgent.Loop.*`, `PtcRunner.Lisp.Eval.*`, or other
@@ -95,9 +95,9 @@ each user message as a fresh mission:
    needs prior conversation state.
 
 Use `PtcRunner.SubAgent.chat/3` only when you specifically want its wrapper
-contract: it returns `{:ok, result, updated_messages, memory}` (or
-`{:error, reason}`) and threads those values into the next call. It is still
-not a long-lived agent process.
+contract: it returns `{:ok, result, %PtcRunner.SubAgent.Chat{}}` (or
+`{:error, reason}`), and the returned chat handle is passed back with
+`chat: chat` on the next call. It is still not a long-lived agent process.
 
 See `livebooks/output_modes_in_app_loops.livemd` for the canonical pattern:
 plain text turn, structured text turn, then a PTC-Lisp turn over the same

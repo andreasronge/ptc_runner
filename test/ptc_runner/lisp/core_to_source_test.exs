@@ -268,8 +268,8 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert CoreToSource.serialize_closure(closure) == "(fn [x] x)"
     end
 
-    test "serializes closure from Lisp.run" do
-      {:ok, step} = PtcRunner.Lisp.run("(fn [x] (+ x 1))")
+    test "serializes closure from native Lisp result" do
+      {:ok, step} = PtcRunner.Lisp.run_native("(fn [x] (+ x 1))")
       source = CoreToSource.serialize_closure(step.return)
       assert source == "(fn [x] (+ x 1))"
     end

@@ -1,6 +1,8 @@
 defmodule PtcRunner.SubAgent.CompiledAgentTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.PublicStepAssertions
+
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.{CompiledAgent, LLMTool}
 
@@ -45,6 +47,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
       mock_llm = fn _ -> {:ok, "invalid lisp code"} end
 
       assert {:error, step} = SubAgent.compile(agent, llm: mock_llm)
+      assert %PtcRunner.Step{} = step
+      assert_public_step!(step)
       assert step.fail != nil
     end
 
@@ -177,6 +181,41 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       result = compiled.execute.(%{n: 10}, [])
       assert result.return["result"] == 20
+    end
+
+    test "compiled.execute telemetry reports success status" do
+      tools = %{"add_ten" => fn %{"n" => n} -> n + 10 end}
+
+      agent =
+        SubAgent.new(
+          prompt: "Add 10 to {{n}}",
+          signature: "(n :int) -> {result :int}",
+          tools: tools,
+          max_turns: 1
+        )
+
+      mock_llm = fn _ ->
+        {:ok, ~S|(return {:result (tool/add_ten {:n data/n})})|}
+      end
+
+      {:ok, compiled} = SubAgent.compile(agent, llm: mock_llm, sample: %{n: 5})
+
+      parent = self()
+      handler_id = :"compiled_execute_status_#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:ptc_runner, :sub_agent, :compiled, :execute, :stop],
+        fn _event, _measurements, metadata, _config ->
+          send(parent, {:compiled_execute_stop, metadata.status})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert compiled.execute.(%{n: 10}, []).return["result"] == 20
+      assert_receive {:compiled_execute_stop, :ok}
     end
 
     test "compiled.execute calls tools at runtime with correct args" do
@@ -402,6 +441,8 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # Should return error, not raise
       {:error, step} = SubAgent.run(compiled, context: %{input: "test"})
+      assert %PtcRunner.Step{} = step
+      assert_public_step!(step)
       assert step.fail.reason == :llm_required
     end
 
@@ -708,8 +749,7 @@ defmodule PtcRunner.SubAgent.CompiledAgentTest do
 
       # With default heap, should succeed
       result_ok = compiled.execute.(%{size: 100}, [])
-      # `count` is a bounded-vocabulary name, so it externalizes as an atom.
-      assert result_ok.return.count == 100
+      assert result_ok.return["count"] == 100
     end
   end
 

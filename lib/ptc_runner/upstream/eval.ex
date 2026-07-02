@@ -46,7 +46,7 @@ defmodule PtcRunner.Upstream.Eval do
   end
 
   @spec run_lisp(struct() | pid(), String.t(), keyword()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+          {:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}
   def run_lisp(runtime, program, opts \\ []) do
     {result, _records} = run_lisp_with_records(runtime, program, opts)
     result
@@ -54,7 +54,7 @@ defmodule PtcRunner.Upstream.Eval do
 
   @doc false
   @spec run_lisp_with_records(struct() | pid(), String.t(), keyword()) ::
-          {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
+          {{:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}, [map()]}
   def run_lisp_with_records(runtime, program, opts \\ []) do
     context_opts = Keyword.take(opts, @context_keys)
     lisp_opts = Keyword.drop(opts, @context_keys)
@@ -80,7 +80,7 @@ defmodule PtcRunner.Upstream.Eval do
         |> Keyword.put(:tools, merged_tools)
         |> Keyword.put_new(:runtime, runtime)
 
-      PtcRunner.Lisp.run(program, opts)
+      PtcRunner.Lisp.run_native(program, opts)
     end)
   end
 
@@ -151,8 +151,8 @@ defmodule PtcRunner.Upstream.Eval do
     end)
   end
 
-  defp render_subagent_result({:ok, step}), do: {:ok, PublicStep.render(step)}
-  defp render_subagent_result({:error, step}), do: {:error, PublicStep.render(step)}
+  defp render_subagent_result({:ok, step}), do: {:ok, PublicStep.from_native(step)}
+  defp render_subagent_result({:error, step}), do: {:error, PublicStep.from_native(step)}
 
   defp maybe_decorate(tools, nil), do: tools
 

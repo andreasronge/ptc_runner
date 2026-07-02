@@ -28,6 +28,7 @@ defmodule PtcRunner.SubAgent.Loop.State do
   `compaction_stats`
   """
 
+  alias PtcRunner.Step.Native
   alias PtcRunner.Turn
 
   @enforce_keys [:llm, :context, :turn, :messages, :start_time, :work_turns_remaining]
@@ -193,7 +194,7 @@ defmodule PtcRunner.SubAgent.Loop.State do
           budget_callback: (map() -> :continue | :stop) | nil,
           continuation_guard:
             (Turn.t(), t(), t() ->
-               :continue | {:stop, {:ok | :error, PtcRunner.Step.t()}})
+               :continue | {:stop, {:ok | :error, Native.t() | PtcRunner.Step.t()}})
             | nil,
           # Trace context
           trace_context: map() | nil,

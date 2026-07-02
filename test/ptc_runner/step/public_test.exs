@@ -2,7 +2,7 @@ defmodule PtcRunner.Step.PublicTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public
   alias PtcRunner.Turn
 
@@ -21,9 +21,9 @@ defmodule PtcRunner.Step.PublicTest do
         memory: %{}
       })
 
-    step = %Step{return: :done, memory: %{}, turns: [turn], tool_calls: [call]}
+    step = %Native{return: :done, memory: %{}, turns: [turn], tool_calls: [call]}
 
-    public = Public.render(step)
+    public = Public.from_native(step)
     assert_public_step!(public)
 
     assert public.tool_calls == [
@@ -36,7 +36,7 @@ defmodule PtcRunner.Step.PublicTest do
   end
 
   test "externalizes native values in journal and tool cache" do
-    step = %Step{
+    step = %Native{
       return: :done,
       memory: %{},
       journal: %{
@@ -51,7 +51,7 @@ defmodule PtcRunner.Step.PublicTest do
       }
     }
 
-    public = Public.render(step)
+    public = Public.from_native(step)
     assert_public_step!(public)
 
     assert public.journal == %{"task" => %{"parse" => "jsonl"}}
@@ -66,7 +66,7 @@ defmodule PtcRunner.Step.PublicTest do
   end
 
   test "externalizes native values in catalog operation ledgers" do
-    step = %Step{
+    step = %Native{
       return: :done,
       memory: %{},
       catalog_ops: [
@@ -80,7 +80,7 @@ defmodule PtcRunner.Step.PublicTest do
       ]
     }
 
-    public = Public.render(step)
+    public = Public.from_native(step)
     assert_public_step!(public)
 
     assert public.catalog_ops == [
@@ -95,12 +95,12 @@ defmodule PtcRunner.Step.PublicTest do
   end
 
   test "externalizes child steps nested in tool cache" do
-    child = %Step{
+    child = %Native{
       return: %LispKeyword{name: "childret"},
       memory: %{"m" => %{"parse" => %LispKeyword{name: "jsonl"}}}
     }
 
-    step = %Step{
+    step = %Native{
       return: :done,
       memory: %{},
       tool_cache: %{
@@ -112,7 +112,7 @@ defmodule PtcRunner.Step.PublicTest do
       }
     }
 
-    public = Public.render(step)
+    public = Public.from_native(step)
     assert_public_step!(public)
 
     cached = Map.fetch!(public.tool_cache, {"child", %{}})

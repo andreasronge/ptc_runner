@@ -60,7 +60,8 @@ defmodule PtcRunner.Lisp do
   @default_max_parallel_workers 8
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native, as: Step
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
 
@@ -163,10 +164,6 @@ defmodule PtcRunner.Lisp do
       against any upstream (the configured `:tools` map still guards actual tool
       surfaces). (default: nil)
     - `:trace_context` - Trace context for nested agent tracing (default: nil)
-    - `:native_step` - Return native PTC-Lisp runtime values in `step.return`
-      and `step.memory` instead of the default public representation. Stateful
-      internal hosts use this when they feed step state directly into a later
-      eval. Public callers should leave this as `false` (default).
     - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
       `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
       instrumentation: attached to `[:ptc_runner, :lisp, :execute, *]`
@@ -200,7 +197,15 @@ defmodule PtcRunner.Lisp do
   On success, returns:
    - `{:ok, Step.t()}` with:
      - `step.return`: The value returned to the caller
-     - `step.memory`: Complete memory state after execution
+     - `step.memory`: Complete memory state after execution. This is native
+       continuation state for compatibility with direct Lisp callers that pass
+       it back through the `:memory` option on a later eval; use
+       `PtcRunner.Step.Public.memory/1` when you need a purely public
+       observation shape. Do not serialize `step.memory` (JSON, ETF-to-disk,
+       database) between evals — serialization silently converts native
+       values such as keywords into plain strings. For persistent or
+       cross-process REPL state, use `PtcRunner.Session`, which owns
+       continuation memory and returns publicly rendered steps.
      - `step.usage`: Execution metrics (`duration_ms`, `memory_bytes`,
        `eval_reductions`)
 
@@ -208,7 +213,7 @@ defmodule PtcRunner.Lisp do
   - `{:error, Step.t()}` with:
     - `step.fail.reason`: Error reason atom
     - `step.fail.message`: Human-readable error description
-    - `step.memory`: Memory state at time of error
+    - `step.memory`: Native memory state at time of error
 
   ## Memory Contract
 
@@ -280,8 +285,17 @@ defmodule PtcRunner.Lisp do
   See `PtcRunner.Lisp.DataKeys` for the static analysis implementation.
   """
   @spec run(String.t(), keyword()) ::
-          {:ok, Step.t()} | {:error, Step.t()}
+          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
   def run(source, opts \\ []) do
+    source
+    |> run_native(opts)
+    |> public_result()
+  end
+
+  @doc false
+  @spec run_native(String.t(), keyword()) ::
+          {:ok, Step.t()} | {:error, Step.t()}
+  def run_native(source, opts \\ []) do
     caller = validate_caller!(Keyword.get(opts, :caller, :in_process_v1))
     profile = validate_profile!(Keyword.get(opts, :profile))
     # Strip :caller / :profile from opts: pure instrumentation; must
@@ -311,6 +325,12 @@ defmodule PtcRunner.Lisp do
       {result, %{result_bytes: result_bytes, prints_count: prints_count}, stop_meta}
     end)
   end
+
+  defp public_result({:ok, %Step{} = step}),
+    do: {:ok, PublicStep.from_native(step, memory: :native, normalize_return_keys: false)}
+
+  defp public_result({:error, %Step{} = step}),
+    do: {:error, PublicStep.from_native(step, memory: :native, normalize_return_keys: false)}
 
   # Closed atom set for :caller telemetry tag. Validated at entry to
   # `run/2` so out-of-set values fail fast and don't reach instrumentation.
@@ -437,7 +457,6 @@ defmodule PtcRunner.Lisp do
       trace_context: Keyword.get(opts, :trace_context),
       journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
-      native_step: Keyword.get(opts, :native_step, false),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       strict_data: Keyword.get(opts, :strict_data, false),
@@ -731,7 +750,6 @@ defmodule PtcRunner.Lisp do
       trace_context: trace_context,
       journal: journal,
       tool_cache: tool_cache,
-      native_step: native_step,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       max_tool_call_result_bytes: max_tool_call_result_bytes,
@@ -766,7 +784,6 @@ defmodule PtcRunner.Lisp do
         trace_context: trace_context,
         journal: journal,
         tool_cache: tool_cache,
-        native_step: native_step,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
@@ -1044,9 +1061,9 @@ defmodule PtcRunner.Lisp do
     cleaned_pmap_calls = Enum.map(reversed_pmap_calls, &Map.delete(&1, :child_steps))
 
     %Step{
-      return: return_for_step(value, ctx, precision),
+      return: round_floats(value, precision),
       fail: nil,
-      memory: memory_for_step(ctx.user_ns, ctx),
+      memory: native_memory(ctx.user_ns),
       journal: ctx.journal,
       summaries: ctx.summaries,
       tool_cache: ctx.tool_cache,
@@ -1056,31 +1073,10 @@ defmodule PtcRunner.Lisp do
       prints: Enum.reverse(ctx.prints),
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      catalog_ops: catalog_ops_for_step(ctx),
+      catalog_ops: Enum.reverse(ctx.catalog_ops),
       child_traces: child_traces,
       child_steps: child_steps
     }
-  end
-
-  defp catalog_ops_for_step(%EvalContext{native_step: true, catalog_ops: catalog_ops}) do
-    Enum.reverse(catalog_ops)
-  end
-
-  defp catalog_ops_for_step(%EvalContext{catalog_ops: catalog_ops}) do
-    catalog_ops
-    |> Enum.reverse()
-    |> externalize_value()
-  end
-
-  defp memory_for_step(memory, %EvalContext{native_step: true}), do: native_memory(memory)
-  defp memory_for_step(memory, %EvalContext{}), do: externalize_memory(memory)
-
-  defp return_for_step(value, %EvalContext{native_step: true}, precision) do
-    round_floats(value, precision)
-  end
-
-  defp return_for_step(value, %EvalContext{}, precision) do
-    value |> externalize_value() |> round_floats(precision)
   end
 
   defp native_memory(memory) when is_map(memory) do

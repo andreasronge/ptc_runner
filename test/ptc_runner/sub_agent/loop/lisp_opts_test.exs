@@ -53,14 +53,12 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
                :budget,
                :trace_context,
                :journal,
-               :tool_cache,
-               :native_step
+               :tool_cache
              ]
 
       assert opts[:context] == %{user: "u1"}
       assert opts[:tools] == %{}
       assert opts[:float_precision] == 4
-      assert opts[:native_step] == true
     end
 
     test "preserves nested keyword values when memory is fed into the next turn" do
@@ -69,12 +67,14 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
       first_opts =
         LispOpts.build(agent, state_fixture(%{memory: %{}, tool_cache: %{}}), %{}, %{})
 
-      assert {:ok, first} = Lisp.run("(def m {:page {:parse :jsonl}})", first_opts)
+      assert {:ok, first} = Lisp.run_native("(def m {:page {:parse :jsonl}})", first_opts)
 
       second_opts =
         LispOpts.build(agent, state_fixture(%{memory: first.memory, tool_cache: %{}}), %{}, %{})
 
-      assert {:ok, second} = Lisp.run("(keyword? (get (get m :page) :parse))", second_opts)
+      assert {:ok, second} =
+               Lisp.run_native("(keyword? (get (get m :page) :parse))", second_opts)
+
       assert second.return == true
     end
 
@@ -83,14 +83,14 @@ defmodule PtcRunner.SubAgent.Loop.LispOptsTest do
       state = state_fixture(%{memory: %{}, tool_cache: %{}})
       opts = LispOpts.build(agent, state, %{}, %{})
 
-      assert {:ok, first} = Lisp.run(":jsonl", opts)
+      assert {:ok, first} = Lisp.run_native(":jsonl", opts)
 
       state =
         state_fixture(%{memory: first.memory, tool_cache: %{}, turn_history: [first.return]})
 
       opts = LispOpts.build(agent, state, %{}, %{})
 
-      assert {:ok, second} = Lisp.run("(keyword? *1)", opts)
+      assert {:ok, second} = Lisp.run_native("(keyword? *1)", opts)
       assert second.return == true
     end
 

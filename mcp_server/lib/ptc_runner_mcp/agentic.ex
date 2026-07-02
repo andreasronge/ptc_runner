@@ -1,7 +1,7 @@
 defmodule PtcRunnerMcp.Agentic do
   @moduledoc false
 
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Loop.StepAssembler
   alias PtcRunner.Upstream.{Effect, Eval, Result, Runtime}

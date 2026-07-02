@@ -486,7 +486,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
 
     case result do
       {:ok, step} ->
-        public_step = PublicStep.render(step)
+        public_step = PublicStep.from_native(step)
 
         # Return wrapper with trace_id and child step so callers can collect them
         %{
@@ -496,7 +496,7 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
         }
 
       {:error, step} ->
-        public_step = PublicStep.render(step)
+        public_step = PublicStep.from_native(step)
 
         # Propagate child agent failure with child step for tree visibility
         raise PtcRunner.Lisp.ExecutionError,
@@ -513,11 +513,11 @@ defmodule PtcRunner.SubAgent.Loop.ToolNormalizer do
   defp execute_without_trace(name, agent, run_opts) do
     case Runner.run(agent, run_opts) do
       {:ok, step} ->
-        public_step = PublicStep.render(step)
+        public_step = PublicStep.from_native(step)
         %{__child_step__: prune_child_step(public_step), value: public_step.return}
 
       {:error, step} ->
-        public_step = PublicStep.render(step)
+        public_step = PublicStep.from_native(step)
 
         raise PtcRunner.Lisp.ExecutionError,
           reason: :tool_error,

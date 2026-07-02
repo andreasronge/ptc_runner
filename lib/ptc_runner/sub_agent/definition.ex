@@ -11,6 +11,7 @@ defmodule PtcRunner.SubAgent.Definition do
   """
 
   alias PtcRunner.PreludeStore.Selection
+  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
 
   @typedoc """
@@ -375,8 +376,8 @@ defmodule PtcRunner.SubAgent.Definition do
   end
 
   @doc false
-  @spec unwrap_sentinels(PtcRunner.Step.t()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+  @spec unwrap_sentinels(PtcRunner.Step.t() | Native.t()) ::
+          {:ok, PtcRunner.Step.t() | Native.t()} | {:error, PtcRunner.Step.t() | Native.t()}
   def unwrap_sentinels(%{return: {:__ptc_return__, value}} = step) do
     {:ok, %{step | return: value}}
   end

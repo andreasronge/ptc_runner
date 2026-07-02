@@ -9,7 +9,7 @@ defmodule PtcRunner.SubAgent.Loop.Budget do
   - Budget introspection maps for Lisp and Elixir callbacks
   """
 
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent.{Definition, KeyNormalizer}
   alias PtcRunner.SubAgent.Loop.{ReturnValidation, StepAssembler}
 

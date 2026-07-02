@@ -20,6 +20,8 @@ defmodule PtcRunner.SubAgent.Compiler do
   See `PtcRunner.SubAgent.compile/2` for the public API.
   """
 
+  alias PtcRunner.Step.Native
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.CompiledAgent
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.ToolNormalizer
@@ -222,7 +224,7 @@ defmodule PtcRunner.SubAgent.Compiler do
          }}
 
       {:error, step} ->
-        {:error, step}
+        {:error, PublicStep.from_native(step)}
     end
   end
 
@@ -287,11 +289,21 @@ defmodule PtcRunner.SubAgent.Compiler do
   defp run_and_unwrap(args, source, tools, lisp_opts) do
     opts = Keyword.merge([context: args, tools: tools], lisp_opts)
 
-    case PtcRunner.Lisp.run(source, opts) do
-      {:ok, step} -> Definition.unwrap_sentinels(step)
-      {:error, step} -> {:error, step}
+    case PtcRunner.Lisp.run_native(source, opts) do
+      {:ok, step} ->
+        step
+        |> Definition.unwrap_sentinels()
+        |> render_compiled_result()
+
+      {:error, step} ->
+        {:error, PublicStep.from_native(step)}
     end
   end
+
+  defp render_compiled_result({:ok, %Native{} = step}), do: {:ok, PublicStep.from_native(step)}
+
+  defp render_compiled_result({:error, %Native{} = step}),
+    do: {:error, PublicStep.from_native(step)}
 
   # Adds field_descriptions to the step regardless of success/error
   defp add_field_descriptions({:ok, step}, field_descs),

@@ -184,8 +184,8 @@ defmodule PtcRunner.Step do
         llm: llm
       )
 
-      step.return.count     #=> 5
-      step.return.email_ids #=> [101, 102, 103, 104, 105]
+      step.return["count"]     #=> 5
+      step.return["email_ids"] #=> [101, 102, 103, 104, 105]
   """
 
   defstruct [

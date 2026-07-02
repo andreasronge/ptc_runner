@@ -446,19 +446,19 @@ agent = PtcRunner.SubAgent.new(
 )
 
 # First turn
-{:ok, reply, messages, _memory} = PtcRunner.SubAgent.chat(agent, "Hello!", llm: my_llm)
+{:ok, reply, chat} = PtcRunner.SubAgent.chat(agent, "Hello!", llm: my_llm)
 
-# Second turn — pass messages back to continue the conversation
-{:ok, reply2, messages2, _memory} = PtcRunner.SubAgent.chat(
+# Second turn — pass chat back to continue the conversation
+{:ok, reply2, chat2} = PtcRunner.SubAgent.chat(
   agent, "Tell me more",
-  llm: my_llm, messages: messages
+  llm: my_llm, chat: chat
 )
 ```
 
 `chat/3` auto-detects mode based on `agent.output`:
 
-- **`:text`** — Forces text mode, clears signature. Returns plain text with empty memory.
-- **`:ptc_lisp`** — Keeps PTC-Lisp mode. Returns structured data and memory (variables defined via `def`).
+- **`:text`** — Forces text mode, clears signature. Returns plain text and a chat continuation.
+- **`:ptc_lisp`** — Keeps PTC-Lisp mode. Returns structured data and a chat continuation that includes native PTC-Lisp memory.
 
 The system prompt is managed by the agent struct — you don't need to include it in the messages list.
 
@@ -475,25 +475,23 @@ agent = PtcRunner.SubAgent.new(
 )
 
 # First turn — LLM can use tools and define variables
-{:ok, result, messages, memory} = PtcRunner.SubAgent.chat(agent, "Look up X", llm: my_llm)
+{:ok, result, chat} = PtcRunner.SubAgent.chat(agent, "Look up X", llm: my_llm)
 
-# Second turn — thread both messages and memory
-{:ok, result2, messages2, memory2} = PtcRunner.SubAgent.chat(
+# Second turn — thread the opaque chat continuation
+{:ok, result2, chat2} = PtcRunner.SubAgent.chat(
   agent, "Now use that result",
-  llm: my_llm, messages: messages, memory: memory
+  llm: my_llm, chat: chat
 )
 ```
 
-The `:memory` option seeds the PTC-Lisp environment with variables from a prior call, so the LLM can reference them without re-computing.
-
-Treat the returned `memory` value as opaque continuation state: pass it back unchanged on the next `SubAgent.chat/3` call. It may contain native PTC-Lisp runtime values for correct cross-call semantics.
+Treat the returned `%PtcRunner.SubAgent.Chat{}` as opaque continuation state: pass it back unchanged with `chat: chat` on the next `SubAgent.chat/3` call. It may contain native PTC-Lisp runtime values for correct cross-call semantics and should not be JSON-encoded.
 
 ### Streaming
 
 Streaming works via `on_chunk`:
 
 ```elixir
-{:ok, reply, messages, _memory} = PtcRunner.SubAgent.chat(agent, "Hello!",
+{:ok, reply, chat} = PtcRunner.SubAgent.chat(agent, "Hello!",
   llm: my_llm,
   on_chunk: fn %{delta: text} -> IO.write(text) end
 )

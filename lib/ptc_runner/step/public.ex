@@ -1,6 +1,6 @@
 defmodule PtcRunner.Step.Public do
   @moduledoc """
-  Public rendering for native `%PtcRunner.Step{}` values.
+  Public rendering for native `%PtcRunner.Step.Native{}` values.
 
   Runtime code may keep PTC-Lisp values in their native representation so
   continuation state preserves keyword/function semantics across turns. This
@@ -9,10 +9,12 @@ defmodule PtcRunner.Step.Public do
   APIs.
   """
 
-  alias PtcRunner.{Lisp, Step}
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Step
+  alias PtcRunner.Step.Native
   alias PtcRunner.SubAgent.KeyNormalizer
 
   @type render_opt ::
@@ -21,22 +23,38 @@ defmodule PtcRunner.Step.Public do
           | {:turns, :public | :native}
           | {:normalize_return_keys, boolean()}
 
-  @spec render(Step.t(), [render_opt()]) :: Step.t()
-  def render(%Step{} = step, opts \\ []) do
-    %{
-      step
-      | return: render_return(step.return, opts),
-        fail: render_fail(step.fail),
-        memory: render_memory(step.memory, Keyword.get(opts, :memory, :public)),
-        journal: render_value(step.journal),
-        turns: render_turns(step.turns, Keyword.get(opts, :turns, :public)),
-        child_steps: render_child_steps(step.child_steps, opts),
-        tool_calls: render_tool_calls(step.tool_calls),
-        pmap_calls: render_value(step.pmap_calls),
-        catalog_ops: render_value(step.catalog_ops),
-        tool_cache: render_value(step.tool_cache)
+  @spec from_native(Native.t(), [render_opt()]) :: Step.t()
+  def from_native(%Native{} = step, opts \\ []) do
+    %Step{
+      return: render_return(step.return, opts),
+      fail: render_fail(step.fail),
+      memory: render_memory(step.memory, Keyword.get(opts, :memory, :public)),
+      journal: render_value(step.journal),
+      signature: step.signature,
+      usage: step.usage,
+      turns: render_turns(step.turns, Keyword.get(opts, :turns, :public)),
+      trace_id: step.trace_id,
+      parent_trace_id: step.parent_trace_id,
+      name: step.name,
+      field_descriptions: step.field_descriptions,
+      prints: step.prints,
+      tool_calls: render_tool_calls(step.tool_calls),
+      pmap_calls: render_value(step.pmap_calls),
+      catalog_ops: render_value(step.catalog_ops),
+      child_traces: step.child_traces,
+      child_steps: render_child_steps(step.child_steps, opts),
+      messages: step.messages,
+      prompt: step.prompt,
+      original_prompt: step.original_prompt,
+      tools: step.tools,
+      prelude_trace: step.prelude_trace,
+      summaries: step.summaries,
+      tool_cache: render_value(step.tool_cache)
     }
   end
+
+  @spec render(Native.t(), [render_opt()]) :: Step.t()
+  def render(%Native{} = step, opts \\ []), do: from_native(step, opts)
 
   @spec value(term()) :: term()
   def value(value), do: render_value(value)
@@ -125,7 +143,7 @@ defmodule PtcRunner.Step.Public do
 
   defp render_value(value), do: value |> Lisp.externalize_value() |> render_opaque_values()
 
-  defp render_opaque_values(%Step{} = step), do: render(step)
+  defp render_opaque_values(%Native{} = step), do: from_native(step)
 
   defp render_opaque_values({:closure, _params, _body, _env, _turn_history, _metadata} = closure) do
     closure
@@ -167,7 +185,7 @@ defmodule PtcRunner.Step.Public do
 
   defp render_child_steps(child_steps, opts) when is_list(child_steps) do
     Enum.map(child_steps, fn
-      %Step{} = child -> render(child, opts)
+      %Native{} = child -> from_native(child, opts)
       other -> other
     end)
   end

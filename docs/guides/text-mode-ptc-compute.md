@@ -301,18 +301,18 @@ who don't want the prompt overhead should not opt into combined mode.
 
 Combined mode is supported in `PtcRunner.SubAgent.chat/3`. Each
 `chat/3` call behaves like a fresh combined-mode run over the provided
-messages. The validator does not reject combined mode at the `chat/3`
-boundary.
+opaque chat continuation. The validator does not reject combined mode at
+the `chat/3` boundary.
 
 **Cross-call state does NOT persist.** `tool_cache`, `journal`,
 `turn_history`, and retained child-execution state do not survive
 across `chat/3` turns. Cross-turn threading is fully deferred to a
 future `ChatState` API.
 
-For `output: :ptc_lisp`, `SubAgent.chat/3` can thread memory explicitly
-through its returned tuple and the next call's `:memory` option. That
-memory is native continuation state; pass it back unchanged rather than
-serializing or normalizing it.
+For `output: :ptc_lisp`, `SubAgent.chat/3` threads memory through its
+returned `%PtcRunner.SubAgent.Chat{}` handle and the next call's `:chat`
+option. That handle is native continuation state; pass it back unchanged
+rather than serializing or normalizing it.
 
 **Known wart (accepted, not fixed in v1).** A previous turn's
 `full_result_cached: true` + `cache_hint` references a cache key that

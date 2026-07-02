@@ -330,9 +330,9 @@ defmodule PtcRunnerMcp.Sessions do
 
   @doc "Run a previously acquired eval snapshot."
   @spec run_snapshot(map(), String.t(), map()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+          {:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}
   def run_snapshot(snapshot, program, opts \\ %{}) when is_map(snapshot) and is_binary(program) do
-    PtcRunner.Lisp.run(program, Session.lisp_opts(snapshot, program, opts))
+    PtcRunner.Lisp.run_native(program, Session.lisp_opts(snapshot, program, opts))
   end
 
   @doc "Commit a worker eval result."

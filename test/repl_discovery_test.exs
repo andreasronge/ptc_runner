@@ -84,12 +84,11 @@ defmodule PtcRunner.ReplDiscoveryTest do
 
     test "native catalog operation args render at the public step boundary" do
       assert {:ok, native_step} =
-               Lisp.run(~s|(apropos "github" {:mode :jsonl})|,
-                 discovery_exec: discovery_exec(),
-                 native_step: true
+               Lisp.run_native(~s|(apropos "github" {:mode :jsonl})|,
+                 discovery_exec: discovery_exec()
                )
 
-      public_step = Public.render(native_step)
+      public_step = Public.from_native(native_step)
       assert_public_step!(public_step)
 
       assert [
@@ -123,7 +122,11 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert Enum.join(doc_step.prints, "\n") =~ "LocalDate/parse"
 
       assert {:ok, meta_step} = Lisp.run("(meta 'java.time.Duration/between)")
-      assert meta_step.return.kind in ["java-interop", "ptc-builtin"]
+
+      assert (meta_step.return[:kind] || meta_step.return["kind"]) in [
+               "java-interop",
+               "ptc-builtin"
+             ]
 
       assert {:ok, publics_step} = Lisp.run("(ns-publics 'clojure.string)")
       assert is_map(publics_step.return)
@@ -138,7 +141,11 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert Enum.join(doc_step.prints, "\n") =~ "Integer/parseInt"
 
       assert {:ok, meta_step} = Lisp.run("(meta java.time.Duration/between)")
-      assert meta_step.return.kind in ["java-interop", "ptc-builtin"]
+
+      assert (meta_step.return[:kind] || meta_step.return["kind"]) in [
+               "java-interop",
+               "ptc-builtin"
+             ]
 
       assert {:ok, string_dir} = Lisp.run("(dir clojure.string)")
       assert Enum.any?(string_dir.return, &String.starts_with?(&1, "replace"))

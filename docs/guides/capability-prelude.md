@@ -243,7 +243,10 @@ its own upstream bridge/runtime.
 > `:partial_side_effects`. The failure details contain sanitized
 > `%{matched_calls: [%{server, tool, effect}, ...]}` entries only — never
 > upstream args or results. A host-supplied `continuation_guard` overrides this
-> default completely.
+> default completely. A guard that stops with its own `%PtcRunner.Step{}` has
+> that step adopted verbatim as the final result — build it from the loop
+> state the guard received (especially its memory) rather than from
+> externalized values, or keyword identity is lost downstream.
 
 > The prelude does **not** define upstream endpoints or credentials. It only
 > *wraps* operations the host has already configured. Credentials live in

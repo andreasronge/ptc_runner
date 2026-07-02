@@ -28,6 +28,7 @@ defmodule PtcRunner.Session do
 
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Step
+  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent
@@ -143,13 +144,12 @@ defmodule PtcRunner.Session do
       |> Keyword.merge(opts)
       |> Keyword.put(:memory, session.memory)
       |> Keyword.put(:turn_history, session.turn_history)
-      |> Keyword.put(:native_step, true)
 
     started_at = System.monotonic_time(:millisecond)
     attempt = session.attempts + 1
 
     case run_lisp(session, source, run_opts) do
-      {:ok, %Step{} = step} ->
+      {:ok, %Native{} = step} ->
         updated = %{
           session
           | memory: step.memory,
@@ -160,19 +160,19 @@ defmodule PtcRunner.Session do
         }
 
         emit_turn_event(session, updated, source, step, attempt, true, started_at)
-        {{:ok, PublicStep.render(step, normalize_return_keys: false)}, updated}
+        {{:ok, PublicStep.from_native(step, normalize_return_keys: false)}, updated}
 
-      {:error, %Step{} = step} ->
+      {:error, %Native{} = step} ->
         updated = %{session | attempts: attempt}
 
         emit_turn_event(session, updated, source, step, attempt, false, started_at)
-        {{:error, PublicStep.render(step, normalize_return_keys: false)}, updated}
+        {{:error, PublicStep.from_native(step, normalize_return_keys: false)}, updated}
     end
   end
 
   # Build and record the canonical turn event (plan P2). Skipped entirely when
   # nothing is recording so the common no-trace path pays nothing.
-  defp emit_turn_event(prev, next, source, %Step{} = step, attempt, committed?, started_at) do
+  defp emit_turn_event(prev, next, source, %Native{} = step, attempt, committed?, started_at) do
     if TraceLog.recording?() do
       %{
         driver: :session,
@@ -237,7 +237,7 @@ defmodule PtcRunner.Session do
   end
 
   defp run_lisp(%__MODULE__{upstream_runtime: nil}, source, opts) do
-    PtcRunner.Lisp.run(source, opts)
+    PtcRunner.Lisp.run_native(source, opts)
   end
 
   defp run_lisp(%__MODULE__{upstream_runtime: runtime}, source, opts) do

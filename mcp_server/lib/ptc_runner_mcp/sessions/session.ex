@@ -907,7 +907,6 @@ defmodule PtcRunnerMcp.Sessions.Session do
        context: Map.get(opts, :context, %{}),
        tools: session_eval_tools(snapshot, Map.get(opts, :tools, [])),
        tool_cache: %{},
-       native_step: true,
        caller: :mcp,
        profile: Map.get(opts, :profile, :mcp_no_tools),
        timeout: Map.get(opts, :timeout, McpLimits.program_timeout_ms()),

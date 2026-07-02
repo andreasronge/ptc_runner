@@ -61,10 +61,12 @@ defmodule PtcRunner.SubAgent.Loop do
   This is an internal module called by `SubAgent.run/2`.
   """
 
-  alias PtcRunner.{Lisp, Step, Turn}
+  alias PtcRunner.Lisp
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
+  alias PtcRunner.Turn
 
   alias PtcRunner.SubAgent.Loop.{
     Budget,
@@ -127,9 +129,17 @@ defmodule PtcRunner.SubAgent.Loop do
       iex> step.return
       %{"result" => 8}
   """
-  @spec run(Definition.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
+  @spec run(Definition.t(), keyword()) :: {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
   def run(%Definition{} = agent, opts) do
-    native_step_result? = Keyword.get(opts, :native_step_result, false)
+    case run_native(agent, opts) do
+      {:ok, %Step{} = step} -> {:ok, PublicStep.from_native(step)}
+      {:error, %Step{} = step} -> {:error, PublicStep.from_native(step)}
+    end
+  end
+
+  @doc false
+  @spec run_native(Definition.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
+  def run_native(%Definition{} = agent, opts) do
     llm = Keyword.fetch!(opts, :llm)
     context = Keyword.get(opts, :context, %{})
     llm_registry = Keyword.get(opts, :llm_registry, %{})
@@ -225,13 +235,8 @@ defmodule PtcRunner.SubAgent.Loop do
         end
       end
 
-    render_loop_result(result, native_step_result?)
+    result
   end
-
-  defp render_loop_result(result, true), do: result
-  defp render_loop_result({:ok, %Step{} = step}, false), do: {:ok, PublicStep.render(step)}
-  defp render_loop_result({:error, %Step{} = step}, false), do: {:error, PublicStep.render(step)}
-  defp render_loop_result(result, false), do: result
 
   # Wrap execution with telemetry span
   defp run_with_telemetry(agent, run_opts) do
@@ -250,7 +255,7 @@ defmodule PtcRunner.SubAgent.Loop do
       stop_meta =
         case result do
           {:ok, step} ->
-            public_step = PublicStep.render(step)
+            public_step = PublicStep.from_native(step)
 
             %{
               agent_name: agent.name,
@@ -261,7 +266,7 @@ defmodule PtcRunner.SubAgent.Loop do
             }
 
           {:error, step} ->
-            public_step = PublicStep.render(step)
+            public_step = PublicStep.from_native(step)
 
             %{
               agent_name: agent.name,
@@ -505,6 +510,18 @@ defmodule PtcRunner.SubAgent.Loop do
 
           {:stop, {:error, %Step{}} = result} ->
             {:stop, result}
+
+          # Host-supplied guards can only build the public struct (Step.Native
+          # is private). The step is adopted verbatim as the final result: its
+          # memory becomes continuation state without re-nativization, so a
+          # guard that needs keyword identity preserved downstream must reuse
+          # the native memory from the state it was given, not rebuild it from
+          # externalized values.
+          {:stop, {:ok, %PtcRunner.Step{} = step}} ->
+            {:stop, {:ok, Step.from_public(step)}}
+
+          {:stop, {:error, %PtcRunner.Step{} = step}} ->
+            {:stop, {:error, Step.from_public(step)}}
 
           other ->
             raise ArgumentError, "continuation_guard returned invalid value: #{inspect(other)}"
@@ -859,7 +876,7 @@ defmodule PtcRunner.SubAgent.Loop do
   defp execute_code_with_tools(code, response, agent, state, exec_context, all_tools) do
     lisp_opts = LispOpts.build(agent, state, exec_context, all_tools)
 
-    lisp_result = Lisp.run(code, lisp_opts)
+    lisp_result = Lisp.run_native(code, lisp_opts)
     # Stash the ACTUAL attached prelude trace for the canonical turn event
     # (nil when attach failed). `elem/2` reads the step from both {:ok|:error, step}.
     TraceContext.put_lisp_prelude_trace(elem(lisp_result, 1).prelude_trace)

@@ -41,8 +41,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
       budget: Budget.build_introspection_map(agent, state),
       trace_context: state.trace_context,
       journal: state.journal,
-      tool_cache: state.tool_cache,
-      native_step: true
+      tool_cache: state.tool_cache
     ]
     |> maybe_put(:max_heap, state.max_heap)
     |> maybe_put(:max_tool_calls, agent.max_tool_calls)

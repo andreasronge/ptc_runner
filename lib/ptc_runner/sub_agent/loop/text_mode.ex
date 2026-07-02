@@ -19,7 +19,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   alias PtcRunner.{Lisp, PtcToolProtocol}
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Prompts
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Exposure
@@ -1141,7 +1141,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     lisp_opts =
       build_lisp_opts(agent, state, exec_context, ptc_lisp_inventory)
 
-    result = Lisp.run(program, lisp_opts)
+    result = Lisp.run_native(program, lisp_opts)
     # Stash the ACTUAL attached prelude trace for the canonical turn event
     # (nil when attach failed). This combined/text-mode path builds the turn with
     # `program: nil`, so the trace — not `turn.program` — is the sound signal.

@@ -39,7 +39,9 @@ defmodule PtcRunner.SubAgent do
   """
 
   alias PtcRunner.PreludeStore.Selection
+  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
+  alias PtcRunner.SubAgent.Chat
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Runner
 
@@ -346,11 +348,12 @@ defmodule PtcRunner.SubAgent do
 
     if compiled.llm_required? and not Keyword.has_key?(opts, :llm) do
       {:error,
-       PtcRunner.Step.error(
+       Native.error(
          :llm_required,
          "llm required for CompiledAgent with SubAgentTools",
          %{}
        )}
+      |> render_run_result()
     else
       step = compiled.execute.(context, opts)
       result = if step.fail, do: {:error, step}, else: {:ok, step}
@@ -380,10 +383,10 @@ defmodule PtcRunner.SubAgent do
     Runner.run(agent, opts)
   end
 
-  defp render_run_result({:ok, %PtcRunner.Step{} = step}), do: {:ok, PublicStep.render(step)}
+  defp render_run_result({:ok, %Native{} = step}), do: {:ok, PublicStep.from_native(step)}
 
-  defp render_run_result({:error, %PtcRunner.Step{} = step}),
-    do: {:error, PublicStep.render(step)}
+  defp render_run_result({:error, %Native{} = step}),
+    do: {:error, PublicStep.from_native(step)}
 
   defp render_run_result(other), do: other
 
@@ -430,20 +433,18 @@ defmodule PtcRunner.SubAgent do
 
   - `agent` - A `SubAgent.t()` struct
   - `user_message` - The user's message for this turn
-  - `opts` - Runtime options (same as `run/2`, plus `:messages` and `:memory`)
+  - `opts` - Runtime options (same as `run/2`, plus `:chat`)
 
   ## Options
 
-  - `:messages` - Prior conversation history (default: `[]`). Pass the
-    `updated_messages` from a previous `chat/3` call to continue the conversation.
-  - `:memory` - Prior memory map (default: `%{}`). For PTC-Lisp mode, pass the
-    memory from a previous `chat/3` call so the LLM can access prior variables.
+  - `:chat` - Prior `%PtcRunner.SubAgent.Chat{}` continuation returned from a
+    previous `chat/3` call (default: a fresh continuation).
   - All other options are forwarded to `run/2` (e.g., `:llm`, `:context`)
 
   ## Returns
 
-  - `{:ok, result, updated_messages, memory}` — the result (text or structured),
-    the full message history, and the memory map (empty for text mode)
+  - `{:ok, result, chat}` — the result (text or structured) and the opaque
+    continuation handle to pass back on the next call
   - `{:error, reason}` — on failure
 
   ## Examples
@@ -455,10 +456,10 @@ defmodule PtcRunner.SubAgent do
         system_prompt: "You are a helpful assistant."
       )
 
-      {:ok, reply, messages, _memory} = SubAgent.chat(agent, "Hello!", llm: my_llm)
-      {:ok, reply2, messages2, _memory} = SubAgent.chat(
+      {:ok, reply, chat} = SubAgent.chat(agent, "Hello!", llm: my_llm)
+      {:ok, reply2, chat2} = SubAgent.chat(
         agent, "Tell me more",
-        llm: my_llm, messages: messages
+        llm: my_llm, chat: chat
       )
 
       # PTC-Lisp mode with memory threading
@@ -469,20 +470,21 @@ defmodule PtcRunner.SubAgent do
         tools: my_tools
       )
 
-      {:ok, result, messages, memory} = SubAgent.chat(agent, "Look up X", llm: my_llm)
-      {:ok, result2, messages2, memory2} = SubAgent.chat(
+      {:ok, result, chat} = SubAgent.chat(agent, "Look up X", llm: my_llm)
+      {:ok, result2, chat2} = SubAgent.chat(
         agent, "Now use that result",
-        llm: my_llm, messages: messages, memory: memory
+        llm: my_llm, chat: chat
       )
 
-      # The returned memory is native continuation state. Treat it as opaque and
-      # pass it back unchanged; it may contain internal PTC-Lisp runtime values.
+      # The returned chat value is native continuation state. Treat it as opaque
+      # and pass it back unchanged; it may contain internal PTC-Lisp runtime values.
   """
   @spec chat(t(), String.t(), keyword()) ::
-          {:ok, term(), [map()], map()} | {:error, term()}
+          {:ok, term(), Chat.t()} | {:error, term()}
   def chat(%Definition{} = agent, user_message, opts \\ []) do
-    {history, opts} = Keyword.pop(opts, :messages, [])
-    {memory, opts} = Keyword.pop(opts, :memory, %{})
+    {chat, opts} = Keyword.pop(opts, :chat, Chat.new())
+    history = Chat.messages(chat)
+    memory = Chat.memory(chat)
 
     # Strip system messages from history — the loop regenerates the system prompt
     initial_messages =
@@ -506,7 +508,7 @@ defmodule PtcRunner.SubAgent do
 
         case run(agent, run_opts) do
           {:ok, step} ->
-            {:ok, step.return, step.messages, %{}}
+            {:ok, step.return, Chat.new(step.messages || [], %{})}
 
           {:error, step} ->
             {:error, step.fail || step}
@@ -524,11 +526,11 @@ defmodule PtcRunner.SubAgent do
 
         case run_native_resolved(agent, run_opts) do
           {:ok, step} ->
-            public_step = PublicStep.render(step, memory: :native, turns: :native)
-            {:ok, public_step.return, public_step.messages, step.memory}
+            public_step = PublicStep.from_native(step)
+            {:ok, public_step.return, Chat.new(public_step.messages || [], step.memory)}
 
           {:error, step} ->
-            public_step = PublicStep.render(step, memory: :native, turns: :native)
+            public_step = PublicStep.from_native(step)
             {:error, public_step.fail || public_step}
         end
     end

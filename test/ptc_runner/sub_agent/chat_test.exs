@@ -4,9 +4,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
   import PtcRunner.TestSupport.PtcToolCallTestHelpers
 
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Chat
 
   describe "chat/3 text mode" do
-    test "basic chat returns {:ok, text, messages, memory}" do
+    test "basic chat returns {:ok, text, chat}" do
       agent =
         SubAgent.new(
           prompt: "placeholder",
@@ -16,11 +17,12 @@ defmodule PtcRunner.SubAgent.ChatTest do
 
       llm = fn _input -> {:ok, "Hello! How can I help?"} end
 
-      {:ok, reply, messages, memory} = SubAgent.chat(agent, "Hi there", llm: llm)
+      {:ok, reply, chat} = SubAgent.chat(agent, "Hi there", llm: llm)
+      messages = Chat.messages(chat)
 
       assert reply == "Hello! How can I help?"
       assert is_list(messages)
-      assert memory == %{}
+      assert Chat.memory(chat) == %{}
       # system + user + assistant
       assert length(messages) == 3
       assert Enum.at(messages, 0).role == :system
@@ -56,8 +58,8 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, "It runs on the BEAM VM."}
       end
 
-      {:ok, reply, _messages, _memory} =
-        SubAgent.chat(agent, "Tell me more", llm: llm, messages: prior_messages)
+      {:ok, reply, _chat} =
+        SubAgent.chat(agent, "Tell me more", llm: llm, chat: Chat.new(prior_messages))
 
       assert reply == "It runs on the BEAM VM."
     end
@@ -83,7 +85,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, %{content: "Hello world", tokens: %{input: 5, output: 3}}}
       end
 
-      {:ok, reply, _messages, _memory} =
+      {:ok, reply, _chat} =
         SubAgent.chat(agent, "Hi", llm: llm, on_chunk: on_chunk)
 
       assert reply == "Hello world"
@@ -133,7 +135,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
         end
       end
 
-      {:ok, reply, _messages, _memory} =
+      {:ok, reply, _chat} =
         SubAgent.chat(agent, "What is the answer?", llm: llm, on_chunk: on_chunk)
 
       assert reply == "The answer is 42"
@@ -170,7 +172,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, "First reply"}
       end
 
-      {:ok, _reply, messages, _memory} = SubAgent.chat(agent, "Hello", llm: llm1)
+      {:ok, _reply, chat} = SubAgent.chat(agent, "Hello", llm: llm1)
 
       # Second call with history — system should still not be in messages
       llm2 = fn %{system: system, messages: messages} ->
@@ -180,8 +182,8 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, "Second reply"}
       end
 
-      {:ok, _reply2, _messages2, _memory} =
-        SubAgent.chat(agent, "Follow up", llm: llm2, messages: messages)
+      {:ok, _reply2, _chat2} =
+        SubAgent.chat(agent, "Follow up", llm: llm2, chat: chat)
     end
 
     test "multi-turn: pass messages from first call to second call" do
@@ -194,13 +196,14 @@ defmodule PtcRunner.SubAgent.ChatTest do
 
       llm = fn _input -> {:ok, "Response"} end
 
-      {:ok, reply1, messages1, _memory} = SubAgent.chat(agent, "First message", llm: llm)
+      {:ok, reply1, chat1} = SubAgent.chat(agent, "First message", llm: llm)
       assert reply1 == "Response"
 
-      {:ok, reply2, messages2, _memory} =
-        SubAgent.chat(agent, "Second message", llm: llm, messages: messages1)
+      {:ok, reply2, chat2} =
+        SubAgent.chat(agent, "Second message", llm: llm, chat: chat1)
 
       assert reply2 == "Response"
+      messages2 = Chat.messages(chat2)
 
       # messages2 should contain the full conversation
       # system + prior_user + prior_assistant + new_user + new_assistant
@@ -222,7 +225,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
       # Without clearing, TextMode would try to parse this as JSON and fail
       llm = fn _input -> {:ok, "Just a plain text response"} end
 
-      {:ok, reply, _messages, _memory} = SubAgent.chat(agent, "Rate this", llm: llm)
+      {:ok, reply, _chat} = SubAgent.chat(agent, "Rate this", llm: llm)
 
       assert is_binary(reply)
       assert reply == "Just a plain text response"
@@ -242,11 +245,11 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, %{content: "(return {:answer \"hello\"})", tokens: %{input: 10, output: 5}}}
       end
 
-      {:ok, result, messages, memory} = SubAgent.chat(agent, "Greet me", llm: llm)
+      {:ok, result, chat} = SubAgent.chat(agent, "Greet me", llm: llm)
 
       assert result == %{"answer" => "hello"}
-      assert is_list(messages)
-      assert is_map(memory)
+      assert is_list(Chat.messages(chat))
+      assert is_map(Chat.memory(chat))
     end
 
     test "memory threading — initial memory is accessible via def'd variables" do
@@ -266,10 +269,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      {:ok, result1, messages1, memory1} = SubAgent.chat(agent, "Set counter", llm: llm1)
+      {:ok, result1, chat1} = SubAgent.chat(agent, "Set counter", llm: llm1)
 
       assert result1 == %{"value" => 42}
-      assert memory1["counter"] == 42
+      assert Chat.memory(chat1)["counter"] == 42
 
       # Second call: LLM receives previous memory and can use the variable
       llm2 = fn _input ->
@@ -280,11 +283,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      {:ok, result2, _messages2, _memory2} =
+      {:ok, result2, _chat2} =
         SubAgent.chat(agent, "Increment counter",
           llm: llm2,
-          messages: messages1,
-          memory: memory1
+          chat: chat1
         )
 
       assert result2 == %{"value" => 43}
@@ -306,7 +308,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+      {:ok, "stored", chat1} = SubAgent.chat(agent, "Store parser", llm: llm1)
 
       llm2 = fn _input ->
         {:ok,
@@ -316,11 +318,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      assert {:ok, true, _messages2, _memory2} =
+      assert {:ok, true, _chat2} =
                SubAgent.chat(agent, "Check parser",
                  llm: llm2,
-                 messages: messages1,
-                 memory: memory1
+                 chat: chat1
                )
     end
 
@@ -341,7 +342,7 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+      {:ok, "stored", chat1} = SubAgent.chat(agent, "Store parser", llm: llm1)
 
       llm2 = fn _input ->
         {:ok,
@@ -351,11 +352,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
          }}
       end
 
-      assert {:ok, true, _messages2, _memory2} =
+      assert {:ok, true, _chat2} =
                SubAgent.chat(agent, "Check parser",
                  llm: llm2,
-                 messages: messages1,
-                 memory: memory1
+                 chat: chat1
                )
     end
 
@@ -375,18 +375,17 @@ defmodule PtcRunner.SubAgent.ChatTest do
           content_response("stored")
         ])
 
-      {:ok, "stored", messages1, memory1} = SubAgent.chat(agent, "Store parser", llm: llm1)
+      {:ok, "stored", chat1} = SubAgent.chat(agent, "Store parser", llm: llm1)
 
       llm2 =
         scripted_llm([
           tool_call_response("(return (keyword? (get (get m :page) :parse)))", id: "c2")
         ])
 
-      assert {:ok, true, _messages2, _memory2} =
+      assert {:ok, true, _chat2} =
                SubAgent.chat(agent, "Check parser",
                  llm: llm2,
-                 messages: messages1,
-                 memory: memory1
+                 chat: chat1
                )
     end
 
@@ -413,10 +412,10 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, %{content: "(return {:ok true})", tokens: %{input: 10, output: 5}}}
       end
 
-      {:ok, _result, _messages, _memory} =
+      {:ok, _result, _chat} =
         SubAgent.chat(agent, "Follow up",
           llm: llm,
-          messages: prior_messages
+          chat: Chat.new(prior_messages)
         )
     end
 
@@ -438,11 +437,22 @@ defmodule PtcRunner.SubAgent.ChatTest do
         {:ok, %{content: "(return {:value counter})", tokens: %{input: 10, output: 5}}}
       end
 
-      {:ok, _result, _messages, _memory} =
+      {:ok, _result, _chat} =
         SubAgent.chat(agent, "Use the counter",
           llm: llm,
-          memory: initial_memory
+          chat: Chat.new([], initial_memory)
         )
+    end
+
+    test "chat continuation is opaque to JSON and inspect" do
+      chat = Chat.new([], %{"m" => %{"page" => %{"parse" => "jsonl"}}})
+
+      assert_raise Protocol.UndefinedError, fn -> Jason.encode!(chat) end
+
+      rendered = inspect(chat)
+      assert rendered =~ "PtcRunner.SubAgent.Chat"
+      assert rendered =~ "opaque"
+      refute rendered =~ "jsonl"
     end
   end
 end

@@ -7,7 +7,7 @@ defmodule PtcRunner.SubAgent.Loop.StepAssembler do
   `Loop` and `Loop.TextMode` to construct the step returned from `SubAgent.run/2`.
   """
 
-  alias PtcRunner.Step
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent.Loop.Metrics
 
   @doc """

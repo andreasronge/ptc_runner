@@ -13,6 +13,7 @@ defmodule PtcRunner.SubAgent.Runner do
   public `PtcRunner.SubAgent` facade; only Definition execution lives here.
   """
 
+  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.LLMResolver
@@ -33,7 +34,7 @@ defmodule PtcRunner.SubAgent.Runner do
   `{:ok, Step.t()}` or `{:error, Step.t()}`.
   """
   @spec run(Definition.t(), keyword()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+          {:ok, Step.t()} | {:error, Step.t()}
   def run(%Definition{} = agent, opts) do
     # Auto-inject trace_context if TraceLog is active but trace_context not provided
     opts = maybe_inject_trace_context(opts)
@@ -68,7 +69,7 @@ defmodule PtcRunner.SubAgent.Runner do
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
           step =
-            PtcRunner.Step.error(
+            Step.error(
               :chained_failure,
               "Upstream agent failed: #{upstream_fail.reason}",
               %{},
@@ -103,10 +104,9 @@ defmodule PtcRunner.SubAgent.Runner do
               opts
               |> Keyword.put(:context, context)
               |> Keyword.put(:llm, llm)
-              |> Keyword.put(:native_step_result, true)
               |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
 
-            Loop.run(agent, updated_opts)
+            Loop.run_native(agent, updated_opts)
           end
       end
     else
@@ -274,10 +274,9 @@ defmodule PtcRunner.SubAgent.Runner do
       opts
       |> Keyword.put(:context, context)
       |> Keyword.put(:llm, llm)
-      |> Keyword.put(:native_step_result, true)
       |> Keyword.put(:_received_field_descriptions, received_field_descriptions)
 
-    Loop.run(agent, updated_opts)
+    Loop.run_native(agent, updated_opts)
   end
 
   defp run_single_shot(
@@ -334,13 +333,12 @@ defmodule PtcRunner.SubAgent.Runner do
             # to `Loop.run/2` (see `prelude_tool_backed?/1`), because this path
             # runs with `tools: %{}` and cannot back an export's `(tool/...)` call.
             lisp_result =
-              case PtcRunner.Lisp.run(code,
+              case PtcRunner.Lisp.run_native(code,
                      context: context,
                      tools: %{},
                      memory: initial_memory,
                      float_precision: agent.float_precision,
-                     prelude: agent.runtime_prelude,
-                     native_step: true
+                     prelude: agent.runtime_prelude
                    ) do
                 {:ok, step} -> Definition.unwrap_sentinels(step)
                 other -> other
@@ -447,7 +445,7 @@ defmodule PtcRunner.SubAgent.Runner do
   defp return_error(reason, message, memory, start_time) do
     duration_ms = System.monotonic_time(:millisecond) - start_time
 
-    step = PtcRunner.Step.error(reason, message, memory)
+    step = Step.error(reason, message, memory)
 
     updated_step = %{step | usage: %{duration_ms: duration_ms, memory_bytes: 0}}
 
