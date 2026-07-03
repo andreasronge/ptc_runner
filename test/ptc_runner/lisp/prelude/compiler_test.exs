@@ -227,6 +227,87 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   end
 
   # ============================================================
+  # form_graph (prelude form-edit/introspection plan, Phase 1)
+  # ============================================================
+
+  describe "compile/1 form_graph" do
+    setup do
+      source = """
+      (ns crm "CRM helpers." {:visibility :prompt})
+
+      (defn- fetch-raw
+        "Fetch the raw user record."
+        [id]
+        (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+
+      (defn get-user
+        "Return a CRM user by id."
+        [id]
+        (fetch-raw id))
+
+      (defn- unused-helper
+        "Never called by anything."
+        []
+        42)
+
+      (def max-retries "Retry budget." 3)
+      """
+
+      {:ok, prelude} = Compiler.compile(source)
+      %{prelude: prelude, graph: prelude.form_graph["crm"]}
+    end
+
+    test "public function entry carries visibility/kind/arity/doc/calls", %{graph: graph} do
+      entry = graph["get-user"]
+      assert entry.visibility == :public
+      assert entry.kind == :function
+      assert entry.arity == 1
+      assert entry.doc == "Return a CRM user by id."
+      assert entry.calls == ["fetch-raw"]
+    end
+
+    test "private helper entry is present even though it has no public export", %{graph: graph} do
+      entry = graph["fetch-raw"]
+      assert entry.visibility == :private
+      assert entry.kind == :function
+    end
+
+    test "a def constant is kind :constant with arity 0", %{graph: graph} do
+      entry = graph["max-retries"]
+      assert entry.kind == :constant
+      assert entry.arity == 0
+      assert entry.doc == "Retry budget."
+      assert entry.calls == []
+    end
+
+    test "direct requires/tool_refs cover only the form's own body", %{graph: graph} do
+      helper = graph["fetch-raw"]
+      assert helper.requires.direct == ["upstream:crm/get_user"]
+      assert helper.tool_refs.direct == ["call"]
+
+      export = graph["get-user"]
+      assert export.requires.direct == []
+      assert export.tool_refs.direct == []
+    end
+
+    test "transitive requires/tool_refs widen through a called private helper and match the resolved export",
+         %{prelude: prelude, graph: graph} do
+      entry = graph["get-user"]
+      export = Enum.find(prelude.exports, &(&1.ref == "crm/get-user"))
+
+      assert entry.requires.transitive == ["upstream:crm/get_user"]
+      assert entry.tool_refs.transitive == ["call"]
+      assert export.requires == ["upstream:crm/get_user"]
+      assert export.tool_refs == ["call"]
+    end
+
+    test "an unreferenced ('dead') private still appears in the graph", %{graph: graph} do
+      assert Map.has_key?(graph, "unused-helper")
+      assert graph["unused-helper"].calls == []
+    end
+  end
+
+  # ============================================================
   # Rejections
   # ============================================================
 

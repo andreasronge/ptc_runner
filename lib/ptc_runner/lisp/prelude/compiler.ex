@@ -59,7 +59,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   def compile(source) when is_binary(source) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
-         {:ok, exports} <- build_exports(specs, ns_meta),
+         form_graph = build_form_graph(specs),
+         {:ok, exports} <- build_exports(specs, ns_meta, form_graph),
          {:ok, private_env} <- build_runtime(specs) do
       namespaces = ns_meta |> Map.keys() |> Enum.sort()
 
@@ -69,7 +70,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          exports: exports,
          private_env: private_env,
          source_hash: source_hash(source),
-         source_index: build_source_index(specs, exports),
+         source_index: build_source_index(specs, exports, form_graph),
+         form_graph: form_graph,
          metadata: %{namespaces: ns_meta}
        }}
     end
@@ -437,13 +439,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # Build public Export records
   # ============================================================
 
-  defp build_exports(specs, ns_meta) do
+  defp build_exports(specs, ns_meta, form_graph) do
     public = Enum.reject(specs, & &1.private?)
-    ns_backing = namespace_backing(specs)
 
     with :ok <- reject_duplicate_refs(specs) do
       Enum.reduce_while(public, {:ok, []}, fn spec, {:ok, acc} ->
-        case build_export(spec, ns_meta, ns_backing) do
+        case build_export(spec, ns_meta, form_graph) do
           {:ok, export} -> {:cont, {:ok, [export | acc]}}
           {:error, _} = err -> {:halt, err}
         end
@@ -479,7 +480,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  defp build_export(%Spec{} = spec, ns_meta, ns_backing) do
+  defp build_export(%Spec{} = spec, ns_meta, form_graph) do
     # Visibility precedence: explicit export metadata, then the declaring
     # namespace's default, then the global default (plan §10).
     ns_default =
@@ -490,10 +491,15 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
          {:ok, explicit_provider} <- validate_provider_ref(Map.get(spec.metadata, "provider-ref")) do
-      transitive =
-        ns_backing
+      graph_entry =
+        form_graph
         |> Map.get(spec.namespace, %{})
-        |> Map.get(spec.symbol, %{requires: [], tool_refs: []})
+        |> Map.get(spec.symbol, %{requires: %{transitive: []}, tool_refs: %{transitive: []}})
+
+      transitive = %{
+        requires: graph_entry.requires.transitive,
+        tool_refs: graph_entry.tool_refs.transitive
+      }
 
       backing = backing(spec, explicit_requires, explicit_provider, transitive)
 
@@ -610,25 +616,46 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     %{provider_ref: provider_ref, requires: requires, effect: effect}
   end
 
-  # `%{namespace => %{symbol => sorted upstream ids}}` where each symbol's id set
-  # is its body's literal upstream ids UNIONED with those transitively reachable
-  # through the same-namespace helpers it calls. This keeps a public export's
-  # `requires` precise (it does not absorb a sibling export's requirements) while
-  # still capturing helper-backed upstream operations.
-  # `%{namespace => %{symbol => %{requires: [...], tool_refs: [...]}}}`. Both the
-  # upstream `requires` ids AND the typed `tool_refs` names are computed PER
-  # EXPORT and transitively over the same-namespace helpers it actually calls
-  # (sharing one scope-aware call graph), so a pure export does NOT inherit a
-  # sibling export's tools/requirements.
-  defp namespace_backing(specs) do
+  # ============================================================
+  # Form graph — shared per-namespace sibling call graph (plan Phase 1)
+  # ============================================================
+
+  # `%{namespace => %{symbol => entry}}`, ONE construction pass over the
+  # scope-aware sibling call graph (`collect_refs`, direct upstream/tool
+  # literals) shared by every consumer that used to rebuild it independently:
+  # `build_export/3` (transitive requires/tool_refs), `source_dependencies/3`
+  # (the `depends-on` hint), and `reachable_private_symbols/1` (the D4
+  # reachable-private set). Stored on `%Prelude{}` as `form_graph` (plan §Phase
+  # 1) so it is guaranteed consistent with write-time validation instead of
+  # being an inline idiom recomputed ad hoc.
+  defp build_form_graph(specs) do
     specs
     |> Enum.group_by(& &1.namespace)
-    |> Map.new(fn {ns, ns_specs} -> {ns, transitive_backing(ns_specs)} end)
+    |> Map.new(fn {ns, ns_specs} -> {ns, namespace_form_graph(ns_specs)} end)
   end
 
   # Plain lists throughout (not MapSet) to avoid dialyzer opaque-type friction;
   # results are small (a namespace's symbol/id sets) so list dedup is cheap.
-  defp transitive_backing(ns_specs) do
+  #
+  # `calls` is the DIRECT same-namespace reference edges only. `requires`/
+  # `tool_refs` each carry `direct` (the symbol's own body) and `transitive`
+  # (the closure over `calls`) so an export's requirement precisely follows
+  # what it itself reaches — it does NOT absorb a sibling export's unrelated
+  # requirements.
+  defp namespace_form_graph(ns_specs) do
+    ns_symbols = Enum.map(ns_specs, & &1.symbol)
+
+    calls =
+      Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
+        refs =
+          body
+          |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
+          |> Enum.uniq()
+          |> Enum.filter(&(&1 in ns_symbols))
+
+        {sym, refs}
+      end)
+
     direct_ids =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
         ids =
@@ -645,24 +672,22 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {sym, body |> Enum.reduce([], &collect_tool_names_raw/2) |> Enum.uniq()}
       end)
 
-    ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-    calls =
-      Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-        refs =
-          body
-          |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-          |> Enum.uniq()
-          |> Enum.filter(&(&1 in ns_symbols))
-
-        {sym, refs}
-      end)
-
-    Map.new(ns_specs, fn %Spec{symbol: sym} ->
+    Map.new(ns_specs, fn %Spec{symbol: sym} = spec ->
       {sym,
        %{
-         requires: sym |> reachable_ids(direct_ids, calls, []) |> Enum.uniq() |> Enum.sort(),
-         tool_refs: sym |> reachable_ids(direct_tools, calls, []) |> Enum.uniq() |> Enum.sort()
+         visibility: if(spec.private?, do: :private, else: :public),
+         kind: export_kind(spec),
+         arity: spec.arity,
+         doc: spec.doc,
+         calls: Map.fetch!(calls, sym),
+         requires: %{
+           direct: direct_ids |> Map.fetch!(sym) |> Enum.sort(),
+           transitive: sym |> reachable_ids(direct_ids, calls, []) |> Enum.uniq() |> Enum.sort()
+         },
+         tool_refs: %{
+           direct: direct_tools |> Map.fetch!(sym) |> Enum.sort(),
+           transitive: sym |> reachable_ids(direct_tools, calls, []) |> Enum.uniq() |> Enum.sort()
+         }
        }}
     end)
   end
@@ -836,7 +861,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # the modifiers (Clojure scoping: an expression sees the names bound before
   # it). Returns {introduced_names, acc}. Defensive on shape: an unexpected
   # trailing token is walked as a plain ref and binds nothing, so the
-  # pre-validation `transitive_backing` caller never crashes on a malformed
+  # pre-validation `build_form_graph` caller never crashes on a malformed
   # vector (the post-validation source index only ever sees well-formed ones).
   defp collect_for_bindings(tokens, bound, acc), do: do_for_bindings(tokens, bound, [], acc)
 
@@ -1216,10 +1241,10 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # it, but unreferenced "dead" privates stay hidden — see plan D4). Rendered to
   # strings at compile time: deterministic, bounded, and consistent with the
   # no-raw-atoms discipline (the raw `%Spec{}` forms are discarded after compile).
-  defp build_source_index(specs, exports) do
+  defp build_source_index(specs, exports, form_graph) do
     export_by_ref = Map.new(exports, &{&1.ref, &1})
-    reachable = reachable_private_symbols(specs)
-    dependencies_by_ref = source_dependencies(specs, reachable)
+    reachable = reachable_private_symbols(form_graph)
+    dependencies_by_ref = source_dependencies(specs, reachable, form_graph)
 
     specs
     |> Enum.filter(fn %Spec{} = spec ->
@@ -1240,7 +1265,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     ";; depends-on: #{forms}\n"
   end
 
-  defp source_dependencies(specs, reachable_private) do
+  defp source_dependencies(specs, reachable_private, form_graph) do
     public_symbols =
       specs
       |> Enum.reject(& &1.private?)
@@ -1248,36 +1273,19 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     indexable_symbols = MapSet.union(public_symbols, reachable_private)
 
-    specs
-    |> Enum.group_by(& &1.namespace)
-    |> Enum.flat_map(fn {ns, ns_specs} ->
-      ns_symbols = Enum.map(ns_specs, & &1.symbol)
+    Map.new(specs, fn %Spec{} = spec ->
+      deps =
+        form_graph
+        |> get_in([spec.namespace, spec.symbol, :calls])
+        |> List.wrap()
+        |> Enum.reject(&(&1 == spec.symbol))
+        |> Enum.uniq()
+        |> Enum.filter(&MapSet.member?(indexable_symbols, {spec.namespace, &1}))
+        |> Enum.map(&ref(spec.namespace, &1))
+        |> Enum.sort()
 
-      calls =
-        Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-          refs =
-            body
-            |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-            |> Enum.uniq()
-            |> Enum.filter(&(&1 in ns_symbols))
-
-          {sym, refs}
-        end)
-
-      Enum.map(ns_specs, fn %Spec{} = spec ->
-        deps =
-          calls
-          |> Map.get(spec.symbol, [])
-          |> Enum.reject(&(&1 == spec.symbol))
-          |> Enum.uniq()
-          |> Enum.filter(&MapSet.member?(indexable_symbols, {ns, &1}))
-          |> Enum.map(&ref(ns, &1))
-          |> Enum.sort()
-
-        {ref(spec.namespace, spec.symbol), deps}
-      end)
+      {ref(spec.namespace, spec.symbol), deps}
     end)
-    |> Map.new()
   end
 
   # `source` is a discovery convenience, so a Formatter gap must NEVER take down
@@ -1358,34 +1366,23 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # is discoverable only by reading a body that mentions it — instead of turning
   # `(source ns/guessed)` into an existence oracle over all private names.
   #
-  # Reuses the same same-namespace call graph `transitive_backing/1` builds
-  # internally (`collect_refs` over each body filtered to sibling symbols) but
-  # accumulates reachable SYMBOLS, which `transitive_backing/1` discards. Scoped
-  # PER NAMESPACE and keyed by `{namespace, symbol}` so distinct namespaces can
-  # reuse a helper name without colliding.
-  defp reachable_private_symbols(specs) do
-    specs
-    |> Enum.group_by(& &1.namespace)
-    |> Enum.flat_map(fn {ns, ns_specs} ->
-      ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-      calls =
-        Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-          refs =
-            body
-            |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-            |> Enum.uniq()
-            |> Enum.filter(&(&1 in ns_symbols))
-
-          {sym, refs}
-        end)
+  # Reuses the shared `form_graph`'s `calls` edges (built once by
+  # `build_form_graph/1`) but accumulates reachable SYMBOLS, which the graph
+  # itself does not. Scoped PER NAMESPACE and keyed by `{namespace, symbol}` so
+  # distinct namespaces can reuse a helper name without colliding.
+  defp reachable_private_symbols(form_graph) do
+    form_graph
+    |> Enum.flat_map(fn {ns, ns_graph} ->
+      calls = Map.new(ns_graph, fn {sym, entry} -> {sym, entry.calls} end)
 
       private_syms =
-        ns_specs |> Enum.filter(& &1.private?) |> Enum.map(& &1.symbol) |> MapSet.new()
+        ns_graph
+        |> Enum.filter(fn {_sym, entry} -> entry.visibility == :private end)
+        |> MapSet.new(fn {sym, _entry} -> sym end)
 
-      ns_specs
-      |> Enum.reject(& &1.private?)
-      |> Enum.flat_map(&reachable_symbols(&1.symbol, calls, []))
+      ns_graph
+      |> Enum.reject(fn {_sym, entry} -> entry.visibility == :private end)
+      |> Enum.flat_map(fn {sym, _entry} -> reachable_symbols(sym, calls, []) end)
       |> Enum.filter(&MapSet.member?(private_syms, &1))
       |> Enum.map(fn sym -> {ns, sym} end)
     end)

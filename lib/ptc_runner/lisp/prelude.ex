@@ -32,6 +32,18 @@ defmodule PtcRunner.Lisp.Prelude do
       form), so this cache leaks no captured closure or raw parser AST. NOTE: it
       exposes export IMPLEMENTATION, not just contract — deployments must keep
       secrets/credentials out of prelude bodies, not just docstrings.
+    * `form_graph` — `%{namespace => %{symbol => entry}}`, the compiled
+      per-namespace sibling call graph (prelude form-edit/introspection plan,
+      Phase 1). Each entry carries `visibility` (`:public`/`:private`, this
+      form's own definition kind — distinct from `Export.visibility`'s
+      `:prompt`/`:discoverable`), `kind`, `arity`, `doc`, direct `calls` (sibling
+      symbol references only), and `requires`/`tool_refs` each split into
+      `direct` (this form's own body) and `transitive` (the closure over the
+      siblings it calls). Includes BOTH public and private definitions — unlike
+      `source_index`, this is not reachable-filtered. This is the single
+      construction pass `build_export/3`, the `source` dependency hint, and the
+      D4 reachable-private set all consume; it carries no callables or captured
+      env, only string/atom/list facts.
     * `metadata` — small map of namespace-level facts for traces/debugging,
       e.g. per-namespace docstring and default visibility.
 
@@ -58,12 +70,32 @@ defmodule PtcRunner.Lisp.Prelude do
 
   alias PtcRunner.Lisp.Prelude.Export
 
+  @typedoc """
+  A `form_graph` entry: one compiled top-level definition (plan Phase 1).
+
+  `calls` is DIRECT same-namespace references only; `requires`/`tool_refs`
+  split `direct` (this form's own body) from `transitive` (the closure over
+  the siblings it calls) — both sorted and deduped.
+  """
+  @type form_graph_entry :: %{
+          visibility: :public | :private,
+          kind: Export.kind(),
+          arity: Export.export_arity(),
+          doc: String.t() | nil,
+          calls: [String.t()],
+          requires: %{direct: [String.t()], transitive: [String.t()]},
+          tool_refs: %{direct: [String.t()], transitive: [String.t()]}
+        }
+
+  @type form_graph :: %{String.t() => %{String.t() => form_graph_entry()}}
+
   @type t :: %__MODULE__{
           namespaces: [String.t()],
           exports: [Export.t()],
           private_env: %{String.t() => %{String.t() => term()}},
           source_hash: String.t(),
           source_index: %{String.t() => String.t()},
+          form_graph: form_graph(),
           metadata: map()
         }
 
@@ -73,6 +105,7 @@ defmodule PtcRunner.Lisp.Prelude do
             private_env: %{},
             source_hash: nil,
             source_index: %{},
+            form_graph: %{},
             metadata: %{}
 
   @doc "The declared (protected) namespace names, sorted."
