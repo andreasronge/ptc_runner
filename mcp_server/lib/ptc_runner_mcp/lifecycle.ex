@@ -12,6 +12,46 @@ defmodule PtcRunnerMcp.Lifecycle do
 
   alias PtcRunnerMcp.{Log, Version}
 
+  @boot_id_key {__MODULE__, :boot_id}
+
+  @doc """
+  Return the server boot id for this BEAM application run.
+
+  The id is generated lazily so lifecycle fields are usable from tests and
+  helper processes that do not run `PtcRunnerMcp.Application.start/2`.
+  """
+  @spec boot_id() :: String.t()
+  def boot_id do
+    case :persistent_term.get(@boot_id_key, nil) do
+      id when is_binary(id) ->
+        id
+
+      nil ->
+        id = generate_boot_id()
+        :persistent_term.put(@boot_id_key, id)
+        id
+    end
+  end
+
+  @doc false
+  @spec reset_boot_id!() :: :ok
+  def reset_boot_id! do
+    :persistent_term.erase(@boot_id_key)
+    :ok
+  end
+
+  @doc """
+  Add process-level lifecycle correlation fields to an event payload.
+  """
+  @spec lifecycle_fields(map()) :: map()
+  def lifecycle_fields(extra \\ %{}) when is_map(extra) do
+    %{
+      boot_id: boot_id(),
+      os_pid: System.pid()
+    }
+    |> Map.merge(extra)
+  end
+
   @doc """
   Build the `initialize` reply per § 7.1.
 
@@ -57,5 +97,11 @@ defmodule PtcRunnerMcp.Lifecycle do
 
     Log.log(:debug, "notifications_cancelled", %{request_id: request_id})
     :ok
+  end
+
+  defp generate_boot_id do
+    timestamp = DateTime.utc_now() |> DateTime.to_iso8601(:basic)
+    suffix = :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)
+    "#{timestamp}-#{suffix}"
   end
 end

@@ -55,6 +55,7 @@ defmodule PtcRunnerMcp.Application do
     ConcurrencyGate,
     Credentials,
     DebugConfig,
+    Lifecycle,
     Limits,
     Log,
     ResponseProfile,
@@ -74,6 +75,7 @@ defmodule PtcRunnerMcp.Application do
     args = parse_args(System.argv())
 
     Log.set_level(env_or(args, :log_level, "PTC_RUNNER_MCP_LOG_LEVEL", "info"))
+    Log.log(:info, "application_start", application_start_fields(args))
 
     aggregator_config = load_aggregator_config(args)
 
@@ -667,7 +669,8 @@ defmodule PtcRunnerMcp.Application do
           file: file,
           source: source,
           id: prelude_namespace!(source, file),
-          deps: seed_dep_refs!(file)
+          deps: seed_dep_refs!(file),
+          seed_checksum: sha256_hex(source)
         }
       end)
 
@@ -686,7 +689,16 @@ defmodule PtcRunnerMcp.Application do
       Enum.reduce(entries, {0, []}, fn entry, {seeded, stuck} ->
         case PtcRunner.PreludeStore.write(store, entry.id, entry.source, seed_metadata(entry)) do
           {:ok, _} ->
-            Log.log(:info, "prelude_store_seeded", %{id: entry.id, path: entry.file})
+            Log.log(
+              :info,
+              "prelude_store_seeded",
+              Lifecycle.lifecycle_fields(%{
+                id: entry.id,
+                path: entry.file,
+                store_seed_checksum: entry.seed_checksum
+              })
+            )
+
             {seeded + 1, stuck}
 
           {:error, %{reason: :unknown_dependency}} ->
@@ -723,6 +735,10 @@ defmodule PtcRunnerMcp.Application do
       [] -> base
       deps -> Map.put(base, "requires_preludes", deps)
     end
+  end
+
+  defp sha256_hex(source) when is_binary(source) do
+    :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
   end
 
   # Sidecar dependency declaration for seed files: `audit.clj` may ship an
@@ -1304,6 +1320,23 @@ defmodule PtcRunnerMcp.Application do
       home ->
         path = Path.join([home, ".config", "ptc_runner_mcp", "upstreams.json"])
         if File.exists?(path), do: path, else: nil
+    end
+  end
+
+  defp application_start_fields(args) do
+    Lifecycle.lifecycle_fields(%{
+      http_requested: read_bool(args, :http, "PTC_RUNNER_MCP_HTTP", false),
+      turn_log_dir: configured_turn_log_dir(args),
+      prelude_store_seed_path:
+        env_or(args, :prelude_store_seed, "PTC_RUNNER_MCP_PRELUDE_STORE_SEED", nil)
+    })
+  end
+
+  defp configured_turn_log_dir(args) do
+    case env_or(args, :turn_log_dir, "PTC_RUNNER_MCP_TURN_LOG_DIR", nil) do
+      nil -> nil
+      "" -> nil
+      v when is_binary(v) -> v
     end
   end
 

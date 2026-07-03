@@ -77,6 +77,15 @@ credential-free tool-call summaries, and session-level failure/limit reasons.
 Owner mismatches, stale request ids, expiry races, and aborted evals do not emit
 turn events because no accepted session work can be attributed.
 
+The MCP server also emits structured lifecycle records to stderr. Every
+lifecycle record includes a `boot_id` and `os_pid` so long-running harnesses can
+distinguish a child-process restart from a new BEAM process. Key events include
+`application_start`, `turn_log_collector_start`,
+`turn_log_collector_terminate`, `session_registry_start`,
+`session_registry_terminate`, and `prelude_store_seeded`. Collector events stamp
+the concrete turn-log JSONL path; prelude seed events stamp the seed source
+checksum.
+
 ## Streamable HTTP flags
 
 HTTP mode is opt-in. Without `--http`, the release starts exactly as a

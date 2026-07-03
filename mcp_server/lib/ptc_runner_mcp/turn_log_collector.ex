@@ -6,7 +6,7 @@ defmodule PtcRunnerMcp.TurnLogCollector do
   use GenServer
 
   alias PtcRunner.TraceLog.Collector
-  alias PtcRunnerMcp.TurnLogConfig
+  alias PtcRunnerMcp.{Lifecycle, Log, TurnLogConfig}
 
   defstruct [:collector, :path]
 
@@ -48,6 +48,16 @@ defmodule PtcRunnerMcp.TurnLogCollector do
 
     TurnLogConfig.put_collector(collector)
 
+    Log.log(
+      :info,
+      "turn_log_collector_start",
+      Lifecycle.lifecycle_fields(%{
+        turn_log_dir: dir,
+        turn_log_path: path,
+        collector_pid: inspect(collector)
+      })
+    )
+
     {:ok, %__MODULE__{collector: collector, path: path}}
   end
 
@@ -55,7 +65,17 @@ defmodule PtcRunnerMcp.TurnLogCollector do
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
 
   @impl GenServer
-  def terminate(_reason, %{collector: collector}) do
+  def terminate(reason, %{collector: collector, path: path}) do
+    Log.log(
+      :info,
+      "turn_log_collector_terminate",
+      Lifecycle.lifecycle_fields(%{
+        turn_log_path: path,
+        collector_pid: inspect(collector),
+        reason: inspect(reason)
+      })
+    )
+
     TurnLogConfig.put_collector(nil)
 
     if is_pid(collector) and Process.alive?(collector) do

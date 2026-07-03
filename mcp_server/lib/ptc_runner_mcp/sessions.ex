@@ -67,7 +67,7 @@ defmodule PtcRunnerMcp.Sessions do
   def child_specs do
     [
       names_registry_child_spec(),
-      {Registry, [session_supervisor: Supervisor]},
+      {Registry, [session_supervisor: Supervisor, trap_exit: true]},
       {Supervisor, []}
     ]
   end

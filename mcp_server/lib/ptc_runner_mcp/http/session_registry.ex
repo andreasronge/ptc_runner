@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
 
   use GenServer
 
-  alias PtcRunnerMcp.{Credentials, Log, Sessions}
+  alias PtcRunnerMcp.{Credentials, Lifecycle, Log, Sessions}
   alias PtcRunnerMcp.Http.{Session, Telemetry}
   alias PtcRunnerMcp.Sessions.Owner, as: PtcOwner
 
@@ -27,6 +27,19 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
     config = Keyword.fetch!(opts, :config)
     register_auth_token_redaction(config)
     ref = Process.send_after(self(), :cleanup, @cleanup_interval_ms)
+
+    Log.log(
+      :info,
+      "session_registry_start",
+      Lifecycle.lifecycle_fields(%{
+        registry: inspect(__MODULE__),
+        transport: "http",
+        instance: config.instance_label,
+        max_sessions: config.max_sessions,
+        max_sessions_per_owner: config.max_sessions_per_owner
+      })
+    )
+
     {:ok, %__MODULE__{config: config, cleanup_ref: ref}}
   end
 
@@ -218,6 +231,18 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
 
   @impl GenServer
   def terminate(reason, state) do
+    Log.log(
+      :info,
+      "session_registry_terminate",
+      Lifecycle.lifecycle_fields(%{
+        registry: inspect(__MODULE__),
+        transport: "http",
+        instance: state.config.instance_label,
+        live_sessions: map_size(state.sessions),
+        reason: inspect(reason)
+      })
+    )
+
     if is_reference(state.cleanup_ref), do: Process.cancel_timer(state.cleanup_ref)
 
     Enum.each(state.sessions, fn {id, meta} ->

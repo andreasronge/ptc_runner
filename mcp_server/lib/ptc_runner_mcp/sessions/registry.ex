@@ -8,12 +8,14 @@ defmodule PtcRunnerMcp.Sessions.Registry do
 
   use GenServer
 
+  alias PtcRunnerMcp.{Lifecycle, Log}
   alias PtcRunnerMcp.Sessions.{Config, Owner, Supervisor}
 
   @max_tombstones 1024
   @names_registry PtcRunnerMcp.Sessions.Names
 
-  defstruct sessions: %{},
+  defstruct name: nil,
+            sessions: %{},
             by_owner: %{},
             monitors: %{},
             tombstones: %{},
@@ -39,13 +41,48 @@ defmodule PtcRunnerMcp.Sessions.Registry do
 
   @impl GenServer
   def init(opts) do
+    if Keyword.get(opts, :trap_exit, false) do
+      Process.flag(:trap_exit, true)
+    end
+
     name = Keyword.get(opts, :name, __MODULE__)
+    session_supervisor = Keyword.get(opts, :session_supervisor, Supervisor)
+    names_registry = Keyword.get(opts, :names_registry, default_names_registry(name))
+
+    Log.log(
+      :info,
+      "session_registry_start",
+      Lifecycle.lifecycle_fields(%{
+        registry: inspect(name),
+        transport: "stdio",
+        session_supervisor: inspect(session_supervisor),
+        names_registry: inspect(names_registry)
+      })
+    )
 
     {:ok,
      %__MODULE__{
-       session_supervisor: Keyword.get(opts, :session_supervisor, Supervisor),
-       names_registry: Keyword.get(opts, :names_registry, default_names_registry(name))
+       name: name,
+       session_supervisor: session_supervisor,
+       names_registry: names_registry
      }}
+  end
+
+  @impl GenServer
+  def terminate(reason, state) do
+    Log.log(
+      :info,
+      "session_registry_terminate",
+      Lifecycle.lifecycle_fields(%{
+        registry: inspect(state.name),
+        transport: "stdio",
+        live_sessions: map_size(state.sessions),
+        tombstones: map_size(state.tombstones),
+        reason: inspect(reason)
+      })
+    )
+
+    :ok
   end
 
   @doc "Create and register a new session."
@@ -173,6 +210,14 @@ defmodule PtcRunnerMcp.Sessions.Registry do
   end
 
   @impl GenServer
+  def handle_info({:EXIT, _pid, :normal}, state) do
+    {:noreply, state}
+  end
+
+  def handle_info({:EXIT, _pid, reason}, state) do
+    {:stop, reason, state}
+  end
+
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     case Map.pop(state.monitors, ref) do
       {nil, monitors} ->
