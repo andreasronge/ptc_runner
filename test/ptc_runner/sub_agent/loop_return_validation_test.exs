@@ -1,7 +1,9 @@
 defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.SubAgent
+  alias PtcRunner.SubAgent.Loop.ReturnValidation
 
   # Mock LLM that returns predefined responses in sequence
   defp mock_llm(responses) when is_list(responses) do
@@ -151,6 +153,28 @@ defmodule PtcRunner.SubAgent.LoopReturnValidationTest do
 
       assert step.return == 54
       assert step.usage.turns == 2
+    end
+
+    test "validation feedback renders native keyword values before prompting LLM" do
+      agent =
+        SubAgent.new(
+          prompt: "Return a string",
+          signature: "() -> :string",
+          max_turns: 2
+        )
+
+      actual = %{
+        %LispKeyword{name: "page"} => %{
+          %LispKeyword{name: "parse"} => %LispKeyword{name: "jsonl"}
+        }
+      }
+
+      assert {:error, errors} = ReturnValidation.validate(agent, actual)
+      feedback = ReturnValidation.format_error_for_llm(agent, actual, errors)
+
+      refute feedback =~ "PtcRunner.Lisp.Keyword"
+      assert feedback =~ ~s("page")
+      assert feedback =~ ~s("jsonl")
     end
   end
 end

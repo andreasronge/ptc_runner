@@ -43,6 +43,8 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   that is where memory-diff values and prints get their byte bounds.
   """
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceLog.Event
@@ -55,6 +57,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   # Cap collection elements rendered while building a preview, so previewing a
   # large (≤10MB) sandbox result is O(preview size), not O(result size).
   @preview_items 50
+  @preview_depth 32
 
   @typedoc "Normalized attributes accepted by `build/1` (atom-keyed)."
   @type attrs :: map() | keyword()
@@ -95,21 +98,125 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   Shared by both drivers so `result_preview` reads the same regardless of who
   produced the turn.
   """
-  @spec preview(term()) :: String.t()
-  def preview(nil), do: "nil"
+  @spec preview(term(), keyword()) :: String.t()
+  def preview(value, opts \\ [])
+  def preview(nil, _opts), do: "nil"
 
-  def preview(value) do
-    rendered =
-      value
-      |> PublicStep.value()
-      |> inspect(limit: @preview_items, printable_limit: @preview_limit)
+  def preview(value, opts) do
+    limit = opts |> Keyword.get(:limit, @preview_limit) |> normalize_preview_limit()
 
-    if String.length(rendered) > @preview_limit do
-      String.slice(rendered, 0, @preview_limit - 3) <> "..."
-    else
-      rendered
+    value
+    |> preview_value(limit, 0)
+    |> clamp_preview(limit)
+  end
+
+  defp normalize_preview_limit(limit) when is_integer(limit), do: max(limit, 0)
+  defp normalize_preview_limit(_limit), do: @preview_limit
+
+  defp clamp_preview(preview, limit) do
+    cond do
+      limit <= 0 ->
+        ""
+
+      String.length(preview) <= limit ->
+        preview
+
+      limit <= 3 ->
+        String.slice(preview, 0, limit)
+
+      true ->
+        String.slice(preview, 0, limit - 3) <> "..."
     end
   end
+
+  defp preview_value(_value, _limit, depth) when depth >= @preview_depth, do: "..."
+
+  defp preview_value(nil, _limit, _depth), do: "nil"
+  defp preview_value(true, _limit, _depth), do: "true"
+  defp preview_value(false, _limit, _depth), do: "false"
+  defp preview_value(value, _limit, _depth) when is_integer(value), do: Integer.to_string(value)
+
+  defp preview_value(value, _limit, _depth) when is_float(value),
+    do: Float.to_string(value)
+
+  defp preview_value(value, _limit, _depth) when is_atom(value), do: ":#{value}"
+  defp preview_value(%LispKeyword{} = value, _limit, _depth), do: inspect(value)
+
+  defp preview_value(%RuntimeCallable{} = value, _limit, _depth),
+    do: inspect(PublicStep.value(value))
+
+  defp preview_value(value, limit, _depth) when is_binary(value) do
+    {prefix, rest} = String.split_at(value, limit)
+    suffix = if rest == "", do: "", else: "..."
+    inspect(prefix <> suffix)
+  end
+
+  defp preview_value({:closure, params, _body, _env, _turn_history, _metadata}, _limit, _depth) do
+    names = Enum.map_join(params, " ", &closure_param_name/1)
+    "#fn[#{names}]"
+  end
+
+  defp preview_value(%MapSet{} = set, limit, depth) do
+    {items, truncated?} = take_preview_items(set)
+    body = Enum.map_join(items, " ", &preview_value(&1, limit, depth + 1))
+    "\#{#{body}#{truncation_suffix(truncated?)}}"
+  end
+
+  defp preview_value(value, limit, depth) when is_list(value) do
+    {items, truncated?} = take_preview_items(value)
+    body = Enum.map_join(items, " ", &preview_value(&1, limit, depth + 1))
+    "[#{body}#{truncation_suffix(truncated?)}]"
+  end
+
+  defp preview_value(value, _limit, _depth) when is_tuple(value) and tuple_size(value) == 0,
+    do: "[]"
+
+  defp preview_value(value, limit, depth) when is_tuple(value) do
+    size = tuple_size(value)
+    count = min(size, @preview_items)
+
+    items =
+      for index <- 0..(count - 1)//1 do
+        value |> elem(index) |> preview_value(limit, depth + 1)
+      end
+
+    "[#{Enum.join(items, " ")}#{truncation_suffix(size > count)}]"
+  end
+
+  defp preview_value(%_{} = struct, limit, _depth),
+    do: inspect(struct, limit: @preview_items, printable_limit: limit)
+
+  defp preview_value(value, limit, depth) when is_map(value) do
+    {entries, truncated?} = take_preview_items(value)
+
+    body =
+      Enum.map_join(entries, " ", fn {key, inner} ->
+        "#{preview_key(key, limit, depth + 1)} #{preview_value(inner, limit, depth + 1)}"
+      end)
+
+    "{#{body}#{truncation_suffix(truncated?)}}"
+  end
+
+  defp preview_value(value, _limit, _depth), do: inspect(value, limit: @preview_items)
+
+  defp preview_key(nil, _limit, _depth), do: "nil"
+  defp preview_key(true, _limit, _depth), do: "true"
+  defp preview_key(false, _limit, _depth), do: "false"
+  defp preview_key(key, _limit, _depth) when is_atom(key), do: ":#{key}"
+  defp preview_key(%LispKeyword{} = key, _limit, _depth), do: inspect(key)
+  defp preview_key(key, _limit, _depth) when is_binary(key), do: inspect(key)
+  defp preview_key(key, limit, depth), do: preview_value(key, limit, depth)
+
+  defp take_preview_items(enumerable) do
+    items = Enum.take(enumerable, @preview_items + 1)
+    {Enum.take(items, @preview_items), length(items) > @preview_items}
+  end
+
+  defp truncation_suffix(true), do: " ..."
+  defp truncation_suffix(false), do: ""
+
+  defp closure_param_name({:var, name}), do: to_string(name)
+  defp closure_param_name(_), do: "_"
 
   @doc """
   Slims a prelude trace summary (`PtcRunner.Lisp.Prelude.trace_summary/1`) to the

@@ -10,7 +10,6 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Trace filtering based on execution result
   """
 
-  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
   alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog
@@ -304,18 +303,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   @spec build_result_preview(term()) :: String.t()
   def build_result_preview(nil), do: "nil"
 
-  def build_result_preview(result) do
-    preview =
-      result
-      |> PublicStep.value()
-      |> inspect(limit: :infinity, printable_limit: @max_result_preview_length)
-
-    if String.length(preview) > @max_result_preview_length do
-      String.slice(preview, 0, @max_result_preview_length - 3) <> "..."
-    else
-      preview
-    end
-  end
+  def build_result_preview(result),
+    do: TurnEvent.preview(result, limit: @max_result_preview_length)
 
   @doc """
   Build measurements for turn stop event with optional tokens.

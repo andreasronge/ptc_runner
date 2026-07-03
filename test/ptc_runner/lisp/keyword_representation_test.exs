@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.KeywordRepresentationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   # Force the atom to exist before evaluation. Pre-#964, externalization
   # consulted `String.to_existing_atom/1`, so a pre-existing atom made the
@@ -75,5 +76,9 @@ defmodule PtcRunner.Lisp.KeywordRepresentationTest do
     {:ok, %{return: result}} = Lisp.run("(:kw964probe {:kw964probe 7})")
 
     assert result == 7
+  end
+
+  test "inspect renders native keywords in Lisp form" do
+    assert inspect(%LispKeyword{name: "jsonl"}) == ":jsonl"
   end
 end

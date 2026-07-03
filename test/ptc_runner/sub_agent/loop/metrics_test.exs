@@ -47,13 +47,13 @@ defmodule PtcRunner.SubAgent.Loop.MetricsTest do
   end
 
   describe "build_result_preview/1" do
-    test "externalizes native Lisp keyword values" do
-      assert Metrics.build_result_preview(%LispKeyword{name: "jsonl"}) == ~s("jsonl")
+    test "renders native Lisp keyword values in Lisp form" do
+      assert Metrics.build_result_preview(%LispKeyword{name: "jsonl"}) == ":jsonl"
     end
 
     test "renders closure values as opaque function previews" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
-      assert Metrics.build_result_preview(closure) == ~s("#fn[x]")
+      assert Metrics.build_result_preview(closure) == "#fn[x]"
     end
   end
 end

@@ -746,7 +746,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
-    test "result previews externalize native keyword returns", %{tmp_dir: dir} do
+    test "result previews render native keyword returns", %{tmp_dir: dir} do
       TurnLogConfig.set(%{turn_log_dir: dir})
       start_supervised!({TurnLogCollector, [dir: dir]})
       path = TurnLogCollector.path()
@@ -759,7 +759,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       stop_turn_log!()
 
       [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
-      assert get_in(turn, ["data", "result_preview"]) == ~s("jsonl")
+      assert get_in(turn, ["data", "result_preview"]) == ":jsonl"
       refute get_in(turn, ["data", "result_preview"]) =~ "PtcRunner.Lisp.Keyword"
     end
 

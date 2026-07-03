@@ -43,3 +43,9 @@ defmodule PtcRunner.Lisp.Keyword do
 
   def keyword?(_), do: false
 end
+
+defimpl Inspect, for: PtcRunner.Lisp.Keyword do
+  import Inspect.Algebra
+
+  def inspect(%{name: name}, _opts), do: concat([":", name])
+end

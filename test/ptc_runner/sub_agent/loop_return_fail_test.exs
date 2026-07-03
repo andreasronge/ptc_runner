@@ -66,6 +66,24 @@ defmodule PtcRunner.SubAgent.LoopReturnFailTest do
 
       assert step.return == %{"sign" => "positive"}
     end
+
+    test "signature validation accepts keyword values rendered as public strings" do
+      agent =
+        SubAgent.new(
+          prompt: "Compute",
+          signature: "() -> :string",
+          max_turns: 2
+        )
+
+      llm = fn _ ->
+        {:ok, ~S|```clojure
+(return :jsonl)
+```|}
+      end
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == "jsonl"
+    end
   end
 
   describe "(fail error) syntactic sugar" do

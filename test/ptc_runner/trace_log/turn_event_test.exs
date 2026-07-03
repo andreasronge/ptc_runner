@@ -4,6 +4,10 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.TraceLog.TurnEvent
 
+  defmodule PreviewStruct do
+    defstruct [:body]
+  end
+
   describe "build/1" do
     test "produces the canonical top-level shape for a session turn" do
       event =
@@ -228,18 +232,23 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
   end
 
   describe "preview/1" do
-    test "externalizes native Lisp keyword values" do
-      assert TurnEvent.preview(%LispKeyword{name: "jsonl"}) == ~s("jsonl")
+    test "renders native Lisp keyword values in Lisp form" do
+      assert TurnEvent.preview(%LispKeyword{name: "jsonl"}) == ":jsonl"
     end
 
     test "renders closure values as opaque function previews" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
-      assert TurnEvent.preview(closure) == ~s("#fn[x]")
+      assert TurnEvent.preview(closure) == "#fn[x]"
+    end
+
+    test "renders floats in user-facing decimal form" do
+      assert TurnEvent.preview(3.14) == "3.14"
+      assert TurnEvent.preview(1.2) == "1.2"
     end
 
     test "renders nil and bounds long values" do
       assert TurnEvent.preview(nil) == "nil"
-      assert TurnEvent.preview([1, 2, 3]) == "[1, 2, 3]"
+      assert TurnEvent.preview([1, 2, 3]) == "[1 2 3]"
 
       long = String.duplicate("x", 10_000)
       preview = TurnEvent.preview(long)
@@ -254,6 +263,37 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       assert String.length(preview) <= 4_096
       assert preview =~ "..."
       refute preview =~ "99999"
+    end
+
+    test "bounds deeply nested collections without recursively copying every level" do
+      nested = Enum.reduce(1..50_000, [], fn _, acc -> [acc] end)
+
+      preview = TurnEvent.preview(nested)
+
+      assert preview == String.duplicate("[", 32) <> "..." <> String.duplicate("]", 32)
+    end
+
+    test "honors tiny explicit preview limits without crashing" do
+      assert TurnEvent.preview("abc", limit: 2) == "\"a"
+      assert TurnEvent.preview("abc", limit: 0) == ""
+    end
+
+    test "renders nil and boolean map keys without keyword prefixes" do
+      preview = TurnEvent.preview(%{nil => 1, true => 2, false => 3})
+
+      assert preview =~ "nil 1"
+      assert preview =~ "true 2"
+      assert preview =~ "false 3"
+      refute preview =~ ":nil"
+      refute preview =~ ":true"
+      refute preview =~ ":false"
+    end
+
+    test "bounds nested binary rendering in struct previews before final clamp" do
+      preview = TurnEvent.preview(%PreviewStruct{body: String.duplicate("x", 10_000)}, limit: 64)
+
+      assert String.length(preview) <= 64
+      assert preview =~ "..."
     end
   end
 

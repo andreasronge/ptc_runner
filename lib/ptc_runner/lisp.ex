@@ -1718,7 +1718,7 @@ defmodule PtcRunner.Lisp do
   defp validate_return_value(nil, _signature_str, step), do: {:ok, step}
 
   defp validate_return_value(parsed_signature, signature_str, step) do
-    case Signature.validate(parsed_signature, step.return) do
+    case Signature.validate(parsed_signature, PublicStep.value(step.return)) do
       :ok ->
         # Store the original signature string in the step
         {:ok, %{step | signature: signature_str}}

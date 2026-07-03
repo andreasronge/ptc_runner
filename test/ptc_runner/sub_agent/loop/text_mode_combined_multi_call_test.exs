@@ -30,9 +30,14 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
 
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent
   alias PtcRunner.SubAgent.Definition
+  alias PtcRunner.SubAgent.Loop.State
+  alias PtcRunner.SubAgent.Loop.TextMode
 
+  import PtcRunner.TestSupport.PublicStepAssertions
   import PtcRunner.TestSupport.SubAgentTestHelpers, only: [tool_calling_llm: 1]
 
   defp into_combined(%Definition{} = agent), do: %{agent | ptc_transport: :tool_call}
@@ -256,6 +261,101 @@ defmodule PtcRunner.SubAgent.Loop.TextModeCombinedMultiCallTest do
       assert payload["status"] == "ok"
 
       assert universal_pairing_ok?(step)
+    end
+
+    test "renders native lisp_eval results in public tool-call ledgers" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{id: "c1", name: "lisp_eval", args: %{"program" => ":jsonl"}}
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = SubAgent.new(prompt: "x", output: :text, tools: %{}, max_turns: 5)
+      {:ok, step} = run_combined(agent, llm)
+
+      assert step.return == "done"
+      assert [%{name: "lisp_eval", result: "jsonl"}] = step.tool_calls
+      assert_public_step!(step)
+    end
+
+    test "retains native lisp_eval results until the public step boundary" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{id: "c1", name: "lisp_eval", args: %{"program" => ":jsonl"}}
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          },
+          %{content: "done", tokens: %{input: 1, output: 1}}
+        ])
+
+      agent = into_combined(SubAgent.new(prompt: "x", output: :text, tools: %{}, max_turns: 5))
+
+      state = %State{
+        llm: llm,
+        context: %{},
+        turn: 1,
+        messages: [%{role: :user, content: "x"}],
+        start_time: System.monotonic_time(:millisecond),
+        memory: %{},
+        remaining_turns: agent.max_turns,
+        work_turns_remaining: agent.max_turns,
+        collect_messages: true,
+        original_prompt: agent.prompt,
+        agent_name: agent.name
+      }
+
+      assert {:ok, native_step} = TextMode.run(agent, llm, state)
+      assert [%{name: "lisp_eval", result: %LispKeyword{name: "jsonl"}}] = native_step.tool_calls
+
+      public_step = PublicStep.from_native(native_step)
+      assert [%{name: "lisp_eval", result: "jsonl"}] = public_step.tool_calls
+      assert_public_step!(public_step)
+    end
+
+    test "renders fatal native memory before returning public error step" do
+      llm =
+        tool_calling_llm([
+          %{
+            tool_calls: [
+              %{
+                id: "c1",
+                name: "lisp_eval",
+                args: %{
+                  "program" =>
+                    "(do (def m {:page {:parse :jsonl}}) (def big (apply str (range 0 1000))))"
+                }
+              }
+            ],
+            content: nil,
+            tokens: %{input: 1, output: 1}
+          }
+        ])
+
+      agent =
+        SubAgent.new(
+          prompt: "x",
+          output: :text,
+          tools: %{},
+          max_turns: 5,
+          memory_limit: 200,
+          memory_strategy: :strict
+        )
+
+      {:error, step} = run_combined(agent, llm)
+
+      page = get_in(step.memory, ["m", "page"]) || get_in(step.memory, ["m", :page])
+
+      assert (page["parse"] || page[:parse]) == "jsonl"
+      assert_public_step!(step)
     end
   end
 

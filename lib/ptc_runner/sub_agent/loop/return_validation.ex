@@ -6,7 +6,9 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   formats validation errors for LLM feedback.
   """
 
+  alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Definition
+  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.Signature
 
   @doc """
@@ -19,7 +21,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   def validate(%{parsed_signature: {:signature, _, :any}}, _value), do: :ok
 
   def validate(%{parsed_signature: parsed_sig}, value) do
-    Signature.validate(parsed_sig, value)
+    Signature.validate(parsed_sig, public_value(value))
   end
 
   @doc """
@@ -32,7 +34,7 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   def format_error_for_llm(agent, actual_value, errors) do
     expected_type = format_expected_type(agent)
     error_details = format_error_details(errors)
-    actual_str = inspect(actual_value, limit: 10, pretty: false)
+    actual_str = inspect(public_value(actual_value), limit: 10, pretty: false)
     truncated_actual = String.slice(actual_str, 0, 200)
 
     fix_instruction = "Please fix and call (return ...) with a correctly typed value."
@@ -61,5 +63,11 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
       path_str = if path == [], do: "root", else: "[#{Enum.join(kebab_path, ".")}]"
       "- #{path_str}: #{message}"
     end)
+  end
+
+  defp public_value(value) do
+    value
+    |> PublicStep.value()
+    |> KeyNormalizer.normalize_keys()
   end
 end

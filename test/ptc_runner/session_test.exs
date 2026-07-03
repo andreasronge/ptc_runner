@@ -70,6 +70,18 @@ defmodule PtcRunner.SessionTest do
       assert step2.return == true
     end
 
+    test "validates signatures against rendered public return values" do
+      session = Session.new(signature: "() -> :string")
+
+      {{:ok, step}, session} = Session.eval(session, ":jsonl")
+
+      assert_public_step!(step)
+      assert step.return == "jsonl"
+
+      {{:ok, step2}, _session} = Session.eval(session, "(keyword? *1)", signature: nil)
+      assert step2.return == true
+    end
+
     test "does not persist a top-level runtime callable binding" do
       tools = %{"echo" => fn args -> args["x"] end}
       session = Session.new(tools: tools)

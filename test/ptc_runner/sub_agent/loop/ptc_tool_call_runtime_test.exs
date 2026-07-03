@@ -38,6 +38,21 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCallRuntimeTest do
       assert step.return == 42
     end
 
+    test "signature validation accepts keyword values rendered as public strings" do
+      llm = scripted_llm([tool_call_response("(return :jsonl)")])
+
+      agent =
+        SubAgent.new(
+          prompt: "Test",
+          signature: "() -> :string",
+          ptc_transport: :tool_call,
+          max_turns: 3
+        )
+
+      assert {:ok, step} = SubAgent.run(agent, llm: llm)
+      assert step.return == "jsonl"
+    end
+
     test "intermediate execution then (return ...) on next turn" do
       llm =
         scripted_llm([
