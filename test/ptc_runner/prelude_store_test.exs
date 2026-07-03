@@ -688,6 +688,26 @@ defmodule PtcRunner.PreludeStoreTest do
       assert aft.export_visibility == :discoverable
     end
 
+    # The size bound must reject an oversized edit payload BEFORE any
+    # scanner/parser work runs on it — the write-time max_source_bytes check
+    # alone would let a huge replace_form source burn unbounded CPU first.
+    test "rejects an oversized edit source before scanning it" do
+      {:ok, store} = PreludeStore.new(max_source_bytes: byte_size(@edit_base) + 100)
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      oversized = "(defn get-user [id] " <> String.duplicate(";x", 2_000) <> " id)"
+
+      assert {:error, %{reason: :source_too_large, limit_bytes: _}} =
+               PreludeStore.edit(store, "store-edit", [
+                 %{op: :replace_form, name: "get-user", source: oversized}
+               ])
+
+      assert {:error, %{reason: :source_too_large}} =
+               PreludeStore.edit(store, "store-edit", [
+                 %{op: :set_ns_doc, doc: String.duplicate("d", byte_size(@edit_base) + 200)}
+               ])
+    end
+
     test "rejects a batch where two ops target the same form name" do
       {:ok, store} = PreludeStore.new()
       assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)

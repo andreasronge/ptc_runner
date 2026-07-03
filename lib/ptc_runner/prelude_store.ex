@@ -172,7 +172,11 @@ defmodule PtcRunner.PreludeStore do
       base_checksum = PreludeCandidate.checksum(base)
       write_metadata = Map.merge(metadata, %{"parent_checksum" => base_checksum})
 
-      with {:ok, new_source, forms_summary} <- FormEdit.apply(base.source, edits),
+      max_source_bytes =
+        Keyword.get(store.opts, :max_source_bytes, @default_max_source_bytes)
+
+      with {:ok, new_source, forms_summary} <-
+             FormEdit.apply(base.source, edits, max_source_bytes: max_source_bytes),
            {:ok, result} <- write(store, id, new_source, write_metadata),
            {:ok, new_candidate} <-
              read(store, %{id: id, version: result.version, checksum: result.checksum}) do

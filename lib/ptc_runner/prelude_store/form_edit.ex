@@ -121,10 +121,24 @@ defmodule PtcRunner.PreludeStore.FormEdit do
   @doc """
   Applies `edits` to `base_source`, returning `{:ok, new_source, summary}` or
   a fail-closed `{:error, %{reason: ..., message: ...}}`.
+
+  `opts` supports `:max_source_bytes` — when set, every caller-supplied
+  `source`/`doc` string is bounded BEFORE any scanning or parsing work
+  happens on it (`:source_too_large`). The base source is trusted (it comes
+  from the store, which already enforces its own bound); only edit payloads
+  need this pre-scan gate — without it, an oversized `replace_form` source
+  would burn scanner/parser CPU only to be rejected later by the write-time
+  size check.
   """
-  @spec apply(binary(), [edit()]) :: {:ok, binary(), summary()} | {:error, map()}
-  def apply(base_source, edits) when is_binary(base_source) and is_list(edits) do
+  @spec apply(binary(), [edit()], keyword()) :: {:ok, binary(), summary()} | {:error, map()}
+  def apply(base_source, edits, opts \\ [])
+
+  def apply(base_source, edits, opts)
+      when is_binary(base_source) and is_list(edits) and is_list(opts) do
+    max_bytes = Keyword.get(opts, :max_source_bytes)
+
     with :ok <- validate_edits_shape(edits),
+         :ok <- validate_edit_bounds(edits, max_bytes),
          {:ok, scan} <- scan_base(base_source),
          {:ok, ops} <- normalize_all(edits),
          :ok <- validate_batch(ops, scan) do
@@ -132,8 +146,8 @@ defmodule PtcRunner.PreludeStore.FormEdit do
     end
   end
 
-  def apply(_base_source, _edits) do
-    {:error, invalid_argument("FormEdit.apply/2 requires a binary base_source and a list edits")}
+  def apply(_base_source, _edits, _opts) do
+    {:error, invalid_argument("FormEdit.apply/3 requires a binary base_source and a list edits")}
   end
 
   # ============================================================
@@ -147,6 +161,32 @@ defmodule PtcRunner.PreludeStore.FormEdit do
       :ok
     else
       {:error, invalid_argument("each edit must be a map")}
+    end
+  end
+
+  # Bounds every string an edit can carry (`source`, `doc`) before ANY
+  # scanner/parser work touches it. Field presence/typing is NOT validated
+  # here — `normalize_all/1` owns that; this pass only guards resource use.
+  defp validate_edit_bounds(_edits, nil), do: :ok
+
+  defp validate_edit_bounds(edits, max_bytes) do
+    edits
+    |> Enum.find_value(fn edit ->
+      ["source", :source, "doc", :doc]
+      |> Enum.map(&Map.get(edit, &1))
+      |> Enum.find(&(is_binary(&1) and byte_size(&1) > max_bytes))
+    end)
+    |> case do
+      nil ->
+        :ok
+
+      oversized ->
+        {:error,
+         %{
+           reason: :source_too_large,
+           message: "edit source is #{byte_size(oversized)} bytes; limit is #{max_bytes}",
+           limit_bytes: max_bytes
+         }}
     end
   end
 
