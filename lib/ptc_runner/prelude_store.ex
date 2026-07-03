@@ -121,6 +121,7 @@ defmodule PtcRunner.PreludeStore do
          :ok <- check_parent(store, id, parent_checksum),
          {:ok, declared_refs} <- declared_dep_refs(id, metadata),
          {:ok, dep_candidates} <- resolve_deps(store, declared_refs),
+         :ok <- validate_dep_closure(store, id, dep_candidates),
          final_metadata = put_dep_metadata(metadata, declared_refs, dep_candidates),
          # The bound must hold for what is STORED, not just what the caller
          # sent: computed pins add ~100 bytes per dep (a 64-hex checksum
@@ -467,6 +468,71 @@ defmodule PtcRunner.PreludeStore do
       true ->
         {:ok, parsed}
     end
+  end
+
+  # Version-level pins are acyclic (a dep is always written before its
+  # dependent), but the ID-level graph can still fold back through history:
+  # `a@1`, then `b@1 -> a@1`, then `a@2` declaring `b` persists
+  # `a@2 -> b@1 -> a@1` — written successfully yet never attachable, since
+  # selection resolves by id and fails the a@2/a@1 conflict. Walk the
+  # declared deps' transitive pin closure and reject (1) any path back to
+  # the id being written and (2) conflicting versions of a shared dep, so
+  # "written" keeps implying "attachable alone" (codex review finding).
+  defp validate_dep_closure(_store, _id, []), do: :ok
+
+  defp validate_dep_closure(store, id, dep_candidates) do
+    dep_candidates
+    |> Enum.reduce_while({:ok, %{}}, fn candidate, {:ok, seen} ->
+      case closure_walk(store, id, candidate, seen) do
+        {:ok, seen2} -> {:cont, {:ok, seen2}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, _seen} -> :ok
+      {:error, _} = error -> error
+    end
+  end
+
+  defp closure_walk(store, root_id, %PreludeCandidate{} = candidate, seen) do
+    cond do
+      candidate.id == root_id ->
+        {:error,
+         error(
+           :dependency_cycle,
+           "declared dependencies reach back to `#{root_id}` " <>
+             "(the closure pins `#{candidate.id}@#{candidate.version}`); " <>
+             "a prelude cannot depend on itself, even transitively"
+         )}
+
+      Map.get(seen, candidate.id, candidate.version) != candidate.version ->
+        {:error,
+         error(
+           :dependency_conflict,
+           "declared dependencies pin conflicting versions of `#{candidate.id}` " <>
+             "(@#{Map.get(seen, candidate.id)} and @#{candidate.version}); " <>
+             "no session could attach both — align the dependency pins"
+         )}
+
+      Map.has_key?(seen, candidate.id) ->
+        {:ok, seen}
+
+      true ->
+        seen = Map.put(seen, candidate.id, candidate.version)
+        walk_pins(store, root_id, PreludeCandidate.dep_pins(candidate), seen)
+    end
+  end
+
+  defp walk_pins(store, root_id, pins, seen) do
+    Enum.reduce_while(pins, {:ok, seen}, fn pin, {:ok, acc} ->
+      with {:ok, dep} <-
+             read(store, %{id: pin.id, version: pin.version, checksum: pin.checksum}),
+           {:ok, acc2} <- closure_walk(store, root_id, dep, acc) do
+        {:cont, {:ok, acc2}}
+      else
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
   end
 
   defp check_enriched_metadata_bound(_metadata, [], _max_bytes), do: :ok

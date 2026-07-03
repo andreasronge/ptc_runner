@@ -1097,6 +1097,53 @@ defmodule PtcRunner.PreludeStoreTest do
       assert error.message =~ "requires_preludes"
     end
 
+    test "a write whose dependency closure reaches back to the written id is rejected" do
+      # Regression (codex review): a@1, then b@1 pinning a@1, then a@2
+      # declaring b would persist a@2 -> b@1 -> a@1 — written successfully
+      # but never attachable (id-level conflict at selection). Reject at
+      # write so "written" keeps implying "attachable".
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _} = PreludeStore.write(store, "a", "(ns a \"A.\")\n(defn fa [x] x)")
+
+      {:ok, _} =
+        PreludeStore.write(store, "b", "(ns b \"B.\")\n(defn fb [x] (a/fa x))", %{
+          "requires_preludes" => ["a"]
+        })
+
+      assert {:error, %{reason: :dependency_cycle, message: message}} =
+               PreludeStore.write(store, "a", "(ns a \"A2.\")\n(defn fa [x] (b/fb x))", %{
+                 "requires_preludes" => ["b"]
+               })
+
+      assert message =~ "reach back to `a`"
+      assert message =~ "a@1"
+    end
+
+    test "a write whose deps pin conflicting versions of a shared dep is rejected" do
+      {store, _base} = store_with_base()
+
+      {:ok, _} =
+        PreludeStore.write(store, "c", "(ns c \"C.\")\n(defn fc [x] (base/helper x))", %{
+          "requires_preludes" => ["base"]
+        })
+
+      {:ok, _} = PreludeStore.write(store, "base", @dep_base_v2)
+
+      {:ok, _} =
+        PreludeStore.write(store, "d", "(ns d \"D.\")\n(defn fd [x] (base/helper x))", %{
+          "requires_preludes" => ["base"]
+        })
+
+      # c pins base@1, d pins base@2 — a dependent of both could never attach.
+      assert {:error, %{reason: :dependency_conflict, message: message}} =
+               PreludeStore.write(store, "e", "(ns e \"E.\")\n(defn fe [x] (c/fc (d/fd x)))", %{
+                 "requires_preludes" => ["c", "d"]
+               })
+
+      assert message =~ "base"
+    end
+
     test "the metadata bound applies to the FINAL metadata including computed pins" do
       # Regression (codex review): the bound was checked on caller metadata
       # BEFORE the store added prelude_deps pins, so stored rows could exceed
