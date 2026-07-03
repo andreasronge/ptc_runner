@@ -711,8 +711,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     # `state.tool_cache` (combined-mode native preview seeding). Pure text
     # mode never enters the cache-write branch, so the threaded state is a
     # noop for v1 callers.
-    {tool_results_rev, current_turn_calls, state_after_calls, fatal_step} =
-      Enum.reduce_while(calls_to_execute, {[], [], state, nil}, fn entry, acc ->
+    {tool_results_rev, current_turn_calls, state_after_calls, fatal_step, turn_catalog_ops} =
+      Enum.reduce_while(calls_to_execute, {[], [], state, nil, []}, fn entry, acc ->
         dispatch_one_call(entry, agent, acc)
       end)
 
@@ -731,6 +731,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           success?: false,
           prints: [],
           tool_calls: Enum.reverse(current_turn_calls),
+          catalog_ops: turn_catalog_ops,
           memory: %{}
         )
 
@@ -781,6 +782,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           success?: true,
           prints: [],
           tool_calls: Enum.reverse(current_turn_calls),
+          catalog_ops: turn_catalog_ops,
           memory: %{}
         )
 
@@ -808,7 +810,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   # Per-call dispatch branch extracted from the `Enum.reduce_while/3`
   # body in `proceed_with_tool_calls/4` to keep cyclomatic complexity
   # under the credo gate. Returns the standard reduce-while tuple.
-  defp dispatch_one_call({tc, exempt?}, agent, {results_acc, calls_acc, st, _fatal}) do
+  defp dispatch_one_call({tc, exempt?}, agent, {results_acc, calls_acc, st, _fatal, ops_acc}) do
     tool_name = tc.name
     tool_args = tc.args || %{}
     tool_id = tc.id
@@ -816,16 +818,22 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     cond do
       exempt? ->
         case dispatch_lisp_eval(tc, agent, st) do
-          {:ok, result_str, step_entry, st_next} ->
+          {:ok, result_str, step_entry, st_next, catalog_ops} ->
             tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-            {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
 
-          {:fatal, error_step, result_str, step_entry} ->
+            {:cont,
+             {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil,
+              ops_acc ++ catalog_ops}}
+
+          {:fatal, error_step, result_str, step_entry, catalog_ops} ->
             # Terminal Lisp failure (`:prelude_attach_failed` or a strict
             # memory-limit exit): keep the paired tool result + step entry for
             # observability, then halt the reduce.
             tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-            {:halt, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, error_step}}
+
+            {:halt,
+             {[tool_result_msg | results_acc], [step_entry | calls_acc], st, error_step,
+              ops_acc ++ catalog_ops}}
         end
 
       # Tier 3.5 Fix 4: unknown_tool wins over args_error in combined
@@ -843,19 +851,21 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
         result_str = protocol_error_json(:unknown_tool, message)
         step_entry = simple_step_entry(tool_name, tool_args, message)
         tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil, ops_acc}}
 
       Map.get(tc, :args_error) ->
         error_msg = Map.get(tc, :args_error)
         result_str = Jason.encode!(%{"error" => error_msg})
         step_entry = simple_step_entry(tool_name, tool_args, error_msg)
         tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil}}
+        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st, nil, ops_acc}}
 
       true ->
         {result_str, step_entry, st_next} = execute_single_tool(tool_name, tool_args, st)
         tool_result_msg = %{role: :tool, tool_call_id: tool_id, content: result_str}
-        {:cont, {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil}}
+
+        {:cont,
+         {[tool_result_msg | results_acc], [step_entry | calls_acc], st_next, nil, ops_acc}}
     end
   end
 
@@ -1180,7 +1190,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     step_entry = ptc_lisp_step_entry(call, unwrapped, duration_ms, nil)
     _ = program
-    {:ok, result_json, step_entry, state_next}
+    {:ok, result_json, step_entry, state_next, unwrapped.catalog_ops}
   end
 
   defp handle_lisp_success(
@@ -1206,7 +1216,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       ptc_lisp_step_entry(call, lisp_step, duration_ms, fail_message)
 
     _ = {program, agent}
-    {:ok, result_json, step_entry, state_next}
+    {:ok, result_json, step_entry, state_next, lisp_step.catalog_ops}
   end
 
   defp handle_lisp_success(lisp_step, program, call, agent, state, duration_ms) do
@@ -1224,7 +1234,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
         step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, nil)
         _ = program
-        {:ok, result_json, step_entry, state_next}
+        {:ok, result_json, step_entry, state_next, lisp_step.catalog_ops}
 
       {:error, :memory_limit_exceeded, actual_size} ->
         handle_memory_limit_exceeded(
@@ -1247,15 +1257,16 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       # never become a recoverable `lisp_eval` tool error that the LLM retries —
       # parity with the `:content` and `:tool_call` transports. Render the paired
       # tool error + step entry so the halting turn stays observable, then signal
-      # fatal: the 4-tuple `{:fatal, step, result_json, step_entry}` halts the
-      # combined-mode reduce while preserving the assistant call + tool result.
+      # fatal: the `{:fatal, step, result_json, step_entry, catalog_ops}` tuple
+      # halts the combined-mode reduce while preserving the assistant call +
+      # tool result.
       reason_atom = Shared.classify_lisp_error(fail)
       message = fail.message
       result_json = PtcToolProtocol.render_error(reason_atom, message)
       emit_ptc_lisp_telemetry(state, duration_ms, true)
       step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
       _ = program
-      {:fatal, lisp_step, result_json, step_entry}
+      {:fatal, lisp_step, result_json, step_entry, lisp_step.catalog_ops}
     else
       reason_atom = Shared.classify_lisp_error(fail)
       message = fail.message
@@ -1272,7 +1283,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       emit_ptc_lisp_telemetry(state, duration_ms, true)
       step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, message)
       _ = program
-      {:ok, result_json, step_entry, state_next}
+      {:ok, result_json, step_entry, state_next, lisp_step.catalog_ops}
     end
   end
 
@@ -1292,10 +1303,11 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       result_json =
         PtcToolProtocol.render_error(:memory_limit, error_msg <> " Last turn rolled back.")
 
-      # Rollback: do NOT propagate lisp_step's memory/turn_history.
+      # Rollback: do NOT propagate lisp_step's memory/turn_history. The
+      # catalog ops still happened — keep them observable on the turn.
       emit_ptc_lisp_telemetry(state, duration_ms, true)
       step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, error_msg)
-      {:ok, result_json, step_entry, state}
+      {:ok, result_json, step_entry, state, lisp_step.catalog_ops}
     else
       emit_ptc_lisp_telemetry(state, duration_ms, true)
       error_step = Step.error(:memory_limit_exceeded, error_msg, lisp_step.memory)
@@ -1303,7 +1315,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
       # matching `role: :tool` response (valid transcript under collect_messages).
       result_json = PtcToolProtocol.render_error(:memory_limit, error_msg)
       step_entry = ptc_lisp_step_entry(call, lisp_step, duration_ms, error_msg)
-      {:fatal, error_step, result_json, step_entry}
+      # `error_step` is synthesized with empty catalog_ops; carry the real ones.
+      {:fatal, error_step, result_json, step_entry, lisp_step.catalog_ops}
     end
   end
 

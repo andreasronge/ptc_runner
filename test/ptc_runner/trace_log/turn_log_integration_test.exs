@@ -175,6 +175,58 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert is_integer(sub_op["duration_ms"])
     end
 
+    test "combined text mode records catalog discovery ops in turn events", %{tmp_dir: dir} do
+      discovery_exec = fn
+        :apropos, ["github" | _] ->
+          {:ok, ["github.search(query) - Search repositories"]}
+
+        operation, args ->
+          {:programmer_fault, "unexpected discovery call #{inspect({operation, args})}"}
+      end
+
+      responses = [
+        %{
+          content: nil,
+          tool_calls: [
+            %{
+              id: "c1",
+              name: "lisp_eval",
+              args: %{"program" => ~s|(apropos "github" {:limit 1})|}
+            }
+          ],
+          tokens: %{input: 0, output: 0}
+        },
+        %{content: "done", tokens: %{input: 0, output: 0}}
+      ]
+
+      {:ok, script} = Agent.start_link(fn -> responses end)
+      llm = fn _ -> {:ok, Agent.get_and_update(script, fn [h | t] -> {h, t} end)} end
+
+      turns =
+        session_turn_events(dir, "combined-catalog", fn ->
+          agent =
+            SubAgent.new(
+              prompt: "Discover",
+              output: :text,
+              ptc_transport: :tool_call,
+              max_turns: 3
+            )
+
+          {:ok, _} = SubAgent.run(agent, llm: llm, discovery_exec: discovery_exec)
+        end)
+
+      assert [op] =
+               turns
+               |> Enum.find(&(&1["data"]["catalog_ops"] != []))
+               |> get_in(["data", "catalog_ops"]),
+             "no turn event carried catalog_ops; combined-mode lisp_eval discovery was dropped"
+
+      assert op["operation"] == "apropos"
+      assert op["args"] == %{"query" => "github", "opts" => %{"limit" => 1}}
+      assert op["outcome"] == "ok"
+      assert is_integer(op["duration_ms"])
+    end
+
     test "SubAgent turns carry prelude provenance only when actually attached", %{tmp_dir: dir} do
       {:ok, prelude} =
         Compiler.compile("""
