@@ -47,9 +47,16 @@ defmodule PtcRunner.Lisp.Prelude.FormScannerTest do
       (Path.wildcard(Path.join(@root, "examples/**/*.clj")) ++
          Path.wildcard(Path.join(@root, "test/**/*.clj")))
       |> Enum.sort()
+      |> Enum.reject(&generated_or_dependency_path?/1)
       |> Enum.map(fn path -> {Path.relative_to(path, @root), File.read!(path)} end)
 
     file_sources ++ [{"PtcRunner.PreludeStore.Tools.prelude_source/0", Tools.prelude_source()}]
+  end
+
+  defp generated_or_dependency_path?(path) do
+    rel = Path.relative_to(path, @root)
+
+    String.contains?(rel, "/_build/") or String.contains?(rel, "/deps/")
   end
 
   # ============================================================

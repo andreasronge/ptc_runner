@@ -18,6 +18,32 @@ reconstruct a 9,294-byte source through 512-char eval previews within the
 turn cap), while an in-session anchor splice succeeded with one
 compile-guided retry.
 
+### Post-implementation validation (2026-07-03)
+
+Focused core validation passed after implementation:
+
+- `mix test test/ptc_runner/lisp/prelude/compiler_test.exs
+  test/ptc_runner/lisp/prelude/form_scanner_test.exs
+  test/ptc_runner/prelude_store_test.exs
+  test/ptc_runner/prelude_store_tools_test.exs` — 114 tests, 0 failures.
+- Full root suite — 393 doctests, 3 properties, 6270 tests, 0 failures.
+
+MCP stdio smoke also passed end to end through the real JSON-RPC server
+surface: `initialize`; `lisp_session_start` in `write_capable` mode;
+`lisp_session_eval` running `(prelude/write ...)`; `prelude/forms` seeing
+public and private forms; `prelude/form-deps` showing a public function's
+private helper dependency; `prelude/edit` replacing the private helper,
+adding a public function, and setting the namespace doc; then a separate
+read-only verifier session attaching `["demo@2"]` and observing the edited
+behavior (`show -> "v2:x"`, `shout -> "v2:x!"`).
+
+One test-harness correction came out of the smoke pass: the scanner corpus
+gate must exclude generated build/dependency trees such as `examples/**/_build`
+and `examples/**/deps`. Those paths can contain deliberately invalid benchmark
+outputs; accepting them would weaken the scanner for no product benefit. The
+gate still scans real `examples/**/*.clj`, `test/**/*.clj`, and the shipped
+`prelude/` wrapper source.
+
 ## Problem
 
 `prelude/write` accepts only a complete namespace source string. The model
