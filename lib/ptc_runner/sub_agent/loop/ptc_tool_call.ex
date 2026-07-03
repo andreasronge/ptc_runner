@@ -403,6 +403,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: true,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type
       )
@@ -448,6 +449,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: true,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type || :normal
       )
@@ -500,6 +502,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type
       )
@@ -549,6 +552,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type
       )
@@ -626,6 +630,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type
       )
@@ -668,6 +673,7 @@ defmodule PtcRunner.SubAgent.Loop.PtcToolCall do
         success?: false,
         prints: lisp_step.prints,
         tool_calls: lisp_step.tool_calls,
+        catalog_ops: lisp_step.catalog_ops,
         memory: lisp_step.memory,
         type: state.current_turn_type
       )

@@ -13,6 +13,7 @@ defmodule PtcRunner.Turn do
   - `result` - Execution result value
   - `prints` - Captured println output
   - `tool_calls` - Tool invocations made during this turn
+  - `catalog_ops` - REPL discovery/catalog operations made during this turn
   - `memory` - Accumulated definitions after this turn
   - `success?` - Whether the turn succeeded
   - `messages` - Messages sent to the LLM for this turn (for debugging/verification)
@@ -40,6 +41,7 @@ defmodule PtcRunner.Turn do
     :result,
     :prints,
     :tool_calls,
+    :catalog_ops,
     :memory,
     :success?,
     :messages,
@@ -85,6 +87,7 @@ defmodule PtcRunner.Turn do
           result: term(),
           prints: [String.t()],
           tool_calls: [tool_call()],
+          catalog_ops: [PtcRunner.Step.catalog_op()],
           memory: map(),
           success?: boolean(),
           messages: [message()] | nil,
@@ -105,6 +108,7 @@ defmodule PtcRunner.Turn do
   - `params` - Optional map with:
     - `:prints` - Captured println output (default: [])
     - `:tool_calls` - Tool invocations made during this turn (default: [])
+    - `:catalog_ops` - Discovery/catalog operations made during this turn (default: [])
     - `:memory` - Accumulated definitions after this turn (default: %{})
     - `:messages` - Messages sent to the LLM for this turn (default: nil)
     - `:type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
@@ -139,6 +143,7 @@ defmodule PtcRunner.Turn do
       result: result,
       prints: Map.get(params, :prints, []),
       tool_calls: Map.get(params, :tool_calls, []),
+      catalog_ops: Map.get(params, :catalog_ops, []),
       memory: Map.get(params, :memory, %{}),
       success?: true,
       messages: Map.get(params, :messages),
@@ -162,6 +167,7 @@ defmodule PtcRunner.Turn do
   - `params` - Optional map with:
     - `:prints` - Captured println output (default: [])
     - `:tool_calls` - Tool invocations made during this turn (default: [])
+    - `:catalog_ops` - Discovery/catalog operations made during this turn (default: [])
     - `:memory` - Memory state after this turn (default: %{})
     - `:messages` - Messages sent to the LLM for this turn (default: nil)
     - `:type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
@@ -190,6 +196,7 @@ defmodule PtcRunner.Turn do
       result: error,
       prints: Map.get(params, :prints, []),
       tool_calls: Map.get(params, :tool_calls, []),
+      catalog_ops: Map.get(params, :catalog_ops, []),
       memory: Map.get(params, :memory, %{}),
       success?: false,
       messages: Map.get(params, :messages),

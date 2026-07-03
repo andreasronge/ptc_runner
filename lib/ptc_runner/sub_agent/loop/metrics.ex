@@ -243,6 +243,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         result_preview: Keyword.fetch!(fields, :result_preview),
         prints: Keyword.fetch!(fields, :prints),
         tool_calls: turn_tool_calls(turn),
+        catalog_ops: turn_catalog_ops(turn),
         fail: turn_fail(turn),
         # The ACTUAL prelude trace from this turn's Lisp execution (nil when
         # attach failed or no Lisp ran), captured onto the Turn at build time.
@@ -294,6 +295,12 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   end
 
   defp turn_tool_calls(_), do: []
+
+  defp turn_catalog_ops(%Turn{catalog_ops: catalog_ops}) when is_list(catalog_ops) do
+    Enum.map(catalog_ops, &TurnEvent.catalog_op_summary/1)
+  end
+
+  defp turn_catalog_ops(_), do: []
 
   @doc """
   Build a truncated preview of the result for telemetry metadata.
@@ -378,6 +385,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     - `success?` - Whether this turn succeeded (default: true)
     - `prints` - Captured println output (default: [])
     - `tool_calls` - Tool invocations made during this turn (default: [])
+    - `catalog_ops` - REPL discovery/catalog operations made during this turn (default: [])
     - `memory` - Memory state after this turn (default: state.memory)
     - `type` - Turn type: `:normal`, `:must_return`, or `:retry` (default: `:normal`)
 
@@ -390,6 +398,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     success? = Keyword.get(opts, :success?, true)
     prints = Keyword.get(opts, :prints, [])
     tool_calls = Keyword.get(opts, :tool_calls, [])
+    catalog_ops = Keyword.get(opts, :catalog_ops, [])
     memory = Keyword.get(opts, :memory, state.memory)
     turn_type = Keyword.get(opts, :type, :normal)
     # Get messages from state (set by loop before LLM call)
@@ -410,6 +419,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
     params = %{
       prints: prints,
       tool_calls: simplified_tool_calls,
+      catalog_ops: catalog_ops,
       memory: memory,
       messages: messages,
       system_prompt: system_prompt,

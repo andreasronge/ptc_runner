@@ -34,7 +34,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   ## `data` bag
 
       program, raw_response, result_preview, prints, memory_diff,
-      tool_calls, limits_hit, preludes, fail, turn_type
+      tool_calls, catalog_ops, limits_hit, preludes, fail, turn_type
 
   Per-driver fields that don't apply are nil/empty. `raw_response` carries what
   the driver's LLM generated when there is no parsed `program` (SubAgent
@@ -304,6 +304,27 @@ defmodule PtcRunner.TraceLog.TurnEvent do
 
   def tool_call_summary(_), do: %{}
 
+  @doc """
+  Builds the credential-free turn-log projection for one discovery/catalog op.
+
+  Discovery arguments are intentionally kept because they are already the
+  model-authored query/ref/options, not upstream result payloads. Results stay
+  out of the turn event; this record is for measuring discovery overhead and
+  diagnosing failed discovery paths.
+  """
+  @spec catalog_op_summary(map()) :: map()
+  def catalog_op_summary(op) when is_map(op) do
+    %{
+      "operation" => stringify(get_key(op, :operation)),
+      "args" => PublicStep.value(get_key(op, :args) || %{}),
+      "outcome" => stringify(get_key(op, :outcome)),
+      "reason" => stringify(get_key(op, :reason)),
+      "duration_ms" => get_key(op, :duration_ms)
+    }
+  end
+
+  def catalog_op_summary(_), do: %{}
+
   # --- private ---
 
   defp build_data(attrs) do
@@ -314,6 +335,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "prints" => Map.get(attrs, :prints) || [],
       "memory_diff" => normalize_memory_diff(Map.get(attrs, :memory_diff)),
       "tool_calls" => Map.get(attrs, :tool_calls) || [],
+      "catalog_ops" => Map.get(attrs, :catalog_ops) || [],
       "limits_hit" => Map.get(attrs, :limits_hit) || [],
       "preludes" => Map.get(attrs, :preludes) || [],
       "fail" => normalize_fail(Map.get(attrs, :fail)),

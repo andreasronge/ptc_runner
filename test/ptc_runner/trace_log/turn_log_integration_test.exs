@@ -129,6 +129,52 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       refute Map.has_key?(sub_call, "args")
     end
 
+    test "both drivers record catalog discovery ops in canonical turn events", %{
+      tmp_dir: dir
+    } do
+      discovery_exec = fn
+        :apropos, ["github" | _] ->
+          {:ok, ["github.search(query) - Search repositories"]}
+
+        operation, args ->
+          {:programmer_fault, "unexpected discovery call #{inspect({operation, args})}"}
+      end
+
+      session_turns =
+        session_turn_events(dir, "session-catalog", fn ->
+          session = Session.new(session_id: "sess-catalog")
+
+          {{:ok, _}, _session} =
+            Session.eval(session, ~s|(apropos "github" {:limit 1})|,
+              discovery_exec: discovery_exec
+            )
+        end)
+
+      sub_turns =
+        session_turn_events(dir, "sub-catalog", fn ->
+          agent = SubAgent.new(prompt: "Discover", max_turns: 2)
+
+          SubAgent.run(agent,
+            llm: mock_llm([~s|(apropos "github" {:limit 1})|, "(return :done)"]),
+            discovery_exec: discovery_exec
+          )
+        end)
+
+      assert [session_op] = hd(session_turns)["data"]["catalog_ops"]
+
+      assert [sub_op] =
+               sub_turns
+               |> Enum.find(&(&1["data"]["catalog_ops"] != []))
+               |> get_in(["data", "catalog_ops"])
+
+      assert Map.drop(session_op, ["duration_ms"]) == Map.drop(sub_op, ["duration_ms"])
+      assert session_op["operation"] == "apropos"
+      assert session_op["args"] == %{"query" => "github", "opts" => %{"limit" => 1}}
+      assert session_op["outcome"] == "ok"
+      assert is_integer(session_op["duration_ms"])
+      assert is_integer(sub_op["duration_ms"])
+    end
+
     test "SubAgent turns carry prelude provenance only when actually attached", %{tmp_dir: dir} do
       {:ok, prelude} =
         Compiler.compile("""

@@ -272,7 +272,8 @@ defmodule PtcRunner.TraceLog.Introspection do
       "program" => get_in(event, ["data", "program"]),
       "result_preview" => get_in(event, ["data", "result_preview"]),
       "fail" => get_in(event, ["data", "fail"]),
-      "tool_calls" => get_in(event, ["data", "tool_calls"]) || []
+      "tool_calls" => get_in(event, ["data", "tool_calls"]) || [],
+      "catalog_ops" => get_in(event, ["data", "catalog_ops"]) || []
     }
   end
 

@@ -187,6 +187,7 @@ defmodule PtcRunner.Session do
         prints: step.prints,
         memory_diff: TurnEvent.memory_diff(prev.memory, step.memory),
         tool_calls: tool_call_summaries(step.tool_calls),
+        catalog_ops: catalog_op_summaries(step.catalog_ops),
         fail: step.fail,
         preludes: TurnEvent.prelude_provenance(step.prelude_trace)
       }
@@ -200,6 +201,12 @@ defmodule PtcRunner.Session do
   defp tool_call_summaries(tool_calls) when is_list(tool_calls) do
     Enum.map(tool_calls, &TurnEvent.tool_call_summary/1)
   end
+
+  defp catalog_op_summaries(catalog_ops) when is_list(catalog_ops) do
+    Enum.map(catalog_ops, &TurnEvent.catalog_op_summary/1)
+  end
+
+  defp catalog_op_summaries(_), do: []
 
   defp generate_session_id do
     :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)

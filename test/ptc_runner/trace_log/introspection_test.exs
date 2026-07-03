@@ -160,6 +160,43 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
                )
     end
 
+    test "catalog discovery ops are visible from log turns" do
+      {:ok, sink} = TraceLog.start_memory_sink()
+
+      try do
+        discovery_exec = fn
+          :apropos, ["github" | _] ->
+            {:ok, ["github.search(query) - Search repositories"]}
+
+          operation, args ->
+            {:programmer_fault, "unexpected discovery call #{inspect({operation, args})}"}
+        end
+
+        session = Session.new(session_id: "discovery")
+
+        {{:ok, _}, _session} =
+          Session.eval(session, ~s|(apropos "github" {:limit 1})|, discovery_exec: discovery_exec)
+      after
+        TraceLog.stop_memory_sink(sink)
+      end
+
+      tools = Introspection.tools(MemorySink.events(sink))
+
+      assert %{"items" => [turn]} = tools["log_turns"].(%{"session-id" => "discovery"})
+
+      assert [
+               %{
+                 "operation" => "apropos",
+                 "args" => %{"query" => "github", "opts" => %{"limit" => 1}},
+                 "outcome" => "ok",
+                 "reason" => nil,
+                 "duration_ms" => duration
+               }
+             ] = turn["catalog_ops"]
+
+      assert is_integer(duration)
+    end
+
     test "fails closed when the host does not grant the introspection tools" do
       assert {:error, %Step{} = step} =
                Lisp.run(~S|(log/sessions)|,
