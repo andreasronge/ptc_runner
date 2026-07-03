@@ -621,6 +621,40 @@ defmodule PtcRunner.PreludeStoreTest do
       assert before.arity == aft.arity
     end
 
+    # An authority-only change: swapping a private helper's literal tool/call
+    # target leaves visibility/kind/arity/effect equal everywhere, so a diff
+    # over those fields alone would report `changed: []` — hiding exactly the
+    # capability change the human gate most needs to see. Both the helper and
+    # the public fn that transitively inherits its requires must surface.
+    test "swapping a helper's upstream target surfaces as an authority change" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :replace_form,
+          name: "fetch-raw",
+          source: ~S|(defn- fetch-raw
+            "Fetch the raw record."
+            [id]
+            (tool/call {:server "crm" :tool "list_users" :args {:id id}}))|
+        }
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+
+      assert %{added: [], removed: [], changed: changed} = result.public_surface
+      changed_by_name = Map.new(changed, &{&1.name, &1})
+      assert %{before: helper_before, after: helper_after} = changed_by_name["fetch-raw"]
+      assert helper_before.requires == ["upstream:crm/get_user"]
+      assert helper_after.requires == ["upstream:crm/list_users"]
+      assert helper_before.visibility == helper_after.visibility
+
+      assert %{before: caller_before, after: caller_after} = changed_by_name["get-user"]
+      assert caller_before.requires == ["upstream:crm/get_user"]
+      assert caller_after.requires == ["upstream:crm/list_users"]
+    end
+
     test "rejects a batch where two ops target the same form name" do
       {:ok, store} = PreludeStore.new()
       assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)

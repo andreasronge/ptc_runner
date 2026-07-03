@@ -524,9 +524,12 @@ On success the result is `prelude/write`'s result (`id`, `version`,
 - `forms` — `{replaced:, added:, removed:, ns_doc_set:}`, the names touched;
 - `public_surface` — `{added:, removed:, changed:}`, diffing the OLD and NEW
   compiled `form_graph` (every form, not only exports — so a `defn`/`defn-`
-  visibility flip surfaces as `changed` rather than silently disappearing)
-  so a human reviewer sees every capability-relevant shape change without a
-  source diff.
+  visibility flip surfaces as `changed` rather than silently disappearing).
+  Each per-form view carries visibility/kind/arity/effect AND the form's
+  transitive `requires`/`tool_refs`, so an authority-only edit (swapping a
+  helper's `tool/call` target while nothing else moves) still lands in
+  `changed` — a human reviewer sees every capability-relevant change
+  without a source diff.
 
 `prelude/set-default` accepts an optional checksum:
 

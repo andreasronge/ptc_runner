@@ -272,7 +272,11 @@ existing parent-checksum path — edit-and-fork is not supported.
   only would make a `defn` -> `defn-` visibility flip silently vanish
   instead of surfacing as a change. `effect` (read/write/unknown) is looked
   up from the matching compiled export when a name is currently public, and
-  is absent for a private name.
+  is absent for a private name. The compared per-form view also carries the
+  form's transitive `requires`/`tool_refs` (codex review finding,
+  2026-07-03): an authority-only edit — swapping a helper's `tool/call`
+  target while visibility/kind/arity/effect all stay equal — must land in
+  `changed`, not report an empty diff.
 
 ## Files to change
 

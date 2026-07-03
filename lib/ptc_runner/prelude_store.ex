@@ -389,7 +389,12 @@ defmodule PtcRunner.PreludeStore do
   # `defn`/`defn-` visibility flip would vanish instead of landing in
   # `changed`). `effect` is looked up from the matching compiled export when
   # a name is currently public; `nil` for a private name (no export exists
-  # to carry it).
+  # to carry it). The compared view includes each form's TRANSITIVE
+  # `requires`/`tool_refs`: an edit that swaps a helper's `tool/call` from
+  # `upstream:a/x` to `upstream:a/y` changes real authority while leaving
+  # visibility/kind/arity/effect equal — omitting authority would return
+  # `changed: []` for exactly the class of change the human gate most needs
+  # to see.
   defp public_surface_diff(%Prelude{} = old_compiled, %Prelude{} = new_compiled, id) do
     old_graph = Map.get(old_compiled.form_graph, id, %{})
     new_graph = Map.get(new_compiled.form_graph, id, %{})
@@ -436,7 +441,9 @@ defmodule PtcRunner.PreludeStore do
       visibility: entry.visibility,
       kind: entry.kind,
       arity: entry.arity,
-      effect: Map.get(effects, name)
+      effect: Map.get(effects, name),
+      requires: entry.requires.transitive,
+      tool_refs: entry.tool_refs.transitive
     }
   end
 
