@@ -95,9 +95,9 @@ defmodule PtcRunner.PreludeStore.Server do
     {:reply, result, state}
   end
 
-  def handle_call({:append, %PreludeCandidate{} = candidate, parent_checksum}, _from, state) do
+  def handle_call({:append, %PreludeCandidate{} = candidate, parent}, _from, state) do
     {result, state} =
-      with :ok <- recheck_parent(state.table, candidate.id, parent_checksum),
+      with :ok <- recheck_parent(state.table, candidate.id, parent),
            :ok <- check_id_bound(state.table, candidate.id, state.max_ids),
            :ok <- recheck_dep_pins(state.table, candidate) do
         append_candidate(state, candidate)
@@ -232,17 +232,26 @@ defmodule PtcRunner.PreludeStore.Server do
     end
   end
 
-  defp recheck_parent(_table, _id, nil), do: :ok
+  defp recheck_parent(_table, _id, %{checksum: nil}), do: :ok
 
-  defp recheck_parent(table, id, checksum) do
+  defp recheck_parent(table, id, %{checksum: checksum, version: parent_version}) do
     case resolve_version(table, %{id: id}) do
       {:ok, version} ->
         {:ok, current} = lookup_version(table, id, version)
+        actual = PreludeCandidate.checksum(current)
 
-        if PreludeCandidate.checksum(current) == checksum do
-          :ok
-        else
-          stale_base(checksum, PreludeCandidate.checksum(current))
+        cond do
+          actual != checksum ->
+            stale_base(checksum, actual)
+
+          # A pin-only rewrite reuses its parent's SOURCE checksum, so the
+          # checksum alone cannot detect a stale base there — compare the
+          # version too when the caller supplied one.
+          parent_version != nil and current.version != parent_version ->
+            stale_base(checksum, actual)
+
+          true ->
+            :ok
         end
 
       {:error, %{reason: :not_found}} ->

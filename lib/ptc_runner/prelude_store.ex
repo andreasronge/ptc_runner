@@ -118,7 +118,8 @@ defmodule PtcRunner.PreludeStore do
              Keyword.get(opts, :max_metadata_bytes, @default_max_metadata_bytes)
            ),
          {:ok, parent_checksum} <- parent_checksum(metadata),
-         :ok <- check_parent(store, id, parent_checksum),
+         {:ok, parent_version} <- parent_version(metadata),
+         :ok <- check_parent(store, id, parent_checksum, parent_version),
          {:ok, declared_refs} <- declared_dep_refs(id, metadata),
          {:ok, dep_candidates} <- resolve_deps(store, declared_refs),
          :ok <- validate_dep_closure(store, id, dep_candidates),
@@ -145,7 +146,7 @@ defmodule PtcRunner.PreludeStore do
         created_at: DateTime.utc_now()
       }
 
-      Server.append(store, candidate, parent_checksum)
+      Server.append(store, candidate, %{checksum: parent_checksum, version: parent_version})
     end
   end
 
@@ -187,7 +188,7 @@ defmodule PtcRunner.PreludeStore do
 
       write_metadata =
         metadata
-        |> Map.merge(%{"parent_checksum" => base_checksum})
+        |> Map.merge(%{"parent_checksum" => base_checksum, "parent_version" => base.version})
         |> inherit_dep_declaration(base)
 
       max_source_bytes =
@@ -354,17 +355,43 @@ defmodule PtcRunner.PreludeStore do
     end
   end
 
-  defp check_parent(_store, _id, nil), do: :ok
+  # The checksum is the SOURCE hash, so two versions differing only in dep
+  # pins share one checksum — `parent_version` (optional, enforced when
+  # supplied; `edit/4` always supplies it) disambiguates staleness for
+  # pin-only rewrites.
+  defp parent_version(metadata) do
+    case Map.get(metadata, "parent_version") || Map.get(metadata, :parent_version) do
+      nil ->
+        {:ok, nil}
 
-  defp check_parent(store, id, checksum) do
+      version when is_integer(version) and version > 0 ->
+        {:ok, version}
+
+      other ->
+        {:error,
+         error(
+           :invalid_metadata,
+           "parent_version must be a positive integer, got #{inspect(other)}"
+         )}
+    end
+  end
+
+  defp check_parent(_store, _id, nil, _parent_version), do: :ok
+
+  defp check_parent(store, id, checksum, parent_version) do
     case read(store, id) do
       {:ok, candidate} ->
         actual = PreludeCandidate.checksum(candidate)
 
-        if actual == checksum do
-          :ok
-        else
-          stale_base(checksum, actual)
+        cond do
+          actual != checksum ->
+            stale_base(checksum, actual)
+
+          parent_version != nil and candidate.version != parent_version ->
+            stale_base(checksum, actual)
+
+          true ->
+            :ok
         end
 
       {:error, %{reason: :not_found}} ->

@@ -1144,6 +1144,48 @@ defmodule PtcRunner.PreludeStoreTest do
       assert message =~ "base"
     end
 
+    test "parent_version disambiguates staleness when a pin-only rewrite reuses the checksum" do
+      # Regression (codex review): checksum is the SOURCE hash, so a rewrite
+      # that only moves a dep pin produces a new version with its parent's
+      # checksum — parent_checksum alone cannot detect a stale base there.
+      {store, _base} = store_with_base()
+
+      # A v2 of base with the SAME public surface, so moving the pin is a
+      # legitimate pin-only change.
+      {:ok, _} =
+        PreludeStore.write(store, "base", """
+        (ns base "Shared helpers, v2.")
+
+        (defn helper [x] (str "helper2:" x))
+
+        (defn fetch [id]
+          (tool/call {:server "crm" :tool "get_user_v2" :args {:id id}}))
+        """)
+
+      {:ok, v1} =
+        PreludeStore.write(store, "audit", @dep_audit, %{"requires_preludes" => ["base@1"]})
+
+      # Same source, different pin: v2 shares v1's checksum.
+      {:ok, v2} =
+        PreludeStore.write(store, "audit", @dep_audit, %{
+          "requires_preludes" => ["base@2"],
+          "parent_checksum" => v1.checksum,
+          "parent_version" => 1
+        })
+
+      assert v2.version == 2
+      assert v2.checksum == v1.checksum
+
+      # A writer still holding v1 as its base must be rejected even though
+      # the checksum matches the current candidate.
+      assert {:error, %{reason: :stale_base}} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"],
+                 "parent_checksum" => v1.checksum,
+                 "parent_version" => 1
+               })
+    end
+
     test "the metadata bound applies to the FINAL metadata including computed pins" do
       # Regression (codex review): the bound was checked on caller metadata
       # BEFORE the store added prelude_deps pins, so stored rows could exceed
