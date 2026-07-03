@@ -121,6 +121,17 @@ defmodule PtcRunner.PreludeStore do
          :ok <- check_parent(store, id, parent_checksum),
          {:ok, declared_refs} <- declared_dep_refs(id, metadata),
          {:ok, dep_candidates} <- resolve_deps(store, declared_refs),
+         final_metadata = put_dep_metadata(metadata, declared_refs, dep_candidates),
+         # The bound must hold for what is STORED, not just what the caller
+         # sent: computed pins add ~100 bytes per dep (a 64-hex checksum
+         # each), so re-check after enrichment (skipped when nothing was
+         # added — the caller metadata was already checked above).
+         :ok <-
+           check_enriched_metadata_bound(
+             final_metadata,
+             dep_candidates,
+             Keyword.get(opts, :max_metadata_bytes, @default_max_metadata_bytes)
+           ),
          {:ok, compiled} <- compile_bounded(source, opts, id, dep_candidates),
          :ok <- validate_compiled_namespace(id, compiled) do
       candidate = %PreludeCandidate{
@@ -129,7 +140,7 @@ defmodule PtcRunner.PreludeStore do
         source: source,
         compiled: compiled,
         origin: Keyword.get(opts, :origin, {:memory, store.pid}),
-        metadata: put_dep_metadata(metadata, declared_refs, dep_candidates),
+        metadata: final_metadata,
         created_at: DateTime.utc_now()
       }
 
@@ -457,6 +468,11 @@ defmodule PtcRunner.PreludeStore do
         {:ok, parsed}
     end
   end
+
+  defp check_enriched_metadata_bound(_metadata, [], _max_bytes), do: :ok
+
+  defp check_enriched_metadata_bound(metadata, _dep_candidates, max_bytes),
+    do: check_metadata_bound(metadata, max_bytes)
 
   defp resolve_deps(_store, []), do: {:ok, []}
 

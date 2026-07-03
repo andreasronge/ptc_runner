@@ -1097,6 +1097,20 @@ defmodule PtcRunner.PreludeStoreTest do
       assert error.message =~ "requires_preludes"
     end
 
+    test "the metadata bound applies to the FINAL metadata including computed pins" do
+      # Regression (codex review): the bound was checked on caller metadata
+      # BEFORE the store added prelude_deps pins, so stored rows could exceed
+      # :max_metadata_bytes. Pick a bound the declaration passes but the
+      # pin-enriched metadata (a ~64-hex checksum per dep) cannot.
+      declaration = %{"requires_preludes" => ["base"]}
+      bound = :erlang.external_size(declaration) + 40
+
+      {store, _base} = store_with_base(max_metadata_bytes: bound)
+
+      assert {:error, %{reason: :metadata_too_large}} =
+               PreludeStore.write(store, "audit", @dep_audit, declaration)
+    end
+
     test "pruning retains dep-pinned versions" do
       {store, base} = store_with_base(max_versions: 1)
 
