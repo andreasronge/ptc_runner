@@ -246,6 +246,49 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       assert candidate.id == "seeded"
       assert {:error, %{reason: :not_found}} = PtcRunner.PreludeStore.read(store, "wrong")
     end
+
+    test "prelude store seed resolves dependency order via .deps sidecars" do
+      dir = seed_dir!()
+
+      # "audit" sorts before "base", so the first pass hits
+      # :unknown_dependency and the retry pass must land it.
+      File.write!(Path.join(dir, "audit.clj"), """
+      (ns audit)
+      (defn check [x] (base/helper x))
+      """)
+
+      File.write!(Path.join(dir, "audit.deps"), "# boot dep declaration\nbase\n")
+
+      File.write!(Path.join(dir, "base.clj"), """
+      (ns base)
+      (defn helper [x] (str "h:" x))
+      """)
+
+      args = Application.maybe_seed_prelude_store(%{prelude_store_seed: dir})
+
+      assert %{prelude_store: store} = args
+      assert {:ok, base} = PtcRunner.PreludeStore.read(store, "base")
+      assert {:ok, audit} = PtcRunner.PreludeStore.read(store, "audit")
+
+      assert PtcRunner.PreludeCandidate.dep_pins(audit) == [
+               %{id: "base", version: 1, checksum: PtcRunner.PreludeCandidate.checksum(base)}
+             ]
+    end
+
+    test "prelude store seed fails closed at boot on an unresolvable dependency" do
+      dir = seed_dir!()
+
+      File.write!(Path.join(dir, "audit.clj"), """
+      (ns audit)
+      (defn check [x] (base/helper x))
+      """)
+
+      File.write!(Path.join(dir, "audit.deps"), "base\n")
+
+      assert_raise RuntimeError, ~r/unresolvable dependencies.*audit\.clj/, fn ->
+        Application.maybe_seed_prelude_store(%{prelude_store_seed: dir})
+      end
+    end
   end
 
   describe "apply_turn_log_config/1" do
@@ -278,6 +321,18 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   # Re-run the same apply path Application.start/2 uses. Phase 0
   # exposes `apply_limits/1` as a `@doc false` seam for this test.
   defp run_apply_limits(args), do: PtcRunnerMcp.Application.apply_limits(args)
+
+  defp seed_dir! do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc_runner_mcp_seed_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    dir
+  end
 
   defp write_prelude!(label, source \\ nil) do
     path =

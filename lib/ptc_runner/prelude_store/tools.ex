@@ -432,7 +432,10 @@ defmodule PtcRunner.PreludeStore.Tools do
         |> Enum.map(&%{name: &1, visibility: Map.fetch!(ns_graph, &1).visibility})
         |> Enum.sort_by(& &1.name),
       requires: entry.requires,
-      tool_refs: entry.tool_refs
+      tool_refs: entry.tool_refs,
+      # Cross-prelude edges (full refs into declared dep namespaces). Default
+      # covers artifacts compiled before dep support existed.
+      dep_calls: Map.get(entry, :dep_calls, %{direct: [], transitive: []})
     }
   end
 

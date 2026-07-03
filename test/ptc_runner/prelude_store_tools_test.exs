@@ -380,7 +380,8 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                  "direct" => ["upstream:crm/get_user"],
                  "transitive" => ["upstream:crm/get_user"]
                },
-               "tool_refs" => %{"direct" => ["call"], "transitive" => ["call"]}
+               "tool_refs" => %{"direct" => ["call"], "transitive" => ["call"]},
+               "dep_calls" => %{"direct" => [], "transitive" => []}
              }
 
       assert {:ok, %Step{return: caller}} =
@@ -397,7 +398,8 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                  "direct" => [],
                  "transitive" => ["upstream:crm/get_user"]
                },
-               "tool_refs" => %{"direct" => [], "transitive" => ["call"]}
+               "tool_refs" => %{"direct" => [], "transitive" => ["call"]},
+               "dep_calls" => %{"direct" => [], "transitive" => []}
              }
     end
 

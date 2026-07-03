@@ -46,7 +46,7 @@ defmodule PtcRunnerMcp.Application do
 
   use Application
 
-  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunner.Lisp.Prelude.FormScanner
 
   alias PtcRunnerMcp.{
     AgenticConfig,
@@ -659,24 +659,88 @@ defmodule PtcRunnerMcp.Application do
 
     {:ok, store} = PtcRunner.PreludeStore.new()
 
-    Enum.each(files, fn file ->
-      source = File.read!(file)
-      id = prelude_namespace!(source, file)
+    entries =
+      Enum.map(files, fn file ->
+        source = File.read!(file)
 
-      case PtcRunner.PreludeStore.write(store, id, source, %{
-             "reason" => "boot seed",
-             "origin_path" => Path.relative_to_cwd(file)
-           }) do
-        {:ok, _} ->
-          Log.log(:info, "prelude_store_seeded", %{id: id, path: file})
+        %{
+          file: file,
+          source: source,
+          id: prelude_namespace!(source, file),
+          deps: seed_dep_refs!(file)
+        }
+      end)
 
-        {:error, error} ->
-          raise "failed to seed prelude `#{id}` from #{file}: " <>
-                  Map.get(error, :message, inspect(error))
-      end
-    end)
-
+    seed_rounds!(store, entries)
     store
+  end
+
+  # A dependent must land after its deps, but seed files are discovered in
+  # sorted order. Rather than requiring topologically-sorted filenames, retry
+  # `:unknown_dependency` failures after each full pass; a pass with no
+  # progress fails closed at boot listing the stuck files.
+  defp seed_rounds!(_store, []), do: :ok
+
+  defp seed_rounds!(store, entries) do
+    {seeded, stuck} =
+      Enum.reduce(entries, {0, []}, fn entry, {seeded, stuck} ->
+        case PtcRunner.PreludeStore.write(store, entry.id, entry.source, seed_metadata(entry)) do
+          {:ok, _} ->
+            Log.log(:info, "prelude_store_seeded", %{id: entry.id, path: entry.file})
+            {seeded + 1, stuck}
+
+          {:error, %{reason: :unknown_dependency}} ->
+            {seeded, [entry | stuck]}
+
+          {:error, error} ->
+            raise "failed to seed prelude `#{entry.id}` from #{entry.file}: " <>
+                    Map.get(error, :message, inspect(error))
+        end
+      end)
+
+    case {seeded, Enum.reverse(stuck)} do
+      {_, []} ->
+        :ok
+
+      {0, unresolved} ->
+        files = Enum.map_join(unresolved, ", ", & &1.file)
+
+        raise "failed to seed preludes — unresolvable dependencies " <>
+                "(missing dep seeds or a declaration cycle): #{files}"
+
+      {_, unresolved} ->
+        seed_rounds!(store, unresolved)
+    end
+  end
+
+  defp seed_metadata(entry) do
+    base = %{
+      "reason" => "boot seed",
+      "origin_path" => Path.relative_to_cwd(entry.file)
+    }
+
+    case entry.deps do
+      [] -> base
+      deps -> Map.put(base, "requires_preludes", deps)
+    end
+  end
+
+  # Sidecar dependency declaration for seed files: `audit.clj` may ship an
+  # `audit.deps` next to it with one `id` / `id@version` ref per line
+  # (`#` comments and blank lines ignored). The store validates ref shape
+  # and resolution — this only reads the lines.
+  defp seed_dep_refs!(file) do
+    sidecar = Path.rootname(file, ".clj") <> ".deps"
+
+    if File.regular?(sidecar) do
+      sidecar
+      |> File.read!()
+      |> String.split("\n")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+    else
+      []
+    end
   end
 
   defp prelude_seed_files!(path) do
@@ -695,20 +759,28 @@ defmodule PtcRunnerMcp.Application do
     end
   end
 
-  # The store requires the compiled namespace to equal the id, so derive the id
-  # from the compiler result rather than the filename or raw source text.
+  # The store requires the compiled namespace to equal the id. The id is
+  # derived from the scanned `(ns ...)` form — NOT the filename or comment
+  # text — via `FormScanner` rather than a solo compile: a dependent seed's
+  # cross-namespace refs cannot compile before its deps are seeded. The store
+  # write remains the authoritative compile gate (namespace == id enforced
+  # there, fail-closed at boot).
   defp prelude_namespace!(source, file) do
-    case PreludeCompiler.compile(source) do
-      {:ok, %{namespaces: [ns]}} ->
-        ns
+    case FormScanner.scan(source) do
+      {:ok, %{forms: forms}} ->
+        case Enum.filter(forms, &(&1.head == "ns")) do
+          [%{name: ns}] when is_binary(ns) ->
+            ns
 
-      {:ok, %{namespaces: namespaces}} ->
-        raise "seed prelude #{file} must declare exactly one namespace, got: " <>
-                inspect(namespaces)
+          [] ->
+            raise "seed prelude #{file} must declare a namespace"
+
+          _many ->
+            raise "seed prelude #{file} must declare exactly one namespace"
+        end
 
       {:error, error} ->
-        raise "failed to compile seed prelude #{file}: " <>
-                Map.get(error, :message, inspect(error))
+        raise "failed to scan seed prelude #{file}: #{inspect(error, limit: 5)}"
     end
   end
 

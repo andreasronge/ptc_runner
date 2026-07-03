@@ -552,6 +552,62 @@ session = PtcRunner.Session.new(prelude_store: store, preludes: ["paged"])
 {{:ok, step}, session} = PtcRunner.Session.eval(session, "(paged/inspect)")
 ```
 
+### Composing preludes: declared dependencies
+
+A stored prelude can call another stored prelude's **public** exports by
+declaring the dependency at write time (`requires_preludes`, a vector of
+`"id"` or `"id@version"` strings):
+
+```clojure
+(prelude/write {:id "audit"
+                :source audit-source
+                :requires_preludes ["base"]})
+```
+
+The write resolves each declared dep from the store (a bare id resolves to
+the **current version at write time**), compiles the candidate with the
+deps' export tables in scope, and records the resolution as explicit pins —
+echoed and stored as `prelude_deps` metadata
+(`[{:id "base" :version 2 :checksum "..."}]`). Because a dep must already
+exist before its dependent can be written, the dependency graph is acyclic
+by construction. Write-time validation is the same analyzer user code gets:
+wrong arity and calls to non-exports are rejected precisely, and `defn-`
+privates of the dep have no export record, so they are unreachable across
+preludes — the library boundary comes for free.
+
+Attach resolves the transitive pin closure: selecting `["audit"]` auto-pulls
+`base@pinned`, and the session's resolved refs mark auto-pulled components
+with `required_by: ["audit"]`. A session needing two different versions of
+the same prelude (directly or transitively) fails closed at session start,
+naming the requirers. Identical refs deduplicate to one component.
+
+Rules worth knowing:
+
+- **Pins do not float.** Upgrading `base` does not change `audit` until
+  `audit` is rewritten or re-edited. `prelude/edit` inherits the base
+  version's resolved pins (`base@2`, not the bare declaration); pass an
+  explicit `requires_preludes` to change them, or `[]` to drop them.
+- **`def` initializers cannot reference deps** (`:dep_ref_in_def`): constant
+  initializers evaluate at prelude compile time under a no-op tool executor,
+  where a dep call would silently compute garbage. Wrap the value in a
+  `defn` instead.
+- **Authority is unioned.** An export that reaches a dep export inherits its
+  transitive `requires`/`tool_refs`, so attach-time validation and the
+  pre-execution tool guard see the full capability surface — a dependent
+  cannot smuggle a tool call in through a dep.
+- **Undeclared cross-namespace calls still fail** at write with
+  `unknown namespace` — declaration is the only path to visibility, even if
+  the other prelude exists in the store.
+- Dep-pinned versions are retained by the store's pruning ring, like
+  `set_default` pins — a pin can never dangle.
+- The MCP server's boot seeding (`--prelude-store-seed`) declares seed-file
+  deps via a sidecar: `audit.clj` + `audit.deps` (one `id`/`id@version` ref
+  per line, `#` comments allowed); seed order is resolved automatically.
+
+Note the naming: `requires_preludes`/`prelude_deps` are **prelude-level**
+dependencies; `(prelude/form-deps id name)` and `(prelude/deps id)` remain
+**form-level** introspection within one namespace.
+
 ---
 
 ## 9. Traceability

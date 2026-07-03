@@ -140,7 +140,8 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
                  "id" => "picked",
                  "version" => 1,
                  "checksum" => first.checksum,
-                 "origin" => "memory"
+                 "origin" => "memory",
+                 "required_by" => []
                }
              ]
 
@@ -234,7 +235,8 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
                  "id" => "picked",
                  "version" => 1,
                  "checksum" => first.checksum,
-                 "origin" => "memory"
+                 "origin" => "memory",
+                 "required_by" => []
                }
              ]
 

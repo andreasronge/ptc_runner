@@ -2,7 +2,16 @@
 
 ## Status
 
-Approved design, ready for implementation. Derived from the investigation
+**Implemented** 2026-07-03 (all four phases; see the `feat(prelude)`,
+`feat(store)`, `feat(attach)`, and `feat(mcp)` commits landing compiler
+dep-scoped compilation, store pins + retention, attach closure expansion,
+and seed-order resolution). The keystone integration test
+(`test/ptc_runner/sub_agent/prelude_deps_integration_test.exs`) proves the
+runtime model end-to-end through all three attach entry points. One planned
+behavior change: duplicate identical session refs now deduplicate to one
+component instead of raising (decision 4).
+
+Approved design derived from the investigation
 in the external repo `ptc-bench-comparison`
 (`notes/prelude-deps-options-2026-07-03.md`, commits `f6be0cd`..`a859aeb`),
 which evaluated five options against source-verified experiments at
