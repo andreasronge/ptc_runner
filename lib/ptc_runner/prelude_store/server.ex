@@ -28,10 +28,12 @@ defmodule PtcRunner.PreludeStore.Server do
   @spec read(PreludeStore.t(), map()) :: {:ok, PreludeCandidate.t()} | {:error, map()}
   def read(%PreludeStore{pid: pid}, ref), do: GenServer.call(pid, {:read, ref}, @call_timeout)
 
-  @spec append(PreludeStore.t(), PreludeCandidate.t(), String.t() | nil) ::
-          {:ok, map()} | {:error, map()}
-  def append(%PreludeStore{pid: pid}, candidate, parent_checksum) do
-    GenServer.call(pid, {:append, candidate, parent_checksum}, @call_timeout)
+  @spec append(PreludeStore.t(), PreludeCandidate.t(), %{
+          checksum: String.t() | nil,
+          version: pos_integer() | nil
+        }) :: {:ok, map()} | {:error, map()}
+  def append(%PreludeStore{pid: pid}, candidate, parent) do
+    GenServer.call(pid, {:append, candidate, parent}, @call_timeout)
   end
 
   @spec set_default(PreludeStore.t(), map(), map()) :: {:ok, map()} | {:error, map()}

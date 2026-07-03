@@ -81,7 +81,7 @@ defmodule PtcRunner.PreludeStore.Selection do
   defp expand_dep_closure!(store, requested) do
     {order, entries} =
       Enum.reduce(requested, {[], %{}}, fn candidate, {order, entries} ->
-        visit(store, candidate, nil, order, entries, MapSet.new())
+        visit(store, candidate, nil, order, entries, [])
       end)
 
     order
@@ -89,8 +89,10 @@ defmodule PtcRunner.PreludeStore.Selection do
     |> Enum.map(&Map.fetch!(entries, &1))
   end
 
+  # `path` is a plain list (not MapSet) to avoid dialyzer opaque-type
+  # friction; pin chains are short so linear membership is fine.
   defp visit(store, %PreludeCandidate{} = candidate, requirer, order, entries, path) do
-    if MapSet.member?(path, candidate.id) do
+    if candidate.id in path do
       raise ArgumentError,
             "prelude dependency cycle involving `#{candidate.id}` " <>
               "(store pins are expected to be acyclic)"
@@ -102,7 +104,7 @@ defmodule PtcRunner.PreludeStore.Selection do
         {order, Map.put(entries, candidate.id, add_requirer(entry, requirer))}
 
       nil ->
-        path = MapSet.put(path, candidate.id)
+        path = [candidate.id | path]
 
         {order, entries} =
           candidate

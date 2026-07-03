@@ -236,7 +236,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     nodes
     |> Enum.reduce_while({:ok, {[], MapSet.new()}}, fn ns, {:ok, {order, done}} ->
-      case topo_visit(ns, edges, order, done, MapSet.new()) do
+      case topo_visit(ns, edges, order, done, []) do
         {:ok, order2, done2} -> {:cont, {:ok, {order2, done2}}}
         {:error, _} = err -> {:halt, err}
       end
@@ -247,12 +247,14 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
+  # `path` is a plain list (not MapSet) to avoid dialyzer opaque-type
+  # friction; dependency chains are short so linear membership is fine.
   defp topo_visit(ns, edges, order, done, path) do
     cond do
       MapSet.member?(done, ns) ->
         {:ok, order, done}
 
-      MapSet.member?(path, ns) ->
+      ns in path ->
         {:error,
          ValidationError.new(
            :dependency_cycle,
@@ -262,7 +264,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          )}
 
       true ->
-        path = MapSet.put(path, ns)
+        path = [ns | path]
 
         edges
         |> Map.get(ns, [])

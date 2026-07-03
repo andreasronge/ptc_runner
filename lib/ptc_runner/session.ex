@@ -206,8 +206,6 @@ defmodule PtcRunner.Session do
     Enum.map(catalog_ops, &TurnEvent.catalog_op_summary/1)
   end
 
-  defp catalog_op_summaries(_), do: []
-
   defp generate_session_id do
     :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
   end
