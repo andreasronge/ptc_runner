@@ -9,6 +9,7 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.Prelude.FormScanner
   alias PtcRunner.PreludeCandidate
   alias PtcRunner.PreludeStore
 
@@ -20,6 +21,8 @@ defmodule PtcRunner.PreludeStore.Tools do
   @forms_tool "prelude_store_forms"
   @form_deps_tool "prelude_store_form_deps"
   @deps_tool "prelude_store_deps"
+  @form_tool "prelude_store_form"
+  @edit_tool "prelude_store_edit"
   @reserved_names [
     @list_tool,
     @history_tool,
@@ -28,9 +31,18 @@ defmodule PtcRunner.PreludeStore.Tools do
     @set_default_tool,
     @forms_tool,
     @form_deps_tool,
-    @deps_tool
+    @deps_tool,
+    @form_tool,
+    @edit_tool
   ]
   @max_public_string_bytes 1_024
+  # Mirrors `PreludeCandidate`'s own `@default_source_bytes` (also 64 KB): a
+  # single form's exact source text is bounded the same way `prelude/source`
+  # bounds a whole candidate's source, fail-closed rather than truncated.
+  @max_form_source_bytes 64 * 1024
+  # `PtcRunner.PreludeStore.FormEdit` keys name-based lookups the same way:
+  # the `(ns ...)` form is deliberately excluded (see its moduledoc).
+  @keyable_heads ~w(defn defn- def)
 
   @prelude_source """
   (ns prelude
@@ -85,6 +97,12 @@ defmodule PtcRunner.PreludeStore.Tools do
     [id]
     (tool/prelude_store_deps {:id id}))
 
+  (defn form
+    "Read one named top-level form's EXACT byte-slice source text (public or
+     private) from a stored prelude candidate by id or id@version."
+    [id name]
+    (tool/prelude_store_form {:id id :name name}))
+
   (defn write
     "Write a full namespace source candidate with optional metadata."
     {:effect :write}
@@ -93,6 +111,17 @@ defmodule PtcRunner.PreludeStore.Tools do
       (tool/prelude_store_write
         {:id (get candidate "id")
          :source (get candidate "source")
+         :metadata (if (map? metadata) metadata {})})))
+
+  (defn edit
+    "Apply a form-keyed batch of edits (replace_form/add_form/remove_form/
+     set_ns_doc) to the current candidate for id, writing one new version."
+    {:effect :write}
+    [request]
+    (let [metadata (get request "metadata" {})]
+      (tool/prelude_store_edit
+        {:id (get request "id")
+         :edits (get request "edits")
          :metadata (if (map? metadata) metadata {})})))
 
   (defn set-default
@@ -187,10 +216,22 @@ defmodule PtcRunner.PreludeStore.Tools do
          description: "Show the whole intra-namespace direct-reference graph.",
          expose: :ptc_lisp,
          visibility: :private},
+      @form_tool =>
+        {fn args -> form_tool(store, args) end,
+         signature: "(id :string, name :string) -> :map",
+         description: "Read one named form's exact byte-slice source text.",
+         expose: :ptc_lisp,
+         visibility: :private},
       @write_tool =>
         {fn args -> write_tool(store, args) end,
          signature: "(id :string, source :string, metadata :map) -> :map",
          description: "Write a versioned prelude candidate.",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @edit_tool =>
+        {fn args -> edit_tool(store, args) end,
+         signature: "(id :string, edits [:map], metadata :map) -> :map",
+         description: "Apply a form-keyed edit batch and write one new version.",
          expose: :ptc_lisp,
          visibility: :private},
       @set_default_tool =>
@@ -242,8 +283,8 @@ defmodule PtcRunner.PreludeStore.Tools do
   end
 
   defp forms_tool(store, %{"id" => id}) when is_binary(id) do
-    case resolve_form_graph(store, id) do
-      {:ok, ns_graph} -> public_map(forms_rows(ns_graph))
+    case resolve_form_graph_and_source(store, id) do
+      {:ok, ns_graph, source} -> public_map(forms_rows(ns_graph, source))
       {:error, error} -> public_error(error)
     end
   rescue
@@ -315,16 +356,26 @@ defmodule PtcRunner.PreludeStore.Tools do
   # exactly one namespace == id (`validate_compiled_namespace`), so the
   # candidate's own id is the graph key.
   defp resolve_form_graph(store, id) do
+    case resolve_form_graph_and_source(store, id) do
+      {:ok, ns_graph, _source} -> {:ok, ns_graph}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp resolve_form_graph_and_source(store, id) do
     case PreludeStore.read(store, id) do
-      {:ok, %PreludeCandidate{id: namespace, compiled: %Prelude{form_graph: form_graph}}} ->
-        {:ok, Map.get(form_graph, namespace, %{})}
+      {:ok,
+       %PreludeCandidate{id: namespace, compiled: %Prelude{form_graph: form_graph}} = candidate} ->
+        {:ok, Map.get(form_graph, namespace, %{}), candidate.source}
 
       {:error, _} = error ->
         error
     end
   end
 
-  defp forms_rows(ns_graph) do
+  defp forms_rows(ns_graph, source) do
+    byte_sizes = form_byte_sizes(source)
+
     ns_graph
     |> Enum.map(fn {name, entry} ->
       %{
@@ -334,8 +385,33 @@ defmodule PtcRunner.PreludeStore.Tools do
         arity: entry.arity,
         doc: bound_public_doc(entry.doc)
       }
+      |> maybe_put_byte_size(byte_sizes, name)
     end)
     |> Enum.sort_by(& &1.name)
+  end
+
+  # A read-time `FormScanner` pass for the OPTIONAL `byte_size` row field —
+  # cosmetic fail-soft (mirrors `render_source_body`'s posture in the
+  # compiler): a scan failure here (should never happen for an already
+  # compiled, stored candidate) silently omits `byte_size` from every row
+  # rather than failing the whole `forms` read.
+  defp form_byte_sizes(source) do
+    case FormScanner.scan(source) do
+      {:ok, %{forms: forms}} ->
+        forms
+        |> Enum.filter(&(&1.head in @keyable_heads))
+        |> Map.new(fn form -> {form.name, elem(form.span, 1)} end)
+
+      {:error, _} ->
+        %{}
+    end
+  end
+
+  defp maybe_put_byte_size(row, byte_sizes, name) do
+    case Map.fetch(byte_sizes, name) do
+      {:ok, byte_size} -> Map.put(row, :byte_size, byte_size)
+      :error -> row
+    end
   end
 
   defp form_deps_view(name, entry, ns_graph) do
@@ -355,6 +431,81 @@ defmodule PtcRunner.PreludeStore.Tools do
     Map.new(ns_graph, fn {name, entry} -> {name, Enum.sort(entry.calls)} end)
   end
 
+  defp form_tool(store, %{"id" => id, "name" => name}) when is_binary(id) and is_binary(name) do
+    case PreludeStore.read(store, id) do
+      {:ok, %PreludeCandidate{} = candidate} ->
+        ns_graph = Map.get(candidate.compiled.form_graph, candidate.id, %{})
+
+        case Map.fetch(ns_graph, name) do
+          {:ok, entry} ->
+            form_source_view(candidate, name, entry)
+
+          :error ->
+            public_error(%{
+              reason: :form_not_found,
+              message: "prelude form `#{name}` not found in `#{id}`",
+              id: id,
+              name: name
+            })
+        end
+
+      {:error, error} ->
+        public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp form_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_form requires string id and name fields"
+    })
+  end
+
+  # `form_graph` and a fresh `FormScanner.scan/1` of the SAME already-compiled
+  # source disagreeing is a real bug, not a caller error (a stored candidate's
+  # source always compiled) — fail closed with a hard store error rather than
+  # guess at a span.
+  defp form_source_view(candidate, name, entry) do
+    case FormScanner.scan(candidate.source) do
+      {:ok, %{forms: forms}} ->
+        case Enum.find(forms, &(&1.head in @keyable_heads and &1.name == name)) do
+          nil ->
+            public_error(%{
+              reason: :prelude_store_error,
+              message: "form `#{name}` has no matching span in the stored prelude source"
+            })
+
+          form ->
+            bound_form_source(name, entry, slice(candidate.source, form.span))
+        end
+
+      {:error, reason} ->
+        public_error(%{
+          reason: :prelude_store_error,
+          message: "stored prelude source failed to scan: #{inspect(reason, limit: 5)}"
+        })
+    end
+  end
+
+  defp bound_form_source(name, entry, source) when byte_size(source) <= @max_form_source_bytes do
+    public_map(%{name: name, visibility: entry.visibility, source: source})
+  end
+
+  defp bound_form_source(name, _entry, source) do
+    public_error(%{
+      reason: :source_truncated,
+      message: "prelude form source exceeds the public read bound",
+      name: name,
+      source_bytes: byte_size(source)
+    })
+  end
+
+  defp slice(source, {offset, length}), do: binary_part(source, offset, length)
+
   defp write_tool(store, %{"id" => id, "source" => source} = args)
        when is_binary(id) and is_binary(source) do
     metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
@@ -373,6 +524,27 @@ defmodule PtcRunner.PreludeStore.Tools do
     public_error(%{
       reason: :invalid_argument,
       message: "prelude_store_write requires string id and source fields"
+    })
+  end
+
+  defp edit_tool(store, %{"id" => id, "edits" => edits} = args)
+       when is_binary(id) and is_list(edits) do
+    metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
+
+    case PreludeStore.edit(store, id, edits, metadata) do
+      {:ok, result} -> public_map(Map.put(result, :status, :ok))
+      {:error, error} -> public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp edit_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_edit requires string id and list edits fields"
     })
   end
 
@@ -425,7 +597,8 @@ defmodule PtcRunner.PreludeStore.Tools do
       :limit,
       :limit_bytes,
       :id,
-      :name
+      :name,
+      :source_bytes
     ])
     |> bound_public_error_strings()
     |> Map.put(:status, :error)

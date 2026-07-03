@@ -2,8 +2,10 @@ defmodule PtcRunner.PreludeStoreTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.FormScanner
   alias PtcRunner.PreludeCandidate
   alias PtcRunner.PreludeStore
+  alias PtcRunner.PreludeStore.FormEdit
 
   @paged_v1 """
   (ns paged "Paged helpers.")
@@ -16,6 +18,29 @@ defmodule PtcRunner.PreludeStoreTest do
 
   (defn inspect [] {:version 2})
   (defn profile [] {:ok true})
+  """
+
+  @edit_base """
+  (ns store-edit
+    "Store edit test namespace.")
+
+  ;; Fetch the raw record from upstream.
+  (defn- fetch-raw
+    "Fetch the raw record."
+    [id]
+    (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+
+  (defn get-user
+    "Return a user by id."
+    [id]
+    (fetch-raw id))
+
+  (defn- unused-helper
+    "Never called."
+    []
+    42)
+
+  (def max-retries "Retry budget." 3)
   """
 
   test "write/list/read store versioned compiled candidates" do
@@ -500,4 +525,335 @@ defmodule PtcRunner.PreludeStoreTest do
     assert {:ok, current} = PreludeStore.read(store, "paged")
     assert current.version == 2
   end
+
+  describe "PreludeStore.edit/3,4" do
+    test "applies a multi-op batch as one version bump and echoes base_version/parent_checksum/forms" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :replace_form,
+          name: "get-user",
+          source: ~S"""
+          (defn get-user
+            "Return a user by id (v2)."
+            [id]
+            (fetch-raw id))
+          """
+        },
+        %{op: :add_form, source: ~S|(defn list-users "List users." [] [])|},
+        %{op: :remove_form, name: "unused-helper"},
+        %{op: :set_ns_doc, doc: "Updated store edit test namespace."}
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+
+      assert result.id == "store-edit"
+      assert result.version == 2
+      assert result.base_version == 1
+      assert result.parent_checksum == base.checksum
+
+      assert result.forms == %{
+               replaced: ["get-user"],
+               added: ["list-users"],
+               removed: ["unused-helper"],
+               ns_doc_set: true
+             }
+
+      assert [%{versions_count: 2, latest_version: 2}] = PreludeStore.list(store)
+    end
+
+    test "untouched forms are byte-identical after an edit batch" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :replace_form,
+          name: "get-user",
+          source: ~S|(defn get-user "v2" [id] (fetch-raw id))|
+        },
+        %{op: :remove_form, name: "unused-helper"}
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+      assert {:ok, new_candidate} = PreludeStore.read(store, "store-edit@#{result.version}")
+
+      {:ok, old_scan} = FormScanner.scan(@edit_base)
+      {:ok, new_scan} = FormScanner.scan(new_candidate.source)
+
+      old_fetch_raw = Enum.find(old_scan.forms, &(&1.name == "fetch-raw"))
+      new_fetch_raw = Enum.find(new_scan.forms, &(&1.name == "fetch-raw"))
+
+      assert slice(@edit_base, old_fetch_raw.gap) ==
+               slice(new_candidate.source, new_fetch_raw.gap)
+
+      assert slice(@edit_base, old_fetch_raw.span) ==
+               slice(new_candidate.source, new_fetch_raw.span)
+
+      old_max_retries = Enum.find(old_scan.forms, &(&1.name == "max-retries"))
+      new_max_retries = Enum.find(new_scan.forms, &(&1.name == "max-retries"))
+
+      assert slice(@edit_base, old_max_retries.span) ==
+               slice(new_candidate.source, new_max_retries.span)
+    end
+
+    test "a replace_form visibility flip (defn -> defn-) surfaces in public_surface.changed" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :replace_form,
+          name: "get-user",
+          source: ~S|(defn- get-user "now private" [id] (fetch-raw id))|
+        }
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+
+      assert %{added: [], removed: [], changed: changed} = result.public_surface
+      assert [%{name: "get-user", before: before, after: aft}] = changed
+      assert before.visibility == :public
+      assert aft.visibility == :private
+      assert before.kind == aft.kind
+      assert before.arity == aft.arity
+    end
+
+    test "rejects a batch where two ops target the same form name" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{op: :replace_form, name: "unused-helper", source: "(defn- unused-helper [] 1)"},
+        %{op: :remove_form, name: "unused-helper"}
+      ]
+
+      assert {:error, %{reason: :conflicting_edit_batch}} =
+               PreludeStore.edit(store, "store-edit", edits)
+    end
+
+    test "rejects an add_form anchored to a form the same batch removes" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{op: :remove_form, name: "unused-helper"},
+        %{
+          op: :add_form,
+          placement: :before,
+          anchor: "unused-helper",
+          source: "(defn- extra [] 1)"
+        }
+      ]
+
+      assert {:error, %{reason: :conflicting_edit_batch}} =
+               PreludeStore.edit(store, "store-edit", edits)
+    end
+
+    test "rejects replace_form when the source's derived name does not match the declared name" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [%{op: :replace_form, name: "get-user", source: "(defn other-name [] 1)"}]
+
+      assert {:error, %{reason: :form_name_mismatch}} =
+               PreludeStore.edit(store, "store-edit", edits)
+    end
+
+    test "rejects add_form whose name already exists" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [%{op: :add_form, source: "(defn get-user [] 1)"}]
+
+      assert {:error, %{reason: :form_already_exists}} =
+               PreludeStore.edit(store, "store-edit", edits)
+    end
+
+    test "rejects a replace_form/remove_form target or an add_form anchor that does not exist" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      assert {:error, %{reason: :form_not_found}} =
+               PreludeStore.edit(store, "store-edit", [%{op: :remove_form, name: "nonexistent"}])
+
+      assert {:error, %{reason: :form_not_found}} =
+               PreludeStore.edit(store, "store-edit", [
+                 %{op: :replace_form, name: "nonexistent", source: "(defn nonexistent [] 1)"}
+               ])
+
+      assert {:error, %{reason: :form_not_found}} =
+               PreludeStore.edit(store, "store-edit", [
+                 %{
+                   op: :add_form,
+                   placement: :after,
+                   anchor: "nonexistent",
+                   source: "(defn extra [] 1)"
+                 }
+               ])
+    end
+
+    test "concurrent edit races a direct write/4 for the same base and rejects the stale contender" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, base} = PreludeStore.write(store, "paged", @paged_v1)
+
+      other_source = """
+      (ns paged)
+      (defn inspect [] {:version 99})
+      """
+
+      results =
+        [
+          fn ->
+            {:edit,
+             PreludeStore.edit(store, "paged", [%{op: :add_form, source: "(defn extra [] 1)"}])}
+          end,
+          fn ->
+            {:write,
+             PreludeStore.write(store, "paged", other_source, %{
+               "parent_checksum" => base.checksum
+             })}
+          end
+        ]
+        |> Task.async_stream(& &1.(), max_concurrency: 2, timeout: 5_000)
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      successes = Enum.filter(results, fn {_kind, result} -> match?({:ok, _}, result) end)
+      failures = Enum.filter(results, fn {_kind, result} -> match?({:error, _}, result) end)
+
+      assert length(successes) == 1
+      assert [{_kind, {:error, %{reason: :stale_base}}}] = failures
+
+      assert [%{versions_count: 2, latest_version: 2}] = PreludeStore.list(store)
+    end
+
+    test "removing a private helper still referenced by a public fn fails the existing compile gate" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      assert {:error,
+              %{reason: :prelude_compile_error, compile_reason: :compile_error, message: message}} =
+               PreludeStore.edit(store, "store-edit", [%{op: :remove_form, name: "fetch-raw"}])
+
+      assert message =~ "fetch-raw"
+      assert [%{versions_count: 1, latest_version: 1}] = PreludeStore.list(store)
+    end
+
+    test "set_ns_doc replaces an existing docstring, preserving surrounding bytes" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      assert {:ok, result} =
+               PreludeStore.edit(store, "store-edit", [%{op: :set_ns_doc, doc: "New ns doc."}])
+
+      assert {:ok, new_candidate} = PreludeStore.read(store, "store-edit@#{result.version}")
+
+      assert get_in(new_candidate.compiled.metadata, [:namespaces, "store-edit", :doc]) ==
+               "New ns doc."
+
+      {:ok, old_scan} = FormScanner.scan(@edit_base)
+      {:ok, new_scan} = FormScanner.scan(new_candidate.source)
+      old_ns = Enum.find(old_scan.forms, &(&1.head == "ns"))
+      new_ns = Enum.find(new_scan.forms, &(&1.head == "ns"))
+
+      # Bytes up to "(ns store-edit\n  " (before the docstring token) are
+      # untouched by the doc replacement.
+      prefix = "(ns store-edit\n  "
+      prefix_len = byte_size(prefix)
+
+      assert binary_part(@edit_base, elem(old_ns.span, 0), prefix_len) ==
+               binary_part(new_candidate.source, elem(new_ns.span, 0), prefix_len)
+    end
+
+    test "set_ns_doc inserts a docstring when the ns form has none" do
+      {:ok, store} = PreludeStore.new()
+      bare = "(ns bare)\n\n(defn f [] 1)\n"
+      assert {:ok, _base} = PreludeStore.write(store, "bare", bare)
+
+      assert {:ok, result} =
+               PreludeStore.edit(store, "bare", [%{op: :set_ns_doc, doc: "Added doc."}])
+
+      assert {:ok, new_candidate} = PreludeStore.read(store, "bare@#{result.version}")
+
+      assert get_in(new_candidate.compiled.metadata, [:namespaces, "bare", :doc]) == "Added doc."
+    end
+
+    test "add_form supports :before, :after, and :end placements in one batch" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :add_form,
+          placement: :before,
+          anchor: "get-user",
+          source: "(defn- before-helper [] 1)"
+        },
+        %{
+          op: :add_form,
+          placement: :after,
+          anchor: "get-user",
+          source: "(defn- after-helper [] 2)"
+        },
+        %{op: :add_form, placement: :end, source: "(defn- end-helper [] 3)"}
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+      assert {:ok, new_candidate} = PreludeStore.read(store, "store-edit@#{result.version}")
+
+      {:ok, new_scan} = FormScanner.scan(new_candidate.source)
+      order = Enum.map(new_scan.forms, & &1.name)
+
+      before_idx = Enum.find_index(order, &(&1 == "before-helper"))
+      get_user_idx = Enum.find_index(order, &(&1 == "get-user"))
+      after_idx = Enum.find_index(order, &(&1 == "after-helper"))
+      end_idx = Enum.find_index(order, &(&1 == "end-helper"))
+
+      assert before_idx == get_user_idx - 1
+      assert after_idx == get_user_idx + 1
+      assert end_idx == length(order) - 1
+    end
+
+    test "replace_form of a name coinciding with the namespace's own symbol never touches the (ns ...) form" do
+      {:ok, store} = PreludeStore.new()
+
+      source = """
+      (ns dup "original ns doc.")
+
+      (defn dup [] 42)
+      """
+
+      assert {:ok, _base} = PreludeStore.write(store, "dup", source)
+
+      assert {:ok, result} =
+               PreludeStore.edit(store, "dup", [
+                 %{op: :replace_form, name: "dup", source: "(defn dup [] 43)"}
+               ])
+
+      assert {:ok, new_candidate} = PreludeStore.read(store, "dup@#{result.version}")
+
+      assert get_in(new_candidate.compiled.metadata, [:namespaces, "dup", :doc]) ==
+               "original ns doc."
+
+      {:ok, new_scan} = FormScanner.scan(new_candidate.source)
+      assert Enum.count(new_scan.forms, &(&1.head == "ns")) == 1
+      assert Enum.count(new_scan.forms, &(&1.head == "defn" and &1.name == "dup")) == 1
+    end
+  end
+
+  describe "FormEdit.apply/2 (unit)" do
+    test "fails closed when the base source itself fails to scan" do
+      assert {:error, %{reason: :base_scan_failed}} =
+               FormEdit.apply("(defn foo [] 1", [%{op: :remove_form, name: "foo"}])
+    end
+
+    test "rejects an empty edits list and non-map edits" do
+      assert {:error, %{reason: :invalid_argument}} = FormEdit.apply("(ns x)\n", [])
+      assert {:error, %{reason: :invalid_argument}} = FormEdit.apply("(ns x)\n", ["not-a-map"])
+    end
+  end
+
+  defp slice(source, {offset, length}), do: binary_part(source, offset, length)
 end

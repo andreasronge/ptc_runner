@@ -21,6 +21,7 @@ defmodule PtcRunner.PreludeStore do
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.ProtectedNamespaces
   alias PtcRunner.PreludeCandidate
+  alias PtcRunner.PreludeStore.FormEdit
   alias PtcRunner.PreludeStore.Server
   alias PtcRunner.Sandbox
 
@@ -137,6 +138,59 @@ defmodule PtcRunner.PreludeStore do
   def write(%__MODULE__{}, _id, _source, _metadata) do
     {:error,
      error(:invalid_argument, "write/4 requires string id, string source, and map metadata")}
+  end
+
+  @doc """
+  Applies a form-keyed edit batch (`PtcRunner.PreludeStore.FormEdit`) to the
+  current candidate for `id` and writes the spliced result as a new version.
+
+  Reads the CURRENT (bare-id) candidate as the base, splices `edits` via
+  `FormEdit.apply/2` against its exact source text, then writes through the
+  ordinary `write/4` compile-and-append path with `parent_checksum` forced
+  to the base's own checksum (any caller-supplied `parent_checksum` in
+  `metadata` is overridden). `edit/3,4` performs no concurrency control of
+  its own: a write landing between this read and this write is rejected as
+  `:stale_base` by the SAME check `write/4` already has — editing a
+  non-current base is unsupported, exactly like `write/4`.
+
+  On success, returns `write/4`'s result map plus `base_version` and
+  `parent_checksum` (the base this edit was applied against), `forms`
+  (`FormEdit.apply/2`'s replaced/added/removed/ns_doc_set summary), and
+  `public_surface` (`%{added:, removed:, changed:}`, diffing the OLD and NEW
+  compiled `form_graph` — not `exports` alone, since a private definition
+  has no `Export` record at all: a `defn` -> `defn-` visibility flip would
+  otherwise silently disappear from an exports-only diff instead of
+  surfacing as a change).
+  """
+  @spec edit(t(), String.t(), [map()], map()) :: {:ok, map()} | {:error, map()}
+  def edit(store, id, edits, metadata \\ %{})
+
+  def edit(%__MODULE__{} = store, id, edits, metadata)
+      when is_binary(id) and is_list(edits) and is_map(metadata) do
+    with :ok <- validate_id(id),
+         {:ok, base} <- read(store, id) do
+      base_checksum = PreludeCandidate.checksum(base)
+      write_metadata = Map.merge(metadata, %{"parent_checksum" => base_checksum})
+
+      with {:ok, new_source, forms_summary} <- FormEdit.apply(base.source, edits),
+           {:ok, result} <- write(store, id, new_source, write_metadata),
+           {:ok, new_candidate} <-
+             read(store, %{id: id, version: result.version, checksum: result.checksum}) do
+        {:ok,
+         result
+         |> Map.put(:base_version, base.version)
+         |> Map.put(:parent_checksum, base_checksum)
+         |> Map.put(:forms, forms_summary)
+         |> Map.put(
+           :public_surface,
+           public_surface_diff(base.compiled, new_candidate.compiled, id)
+         )}
+      end
+    end
+  end
+
+  def edit(%__MODULE__{}, _id, _edits, _metadata) do
+    {:error, error(:invalid_argument, "edit/4 requires string id, list edits, and map metadata")}
   end
 
   @doc """
@@ -328,6 +382,62 @@ defmodule PtcRunner.PreludeStore do
         {:error,
          %{reason: :prelude_compile_error, message: message, compile_reason: :compile_error}}
     end
+  end
+
+  # Diffs two compiled %Prelude{}s' `form_graph` entries for namespace `id`
+  # (NOT `exports` alone — private definitions have no `Export` record, so a
+  # `defn`/`defn-` visibility flip would vanish instead of landing in
+  # `changed`). `effect` is looked up from the matching compiled export when
+  # a name is currently public; `nil` for a private name (no export exists
+  # to carry it).
+  defp public_surface_diff(%Prelude{} = old_compiled, %Prelude{} = new_compiled, id) do
+    old_graph = Map.get(old_compiled.form_graph, id, %{})
+    new_graph = Map.get(new_compiled.form_graph, id, %{})
+    old_effects = Map.new(old_compiled.exports, &{&1.symbol, &1.effect})
+    new_effects = Map.new(new_compiled.exports, &{&1.symbol, &1.effect})
+
+    old_names = Map.keys(old_graph)
+    new_names = Map.keys(new_graph)
+
+    added_names = Enum.filter(new_names, &(&1 not in old_names))
+    removed_names = Enum.filter(old_names, &(&1 not in new_names))
+    common_names = Enum.filter(new_names, &(&1 in old_names))
+
+    added =
+      added_names
+      |> Enum.map(&surface_entry(&1, new_graph, new_effects))
+      |> Enum.sort_by(& &1.name)
+
+    removed =
+      removed_names
+      |> Enum.map(&surface_entry(&1, old_graph, old_effects))
+      |> Enum.sort_by(& &1.name)
+
+    changed =
+      common_names
+      |> Enum.map(fn name ->
+        {name, surface_view(name, old_graph, old_effects),
+         surface_view(name, new_graph, new_effects)}
+      end)
+      |> Enum.filter(fn {_name, before, after_} -> before != after_ end)
+      |> Enum.map(fn {name, before, after_} -> %{name: name, before: before, after: after_} end)
+      |> Enum.sort_by(& &1.name)
+
+    %{added: added, removed: removed, changed: changed}
+  end
+
+  defp surface_entry(name, graph, effects),
+    do: Map.put(surface_view(name, graph, effects), :name, name)
+
+  defp surface_view(name, graph, effects) do
+    entry = Map.fetch!(graph, name)
+
+    %{
+      visibility: entry.visibility,
+      kind: entry.kind,
+      arity: entry.arity,
+      effect: Map.get(effects, name)
+    }
   end
 
   defp validate_compiled_namespace(id, %Prelude{namespaces: [id]}) do

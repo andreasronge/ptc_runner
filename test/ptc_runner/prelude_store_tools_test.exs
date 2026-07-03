@@ -3,6 +3,7 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.FormScanner
   alias PtcRunner.PreludeStore
   alias PtcRunner.PreludeStore.Tools
   alias PtcRunner.Step
@@ -44,13 +45,13 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert Enum.map(prelude.exports, & &1.ref) ==
              ~w(prelude/list prelude/history prelude/read prelude/source
-                prelude/forms prelude/form-deps prelude/deps
-                prelude/write prelude/set-default)
+                prelude/forms prelude/form-deps prelude/deps prelude/form
+                prelude/write prelude/edit prelude/set-default)
 
     for ref <-
           ~w(prelude/list prelude/history prelude/read prelude/source
-             prelude/forms prelude/form-deps prelude/deps
-             prelude/write prelude/set-default) do
+             prelude/forms prelude/form-deps prelude/deps prelude/form
+             prelude/write prelude/edit prelude/set-default) do
       assert Prelude.export_tool_refs(prelude, ref) != []
     end
 
@@ -62,7 +63,9 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert effects["prelude/forms"] == :read
     assert effects["prelude/form-deps"] == :read
     assert effects["prelude/deps"] == :read
+    assert effects["prelude/form"] == :read
     assert effects["prelude/write"] == :write
+    assert effects["prelude/edit"] == :write
     assert effects["prelude/set-default"] == :write
   end
 
@@ -300,13 +303,15 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                ["fetch-raw", "get-user", "max-retries", "unused-helper"]
 
       by_name = Map.new(rows, &{&1["name"], &1})
+      byte_size = form_byte_size(@graph_source, "fetch-raw")
 
       assert by_name["fetch-raw"] == %{
                "name" => "fetch-raw",
                "visibility" => "private",
                "kind" => "function",
                "arity" => 1,
-               "doc" => "Fetch the raw user record."
+               "doc" => "Fetch the raw user record.",
+               "byte_size" => byte_size
              }
 
       assert by_name["get-user"] == %{
@@ -314,7 +319,8 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                "visibility" => "public",
                "kind" => "function",
                "arity" => 1,
-               "doc" => "Return a CRM user by id."
+               "doc" => "Return a CRM user by id.",
+               "byte_size" => form_byte_size(@graph_source, "get-user")
              }
 
       assert by_name["max-retries"] == %{
@@ -322,7 +328,8 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                "visibility" => "public",
                "kind" => "constant",
                "arity" => 0,
-               "doc" => "Retry budget."
+               "doc" => "Retry budget.",
+               "byte_size" => form_byte_size(@graph_source, "max-retries")
              }
 
       assert by_name["unused-helper"] == %{
@@ -330,7 +337,8 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                "visibility" => "private",
                "kind" => "function",
                "arity" => 0,
-               "doc" => "Never called by anything."
+               "doc" => "Never called by anything.",
+               "byte_size" => form_byte_size(@graph_source, "unused-helper")
              }
     end
 
@@ -422,6 +430,122 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
                "max-retries" => [],
                "unused-helper" => []
              }
+    end
+  end
+
+  describe "prelude/form" do
+    setup do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+      assert {:ok, _} = PreludeStore.write(store, "crm", @graph_source)
+      %{store: store, prelude: prelude}
+    end
+
+    test "returns the exact byte slice of a named form's source", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(~S|(prelude/form "crm" "fetch-raw")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["name"] == "fetch-raw"
+      assert result["visibility"] == "private"
+
+      {:ok, scan} = FormScanner.scan(@graph_source)
+      form = Enum.find(scan.forms, &(&1.name == "fetch-raw"))
+      {offset, length} = form.span
+
+      assert result["source"] == binary_part(@graph_source, offset, length)
+    end
+
+    test "returns a public form_not_found error for an unknown form name", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(~S|(prelude/form "crm" "nonexistent")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "error"
+      assert result["reason"] == "form_not_found"
+    end
+  end
+
+  describe "prelude/edit" do
+    test "public wrapper applies a form-keyed edit batch end-to-end, marshaling the edits list of maps" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+      assert {:ok, _} = PreludeStore.write(store, "crm", @graph_source)
+
+      program = ~S"""
+      (prelude/edit
+        {:id "crm"
+         :edits [{:op :remove_form :name "unused-helper"}
+                 {:op :add_form :source "(defn- extra-helper [] 99)" :placement :end}]
+         :metadata {:reason "cleanup"}})
+      """
+
+      assert {:ok, %Step{return: result} = step} =
+               Lisp.run(program, prelude: prelude, tools: Tools.tools(store))
+
+      assert result["status"] == "ok"
+      assert result["id"] == "crm"
+      assert result["version"] == 2
+      assert result["base_version"] == 1
+      assert result["parent_checksum"] == result["metadata"]["parent_checksum"]
+      assert result["metadata"]["reason"] == "cleanup"
+
+      assert result["forms"] == %{
+               "replaced" => [],
+               "added" => ["extra-helper"],
+               "removed" => ["unused-helper"],
+               "ns_doc_set" => false
+             }
+
+      assert %{"added" => added, "removed" => removed} = result["public_surface"]
+      assert Enum.map(added, & &1["name"]) == ["extra-helper"]
+      assert Enum.map(removed, & &1["name"]) == ["unused-helper"]
+
+      assert [%{name: "prelude_store_edit", private: true} = call] = step.tool_calls
+
+      # The existing source-redaction rule (see "private source args are
+      # summarized" below) applies recursively to a "source" key nested
+      # inside the edits LIST OF MAPS too, not just a top-level arg.
+      new_form_source = "(defn- extra-helper [] 99)"
+
+      assert call.args["edits"] == [
+               %{"op" => "remove_form", "name" => "unused-helper"},
+               %{
+                 "op" => "add_form",
+                 "source" => %{
+                   "redacted" => true,
+                   "bytes" => byte_size(new_form_source),
+                   "sha256" => sha256(new_form_source)
+                 },
+                 "placement" => "end"
+               }
+             ]
+    end
+
+    test "public wrapper surfaces conflicting-batch and form-not-found errors as plain error maps" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+      assert {:ok, _} = PreludeStore.write(store, "crm", @graph_source)
+
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(
+                 ~S|(prelude/edit {:id "crm" :edits [{:op :remove_form :name "nonexistent"}]})|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "error"
+      assert result["reason"] == "form_not_found"
     end
   end
 
@@ -582,5 +706,11 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
   defp sha256(source) do
     :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
+  end
+
+  defp form_byte_size(source, name) do
+    {:ok, scan} = FormScanner.scan(source)
+    form = Enum.find(scan.forms, &(&1.name == name))
+    elem(form.span, 1)
   end
 end

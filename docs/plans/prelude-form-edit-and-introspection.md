@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed and approved 2026-07-03, not started. Review sharpenings
+Approved and **implemented** 2026-07-03 (Phases 1, 2, and 3 all shipped;
+see the commits introducing `form_graph`, the introspection tools,
+`FormScanner`, and `FormEdit`/`PreludeStore.edit`). Review sharpenings
 incorporated: `prelude/form` moved behind the span scanner (no rendered
 fallback), scanner test coverage is a hard gate for `prelude/edit`,
 direct/transitive authority split in the dep surface, explicit-only
@@ -214,7 +216,11 @@ frequently trips its own refusal is not shippable either.
 - `replace-form name source` — works regardless of the current head
   (`defn` / `defn-` / `def`); a visibility change is an ordinary replace,
   validated by the compile gate and surfaced in the write result for human
-  review.
+  review. **No rename op.** A `replace-form` whose declared `name` doesn't
+  match the source's derived name is rejected (`:form_name_mismatch`), not
+  treated as a rename — a rename is expressed as `remove-form` +
+  `add-form`, so the name a batch touches is always explicit rather than
+  inferred from a before/after diff of two spans.
 - `add-form source` with placement exactly one of `:before name`,
   `:after name`, or `:end` (the default). No other placement logic — no
   inference from dependencies, no "smart" ordering. Bad placement
@@ -222,6 +228,29 @@ frequently trips its own refusal is not shippable either.
 - `remove-form name`.
 - `set-ns-doc doc` — dedicated op for the one recurring non-form edit (the
   ns docstring); the `(ns ...)` form is not symbol-keyed like definitions.
+  Concretely: the `(ns ...)` form is excluded from every name-keyed lookup
+  above too (`replace-form`/`remove-form`/`add-form`'s anchor, and the
+  existing-name check) — it is reachable only through `set-ns-doc`. This
+  also sidesteps a real ambiguity, since the scanner derives a `name` for an
+  `ns` form too (its namespace symbol), and nothing stops a `defn`/`def`
+  from sharing that name (the compiler only rejects duplicate refs among
+  `defn`/`def` specs, never against the ns name itself).
+
+**Splice text rules.** `replace-form` swaps only the target's span; its
+preceding gap (header comments, blank lines) is untouched. `remove-form`
+removes the target's span AND its preceding gap — header comments travel
+with the form they document. `add-form :before X` inserts
+`"\n\n" <> new-form-text` right after whatever precedes X (i.e. before X's
+own gap begins), so X's header comments stay attached to X, not to the
+newly inserted form — the separator sits on the new form's LEFT edge; on
+its right, X's own untouched gap provides the separation; `:after X` inserts `"\n\n" <> new-form-text`
+immediately after X's span ends; `:end` appends `"\n\n" <> new-form-text`
+after the last form's span, before the source's trailing gap. Untouched
+forms are byte-identical by construction — their gap and span are copied
+verbatim. Only the single top-level form's own span from a
+`replace-form`/`add-form` source is spliced in; any leading/trailing gap in
+that source itself (e.g. a comment the caller put before the form) is
+discarded.
 
 **Batch semantics.** Ops are accepted as one atomic batch producing one
 version bump. Every op resolves its span against the *base* version; the
@@ -237,9 +266,13 @@ existing parent-checksum path — edit-and-fork is not supported.
   an audit log must connect edit intent to the exact base without a store
   round-trip, and the response is the natural place to bind them;
 - which forms were replaced/added/removed;
-- a public-surface diff (exports before/after, computed from the two
-  compiled `%Prelude{}` structs) so visibility changes are flagged for the
-  human gate without a source diff.
+- a public-surface diff computed from the two compiled `%Prelude{}` structs'
+  `form_graph` — every form (public AND private), not `exports` alone: a
+  private definition has no `Export` record at all, so diffing `exports`
+  only would make a `defn` -> `defn-` visibility flip silently vanish
+  instead of surfacing as a change. `effect` (read/write/unknown) is looked
+  up from the matching compiled export when a name is currently public, and
+  is absent for a private name.
 
 ## Files to change
 

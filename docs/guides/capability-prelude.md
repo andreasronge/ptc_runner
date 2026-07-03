@@ -442,7 +442,9 @@ model-visible API includes:
 (prelude/forms "paged")
 (prelude/form-deps "paged" "some-helper")
 (prelude/deps "paged")
+(prelude/form "paged" "some-helper")
 (prelude/write {:id "paged" :source new-source :metadata {:reason "add profile"}})
+(prelude/edit {:id "paged" :edits [...] :metadata {:reason "add profile"}})
 (prelude/set-default {:id "paged" :version 1 :metadata {:reason "rollback"}})
 ```
 
@@ -452,7 +454,9 @@ model-visible API includes:
 - `(prelude/forms id)` — one row per top-level form (public AND private,
   including unreferenced/dead helpers), sorted by name: `name`, `visibility`
   (`"public"`/`"private"`), `kind` (`"function"`/`"constant"`), `arity` (int or
-  `"variadic"`), and a bounded `doc`.
+  `"variadic"`), a bounded `doc`, and `byte_size` (the form's exact source
+  span length; omitted, cosmetic fail-soft, on the rare read-time scan
+  failure of an already-compiled candidate).
 - `(prelude/form-deps id name)` — one named form's direct sibling `calls`
   (each entry carries its own `visibility`), plus `requires`/`tool_refs` split
   into `direct` (the form's own body) and `transitive` (the closure over the
@@ -466,6 +470,63 @@ An unknown id returns the same public `not_found` error as `prelude/read`; an
 unknown form name returns `{:reason "form_not_found" :id id :name name ...}`.
 All three carry structure and authority facts only — no source text below the
 whole-candidate `prelude/source` bound.
+
+`(prelude/form id name)` returns the named form's EXACT byte-slice source
+text — `{name:, visibility:, source:}` — located via a byte-exact top-level
+span scanner (`PtcRunner.Lisp.Prelude.FormScanner`), never a re-rendered
+approximation. `source` is bounded the same way `prelude/source` bounds a
+whole candidate (64 KB); an oversized form fails closed with
+`{:reason "source_truncated" :source_bytes n}` rather than truncating. As
+with `forms`/`form-deps`/`deps`, `name` is keyed against `form_graph` — the
+`(ns ...)` directive itself is not a valid `name` here; it is reachable only
+through `prelude/edit`'s `set_ns_doc` op.
+
+`(prelude/edit {:id :edits :metadata})` applies a form-keyed BATCH of edits to
+the CURRENT candidate for `id` and writes the spliced result as one new
+version — the model emits only the deltas; the server holds the text and
+performs the splice, so untouched forms are byte-identical by construction.
+Each entry in `:edits` is a map with an `"op"` (values use underscores, e.g.
+`"replace_form"`, not `"replace-form"`):
+
+```clojure
+(prelude/edit
+  {:id "paged"
+   :edits [{:op "replace_form" :name "inspect" :source "(defn inspect [] {:v 2})"}
+           {:op "add_form" :source "(defn- helper [] 1)" :placement "before" :anchor "inspect"}
+           {:op "remove_form" :name "dead-helper"}
+           {:op "set_ns_doc" :doc "Updated namespace doc."}]
+   :metadata {:reason "cleanup"}})
+```
+
+- `replace_form` swaps a named form's definition; the head may change freely
+  (`defn` <-> `defn-` <-> `def`) — a visibility flip is an ordinary replace,
+  surfaced in the result's `public_surface` diff, not rejected.
+- `add_form` inserts a new named form; `:placement` is `"end"` (default),
+  `"before"`, or `"after"` (`"before"`/`"after"` require `:anchor`).
+- `remove_form` deletes a named form and its header comments.
+- `set_ns_doc` replaces (or inserts, if absent) only the `(ns ...)` form's
+  docstring.
+
+All ops resolve against the CURRENT candidate's spans and splice in one pass;
+a batch is rejected outright (no partial application) when two ops target the
+same form, an `add_form` anchors to a form the same batch removes, an
+`add_form` name already exists or is added twice, or a target/anchor name
+does not exist. Removing a helper another surviving form still calls fails
+the existing compile gate, naming the now-undefined symbol. Editing a
+non-current base is rejected as `:stale_base` — like `prelude/write`,
+edit-and-fork is not supported.
+
+On success the result is `prelude/write`'s result (`id`, `version`,
+`checksum`, `namespaces`, `exports`, `metadata`) plus:
+
+- `base_version`/`parent_checksum` — the version and checksum this edit was
+  applied against;
+- `forms` — `{replaced:, added:, removed:, ns_doc_set:}`, the names touched;
+- `public_surface` — `{added:, removed:, changed:}`, diffing the OLD and NEW
+  compiled `form_graph` (every form, not only exports — so a `defn`/`defn-`
+  visibility flip surfaces as `changed` rather than silently disappearing)
+  so a human reviewer sees every capability-relevant shape change without a
+  source diff.
 
 `prelude/set-default` accepts an optional checksum:
 

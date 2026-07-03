@@ -110,6 +110,18 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
   With both checks in place, the worst failure mode is a loud refusal —
   never a silently wrong span.
 
+  ## Locating the `(ns ...)` docstring
+
+  `locate_ns_doc/2` is the one narrowly-scoped extra entry point this module
+  carries for `prelude/edit`'s `set-ns-doc` op
+  (`PtcRunner.PreludeStore.FormEdit`): given the byte span of a `(ns ...)`
+  form (as produced by `scan/1` — a `%{head: "ns", ...}` entry), it locates
+  the docstring token, if any, WITHOUT re-deriving or duplicating any of
+  `PtcRunner.Lisp.Prelude.Compiler`'s `ns_metadata/1` semantics — it reuses
+  this module's own `scan_symbol/1`/`scan_value/1`/`skip_ws/1` machinery
+  against the same span. Span in, span(s) out: callers splice bytes
+  themselves; this module never rewrites source text.
+
   ## Reader-macro coverage
 
   Mirrors every construct `PtcRunner.Lisp.FastParser.parse/1` accepts:
@@ -141,6 +153,8 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
 
   @type scan_error :: %{required(:reason) => atom(), optional(atom()) => term()}
 
+  @type ns_doc_location :: %{doc_span: byte_span() | nil, insert_at: non_neg_integer()}
+
   @naming_heads ["ns", "defn", "defn-", "def"]
 
   # Must be defined (as a guard-usable macro) before any function clause
@@ -167,6 +181,55 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
     e ->
       {:error, %{reason: :scan_internal_error, message: Exception.message(e)}}
   end
+
+  @doc """
+  Locates the `(ns ...)` docstring token within `ns_span` — the `{offset,
+  length}` byte span of a form `scan/1` reported with `head: "ns"`.
+
+  Returns `doc_span`, the exact byte span of the quoted string literal
+  (INCLUDING its surrounding quotes) when the ns form already has a
+  docstring — e.g. `(ns name "doc" ...)` — or `nil` when it does not (`(ns
+  name)` / `(ns name {meta})`). `insert_at` is always the byte offset
+  immediately after the namespace name symbol (before any following
+  whitespace, docstring, metadata map, or closing paren): a caller replaces
+  exactly `doc_span` in place when it is present, or splices new bytes at
+  `insert_at` when it is `nil` — either way, no other byte of the ns form is
+  ever touched.
+
+  Fails closed (`{:error, %{reason: :unexpected_ns_form}}`) on any shape
+  other than `(ns <symbol> ...)`. Callers are only expected to pass spans
+  `scan/1` itself already tagged `head: "ns"` for the SAME source, so this
+  should never trigger for a real caller — it exists so a shape this module
+  doesn't recognize is refused rather than mis-splice.
+  """
+  @spec locate_ns_doc(binary(), byte_span()) :: {:ok, ns_doc_location()} | {:error, scan_error()}
+  def locate_ns_doc(source, {offset, length}) when is_binary(source) do
+    cursor = {binary_part(source, offset, length), offset}
+
+    with {"(" <> rest, offset1} <- cursor,
+         cursor2 = skip_ws({rest, offset1 + 1}),
+         {:ok, cursor3, {:symbol, "ns"}} <- scan_symbol(cursor2),
+         cursor4 = skip_ws(cursor3),
+         {:ok, cursor5, {:symbol, _name}} <- scan_symbol(cursor4) do
+      locate_after_ns_name(skip_ws(cursor5))
+    else
+      _ -> {:error, %{reason: :unexpected_ns_form}}
+    end
+  rescue
+    e -> {:error, %{reason: :scan_internal_error, message: Exception.message(e)}}
+  end
+
+  defp locate_after_ns_name({"\"" <> _, doc_offset} = cursor) do
+    case scan_value(cursor) do
+      {:ok, {_rest, doc_end}, :string} ->
+        {:ok, %{doc_span: {doc_offset, doc_end - doc_offset}, insert_at: doc_offset}}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp locate_after_ns_name({_rest, insert_at}), do: {:ok, %{doc_span: nil, insert_at: insert_at}}
 
   # ============================================================
   # Top-level program loop
