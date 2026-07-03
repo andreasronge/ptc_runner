@@ -439,9 +439,33 @@ model-visible API includes:
 (prelude/history "paged")
 (prelude/read "paged@2")
 (prelude/source "paged")
+(prelude/forms "paged")
+(prelude/form-deps "paged" "some-helper")
+(prelude/deps "paged")
 (prelude/write {:id "paged" :source new-source :metadata {:reason "add profile"}})
 (prelude/set-default {:id "paged" :version 1 :metadata {:reason "rollback"}})
 ```
+
+`prelude/forms`, `prelude/form-deps`, and `prelude/deps` project the compiled
+`form_graph` (no re-parsing) for a stored candidate by id or `id@version`:
+
+- `(prelude/forms id)` — one row per top-level form (public AND private,
+  including unreferenced/dead helpers), sorted by name: `name`, `visibility`
+  (`"public"`/`"private"`), `kind` (`"function"`/`"constant"`), `arity` (int or
+  `"variadic"`), and a bounded `doc`.
+- `(prelude/form-deps id name)` — one named form's direct sibling `calls`
+  (each entry carries its own `visibility`), plus `requires`/`tool_refs` split
+  into `direct` (the form's own body) and `transitive` (the closure over the
+  siblings it calls) — the transitive view is what widens when a private
+  helper's authority changes.
+- `(prelude/deps id)` — the whole intra-namespace direct-reference graph,
+  `{name -> [direct sibling names]}`, covering every form including dead
+  privates.
+
+An unknown id returns the same public `not_found` error as `prelude/read`; an
+unknown form name returns `{:reason "form_not_found" :id id :name name ...}`.
+All three carry structure and authority facts only — no source text below the
+whole-candidate `prelude/source` bound.
 
 `prelude/set-default` accepts an optional checksum:
 

@@ -16,16 +16,41 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
   (defn inspect [] {:version 1})
   """
 
+  @graph_source """
+  (ns crm "CRM helpers." {:visibility :prompt})
+
+  (defn- fetch-raw
+    "Fetch the raw user record."
+    [id]
+    (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+
+  (defn get-user
+    "Return a CRM user by id."
+    [id]
+    (fetch-raw id))
+
+  (defn- unused-helper
+    "Never called by anything."
+    []
+    42)
+
+  (def max-retries "Retry budget." 3)
+  """
+
   test "host prelude compiles as public prelude wrappers over private store tools" do
     assert {:ok, %Prelude{} = prelude} = Tools.prelude()
 
     assert Prelude.namespaces(prelude) == ["prelude"]
 
     assert Enum.map(prelude.exports, & &1.ref) ==
-             ~w(prelude/list prelude/history prelude/read prelude/source prelude/write prelude/set-default)
+             ~w(prelude/list prelude/history prelude/read prelude/source
+                prelude/forms prelude/form-deps prelude/deps
+                prelude/write prelude/set-default)
 
     for ref <-
-          ~w(prelude/list prelude/history prelude/read prelude/source prelude/write prelude/set-default) do
+          ~w(prelude/list prelude/history prelude/read prelude/source
+             prelude/forms prelude/form-deps prelude/deps
+             prelude/write prelude/set-default) do
       assert Prelude.export_tool_refs(prelude, ref) != []
     end
 
@@ -34,6 +59,9 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert effects["prelude/history"] == :read
     assert effects["prelude/read"] == :read
     assert effects["prelude/source"] == :read
+    assert effects["prelude/forms"] == :read
+    assert effects["prelude/form-deps"] == :read
+    assert effects["prelude/deps"] == :read
     assert effects["prelude/write"] == :write
     assert effects["prelude/set-default"] == :write
   end
@@ -251,6 +279,176 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert result["compile_reason"] == "parse_error"
 
     assert PreludeStore.list(store) == []
+  end
+
+  describe "prelude/forms, prelude/form-deps, prelude/deps" do
+    setup do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+      assert {:ok, _} = PreludeStore.write(store, "crm", @graph_source)
+      %{store: store, prelude: prelude}
+    end
+
+    test "forms lists every top-level form, including a dead private, sorted by name", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: rows}} =
+               Lisp.run(~S|(prelude/forms "crm")|, prelude: prelude, tools: Tools.tools(store))
+
+      assert Enum.map(rows, & &1["name"]) ==
+               ["fetch-raw", "get-user", "max-retries", "unused-helper"]
+
+      by_name = Map.new(rows, &{&1["name"], &1})
+
+      assert by_name["fetch-raw"] == %{
+               "name" => "fetch-raw",
+               "visibility" => "private",
+               "kind" => "function",
+               "arity" => 1,
+               "doc" => "Fetch the raw user record."
+             }
+
+      assert by_name["get-user"] == %{
+               "name" => "get-user",
+               "visibility" => "public",
+               "kind" => "function",
+               "arity" => 1,
+               "doc" => "Return a CRM user by id."
+             }
+
+      assert by_name["max-retries"] == %{
+               "name" => "max-retries",
+               "visibility" => "public",
+               "kind" => "constant",
+               "arity" => 0,
+               "doc" => "Retry budget."
+             }
+
+      assert by_name["unused-helper"] == %{
+               "name" => "unused-helper",
+               "visibility" => "private",
+               "kind" => "function",
+               "arity" => 0,
+               "doc" => "Never called by anything."
+             }
+    end
+
+    test "forms resolves an id@version ref", %{store: store, prelude: prelude} do
+      assert {:ok, %Step{return: rows}} =
+               Lisp.run(~S|(prelude/forms "crm@1")|, prelude: prelude, tools: Tools.tools(store))
+
+      assert Enum.map(rows, & &1["name"]) ==
+               ["fetch-raw", "get-user", "max-retries", "unused-helper"]
+    end
+
+    test "forms returns a public not_found error for an unknown id", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(~S|(prelude/forms "missing")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "error"
+      assert result["reason"] == "not_found"
+    end
+
+    test "form-deps splits direct (own body) from transitive (through called siblings) authority",
+         %{store: store, prelude: prelude} do
+      assert {:ok, %Step{return: helper}} =
+               Lisp.run(~S|(prelude/form-deps "crm" "fetch-raw")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert helper == %{
+               "name" => "fetch-raw",
+               "visibility" => "private",
+               "calls" => [],
+               "requires" => %{
+                 "direct" => ["upstream:crm/get_user"],
+                 "transitive" => ["upstream:crm/get_user"]
+               },
+               "tool_refs" => %{"direct" => ["call"], "transitive" => ["call"]}
+             }
+
+      assert {:ok, %Step{return: caller}} =
+               Lisp.run(~S|(prelude/form-deps "crm" "get-user")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert caller == %{
+               "name" => "get-user",
+               "visibility" => "public",
+               "calls" => [%{"name" => "fetch-raw", "visibility" => "private"}],
+               "requires" => %{
+                 "direct" => [],
+                 "transitive" => ["upstream:crm/get_user"]
+               },
+               "tool_refs" => %{"direct" => [], "transitive" => ["call"]}
+             }
+    end
+
+    test "form-deps returns a public form_not_found error for an unknown form name", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(~S|(prelude/form-deps "crm" "nonexistent")|,
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "error"
+      assert result["reason"] == "form_not_found"
+      assert result["id"] == "crm"
+      assert result["name"] == "nonexistent"
+    end
+
+    test "deps covers every form in the namespace, including the dead private", %{
+      store: store,
+      prelude: prelude
+    } do
+      assert {:ok, %Step{return: graph}} =
+               Lisp.run(~S|(prelude/deps "crm")|, prelude: prelude, tools: Tools.tools(store))
+
+      assert graph == %{
+               "fetch-raw" => [],
+               "get-user" => ["fetch-raw"],
+               "max-retries" => [],
+               "unused-helper" => []
+             }
+    end
+  end
+
+  test "forms bounds a long docstring with a truncation marker" do
+    {:ok, store} = PreludeStore.new()
+    {:ok, prelude} = Tools.prelude()
+
+    long_doc = String.duplicate("x", 2_000)
+
+    source = """
+    (ns docs "Docstring stress test.")
+
+    (defn verbose
+      "#{long_doc}"
+      []
+      1)
+    """
+
+    assert {:ok, _} = PreludeStore.write(store, "docs", source)
+
+    assert {:ok, %Step{return: [row]}} =
+             Lisp.run(~S|(prelude/forms "docs")|, prelude: prelude, tools: Tools.tools(store))
+
+    assert row["name"] == "verbose"
+    assert byte_size(row["doc"]) <= 1_024
+    assert row["doc"] =~ "truncated"
+    refute row["doc"] =~ long_doc
   end
 
   test "reserved store tool collisions fail before merge" do

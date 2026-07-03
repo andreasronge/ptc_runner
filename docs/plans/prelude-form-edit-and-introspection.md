@@ -251,8 +251,9 @@ existing parent-checksum path — edit-and-fork is not supported.
   `write/4` after the splice.
 - `lib/ptc_runner/prelude_store/tools.ex` — new wrapper fns in
   `@prelude_source`, new reserved backing tool names
-  (`prelude_store_forms`, `prelude_store_form`, `prelude_store_deps`,
-  `prelude_store_edit`), marshaling for the `:edits` list-of-maps arg.
+  (`prelude_store_forms`, `prelude_store_form_deps`, `prelude_store_form`,
+  `prelude_store_deps`, `prelude_store_edit`), marshaling for the `:edits`
+  list-of-maps arg.
 - Tests: `test/ptc_runner/prelude_store_test.exs`,
   `test/ptc_runner/prelude_store_tools_test.exs` (both already cover the
   write path incl. stale-parent and concurrent writes), new scanner

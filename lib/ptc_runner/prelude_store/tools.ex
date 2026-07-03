@@ -17,8 +17,20 @@ defmodule PtcRunner.PreludeStore.Tools do
   @read_tool "prelude_store_read"
   @write_tool "prelude_store_write"
   @set_default_tool "prelude_store_set_default"
-  @reserved_names [@list_tool, @history_tool, @read_tool, @write_tool, @set_default_tool]
-  @max_public_error_string_bytes 1_024
+  @forms_tool "prelude_store_forms"
+  @form_deps_tool "prelude_store_form_deps"
+  @deps_tool "prelude_store_deps"
+  @reserved_names [
+    @list_tool,
+    @history_tool,
+    @read_tool,
+    @write_tool,
+    @set_default_tool,
+    @forms_tool,
+    @form_deps_tool,
+    @deps_tool
+  ]
+  @max_public_string_bytes 1_024
 
   @prelude_source """
   (ns prelude
@@ -52,6 +64,26 @@ defmodule PtcRunner.PreludeStore.Tools do
                  :id id
                  :source_bytes (get candidate "source_bytes")})
           (get candidate "source")))))
+
+  (defn forms
+    "List a stored prelude's top-level forms (public and private) by id or
+     id@version: name, visibility, kind, arity, and a bounded docstring."
+    [id]
+    (tool/prelude_store_forms {:id id}))
+
+  (defn form-deps
+    "Show one named form's direct sibling calls (with each call's own
+     visibility) plus the form's requires/tool-refs split into direct (its own
+     body) and transitive (through the siblings it calls)."
+    [id name]
+    (tool/prelude_store_form_deps {:id id :name name}))
+
+  (defn deps
+    "Show the whole intra-namespace direct-reference graph for a stored
+     prelude: every form name (including unreferenced private helpers) mapped
+     to the sibling names it directly calls."
+    [id]
+    (tool/prelude_store_deps {:id id}))
 
   (defn write
     "Write a full namespace source candidate with optional metadata."
@@ -137,6 +169,24 @@ defmodule PtcRunner.PreludeStore.Tools do
          description: "Read a bounded public prelude candidate view.",
          expose: :ptc_lisp,
          visibility: :private},
+      @forms_tool =>
+        {fn args -> forms_tool(store, args) end,
+         signature: "(id :string) -> [:map]",
+         description: "List a stored prelude's top-level forms (public and private).",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @form_deps_tool =>
+        {fn args -> form_deps_tool(store, args) end,
+         signature: "(id :string, name :string) -> :map",
+         description: "Show one form's sibling calls and direct/transitive authority.",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @deps_tool =>
+        {fn args -> deps_tool(store, args) end,
+         signature: "(id :string) -> :map",
+         description: "Show the whole intra-namespace direct-reference graph.",
+         expose: :ptc_lisp,
+         visibility: :private},
       @write_tool =>
         {fn args -> write_tool(store, args) end,
          signature: "(id :string, source :string, metadata :map) -> :map",
@@ -189,6 +239,120 @@ defmodule PtcRunner.PreludeStore.Tools do
     e -> store_error(e)
   catch
     kind, reason -> store_error({kind, reason})
+  end
+
+  defp forms_tool(store, %{"id" => id}) when is_binary(id) do
+    case resolve_form_graph(store, id) do
+      {:ok, ns_graph} -> public_map(forms_rows(ns_graph))
+      {:error, error} -> public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp forms_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_forms requires a string id field"
+    })
+  end
+
+  defp form_deps_tool(store, %{"id" => id, "name" => name})
+       when is_binary(id) and is_binary(name) do
+    case resolve_form_graph(store, id) do
+      {:ok, ns_graph} ->
+        case Map.fetch(ns_graph, name) do
+          {:ok, entry} ->
+            public_map(form_deps_view(name, entry, ns_graph))
+
+          :error ->
+            public_error(%{
+              reason: :form_not_found,
+              message: "prelude form `#{name}` not found in `#{id}`",
+              id: id,
+              name: name
+            })
+        end
+
+      {:error, error} ->
+        public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp form_deps_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_form_deps requires string id and name fields"
+    })
+  end
+
+  defp deps_tool(store, %{"id" => id}) when is_binary(id) do
+    case resolve_form_graph(store, id) do
+      {:ok, ns_graph} -> public_map(deps_view(ns_graph))
+      {:error, error} -> public_error(error)
+    end
+  rescue
+    e -> store_error(e)
+  catch
+    kind, reason -> store_error({kind, reason})
+  end
+
+  defp deps_tool(_store, _args) do
+    public_error(%{
+      reason: :invalid_argument,
+      message: "prelude_store_deps requires a string id field"
+    })
+  end
+
+  # Resolves `id`/`id@version` the same way `prelude_store_read` does, then
+  # projects the namespace's `form_graph` submap. A store id always compiles to
+  # exactly one namespace == id (`validate_compiled_namespace`), so the
+  # candidate's own id is the graph key.
+  defp resolve_form_graph(store, id) do
+    case PreludeStore.read(store, id) do
+      {:ok, %PreludeCandidate{id: namespace, compiled: %Prelude{form_graph: form_graph}}} ->
+        {:ok, Map.get(form_graph, namespace, %{})}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp forms_rows(ns_graph) do
+    ns_graph
+    |> Enum.map(fn {name, entry} ->
+      %{
+        name: name,
+        visibility: entry.visibility,
+        kind: entry.kind,
+        arity: entry.arity,
+        doc: bound_public_doc(entry.doc)
+      }
+    end)
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp form_deps_view(name, entry, ns_graph) do
+    %{
+      name: name,
+      visibility: entry.visibility,
+      calls:
+        entry.calls
+        |> Enum.map(&%{name: &1, visibility: Map.fetch!(ns_graph, &1).visibility})
+        |> Enum.sort_by(& &1.name),
+      requires: entry.requires,
+      tool_refs: entry.tool_refs
+    }
+  end
+
+  defp deps_view(ns_graph) do
+    Map.new(ns_graph, fn {name, entry} -> {name, Enum.sort(entry.calls)} end)
   end
 
   defp write_tool(store, %{"id" => id, "source" => source} = args)
@@ -252,7 +416,17 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp public_error(error) when is_map(error) do
     error
-    |> Map.take([:reason, :message, :compile_reason, :namespace, :ref, :limit, :limit_bytes])
+    |> Map.take([
+      :reason,
+      :message,
+      :compile_reason,
+      :namespace,
+      :ref,
+      :limit,
+      :limit_bytes,
+      :id,
+      :name
+    ])
     |> bound_public_error_strings()
     |> Map.put(:status, :error)
     |> public_map()
@@ -261,12 +435,17 @@ defmodule PtcRunner.PreludeStore.Tools do
   defp bound_public_error_strings(error) do
     Map.new(error, fn
       {key, value} when is_binary(value) ->
-        {key, bound_public_string(value, @max_public_error_string_bytes)}
+        {key, bound_public_string(value, @max_public_string_bytes)}
 
       entry ->
         entry
     end)
   end
+
+  defp bound_public_doc(nil), do: nil
+
+  defp bound_public_doc(doc) when is_binary(doc),
+    do: bound_public_string(doc, @max_public_string_bytes)
 
   defp bound_public_string(value, max_bytes) when byte_size(value) <= max_bytes, do: value
 
