@@ -247,7 +247,7 @@ defmodule PtcRunner.SessionTest do
       end
     end
 
-    test "selected preludes reject duplicate namespaces and require granted tools at eval" do
+    test "selected preludes dedupe identical refs and require granted tools at eval" do
       {:ok, store} = PreludeStore.new()
 
       source = """
@@ -258,9 +258,10 @@ defmodule PtcRunner.SessionTest do
 
       assert {:ok, _} = PreludeStore.write(store, "cap", source)
 
-      assert_raise ArgumentError, fn ->
-        Session.new(prelude_store: store, preludes: ["cap", "cap"])
-      end
+      # Identical refs deduplicate to one component (docs/plans/prelude-deps.md
+      # decision 4); only version CONFLICTS fail closed.
+      deduped = Session.new(prelude_store: store, preludes: ["cap", "cap"])
+      assert {:ok, [%{id: "cap", version: 1}]} = Session.preludes(deduped)
 
       session = Session.new(prelude_store: store, preludes: ["cap"])
       {{:error, step}, _session} = Session.eval(session, "(cap/fetch)")

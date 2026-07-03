@@ -45,7 +45,7 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   def compile(selections) when is_list(selections) do
     with {:ok, components} <- normalize_and_compile(selections),
          :ok <- reject_duplicate_namespaces(components) do
-      compile_components(components)
+      compile_components(components, [])
     end
   end
 
@@ -54,23 +54,32 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   end
 
   @doc false
-  @spec compile_precompiled([map()]) :: {:ok, Prelude.t()} | {:error, ValidationError.t()}
-  def compile_precompiled(selections) when is_list(selections) do
+  # `compile_opts` are forwarded to the ONE aggregate `Compiler.compile/2`
+  # call — the store-resolved attach path passes `namespace_deps:` derived
+  # from recorded pins so dependent components compile with their declared
+  # dep scope (docs/plans/prelude-deps.md §3). The raw selection-list path
+  # (`compile/1`) stays dep-blind by design.
+  @spec compile_precompiled([map()], keyword()) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compile_precompiled(selections, compile_opts \\ [])
+
+  def compile_precompiled(selections, compile_opts)
+      when is_list(selections) and is_list(compile_opts) do
     with {:ok, components} <- normalize_precompiled(selections),
          :ok <- reject_duplicate_namespaces(components) do
-      compile_components(components)
+      compile_components(components, compile_opts)
     end
   end
 
-  def compile_precompiled(_other) do
+  def compile_precompiled(_other, _compile_opts) do
     {:error,
      ValidationError.new(:compile_error, "precompiled prelude bundle selections must be a list")}
   end
 
-  defp compile_components(components) do
+  defp compile_components(components, compile_opts) do
     source = concatenate_sources(components)
 
-    with {:ok, %Prelude{} = prelude} <- Compiler.compile(source) do
+    with {:ok, %Prelude{} = prelude} <- Compiler.compile(source, compile_opts) do
       {:ok,
        %Prelude{
          prelude
