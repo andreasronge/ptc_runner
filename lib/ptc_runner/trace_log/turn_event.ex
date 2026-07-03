@@ -307,10 +307,11 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   @doc """
   Builds the credential-free turn-log projection for one discovery/catalog op.
 
-  Discovery arguments are intentionally kept because they are already the
-  model-authored query/ref/options, not upstream result payloads. Results stay
-  out of the turn event; this record is for measuring discovery overhead and
-  diagnosing failed discovery paths.
+  Discovery arguments are intentionally kept verbatim: they are small
+  queries/refs/options, and legible queries are the point of this record —
+  measuring discovery overhead and diagnosing failed discovery paths.
+  Discovery *results* never enter the `catalog_ops` ledger, so they cannot
+  appear here.
   """
   @spec catalog_op_summary(map()) :: map()
   def catalog_op_summary(op) when is_map(op) do

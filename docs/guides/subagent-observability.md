@@ -46,6 +46,7 @@ Each `Turn` struct captures:
 - `result` - Execution result
 - `prints` - Output from `println` calls
 - `tool_calls` - Tools invoked with args and results. A large result is recorded as a bounded preview (`result_truncated: true`, `result_bytes: N`) so a looping/paginated tool fold can't bloat eval memory; `args` are kept verbatim
+- `catalog_ops` - REPL discovery/catalog operations (`apropos`, `dir`, `doc`, `tool/servers`) with operation, args, outcome, and `duration_ms` — discovery results are never recorded
 - `memory` - State snapshot after this turn
 - `success?` - Whether the turn succeeded
 
