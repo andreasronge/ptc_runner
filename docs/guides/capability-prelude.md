@@ -427,12 +427,13 @@ Model-facing store tools keep source bounded and filter metadata to documented
 public scalar keys; private backing-tool ledgers summarize source args and
 filter metadata before traces or `step.tool_calls` retain them.
 
-Editor sessions can attach the host-shipped `prelude/` wrapper over private
-store tools. In the MCP server this is available only when the operator starts
-with `--sessions-allow-prelude-write`, a prelude store is configured, and the
-session starts with `mode: "write_capable"`. Read-only sessions do not see the
-`prelude/` namespace or the private `prelude_store_*` backing tools. The
-model-visible API includes:
+MCP sessions can attach host-shipped `prelude/` wrappers over private store
+tools. When a prelude store is configured and no separate runtime prelude is
+already attached, read-only sessions receive the read-only wrapper for
+inspection (`list`, `history`, `read`, `source`, `forms`, `form-deps`, `deps`,
+`form`). Editor sessions receive the full wrapper only when the operator starts
+with `--sessions-allow-prelude-write` and the session starts with
+`mode: "write_capable"`. The model-visible API includes:
 
 ```clojure
 (prelude/list)

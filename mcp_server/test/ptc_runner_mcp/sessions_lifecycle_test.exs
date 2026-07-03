@@ -114,6 +114,56 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["structuredContent"]["result"] == "user=> 42"
     end
 
+    test "explicit empty selected preludes keeps configured runtime prelude available" do
+      Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
+
+      start = call("lisp_session_start", %{"preludes" => []})
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(smoke/plus-one 41)"
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["status"] == "ok"
+      assert eval["structuredContent"]["result"] == "user=> 42"
+    end
+
+    test "configured runtime prelude does not receive store read backing tools implicitly" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _candidate} =
+        PreludeStore.write(store, "picked", """
+        (ns picked)
+        (defn value [] 1)
+        """)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:prelude_source, """
+        (ns operator {:visibility :prompt})
+        (defn list-store [] (tool/prelude_store_list {}))
+        """)
+      )
+
+      sid = SoakHelpers.start_session()
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(operator/list-store)"
+        })
+
+      assert eval["isError"] == true
+      assert eval["structuredContent"]["reason"] == "prelude_attach_failed"
+      assert eval["structuredContent"]["message"] =~ "prelude_store_list"
+    end
+
     test "start accepts selected preludes and freezes them for eval and list" do
       {:ok, store} = PreludeStore.new()
 
@@ -145,14 +195,21 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
                }
              ]
 
-      assert start["structuredContent"]["preludes"] == [
+      assert Enum.find(start["structuredContent"]["preludes"], &(&1["namespace"] == "prelude")) ==
+               %{
+                 "namespace" => "prelude",
+                 "doc" => "Read versioned capability preludes.",
+                 "discover" => "(ns-publics 'prelude)",
+                 "source" => "(source prelude/deps)"
+               }
+
+      assert Enum.find(start["structuredContent"]["preludes"], &(&1["namespace"] == "picked")) ==
                %{
                  "namespace" => "picked",
                  "doc" => "Selected helpers.",
                  "discover" => "(ns-publics 'picked)",
                  "source" => "(source picked/value)"
                }
-             ]
 
       {:ok, _second} = PreludeStore.write(store, "picked", v2)
 
@@ -171,6 +228,42 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert listed["structuredContent"]["prelude_refs"] ==
                start["structuredContent"]["prelude_refs"]
+    end
+
+    test "read-only selected prelude sessions can introspect store forms without write wrappers" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _candidate} =
+        PreludeStore.write(store, "picked", """
+        (ns picked "Selected helpers." {:visibility :prompt})
+        (defn value [] 1)
+        """)
+
+      Config.set(Config.get() |> Map.put(:prelude_store, store))
+
+      start = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      forms =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(count (prelude/forms "picked"))|
+        })
+
+      assert forms["isError"] == false
+      assert forms["structuredContent"]["result"] == "user=> 1"
+
+      write_attempt =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(prelude/write {:id "new" :source "(ns new)"})|
+        })
+
+      assert write_attempt["isError"] == true
+      assert write_attempt["structuredContent"]["reason"] in ["invalid_form", "unbound_var"]
+      assert write_attempt["structuredContent"]["message"] =~ "prelude/write"
     end
 
     test "selected preludes can be pinned by version and checksum" do
@@ -688,6 +781,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
       assert String.starts_with?(sid, "ptcs_")
 
+      commit_discovery_eval!(sid)
       commit_tool_eval!(sid)
 
       assert {:error, sandbox_error} = Sessions.eval(sid, "(no-such-fn 1)")
@@ -708,30 +802,35 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       events = Analyzer.load(path)
       turns = Analyzer.session_turns(events, sid)
 
-      assert length(turns) == 3
-      assert Enum.map(turns, & &1["session_id"]) == [sid, sid, sid]
-      assert Enum.map(turns, & &1["driver"]) == ["session", "session", "session"]
-      assert Enum.map(turns, & &1["attempt"]) == [1, 2, 3]
-      assert Enum.map(turns, & &1["turn"]) == [1, 1, 1]
-      assert Enum.map(turns, & &1["committed"]) == [true, false, false]
-      assert Enum.map(turns, & &1["status"]) == ["ok", "error", "error"]
+      assert length(turns) == 4
+      assert Enum.map(turns, & &1["session_id"]) == [sid, sid, sid, sid]
+      assert Enum.map(turns, & &1["driver"]) == ["session", "session", "session", "session"]
+      assert Enum.map(turns, & &1["attempt"]) == [1, 2, 3, 4]
+      assert Enum.map(turns, & &1["turn"]) == [1, 2, 2, 2]
+      assert Enum.map(turns, & &1["committed"]) == [true, true, false, false]
+      assert Enum.map(turns, & &1["status"]) == ["ok", "ok", "error", "error"]
 
-      [[tool_call], [], []] = Enum.map(turns, &get_in(&1, ["data", "tool_calls"]))
+      assert [catalog_op] = get_in(hd(turns), ["data", "catalog_ops"])
+      assert catalog_op["operation"] == "apropos"
+      assert catalog_op["args"] == %{"query" => "github", "opts" => %{"limit" => 1}}
+      assert catalog_op["outcome"] == "ok"
+
+      [[], [tool_call], [], []] = Enum.map(turns, &get_in(&1, ["data", "tool_calls"]))
       assert tool_call["tool"] == "fetch"
       assert is_binary(tool_call["args_hash"])
       assert byte_size(tool_call["args_hash"]) > 0
 
-      sandbox_turn = Enum.at(turns, 1)
+      sandbox_turn = Enum.at(turns, 2)
       assert get_in(sandbox_turn, ["data", "fail", "reason"]) == "unbound_var"
 
-      validation_turn = Enum.at(turns, 2)
+      validation_turn = Enum.at(turns, 3)
       assert get_in(validation_turn, ["data", "fail", "reason"]) == "validation_failed"
       assert get_in(validation_turn, ["data", "result_preview"]) =~ "not-an-integer"
 
       assert [summary] = Analyzer.sessions(events)
       assert summary.correlation_id == sid
-      assert summary.turns == 3
-      assert summary.committed == 1
+      assert summary.turns == 4
+      assert summary.committed == 2
       assert summary.failed == 2
       assert summary.tool_calls == 1
 
@@ -739,7 +838,17 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
         ~s|[(count (get (log/turns "#{sid}") "items")) (get (log/programs "#{sid}") "items")]|
 
       assert {:ok,
-              %{return: [3, ["(tool/fetch {:id 1})", "(no-such-fn 1)", "\"not-an-integer\""]]}} =
+              %{
+                return: [
+                  4,
+                  [
+                    ~s|(apropos "github" {:limit 1})|,
+                    "(tool/fetch {:id 1})",
+                    "(no-such-fn 1)",
+                    "\"not-an-integer\""
+                  ]
+                ]
+              }} =
                Lisp.run(
                  log_program,
                  prelude: Introspection.prelude_source(),
@@ -1540,6 +1649,31 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
     tools = %{"fetch" => fn %{"id" => id} -> %{"id" => id} end}
     result = Sessions.run_snapshot(snapshot, program, %{tools: tools})
+
+    assert {:ok, response} =
+             Session.commit_eval(meta.pid, owner, request_id, result, %{})
+
+    assert response["status"] == "ok"
+  end
+
+  defp commit_discovery_eval!(sid) do
+    owner = Owner.stdio()
+    {:ok, meta} = SessionsRegistry.lookup(sid)
+    request_id = make_ref()
+    program = ~s|(apropos "github" {:limit 1})|
+
+    {:ok, snapshot} =
+      Session.begin_eval(meta.pid, owner, request_id, %{program: program})
+
+    discovery_exec = fn
+      :apropos, ["github" | _] ->
+        {:ok, ["github.search(query) - Search repositories"]}
+
+      operation, args ->
+        {:programmer_fault, "unexpected discovery call #{inspect({operation, args})}"}
+    end
+
+    result = Sessions.run_snapshot(snapshot, program, %{discovery_exec: discovery_exec})
 
     assert {:ok, response} =
              Session.commit_eval(meta.pid, owner, request_id, result, %{})

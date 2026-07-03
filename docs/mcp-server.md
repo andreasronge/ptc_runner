@@ -220,7 +220,10 @@ timers.
 When the server starts with `--prelude-store-seed`, session starts can freeze
 stored prelude refs with `preludes: ["id", "id@version"]`; the selected bundle
 is pinned to the session and reported by `lisp_session_list_preludes`.
-`mode` defaults to `"read_only"`. If the operator also enables
+`mode` defaults to `"read_only"`; read-only sessions with a configured store
+also attach the host `prelude/` read wrapper for store inspection forms such as
+`(prelude/forms "id")`, unless a separate runtime prelude is already
+configured. If the operator also enables
 `--sessions-allow-prelude-write`, a session may start with
 `mode: "write_capable"` to attach the host `prelude/` authoring wrapper and
 write new prelude versions through `(prelude/write ...)`. Write-capable

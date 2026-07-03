@@ -41,7 +41,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--agentic-capability-summary-max-bytes` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY_MAX_BYTES` | `800` | Byte cap for the auto-generated `lisp_task` capability summary. |
 | `--agentic-capability-summary` | `PTC_RUNNER_MCP_AGENTIC_CAPABILITY_SUMMARY` | unset | Path to an operator-supplied capability summary for `lisp_task`. |
 | `--sessions` | `PTC_RUNNER_MCP_SESSIONS` | `false` | Expose opt-in stateful PTC-Lisp session tools. |
-| `--sessions-allow-prelude-write` | `PTC_RUNNER_MCP_SESSIONS_ALLOW_PRELUDE_WRITE` | `false` | Permit `lisp_session_start` with `mode: "write_capable"` when a prelude store is configured. The session attaches the host `prelude/` wrapper and grants private `prelude_store_*` backing tools only for that session's evals. |
+| `--sessions-allow-prelude-write` | `PTC_RUNNER_MCP_SESSIONS_ALLOW_PRELUDE_WRITE` | `false` | Permit `lisp_session_start` with `mode: "write_capable"` when a prelude store is configured. Read-only sessions with a configured store get read-only `prelude/` inspection forms unless a separate runtime prelude is configured; write-capable sessions attach the full host `prelude/` wrapper and grant write backing tools only for that session's evals. |
 | `--max-sessions` | `PTC_RUNNER_MCP_MAX_SESSIONS` | `64` | Maximum live sessions per MCP server process. |
 | `--max-sessions-per-owner` | `PTC_RUNNER_MCP_MAX_SESSIONS_PER_OWNER` | `16` | Maximum live sessions per owner. |
 | `--session-ttl-ms` | `PTC_RUNNER_MCP_SESSION_TTL_MS` | `1800000` (30 min) | Maximum lifetime for a session. |

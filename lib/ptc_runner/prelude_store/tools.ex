@@ -44,9 +44,9 @@ defmodule PtcRunner.PreludeStore.Tools do
   # the `(ns ...)` form is deliberately excluded (see its moduledoc).
   @keyable_heads ~w(defn defn- def)
 
-  @prelude_source """
+  @read_prelude_source """
   (ns prelude
-    "Read and write versioned capability preludes."
+    "Read versioned capability preludes."
     {:visibility :prompt})
 
   (defn list
@@ -102,6 +102,10 @@ defmodule PtcRunner.PreludeStore.Tools do
      private) from a stored prelude candidate by id or id@version."
     [id name]
     (tool/prelude_store_form {:id id :name name}))
+  """
+
+  @prelude_source """
+  #{@read_prelude_source}
 
   (defn write
     "Write a full namespace source candidate with optional metadata.
@@ -156,9 +160,17 @@ defmodule PtcRunner.PreludeStore.Tools do
   @spec prelude_source() :: String.t()
   def prelude_source, do: @prelude_source
 
+  @doc "Source for the read-only `prelude/` capability prelude."
+  @spec read_prelude_source() :: String.t()
+  def read_prelude_source, do: @read_prelude_source
+
   @doc "Compiled public `prelude/` capability prelude."
   @spec prelude() :: {:ok, Prelude.t()} | {:error, term()}
   def prelude, do: Compiler.compile(@prelude_source)
+
+  @doc "Compiled read-only public `prelude/` capability prelude."
+  @spec read_prelude() :: {:ok, Prelude.t()} | {:error, term()}
+  def read_prelude, do: Compiler.compile(@read_prelude_source)
 
   @doc """
   Returns private backing tools for `store`.
@@ -172,6 +184,20 @@ defmodule PtcRunner.PreludeStore.Tools do
     validate_no_reserved_collisions!(base_tools)
 
     Map.merge(base_tools, private_tools(store))
+  end
+
+  @doc """
+  Returns only read-effect private backing tools for `store`.
+
+  This supports least-privilege read-only sessions that expose `prelude/forms`
+  and related introspection without granting write backing tools.
+  """
+  @spec read_tools(PreludeStore.t(), keyword()) :: map()
+  def read_tools(%PreludeStore{} = store, opts \\ []) when is_list(opts) do
+    base_tools = Keyword.get(opts, :base_tools, %{})
+    validate_no_reserved_collisions!(base_tools)
+
+    Map.merge(base_tools, read_private_tools(store))
   end
 
   @doc "Raises if `tools` contains a reserved private store-tool name."
@@ -188,6 +214,29 @@ defmodule PtcRunner.PreludeStore.Tools do
   end
 
   defp private_tools(store) do
+    Map.merge(read_private_tools(store), %{
+      @write_tool =>
+        {fn args -> write_tool(store, args) end,
+         signature: "(id :string, source :string, metadata :map) -> :map",
+         description: "Write a versioned prelude candidate.",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @edit_tool =>
+        {fn args -> edit_tool(store, args) end,
+         signature: "(id :string, edits [:map], metadata :map) -> :map",
+         description: "Apply a form-keyed edit batch and write one new version.",
+         expose: :ptc_lisp,
+         visibility: :private},
+      @set_default_tool =>
+        {fn args -> set_default_tool(store, args) end,
+         signature: "(id :string, version :int, checksum :string?, metadata :map) -> :map",
+         description: "Move the editable prelude default to an existing version.",
+         expose: :ptc_lisp,
+         visibility: :private}
+    })
+  end
+
+  defp read_private_tools(store) do
     %{
       @list_tool =>
         {fn _args -> list_tool(store) end,
@@ -229,24 +278,6 @@ defmodule PtcRunner.PreludeStore.Tools do
         {fn args -> form_tool(store, args) end,
          signature: "(id :string, name :string) -> :map",
          description: "Read one named form's exact byte-slice source text.",
-         expose: :ptc_lisp,
-         visibility: :private},
-      @write_tool =>
-        {fn args -> write_tool(store, args) end,
-         signature: "(id :string, source :string, metadata :map) -> :map",
-         description: "Write a versioned prelude candidate.",
-         expose: :ptc_lisp,
-         visibility: :private},
-      @edit_tool =>
-        {fn args -> edit_tool(store, args) end,
-         signature: "(id :string, edits [:map], metadata :map) -> :map",
-         description: "Apply a form-keyed edit batch and write one new version.",
-         expose: :ptc_lisp,
-         visibility: :private},
-      @set_default_tool =>
-        {fn args -> set_default_tool(store, args) end,
-         signature: "(id :string, version :int, checksum :string?, metadata :map) -> :map",
-         description: "Move the editable prelude default to an existing version.",
          expose: :ptc_lisp,
          visibility: :private}
     }

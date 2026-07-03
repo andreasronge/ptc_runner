@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.Sessions do
   import Kernel, except: [inspect: 1]
 
   alias PtcRunner.PreludeStore.Selection
+  alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
   alias PtcRunner.Upstream.{Eval, RunContext}
 
   alias PtcRunnerMcp.{
@@ -708,7 +709,12 @@ defmodule PtcRunnerMcp.Sessions do
   defp prepare_read_only_start_opts(opts) do
     case Map.get(opts, :preludes) || Map.get(opts, "preludes") do
       nil ->
-        {:ok, Map.delete(opts, "preludes")}
+        opts =
+          opts
+          |> Map.delete("preludes")
+          |> maybe_put_read_prelude()
+
+        {:ok, opts}
 
       refs when is_list(refs) ->
         with {:ok, refs} <- normalize_prelude_refs(refs),
@@ -777,7 +783,12 @@ defmodule PtcRunnerMcp.Sessions do
     do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{Kernel.inspect(other)}"}
 
   defp resolve_start_preludes(refs, opts) do
-    case Selection.resolve!(Config.prelude_store(), refs, configured_prelude_opts(opts)) do
+    case Selection.resolve_with_prefix!(
+           Config.prelude_store(),
+           refs,
+           read_prelude_prefixes(opts),
+           configured_prelude_opts(opts)
+         ) do
       {nil, []} ->
         {:ok, %{}}
 
@@ -890,6 +901,49 @@ defmodule PtcRunnerMcp.Sessions do
     case Map.get(opts, :runtime_prelude) || Config.runtime_prelude() do
       nil -> []
       runtime_prelude -> [runtime_prelude: runtime_prelude]
+    end
+  end
+
+  defp maybe_put_read_prelude(opts) do
+    case read_prelude_prefixes(opts) do
+      [] ->
+        opts
+
+      prefixes ->
+        case Selection.resolve_with_prefix!(Config.prelude_store(), [], prefixes, []) do
+          {nil, _refs} -> opts
+          {runtime_prelude, _refs} -> Map.put(opts, :runtime_prelude, runtime_prelude)
+        end
+    end
+  rescue
+    error in ArgumentError -> reraise error, __STACKTRACE__
+  end
+
+  defp read_prelude_prefixes(opts) do
+    cond do
+      Config.prelude_store() == nil ->
+        []
+
+      configured_prelude_opts(opts) != [] ->
+        []
+
+      true ->
+        case PreludeStoreTools.read_prelude() do
+          {:ok, prelude} ->
+            [
+              %{
+                id: "ptc_runner_prelude_read",
+                checksum: prelude.source_hash,
+                source: PreludeStoreTools.read_prelude_source(),
+                prelude: prelude,
+                origin: :host
+              }
+            ]
+
+          {:error, error} ->
+            raise ArgumentError,
+                  "failed to compile prelude read capability: #{Kernel.inspect(error)}"
+        end
     end
   end
 

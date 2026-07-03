@@ -200,8 +200,10 @@ enough.
 For store-backed prelude selection, use `--prelude-store-seed <file-or-dir>` to
 seed the server's volatile in-memory store at boot. A stateful session can then
 start with `preludes: ["id", "id@version"]`; those refs are frozen for the
-session and can be inspected with `lisp_session_list_preludes`. To allow an
-editor session to call `(prelude/write ...)`, also pass
+session and can be inspected with `lisp_session_list_preludes`. Read-only
+sessions with a configured store can also use `prelude/` read forms such as
+`(prelude/forms "id")` for store introspection when no separate runtime prelude
+is configured. To allow an editor session to call `(prelude/write ...)`, also pass
 `--sessions-allow-prelude-write` and start that session with
 `mode: "write_capable"`. Leave this flag off for verifier/read-only sessions.
 

@@ -690,6 +690,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             prints: Map.get(step, :prints, []),
             memory_diff: TurnEvent.memory_diff(previous.memory, Map.get(step, :memory)),
             tool_calls: Enum.map(step_tool_calls(step), &TurnEvent.tool_call_summary/1),
+            catalog_ops: Enum.map(step_catalog_ops(step), &TurnEvent.catalog_op_summary/1),
             fail: Keyword.get(opts, :fail),
             limits_hit: Keyword.get(opts, :limits_hit, []),
             preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace))
@@ -704,6 +705,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
 
   defp step_tool_calls(%{tool_calls: calls}) when is_list(calls), do: calls
   defp step_tool_calls(_step), do: []
+
+  defp step_catalog_ops(%{catalog_ops: ops}) when is_list(ops), do: ops
+  defp step_catalog_ops(_step), do: []
 
   defp clear_eval_monitor(state, eval) do
     if eval.monitor, do: Process.demonitor(eval.monitor, [:flush])
@@ -924,9 +928,10 @@ defmodule PtcRunnerMcp.Sessions.Session do
   defp snapshot_prelude(_snapshot), do: Config.runtime_prelude() || Config.prelude_source()
 
   # A write_capable session (gated by --sessions-allow-prelude-write) is granted
-  # the private prelude_store_* backing tools so the attached `prelude/`
-  # capability can author into the configured store. Read-only sessions get the
-  # base tool set unchanged.
+  # the full private prelude_store_* backing tool set so the attached `prelude/`
+  # capability can author into the configured store. Read-only sessions receive
+  # only read-effect backing tools for the read-only `prelude/` introspection
+  # wrapper.
   defp session_eval_tools(%{mode: :write_capable}, base) do
     if Config.allow_prelude_write?() do
       case Config.prelude_store() do
@@ -938,7 +943,25 @@ defmodule PtcRunnerMcp.Sessions.Session do
     end
   end
 
+  defp session_eval_tools(%{mode: :read_only, runtime_prelude: runtime_prelude}, base) do
+    if read_prelude_attached?(runtime_prelude) do
+      case Config.prelude_store() do
+        nil -> base
+        store -> PreludeStoreTools.read_tools(store, base_tools: as_tool_map(base))
+      end
+    else
+      base
+    end
+  end
+
   defp session_eval_tools(_snapshot, base), do: base
+
+  defp read_prelude_attached?(%PtcRunner.Lisp.Prelude{metadata: %{components: components}})
+       when is_list(components) do
+    Enum.any?(components, &(Map.get(&1, :id) == "ptc_runner_prelude_read"))
+  end
+
+  defp read_prelude_attached?(_runtime_prelude), do: false
 
   defp as_tool_map(nil), do: %{}
   defp as_tool_map(base) when is_map(base), do: base

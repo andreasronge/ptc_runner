@@ -169,6 +169,15 @@ defmodule PtcRunnerMcp.PromptRegistryTest do
     assert description =~ "No persistence across calls."
   end
 
+  test "session start prompt advertises read-only prelude store introspection" do
+    description = PromptRegistry.render(:mcp_session_start_description, [])
+
+    assert description =~ "configured store"
+    assert description =~ "read-only sessions"
+    assert description =~ "prelude/forms"
+    assert description =~ "prelude/form"
+  end
+
   test "execute and session eval descriptions include the shared MCP language reference" do
     for key <- [
           :mcp_no_tools_description,

@@ -69,6 +69,41 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert effects["prelude/set-default"] == :write
   end
 
+  test "read prelude exposes only read-effect public wrappers" do
+    assert {:ok, %Prelude{} = prelude} = Tools.read_prelude()
+
+    assert Enum.map(prelude.exports, & &1.ref) ==
+             ~w(prelude/list prelude/history prelude/read prelude/source
+                prelude/forms prelude/form-deps prelude/deps prelude/form)
+
+    assert Map.new(prelude.exports, &{&1.ref, &1.effect}) ==
+             %{
+               "prelude/list" => :read,
+               "prelude/history" => :read,
+               "prelude/read" => :read,
+               "prelude/source" => :read,
+               "prelude/forms" => :read,
+               "prelude/form-deps" => :read,
+               "prelude/deps" => :read,
+               "prelude/form" => :read
+             }
+  end
+
+  test "read backing tools omit write-authority private tools" do
+    {:ok, store} = PreludeStore.new()
+
+    read_tool_names = Tools.read_tools(store) |> Map.keys() |> Enum.sort()
+
+    assert read_tool_names ==
+             ~w(prelude_store_deps prelude_store_form prelude_store_form_deps
+                prelude_store_forms prelude_store_history prelude_store_list
+                prelude_store_read)
+
+    refute "prelude_store_write" in read_tool_names
+    refute "prelude_store_edit" in read_tool_names
+    refute "prelude_store_set_default" in read_tool_names
+  end
+
   test "private backing tools are hidden from native schema and prompt namespace projections" do
     {:ok, store} = PreludeStore.new()
     tools = Tools.tools(store, base_tools: %{"visible" => fn _args -> "ok" end})

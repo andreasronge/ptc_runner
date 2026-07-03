@@ -30,29 +30,64 @@ defmodule PtcRunner.PreludeStore.Selection do
       raise ArgumentError, ":runtime_prelude/:prelude and :preludes are mutually exclusive"
     end
 
+    store
+    |> resolve_closure!(prelude_refs)
+    |> compile_closure!([])
+  end
+
+  def resolve!(store, _prelude_refs, _opts) do
+    raise ArgumentError,
+          ":prelude_store must be a %PtcRunner.PreludeStore{}, got: #{inspect(store)}"
+  end
+
+  @doc false
+  @spec resolve_with_prefix!(PreludeStore.t() | nil, term(), [map()], keyword()) :: resolved()
+  def resolve_with_prefix!(store, prelude_refs, prefixes, opts)
+      when is_list(prefixes) and is_list(opts) do
+    cond do
+      prelude_refs in [nil, []] ->
+        compile_prefixes!(prefixes, [])
+
+      Keyword.has_key?(opts, :prelude) or Keyword.has_key?(opts, :runtime_prelude) ->
+        raise ArgumentError, ":runtime_prelude/:prelude and :preludes are mutually exclusive"
+
+      true ->
+        store
+        |> resolve_closure!(prelude_refs)
+        |> compile_closure!(prefixes)
+    end
+  end
+
+  def resolve_with_prefix!(store, prelude_refs, _prefixes, opts) do
+    resolve!(store, prelude_refs, opts)
+  end
+
+  defp resolve_closure!(nil, prelude_refs) do
+    raise ArgumentError,
+          ":prelude_store is required when :preludes is supplied, got preludes: " <>
+            inspect(prelude_refs, limit: 5)
+  end
+
+  defp resolve_closure!(%PreludeStore{} = store, prelude_refs) do
     requested =
       prelude_refs
       |> List.wrap()
       |> Enum.map(&read_candidate!(store, &1))
 
-    closure = expand_dep_closure!(store, requested)
-    namespace_deps = closure_namespace_deps(closure)
+    expand_dep_closure!(store, requested)
+  end
 
-    closure
-    |> Enum.map(&candidate_selection(&1.candidate))
-    |> Bundle.compile_precompiled(namespace_deps: namespace_deps)
-    |> case do
+  defp compile_closure!(closure, prefixes) do
+    namespace_deps = closure_namespace_deps(closure)
+    selections = prefixes ++ Enum.map(closure, &candidate_selection(&1.candidate))
+
+    case Bundle.compile_precompiled(selections, namespace_deps: namespace_deps) do
       {:ok, prelude} ->
         {prelude, Enum.map(closure, &candidate_ref/1)}
 
       {:error, error} ->
         raise ArgumentError, "failed to compile selected preludes: #{error.message}"
     end
-  end
-
-  def resolve!(store, _prelude_refs, _opts) do
-    raise ArgumentError,
-          ":prelude_store must be a %PtcRunner.PreludeStore{}, got: #{inspect(store)}"
   end
 
   defp read_candidate!(store, ref) do
@@ -193,5 +228,17 @@ defmodule PtcRunner.PreludeStore.Selection do
       origin: PreludeCandidate.public_origin(candidate.origin),
       required_by: Enum.sort(required_by)
     }
+  end
+
+  defp compile_prefixes!([], resolved), do: {nil, resolved}
+
+  defp compile_prefixes!(prefixes, resolved) do
+    case Bundle.compile_precompiled(prefixes) do
+      {:ok, prelude} ->
+        {prelude, resolved}
+
+      {:error, error} ->
+        raise ArgumentError, "failed to compile prefixed preludes: #{error.message}"
+    end
   end
 end
