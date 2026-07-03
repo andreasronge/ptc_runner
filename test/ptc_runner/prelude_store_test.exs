@@ -1184,6 +1184,27 @@ defmodule PtcRunner.PreludeStoreTest do
                  "parent_checksum" => v1.checksum,
                  "parent_version" => 1
                })
+
+      # A CHECKSUM-ONLY writer is ambiguous once two versions share the
+      # checksum: accepting it could silently roll the pins back. Fail
+      # closed and ask for parent_version.
+      assert {:error, %{reason: :stale_base, message: message}} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"],
+                 "parent_checksum" => v1.checksum
+               })
+
+      assert message =~ "parent_version"
+
+      # With the version supplied, building on the true current works.
+      assert {:ok, v3} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"],
+                 "parent_checksum" => v2.checksum,
+                 "parent_version" => 2
+               })
+
+      assert v3.version == 3
     end
 
     test "the metadata bound applies to the FINAL metadata including computed pins" do

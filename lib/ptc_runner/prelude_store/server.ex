@@ -252,6 +252,21 @@ defmodule PtcRunner.PreludeStore.Server do
           parent_version != nil and current.version != parent_version ->
             stale_base(checksum, actual)
 
+          # Without a version, a matching checksum shared by MULTIPLE
+          # retained versions is ambiguous: the writer may have built on an
+          # older same-source version and would silently roll the dep pins
+          # back. Fail closed and ask for parent_version.
+          parent_version == nil and ambiguous_checksum?(table, id, checksum) ->
+            {:error,
+             %{
+               reason: :stale_base,
+               message:
+                 "multiple retained versions of `#{id}` share checksum #{checksum} " <>
+                   "(pin-only rewrites); supply parent_version to disambiguate the base",
+               expected_checksum: checksum,
+               actual_checksum: actual
+             }}
+
           true ->
             :ok
         end
@@ -259,6 +274,18 @@ defmodule PtcRunner.PreludeStore.Server do
       {:error, %{reason: :not_found}} ->
         stale_base(checksum, nil)
     end
+  end
+
+  defp ambiguous_checksum?(table, id, checksum) do
+    table
+    |> retained_versions(id)
+    |> Enum.count(fn version ->
+      case lookup_version(table, id, version) do
+        {:ok, candidate} -> PreludeCandidate.checksum(candidate) == checksum
+        {:error, _} -> false
+      end
+    end)
+    |> Kernel.>(1)
   end
 
   defp check_id_bound(table, id, max_ids) do
