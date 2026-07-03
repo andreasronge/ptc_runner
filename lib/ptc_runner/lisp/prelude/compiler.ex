@@ -53,15 +53,35 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   @doc """
   Compiles prelude `source` into a `%PtcRunner.Lisp.Prelude{}`.
 
+  Options (declared prelude-to-prelude dependencies, see
+  `docs/plans/prelude-deps.md`):
+
+    * `:deps` — compiled `%Prelude{}` artifacts whose PUBLIC exports are
+      visible to namespaces that declare them in `:namespace_deps`.
+    * `:namespace_deps` — `%{namespace => [dep_namespace]}` declaring which
+      dep namespaces each compiled namespace may reference. A declared dep
+      must be provided by `:deps` or be a sibling namespace of this compile;
+      siblings are processed in dependency order with progressive scope.
+
+  Undeclared cross-namespace references keep failing (`unknown namespace`),
+  and `defn-` privates of a dep have no export record so they stay
+  unreachable. Dep references inside `def` initializers are rejected
+  (`:dep_ref_in_def`): initializers evaluate at compile time under a no-op
+  tool executor, so a dep call there would silently compute garbage.
+
   Returns `{:ok, prelude}` or `{:error, %ValidationError{}}`.
   """
-  @spec compile(String.t()) :: {:ok, Prelude.t()} | {:error, ValidationError.t()}
-  def compile(source) when is_binary(source) do
+  @spec compile(String.t(), keyword()) :: {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compile(source, opts \\ [])
+
+  def compile(source, opts) when is_binary(source) and is_list(opts) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
-         form_graph = build_form_graph(specs),
-         {:ok, exports} <- build_exports(specs, ns_meta, form_graph),
-         {:ok, private_env} <- build_runtime(specs) do
+         {:ok, dep_ctx} <- build_dep_context(ns_meta, opts),
+         :ok <- reject_dep_refs_in_defs(specs, dep_ctx),
+         form_graph = build_form_graph(specs, dep_ctx),
+         {:ok, exports} <- build_exports(specs, ns_meta, form_graph, dep_ctx),
+         {:ok, private_env} <- build_runtime(specs, exports, dep_ctx) do
       namespaces = ns_meta |> Map.keys() |> Enum.sort()
 
       {:ok,
@@ -106,6 +126,230 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # form parses to the bare form. Normalize both to `{:program, forms}`.
   defp normalize_program({:program, forms}) when is_list(forms), do: {:program, forms}
   defp normalize_program(single), do: {:program, [single]}
+
+  # ============================================================
+  # Declared dependencies (docs/plans/prelude-deps.md, Phase 1)
+  # ============================================================
+
+  # Normalized dependency context threaded through the compile:
+  #
+  #   * `namespace_deps` — `%{ns => [dep_ns]}`, string-keyed, restricted to
+  #     this compile's namespaces, deduped.
+  #   * `external_exports` — `%{dep_ns => [%Export{}]}` from the `:deps`
+  #     artifacts. Only PUBLIC exports exist here, so dep privates are
+  #     unreachable by construction.
+  #   * `order` — this compile's namespaces, dependencies before dependents
+  #     (progressive scope for sibling deps). Cycles "cannot happen" for
+  #     store-pinned deps (a dep must exist before its dependent is written)
+  #     but the sort still fails closed on one.
+  defp build_dep_context(ns_meta, opts) do
+    deps = Keyword.get(opts, :deps, [])
+    namespace_deps = Keyword.get(opts, :namespace_deps, %{})
+
+    unless is_list(deps) and Enum.all?(deps, &match?(%Prelude{}, &1)) do
+      raise ArgumentError, ":deps must be a list of compiled %Prelude{} artifacts"
+    end
+
+    unless is_map(namespace_deps) do
+      raise ArgumentError, ":namespace_deps must be a map of namespace => [dep namespaces]"
+    end
+
+    sibling_set = ns_meta |> Map.keys() |> MapSet.new()
+    normalized = normalize_namespace_deps(namespace_deps, sibling_set)
+    external_set = deps |> Enum.flat_map(& &1.namespaces) |> MapSet.new()
+
+    with :ok <- validate_declared_deps(normalized, external_set, sibling_set),
+         {:ok, order} <- topological_order(sibling_set, normalized) do
+      external_exports = deps |> Enum.flat_map(& &1.exports) |> Enum.group_by(& &1.namespace)
+
+      {:ok, %{namespace_deps: normalized, external_exports: external_exports, order: order}}
+    end
+  end
+
+  defp normalize_namespace_deps(namespace_deps, sibling_set) do
+    namespace_deps
+    |> Enum.map(fn {ns, dep_list} ->
+      unless is_list(dep_list) do
+        raise ArgumentError,
+              ":namespace_deps values must be lists of namespace strings, " <>
+                "got #{inspect(dep_list, limit: 5)} for #{inspect(ns)}"
+      end
+
+      {to_string(ns), dep_list |> Enum.map(&to_string/1) |> Enum.uniq()}
+    end)
+    |> Enum.filter(fn {ns, _} -> MapSet.member?(sibling_set, ns) end)
+    |> Map.new()
+  end
+
+  defp validate_declared_deps(namespace_deps, external_set, sibling_set) do
+    namespace_deps
+    |> Enum.find_value(fn {ns, dep_list} ->
+      Enum.find_value(dep_list, fn dep ->
+        external? = MapSet.member?(external_set, dep)
+        sibling? = MapSet.member?(sibling_set, dep)
+
+        cond do
+          dep == ns ->
+            ValidationError.new(
+              :dependency_cycle,
+              "namespace `#{ns}` declares a dependency on itself",
+              namespace: ns
+            )
+
+          external? and sibling? ->
+            ValidationError.new(
+              :compile_error,
+              "dependency namespace `#{dep}` is provided both by :deps and by the " <>
+                "compiled source (duplicate namespaces fail closed)",
+              namespace: ns
+            )
+
+          not external? and not sibling? ->
+            ValidationError.new(
+              :unknown_dependency,
+              "namespace `#{ns}` declares a dependency on unknown namespace `#{dep}`; " <>
+                "provide it via :deps or include its source in this compile",
+              namespace: ns
+            )
+
+          true ->
+            nil
+        end
+      end)
+    end)
+    |> case do
+      nil -> :ok
+      %ValidationError{} = error -> {:error, error}
+    end
+  end
+
+  # DFS post-order over sibling dependency edges: dependencies emit before
+  # dependents. External deps are precompiled (not nodes). Deterministic via
+  # sorted node seeds.
+  defp topological_order(sibling_set, namespace_deps) do
+    nodes = sibling_set |> MapSet.to_list() |> Enum.sort()
+
+    edges =
+      Map.new(nodes, fn ns ->
+        {ns, namespace_deps |> Map.get(ns, []) |> Enum.filter(&MapSet.member?(sibling_set, &1))}
+      end)
+
+    nodes
+    |> Enum.reduce_while({:ok, {[], MapSet.new()}}, fn ns, {:ok, {order, done}} ->
+      case topo_visit(ns, edges, order, done, MapSet.new()) do
+        {:ok, order2, done2} -> {:cont, {:ok, {order2, done2}}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, {order, _done}} -> {:ok, Enum.reverse(order)}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp topo_visit(ns, edges, order, done, path) do
+    cond do
+      MapSet.member?(done, ns) ->
+        {:ok, order, done}
+
+      MapSet.member?(path, ns) ->
+        {:error,
+         ValidationError.new(
+           :dependency_cycle,
+           "prelude namespace dependency cycle involving `#{ns}` " <>
+             "(declared dependencies must be acyclic)",
+           namespace: ns
+         )}
+
+      true ->
+        path = MapSet.put(path, ns)
+
+        edges
+        |> Map.get(ns, [])
+        |> Enum.reduce_while({:ok, order, done}, fn dep, {:ok, o, d} ->
+          case topo_visit(dep, edges, o, d, path) do
+            {:ok, o2, d2} -> {:cont, {:ok, o2, d2}}
+            {:error, _} = err -> {:halt, err}
+          end
+        end)
+        |> case do
+          {:ok, order2, done2} -> {:ok, [ns | order2], MapSet.put(done2, ns)}
+          {:error, _} = err -> err
+        end
+    end
+  end
+
+  defp declared_deps(dep_ctx, ns), do: Map.get(dep_ctx.namespace_deps, ns, [])
+
+  # Dep references are rejected inside `def` initializers: those value forms
+  # evaluate at prelude COMPILE time in a bare context with a no-op tool
+  # executor (`eval_runtime/1`), where a dep call would fail as unbound — or
+  # worse, silently compute garbage if it were made resolvable. Fail closed;
+  # `defn` bodies cover composition (plan decision 3).
+  defp reject_dep_refs_in_defs(specs, dep_ctx) do
+    specs
+    |> Enum.filter(&(&1.params_form == nil))
+    |> Enum.find_value(fn %Spec{} = spec ->
+      dep_set = dep_ctx |> declared_deps(spec.namespace) |> MapSet.new()
+
+      if MapSet.size(dep_set) == 0 do
+        nil
+      else
+        case Enum.reduce(spec.body_form, [], &collect_dep_refs(&1, dep_set, &2)) do
+          [] -> nil
+          refs -> {spec, refs |> Enum.sort() |> hd()}
+        end
+      end
+    end)
+    |> case do
+      nil ->
+        :ok
+
+      {%Spec{} = spec, dep_ref} ->
+        {:error,
+         ValidationError.new(
+           :dep_ref_in_def,
+           "dependency reference `#{dep_ref}` is not allowed in the `def #{spec.symbol}` " <>
+             "initializer (initializers evaluate at compile time under a no-op tool " <>
+             "executor); define a function with `defn` instead",
+           namespace: spec.namespace,
+           ref: ref(spec.namespace, spec.symbol)
+         )}
+    end
+  end
+
+  # Raw-AST collector for qualified refs into DECLARED dep namespaces —
+  # call-head AND value position (`(map base/helper xs)` counts). Same
+  # container set and fail-closed leaf discipline as the other walkers
+  # (issue #1095): quoted/comment forms contribute nothing.
+  defp collect_dep_refs({:ns_symbol, ns, sym}, dep_set, acc) do
+    ns_str = to_string(ns)
+    if MapSet.member?(dep_set, ns_str), do: ["#{ns_str}/#{sym}" | acc], else: acc
+  end
+
+  defp collect_dep_refs({:list, [{:symbol, head} | _]}, _dep_set, acc)
+       when head in [:comment, "comment", :quote, "quote"],
+       do: acc
+
+  defp collect_dep_refs({:list, items}, dep_set, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_dep_refs(&1, dep_set, &2))
+
+  defp collect_dep_refs({:vector, items}, dep_set, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_dep_refs(&1, dep_set, &2))
+
+  defp collect_dep_refs({:map, pairs}, dep_set, acc) when is_list(pairs),
+    do:
+      Enum.reduce(pairs, acc, fn {k, v}, a ->
+        collect_dep_refs(v, dep_set, collect_dep_refs(k, dep_set, a))
+      end)
+
+  defp collect_dep_refs({:short_fn, body}, dep_set, acc) when is_list(body),
+    do: collect_dep_refs({:list, body}, dep_set, acc)
+
+  defp collect_dep_refs({:set, items}, dep_set, acc) when is_list(items),
+    do: Enum.reduce(items, acc, &collect_dep_refs(&1, dep_set, &2))
+
+  defp collect_dep_refs(node, _dep_set, acc), do: leaf_or_reject(node, acc)
 
   # ============================================================
   # Collect namespace directives + definition specs
@@ -439,20 +683,50 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # Build public Export records
   # ============================================================
 
-  defp build_exports(specs, ns_meta, form_graph) do
+  # Exports are computed namespace-by-namespace in dependency order so a
+  # dependent's requires/tool_refs can union in its dep exports' FINAL values
+  # (external artifacts are final already; siblings become final as the fold
+  # progresses). The result list preserves the original public-spec source
+  # order regardless of compile order.
+  defp build_exports(specs, ns_meta, form_graph, dep_ctx) do
     public = Enum.reject(specs, & &1.private?)
+    by_ns = Enum.group_by(public, & &1.namespace)
 
-    with :ok <- reject_duplicate_refs(specs) do
-      Enum.reduce_while(public, {:ok, []}, fn spec, {:ok, acc} ->
-        case build_export(spec, ns_meta, form_graph) do
-          {:ok, export} -> {:cont, {:ok, [export | acc]}}
-          {:error, _} = err -> {:halt, err}
+    initial_lookup =
+      dep_ctx.external_exports
+      |> Map.values()
+      |> List.flatten()
+      |> Map.new(&{&1.ref, &1})
+
+    with :ok <- reject_duplicate_refs(specs),
+         {:ok, by_ref} <-
+           fold_namespace_exports(dep_ctx.order, by_ns, ns_meta, form_graph, initial_lookup) do
+      {:ok, Enum.map(public, fn spec -> Map.fetch!(by_ref, ref(spec.namespace, spec.symbol)) end)}
+    end
+  end
+
+  defp fold_namespace_exports(order, by_ns, ns_meta, form_graph, lookup) do
+    order
+    |> Enum.reduce_while({:ok, %{}, lookup}, fn ns, {:ok, by_ref, lookup_acc} ->
+      by_ns
+      |> Map.get(ns, [])
+      |> Enum.reduce_while({:ok, by_ref, lookup_acc}, fn spec, {:ok, refs, lkp} ->
+        case build_export(spec, ns_meta, form_graph, lkp) do
+          {:ok, export} ->
+            {:cont, {:ok, Map.put(refs, export.ref, export), Map.put(lkp, export.ref, export)}}
+
+          {:error, _} = err ->
+            {:halt, err}
         end
       end)
       |> case do
-        {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
-        {:error, _} = err -> err
+        {:ok, _, _} = ok -> {:cont, ok}
+        {:error, _} = err -> {:halt, err}
       end
+    end)
+    |> case do
+      {:ok, by_ref, _lookup} -> {:ok, by_ref}
+      {:error, _} = err -> err
     end
   end
 
@@ -480,7 +754,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  defp build_export(%Spec{} = spec, ns_meta, form_graph) do
+  defp build_export(%Spec{} = spec, ns_meta, form_graph, dep_lookup) do
     # Visibility precedence: explicit export metadata, then the declaring
     # namespace's default, then the global default (plan §10).
     ns_default =
@@ -494,11 +768,39 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       graph_entry =
         form_graph
         |> Map.get(spec.namespace, %{})
-        |> Map.get(spec.symbol, %{requires: %{transitive: []}, tool_refs: %{transitive: []}})
+        |> Map.get(spec.symbol, %{
+          requires: %{transitive: []},
+          tool_refs: %{transitive: []},
+          dep_calls: %{transitive: []}
+        })
+
+      # Union the referenced dep exports' FINAL requires/tool_refs into this
+      # export's transitive sets (the fail-open fix, plan Phase 1 item 6):
+      # without it, pre-execution surfaces (`check_undefined_tools`,
+      # capability grants) would silently omit everything reached through the
+      # dep. Refs that miss the lookup (a private or nonexistent dep symbol)
+      # are skipped here — the analysis pass in `build_runtime` rejects them
+      # with the precise arity/visibility error moments later.
+      dep_exports =
+        graph_entry
+        |> Map.get(:dep_calls, %{})
+        |> Map.get(:transitive, [])
+        |> Enum.flat_map(fn dep_ref ->
+          case Map.fetch(dep_lookup, dep_ref) do
+            {:ok, %Export{} = export} -> [export]
+            :error -> []
+          end
+        end)
 
       transitive = %{
-        requires: graph_entry.requires.transitive,
-        tool_refs: graph_entry.tool_refs.transitive
+        requires:
+          (graph_entry.requires.transitive ++ Enum.flat_map(dep_exports, & &1.requires))
+          |> Enum.uniq()
+          |> Enum.sort(),
+        tool_refs:
+          (graph_entry.tool_refs.transitive ++ Enum.flat_map(dep_exports, & &1.tool_refs))
+          |> Enum.uniq()
+          |> Enum.sort()
       }
 
       backing = backing(spec, explicit_requires, explicit_provider, transitive)
@@ -628,10 +930,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # reachable-private set). Stored on `%Prelude{}` as `form_graph` (plan §Phase
   # 1) so it is guaranteed consistent with write-time validation instead of
   # being an inline idiom recomputed ad hoc.
-  defp build_form_graph(specs) do
+  defp build_form_graph(specs, dep_ctx) do
     specs
     |> Enum.group_by(& &1.namespace)
-    |> Map.new(fn {ns, ns_specs} -> {ns, namespace_form_graph(ns_specs)} end)
+    |> Map.new(fn {ns, ns_specs} ->
+      {ns, namespace_form_graph(ns_specs, dep_ctx |> declared_deps(ns) |> MapSet.new())}
+    end)
   end
 
   # Plain lists throughout (not MapSet) to avoid dialyzer opaque-type friction;
@@ -642,7 +946,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # (the closure over `calls`) so an export's requirement precisely follows
   # what it itself reaches — it does NOT absorb a sibling export's unrelated
   # requirements.
-  defp namespace_form_graph(ns_specs) do
+  defp namespace_form_graph(ns_specs, dep_set) do
     ns_symbols = Enum.map(ns_specs, & &1.symbol)
 
     calls =
@@ -672,6 +976,21 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {sym, body |> Enum.reduce([], &collect_tool_names_raw/2) |> Enum.uniq()}
       end)
 
+    # Qualified refs into DECLARED dep namespaces, as full-ref strings
+    # ("base/helper" — JSON-safe, unlike tuples). Collected in every position
+    # so a value-position `(map base/helper xs)` carries authority too.
+    direct_dep_calls =
+      Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
+        refs =
+          if MapSet.size(dep_set) == 0 do
+            []
+          else
+            body |> Enum.reduce([], &collect_dep_refs(&1, dep_set, &2)) |> Enum.uniq()
+          end
+
+        {sym, refs}
+      end)
+
     Map.new(ns_specs, fn %Spec{symbol: sym} = spec ->
       {sym,
        %{
@@ -687,6 +1006,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          tool_refs: %{
            direct: direct_tools |> Map.fetch!(sym) |> Enum.sort(),
            transitive: sym |> reachable_ids(direct_tools, calls, []) |> Enum.uniq() |> Enum.sort()
+         },
+         dep_calls: %{
+           direct: direct_dep_calls |> Map.fetch!(sym) |> Enum.sort(),
+           transitive:
+             sym |> reachable_ids(direct_dep_calls, calls, []) |> Enum.uniq() |> Enum.sort()
          }
        }}
     end)
@@ -1182,13 +1506,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # for constants) — ns directives stripped, `defn-` downgraded to `defn` so the
   # existing analyzer accepts it — then run through the standard analyze+eval
   # pipeline.
-  defp build_runtime(specs) do
+  defp build_runtime(specs, exports, dep_ctx) do
+    exports_by_ns = Enum.group_by(exports, & &1.namespace)
+
     specs
     |> Enum.group_by(& &1.namespace)
     |> Enum.reduce_while({:ok, %{}}, fn {ns, ns_specs}, {:ok, env_acc} ->
       program = {:program, Enum.map(ns_specs, &spec_to_defn_form/1)}
+      scope = dep_scope_prelude(ns, exports_by_ns, dep_ctx)
 
-      with {:ok, core} <- analyze(program),
+      with {:ok, core} <- analyze(program, scope),
            :ok <- check_prelude_vars(core, ns_specs),
            {:ok, env} <- eval_runtime(core) do
         {:cont, {:ok, Map.put(env_acc, ns, env)}}
@@ -1196,6 +1523,30 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {:error, _} = err -> {:halt, err}
       end
     end)
+  end
+
+  # The analysis scope for one namespace: a synthetic `%Prelude{}` carrying
+  # ONLY its declared deps' public exports (external artifacts or siblings of
+  # this compile — the fold guarantees sibling exports are final). The scope
+  # EXCLUDES the namespace itself, preserving the qualified-self-reference
+  # rejection, and excludes undeclared siblings, so an undeclared
+  # cross-namespace ref keeps failing `unknown namespace` (plan decision 5).
+  # With no declared deps the scope is nil — exactly today's behavior.
+  defp dep_scope_prelude(ns, exports_by_ns, dep_ctx) do
+    case declared_deps(dep_ctx, ns) do
+      [] ->
+        nil
+
+      declared ->
+        exports =
+          Enum.flat_map(declared, fn dep_ns ->
+            Map.get(dep_ctx.external_exports, dep_ns, []) ++ Map.get(exports_by_ns, dep_ns, [])
+          end)
+
+        # Synthetic, analysis-only artifact: PreludeScope consults only
+        # `namespaces` and `exports`; it is never attached or stored.
+        %Prelude{namespaces: declared, exports: exports, private_env: %{}, source_hash: ""}
+    end
   end
 
   # Run the same static undefined-var check `Lisp.run` performs before execution,
@@ -1404,17 +1755,22 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  defp analyze(program) do
-    case Analyze.analyze(program) do
+  defp analyze(program, scope) do
+    case Analyze.analyze(program, scope) do
       {:ok, core} ->
         {:ok, core}
 
       {:error, reason} ->
-        {:error,
-         ValidationError.new(
-           :compile_error,
-           "prelude analysis failed: #{inspect(reason, limit: 6)}"
-         )}
+        message = "prelude analysis failed: #{inspect(reason, limit: 6)}"
+
+        hint =
+          if message =~ "unknown namespace" do
+            " (if this names another prelude, declare it as a dependency via requires_preludes)"
+          else
+            ""
+          end
+
+        {:error, ValidationError.new(:compile_error, message <> hint)}
     end
   end
 

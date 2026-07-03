@@ -462,4 +462,210 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       end
     end
   end
+
+  # ============================================================
+  # Declared prelude-to-prelude dependencies (docs/plans/prelude-deps.md)
+  # ============================================================
+
+  describe "compile/2 declared dependencies" do
+    @dep_base_source """
+    (ns base "Shared helpers.")
+
+    (defn- normalize [x] (str "n:" x))
+
+    (defn helper
+      "Normalize and tag one value."
+      [x]
+      (str "helper:" (normalize x)))
+
+    (defn fetch
+      "Wrapped tool fetch."
+      [id]
+      (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+    """
+
+    defp dep_base do
+      {:ok, base} = Compiler.compile(@dep_base_source)
+      base
+    end
+
+    defp compile_audit(body, opts \\ []) do
+      source = """
+      (ns audit "Audit checks.")
+      #{body}
+      """
+
+      Compiler.compile(
+        source,
+        Keyword.merge([deps: [dep_base()], namespace_deps: %{"audit" => ["base"]}], opts)
+      )
+    end
+
+    test "qualified call into a declared external dep compiles; dep namespaces stay external" do
+      assert {:ok, prelude} = compile_audit("(defn check [x] (base/helper x))")
+      assert Prelude.namespaces(prelude) == ["audit"]
+      assert [%Export{ref: "audit/check"}] = prelude.exports
+    end
+
+    test "dep call unions the dep export's requires and tool_refs (call position)" do
+      assert {:ok, prelude} = compile_audit("(defn check [id] (base/fetch id))")
+      [%Export{} = check] = prelude.exports
+      assert "upstream:crm/get_user" in check.requires
+      assert "call" in check.tool_refs
+    end
+
+    test "value-position dep ref unions authority too" do
+      assert {:ok, prelude} = compile_audit("(defn check-all [ids] (map base/fetch ids))")
+      [%Export{} = check] = prelude.exports
+      assert "upstream:crm/get_user" in check.requires
+      assert "call" in check.tool_refs
+    end
+
+    test "short-fn dep ref unions authority (walker container coverage)" do
+      assert {:ok, prelude} = compile_audit("(defn check-all [ids] (map #(base/fetch %) ids))")
+      [%Export{} = check] = prelude.exports
+      assert "upstream:crm/get_user" in check.requires
+    end
+
+    test "union flows through the dependent's own private helpers" do
+      body = """
+      (defn- inner [id] (base/fetch id))
+
+      (defn check [id] (inner id))
+      """
+
+      assert {:ok, prelude} = compile_audit(body)
+      [%Export{ref: "audit/check"} = check] = prelude.exports
+      assert "upstream:crm/get_user" in check.requires
+    end
+
+    test "form_graph records dep_calls as full-ref strings" do
+      assert {:ok, prelude} = compile_audit("(defn check [x] (base/helper x))")
+      entry = prelude.form_graph["audit"]["check"]
+      assert entry.dep_calls.direct == ["base/helper"]
+      assert entry.dep_calls.transitive == ["base/helper"]
+    end
+
+    test "wrong arity on a dep call is rejected precisely" do
+      assert {:error, error} = compile_audit("(defn check [x] (base/helper x x x))")
+      assert error.message =~ "base/helper expects 1 argument(s), got 3"
+    end
+
+    test "a dep's defn- private is not reachable across preludes" do
+      assert {:error, error} = compile_audit("(defn check [x] (base/normalize x))")
+      assert error.message =~ "not a public export"
+    end
+
+    test "an undeclared namespace keeps failing with a requires_preludes hint" do
+      source = """
+      (ns audit "Audit checks.")
+      (defn check [x] (base/helper x))
+      """
+
+      # Without any dep opts, and with deps supplied but NOT declared: both fail.
+      for opts <- [[], [deps: [dep_base()]]] do
+        assert {:error, error} = Compiler.compile(source, opts)
+        assert error.reason == :compile_error
+        assert error.message =~ "unknown namespace"
+        assert error.message =~ "requires_preludes"
+      end
+    end
+
+    test "dep references in def initializers are rejected fail-closed" do
+      for body <- [
+            ~s{(def cfg (base/helper "x"))},
+            ~s{(def f base/helper)},
+            ~s{(def g (fn [x] (base/helper x)))},
+            ~s{(def h #(base/helper %))}
+          ] do
+        assert {:error, error} = compile_audit(body), "expected rejection for #{body}"
+        assert error.reason == :dep_ref_in_def
+        assert error.message =~ "base/helper"
+        assert error.message =~ "defn"
+      end
+    end
+
+    test "quoted dep symbols are data, not references" do
+      assert {:ok, _} = compile_audit("(def cfg (quote base/helper))")
+    end
+
+    test "sibling namespaces compile with progressive scope in both source orders" do
+      audit_ns = """
+      (ns audit "Audit checks.")
+      (defn check [id] (base/fetch id))
+      """
+
+      for source <- [@dep_base_source <> audit_ns, audit_ns <> @dep_base_source] do
+        assert {:ok, prelude} =
+                 Compiler.compile(source, namespace_deps: %{"audit" => ["base"]})
+
+        assert Prelude.namespaces(prelude) == ["audit", "base"]
+        {:ok, check} = Prelude.fetch_export(prelude, "audit/check")
+        assert "upstream:crm/get_user" in check.requires
+        assert "call" in check.tool_refs
+      end
+    end
+
+    test "compiled sibling dep calls run end-to-end (pure runtime smoke)" do
+      audit_ns = """
+      (ns audit "Audit checks.")
+      (defn check [x] (base/helper x))
+      """
+
+      assert {:ok, prelude} =
+               Compiler.compile(audit_ns <> @dep_base_source,
+                 namespace_deps: %{"audit" => ["base"]}
+               )
+
+      assert {:ok, step} = Lisp.run(~s{(audit/check "v")}, prelude: prelude)
+      assert step.return == "helper:n:v"
+    end
+
+    test "dependency cycles fail closed" do
+      source = """
+      (ns a "A.")
+      (defn fa [x] x)
+      (ns b "B.")
+      (defn fb [x] x)
+      """
+
+      assert {:error, error} =
+               Compiler.compile(source, namespace_deps: %{"a" => ["b"], "b" => ["a"]})
+
+      assert error.reason == :dependency_cycle
+
+      assert {:error, self_error} =
+               Compiler.compile(source, namespace_deps: %{"a" => ["a"]})
+
+      assert self_error.reason == :dependency_cycle
+    end
+
+    test "a declared dep that is neither external nor sibling is unknown" do
+      source = """
+      (ns audit "Audit checks.")
+      (defn check [x] x)
+      """
+
+      assert {:error, error} = Compiler.compile(source, namespace_deps: %{"audit" => ["nope"]})
+      assert error.reason == :unknown_dependency
+      assert error.message =~ "nope"
+    end
+
+    test "a dep namespace provided both externally and as a sibling fails closed" do
+      source = """
+      (ns base "Shadow.")
+      (defn helper [x] x)
+      (ns audit "Audit checks.")
+      (defn check [x] (base/helper x))
+      """
+
+      assert {:error, error} =
+               Compiler.compile(source,
+                 deps: [dep_base()],
+                 namespace_deps: %{"audit" => ["base"]}
+               )
+
+      assert error.message =~ "provided both"
+    end
+  end
 end

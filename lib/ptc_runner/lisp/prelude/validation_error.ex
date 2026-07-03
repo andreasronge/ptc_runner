@@ -18,8 +18,10 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
       `:reserved_namespace`, `:reserved_name`, `:duplicate_ref`,
       `:invalid_visibility`, `:invalid_requires`, `:invalid_metadata`,
       `:qualified_self_reference`, `:missing_namespace`, `:invalid_namespace`,
-      `:invalid_signature`, `:parse_error`, `:compile_error`. Attach-time
-      reason: `:prelude_attach_failed`.
+      `:invalid_signature`, `:parse_error`, `:compile_error`. Dependency
+      reasons (declared prelude-to-prelude deps): `:unknown_dependency`,
+      `:dep_ref_in_def`, `:dependency_cycle`. Attach-time reason:
+      `:prelude_attach_failed`.
     * `message` — human-readable detail naming the offending namespace,
       symbol, or value. Must not contain secrets (plan §12).
     * `namespace` — the declaring namespace when known, else `nil`.
@@ -40,6 +42,9 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
           | :parse_error
           | :compile_error
           | :unrecognized_node
+          | :unknown_dependency
+          | :dep_ref_in_def
+          | :dependency_cycle
           | :prelude_attach_failed
 
   @type t :: %__MODULE__{
