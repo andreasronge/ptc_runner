@@ -524,6 +524,28 @@ defmodule PtcRunner.SubAgent.TextModeToolCallingTest do
     end
   end
 
+  describe "combined mode lisp_eval argument errors" do
+    test "invalid lisp_eval args produce a recoverable tool error, not a crash" do
+      llm =
+        tool_calling_llm([
+          # Turn 1: lisp_eval with no program — must pair a recoverable
+          # protocol error as the tool result, not crash the dispatch reduce.
+          %{
+            tool_calls: [%{id: "call_1", name: "lisp_eval", args: %{}}],
+            content: nil,
+            tokens: %{input: 10, output: 5}
+          },
+          # Turn 2: LLM recovers with the final answer.
+          %{content: ~S|{"answer": "recovered"}|, tokens: %{input: 10, output: 5}}
+        ])
+
+      agent = make_agent(ptc_transport: :tool_call)
+      {:ok, step} = SubAgent.run(agent, llm: llm)
+
+      assert step.return == %{"answer" => "recovered"}
+    end
+  end
+
   describe "validation" do
     test "text mode accepts tools without signature (text return)" do
       agent =

@@ -1106,8 +1106,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
   #   - `:args_error` paths render through `PtcToolProtocol.render_error/3`.
 
   # Returns one of:
-  #   {:ok, result_json, step_entry, new_state}            — continue
-  #   {:fatal, error_step, result_json, step_entry}        — terminate run, paired result
+  #   {:ok, result_json, step_entry, new_state, catalog_ops}     — continue
+  #   {:fatal, error_step, result_json, step_entry, catalog_ops} — terminate run, paired result
   defp dispatch_lisp_eval(call, agent, state) do
     start = System.monotonic_time(:millisecond)
 
@@ -1129,7 +1129,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           duration_ms: duration_ms
         }
 
-        {:ok, result_json, step_entry, state}
+        # No program ran, so there are no catalog ops to record.
+        {:ok, result_json, step_entry, state, []}
     end
   end
 
