@@ -119,7 +119,9 @@ defmodule PtcRunner.PreludeStore do
            ),
          {:ok, parent_checksum} <- parent_checksum(metadata),
          :ok <- check_parent(store, id, parent_checksum),
-         {:ok, compiled} <- compile_bounded(source, opts),
+         {:ok, declared_refs} <- declared_dep_refs(id, metadata),
+         {:ok, dep_candidates} <- resolve_deps(store, declared_refs),
+         {:ok, compiled} <- compile_bounded(source, opts, id, dep_candidates),
          :ok <- validate_compiled_namespace(id, compiled) do
       candidate = %PreludeCandidate{
         id: id,
@@ -127,7 +129,7 @@ defmodule PtcRunner.PreludeStore do
         source: source,
         compiled: compiled,
         origin: Keyword.get(opts, :origin, {:memory, store.pid}),
-        metadata: metadata,
+        metadata: put_dep_metadata(metadata, declared_refs, dep_candidates),
         created_at: DateTime.utc_now()
       }
 
@@ -170,7 +172,11 @@ defmodule PtcRunner.PreludeStore do
     with :ok <- validate_id(id),
          {:ok, base} <- read(store, id) do
       base_checksum = PreludeCandidate.checksum(base)
-      write_metadata = Map.merge(metadata, %{"parent_checksum" => base_checksum})
+
+      write_metadata =
+        metadata
+        |> Map.merge(%{"parent_checksum" => base_checksum})
+        |> inherit_dep_declaration(base)
 
       max_source_bytes =
         Keyword.get(store.opts, :max_source_bytes, @default_max_source_bytes)
@@ -357,8 +363,170 @@ defmodule PtcRunner.PreludeStore do
     end
   end
 
-  defp compile_bounded(source, opts) do
-    case Sandbox.run_bounded(fn -> Compiler.compile(source) end,
+  # ============================================================
+  # Declared prelude-to-prelude dependencies (docs/plans/prelude-deps.md §2)
+  # ============================================================
+
+  # An edit inherits the base version's RESOLVED PINS (`id@version`), not the
+  # raw declaration: re-resolving a bare-id declaration to a newer current
+  # version would be float-at-attach through the back door. An explicit
+  # caller-supplied `requires_preludes` (including `[]` to drop deps)
+  # overrides.
+  defp inherit_dep_declaration(metadata, base) do
+    if Map.has_key?(metadata, "requires_preludes") or
+         Map.has_key?(metadata, :requires_preludes) do
+      metadata
+    else
+      case PreludeCandidate.dep_pins(base) do
+        [] -> metadata
+        pins -> Map.put(metadata, "requires_preludes", Enum.map(pins, &"#{&1.id}@#{&1.version}"))
+      end
+    end
+  end
+
+  # The declaration travels in metadata under `"requires_preludes"` (the
+  # `parent_checksum` precedent for metadata-carried protocol keys): a list
+  # of `"id"` / `"id@<version>"` strings. A bare id resolves to the CURRENT
+  # version at write time; either way the result is an explicit pin.
+  defp declared_dep_refs(id, metadata) do
+    case Map.get(metadata, "requires_preludes") || Map.get(metadata, :requires_preludes) do
+      nil ->
+        {:ok, []}
+
+      refs when is_list(refs) ->
+        refs
+        |> Enum.reduce_while({:ok, []}, fn ref, {:ok, acc} ->
+          case parse_dep_ref(ref) do
+            {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
+            {:error, _} = error -> {:halt, error}
+          end
+        end)
+        |> case do
+          {:ok, parsed} -> validate_dep_refs(id, Enum.reverse(parsed))
+          {:error, _} = error -> error
+        end
+
+      other ->
+        {:error,
+         error(
+           :invalid_metadata,
+           "requires_preludes must be a list of id or id@version strings, " <>
+             "got #{inspect(other, limit: 5)}"
+         )}
+    end
+  end
+
+  defp parse_dep_ref(ref) when is_binary(ref) do
+    case String.split(ref, "@", parts: 2) do
+      [dep_id] when dep_id != "" ->
+        {:ok, %{ref: ref, id: dep_id, version: nil}}
+
+      [dep_id, version] when dep_id != "" ->
+        case Integer.parse(version) do
+          {v, ""} when v > 0 -> {:ok, %{ref: ref, id: dep_id, version: v}}
+          _ -> invalid_dep_ref(ref)
+        end
+
+      _ ->
+        invalid_dep_ref(ref)
+    end
+  end
+
+  defp parse_dep_ref(ref), do: invalid_dep_ref(ref)
+
+  defp invalid_dep_ref(ref) do
+    {:error,
+     error(
+       :invalid_metadata,
+       "invalid requires_preludes entry #{inspect(ref, limit: 3)}; " <>
+         "expected \"id\" or \"id@<positive version>\""
+     )}
+  end
+
+  defp validate_dep_refs(id, parsed) do
+    cond do
+      Enum.any?(parsed, &(&1.id == id)) ->
+        {:error,
+         error(:invalid_metadata, "prelude `#{id}` cannot declare itself as a dependency")}
+
+      (dup = parsed |> Enum.frequencies_by(& &1.id) |> Enum.find(fn {_, n} -> n > 1 end)) != nil ->
+        {dup_id, _} = dup
+        {:error, error(:invalid_metadata, "duplicate dependency declaration for `#{dup_id}`")}
+
+      true ->
+        {:ok, parsed}
+    end
+  end
+
+  defp resolve_deps(_store, []), do: {:ok, []}
+
+  defp resolve_deps(store, refs) do
+    refs
+    |> Enum.reduce_while({:ok, []}, fn %{ref: ref}, {:ok, acc} ->
+      case read(store, ref) do
+        {:ok, candidate} ->
+          {:cont, {:ok, [candidate | acc]}}
+
+        {:error, %{reason: :not_found}} ->
+          {:halt,
+           {:error,
+            error(
+              :unknown_dependency,
+              "dependency `#{ref}` not found in the prelude store " <>
+                "(a dependency must be written before its dependents)"
+            )}}
+
+        {:error, _} = error ->
+          {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, candidates} -> {:ok, Enum.reverse(candidates)}
+      {:error, _} = error -> error
+    end
+  end
+
+  # Resolved pins are COMPUTED by the store and override any caller-supplied
+  # value under the reserved `"prelude_deps"` key (metadata is untrusted).
+  # The normalized declaration is also re-stored string-keyed so `edit/4`
+  # inheritance has one shape to read.
+  defp put_dep_metadata(metadata, declared_refs, dep_candidates) do
+    metadata = Map.drop(metadata, ["prelude_deps", :prelude_deps, :requires_preludes])
+
+    case dep_candidates do
+      [] ->
+        Map.delete(metadata, "requires_preludes")
+
+      candidates ->
+        pins =
+          Enum.map(candidates, fn candidate ->
+            %{
+              "id" => candidate.id,
+              "version" => candidate.version,
+              "checksum" => PreludeCandidate.checksum(candidate)
+            }
+          end)
+
+        metadata
+        |> Map.put("requires_preludes", Enum.map(declared_refs, & &1.ref))
+        |> Map.put("prelude_deps", pins)
+    end
+  end
+
+  defp compile_bounded(source, opts, id, dep_candidates) do
+    compile_opts =
+      case dep_candidates do
+        [] ->
+          []
+
+        candidates ->
+          [
+            deps: Enum.map(candidates, & &1.compiled),
+            namespace_deps: %{id => Enum.map(candidates, & &1.id)}
+          ]
+      end
+
+    case Sandbox.run_bounded(fn -> Compiler.compile(source, compile_opts) end,
            timeout: Keyword.get(opts, :compile_timeout, @default_compile_timeout),
            max_heap: Keyword.get(opts, :compile_max_heap, @default_compile_max_heap)
          ) do

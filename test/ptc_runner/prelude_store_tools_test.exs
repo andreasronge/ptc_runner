@@ -713,4 +713,106 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     form = Enum.find(scan.forms, &(&1.name == name))
     elem(form.span, 1)
   end
+
+  # ============================================================
+  # Declared prelude-to-prelude dependencies (docs/plans/prelude-deps.md §2)
+  # ============================================================
+
+  describe "prelude/write with requires_preludes" do
+    @dep_base_source """
+    (ns base "Shared helpers.")
+
+    (defn helper [x] (str "helper:" x))
+    """
+
+    @dep_audit_source """
+    (ns audit "Audit checks.")
+
+    (defn check [x] (base/helper x))
+    """
+
+    test "declares deps through the Lisp op and echoes pins" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+
+      assert {:ok, %Step{return: base_result}} =
+               Lisp.run(
+                 ~S|(prelude/write {:id "base" :source data/source})|,
+                 context: %{source: @dep_base_source},
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert base_result["status"] == "ok"
+
+      assert {:ok, %Step{return: audit_result}} =
+               Lisp.run(
+                 ~S|(prelude/write {:id "audit"
+                                    :source data/source
+                                    :requires_preludes ["base"]})|,
+                 context: %{source: @dep_audit_source},
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert audit_result["status"] == "ok"
+      assert audit_result["metadata"]["requires_preludes"] == ["base"]
+
+      assert [%{"id" => "base", "version" => 1, "checksum" => checksum}] =
+               audit_result["metadata"]["prelude_deps"]
+
+      assert checksum == base_result["checksum"]
+
+      # prelude/read shows the pins too.
+      assert {:ok, %Step{return: read_result}} =
+               Lisp.run(~S|(prelude/read "audit")|, prelude: prelude, tools: Tools.tools(store))
+
+      assert [%{"id" => "base"}] = read_result["metadata"]["prelude_deps"]
+    end
+
+    test "an unresolvable dep surfaces the store error through the op" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(
+                 ~S|(prelude/write {:id "audit"
+                                    :source data/source
+                                    :requires_preludes ["base"]})|,
+                 context: %{source: @dep_audit_source},
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "error"
+      assert result["reason"] == "unknown_dependency"
+      assert result["message"] =~ "base"
+    end
+
+    test "prelude/edit inherits pins through the op surface" do
+      {:ok, store} = PreludeStore.new()
+      {:ok, prelude} = Tools.prelude()
+      {:ok, _} = PreludeStore.write(store, "base", @dep_base_source)
+
+      {:ok, _} =
+        PreludeStore.write(store, "audit", @dep_audit_source, %{
+          "requires_preludes" => ["base"]
+        })
+
+      assert {:ok, %Step{return: result}} =
+               Lisp.run(
+                 ~S|(prelude/edit {:id "audit"
+                                   :edits [{:op "replace_form"
+                                            :name "check"
+                                            :source data/replacement}]})|,
+                 context: %{replacement: ~S|(defn check [x] (base/helper (str x "!")))|},
+                 prelude: prelude,
+                 tools: Tools.tools(store)
+               )
+
+      assert result["status"] == "ok"
+      assert result["metadata"]["requires_preludes"] == ["base@1"]
+      assert [%{"id" => "base", "version" => 1}] = result["metadata"]["prelude_deps"]
+    end
+  end
 end

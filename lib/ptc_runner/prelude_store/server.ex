@@ -98,7 +98,8 @@ defmodule PtcRunner.PreludeStore.Server do
   def handle_call({:append, %PreludeCandidate{} = candidate, parent_checksum}, _from, state) do
     {result, state} =
       with :ok <- recheck_parent(state.table, candidate.id, parent_checksum),
-           :ok <- check_id_bound(state.table, candidate.id, state.max_ids) do
+           :ok <- check_id_bound(state.table, candidate.id, state.max_ids),
+           :ok <- recheck_dep_pins(state.table, candidate) do
         append_candidate(state, candidate)
       else
         {:error, _} = error -> {error, state}
@@ -204,6 +205,33 @@ defmodule PtcRunner.PreludeStore.Server do
     end
   end
 
+  # Dep pins were resolved by `PreludeStore.write/4` OUTSIDE this process; a
+  # racing write to the dep id could have pruned the pinned version before
+  # this append landed (it was not yet in `pinned_versions`). Re-verify
+  # atomically here — the same pattern as `recheck_parent/3`.
+  defp recheck_dep_pins(table, candidate) do
+    candidate
+    |> PreludeCandidate.dep_pins()
+    |> Enum.find_value(fn pin ->
+      with {:ok, dep} <- lookup_version(table, pin.id, pin.version),
+           true <- PreludeCandidate.checksum(dep) == pin.checksum do
+        nil
+      else
+        _ ->
+          %{
+            reason: :unknown_dependency,
+            message:
+              "dependency `#{pin.id}@#{pin.version}` disappeared before the write " <>
+                "committed; retry the write"
+          }
+      end
+    end)
+    |> case do
+      nil -> :ok
+      error -> {:error, error}
+    end
+  end
+
   defp recheck_parent(_table, _id, nil), do: :ok
 
   defp recheck_parent(table, id, checksum) do
@@ -282,8 +310,32 @@ defmodule PtcRunner.PreludeStore.Server do
           latest_bytes: Map.put(state.latest_bytes, candidate.id, latest_row_bytes)
       }
 
+      state = register_dep_pins(state, candidate)
+
       {{:ok, Map.put(candidate_fields(candidate), :version, candidate.version)}, state}
     end
+  end
+
+  # A dep version pinned by a stored dependent joins the same retention set
+  # `set_default` uses, so pruning beyond :max_versions can never strand a
+  # dependent (docs/plans/prelude-deps.md §2). Pruning of the DEPENDENT
+  # releases nothing in v1 — acceptable growth, revisit with refcounts only
+  # if real stores hit the byte bound.
+  defp register_dep_pins(state, candidate) do
+    candidate
+    |> PreludeCandidate.dep_pins()
+    |> Enum.reduce(state, fn pin, acc ->
+      %{
+        acc
+        | pinned_versions:
+            Map.update(
+              acc.pinned_versions,
+              pin.id,
+              MapSet.new([pin.version]),
+              &MapSet.put(&1, pin.version)
+            )
+      }
+    end)
   end
 
   defp candidate_fields(%PreludeCandidate{} = candidate) do

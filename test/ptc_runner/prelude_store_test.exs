@@ -943,4 +943,262 @@ defmodule PtcRunner.PreludeStoreTest do
   end
 
   defp slice(source, {offset, length}), do: binary_part(source, offset, length)
+
+  # ============================================================
+  # Declared prelude-to-prelude dependencies (docs/plans/prelude-deps.md §2)
+  # ============================================================
+
+  describe "write/4 with requires_preludes" do
+    @dep_base """
+    (ns base "Shared helpers.")
+
+    (defn helper [x] (str "helper:" x))
+
+    (defn fetch [id]
+      (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
+    """
+
+    @dep_base_v2 """
+    (ns base "Shared helpers, v2.")
+
+    (defn helper [x] (str "helper2:" x))
+    """
+
+    @dep_audit """
+    (ns audit "Audit checks.")
+
+    (defn check [id] (base/fetch id))
+    """
+
+    defp store_with_base(opts \\ []) do
+      {:ok, store} = PreludeStore.new(opts)
+      {:ok, base} = PreludeStore.write(store, "base", @dep_base)
+      {store, base}
+    end
+
+    test "a write with deps resolves, records pins, and echoes them" do
+      {store, base} = store_with_base()
+
+      assert {:ok, result} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base"]
+               })
+
+      assert result.metadata["requires_preludes"] == ["base"]
+
+      assert result.metadata["prelude_deps"] == [
+               %{"id" => "base", "version" => 1, "checksum" => base.checksum}
+             ]
+
+      # The dependent's export unions the dep's authority.
+      assert {:ok, candidate} = PreludeStore.read(store, "audit")
+      {:ok, check} = Prelude.fetch_export(candidate.compiled, "audit/check")
+      assert "upstream:crm/get_user" in check.requires
+    end
+
+    test "a bare id pins the version that was current at write time" do
+      {store, base} = store_with_base()
+
+      assert {:ok, _} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base"]
+               })
+
+      # base moves on; audit's pin does not.
+      assert {:ok, base_v2} = PreludeStore.write(store, "base", @dep_base_v2)
+      assert base_v2.version == 2
+
+      assert {:ok, audit} = PreludeStore.read(store, "audit")
+
+      assert PreludeCandidate.dep_pins(audit) == [
+               %{id: "base", version: 1, checksum: base.checksum}
+             ]
+    end
+
+    test "an explicit id@version pins that version" do
+      {store, base} = store_with_base()
+      assert {:ok, _} = PreludeStore.write(store, "base", @dep_base_v2)
+
+      assert {:ok, result} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"]
+               })
+
+      assert result.metadata["prelude_deps"] == [
+               %{"id" => "base", "version" => 1, "checksum" => base.checksum}
+             ]
+    end
+
+    test "an unknown dependency fails with :unknown_dependency" do
+      {:ok, store} = PreludeStore.new()
+
+      assert {:error, error} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base"]
+               })
+
+      assert error.reason == :unknown_dependency
+      assert error.message =~ "base"
+    end
+
+    test "caller-supplied prelude_deps metadata is overridden by computed pins" do
+      {store, base} = store_with_base()
+
+      forged = [%{"id" => "base", "version" => 999, "checksum" => "forged"}]
+
+      assert {:ok, result} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base"],
+                 "prelude_deps" => forged
+               })
+
+      assert result.metadata["prelude_deps"] == [
+               %{"id" => "base", "version" => 1, "checksum" => base.checksum}
+             ]
+
+      # And without a declaration, a forged pins key is dropped entirely.
+      assert {:ok, plain} =
+               PreludeStore.write(store, "plain", "(ns plain \"P.\")\n(defn go [] 1)", %{
+                 "prelude_deps" => forged
+               })
+
+      refute Map.has_key?(plain.metadata, "prelude_deps")
+    end
+
+    test "self-dependency, duplicates, and malformed refs are rejected" do
+      {store, _base} = store_with_base()
+
+      assert {:error, %{reason: :invalid_metadata}} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["audit"]
+               })
+
+      assert {:error, %{reason: :invalid_metadata, message: message}} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base", "base@1"]
+               })
+
+      assert message =~ "duplicate"
+
+      for bad <- [["base@0"], ["base@x"], ["@1"], [42], "base"] do
+        assert {:error, %{reason: :invalid_metadata}} =
+                 PreludeStore.write(store, "audit", @dep_audit, %{
+                   "requires_preludes" => bad
+                 })
+      end
+    end
+
+    test "an undeclared cross-namespace ref fails at write with a hint" do
+      {store, _base} = store_with_base()
+
+      assert {:error, error} = PreludeStore.write(store, "audit", @dep_audit)
+      assert error.reason == :prelude_compile_error
+      assert error.message =~ "unknown namespace"
+      assert error.message =~ "requires_preludes"
+    end
+
+    test "pruning retains dep-pinned versions" do
+      {store, base} = store_with_base(max_versions: 1)
+
+      assert {:ok, _} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"]
+               })
+
+      # Two more base versions; max_versions: 1 would normally prune v1.
+      assert {:ok, _} = PreludeStore.write(store, "base", @dep_base_v2)
+      assert {:ok, _} = PreludeStore.write(store, "base", @dep_base)
+
+      # The dep-pinned version survives the ring.
+      assert {:ok, pinned} = PreludeStore.read(store, %{id: "base", version: 1})
+      assert PreludeCandidate.checksum(pinned) == base.checksum
+    end
+  end
+
+  describe "edit/4 dependency pin inheritance" do
+    @edit_dep_base """
+    (ns base "Shared helpers.")
+
+    (defn helper [x] (str "helper:" x))
+    """
+
+    @edit_dep_audit """
+    (ns audit "Audit checks.")
+
+    (defn check [x] (base/helper x))
+    """
+
+    defp store_with_audit do
+      {:ok, store} = PreludeStore.new()
+      {:ok, base} = PreludeStore.write(store, "base", @edit_dep_base)
+
+      {:ok, _} =
+        PreludeStore.write(store, "audit", @edit_dep_audit, %{
+          "requires_preludes" => ["base"]
+        })
+
+      {store, base}
+    end
+
+    test "an edit inherits the base version's resolved pins" do
+      {store, base} = store_with_audit()
+
+      # base gets a new current version; the edit must keep the v1 pin
+      # (inheriting the raw declaration would re-resolve to v2 — float).
+      {:ok, _} = PreludeStore.write(store, "base", "(ns base \"B2.\")\n(defn helper [x] x)")
+
+      edits = [
+        %{
+          "op" => "replace_form",
+          "name" => "check",
+          "source" => "(defn check [x] (base/helper (str x \"!\")))"
+        }
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "audit", edits)
+      assert result.metadata["requires_preludes"] == ["base@1"]
+
+      assert result.metadata["prelude_deps"] == [
+               %{"id" => "base", "version" => 1, "checksum" => base.checksum}
+             ]
+    end
+
+    test "an explicit requires_preludes on edit overrides inheritance" do
+      {store, _base} = store_with_audit()
+      {:ok, base_v2} = PreludeStore.write(store, "base", "(ns base \"B2.\")\n(defn helper [x] x)")
+
+      edits = [
+        %{
+          "op" => "replace_form",
+          "name" => "check",
+          "source" => "(defn check [x] (base/helper x))"
+        }
+      ]
+
+      assert {:ok, result} =
+               PreludeStore.edit(store, "audit", edits, %{"requires_preludes" => ["base@2"]})
+
+      assert result.metadata["prelude_deps"] == [
+               %{"id" => "base", "version" => 2, "checksum" => base_v2.checksum}
+             ]
+    end
+
+    test "an explicit empty requires_preludes drops deps (and the edit must compile alone)" do
+      {store, _base} = store_with_audit()
+
+      edits = [
+        %{
+          "op" => "replace_form",
+          "name" => "check",
+          "source" => "(defn check [x] x)"
+        }
+      ]
+
+      assert {:ok, result} =
+               PreludeStore.edit(store, "audit", edits, %{"requires_preludes" => []})
+
+      refute Map.has_key?(result.metadata, "prelude_deps")
+      refute Map.has_key?(result.metadata, "requires_preludes")
+    end
+  end
 end

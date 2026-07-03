@@ -13,7 +13,8 @@ defmodule PtcRunner.PreludeCandidate do
   @default_source_bytes 64 * 1024
   @default_metadata_bytes 8 * 1024
   @default_origin_bytes 128
-  @public_metadata_keys ~w(reason parent_version parent_checksum source_session_id created_by)
+  @public_metadata_keys ~w(reason parent_version parent_checksum source_session_id created_by
+                           requires_preludes prelude_deps)
 
   @type origin :: {:file, Path.t()} | {:memory, term()} | {:upstream, term()} | nil
 
@@ -41,6 +42,41 @@ defmodule PtcRunner.PreludeCandidate do
     |> Enum.map(fn %Export{symbol: symbol} -> symbol end)
     |> Enum.sort()
   end
+
+  @doc """
+  Resolved dependency pins recorded at write time (`"prelude_deps"` metadata,
+  computed by `PtcRunner.PreludeStore.write/4` — never caller-supplied).
+
+  Malformed entries are skipped: a dependent whose pins were lost attaches
+  WITHOUT its dep and the bundle compile fails closed on the unresolved
+  namespace, so dropping here cannot widen authority.
+  """
+  @spec dep_pins(t() | map()) :: [%{id: String.t(), version: pos_integer(), checksum: String.t()}]
+  def dep_pins(%__MODULE__{metadata: metadata}), do: dep_pins(metadata)
+
+  def dep_pins(metadata) when is_map(metadata) do
+    (Map.get(metadata, "prelude_deps") || Map.get(metadata, :prelude_deps))
+    |> normalize_pins()
+  end
+
+  def dep_pins(_), do: []
+
+  defp normalize_pins(pins) when is_list(pins), do: Enum.flat_map(pins, &normalize_pin/1)
+  defp normalize_pins(_), do: []
+
+  defp normalize_pin(pin) when is_map(pin) do
+    id = Map.get(pin, "id") || Map.get(pin, :id)
+    version = Map.get(pin, "version") || Map.get(pin, :version)
+    checksum = Map.get(pin, "checksum") || Map.get(pin, :checksum)
+
+    if is_binary(id) and is_integer(version) and version > 0 and is_binary(checksum) do
+      [%{id: id, version: version, checksum: checksum}]
+    else
+      []
+    end
+  end
+
+  defp normalize_pin(_), do: []
 
   @doc """
   Returns a bounded, public map view of a candidate.
@@ -85,18 +121,47 @@ defmodule PtcRunner.PreludeCandidate do
     |> Enum.reduce(%{}, fn {key, value}, acc ->
       key = normalize_key(key)
 
-      if key in @public_metadata_keys do
-        case public_metadata_value(value, max_bytes, Keyword.get(opts, :complex, :inspect)) do
-          :drop -> acc
-          public_value -> Map.put(acc, key, public_value)
-        end
-      else
-        acc
+      cond do
+        # Dependency keys get structural (JSON-safe) projections instead of
+        # the generic inspect/drop handling: pins and declarations must
+        # survive both the outbound echo AND the inbound Lisp-op filter
+        # (`complex: :drop` would silently strip them as complex values).
+        key == "prelude_deps" ->
+          case public_pins(value) do
+            [] -> acc
+            pins -> Map.put(acc, key, pins)
+          end
+
+        key == "requires_preludes" ->
+          case public_ref_list(value) do
+            [] -> acc
+            refs -> Map.put(acc, key, refs)
+          end
+
+        key in @public_metadata_keys ->
+          case public_metadata_value(value, max_bytes, Keyword.get(opts, :complex, :inspect)) do
+            :drop -> acc
+            public_value -> Map.put(acc, key, public_value)
+          end
+
+        true ->
+          acc
       end
     end)
   end
 
   def public_metadata(_metadata, _opts), do: %{}
+
+  defp public_ref_list(refs) when is_list(refs), do: Enum.filter(refs, &is_binary/1)
+  defp public_ref_list(_), do: []
+
+  defp public_pins(value) do
+    %{"prelude_deps" => value}
+    |> dep_pins()
+    |> Enum.map(fn pin ->
+      %{"id" => pin.id, "version" => pin.version, "checksum" => pin.checksum}
+    end)
+  end
 
   @doc "Returns a bounded, JSON-safe provenance tag for a candidate origin."
   @spec public_origin(origin(), keyword()) :: String.t() | nil

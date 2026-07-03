@@ -104,25 +104,34 @@ defmodule PtcRunner.PreludeStore.Tools do
     (tool/prelude_store_form {:id id :name name}))
 
   (defn write
-    "Write a full namespace source candidate with optional metadata."
+    "Write a full namespace source candidate with optional metadata.
+     requires_preludes declares prelude dependencies (id or id@version
+     strings); qualified calls into their namespaces resolve at write time
+     and the resolved pins are recorded and echoed as prelude_deps."
     {:effect :write}
     [candidate]
-    (let [metadata (get candidate "metadata" {})]
+    (let [metadata (get candidate "metadata" {})
+          base {:id (get candidate "id")
+                :source (get candidate "source")
+                :metadata (if (map? metadata) metadata {})}
+          requires (get candidate "requires_preludes")]
       (tool/prelude_store_write
-        {:id (get candidate "id")
-         :source (get candidate "source")
-         :metadata (if (map? metadata) metadata {})})))
+        (if requires (assoc base :requires_preludes requires) base))))
 
   (defn edit
     "Apply a form-keyed batch of edits (replace_form/add_form/remove_form/
-     set_ns_doc) to the current candidate for id, writing one new version."
+     set_ns_doc) to the current candidate for id, writing one new version.
+     Dependency pins are inherited from the base version unless
+     requires_preludes is supplied ([] drops them)."
     {:effect :write}
     [request]
-    (let [metadata (get request "metadata" {})]
+    (let [metadata (get request "metadata" {})
+          base {:id (get request "id")
+                :edits (get request "edits")
+                :metadata (if (map? metadata) metadata {})}
+          requires (get request "requires_preludes")]
       (tool/prelude_store_edit
-        {:id (get request "id")
-         :edits (get request "edits")
-         :metadata (if (map? metadata) metadata {})})))
+        (if requires (assoc base :requires_preludes requires) base))))
 
   (defn set-default
     "Move the bare-id default to an existing version, optionally checksum-pinned."
@@ -508,7 +517,11 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp write_tool(store, %{"id" => id, "source" => source} = args)
        when is_binary(id) and is_binary(source) do
-    metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
+    metadata =
+      args
+      |> Map.get("metadata", %{})
+      |> store_tool_metadata()
+      |> merge_requires_preludes(args)
 
     case PreludeStore.write(store, id, source, metadata) do
       {:ok, result} -> public_map(Map.put(result, :status, :ok))
@@ -529,7 +542,11 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp edit_tool(store, %{"id" => id, "edits" => edits} = args)
        when is_binary(id) and is_list(edits) do
-    metadata = store_tool_metadata(Map.get(args, "metadata", %{}))
+    metadata =
+      args
+      |> Map.get("metadata", %{})
+      |> store_tool_metadata()
+      |> merge_requires_preludes(args)
 
     case PreludeStore.edit(store, id, edits, metadata) do
       {:ok, result} -> public_map(Map.put(result, :status, :ok))
@@ -577,6 +594,17 @@ defmodule PtcRunner.PreludeStore.Tools do
 
   defp store_tool_metadata(metadata) do
     PreludeCandidate.public_metadata(metadata, complex: :drop)
+  end
+
+  # The dependency declaration travels as a TOP-LEVEL tool arg (the inbound
+  # metadata filter drops complex values); the store validates its shape, so
+  # pass it through verbatim — rejection happens in one place with one
+  # message.
+  defp merge_requires_preludes(metadata, args) do
+    case Map.get(args, "requires_preludes") do
+      nil -> metadata
+      refs -> Map.put(metadata, "requires_preludes", refs)
+    end
   end
 
   defp public_candidate(%PreludeCandidate{} = candidate) do
