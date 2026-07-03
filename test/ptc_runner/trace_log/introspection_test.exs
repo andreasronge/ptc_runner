@@ -65,6 +65,8 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
       assert %{"items" => turns} = tools["log_turns"].(%{"session-id" => "investigation"})
       assert length(turns) == 3
       assert Enum.map(turns, & &1["program"]) == ["(def x 1)", "(no-such-fn 1)", "(inc x)"]
+      assert Enum.at(turns, 1)["fail"]["reason"] == "unbound_var"
+      assert Enum.at(turns, 1)["fail"]["message"] =~ "no-such-fn"
 
       assert %{"items" => ["(def x 1)", "(no-such-fn 1)", "(inc x)"]} =
                tools["log_programs"].(%{"session-id" => "investigation"})
