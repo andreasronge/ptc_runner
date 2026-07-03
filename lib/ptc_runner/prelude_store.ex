@@ -387,19 +387,19 @@ defmodule PtcRunner.PreludeStore do
   # Diffs two compiled %Prelude{}s' `form_graph` entries for namespace `id`
   # (NOT `exports` alone — private definitions have no `Export` record, so a
   # `defn`/`defn-` visibility flip would vanish instead of landing in
-  # `changed`). `effect` is looked up from the matching compiled export when
-  # a name is currently public; `nil` for a private name (no export exists
-  # to carry it). The compared view includes each form's TRANSITIVE
-  # `requires`/`tool_refs`: an edit that swaps a helper's `tool/call` from
-  # `upstream:a/x` to `upstream:a/y` changes real authority while leaving
-  # visibility/kind/arity/effect equal — omitting authority would return
+  # `changed`). The compared view includes each form's authority — transitive
+  # `requires`/`tool_refs`, overlaid with the compiled export's own fields
+  # for public names (see `surface_view/3`): an edit that swaps a helper's
+  # `tool/call` from `upstream:a/x` to `upstream:a/y`, or that only touches
+  # explicit export metadata, changes real capability while leaving
+  # visibility/kind/arity equal — omitting authority would return
   # `changed: []` for exactly the class of change the human gate most needs
   # to see.
   defp public_surface_diff(%Prelude{} = old_compiled, %Prelude{} = new_compiled, id) do
     old_graph = Map.get(old_compiled.form_graph, id, %{})
     new_graph = Map.get(new_compiled.form_graph, id, %{})
-    old_effects = Map.new(old_compiled.exports, &{&1.symbol, &1.effect})
-    new_effects = Map.new(new_compiled.exports, &{&1.symbol, &1.effect})
+    old_exports = Map.new(old_compiled.exports, &{&1.symbol, &1})
+    new_exports = Map.new(new_compiled.exports, &{&1.symbol, &1})
 
     old_names = Map.keys(old_graph)
     new_names = Map.keys(new_graph)
@@ -410,19 +410,19 @@ defmodule PtcRunner.PreludeStore do
 
     added =
       added_names
-      |> Enum.map(&surface_entry(&1, new_graph, new_effects))
+      |> Enum.map(&surface_entry(&1, new_graph, new_exports))
       |> Enum.sort_by(& &1.name)
 
     removed =
       removed_names
-      |> Enum.map(&surface_entry(&1, old_graph, old_effects))
+      |> Enum.map(&surface_entry(&1, old_graph, old_exports))
       |> Enum.sort_by(& &1.name)
 
     changed =
       common_names
       |> Enum.map(fn name ->
-        {name, surface_view(name, old_graph, old_effects),
-         surface_view(name, new_graph, new_effects)}
+        {name, surface_view(name, old_graph, old_exports),
+         surface_view(name, new_graph, new_exports)}
       end)
       |> Enum.filter(fn {_name, before, after_} -> before != after_ end)
       |> Enum.map(fn {name, before, after_} -> %{name: name, before: before, after: after_} end)
@@ -431,18 +431,29 @@ defmodule PtcRunner.PreludeStore do
     %{added: added, removed: removed, changed: changed}
   end
 
-  defp surface_entry(name, graph, effects),
-    do: Map.put(surface_view(name, graph, effects), :name, name)
+  defp surface_entry(name, graph, exports),
+    do: Map.put(surface_view(name, graph, exports), :name, name)
 
-  defp surface_view(name, graph, effects) do
+  # For a PUBLIC name the compiled `%Export{}` is authoritative for authority
+  # and prompt surface: its `requires` is the UNION of body-inferred and
+  # explicit `{:requires [...]}` metadata, and it alone carries
+  # `provider_ref` and the :prompt/:discoverable visibility — a
+  # metadata-only replace (explicit requires, provider-ref, or a
+  # prompt->discoverable flip) must land in `changed`, not compare equal on
+  # graph-derived fields. Privates have no export; their graph-transitive
+  # view is the whole story.
+  defp surface_view(name, graph, exports) do
     entry = Map.fetch!(graph, name)
+    export = Map.get(exports, name)
 
     %{
       visibility: entry.visibility,
       kind: entry.kind,
       arity: entry.arity,
-      effect: Map.get(effects, name),
-      requires: entry.requires.transitive,
+      effect: export && export.effect,
+      export_visibility: export && export.visibility,
+      provider_ref: export && export.provider_ref,
+      requires: if(export, do: export.requires, else: entry.requires.transitive),
       tool_refs: entry.tool_refs.transitive
     }
   end

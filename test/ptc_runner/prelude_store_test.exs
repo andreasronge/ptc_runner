@@ -655,6 +655,39 @@ defmodule PtcRunner.PreludeStoreTest do
       assert caller_after.requires == ["upstream:crm/list_users"]
     end
 
+    # Export-metadata-only change: body, visibility (public), kind, and arity
+    # are all identical — only explicit `{:requires [...]}` metadata and the
+    # prompt-surface `:visibility` flip. The compiled Export (requires union,
+    # :prompt/:discoverable) is authoritative for publics, so this must land
+    # in `changed`, not compare equal on graph-derived fields alone.
+    test "an export-metadata-only replace surfaces in public_surface.changed" do
+      {:ok, store} = PreludeStore.new()
+      assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)
+
+      edits = [
+        %{
+          op: :replace_form,
+          name: "get-user",
+          source: ~S|(defn get-user
+            "Return a user by id."
+            {:requires ["upstream:audit/log"] :visibility :discoverable}
+            [id]
+            (fetch-raw id))|
+        }
+      ]
+
+      assert {:ok, result} = PreludeStore.edit(store, "store-edit", edits)
+
+      assert %{added: [], removed: [], changed: changed} = result.public_surface
+      assert [%{name: "get-user", before: before, after: aft}] = changed
+      assert before.visibility == aft.visibility
+      assert before.arity == aft.arity
+      assert before.requires == ["upstream:crm/get_user"]
+      assert aft.requires == ["upstream:audit/log", "upstream:crm/get_user"]
+      assert before.export_visibility == :prompt
+      assert aft.export_visibility == :discoverable
+    end
+
     test "rejects a batch where two ops target the same form name" do
       {:ok, store} = PreludeStore.new()
       assert {:ok, _base} = PreludeStore.write(store, "store-edit", @edit_base)

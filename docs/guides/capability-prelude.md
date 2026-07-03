@@ -526,10 +526,13 @@ On success the result is `prelude/write`'s result (`id`, `version`,
   compiled `form_graph` (every form, not only exports — so a `defn`/`defn-`
   visibility flip surfaces as `changed` rather than silently disappearing).
   Each per-form view carries visibility/kind/arity/effect AND the form's
-  transitive `requires`/`tool_refs`, so an authority-only edit (swapping a
-  helper's `tool/call` target while nothing else moves) still lands in
-  `changed` — a human reviewer sees every capability-relevant change
-  without a source diff.
+  authority — for public names the compiled export's `requires` union
+  (body-inferred + explicit metadata), `provider_ref`, and
+  :prompt/:discoverable `export_visibility`; for privates the
+  graph-transitive view — so an authority-only edit (swapping a helper's
+  `tool/call` target, or touching only explicit export metadata) still
+  lands in `changed`. A human reviewer sees every capability-relevant
+  change without a source diff.
 
 `prelude/set-default` accepts an optional checksum:
 
