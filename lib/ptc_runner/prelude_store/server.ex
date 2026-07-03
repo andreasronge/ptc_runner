@@ -55,7 +55,14 @@ defmodule PtcRunner.PreludeStore.Server do
        version_bytes: %{},
        current_bytes: %{},
        latest_bytes: %{},
-       pinned_versions: %{}
+       pinned_versions: %{},
+       # %{id => boolean}: whether the CURRENT version's checksum was also
+       # carried by an earlier version of the id (pin-only rewrites reuse
+       # the source checksum). Server state, not rows: the mark must survive
+       # pruning of the older version, or a stale checksum-only writer slips
+       # back in. One boolean per id — constant-size, unlike a checksum set
+       # (the churn soak enforces flat owner memory).
+       current_checksum_reused: %{}
      }}
   end
 
@@ -99,7 +106,7 @@ defmodule PtcRunner.PreludeStore.Server do
 
   def handle_call({:append, %PreludeCandidate{} = candidate, parent}, _from, state) do
     {result, state} =
-      with :ok <- recheck_parent(state.table, candidate.id, parent),
+      with :ok <- recheck_parent(state, candidate.id, parent),
            :ok <- check_id_bound(state.table, candidate.id, state.max_ids),
            :ok <- recheck_dep_pins(state.table, candidate) do
         append_candidate(state, candidate)
@@ -234,12 +241,12 @@ defmodule PtcRunner.PreludeStore.Server do
     end
   end
 
-  defp recheck_parent(_table, _id, %{checksum: nil}), do: :ok
+  defp recheck_parent(_state, _id, %{checksum: nil}), do: :ok
 
-  defp recheck_parent(table, id, %{checksum: checksum, version: parent_version}) do
-    case resolve_version(table, %{id: id}) do
+  defp recheck_parent(state, id, %{checksum: checksum, version: parent_version}) do
+    case resolve_version(state.table, %{id: id}) do
       {:ok, version} ->
-        {:ok, current} = lookup_version(table, id, version)
+        {:ok, current} = lookup_version(state.table, id, version)
         actual = PreludeCandidate.checksum(current)
 
         cond do
@@ -252,16 +259,20 @@ defmodule PtcRunner.PreludeStore.Server do
           parent_version != nil and current.version != parent_version ->
             stale_base(checksum, actual)
 
-          # Without a version, a matching checksum shared by MULTIPLE
-          # retained versions is ambiguous: the writer may have built on an
-          # older same-source version and would silently roll the dep pins
-          # back. Fail closed and ask for parent_version.
-          parent_version == nil and ambiguous_checksum?(table, id, checksum) ->
+          # Without a version, a matching checksum that an EARLIER version
+          # of this id also carried is ambiguous: the writer may have built
+          # on that older same-source version and would silently roll the
+          # dep pins back. The mark lives in server state so it survives
+          # pruning of the older version. Fail closed and ask for
+          # parent_version. (Only the current version's checksum can reach
+          # this branch — `actual == checksum` above — so one boolean per
+          # id, refreshed at every append, is a complete mark.)
+          parent_version == nil and Map.get(state.current_checksum_reused, id, false) ->
             {:error,
              %{
                reason: :stale_base,
                message:
-                 "multiple retained versions of `#{id}` share checksum #{checksum} " <>
+                 "multiple versions of `#{id}` have carried checksum #{checksum} " <>
                    "(pin-only rewrites); supply parent_version to disambiguate the base",
                expected_checksum: checksum,
                actual_checksum: actual
@@ -274,18 +285,6 @@ defmodule PtcRunner.PreludeStore.Server do
       {:error, %{reason: :not_found}} ->
         stale_base(checksum, nil)
     end
-  end
-
-  defp ambiguous_checksum?(table, id, checksum) do
-    table
-    |> retained_versions(id)
-    |> Enum.count(fn version ->
-      case lookup_version(table, id, version) do
-        {:ok, candidate} -> PreludeCandidate.checksum(candidate) == checksum
-        {:error, _} -> false
-      end
-    end)
-    |> Kernel.>(1)
   end
 
   defp check_id_bound(table, id, max_ids) do
@@ -305,6 +304,8 @@ defmodule PtcRunner.PreludeStore.Server do
     table = state.table
     version = latest_version(table, candidate.id) + 1
     candidate = %{candidate | version: version, created_at: DateTime.utc_now()}
+    # Detect checksum reuse BEFORE pruning removes the colliding row.
+    checksum_collision? = checksum_collision?(table, candidate)
     delete_versions = prunable_versions(state, candidate.id, version)
     reclaimed_bytes = reclaimed_bytes(state.version_bytes, candidate.id, delete_versions)
     version_row = version_row(candidate)
@@ -348,10 +349,29 @@ defmodule PtcRunner.PreludeStore.Server do
           latest_bytes: Map.put(state.latest_bytes, candidate.id, latest_row_bytes)
       }
 
-      state = register_dep_pins(state, candidate)
+      state =
+        state
+        |> register_dep_pins(candidate)
+        |> Map.update!(
+          :current_checksum_reused,
+          &Map.put(&1, candidate.id, checksum_collision?)
+        )
 
       {{:ok, Map.put(candidate_fields(candidate), :version, candidate.version)}, state}
     end
+  end
+
+  defp checksum_collision?(table, candidate) do
+    checksum = PreludeCandidate.checksum(candidate)
+
+    table
+    |> retained_versions(candidate.id)
+    |> Enum.any?(fn version ->
+      case lookup_version(table, candidate.id, version) do
+        {:ok, existing} -> PreludeCandidate.checksum(existing) == checksum
+        {:error, _} -> false
+      end
+    end)
   end
 
   # A dep version pinned by a stored dependent joins the same retention set

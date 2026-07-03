@@ -1207,6 +1207,51 @@ defmodule PtcRunner.PreludeStoreTest do
       assert v3.version == 3
     end
 
+    test "checksum reuse stays version-required even after the old version is pruned" do
+      # Regression (codex review round 6): with max_versions: 1 the older
+      # same-source version is pruned at the pin-only rewrite, so counting
+      # RETAINED versions sees no ambiguity — the reuse mark must survive
+      # pruning.
+      {store, _base} = store_with_base(max_versions: 1)
+
+      # audit pins base@1 FIRST (registering the retention pin), then base
+      # moves to v2 so the pin-only rewrite has a target.
+      {:ok, v1} =
+        PreludeStore.write(store, "audit", @dep_audit, %{"requires_preludes" => ["base@1"]})
+
+      {:ok, _} =
+        PreludeStore.write(store, "base", """
+        (ns base "Shared helpers, v2.")
+
+        (defn helper [x] (str "helper2:" x))
+
+        (defn fetch [id]
+          (tool/call {:server "crm" :tool "get_user_v2" :args {:id id}}))
+        """)
+
+      {:ok, v2} =
+        PreludeStore.write(store, "audit", @dep_audit, %{
+          "requires_preludes" => ["base@2"],
+          "parent_checksum" => v1.checksum,
+          "parent_version" => 1
+        })
+
+      assert v2.checksum == v1.checksum
+      # v1 is pruned (max_versions: 1; only the base@1 dep pin protects base,
+      # not audit's own v1).
+      assert {:error, %{reason: :not_found}} =
+               PreludeStore.read(store, %{id: "audit", version: 1})
+
+      # The stale checksum-only writer must STILL be rejected.
+      assert {:error, %{reason: :stale_base, message: message}} =
+               PreludeStore.write(store, "audit", @dep_audit, %{
+                 "requires_preludes" => ["base@1"],
+                 "parent_checksum" => v1.checksum
+               })
+
+      assert message =~ "parent_version"
+    end
+
     test "the metadata bound applies to the FINAL metadata including computed pins" do
       # Regression (codex review): the bound was checked on caller metadata
       # BEFORE the store added prelude_deps pins, so stored rows could exceed
