@@ -246,17 +246,37 @@ Non-metrics:
 
 ## `ptc_runner` Follow-Ups This Demo Should Drive
 
-1. **Session-mode `catalog_ops`.** Confirm the structural measurement remains
+1. **Audited upstream discovery.** Stage 2 showed that evidence-path discovery
+   and boundary hygiene are coupled. Attempts that lacked first-party evidence
+   listing pressure-tested the launcher and repeatedly reached host discovery
+   surfaces before the accepted run used a neutral manifest workaround.
+   `ptc_runner` should provide bounded, turn-log-visible upstream discovery:
+   protocol-native resource listing where upstream MCP servers support it, and
+   a conventional `list`/`glob` tool shape for file-like evidence lanes that do
+   not.
+2. **Session-selected capability namespaces.** Promote the future direction in
+   `docs/plans/future/prelude-selected-capability-namespaces.md` from cleanup
+   idea to a concrete design candidate. Per-session capability visibility would
+   be declared in session start and auditable in turn logs, unlike process-level
+   CLI allow/deny flags.
+3. **Session-mode `catalog_ops`.** Confirm the structural measurement remains
    present in the actual MCP session path used by the demo.
-2. **Evidence-reading / eval-preview tax.** The prior run lost multiple turn
+4. **Evidence-reading / eval-preview tax.** The prior run lost multiple turn
    budgets to bounded previews and paged evidence reads. The next loop should
    either propose a prelude/workflow improvement or produce a concrete
    `ptc_runner` request such as result handles, artifact paging/search, or
    better preview controls with audit logging.
-3. **Surface-trimming guidance.** If split preludes still increase discovery
+5. **Surface-trimming guidance.** If split preludes still increase discovery
    cost, the loop should propose moving value into fewer public exports,
    namespace docstrings, or better introspection summaries rather than adding
    more helpers.
+6. **`sample` / `fold-pages` loop duplication.** `paged_base/sample` duplicates
+   the page cursor loop used by `fold-pages`, and `paged_audit/reconcile-totals`
+   depends on `sample`. Do not naively implement `sample` in terms of
+   `fold-pages` unless `fold-pages` first gains early termination semantics;
+   otherwise a bounded sample becomes a full scan. The conservative library fix
+   is to extract the shared cursor/page loop into a private helper used by both
+   public functions.
 
 ## Success Criteria
 
