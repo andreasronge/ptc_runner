@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Repl
+  alias PtcRunner.{Session, TraceLog}
 
   test "interactive repl prints captured println output before return value" do
     output =
@@ -47,6 +48,35 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert_raise Mix.Error, ~r/--log-prelude is mutually exclusive with --prelude/, fn ->
       Repl.run(["--log-prelude", "--prelude", "somewhere.clj", "-e", "(+ 1 2)"])
     end
+  end
+
+  @tag :tmp_dir
+  test "--log-source queries a recorded JSONL log through the log prelude", %{tmp_dir: dir} do
+    Mix.Task.reenable("ptc.repl")
+    path = Path.join(dir, "turns.jsonl")
+
+    {:ok, _result, ^path} =
+      TraceLog.with_trace(
+        fn ->
+          session = Session.new(session_id: "recorded", tags: %{"run" => "repl"})
+          {{:ok, _}, _session} = Session.eval(session, "(def recorded 42)")
+        end,
+        path: path
+      )
+
+    output =
+      capture_io(fn ->
+        Repl.run([
+          "--log-prelude",
+          "--log-source",
+          path,
+          "-e",
+          ~S|(log/counters {:tags {"run" "repl"}})|
+        ])
+      end)
+
+    assert output =~ ~S|"attempts" 1|
+    assert output =~ ~S|"sessions" 1|
   end
 
   test "-l prints captured println output before entering repl" do

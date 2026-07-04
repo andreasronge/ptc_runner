@@ -75,6 +75,14 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       assert TurnEvent.build(%{driver: :session, committed: "yes"})["committed"] == false
       assert TurnEvent.build(%{driver: :session, committed: true})["committed"] == true
     end
+
+    test "tags stay map-shaped even when many keys are supplied" do
+      tags = Map.new(1..101, &{"k#{&1}", &1})
+      event = TurnEvent.build(%{driver: :session, tags: tags})
+
+      assert is_map(event["tags"])
+      assert event["tags"]["k101"] == 101
+    end
   end
 
   describe "memory_diff/2" do

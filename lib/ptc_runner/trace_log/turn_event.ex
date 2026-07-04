@@ -88,6 +88,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "input_tokens" => Map.get(attrs, :input_tokens),
       "output_tokens" => Map.get(attrs, :output_tokens),
       "total_tokens" => Map.get(attrs, :total_tokens),
+      "tags" => normalize_tags(Map.get(attrs, :tags)),
       "data" => build_data(attrs)
     }
   end
@@ -358,6 +359,26 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   end
 
   defp normalize_fail(_), do: nil
+
+  defp normalize_tags(tags) when is_map(tags) do
+    Enum.reduce(tags, %{}, fn {key, value}, acc ->
+      key = stringify(key)
+
+      if key == "" do
+        acc
+      else
+        Map.put(acc, key, normalize_tag_value(value))
+      end
+    end)
+  end
+
+  defp normalize_tags(_), do: %{}
+
+  defp normalize_tag_value(value)
+       when is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value),
+       do: value
+
+  defp normalize_tag_value(value), do: stringify(value)
 
   defp stringify(nil), do: nil
   defp stringify(value) when is_atom(value), do: Atom.to_string(value)

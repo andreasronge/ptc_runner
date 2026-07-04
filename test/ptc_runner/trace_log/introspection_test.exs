@@ -50,6 +50,33 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
   end
 
   describe "tool closures (plain data access)" do
+    test "root session turn events carry canonical tags" do
+      {:ok, sink} = TraceLog.start_memory_sink()
+
+      try do
+        session =
+          Session.new(session_id: "tagged-root", tags: %{"run" => "demo", "stage" => "root"})
+
+        {{:ok, _}, _session} = Session.eval(session, "(+ 1 2)")
+      after
+        TraceLog.stop_memory_sink(sink)
+      end
+
+      [turn] = MemorySink.events(sink)
+      assert turn["tags"] == %{"run" => "demo", "stage" => "root"}
+    end
+
+    test "root session tags are bounded before turn-event sanitization" do
+      too_many = Map.new(1..33, &{"k#{&1}", &1})
+      assert_raise ArgumentError, ~r/at most 32 entries/, fn -> Session.new(tags: too_many) end
+
+      too_large = %{"payload" => String.duplicate("x", 4_100)}
+
+      assert_raise ArgumentError, ~r/exceed 4096 encoded bytes/, fn ->
+        Session.new(tags: too_large)
+      end
+    end
+
     test "expose sessions, turns, programs, and tool calls over a source" do
       tools = Introspection.tools(recorded_events())
 
@@ -74,6 +101,56 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
       # Unknown / missing session id is empty, not an error.
       assert %{"items" => []} = tools["log_turns"].(%{"session-id" => "nope"})
       assert %{"items" => []} = tools["log_turns"].(%{})
+    end
+
+    test "filters by tags and exposes counters" do
+      {:ok, sink} = TraceLog.start_memory_sink()
+
+      try do
+        editor = Session.new(session_id: "editor", tags: %{"run" => "demo", "stage" => "editor"})
+        {{:ok, _}, editor} = Session.eval(editor, "(def x 1)")
+        {{:error, _}, _editor} = Session.eval(editor, "(missing 1)")
+
+        reviewer =
+          Session.new(session_id: "reviewer", tags: %{"run" => "demo", "stage" => "reviewer"})
+
+        {{:ok, _}, _reviewer} = Session.eval(reviewer, "(+ 1 2)")
+      after
+        TraceLog.stop_memory_sink(sink)
+      end
+
+      tools = Introspection.tools(MemorySink.events(sink))
+
+      assert %{"items" => [summary]} =
+               tools["log_sessions"].(%{"tags" => %{"stage" => "editor"}})
+
+      assert summary["correlation_id"] == "editor"
+      assert summary["tags"] == %{"run" => "demo", "stage" => "editor"}
+
+      assert %{
+               "sessions" => 1,
+               "attempts" => 2,
+               "committed" => 1,
+               "failed" => 1
+             } = tools["log_counters"].(%{"tags" => %{"stage" => "editor"}})
+    end
+
+    test "tag filters ignore malformed historical tag payloads" do
+      tools =
+        Introspection.tools([
+          %{
+            "event" => "turn",
+            "session_id" => "old",
+            "driver" => "session",
+            "committed" => true,
+            "status" => "ok",
+            "tags" => "Map(101 keys)",
+            "data" => %{"tool_calls" => []}
+          }
+        ])
+
+      assert %{"items" => []} = tools["log_sessions"].(%{"tags" => %{"stage" => "editor"}})
+      assert %{"attempts" => 0} = tools["log_counters"].(%{"tags" => %{"stage" => "editor"}})
     end
 
     test "page all projections with one cursor envelope" do
@@ -226,6 +303,38 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
                  prelude: Introspection.prelude_source(),
                  tools: Introspection.tools(path)
                )
+    end
+
+    @tag :tmp_dir
+    test "reads deterministic directory sources", %{tmp_dir: dir} do
+      path_a = Path.join(dir, "a.jsonl")
+      path_b = Path.join(dir, "b.jsonl")
+
+      {:ok, _r, ^path_b} =
+        TraceLog.with_trace(
+          fn ->
+            session = Session.new(session_id: "b", tags: %{"run" => "dir"})
+            {{:ok, _}, _} = Session.eval(session, "(def b 2)")
+          end,
+          path: path_b
+        )
+
+      {:ok, _r, ^path_a} =
+        TraceLog.with_trace(
+          fn ->
+            session = Session.new(session_id: "a", tags: %{"run" => "dir"})
+            {{:ok, _}, _} = Session.eval(session, "(def a 1)")
+          end,
+          path: path_a
+        )
+
+      tools = Introspection.tools(dir)
+
+      assert %{"items" => summaries} = tools["log_sessions"].(%{"tags" => %{"run" => "dir"}})
+      assert Enum.map(summaries, & &1["correlation_id"]) == ["a", "b"]
+
+      assert %{"sessions" => 2, "attempts" => 2} =
+               tools["log_counters"].(%{"tags" => %{"run" => "dir"}})
     end
   end
 end

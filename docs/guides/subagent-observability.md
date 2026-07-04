@@ -286,7 +286,7 @@ end)
 
 The turn log records every driver turn as a session-correlated event, queryable across runs. The same event shape is emitted by both `PtcRunner.Session.eval/3` (an external LLM driving via MCP or `mix ptc.repl`) and the SubAgent loop, so sessions and agents analyze identically.
 
-Each turn event carries the program, a bounded result preview, prints, a memory diff, credential-free tool-call identities, attached-prelude provenance, and correlation ids (`session_id`/`agent_id`, `turn`, `attempt`). Failed and parse-error attempts are recorded too, so wasted work stays visible. See `PtcRunner.TraceLog.TurnEvent` for the field reference.
+Each turn event carries the program, a bounded result preview, prints, a memory diff, credential-free tool-call identities, attached-prelude provenance, correlation ids (`session_id`/`agent_id`, `turn`, `attempt`), and optional string-keyed scalar `tags`. Failed and parse-error attempts are recorded too, so wasted work stays visible. See `PtcRunner.TraceLog.TurnEvent` for the field reference.
 
 ### Recording
 
@@ -294,7 +294,12 @@ Turn events flow to any active sink. A JSONL trace captures them alongside the o
 
 ```elixir
 {:ok, _result, path} = TraceLog.with_trace(fn ->
-  session = PtcRunner.Session.new(session_id: "investigation")
+  session =
+    PtcRunner.Session.new(
+      session_id: "investigation",
+      tags: %{"run" => "baseline", "stage" => "validator"}
+    )
+
   {{:ok, _}, session} = PtcRunner.Session.eval(session, "(def x 1)")
   {{:ok, _}, _} = PtcRunner.Session.eval(session, "(inc x)")
 end)
@@ -330,20 +335,21 @@ Analyzer.programs(events)                         # program sources, in order
 
 The `log/` prelude lets a session or agent inspect *recorded* sessions from PTC-Lisp — list sessions, read turns and programs, and find duplicated work. The Elixir surface is plain data access; the analysis lives in the program.
 
-Grant the host-bound tools and attach the prelude with `PtcRunner.TraceLog.Introspection.tools/1` and `PtcRunner.TraceLog.Introspection.prelude_source/0`:
+Grant the host-bound tools and attach the prelude with `PtcRunner.TraceLog.Introspection.tools/2` and `PtcRunner.TraceLog.Introspection.prelude_source/0`:
 
 ```elixir
 alias PtcRunner.TraceLog.Introspection
 
-# `source` is a MemorySink pid, a JSONL path, or a list of event maps.
+# `source` is a MemorySink pid, a JSONL path, a turn-log directory,
+# or a list of event maps.
 PtcRunner.Lisp.run(
-  ~S|(count (get (log/turns "investigation") "items"))|,
+  ~S|(log/counters {:tags {"stage" "validator"}})|,
   prelude: Introspection.prelude_source(),
   tools: Introspection.tools(source)
 )
 ```
 
-The exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) return page maps with `"items"`, `"next_cursor"`, `"has_more"`, and `"limit"`. Call them with no opts for the default first page, or pass `{:limit n :cursor c}` and follow `"next_cursor"` for large logs. The `*-all` helpers are explicit eager scans for small local logs. All exports fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
+The paged exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) return page maps with `"items"`, `"next_cursor"`, `"has_more"`, and `"limit"`. Call them with no opts for the default first page, or pass `{:limit n :cursor c}` and follow `"next_cursor"` for large logs. They accept filters such as `:tags`, `:driver`, `:status`, `:from`, and `:to`; `log/counters` applies the same filters and returns aggregate attempt/tool/token counters. The `*-all` helpers are explicit eager scans for small local logs. All exports fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
 
 ### REPL
 
@@ -354,6 +360,14 @@ ptc> (def x 1)
 ptc> :turns
   <id> (session): 1 turns, 1 committed, 0 failed, 0 tool calls
 ptc> (get (log/programs "<id>") "items")
+```
+
+To inspect a recorded JSONL file or turn-log directory instead of the current
+REPL sink, pass `--log-source` with `--log-prelude`:
+
+```bash
+mix ptc.repl --log-prelude --log-source ./turn-log \
+  -e '(log/counters {:tags {"run" "baseline"}})'
 ```
 
 ## Telemetry Events

@@ -9,6 +9,7 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl -l user.clj          # Load user-code file, then interactive
       mix ptc.repl --prelude crm.clj    # Attach a deployment prelude
       mix ptc.repl --log-prelude        # Attach the built-in turn-log prelude
+      mix ptc.repl --log-prelude --log-source ./turn-log
       mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
       mix ptc.repl --prelude crm.clj --show-prompt-inventory
       mix ptc.repl -e "(+ 1 2)"         # Eval and print result
@@ -27,6 +28,8 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `--log-prelude` - Attach the built-in read-only `log/` introspection
       prelude to the REPL's default in-memory turn-log sink. Mutually exclusive
       with `--prelude` until general prelude composition is defined.
+    * `--log-source` - With `--log-prelude`, query a recorded JSONL file or
+      turn-log directory instead of the current REPL's in-memory sink.
     * `--show-prompt-inventory` - Print the prelude's compact prompt inventory
       (the same rendering SubAgent execution injects) before evaluating.
     * `--upstreams-config` - Root upstream JSON config path
@@ -76,6 +79,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     load: :string,
     prelude: :string,
     log_prelude: :boolean,
+    log_source: :string,
     show_prompt_inventory: :boolean,
     help: :boolean,
     upstreams_config: :string,
@@ -146,7 +150,7 @@ defmodule Mix.Tasks.Ptc.Repl do
         opts[:log_prelude] ->
           [
             prelude: compile_introspection_prelude!(),
-            tools: Introspection.tools(sink)
+            tools: Introspection.tools(opts[:log_source] || sink)
           ]
 
         true ->
@@ -169,6 +173,10 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp validate_prelude_opts!(opts) do
     if opts[:prelude] && opts[:log_prelude] do
       Mix.raise("--log-prelude is mutually exclusive with --prelude")
+    end
+
+    if opts[:log_source] && !opts[:log_prelude] do
+      Mix.raise("--log-source requires --log-prelude")
     end
   end
 

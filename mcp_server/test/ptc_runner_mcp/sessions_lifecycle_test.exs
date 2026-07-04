@@ -857,6 +857,31 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "records lisp_session_start tags on MCP turn events", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      start =
+        call("lisp_session_start", %{
+          "tags" => %{"run" => "demo", "stage" => "editor", "attempt" => 1}
+        })
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      assert {:ok, _response} = Sessions.eval(sid, "(+ 1 2)")
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert turn["tags"] == %{"run" => "demo", "stage" => "editor", "attempt" => 1}
+
+      rejected = call("lisp_session_start", %{"tags" => %{"nested" => %{"bad" => true}}})
+      assert rejected["isError"] == true
+      assert rejected["structuredContent"]["reason"] == "session_args_error"
+    end
+
+    @tag :tmp_dir
     test "result previews render native keyword returns", %{tmp_dir: dir} do
       TurnLogConfig.set(%{turn_log_dir: dir})
       start_supervised!({TurnLogCollector, [dir: dir]})

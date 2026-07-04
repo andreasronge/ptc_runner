@@ -11,14 +11,14 @@ defmodule PtcRunner.TraceLog.Introspection do
 
   ## Wiring
 
-      source = sink_pid_or_jsonl_path_or_event_list
+      source = sink_pid_or_jsonl_path_or_directory_or_event_list
       PtcRunner.Lisp.run(program,
         prelude: PtcRunner.TraceLog.Introspection.prelude_source(),
         tools: PtcRunner.TraceLog.Introspection.tools(source))
 
   The `log/` prelude's exports invoke typed tools (`tool/log_sessions`, …), so
   the compiler infers `tool:log_sessions`-style `requires`. Attach fails closed
-  unless the host grants those tools (the `tools/0` map). Read-only by design
+  unless the host grants those tools (the `tools/2` map). Read-only by design
   (the two-grant rule, D4): there is no live-session control here.
 
   ## Memory model (P2 of `docs/plans/sandbox-heap-rebaseline.md`)
@@ -28,9 +28,9 @@ defmodule PtcRunner.TraceLog.Introspection do
   `PtcRunner.TraceLog.Introspection.Holder` started by `tools/2` for path and
   list sources — so only each call's RESULT enters the sandbox and a program's
   heap cost tracks result size, never log size. Call `tools/2` once per grant
-  (each path/list call starts a holder owned by the calling process; it stops
-  when that process goes down). A stopped sink/holder surfaces as a clear,
-  recoverable tool error, not a hang.
+  (each path/directory/list call starts a holder owned by the calling process;
+  it stops when that process goes down). A stopped sink/holder surfaces as a
+  clear, recoverable tool error, not a hang.
 
   ## Trust
 
@@ -43,8 +43,8 @@ defmodule PtcRunner.TraceLog.Introspection do
   alias PtcRunner.TraceLog.Introspection.Holder
 
   @typedoc """
-  A turn-log source: an in-memory sink pid, a JSONL trace path, or an already
-  loaded list of event maps.
+  A turn-log source: an in-memory sink pid, a JSONL trace path, a turn-log
+  directory, or an already loaded list of event maps.
   """
   @type source :: pid() | String.t() | [map()]
 
@@ -97,6 +97,11 @@ defmodule PtcRunner.TraceLog.Introspection do
     "List all tool/upstream calls for one recorded session. Prefer `tool-calls` with limit/cursor for large logs."
     [session-id]
     (get (tool/log_tool_calls {:session-id session-id :all true}) "items"))
+
+  (defn counters
+    "Aggregate recorded turn counters after applying the same filters as sessions/turns."
+    [& opts]
+    (tool/log_counters (first-opts opts)))
   """
 
   @doc """
@@ -109,11 +114,12 @@ defmodule PtcRunner.TraceLog.Introspection do
   Builds the granted, host-bound tool closures over `source`.
 
   Grant these as `tools:`; the keys (`"log_sessions"`, `"log_turns"`,
-  `"log_programs"`, `"log_tool_calls"`) match the `tool:<name>` requirements the
-  `log/` prelude infers. All closures are read-only and return string-keyed data.
+  `"log_programs"`, `"log_tool_calls"`, `"log_counters"`) match the
+  `tool:<name>` requirements the `log/` prelude infers. All closures are
+  read-only and return string-keyed data.
 
-  Path and list sources start a `Holder` owned by the calling process (see the
-  memory-model section above). Options: `:max_bytes` — the holder's
+  Path/directory and list sources start a `Holder` owned by the calling process
+  (see the memory-model section above). Options: `:max_bytes` — the holder's
   serialized-size load cap; raises `ArgumentError` for oversized logs.
   """
   @spec tools(source(), keyword()) :: %{optional(String.t()) => (map() -> term())}
@@ -133,6 +139,9 @@ defmodule PtcRunner.TraceLog.Introspection do
       "log_tool_calls" => fn args ->
         sid = session_id_arg(args)
         run_query(owner, &list_tool_calls(&1, sid, args))
+      end,
+      "log_counters" => fn args ->
+        run_query(owner, &counters(&1, args))
       end
     }
   end
@@ -142,7 +151,8 @@ defmodule PtcRunner.TraceLog.Introspection do
   defp build_owner(pid, _opts) when is_pid(pid), do: {:sink, pid}
 
   defp build_owner(path, opts) when is_binary(path) do
-    {:ok, holder} = Holder.start(Analyzer.load(path), opts)
+    events = if File.dir?(path), do: load_dir!(path, opts), else: Analyzer.load(path)
+    {:ok, holder} = Holder.start(events, opts)
     {:holder, holder}
   end
 
@@ -167,30 +177,50 @@ defmodule PtcRunner.TraceLog.Introspection do
 
   defp list_sessions(events, args) do
     events
-    |> Analyzer.sessions()
-    |> Enum.map(&stringify_summary/1)
+    |> filtered_turns(args)
+    |> session_summaries()
     |> page(args)
   end
 
   defp list_turns(events, session_id, args) do
     events
-    |> session_turns(session_id)
+    |> session_turns(session_id, args)
     |> Enum.map(&project_turn/1)
     |> page(args)
   end
 
   defp list_programs(events, session_id, args) do
     events
-    |> session_turns(session_id)
+    |> session_turns(session_id, args)
     |> Enum.map(&get_in(&1, ["data", "program"]))
     |> page(args)
   end
 
   defp list_tool_calls(events, session_id, args) do
     events
-    |> session_turns(session_id)
+    |> session_turns(session_id, args)
     |> Enum.flat_map(fn turn -> get_in(turn, ["data", "tool_calls"]) || [] end)
     |> page(args)
+  end
+
+  defp counters(events, args) do
+    turns = filtered_turns(events, args)
+    tool_calls = Enum.flat_map(turns, &(get_in(&1, ["data", "tool_calls"]) || []))
+
+    %{
+      "sessions" => turns |> Enum.map(&turn_correlation_id/1) |> Enum.uniq() |> length(),
+      "attempts" => length(turns),
+      "committed" => Enum.count(turns, &(&1["committed"] == true)),
+      "failed" => Enum.count(turns, &(&1["committed"] == false)),
+      "catalog_ops" =>
+        turns |> Enum.flat_map(&(get_in(&1, ["data", "catalog_ops"]) || [])) |> length(),
+      "tool_calls" => length(tool_calls),
+      "upstream_calls" => Enum.count(tool_calls, &upstream_call?/1),
+      "duration_ms" => sum_field(turns, "duration_ms"),
+      "input_tokens" => sum_field(turns, "input_tokens"),
+      "output_tokens" => sum_field(turns, "output_tokens"),
+      "total_tokens" => sum_field(turns, "total_tokens")
+    }
   end
 
   defp page(items, args) do
@@ -255,10 +285,21 @@ defmodule PtcRunner.TraceLog.Introspection do
 
   defp bool_arg(_args, _key, default), do: default
 
-  defp session_turns(_events, nil), do: []
+  defp map_arg(args, key, default) when is_map(args) do
+    case Map.get(args, key) || Map.get(args, String.to_atom(key)) do
+      value when is_map(value) -> value
+      _ -> default
+    end
+  end
 
-  defp session_turns(events, session_id) do
-    Analyzer.session_turns(events, session_id)
+  defp map_arg(_args, _key, default), do: default
+
+  defp session_turns(_events, nil, _args), do: []
+
+  defp session_turns(events, session_id, args) do
+    events
+    |> filtered_turns(args)
+    |> Enum.filter(&(turn_correlation_id(&1) == session_id))
   end
 
   # A slim, string-keyed projection of a turn event: enough to reason about what
@@ -269,6 +310,7 @@ defmodule PtcRunner.TraceLog.Introspection do
       "attempt" => event["attempt"],
       "committed" => event["committed"],
       "status" => event["status"],
+      "tags" => event["tags"] || %{},
       "program" => get_in(event, ["data", "program"]),
       "result_preview" => get_in(event, ["data", "result_preview"]),
       "fail" => get_in(event, ["data", "fail"]),
@@ -277,8 +319,107 @@ defmodule PtcRunner.TraceLog.Introspection do
     }
   end
 
-  defp stringify_summary(summary) do
-    Map.new(summary, fn {k, v} -> {to_string(k), v} end)
+  defp session_summaries(turns) do
+    turns
+    |> Enum.group_by(&turn_correlation_id/1)
+    |> Enum.map(fn {id, grouped} ->
+      %{
+        "correlation_id" => id,
+        "driver" => grouped |> List.first() |> Map.get("driver"),
+        "tags" => grouped |> List.first() |> Map.get("tags", %{}),
+        "turns" => length(grouped),
+        "committed" => Enum.count(grouped, & &1["committed"]),
+        "failed" => Enum.count(grouped, &(&1["committed"] == false)),
+        "tool_calls" =>
+          grouped |> Enum.flat_map(&(get_in(&1, ["data", "tool_calls"]) || [])) |> length()
+      }
+    end)
+    |> Enum.sort_by(& &1["correlation_id"])
+  end
+
+  defp filtered_turns(events, args) do
+    events
+    |> Analyzer.turn_events()
+    |> Enum.filter(&matches_filters?(&1, args))
+  end
+
+  defp matches_filters?(event, args) do
+    matches_driver?(event, string_arg(args, "driver", nil)) and
+      matches_status?(event, string_arg(args, "status", nil)) and
+      matches_tags?(event, map_arg(args, "tags", %{})) and
+      matches_time?(event, string_arg(args, "from", nil), string_arg(args, "to", nil))
+  end
+
+  defp matches_driver?(_event, nil), do: true
+  defp matches_driver?(event, driver), do: event["driver"] == driver
+
+  defp matches_status?(_event, nil), do: true
+  defp matches_status?(event, status), do: event["status"] == status
+
+  defp matches_tags?(_event, tags) when tags == %{}, do: true
+
+  defp matches_tags?(event, tags) when is_map(tags) do
+    case event["tags"] do
+      event_tags when is_map(event_tags) ->
+        Enum.all?(tags, fn {key, value} -> Map.get(event_tags, to_string(key)) == value end)
+
+      nil ->
+        false
+
+      _other ->
+        false
+    end
+  end
+
+  defp matches_tags?(_event, _tags), do: false
+
+  defp matches_time?(_event, nil, nil), do: true
+
+  defp matches_time?(event, from, to) do
+    case parse_event_time(event["timestamp"] || event["ts"]) do
+      nil ->
+        false
+
+      timestamp ->
+        after_from? = is_nil(from) or DateTime.compare(timestamp, parse_filter_time!(from)) != :lt
+        before_to? = is_nil(to) or DateTime.compare(timestamp, parse_filter_time!(to)) != :gt
+        after_from? and before_to?
+    end
+  end
+
+  defp parse_event_time(nil), do: nil
+  defp parse_event_time(value), do: parse_filter_time!(value)
+
+  defp parse_filter_time!(value) do
+    {:ok, datetime, _offset} = DateTime.from_iso8601(value)
+    datetime
+  end
+
+  defp turn_correlation_id(event), do: event["session_id"] || event["agent_id"] || "unknown"
+
+  defp sum_field(events, field) do
+    Enum.reduce(events, 0, fn event, acc ->
+      case event[field] do
+        value when is_integer(value) -> acc + value
+        _ -> acc
+      end
+    end)
+  end
+
+  defp upstream_call?(%{"server" => server}) when is_binary(server) and server != "", do: true
+  defp upstream_call?(_), do: false
+
+  defp load_dir!(dir, opts) do
+    paths = Path.wildcard(Path.join(dir, "*.jsonl")) |> Enum.sort()
+    max_bytes = Keyword.get(opts, :max_bytes, 64 * 1024 * 1024)
+    total = Enum.reduce(paths, 0, fn path, acc -> acc + File.stat!(path).size end)
+
+    if total > max_bytes do
+      raise ArgumentError,
+            "turn-log directory is #{total} bytes, which exceeds the #{max_bytes}-byte :max_bytes cap"
+    end
+
+    Enum.flat_map(paths, &Analyzer.load/1)
   end
 
   # Typed-tool args arrive string-keyed (`:session-id` -> "session-id"); accept

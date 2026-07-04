@@ -29,6 +29,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
           owner_hash: String.t(),
           title: String.t() | nil,
           mode: :read_only | :write_capable,
+          tags: map(),
           created_at: DateTime.t()
         }
 
@@ -244,6 +245,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
     id = Map.get(opts, :session_id) || generate_id()
     title = string_or_nil(Map.get(opts, :title))
     mode = parse_mode(Map.get(opts, :mode))
+    tags = normalize_tags(Map.get(opts, :tags, %{}))
     ttl_ms = Config.clamp_ttl_ms(Map.get(opts, :ttl_ms))
     created_at = DateTime.utc_now()
 
@@ -253,6 +255,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       owner_hash: owner_hash,
       title: title,
       mode: mode,
+      tags: tags,
       created_at: created_at
     }
 
@@ -262,6 +265,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
         owner: owner,
         title: title,
         mode: mode,
+        tags: tags,
         ttl_ms: ttl_ms,
         limits: Config.session_limits(),
         registry: self()
@@ -386,4 +390,19 @@ defmodule PtcRunnerMcp.Sessions.Registry do
   defp parse_mode("write_capable"), do: :write_capable
   defp parse_mode(:write_capable), do: :write_capable
   defp parse_mode(_other), do: :read_only
+
+  defp normalize_tags(tags) when is_map(tags) and not is_struct(tags) do
+    tags
+    |> Enum.reduce(%{}, fn
+      {key, value}, acc
+      when is_binary(key) and
+             (is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value)) ->
+        Map.put(acc, key, value)
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp normalize_tags(_tags), do: %{}
 end

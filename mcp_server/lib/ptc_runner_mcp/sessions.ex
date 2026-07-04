@@ -644,6 +644,7 @@ defmodule PtcRunnerMcp.Sessions do
           |> maybe_put(:ttl_ms, Map.get(args, "ttl_ms"))
           |> maybe_put(:preludes, Map.get(args, "preludes"))
           |> maybe_put(:mode, Map.get(args, "mode"))
+          |> maybe_put(:tags, Map.get(args, "tags"))
 
         start_session(owner_context(args), opts)
 
@@ -681,9 +682,40 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp validate_start_args(args) when is_map(args) do
     case Enum.find(Map.keys(args), &(not start_arg_key?(&1))) do
-      nil -> :ok
+      nil -> validate_tags_arg(Map.get(args, "tags"))
       key -> {:error, "unexpected lisp_session_start argument: #{key}"}
     end
+  end
+
+  defp validate_tags_arg(nil), do: :ok
+
+  defp validate_tags_arg(tags) when is_map(tags) and not is_struct(tags) do
+    if map_size(tags) > 32 do
+      {:error, "tags may contain at most 32 entries"}
+    else
+      with :ok <- validate_tag_entries(tags) do
+        if Jason.encode!(tags) |> byte_size() > 4_096 do
+          {:error, "tags exceed 4096 encoded bytes"}
+        else
+          :ok
+        end
+      end
+    end
+  end
+
+  defp validate_tags_arg(_tags), do: {:error, "tags must be an object when supplied"}
+
+  defp validate_tag_entries(tags) do
+    Enum.reduce_while(tags, :ok, fn
+      {key, value}, :ok
+      when is_binary(key) and key != "" and
+             (is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value)) ->
+        {:cont, :ok}
+
+      _other, :ok ->
+        {:halt,
+         {:error, "tags must be an object with non-empty string keys and scalar JSON values"}}
+    end)
   end
 
   defp prepare_start_opts(opts) when is_map(opts) or is_list(opts) do
@@ -882,8 +914,9 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
-  defp start_arg_key?(key) when key in ["title", "ttl_ms", "preludes", "mode", "owner", :owner],
-    do: true
+  defp start_arg_key?(key)
+       when key in ["title", "ttl_ms", "preludes", "mode", "tags", "owner", :owner],
+       do: true
 
   defp start_arg_key?(_key), do: false
 
@@ -1083,6 +1116,13 @@ defmodule PtcRunnerMcp.Sessions do
                   "additionalProperties" => false
                 }
               ]
+            }
+          },
+          "tags" => %{
+            "type" => "object",
+            "maxProperties" => 32,
+            "additionalProperties" => %{
+              "type" => ["string", "number", "boolean", "null"]
             }
           }
         },
