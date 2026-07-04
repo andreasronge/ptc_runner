@@ -756,7 +756,7 @@ defmodule PtcRunner.PreludeStore do
     by_ref
     |> Map.keys()
     |> Enum.reduce_while({:ok, %{}}, fn ref, {:ok, compiled} ->
-      case compile_snapshot_ref(ref, by_ref, compiled, MapSet.new(), opts) do
+      case compile_snapshot_ref(ref, by_ref, compiled, [], opts) do
         {:ok, compiled} -> {:cont, {:ok, compiled}}
         {:error, _} = error -> {:halt, error}
       end
@@ -768,13 +768,13 @@ defmodule PtcRunner.PreludeStore do
       Map.has_key?(compiled, ref) ->
         {:ok, compiled}
 
-      MapSet.member?(visiting, ref) ->
+      ref in visiting ->
         {:error, error(:dependency_cycle, "snapshot contains a dependency cycle")}
 
       true ->
         with {:ok, version} <- fetch_snapshot_version(by_ref, ref),
              {:ok, compiled} <-
-               compile_snapshot_deps(version, by_ref, compiled, MapSet.put(visiting, ref), opts),
+               compile_snapshot_deps(version, by_ref, compiled, [ref | visiting], opts),
              {:ok, candidate} <- compile_snapshot_candidate(version, compiled, opts) do
           {:ok, Map.put(compiled, ref, candidate)}
         end

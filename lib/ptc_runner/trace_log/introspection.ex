@@ -371,8 +371,6 @@ defmodule PtcRunner.TraceLog.Introspection do
     end
   end
 
-  defp matches_tags?(_event, _tags), do: false
-
   defp matches_time?(_event, nil, nil), do: true
 
   defp matches_time?(event, from, to) do
