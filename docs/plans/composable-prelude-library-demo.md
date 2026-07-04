@@ -19,6 +19,11 @@ This plan uses the now-implemented `prelude/edit`, `prelude/form`, and declared
 prelude dependencies to test the next North Star claim: preludes should behave
 like composable capability libraries, not monolithic prompt bundles.
 
+Minimum implementation pin for the external run is `5055deac`, which adds
+read-only prelude introspection and session-mode `catalog_ops`. Later pins are
+fine, but the run must verify both capabilities through MCP before model
+stages.
+
 ## Objective
 
 Demonstrate and measure a split-prelude workflow:
@@ -68,6 +73,11 @@ Fresh server/store at the pinned commit. Validate independent write/attach,
 declared prelude dependencies, `prelude/edit`, `prelude/form`, and
 `prelude/forms` through MCP.
 
+Also validate stale-parent behavior through MCP. At `5055deac`, `prelude/write`
+honors `parent_checksum`/`parent_version` and fails stale writes closed, while
+`prelude/edit` edits the current candidate and does not expose caller-supplied
+expected-base fields.
+
 ### Stage 1 — Split Prelude Setup
 
 Human-seed the split prelude pair for this run:
@@ -92,6 +102,15 @@ The evidence should include:
   / preview-driven waste;
 - split-prelude export surfaces and form metadata via read-only prelude
   introspection.
+
+Recommendation sections from prior notes should be redacted before serving
+evidence to the proposer. The A/B table and observed findings are evidence; the
+operator's "what to do next" bullets would steer the layer choice.
+
+Hold the `prelude/edit` expected-base verifier finding out of proposer evidence
+by default. Include it only if the pre-registered answer key explicitly treats
+the missing expected-base contract as an acceptable
+`ptc_runner`-engineering-request answer.
 
 The analyst separates observed facts from proposed changes.
 
@@ -138,11 +157,23 @@ Required measurements:
 - touched form names;
 - whether `prelude/edit` prevented the prior position-blind retry class.
 
+If the accepted edit changes `paged_base`, the run must also perform a gated
+companion re-pin of `paged_audit`; otherwise `paged_audit@1` continues to
+attach the old base checksum and validation can silently test unchanged code.
+
+After any editor write, the orchestrator should compare the edit result's
+`base_version` and `parent_checksum` with the prelude version/checksum the
+editor last inspected. A mismatch is a stale-prepared-edit event and should
+stop at the human gate, because current `prelude/edit` cannot pin an expected
+base itself.
+
 ### Stage 6 — Validator
 
 Fresh read-only process attaches the changed top-level prelude and validates:
 
 - transitive dependency pins resolve;
+- a base-layer change is visible through the top-level audit attach closure
+  after the companion re-pin;
 - changed behavior works;
 - unchanged layer contracts still pass;
 - public surface remains trimmed;
@@ -163,7 +194,6 @@ Compare directly against the prior baseline:
 
 Expected value of `prelude/edit`:
 
-- fewer evals before write;
 - no whole-source or anchor-string authoring;
 - touched forms explicit in the edit request/result;
 - no source-wide qualifier replacement;
@@ -178,8 +208,10 @@ the edit request/result, and parent checksum visibility.
 Primary:
 
 - Correct-layer proposal: did the loop choose `paged_base`, `paged_audit`, docs,
-  or a `ptc_runner` request for the right reason?
-- Editing efficiency: evals before first write/edit vs. prior baseline of 15.
+  or a `ptc_runner` request for the right reason, scored against the
+  pre-registered key?
+- Editing structure: typed edit request, explicit touched forms, no
+  whole-source or anchor-string authoring.
 - Editing quality: retries and deviations vs. prior baseline of one compile
   retry plus one position-blind string-literal deviation.
 - Surface economy: number of public exports and discovery turns before the
@@ -190,15 +222,22 @@ Primary:
 Secondary:
 
 - `catalog_ops` count from MCP session turn logs;
+- one-shot replay eval count vs. prior baseline of 15, treated as qualitative
+  unless repeated 3-5 times;
 - print-only / preview-driven turns;
 - evidence-reading turns before first substantive analysis;
 - whether reviewer detects stale-base or wrong-layer risk.
 
 Staleness probe:
 
-- editor prepares an edit against version N;
-- a second write bumps the target prelude to N+1;
-- the original edit must fail closed on the parent-version/checksum guard.
+- write version N;
+- bump the target prelude to N+1;
+- submit a stale `prelude/write` with version N's parent-version/checksum;
+- require fail-closed behavior through the stale-base guard.
+
+Do not claim caller-prepared `prelude/edit` staleness unless `ptc_runner` first
+adds an explicit expected-base contract to `prelude/edit`; that contract is not
+present at `5055deac`.
 
 Non-metrics:
 
@@ -233,8 +272,8 @@ Minimum success:
 Strong success:
 
 - the loop proposes the correct layer without human steering;
-- `prelude/edit` materially improves the replay metrics over the 2026-07-03
-  recipe baseline;
+- `prelude/edit` shows the structural improvements expected over the
+  2026-07-03 recipe baseline;
 - discovery cost is measured structurally and falls after surface trimming.
 
 Sharp negative result:
