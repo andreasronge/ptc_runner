@@ -13,7 +13,12 @@ defmodule PtcRunnerMcp.Http.Router do
     Telemetry
   }
 
-  alias PtcRunnerMcp.{JsonRpc, Limits, Log, Version}
+  alias PtcRunner.PreludeStore
+  alias PtcRunnerMcp.{JsonRpc, Lifecycle, Limits, Log, Version}
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
+
+  @admin_snapshot_path "/admin/prelude-store/snapshot"
+  @admin_export_path "/admin/prelude-store/export"
 
   plug(:match)
   plug(:instrument_request)
@@ -41,6 +46,14 @@ defmodule PtcRunnerMcp.Http.Router do
     end
   end
 
+  get @admin_snapshot_path do
+    route_admin(conn, config(conn), :snapshot)
+  end
+
+  get @admin_export_path do
+    route_admin(conn, config(conn), :export)
+  end
+
   match _ do
     cfg = config(conn)
 
@@ -59,6 +72,179 @@ defmodule PtcRunnerMcp.Http.Router do
       {:error, :origin} -> Plug.Conn.send_resp(conn, 403, "forbidden")
       {:error, :host} -> Plug.Conn.send_resp(conn, 403, "forbidden")
     end
+  end
+
+  defp route_admin(conn, %{admin_token: nil}, _action) do
+    Plug.Conn.send_resp(conn, 404, "not found")
+  end
+
+  defp route_admin(conn, cfg, action) do
+    case authenticate_admin(conn, cfg) do
+      :ok -> dispatch_admin(conn, action)
+      {:error, {:auth, reason}} -> admin_auth_error(conn, reason)
+      {:error, {:auth_rate_limited, retry_after_s}} -> rate_limit_error(conn, retry_after_s)
+      {:error, :origin} -> Plug.Conn.send_resp(conn, 403, "forbidden")
+      {:error, :host} -> Plug.Conn.send_resp(conn, 403, "forbidden")
+    end
+  end
+
+  defp dispatch_admin(conn, action) do
+    case SessionsConfig.prelude_store() do
+      %PreludeStore{} = store ->
+        respond_admin(conn, action, store)
+
+      nil ->
+        admin_json(conn, 503, %{
+          "status" => "error",
+          "reason" => "prelude_store_unavailable",
+          "message" => "prelude store is not configured"
+        })
+    end
+  end
+
+  defp respond_admin(conn, :snapshot, store) do
+    case PreludeStore.snapshot(store) do
+      {:ok, snapshot} ->
+        fingerprint = PreludeStore.store_fingerprint(snapshot)
+
+        payload =
+          admin_envelope(%{
+            "store_fingerprint" => fingerprint,
+            "snapshot" => snapshot
+          })
+
+        log_admin_export(:snapshot, fingerprint)
+        admin_json(conn, 200, payload)
+    end
+  end
+
+  defp respond_admin(conn, :export, store) do
+    case PreludeStore.export_bundle(store) do
+      {:ok, bundle} ->
+        fingerprint = bundle["store_fingerprint"]
+
+        payload =
+          bundle
+          |> Map.take(["manifest", "files", "store_fingerprint"])
+          |> admin_envelope()
+
+        log_admin_export(:export, fingerprint)
+        admin_json(conn, 200, payload)
+
+      {:error, error} ->
+        admin_json(conn, admin_export_error_status(error), %{
+          "status" => "error",
+          "reason" => to_string(Map.get(error, :reason, :export_failed)),
+          "message" => Map.get(error, :message, "failed to export prelude store")
+        })
+    end
+  end
+
+  defp admin_json(conn, status, body) do
+    case Jason.encode(body) do
+      {:ok, encoded} ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(status, encoded)
+
+      {:error, reason} ->
+        Log.log(:error, "http_admin_json_encode_failed", %{
+          request_id: conn.private[:ptc_http_request_id],
+          path: conn.request_path,
+          reason: Exception.message(reason)
+        })
+
+        json(conn, 500, %{
+          "status" => "error",
+          "reason" => "admin_response_encode_failed",
+          "message" => "failed to encode admin response"
+        })
+    end
+  end
+
+  defp admin_export_error_status(%{reason: :non_current_dependency_pin}), do: 409
+  defp admin_export_error_status(_error), do: 500
+
+  defp admin_envelope(extra) when is_map(extra) do
+    %{
+      "status" => "ok",
+      "schema_version" => 1,
+      "boot_id" => Lifecycle.boot_id(),
+      "commit" => Version.git_commit(),
+      "git_dirty" => Version.git_dirty?(),
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+    |> Map.merge(extra)
+  end
+
+  defp log_admin_export(action, fingerprint) do
+    Log.log(
+      :info,
+      "http_admin_prelude_store_#{action}",
+      Lifecycle.lifecycle_fields(%{
+        store_fingerprint: fingerprint,
+        git_commit: Version.git_commit(),
+        git_dirty: Version.git_dirty?()
+      })
+    )
+  end
+
+  defp authenticate_admin(conn, %{admin_token: token} = cfg) when is_binary(token) do
+    cond do
+      not Host.allowed?(conn, cfg) ->
+        Telemetry.emit([:host, :rejected], %{count: 1}, base_meta(conn, cfg))
+        {:error, :host}
+
+      not Origin.allowed?(conn, cfg) ->
+        {:error, :origin}
+
+      true ->
+        authenticate_admin_bearer(conn, cfg, token)
+    end
+  end
+
+  defp authenticate_admin_bearer(conn, cfg, token) do
+    source = {:admin, conn.remote_ip}
+    limiter_cfg = %{cfg | auth_token: token}
+
+    case AuthRateLimiter.check(source, limiter_cfg) do
+      {:blocked, retry_after_s} ->
+        {:error, {:auth_rate_limited, retry_after_s}}
+
+      :ok ->
+        case compare_admin_bearer(conn, token) do
+          :ok ->
+            AuthRateLimiter.reset(source, limiter_cfg)
+            :ok
+
+          {:error, reason} ->
+            AuthRateLimiter.record_failure(source, limiter_cfg)
+
+            Telemetry.emit(
+              [:auth, :failure],
+              %{count: 1},
+              base_meta(conn, cfg, %{reason: reason, surface: :admin})
+            )
+
+            {:error, {:auth, reason}}
+        end
+    end
+  end
+
+  defp compare_admin_bearer(conn, token) do
+    with ["Bearer " <> presented] <- Plug.Conn.get_req_header(conn, "authorization"),
+         true <- constant_time_equal(presented, token) do
+      :ok
+    else
+      [] -> {:error, :missing}
+      _ -> {:error, :invalid}
+    end
+  end
+
+  defp constant_time_equal(a, b) when is_binary(a) and is_binary(b) do
+    Plug.Crypto.secure_compare(a, b)
+  rescue
+    _ -> false
   end
 
   defp dispatch_method(%{method: "DELETE"} = conn, _cfg, owner) do
@@ -311,6 +497,8 @@ defmodule PtcRunnerMcp.Http.Router do
     |> Plug.Conn.put_resp_header("www-authenticate", header)
     |> Plug.Conn.send_resp(status, "")
   end
+
+  defp admin_auth_error(conn, reason), do: auth_error(conn, reason)
 
   # No `www-authenticate` here: a blocked source must not be told whether
   # its token was missing or invalid.

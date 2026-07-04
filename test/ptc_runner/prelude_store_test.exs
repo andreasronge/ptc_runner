@@ -190,6 +190,283 @@ defmodule PtcRunner.PreludeStoreTest do
     assert selected.current_version == 1
   end
 
+  test "snapshot restore preserves version gaps, current pointers, and stale checksum safety" do
+    {:ok, store} = PreludeStore.new(max_versions: 2)
+
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, _selected} = PreludeStore.set_default(store, "paged", 1)
+
+    v2 = """
+    (ns paged)
+    (defn inspect [] {:version 2})
+    """
+
+    assert {:ok, second} =
+             PreludeStore.write(store, "paged", v2, %{
+               "parent_checksum" => first.checksum,
+               "parent_version" => 1
+             })
+
+    # Pin-only rewrite: same source checksum, different dependency metadata shape.
+    assert {:ok, third} =
+             PreludeStore.write(store, "paged", v2, %{
+               "parent_checksum" => second.checksum,
+               "parent_version" => 2,
+               "reason" => "same source rewrite"
+             })
+
+    v4 = """
+    (ns paged)
+    (defn inspect [] {:version 4})
+    """
+
+    assert {:ok, fourth} =
+             PreludeStore.write(store, "paged", v4, %{
+               "parent_checksum" => third.checksum,
+               "parent_version" => 3
+             })
+
+    assert {:ok, _selected} = PreludeStore.set_default(store, "paged", 1)
+    assert {:ok, snapshot} = PreludeStore.snapshot(store)
+    assert Enum.map(snapshot["versions"], & &1["version"]) == [1, 3, 4]
+
+    assert {:ok, restored} = PreludeStore.restore(snapshot, max_versions: 2)
+    assert PreludeStore.diff(snapshot, restored) == %{added: [], removed: [], changed: []}
+    assert length(owned_ets_tables(restored.pid)) == 1
+
+    assert {:ok, current} = PreludeStore.read(restored, "paged")
+    assert current.version == 1
+
+    assert {:ok, latest} = PreludeStore.read(restored, "paged@4")
+    assert latest.version == fourth.version
+
+    assert {:error, %{reason: :stale_base}} =
+             PreludeStore.write(restored, "paged", v2, %{"parent_checksum" => third.checksum})
+  end
+
+  test "restore rejects dependency pin checksum drift inside a snapshot" do
+    {:ok, store} = PreludeStore.new()
+
+    base_source = "(ns base)\n(defn helper [x] x)\n"
+    audit_source = "(ns audit)\n(defn check [x] (base/helper x))\n"
+
+    assert {:ok, base} = PreludeStore.write(store, "base", base_source)
+
+    assert {:ok, _audit} =
+             PreludeStore.write(store, "audit", audit_source, %{
+               "requires_preludes" => ["base@#{base.version}"]
+             })
+
+    assert {:ok, snapshot} = PreludeStore.snapshot(store)
+
+    corrupted =
+      update_in(snapshot, ["versions"], fn versions ->
+        Enum.map(versions, fn
+          %{"id" => "audit", "metadata" => %{"prelude_deps" => [pin]}} = version ->
+            put_in(version, ["metadata", "prelude_deps"], [
+              Map.put(pin, "checksum", String.duplicate("0", 64))
+            ])
+
+          version ->
+            version
+        end)
+      end)
+
+    assert {:error, %{reason: :checksum_mismatch, message: message}} =
+             PreludeStore.restore(corrupted)
+
+    assert message =~ "snapshot dependency checksum mismatch"
+    assert message =~ "base@#{base.version}"
+  end
+
+  test "restore rejects snapshot control pointers to missing versions" do
+    {:ok, store} = PreludeStore.new()
+    assert {:ok, _first} = PreludeStore.write(store, "paged", @paged_v1)
+    assert {:ok, snapshot} = PreludeStore.snapshot(store)
+
+    missing_current = put_in(snapshot, ["current", "paged", "version"], 2)
+
+    assert {:error, %{reason: :invalid_snapshot, message: message}} =
+             PreludeStore.restore(missing_current)
+
+    assert message =~ "snapshot control pointer"
+
+    missing_latest = put_in(snapshot, ["latest", "paged"], 2)
+
+    assert {:error, %{reason: :invalid_snapshot, message: message}} =
+             PreludeStore.restore(missing_latest)
+
+    assert message =~ "snapshot control pointer"
+
+    inconsistent_ids = put_in(snapshot, ["latest"], %{"other" => 1})
+
+    assert {:error, %{reason: :invalid_snapshot, message: message}} =
+             PreludeStore.restore(inconsistent_ids)
+
+    assert message =~ "current/latest ids"
+  end
+
+  test "restore rejects stale latest pointers in snapshot control maps" do
+    {:ok, store} = PreludeStore.new()
+    assert {:ok, first} = PreludeStore.write(store, "paged", @paged_v1)
+
+    v2 = """
+    (ns paged)
+    (defn inspect [] {:version 2})
+    """
+
+    assert {:ok, _second} =
+             PreludeStore.write(store, "paged", v2, %{
+               "parent_checksum" => first.checksum,
+               "parent_version" => first.version
+             })
+
+    assert {:ok, snapshot} = PreludeStore.snapshot(store)
+
+    stale_latest =
+      snapshot
+      |> put_in(["latest", "paged"], 1)
+      |> put_in(["current", "paged", "version"], 1)
+
+    assert {:error, %{reason: :invalid_snapshot, message: message}} =
+             PreludeStore.restore(stale_latest)
+
+    assert message =~ "latest pointer is not retained max"
+
+    current_after_latest = put_in(snapshot, ["latest", "paged"], 1)
+
+    assert {:error, %{reason: :invalid_snapshot, message: message}} =
+             PreludeStore.restore(current_after_latest)
+
+    assert message =~ "current pointer is after latest"
+  end
+
+  @tag :tmp_dir
+  test "export writes current sources, manifest, and dependency sidecars", %{tmp_dir: dir} do
+    {:ok, store} = PreludeStore.new()
+
+    base_source = """
+    (ns base)
+    (defn helper [x] x)
+    """
+
+    audit_source = """
+    (ns audit)
+    (defn check [x] (base/helper x))
+    """
+
+    assert {:ok, _base_v1} = PreludeStore.write(store, "base", base_source)
+    assert {:ok, _base_v2} = PreludeStore.write(store, "base", base_source <> "\n;; v2\n")
+    assert {:ok, base} = PreludeStore.write(store, "base", base_source <> "\n;; v3\n")
+
+    assert {:ok, audit} =
+             PreludeStore.write(store, "audit", audit_source, %{
+               "requires_preludes" => ["base@#{base.version}"]
+             })
+
+    assert {:ok, manifest} = PreludeStore.export(store, dir)
+
+    assert File.read!(Path.join(dir, "base.clj")) == base_source <> "\n;; v3\n"
+    assert File.read!(Path.join(dir, "audit.clj")) == audit_source
+    assert File.read!(Path.join(dir, "audit.deps")) == "base\n"
+    assert File.exists?(Path.join(dir, "prelude_store_manifest.json"))
+
+    assert Enum.map(manifest["entries"], & &1["id"]) == ["audit", "base"]
+    assert manifest["store_fingerprint"] == PreludeStore.store_fingerprint(store)
+    audit_entry = Enum.find(manifest["entries"], &(&1["id"] == "audit"))
+    assert audit_entry["checksum"] == audit.checksum
+    assert audit_entry["deps"] == ["base@3"]
+    assert audit_entry["seed_deps"] == ["base"]
+  end
+
+  test "export_bundle returns seed-compatible files, manifest, and stable fingerprint" do
+    {:ok, store} = PreludeStore.new()
+
+    base_source = "(ns base)\n(defn helper [x] x)\n"
+    audit_source = "(ns audit)\n(defn check [x] (base/helper x))\n"
+
+    assert {:ok, base} = PreludeStore.write(store, "base", base_source)
+
+    assert {:ok, audit} =
+             PreludeStore.write(store, "audit", audit_source, %{
+               "requires_preludes" => ["base@#{base.version}"]
+             })
+
+    assert {:ok, bundle} = PreludeStore.export_bundle(store)
+    fingerprint = PreludeStore.store_fingerprint(store)
+
+    assert bundle["schema_version"] == 1
+    assert bundle["store_fingerprint"] == fingerprint
+    assert bundle["manifest"]["store_fingerprint"] == fingerprint
+    assert Enum.map(bundle["manifest"]["entries"], & &1["id"]) == ["audit", "base"]
+
+    files = Map.new(bundle["files"], &{&1["path"], &1["source"]})
+    assert files["base.clj"] == base_source
+    assert files["audit.clj"] == audit_source
+    assert files["audit.deps"] == "base\n"
+    refute Map.has_key?(files, "base.deps")
+
+    audit_entry = Enum.find(bundle["manifest"]["entries"], &(&1["id"] == "audit"))
+    assert audit_entry["checksum"] == audit.checksum
+    assert audit_entry["deps"] == ["base@#{base.version}"]
+    assert audit_entry["seed_deps"] == ["base"]
+  end
+
+  @tag :tmp_dir
+  test "current-source export fails closed when a current prelude pins a non-current dep", %{
+    tmp_dir: dir
+  } do
+    {:ok, store} = PreludeStore.new()
+
+    base_v1 = "(ns base)\n(defn helper [x] x)\n"
+    audit_source = "(ns audit)\n(defn check [x] (base/helper x))\n"
+    base_v2 = "(ns base)\n(defn helper2 [x] x)\n"
+
+    assert {:ok, base} = PreludeStore.write(store, "base", base_v1)
+
+    assert {:ok, _audit} =
+             PreludeStore.write(store, "audit", audit_source, %{
+               "requires_preludes" => ["base@#{base.version}"]
+             })
+
+    assert {:ok, _base_v2} =
+             PreludeStore.write(store, "base", base_v2, %{
+               "parent_checksum" => base.checksum,
+               "parent_version" => base.version
+             })
+
+    assert {:error, %{reason: :non_current_dependency_pin, message: message}} =
+             PreludeStore.export_bundle(store)
+
+    assert message =~ "pins base@1"
+    assert message =~ "current base"
+
+    assert {:error, %{reason: :non_current_dependency_pin}} = PreludeStore.export(store, dir)
+  end
+
+  @tag :tmp_dir
+  test "export returns an error when it cannot write the target directory", %{tmp_dir: dir} do
+    {:ok, store} = PreludeStore.new()
+    assert {:ok, _candidate} = PreludeStore.write(store, "paged", @paged_v1)
+
+    blocked = Path.join(dir, "blocked")
+    File.write!(blocked, "not a directory")
+
+    assert {:error, %{reason: :export_failed}} =
+             PreludeStore.export(store, Path.join(blocked, "nested"))
+  end
+
+  @tag :tmp_dir
+  test "export normalizes manifest write errors", %{tmp_dir: dir} do
+    {:ok, store} = PreludeStore.new()
+    assert {:ok, _candidate} = PreludeStore.write(store, "paged", @paged_v1)
+
+    assert {:error, %{reason: :export_failed, message: message}} =
+             PreludeStore.export(store, dir, manifest_name: "missing/manifest.json")
+
+    assert message =~ ":enoent"
+  end
+
   test "history validates ids and unknown ids return not_found" do
     {:ok, store} = PreludeStore.new()
 
@@ -1369,5 +1646,15 @@ defmodule PtcRunner.PreludeStoreTest do
       refute Map.has_key?(result.metadata, "prelude_deps")
       refute Map.has_key?(result.metadata, "requires_preludes")
     end
+  end
+
+  defp owned_ets_tables(pid) do
+    Enum.filter(:ets.all(), fn table ->
+      try do
+        :ets.info(table, :owner) == pid
+      rescue
+        ArgumentError -> false
+      end
+    end)
   end
 end

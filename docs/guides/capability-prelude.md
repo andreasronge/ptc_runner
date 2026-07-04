@@ -421,6 +421,25 @@ does not delete later versions, but normal retention pruning may still remove
 superseded rows that are neither explicitly selected nor inside the retained
 latest-version window.
 
+For reproducible experiments and operator handoffs, the store also supports
+host-side state capture:
+
+```elixir
+{:ok, snapshot} = PtcRunner.PreludeStore.snapshot(store)
+{:ok, restored} = PtcRunner.PreludeStore.restore(snapshot)
+diff = PtcRunner.PreludeStore.diff(snapshot, restored)
+{:ok, manifest} = PtcRunner.PreludeStore.export(restored, "priv/preludes")
+```
+
+`snapshot/1` and `restore/2` preserve retained version numbers, current/default
+selections, dependency pins, checksums, and stale-base safety state. `diff/2`
+compares snapshots or a snapshot against a live store. `export/3` writes the
+current source files plus a manifest and `.deps` sidecars compatible with the
+existing seed-directory loader. Because export is a flattened current-source
+seed, sidecars use seed-local dependency ids while the manifest records the
+original pinned dependency versions. See `PtcRunner.PreludeStore` for the exact
+snapshot format and error contracts.
+
 Stored source and metadata are untrusted prompt surfaces. Use
 `PtcRunner.PreludeCandidate.public_view/1` for model-facing projections.
 Model-facing store tools keep source bounded and filter metadata to documented

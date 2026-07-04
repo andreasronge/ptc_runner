@@ -24,6 +24,7 @@ defmodule PtcRunnerMcp.Http.Config do
           port: pos_integer(),
           path: String.t(),
           auth_token: String.t() | nil,
+          admin_token: String.t() | nil,
           auth_disabled: boolean(),
           allowed_origins: [String.t()],
           request_timeout_ms: pos_integer(),
@@ -58,6 +59,12 @@ defmodule PtcRunnerMcp.Http.Config do
           normalize_path(read_string(args, :http_path, "PTC_RUNNER_MCP_HTTP_PATH", @default_path)),
         auth_token:
           read_optional_string(args, :http_auth_token, "PTC_RUNNER_MCP_HTTP_AUTH_TOKEN"),
+        admin_token:
+          read_optional_string(
+            args,
+            :http_admin_token,
+            "PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN"
+          ),
         auth_disabled:
           read_bool(args, :http_disable_auth, "PTC_RUNNER_MCP_HTTP_DISABLE_AUTH", false),
         allowed_origins:
@@ -182,7 +189,15 @@ defmodule PtcRunnerMcp.Http.Config do
   end
 
   defp validate_path_collisions(cfg) do
-    paths = [cfg.path, "/health", "/ready", cfg.metrics_path]
+    paths =
+      [
+        cfg.path,
+        "/health",
+        "/ready",
+        cfg.metrics_path,
+        "/admin/prelude-store/snapshot",
+        "/admin/prelude-store/export"
+      ]
 
     if Enum.uniq(paths) == paths do
       :ok
@@ -194,6 +209,15 @@ defmodule PtcRunnerMcp.Http.Config do
   defp validate_auth(%{auth_token: token})
        when is_binary(token) and byte_size(token) < @token_min_bytes do
     {:error, "HTTP auth token must be at least #{@token_min_bytes} characters"}
+  end
+
+  defp validate_auth(%{admin_token: token})
+       when is_binary(token) and byte_size(token) < @token_min_bytes do
+    {:error, "HTTP admin token must be at least #{@token_min_bytes} characters"}
+  end
+
+  defp validate_auth(%{auth_token: token, admin_token: token}) when is_binary(token) do
+    {:error, "HTTP admin token must be different from HTTP auth token"}
   end
 
   defp validate_auth(%{auth_disabled: true, allow_unsafe_network: true}),

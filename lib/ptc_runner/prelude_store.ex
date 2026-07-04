@@ -75,6 +75,332 @@ defmodule PtcRunner.PreludeStore do
   @spec list(t()) :: [map()]
   def list(%__MODULE__{} = store), do: Server.list(store)
 
+  @doc """
+  Returns an exact host/operator snapshot of retained store state.
+
+  Unlike `PreludeCandidate.public_view/2`, this format is for restore and
+  auditing. It keeps exact source text and full operational metadata.
+  """
+  @spec snapshot(t()) :: {:ok, map()}
+  def snapshot(%__MODULE__{} = store), do: {:ok, Server.snapshot(store)}
+
+  @doc """
+  Restores a fresh volatile store from a snapshot produced by `snapshot/1`.
+  """
+  @spec restore(map(), keyword()) :: {:ok, t()} | {:error, map()}
+  def restore(snapshot, opts \\ [])
+
+  def restore(snapshot, opts) when is_map(snapshot) and is_list(opts) do
+    with :ok <- validate_snapshot_version(snapshot),
+         {:ok, store} <- new(opts) do
+      case restore_into(snapshot, store) do
+        :ok ->
+          {:ok, store}
+
+        {:error, _} = error ->
+          stop_restore_store(store)
+          error
+      end
+    end
+  end
+
+  def restore(_snapshot, _opts), do: {:error, error(:invalid_snapshot, "invalid snapshot")}
+
+  @doc """
+  Diffs two snapshots, or a snapshot and a live store.
+  """
+  @spec diff(map() | t(), map() | t()) :: map()
+  def diff(left, right) do
+    left = snapshot_map!(left)
+    right = snapshot_map!(right)
+
+    left_ids = snapshot_ids(left)
+    right_ids = snapshot_ids(right)
+    all_ids = (left_ids ++ right_ids) |> Enum.uniq() |> Enum.sort()
+
+    changes =
+      Enum.reduce(all_ids, %{added: [], removed: [], changed: []}, fn id, acc ->
+        l = snapshot_entry(left, id)
+        r = snapshot_entry(right, id)
+
+        cond do
+          l == nil ->
+            %{acc | added: [id | acc.added]}
+
+          r == nil ->
+            %{acc | removed: [id | acc.removed]}
+
+          l != r ->
+            %{acc | changed: [diff_id(id, l, r) | acc.changed]}
+
+          true ->
+            acc
+        end
+      end)
+
+    %{
+      added: Enum.reverse(changes.added),
+      removed: Enum.reverse(changes.removed),
+      changed: Enum.reverse(changes.changed)
+    }
+  end
+
+  @doc """
+  Exports current store sources to a seed-compatible directory.
+  """
+  @spec export(t(), Path.t(), keyword()) :: {:ok, map()} | {:error, map()}
+  def export(%__MODULE__{} = store, dir, opts \\ []) when is_binary(dir) and is_list(opts) do
+    store
+    |> do_export(dir, opts)
+    |> normalize_export_result()
+  end
+
+  defp do_export(%__MODULE__{} = store, dir, opts) do
+    with {:ok, snapshot} <- snapshot(store),
+         :ok <- File.mkdir_p(dir),
+         {:ok, manifest_entries} <-
+           export_current_versions(snapshot, Map.fetch!(snapshot, "current"), dir) do
+      manifest =
+        manifest_entries
+        |> export_manifest()
+        |> Map.put("store_fingerprint", store_fingerprint(snapshot))
+
+      manifest_path =
+        Path.join(dir, Keyword.get(opts, :manifest_name, "prelude_store_manifest.json"))
+
+      with {:ok, manifest_json} <- Jason.encode(manifest, pretty: true),
+           :ok <- File.write(manifest_path, manifest_json) do
+        {:ok, manifest}
+      end
+    end
+  end
+
+  defp normalize_export_result({:ok, _} = ok), do: ok
+
+  defp normalize_export_result({:error, %{reason: reason}} = error) when is_atom(reason),
+    do: error
+
+  defp normalize_export_result({:error, %Jason.EncodeError{} = reason}) do
+    {:error,
+     error(:export_failed, "failed to export prelude store: #{Exception.message(reason)}")}
+  end
+
+  defp normalize_export_result({:error, reason}) do
+    {:error, error(:export_failed, "failed to export prelude store: #{inspect(reason)}")}
+  end
+
+  defp normalize_export_result(other) do
+    {:error, error(:export_failed, "failed to export prelude store: #{inspect(other)}")}
+  end
+
+  @doc """
+  Returns a seed-compatible current-source export as data.
+
+  The bundle mirrors `export/3`: source files are named `<id>.clj`, dependent
+  preludes get plain `<id>.deps` sidecars containing one seed dependency per
+  line, and the manifest describes the exported current entries.
+  """
+  @spec export_bundle(t()) :: {:ok, map()} | {:error, map()}
+  def export_bundle(%__MODULE__{} = store) do
+    with {:ok, snapshot} <- snapshot(store),
+         {:ok, current_rows} <- export_current_rows(snapshot) do
+      current = Map.fetch!(snapshot, "current")
+      manifest_entries = Enum.map(current_rows, &manifest_entry(&1, current))
+
+      manifest =
+        manifest_entries
+        |> export_manifest()
+        |> Map.put("store_fingerprint", store_fingerprint(snapshot))
+
+      {:ok,
+       %{
+         "schema_version" => 1,
+         "created_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+         "store_fingerprint" => manifest["store_fingerprint"],
+         "manifest" => manifest,
+         "files" => export_files(current_rows)
+       }}
+    end
+  end
+
+  @doc """
+  Returns a stable fingerprint over the current id/version/checksum set.
+  """
+  @spec store_fingerprint(t() | map()) :: String.t()
+  def store_fingerprint(%__MODULE__{} = store) do
+    {:ok, snapshot} = snapshot(store)
+    store_fingerprint(snapshot)
+  end
+
+  def store_fingerprint(%{"versions" => versions, "current" => current})
+      when is_list(versions) and is_map(current) do
+    %{"versions" => versions}
+    |> current_version_rows(current)
+    |> Enum.map_join("\n", fn %{"id" => id, "version" => version, "checksum" => checksum} ->
+      "#{id}\t#{version}\t#{checksum}"
+    end)
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+    |> then(&("sha256:" <> &1))
+  end
+
+  defp restore_into(snapshot, store) do
+    with {:ok, importable} <- compile_snapshot(snapshot, store.opts),
+         :ok <- Server.import_snapshot(store, importable) do
+      verify_restored(snapshot, store)
+    end
+  end
+
+  defp stop_restore_store(%__MODULE__{pid: pid}) do
+    if Process.alive?(pid) do
+      GenServer.stop(pid, :normal, 1_000)
+    end
+
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp export_current_versions(snapshot, current, dir)
+       when is_map(snapshot) and is_map(current) and is_binary(dir) do
+    with {:ok, current_rows} <- export_current_rows(snapshot) do
+      current_rows
+      |> Enum.reduce_while({:ok, []}, fn version, {:ok, acc} ->
+        file = source_file(version)
+        path = Path.join(dir, file)
+
+        with :ok <- File.write(path, version["source"]),
+             :ok <- write_deps_sidecar(dir, file, version) do
+          {:cont, {:ok, [manifest_entry(version, current) | acc]}}
+        else
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, entries} -> {:ok, Enum.reverse(entries)}
+        {:error, _} = error -> error
+      end
+    end
+  rescue
+    _ -> {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+  end
+
+  defp export_current_versions(_snapshot, _current, _dir) do
+    {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+  end
+
+  defp export_current_rows(%{"current" => current} = snapshot)
+       when is_map(snapshot) and is_map(current) do
+    rows = current_version_rows(snapshot, current)
+
+    with :ok <- validate_current_dep_pins(rows) do
+      {:ok, rows}
+    end
+  rescue
+    _ -> {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+  end
+
+  defp export_current_rows(_snapshot),
+    do: {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+
+  defp current_version_rows(%{"versions" => versions}, current)
+       when is_list(versions) and is_map(current) do
+    versions
+    |> Enum.filter(fn version ->
+      get_in(current, [version["id"], "version"]) == version["version"]
+    end)
+    |> Enum.sort_by(& &1["id"])
+  end
+
+  defp validate_current_dep_pins(current_rows) do
+    by_id = Map.new(current_rows, &{&1["id"], &1})
+
+    Enum.reduce_while(current_rows, :ok, fn version, :ok ->
+      case non_current_dep_pin(version, by_id) do
+        nil -> {:cont, :ok}
+        error -> {:halt, {:error, error}}
+      end
+    end)
+  end
+
+  defp non_current_dep_pin(version, by_id) do
+    version
+    |> Map.get("metadata", %{})
+    |> PreludeCandidate.dep_pins()
+    |> Enum.find_value(fn pin ->
+      pin_id = pin.id
+      pin_version = pin.version
+      pin_checksum = pin.checksum
+
+      case Map.get(by_id, pin_id) do
+        %{"version" => current_version, "checksum" => current_checksum}
+        when current_version == pin_version and current_checksum == pin_checksum ->
+          nil
+
+        %{"version" => current_version, "checksum" => current_checksum} ->
+          error(
+            :non_current_dependency_pin,
+            "cannot export current-source seed: #{version["id"]}@#{version["version"]} " <>
+              "pins #{pin_id}@#{pin_version}/#{pin_checksum}, but current #{pin_id} is " <>
+              "@#{current_version}/#{current_checksum}; use snapshot/restore for exact retained state"
+          )
+
+        nil ->
+          error(
+            :non_current_dependency_pin,
+            "cannot export current-source seed: #{version["id"]}@#{version["version"]} " <>
+              "pins missing current dependency #{pin_id}@#{pin_version}; use snapshot/restore"
+          )
+      end
+    end)
+  end
+
+  defp source_file(version), do: "#{version["id"]}.clj"
+
+  defp manifest_entry(version, current) do
+    %{
+      "id" => version["id"],
+      "version" => version["version"],
+      "checksum" => version["checksum"],
+      "file" => source_file(version),
+      "deps" => dep_refs(version),
+      "seed_deps" => seed_dep_refs(version),
+      "metadata" => version["metadata"],
+      "default_metadata" => get_in(current, [version["id"], "metadata"]) || %{}
+    }
+  end
+
+  defp export_manifest(manifest_entries) do
+    %{
+      "schema_version" => 1,
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "entries" => Enum.sort_by(manifest_entries, & &1["id"])
+    }
+  end
+
+  defp export_files(current_rows) do
+    current_rows
+    |> Enum.flat_map(fn version ->
+      file = source_file(version)
+      source = version["source"]
+      source_file = %{"path" => file, "source" => source}
+      seed_deps = seed_dep_refs(version)
+
+      case seed_deps do
+        [] ->
+          [source_file]
+
+        deps ->
+          sidecar = %{
+            "path" => Path.rootname(file, ".clj") <> ".deps",
+            "source" => Enum.join(deps, "\n") <> "\n"
+          }
+
+          [source_file, sidecar]
+      end
+    end)
+  end
+
   @doc "Returns bounded summary rows for retained versions of one prelude id."
   @spec history(t(), String.t()) :: {:ok, [map()]} | {:error, map()}
   def history(%__MODULE__{} = store, id) do
@@ -274,6 +600,355 @@ defmodule PtcRunner.PreludeStore do
        :invalid_argument,
        "set_default/4 requires string id, positive integer version, and map metadata"
      )}
+  end
+
+  defp validate_snapshot_version(%{"schema_version" => 1}), do: :ok
+
+  defp validate_snapshot_version(_snapshot) do
+    {:error, error(:invalid_snapshot, "unsupported prelude store snapshot schema")}
+  end
+
+  defp compile_snapshot(%{"versions" => versions} = snapshot, opts) when is_list(versions) do
+    by_ref = Map.new(versions, &{{&1["id"], &1["version"]}, &1})
+
+    with :ok <- validate_snapshot_refs(snapshot, by_ref),
+         {:ok, compiled_by_ref} <- compile_snapshot_versions(by_ref, opts) do
+      import_versions =
+        versions
+        |> Enum.map(fn version ->
+          Map.put(
+            version,
+            "candidate",
+            Map.fetch!(compiled_by_ref, {version["id"], version["version"]})
+          )
+        end)
+
+      {:ok, Map.put(snapshot, "versions", import_versions)}
+    end
+  rescue
+    _ -> {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+  end
+
+  defp compile_snapshot(_snapshot, _opts),
+    do: {:error, error(:invalid_snapshot, "invalid snapshot")}
+
+  defp validate_snapshot_refs(
+         %{"versions" => versions, "current" => current, "latest" => latest},
+         by_ref
+       )
+       when is_list(versions) and is_map(current) and is_map(latest) do
+    versions_by_id = snapshot_versions_by_id(versions)
+
+    with :ok <- validate_snapshot_version_rows(versions, by_ref),
+         :ok <- validate_snapshot_control_id_sets(current, latest),
+         :ok <- validate_snapshot_current_refs(current, by_ref),
+         :ok <- validate_snapshot_latest_refs(latest, by_ref),
+         :ok <- validate_snapshot_current_not_after_latest(current, latest) do
+      validate_snapshot_latest_is_max(latest, versions_by_id)
+    end
+  end
+
+  defp validate_snapshot_refs(_snapshot, _by_ref),
+    do: {:error, error(:invalid_snapshot, "invalid prelude store snapshot")}
+
+  defp validate_snapshot_version_rows(versions, by_ref) do
+    if Enum.all?(versions, &snapshot_version_row?/1) and map_size(by_ref) == length(versions) do
+      :ok
+    else
+      {:error, error(:invalid_snapshot, "invalid prelude store snapshot version rows")}
+    end
+  end
+
+  defp snapshot_version_row?(%{"id" => id, "version" => version})
+       when is_binary(id) and is_integer(version) and version > 0,
+       do: true
+
+  defp snapshot_version_row?(_version), do: false
+
+  defp snapshot_versions_by_id(versions) do
+    Enum.reduce(versions, %{}, fn
+      %{"id" => id, "version" => version}, acc when is_binary(id) and is_integer(version) ->
+        Map.update(acc, id, [version], &[version | &1])
+
+      _version, acc ->
+        acc
+    end)
+  end
+
+  defp validate_snapshot_control_id_sets(current, latest) do
+    current_ids = current |> Map.keys() |> Enum.sort()
+    latest_ids = latest |> Map.keys() |> Enum.sort()
+
+    if current_ids == latest_ids and Enum.all?(current_ids, &is_binary/1) do
+      :ok
+    else
+      {:error, error(:invalid_snapshot, "snapshot current/latest ids are inconsistent")}
+    end
+  end
+
+  defp validate_snapshot_latest_is_max(latest, versions_by_id) do
+    Enum.reduce_while(latest, :ok, fn {id, latest_version}, :ok ->
+      case Map.get(versions_by_id, id, []) do
+        [] ->
+          {:halt, missing_snapshot_control_ref(id, latest_version)}
+
+        versions ->
+          if latest_version == Enum.max(versions) do
+            {:cont, :ok}
+          else
+            {:halt,
+             {:error, error(:invalid_snapshot, "snapshot latest pointer is not retained max")}}
+          end
+      end
+    end)
+  end
+
+  defp validate_snapshot_current_not_after_latest(current, latest) do
+    Enum.reduce_while(current, :ok, fn
+      {id, %{"version" => version}}, :ok ->
+        latest_version = Map.get(latest, id)
+
+        if is_integer(version) and is_integer(latest_version) and version <= latest_version do
+          {:cont, :ok}
+        else
+          {:halt, {:error, error(:invalid_snapshot, "snapshot current pointer is after latest")}}
+        end
+
+      {_id, _entry}, :ok ->
+        {:halt, {:error, error(:invalid_snapshot, "invalid snapshot current pointer")}}
+    end)
+  end
+
+  defp validate_snapshot_current_refs(current, by_ref) do
+    Enum.reduce_while(current, :ok, fn
+      {id, %{"version" => version}}, :ok when is_integer(version) and version > 0 ->
+        if Map.has_key?(by_ref, {id, version}) do
+          {:cont, :ok}
+        else
+          {:halt, missing_snapshot_control_ref(id, version)}
+        end
+
+      {_id, _entry}, :ok ->
+        {:halt, {:error, error(:invalid_snapshot, "invalid snapshot current pointer")}}
+    end)
+  end
+
+  defp validate_snapshot_latest_refs(latest, by_ref) do
+    Enum.reduce_while(latest, :ok, fn
+      {id, version}, :ok when is_integer(version) and version > 0 ->
+        if Map.has_key?(by_ref, {id, version}) do
+          {:cont, :ok}
+        else
+          {:halt, missing_snapshot_control_ref(id, version)}
+        end
+
+      {_id, _version}, :ok ->
+        {:halt, {:error, error(:invalid_snapshot, "invalid snapshot latest pointer")}}
+    end)
+  end
+
+  defp missing_snapshot_control_ref(id, version) do
+    {:error,
+     error(:invalid_snapshot, "snapshot control pointer #{inspect({id, version})} not found")}
+  end
+
+  defp compile_snapshot_versions(by_ref, opts) do
+    by_ref
+    |> Map.keys()
+    |> Enum.reduce_while({:ok, %{}}, fn ref, {:ok, compiled} ->
+      case compile_snapshot_ref(ref, by_ref, compiled, MapSet.new(), opts) do
+        {:ok, compiled} -> {:cont, {:ok, compiled}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp compile_snapshot_ref(ref, by_ref, compiled, visiting, opts) do
+    cond do
+      Map.has_key?(compiled, ref) ->
+        {:ok, compiled}
+
+      MapSet.member?(visiting, ref) ->
+        {:error, error(:dependency_cycle, "snapshot contains a dependency cycle")}
+
+      true ->
+        with {:ok, version} <- fetch_snapshot_version(by_ref, ref),
+             {:ok, compiled} <-
+               compile_snapshot_deps(version, by_ref, compiled, MapSet.put(visiting, ref), opts),
+             {:ok, candidate} <- compile_snapshot_candidate(version, compiled, opts) do
+          {:ok, Map.put(compiled, ref, candidate)}
+        end
+    end
+  end
+
+  defp fetch_snapshot_version(by_ref, ref) do
+    case Map.fetch(by_ref, ref) do
+      {:ok, version} ->
+        {:ok, version}
+
+      :error ->
+        {:error, error(:unknown_dependency, "snapshot dependency #{inspect(ref)} not found")}
+    end
+  end
+
+  defp compile_snapshot_deps(version, by_ref, compiled, visiting, opts) do
+    version
+    |> Map.get("metadata", %{})
+    |> PreludeCandidate.dep_pins()
+    |> Enum.reduce_while({:ok, compiled}, fn pin, {:ok, acc} ->
+      case compile_snapshot_dep_pin(pin, by_ref, acc, visiting, opts) do
+        {:ok, acc} -> {:cont, {:ok, acc}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp compile_snapshot_dep_pin(pin, by_ref, compiled, visiting, opts) do
+    with {:ok, dep_version} <- fetch_snapshot_version(by_ref, {pin.id, pin.version}),
+         :ok <- verify_snapshot_pin_checksum(pin, dep_version) do
+      compile_snapshot_ref({pin.id, pin.version}, by_ref, compiled, visiting, opts)
+    end
+  end
+
+  defp verify_snapshot_pin_checksum(%{checksum: checksum}, %{"checksum" => checksum}), do: :ok
+
+  defp verify_snapshot_pin_checksum(pin, version) do
+    {:error,
+     error(
+       :checksum_mismatch,
+       "snapshot dependency checksum mismatch for #{pin.id}@#{pin.version}: " <>
+         "pin has #{pin.checksum}, version has #{Map.get(version, "checksum")}"
+     )}
+  end
+
+  defp compile_snapshot_candidate(version, compiled_by_ref, opts) do
+    id = version["id"]
+    source = version["source"]
+    metadata = version["metadata"] || %{}
+
+    dep_candidates =
+      metadata
+      |> PreludeCandidate.dep_pins()
+      |> Enum.map(&Map.fetch!(compiled_by_ref, {&1.id, &1.version}))
+
+    with :ok <- validate_id(id),
+         {:ok, compiled} <- compile_bounded(source, opts, id, dep_candidates),
+         :ok <- validate_compiled_namespace(id, compiled) do
+      candidate = %PreludeCandidate{
+        id: id,
+        version: version["version"],
+        source: source,
+        compiled: compiled,
+        origin: {:memory, "snapshot"},
+        metadata: metadata,
+        created_at: parse_snapshot_datetime(version["created_at"])
+      }
+
+      if PreludeCandidate.checksum(candidate) == version["checksum"] do
+        {:ok, candidate}
+      else
+        {:error,
+         error(:checksum_mismatch, "snapshot checksum mismatch for #{id}@#{candidate.version}")}
+      end
+    end
+  end
+
+  defp verify_restored(original, store) do
+    restored = Server.snapshot(store)
+
+    if comparable_snapshot(original) == comparable_snapshot(restored) do
+      :ok
+    else
+      {:error, error(:restore_mismatch, "restored prelude store does not match snapshot")}
+    end
+  end
+
+  defp comparable_snapshot(snapshot) do
+    snapshot
+    |> Map.take(["limits", "versions", "current", "latest", "current_checksum_reused"])
+    |> update_in(["versions"], fn versions ->
+      versions
+      |> Enum.map(&Map.drop(&1, ["candidate", "origin"]))
+      |> Enum.sort_by(&{&1["id"], &1["version"]})
+    end)
+  end
+
+  defp snapshot_map!(%__MODULE__{} = store) do
+    {:ok, snapshot} = snapshot(store)
+    snapshot
+  end
+
+  defp snapshot_map!(snapshot) when is_map(snapshot), do: snapshot
+
+  defp snapshot_ids(snapshot) do
+    snapshot
+    |> Map.get("latest", %{})
+    |> Map.keys()
+  end
+
+  defp snapshot_entry(snapshot, id) do
+    versions =
+      snapshot
+      |> Map.get("versions", [])
+      |> Enum.filter(&(&1["id"] == id))
+      |> Enum.map(&Map.drop(&1, ["origin", "candidate"]))
+
+    case versions do
+      [] ->
+        nil
+
+      versions ->
+        %{
+          "latest" => get_in(snapshot, ["latest", id]),
+          "current" => get_in(snapshot, ["current", id]),
+          "versions" => Enum.sort_by(versions, & &1["version"])
+        }
+    end
+  end
+
+  defp diff_id(id, before, after_) do
+    %{
+      id: id,
+      before: before,
+      after: after_,
+      current_changed: before["current"] != after_["current"],
+      latest_changed: before["latest"] != after_["latest"],
+      versions_changed: before["versions"] != after_["versions"]
+    }
+  end
+
+  defp parse_snapshot_datetime(nil), do: DateTime.utc_now()
+  defp parse_snapshot_datetime(%DateTime{} = datetime), do: datetime
+
+  defp parse_snapshot_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> datetime
+      {:error, _} -> DateTime.utc_now()
+    end
+  end
+
+  defp write_deps_sidecar(dir, file, version) do
+    refs = seed_dep_refs(version)
+    sidecar = Path.join(dir, Path.rootname(file, ".clj") <> ".deps")
+
+    case refs do
+      [] -> if File.exists?(sidecar), do: File.rm(sidecar), else: :ok
+      refs -> File.write(sidecar, Enum.join(refs, "\n") <> "\n")
+    end
+  end
+
+  defp dep_refs(version) do
+    version
+    |> Map.get("metadata", %{})
+    |> PreludeCandidate.dep_pins()
+    |> Enum.map(&"#{&1.id}@#{&1.version}")
+  end
+
+  defp seed_dep_refs(version) do
+    version
+    |> Map.get("metadata", %{})
+    |> PreludeCandidate.dep_pins()
+    |> Enum.map(& &1.id)
   end
 
   @doc false

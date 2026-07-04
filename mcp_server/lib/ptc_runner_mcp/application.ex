@@ -276,6 +276,7 @@ defmodule PtcRunnerMcp.Application do
           http_port: :integer,
           http_path: :string,
           http_auth_token: :string,
+          http_admin_token: :string,
           http_disable_auth: :boolean,
           http_allowed_origin: [:string, :keep],
           http_request_timeout_ms: :integer,

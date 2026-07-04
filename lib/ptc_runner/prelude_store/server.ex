@@ -41,6 +41,14 @@ defmodule PtcRunner.PreludeStore.Server do
     GenServer.call(pid, {:set_default, ref, metadata}, @call_timeout)
   end
 
+  @spec snapshot(PreludeStore.t()) :: map()
+  def snapshot(%PreludeStore{pid: pid}), do: GenServer.call(pid, :snapshot, @call_timeout)
+
+  @spec import_snapshot(PreludeStore.t(), map()) :: :ok | {:error, map()}
+  def import_snapshot(%PreludeStore{pid: pid}, snapshot) when is_map(snapshot) do
+    GenServer.call(pid, {:import_snapshot, snapshot}, @call_timeout)
+  end
+
   @impl true
   def init(opts) do
     table = :ets.new(__MODULE__, [:ordered_set, :private])
@@ -130,6 +138,21 @@ defmodule PtcRunner.PreludeStore.Server do
       end
 
     {:reply, result, state}
+  end
+
+  def handle_call(:snapshot, _from, state) do
+    {:reply, snapshot_state(state), state}
+  end
+
+  def handle_call({:import_snapshot, snapshot}, _from, state) do
+    case import_state(snapshot, state) do
+      {:ok, imported} ->
+        delete_table(state.table)
+        {:reply, :ok, imported}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
   end
 
   defp list_row(table, id) do
@@ -504,6 +527,184 @@ defmodule PtcRunner.PreludeStore.Server do
       {:ok, candidate} = lookup_version(state.table, id, version)
       {{:ok, selection_row(state.table, candidate, updated_at, metadata)}, state}
     end
+  end
+
+  defp snapshot_state(state) do
+    ids =
+      state.table
+      |> :ets.match({{:latest, :"$1"}, :_})
+      |> List.flatten()
+      |> Enum.sort()
+
+    versions =
+      Enum.flat_map(ids, fn id ->
+        state.table
+        |> retained_versions(id)
+        |> Enum.map(fn version ->
+          {:ok, candidate} = lookup_version(state.table, id, version)
+
+          %{
+            "id" => id,
+            "version" => version,
+            "checksum" => PreludeCandidate.checksum(candidate),
+            "source" => candidate.source,
+            "metadata" => candidate.metadata,
+            "origin" => PreludeCandidate.public_origin(candidate.origin, max_bytes: 4096),
+            "created_at" => DateTime.to_iso8601(candidate.created_at)
+          }
+        end)
+      end)
+
+    current =
+      Map.new(ids, fn id ->
+        entry = current_entry(state.table, id)
+
+        {id,
+         %{
+           "version" => entry.version,
+           "updated_at" => iso8601_or_nil(entry.updated_at),
+           "metadata" => entry.metadata
+         }}
+      end)
+
+    latest = Map.new(ids, &{&1, latest_version(state.table, &1)})
+
+    %{
+      "schema_version" => 1,
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "limits" => %{
+        "max_versions" => state.max_versions,
+        "max_ids" => state.max_ids,
+        "max_total_bytes" => state.max_total_bytes
+      },
+      "versions" => versions,
+      "current" => current,
+      "latest" => latest,
+      "current_checksum_reused" => stringify_keyed_booleans(state.current_checksum_reused)
+    }
+  end
+
+  defp import_state(
+         %{
+           "limits" => limits,
+           "versions" => versions,
+           "current" => current,
+           "latest" => latest
+         } = snapshot,
+         state
+       )
+       when is_list(versions) and is_map(current) and is_map(latest) do
+    table = :ets.new(__MODULE__, [:ordered_set, :private])
+
+    try do
+      version_rows =
+        Enum.map(versions, fn %{"id" => id, "version" => version, "candidate" => candidate}
+                              when is_binary(id) and is_integer(version) ->
+          {{:version, id, version}, candidate}
+        end)
+
+      latest_rows =
+        Map.new(latest, fn {id, version} -> {{:latest, id}, version} end)
+        |> Map.to_list()
+
+      current_rows =
+        Enum.map(current, fn {id,
+                              %{
+                                "version" => version,
+                                "updated_at" => updated_at,
+                                "metadata" => metadata
+                              }} ->
+          current_row(id, version, parse_datetime!(updated_at), metadata)
+        end)
+
+      all_rows = version_rows ++ latest_rows ++ current_rows
+      Enum.each(all_rows, &:ets.insert(table, &1))
+
+      version_bytes =
+        Map.new(version_rows, fn {{:version, id, version}, _} = row ->
+          {{id, version}, row_bytes(row)}
+        end)
+
+      latest_bytes =
+        Map.new(latest_rows, fn {{:latest, id}, _} = row -> {id, row_bytes(row)} end)
+
+      current_bytes =
+        Map.new(current_rows, fn {{:current, id}, _} = row -> {id, row_bytes(row)} end)
+
+      imported = %{
+        state
+        | table: table,
+          max_versions: int_from(limits, "max_versions", state.max_versions),
+          max_ids: int_from(limits, "max_ids", state.max_ids),
+          max_total_bytes: int_from(limits, "max_total_bytes", state.max_total_bytes),
+          total_bytes: Enum.reduce(all_rows, 0, &(row_bytes(&1) + &2)),
+          version_bytes: version_bytes,
+          current_bytes: current_bytes,
+          latest_bytes: latest_bytes,
+          pinned_versions: recompute_pinned_versions(table, current),
+          current_checksum_reused:
+            parse_checksum_reuse(Map.get(snapshot, "current_checksum_reused", %{}))
+      }
+
+      {:ok, imported}
+    rescue
+      _ ->
+        delete_table(table)
+        {:error, %{reason: :invalid_snapshot, message: "invalid prelude store snapshot"}}
+    end
+  end
+
+  defp import_state(_snapshot, _state) do
+    {:error, %{reason: :invalid_snapshot, message: "invalid prelude store snapshot"}}
+  end
+
+  defp recompute_pinned_versions(table, current) do
+    current_pins =
+      Enum.map(current, fn {id, %{"version" => version}} -> %{id: id, version: version} end)
+
+    dep_pins =
+      table
+      |> :ets.match({{:version, :"$1", :"$2"}, :"$3"})
+      |> Enum.flat_map(fn [_id, _version, candidate] -> PreludeCandidate.dep_pins(candidate) end)
+
+    Enum.reduce(current_pins ++ dep_pins, %{}, fn pin, acc ->
+      Map.update(acc, pin.id, MapSet.new([pin.version]), &MapSet.put(&1, pin.version))
+    end)
+  end
+
+  defp iso8601_or_nil(nil), do: nil
+  defp iso8601_or_nil(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
+
+  defp parse_datetime!(nil), do: nil
+  defp parse_datetime!(%DateTime{} = datetime), do: datetime
+
+  defp parse_datetime!(value) when is_binary(value) do
+    {:ok, datetime, _offset} = DateTime.from_iso8601(value)
+    datetime
+  end
+
+  defp stringify_keyed_booleans(map) do
+    Map.new(map, fn {key, value} -> {to_string(key), value == true} end)
+  end
+
+  defp parse_checksum_reuse(map) when is_map(map) do
+    Map.new(map, fn {key, value} -> {to_string(key), value == true} end)
+  end
+
+  defp parse_checksum_reuse(_), do: %{}
+
+  defp int_from(map, key, default) when is_map(map) do
+    case Map.get(map, key) do
+      value when is_integer(value) and value > 0 -> value
+      _ -> default
+    end
+  end
+
+  defp delete_table(table) do
+    :ets.delete(table)
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   defp first_created_at(table, id) do

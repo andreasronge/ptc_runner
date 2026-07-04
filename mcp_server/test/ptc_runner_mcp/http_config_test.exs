@@ -33,6 +33,48 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     assert message =~ "at least 32"
   end
 
+  test "rejects short admin tokens" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_admin_token: "short"
+             })
+
+    assert message =~ "HTTP admin token"
+    assert message =~ "at least 32"
+  end
+
+  test "accepts admin token from args and env" do
+    token = String.duplicate("m", 32)
+
+    assert {:ok, cfg} =
+             Config.resolve(%{
+               http: true,
+               http_auth_token: String.duplicate("a", 32),
+               http_admin_token: token
+             })
+
+    assert cfg.admin_token == token
+
+    System.put_env("PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN", String.duplicate("n", 32))
+    assert {:ok, cfg} = Config.resolve(%{http: true, http_auth_token: String.duplicate("a", 32)})
+    assert cfg.admin_token == String.duplicate("n", 32)
+  end
+
+  test "rejects reusing the MCP bearer token as the admin token" do
+    token = String.duplicate("s", 32)
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_auth_token: token,
+               http_admin_token: token
+             })
+
+    assert message =~ "admin token"
+    assert message =~ "different"
+  end
+
   test "requires auth for non-loopback binds" do
     assert {:error, message} = Config.resolve(%{http: true, http_host: "0.0.0.0"})
     assert message =~ "required"
@@ -83,6 +125,11 @@ defmodule PtcRunnerMcp.HttpConfigTest do
   test "rejects endpoint path collisions" do
     assert {:error, "HTTP paths must be distinct"} =
              Config.resolve(%{http: true, http_path: "/health"})
+  end
+
+  test "rejects MCP path collision with admin endpoints" do
+    assert {:error, "HTTP paths must be distinct"} =
+             Config.resolve(%{http: true, http_path: "/admin/prelude-store/snapshot"})
   end
 
   test "loopback detection covers 127/8 and ::1" do

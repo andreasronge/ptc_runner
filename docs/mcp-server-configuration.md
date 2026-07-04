@@ -99,8 +99,9 @@ the deployment runbook.
 | `--http` | `PTC_RUNNER_MCP_HTTP` | `false` | Enable the HTTP listener. |
 | `--http-host` | `PTC_RUNNER_MCP_HTTP_HOST` | `127.0.0.1` | Bind IP address or `localhost`. Non-loopback binds always require auth. |
 | `--http-port` | `PTC_RUNNER_MCP_HTTP_PORT` | `7332` | Bind port. |
-| `--http-path` | `PTC_RUNNER_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP MCP endpoint. Must differ from `/health`, `/ready`, and `--http-metrics-path`. |
+| `--http-path` | `PTC_RUNNER_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP MCP endpoint. Must differ from `/health`, `/ready`, admin endpoints, and `--http-metrics-path`. |
 | `--http-auth-token` | `PTC_RUNNER_MCP_HTTP_AUTH_TOKEN` | unset | Static bearer token. Must be at least 32 characters; generate it from a CSPRNG. |
+| `--http-admin-token` | `PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN` | unset | Separate operator bearer token for live prelude-store admin endpoints. Must be at least 32 characters. When unset, admin endpoints return `404`. |
 | `--http-disable-auth` | `PTC_RUNNER_MCP_HTTP_DISABLE_AUTH` | `false` | Disable bearer auth. Only permitted on explicit loopback binds; cannot be combined with `--http-allow-unsafe-network`. |
 | `--http-allowed-origin` | `PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN` | unset | Browser `Origin` allow-list. May be repeated or comma-separated. This is a DNS-rebinding check, not full CORS support. |
 | `--http-request-timeout-ms` | `PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS` | `15000` | HTTP request read timeout. |
@@ -119,6 +120,27 @@ the deployment runbook.
 HTTP emits sanitized telemetry under `[:ptc_lisp, :http, ...]`
 and logs request stop lines to stderr. Raw bearer tokens and raw
 `MCP-Session-Id` values are not logged.
+
+When `--http-admin-token` is set, two operator-only admin endpoints are
+available:
+
+- `GET /admin/prelude-store/snapshot` returns the live
+  `PreludeStore.snapshot/1` payload as JSON with boot id, git commit, dirty
+  flag, timestamp, and stable `store_fingerprint`.
+- `GET /admin/prelude-store/export` returns the current store as a
+  seed-compatible bundle: a manifest, `.clj` source files, and plain `.deps`
+  sidecars for dependent preludes.
+
+These endpoints are not MCP tools and are not model-facing. They require
+`Authorization: Bearer <admin-token>` and return `503` if no live prelude store
+is configured. Export returns `409` instead of a flattened bundle when a current
+prelude pins a non-current dependency version; use the snapshot endpoint for
+exact retained-state capture in that case. The HTTP transport is JSON, so
+host-written metadata must be JSON-encodable for successful snapshot/export
+responses; otherwise the endpoint fails closed with
+`reason: "admin_response_encode_failed"`. Admin endpoints are also subject to
+the same Host and Origin policy as `/mcp`; configure allowed origins or proxy
+host forwarding accordingly.
 
 When the HTTP listener is bound to loopback, `/mcp` also requires a
 loopback `Host`/authority value. This lets non-browser clients omit

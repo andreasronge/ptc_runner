@@ -55,6 +55,36 @@ or saturated.
 Both endpoints are unauthenticated and expose only process status. Keep
 them on a private network or restrict them at the load balancer.
 
+## Prelude Store Admin Snapshot/Export
+
+When the server boots with a prelude store and `--http-admin-token` (or
+`PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN`), operators can capture the live volatile
+store as JSON without entering the BEAM VM:
+
+```bash
+export PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN="$(openssl rand -base64 32)"
+
+curl -H "Authorization: Bearer $PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN" \
+  http://127.0.0.1:7332/admin/prelude-store/snapshot \
+  > prelude-store.snapshot.json
+
+curl -H "Authorization: Bearer $PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN" \
+  http://127.0.0.1:7332/admin/prelude-store/export \
+  > prelude-store.export.json
+```
+
+The admin token is separate from the MCP bearer token. When it is unset,
+admin endpoints return `404`. Export responses include the current sources,
+plain `.deps` sidecars for dependent preludes, a manifest, build metadata, and
+a stable `store_fingerprint` that a harness can compare before restart+seed
+restore. If a current prelude pins a non-current dependency version, export
+returns `409`; use the snapshot endpoint for exact retained-state capture. The
+admin transport is JSON: if host-side metadata contains non-JSON values, snapshot
+and export fail closed with `reason: "admin_response_encode_failed"` instead of
+returning a partial payload. Admin routes also enforce the same Host and Origin
+guards as `/mcp`, so proxy deployments must forward an allowed host and, for
+browser-originated calls, an allowed origin.
+
 ## Security Posture
 
 Use a private subnet, security group, firewall, or equivalent network
