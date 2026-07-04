@@ -18,12 +18,20 @@ defmodule PtcRunnerMcp.SandboxTest do
   """
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
   alias PtcRunnerMcp.{ConcurrencyGate, Limits, Tools}
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
 
   setup do
     # Restore default limits for every test.
+    old_config = SessionsConfig.get()
     Limits.set(Limits.defaults())
     ConcurrencyGate.reset()
+
+    on_exit(fn ->
+      SessionsConfig.set(old_config)
+    end)
+
     :ok
   end
 
@@ -204,5 +212,48 @@ defmodule PtcRunnerMcp.SandboxTest do
       assert feedback =~ "http-get" or feedback =~ "function not found",
              "feedback was: #{inspect(feedback)}"
     end
+  end
+
+  describe "configured evidence bundle" do
+    @tag :tmp_dir
+    test "stateless lisp_eval can read evidence through the composed evidence prelude", %{
+      tmp_dir: dir
+    } do
+      manifest = write_evidence_bundle!(dir)
+
+      SessionsConfig.set(%{
+        SessionsConfig.get()
+        | evidence_bundle_path: manifest,
+          evidence_bundle: EvidenceBundle.load!(manifest),
+          prelude_source: PtcRunner.Evidence.prelude_source(),
+          runtime_prelude: nil
+      })
+
+      env = call_program(~S|(get (evidence/read "summary") "content")|)
+
+      assert env["isError"] == false
+      assert env["structuredContent"]["result"] =~ "stateless facts"
+    end
+  end
+
+  defp write_evidence_bundle!(dir) do
+    File.write!(Path.join(dir, "summary.md"), "stateless facts")
+
+    manifest = %{
+      "schema_version" => 1,
+      "bundle_id" => "mcp/stateless",
+      "items" => [
+        %{
+          "id" => "summary",
+          "kind" => "markdown",
+          "path" => "summary.md",
+          "model_visible" => true
+        }
+      ]
+    }
+
+    path = Path.join(dir, "manifest.json")
+    File.write!(path, Jason.encode!(manifest, pretty: true))
+    path
   end
 end

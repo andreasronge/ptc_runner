@@ -135,6 +135,57 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
              } = tools["log_counters"].(%{"tags" => %{"stage" => "editor"}})
     end
 
+    test "counter token fields distinguish unknown from observed zero" do
+      tools =
+        Introspection.tools([
+          %{
+            "event" => "turn",
+            "session_id" => "unknown",
+            "driver" => "session",
+            "duration_ms" => 7,
+            "committed" => true,
+            "status" => "ok",
+            "tags" => %{"run" => "demo"},
+            "data" => %{"tool_calls" => [], "catalog_ops" => []}
+          },
+          %{
+            "event" => "turn",
+            "session_id" => "observed-zero",
+            "driver" => "sub_agent",
+            "duration_ms" => 11,
+            "input_tokens" => 0,
+            "output_tokens" => 2,
+            "total_tokens" => 2,
+            "committed" => true,
+            "status" => "ok",
+            "tags" => %{"run" => "demo"},
+            "data" => %{"tool_calls" => [], "catalog_ops" => []}
+          }
+        ])
+
+      assert %{
+               "attempts" => 2,
+               "duration_ms" => 18,
+               "input_tokens" => 0,
+               "input_tokens_known_count" => 1,
+               "output_tokens" => 2,
+               "output_tokens_known_count" => 1,
+               "total_tokens" => 2,
+               "total_tokens_known_count" => 1
+             } = tools["log_counters"].(%{"tags" => %{"run" => "demo"}})
+
+      assert %{
+               "attempts" => 1,
+               "duration_ms" => 7,
+               "input_tokens" => nil,
+               "input_tokens_known_count" => 0,
+               "output_tokens" => nil,
+               "output_tokens_known_count" => 0,
+               "total_tokens" => nil,
+               "total_tokens_known_count" => 0
+             } = tools["log_counters"].(%{"driver" => "session"})
+    end
+
     test "tag filters ignore malformed historical tag payloads" do
       tools =
         Introspection.tools([

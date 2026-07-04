@@ -23,6 +23,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
       turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR"),
       prelude: System.get_env("PTC_RUNNER_MCP_PRELUDE"),
+      evidence_bundle: System.get_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE"),
       prelude_store_seed: System.get_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
     }
 
@@ -39,6 +40,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
 
       restore_env("PTC_RUNNER_MCP_TURN_LOG_DIR", original.turn_log_dir)
       restore_env("PTC_RUNNER_MCP_PRELUDE", original.prelude)
+      restore_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE", original.evidence_bundle)
       restore_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED", original.prelude_store_seed)
 
       Limits.set(Limits.defaults())
@@ -54,6 +56,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
     System.delete_env("PTC_RUNNER_MCP_PRELUDE")
+    System.delete_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE")
     System.delete_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
     :ok
   end
@@ -90,6 +93,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     test "accepts --prelude" do
       args = Application.parse_args(["--prelude", "/tmp/session-prelude.clj"])
       assert args[:prelude] == "/tmp/session-prelude.clj"
+    end
+
+    test "accepts --evidence-bundle" do
+      args = Application.parse_args(["--evidence-bundle", "/tmp/evidence/manifest.json"])
+      assert args[:evidence_bundle] == "/tmp/evidence/manifest.json"
     end
 
     test "accepts --max-session-preview-chars" do

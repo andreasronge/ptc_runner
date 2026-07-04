@@ -8,6 +8,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
   resolves CLI-shaped args from an empty map plus environment variables.
   """
 
+  alias PtcRunner.Evidence
+  alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
+  alias PtcRunner.Evidence.Holder, as: EvidenceHolder
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
 
   @default_max_sessions 64
@@ -31,6 +34,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_prelude_source nil
   @default_runtime_prelude nil
   @default_prelude_store nil
+  @default_evidence_bundle_path nil
+  @default_evidence_bundle nil
+  @default_evidence_holder nil
+  @default_evidence_tools nil
 
   @typedoc "Process-wide sessions configuration."
   @type t :: %{
@@ -55,7 +62,11 @@ defmodule PtcRunnerMcp.Sessions.Config do
           prelude_path: String.t() | nil,
           prelude_source: String.t() | nil,
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
-          prelude_store: PtcRunner.PreludeStore.t() | nil
+          prelude_store: PtcRunner.PreludeStore.t() | nil,
+          evidence_bundle_path: String.t() | nil,
+          evidence_bundle: EvidenceBundle.t() | nil,
+          evidence_holder: pid() | nil,
+          evidence_tools: map() | nil
         }
 
   @doc "Default session config. Sessions are disabled by default."
@@ -83,7 +94,11 @@ defmodule PtcRunnerMcp.Sessions.Config do
       prelude_path: @default_prelude_path,
       prelude_source: @default_prelude_source,
       runtime_prelude: @default_runtime_prelude,
-      prelude_store: @default_prelude_store
+      prelude_store: @default_prelude_store,
+      evidence_bundle_path: @default_evidence_bundle_path,
+      evidence_bundle: @default_evidence_bundle,
+      evidence_holder: @default_evidence_holder,
+      evidence_tools: @default_evidence_tools
     }
   end
 
@@ -198,8 +213,13 @@ defmodule PtcRunnerMcp.Sessions.Config do
              "PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS",
              defaults.max_session_preview_chars
            ),
-         {:ok, prelude_path, prelude_source, runtime_prelude} <- read_prelude(args, defaults),
-         {:ok, prelude_store} <- read_prelude_store(args, defaults) do
+         {:ok, prelude_path, prelude_source, _runtime_prelude} <- read_prelude(args, defaults),
+         {:ok, prelude_store} <- read_prelude_store(args, defaults),
+         {:ok, evidence_bundle_path, evidence_bundle} <- read_evidence_bundle(args, defaults),
+         {:ok, runtime_prelude} <-
+           compile_composed_prelude(compose_prelude_source(prelude_source, evidence_bundle)) do
+      composed_prelude_source = compose_prelude_source(prelude_source, evidence_bundle)
+
       {:ok,
        %{
          enabled: read_bool(args, :sessions, "PTC_RUNNER_MCP_SESSIONS", defaults.enabled),
@@ -233,9 +253,13 @@ defmodule PtcRunnerMcp.Sessions.Config do
              defaults.allow_prelude_write
            ),
          prelude_path: prelude_path,
-         prelude_source: prelude_source,
+         prelude_source: composed_prelude_source,
          runtime_prelude: runtime_prelude,
-         prelude_store: prelude_store
+         prelude_store: prelude_store,
+         evidence_bundle_path: evidence_bundle_path,
+         evidence_bundle: evidence_bundle,
+         evidence_holder: nil,
+         evidence_tools: nil
        }}
     end
   end
@@ -243,11 +267,15 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @doc "Install process-wide session config."
   @spec set(map()) :: :ok
   def set(overrides) when is_map(overrides) do
+    old_config = :persistent_term.get({__MODULE__, :config}, nil)
+    overrides = clear_replaced_evidence_holder(overrides, old_config)
+
     config =
       defaults()
       |> Map.merge(Map.take(overrides, Map.keys(defaults())))
       |> normalize()
 
+    stop_replaced_evidence_holder(old_config, config)
     :persistent_term.put({__MODULE__, :config}, config)
     :ok
   end
@@ -258,8 +286,12 @@ defmodule PtcRunnerMcp.Sessions.Config do
     case :persistent_term.get({__MODULE__, :config}, :__ptc_missing__) do
       :__ptc_missing__ ->
         case resolve(%{}) do
-          {:ok, config} -> config
-          {:error, message} -> raise message
+          {:ok, config} ->
+            set(config)
+            :persistent_term.get({__MODULE__, :config})
+
+          {:error, message} ->
+            raise message
         end
 
       config ->
@@ -270,6 +302,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @doc "Clear installed config; useful for tests and short-lived manual runs."
   @spec reset() :: :ok
   def reset do
+    :persistent_term.get({__MODULE__, :config}, nil)
+    |> stop_evidence_holder()
+
     :persistent_term.erase({__MODULE__, :config})
     :ok
   end
@@ -293,6 +328,26 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @doc "Configured process-wide versioned prelude store, or nil when start-time selection is unavailable."
   @spec prelude_store() :: PtcRunner.PreludeStore.t() | nil
   def prelude_store, do: get().prelude_store
+
+  @doc "Configured process-wide evidence bundle, or nil when evidence is not granted."
+  @spec evidence_bundle() :: EvidenceBundle.t() | nil
+  def evidence_bundle, do: get().evidence_bundle
+
+  @doc "Merge evidence tools into an eval tool map/list when evidence is configured."
+  @spec with_evidence_tools(map() | keyword() | nil) :: map() | keyword() | nil
+  def with_evidence_tools(base) do
+    case evidence_bundle() do
+      nil ->
+        base
+
+      %EvidenceBundle{} ->
+        merge_evidence_tools!(base, evidence_tools())
+    end
+  end
+
+  @doc false
+  @spec evidence_tools() :: map()
+  def evidence_tools, do: get().evidence_tools || %{}
 
   @doc "Return only the per-session persisted-state limit keys."
   @spec session_limits() :: map()
@@ -335,14 +390,24 @@ defmodule PtcRunnerMcp.Sessions.Config do
       {:prelude_source, value} when is_binary(value) -> {:prelude_source, value}
       {:runtime_prelude, %PtcRunner.Lisp.Prelude{} = value} -> {:runtime_prelude, value}
       {:prelude_store, %PtcRunner.PreludeStore{} = value} -> {:prelude_store, value}
+      {:evidence_bundle_path, value} when is_binary(value) -> {:evidence_bundle_path, value}
+      {:evidence_bundle, %EvidenceBundle{} = value} -> {:evidence_bundle, value}
+      {:evidence_holder, value} when is_pid(value) -> {:evidence_holder, value}
+      {:evidence_tools, value} when is_map(value) -> {:evidence_tools, value}
       {:prelude_path, _value} -> {:prelude_path, defaults.prelude_path}
       {:prelude_source, _value} -> {:prelude_source, defaults.prelude_source}
       {:runtime_prelude, _value} -> {:runtime_prelude, defaults.runtime_prelude}
       {:prelude_store, _value} -> {:prelude_store, defaults.prelude_store}
+      {:evidence_bundle_path, _value} -> {:evidence_bundle_path, defaults.evidence_bundle_path}
+      {:evidence_bundle, _value} -> {:evidence_bundle, defaults.evidence_bundle}
+      {:evidence_holder, _value} -> {:evidence_holder, defaults.evidence_holder}
+      {:evidence_tools, _value} -> {:evidence_tools, defaults.evidence_tools}
       {key, value} when is_integer(value) and value > 0 -> {key, value}
       {key, _value} -> {key, Map.fetch!(defaults, key)}
     end)
+    |> ensure_evidence_prelude_source()
     |> compile_runtime_prelude_from_source()
+    |> install_evidence_tools()
   end
 
   defp read_prelude(args, defaults) do
@@ -379,6 +444,146 @@ defmodule PtcRunnerMcp.Sessions.Config do
         {:error, ":prelude_store must be a %PtcRunner.PreludeStore{}, got: #{inspect(value)}"}
     end
   end
+
+  defp read_evidence_bundle(args, defaults) do
+    case env_or(args, :evidence_bundle, "PTC_RUNNER_MCP_EVIDENCE_BUNDLE") do
+      nil ->
+        {:ok, defaults.evidence_bundle_path, defaults.evidence_bundle}
+
+      path when is_binary(path) ->
+        try do
+          {:ok, path, EvidenceBundle.load!(path)}
+        rescue
+          exception ->
+            {:error,
+             "--evidence-bundle / PTC_RUNNER_MCP_EVIDENCE_BUNDLE is invalid: #{path} " <>
+               "(#{Exception.message(exception)})"}
+        end
+
+      value ->
+        {:error,
+         "--evidence-bundle / PTC_RUNNER_MCP_EVIDENCE_BUNDLE must be a file path, got: " <>
+           inspect(value)}
+    end
+  end
+
+  defp compose_prelude_source(nil, nil), do: nil
+  defp compose_prelude_source(source, nil), do: source
+  defp compose_prelude_source(nil, %EvidenceBundle{}), do: Evidence.prelude_source()
+
+  defp compose_prelude_source(source, %EvidenceBundle{}) when is_binary(source) do
+    source <> "\n\n;; --- ptc_runner evidence prelude ---\n\n" <> Evidence.prelude_source()
+  end
+
+  defp ensure_evidence_prelude_source(%{evidence_bundle: %EvidenceBundle{} = bundle} = config) do
+    source = Map.get(config, :prelude_source)
+
+    if official_evidence_prelude_present?(source) do
+      config
+    else
+      %{config | prelude_source: compose_prelude_source(source, bundle)}
+    end
+  end
+
+  defp ensure_evidence_prelude_source(config), do: config
+
+  defp official_evidence_prelude_present?(source) when is_binary(source),
+    do: String.contains?(source, Evidence.prelude_source())
+
+  defp official_evidence_prelude_present?(_source), do: false
+
+  defp compile_composed_prelude(nil), do: {:ok, nil}
+
+  defp compile_composed_prelude(source) when is_binary(source) do
+    case compile_prelude(source, nil) do
+      {:ok, runtime_prelude} ->
+        {:ok, runtime_prelude}
+
+      {:error, %PtcRunner.Lisp.Prelude.ValidationError{} = error} ->
+        {:error, "--prelude / --evidence-bundle composed prelude is invalid: #{error.message}"}
+    end
+  end
+
+  defp install_evidence_tools(
+         %{evidence_bundle: %EvidenceBundle{}, evidence_holder: holder} = config
+       )
+       when is_pid(holder) do
+    if Process.alive?(holder) do
+      %{config | evidence_tools: Evidence.tools(config.evidence_bundle, holder: holder)}
+    else
+      install_evidence_tools(%{config | evidence_holder: nil, evidence_tools: nil})
+    end
+  end
+
+  defp install_evidence_tools(%{evidence_bundle: %EvidenceBundle{} = bundle} = config) do
+    {:ok, holder} = EvidenceHolder.start(bundle, owner: nil)
+
+    %{
+      config
+      | evidence_holder: holder,
+        evidence_tools: Evidence.tools(bundle, holder: holder)
+    }
+  end
+
+  defp install_evidence_tools(config), do: config
+
+  defp merge_evidence_tools!(base, evidence_tools) do
+    base_map = as_tool_map(base)
+
+    collisions =
+      base_map
+      |> Map.keys()
+      |> MapSet.new(&to_string/1)
+      |> MapSet.intersection(MapSet.new(Map.keys(evidence_tools), &to_string/1))
+
+    if MapSet.size(collisions) > 0 do
+      names = collisions |> MapSet.to_list() |> Enum.sort() |> Enum.join(", ")
+      raise ArgumentError, "evidence tools collide with configured tools: #{names}"
+    end
+
+    Map.merge(base_map, evidence_tools)
+  end
+
+  defp as_tool_map(nil), do: %{}
+  defp as_tool_map(base) when is_map(base), do: base
+  defp as_tool_map(base) when is_list(base), do: Map.new(base)
+  defp as_tool_map(base), do: Map.new(base)
+
+  defp clear_replaced_evidence_holder(overrides, nil), do: overrides
+
+  defp clear_replaced_evidence_holder(overrides, old_config) do
+    if evidence_bundle_changed?(overrides, old_config) do
+      overrides
+      |> Map.put(:evidence_holder, nil)
+      |> Map.put(:evidence_tools, nil)
+    else
+      overrides
+    end
+  end
+
+  defp evidence_bundle_changed?(overrides, old_config) do
+    Map.get(overrides, :evidence_bundle_path) != Map.get(old_config, :evidence_bundle_path) or
+      Map.get(overrides, :evidence_bundle) != Map.get(old_config, :evidence_bundle)
+  end
+
+  defp stop_replaced_evidence_holder(nil, _new_config), do: :ok
+
+  defp stop_replaced_evidence_holder(old_config, new_config) do
+    if Map.get(old_config, :evidence_holder) != Map.get(new_config, :evidence_holder) do
+      stop_evidence_holder(old_config)
+    end
+
+    :ok
+  end
+
+  defp stop_evidence_holder(%{evidence_holder: holder}) when is_pid(holder) do
+    if Process.alive?(holder), do: EvidenceHolder.stop(holder)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp stop_evidence_holder(_config), do: :ok
 
   defp compile_runtime_prelude_from_source(%{prelude_source: source} = config)
        when is_binary(source) do

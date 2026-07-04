@@ -266,6 +266,7 @@ defmodule PtcRunnerMcp.Application do
           trace_max_files: :integer,
           turn_log_dir: :string,
           prelude: :string,
+          evidence_bundle: :string,
           # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
           debug_tool: :boolean,
           debug_ring_size: :integer,

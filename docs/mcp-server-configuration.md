@@ -24,6 +24,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--turn-log-dir` | `PTC_RUNNER_MCP_TURN_LOG_DIR` | unset | Directory for the canonical stateful-session turn log. When set, all accepted `lisp_session_eval` attempts write `event: "turn"` records to one JSONL file. |
 | `--prelude` | `PTC_RUNNER_MCP_PRELUDE` | unset | Path to a Capability Prelude source file attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task` run. The file is read once at boot; attach-time `requires` still fail closed against configured upstreams and granted tools. |
+| `--evidence-bundle` | `PTC_RUNNER_MCP_EVIDENCE_BUNDLE` | unset | Path to a versioned evidence-bundle manifest. When set, the server composes the read-only `evidence/` prelude with any configured runtime prelude and grants bounded `evidence_bundle`, `evidence_page`, and `evidence_read` tools to `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task`. Stateful session and SubAgent turn logs record safe `evidence_reads` audit entries for evidence reads. |
 | `--prelude-store-seed` | `PTC_RUNNER_MCP_PRELUDE_STORE_SEED` | unset | File or directory of `.clj` Capability Prelude sources used to seed a volatile in-memory `PreludeStore` at boot. Each file's id is derived from its compiled namespace, not its filename. |
 | `--aggregator-read-only` | `PTC_RUNNER_MCP_AGGREGATOR_READ_ONLY` | `false` | Aggregator-mode annotation override for upstream configs that are read-only by construction. |
 | `--agentic` | `PTC_RUNNER_MCP_AGENTIC` | `false` | Expose the experimental `lisp_task` tool when aggregator mode is active. |
@@ -76,6 +77,13 @@ monotonic attempt number, committed turn counter, status, result preview,
 credential-free tool-call summaries, and session-level failure/limit reasons.
 Owner mismatches, stale request ids, expiry races, and aborted evals do not emit
 turn events because no accepted session work can be attributed.
+
+`--evidence-bundle` serves only the operator-selected manifest contents. For
+the MCP server flag, file items and log sources must stay under the manifest
+directory after symlink-aware canonicalization; package or copy turn logs into
+the bundle directory before boot. Hidden/operator-only manifest items are
+included only in harness checksums and are not readable through the model-facing
+`evidence/` tools.
 
 The MCP server also emits structured lifecycle records to stderr. Every
 lifecycle record includes a `boot_id` and `os_pid` so long-running harnesses can

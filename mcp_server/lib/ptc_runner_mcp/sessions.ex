@@ -9,6 +9,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   import Kernel, except: [inspect: 1]
 
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
   alias PtcRunner.Upstream.{Eval, RunContext}
@@ -787,7 +788,7 @@ defmodule PtcRunnerMcp.Sessions do
            "start a read_only session to attach them"}
 
       true ->
-        case PtcRunner.PreludeStore.Tools.prelude() do
+        case write_capable_runtime_prelude() do
           {:ok, capability} ->
             start_opts =
               opts
@@ -813,6 +814,22 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp validate_mode(other),
     do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{Kernel.inspect(other)}"}
+
+  defp write_capable_runtime_prelude do
+    configured_source = Config.prelude_source()
+
+    source =
+      case configured_source do
+        nil ->
+          PreludeStoreTools.prelude_source()
+
+        source when is_binary(source) ->
+          PreludeStoreTools.prelude_source() <>
+            "\n\n;; --- ptc_runner configured runtime prelude ---\n\n" <> source
+      end
+
+    PreludeCompiler.compile(source)
+  end
 
   defp resolve_start_preludes(refs, opts) do
     case Selection.resolve_with_prefix!(
@@ -931,10 +948,24 @@ defmodule PtcRunnerMcp.Sessions do
   defp list_preludes_arg_key?(_key), do: false
 
   defp configured_prelude_opts(opts) do
-    case Map.get(opts, :runtime_prelude) || Config.runtime_prelude() do
-      nil -> []
-      runtime_prelude -> [runtime_prelude: runtime_prelude]
+    cond do
+      Map.get(opts, :runtime_prelude) != nil ->
+        [runtime_prelude: Map.fetch!(opts, :runtime_prelude)]
+
+      evidence_only_configured_prelude?() ->
+        []
+
+      Config.runtime_prelude() != nil ->
+        [runtime_prelude: Config.runtime_prelude()]
+
+      true ->
+        []
     end
+  end
+
+  defp evidence_only_configured_prelude? do
+    Config.evidence_bundle() != nil and
+      Config.prelude_source() == PtcRunner.Evidence.prelude_source()
   end
 
   defp maybe_put_read_prelude(opts) do
@@ -955,7 +986,7 @@ defmodule PtcRunnerMcp.Sessions do
   defp read_prelude_prefixes(opts) do
     cond do
       Config.prelude_store() == nil ->
-        []
+        configured_prelude_prefixes()
 
       configured_prelude_opts(opts) != [] ->
         []
@@ -971,12 +1002,30 @@ defmodule PtcRunnerMcp.Sessions do
                 prelude: prelude,
                 origin: :host
               }
-            ]
+            ] ++ configured_prelude_prefixes()
 
           {:error, error} ->
             raise ArgumentError,
                   "failed to compile prelude read capability: #{Kernel.inspect(error)}"
         end
+    end
+  end
+
+  defp configured_prelude_prefixes do
+    case Config.runtime_prelude() do
+      nil ->
+        []
+
+      runtime_prelude ->
+        [
+          %{
+            id: "ptc_runner_configured_prelude",
+            checksum: runtime_prelude.source_hash,
+            source: Config.prelude_source(),
+            prelude: runtime_prelude,
+            origin: :host
+          }
+        ]
     end
   end
 

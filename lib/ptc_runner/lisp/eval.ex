@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   require Logger
 
+  alias PtcRunner.Evidence.ReadProjection, as: EvidenceReadProjection
   alias PtcRunner.Lisp.ClosureCapture
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Discovery
@@ -1285,6 +1286,7 @@ defmodule PtcRunner.Lisp.Eval do
           cached: true
         }
         |> maybe_put_tool_origin(origin, private_tool?)
+        |> maybe_put_evidence_reads(tool_name, cached.result)
 
       # Restore child_step and child_trace_id from cache for TraceTree
       tool_call =
@@ -1364,6 +1366,7 @@ defmodule PtcRunner.Lisp.Eval do
         duration_ms: duration_ms
       }
       |> maybe_put_tool_origin(origin, private_tool?)
+      |> maybe_put_evidence_reads(tool_name, result)
 
     # Add child_trace_id if present (from SubAgentTool execution)
     tool_call =
@@ -1425,6 +1428,16 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
   defp maybe_put_private_tool(tool_call, false), do: tool_call
+
+  defp maybe_put_evidence_reads(tool_call, tool_name, result)
+       when tool_name in ["evidence_read", "evidence_page"] do
+    case EvidenceReadProjection.from_result(result) do
+      [] -> tool_call
+      reads -> Map.put(tool_call, :evidence_reads, reads)
+    end
+  end
+
+  defp maybe_put_evidence_reads(tool_call, _tool_name, _result), do: tool_call
 
   defp ledger_tool_args(args, false), do: args
   defp ledger_tool_args(args, true), do: redact_source_args(args)

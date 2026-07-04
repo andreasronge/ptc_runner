@@ -19,6 +19,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   """
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
   alias PtcRunner.Lisp
   alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
@@ -50,6 +51,9 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
     :ok
   end
+
+  defp restore_env(key, nil), do: System.delete_env(key)
+  defp restore_env(key, value), do: System.put_env(key, value)
 
   describe "full lifecycle via Tools.call" do
     test "start response lists prompt-visible prelude namespaces with discovery forms" do
@@ -228,6 +232,88 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert listed["structuredContent"]["prelude_refs"] ==
                start["structuredContent"]["prelude_refs"]
+    end
+
+    @tag :tmp_dir
+    test "selected preludes compose with configured evidence bundle", %{tmp_dir: dir} do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, candidate} =
+        PreludeStore.write(store, "picked", """
+        (ns picked "Selected helpers." {:visibility :prompt})
+        (defn value [] 7)
+        """)
+
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      start = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+
+      checksum = candidate.checksum
+
+      assert [
+               %{
+                 "id" => "picked",
+                 "version" => 1,
+                 "checksum" => ^checksum,
+                 "origin" => "memory",
+                 "required_by" => []
+               }
+             ] = start["structuredContent"]["prelude_refs"]
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|[(picked/value) (get (evidence/read "summary") "content")]|
+        })
+
+      assert eval["isError"] == false
+      assert eval["structuredContent"]["status"] == "ok"
+      assert eval["structuredContent"]["result"] =~ "7"
+      assert eval["structuredContent"]["result"] =~ "operator-selected facts"
+    end
+
+    @tag :tmp_dir
+    test "operator prelude plus evidence stays mutually exclusive with selected preludes", %{
+      tmp_dir: dir
+    } do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _candidate} =
+        PreludeStore.write(store, "picked", """
+        (ns picked "Selected helpers." {:visibility :prompt})
+        (defn value [] 7)
+        """)
+
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, operator_prelude_source_with_evidence())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      start = call("lisp_session_start", %{"preludes" => ["picked"]})
+
+      assert start["isError"] == true
+      assert start["structuredContent"]["reason"] == "session_args_error"
+
+      assert start["structuredContent"]["message"] =~
+               ":runtime_prelude/:prelude and :preludes are mutually exclusive"
     end
 
     test "read-only selected prelude sessions can introspect store forms without write wrappers" do
@@ -882,6 +968,148 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "configured evidence bundle is readable in sessions and stamps evidence_reads", %{
+      tmp_dir: dir
+    } do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(
+        Config.get()
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      TurnLogConfig.set(%{turn_log_dir: Path.join(dir, "turn-log")})
+      start_supervised!({TurnLogCollector, [dir: TurnLogConfig.turn_log_dir()]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+
+      assert {:ok, response} =
+               Sessions.eval(sid, ~S|(get (evidence/read "summary") "content")|)
+
+      assert response["status"] == "ok"
+      assert response["result"] =~ "operator-selected facts"
+
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+
+      assert [
+               %{
+                 "bundle_id" => "mcp/evidence",
+                 "item_id" => "summary",
+                 "source_ref" => "summary.md",
+                 "checksum" => "sha256:" <> _,
+                 "bytes" => 24,
+                 "truncated" => false
+               }
+             ] = get_in(turn, ["data", "evidence_reads"])
+
+      assert [%{"tool" => "evidence_read", "evidence_reads" => [_]}] =
+               get_in(turn, ["data", "tool_calls"])
+    end
+
+    @tag :tmp_dir
+    test "large evidence reads keep audit metadata after tool-ledger previewing", %{
+      tmp_dir: dir
+    } do
+      large_content = String.duplicate("large-evidence-line\n", 1_100)
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"), large_content)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      TurnLogConfig.set(%{turn_log_dir: Path.join(dir, "turn-log")})
+      start_supervised!({TurnLogCollector, [dir: TurnLogConfig.turn_log_dir()]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+
+      assert {:ok, response} =
+               Sessions.eval(sid, ~S|(count (get (evidence/read "summary") "content"))|)
+
+      assert response["status"] == "ok"
+      assert response["result"] =~ Integer.to_string(byte_size(large_content))
+
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+
+      assert [
+               %{
+                 "bundle_id" => "mcp/evidence",
+                 "item_id" => "summary",
+                 "source_ref" => "summary.md",
+                 "checksum" => "sha256:" <> _,
+                 "bytes" => bytes,
+                 "truncated" => false
+               }
+             ] = get_in(turn, ["data", "evidence_reads"])
+
+      assert bytes == byte_size(large_content)
+    end
+
+    @tag :tmp_dir
+    test "configured prelude composes with evidence bundle in sessions", %{tmp_dir: dir} do
+      prelude_path = Path.join(dir, "operator.clj")
+      File.write!(prelude_path, test_prelude_source())
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      {:ok, config} =
+        Config.resolve(%{
+          prelude: prelude_path,
+          evidence_bundle: evidence_manifest
+        })
+
+      Config.set(Map.put(config, :enabled, true))
+
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+
+      assert {:ok, response} =
+               Sessions.eval(
+                 sid,
+                 ~S|[(smoke/plus-one 41) (get (evidence/read "summary") "content")]|
+               )
+
+      assert response["status"] == "ok"
+      assert response["result"] =~ "42"
+      assert response["result"] =~ "operator-selected facts"
+    end
+
+    @tag :tmp_dir
+    test "write_capable sessions retain configured evidence prelude", %{tmp_dir: dir} do
+      {:ok, store} = PreludeStore.new()
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(
+        Config.get()
+        |> Map.put(:allow_prelude_write, true)
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      {:ok, %{"session_id" => sid}} =
+        Sessions.start_session(nil, %{"mode" => "write_capable"})
+
+      assert {:ok, response} =
+               Sessions.eval(sid, ~S|(get (evidence/read "summary") "content")|)
+
+      assert response["status"] == "ok"
+      assert response["result"] =~ "operator-selected facts"
+    end
+
+    @tag :tmp_dir
     test "result previews render native keyword returns", %{tmp_dir: dir} do
       TurnLogConfig.set(%{turn_log_dir: dir})
       start_supervised!({TurnLogCollector, [dir: dir]})
@@ -1085,6 +1313,161 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert {:ok, config} = Config.resolve(%{sessions: true, prelude_store: store})
       assert config.enabled == true
       assert config.prelude_store == store
+    end
+
+    @tag :tmp_dir
+    test "resolve/1 compiles configured prelude composed with evidence", %{tmp_dir: dir} do
+      prelude_path = Path.join(dir, "operator.clj")
+      File.write!(prelude_path, test_prelude_source())
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      assert {:ok, config} =
+               Config.resolve(%{
+                 sessions: true,
+                 prelude: prelude_path,
+                 evidence_bundle: evidence_manifest
+               })
+
+      assert config.runtime_prelude != nil
+      assert "smoke" in config.runtime_prelude.namespaces
+      assert "evidence" in config.runtime_prelude.namespaces
+    end
+
+    @tag :tmp_dir
+    test "get/0 installs holder-backed evidence tools for env-only config", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+      old_env = System.get_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE")
+
+      on_exit(fn ->
+        restore_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE", old_env)
+        Config.reset()
+      end)
+
+      Config.reset()
+      System.put_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE", evidence_manifest)
+
+      config = Config.get()
+
+      assert config.evidence_bundle != nil
+      assert is_pid(config.evidence_holder)
+      assert Map.has_key?(config.evidence_tools, "evidence_read")
+
+      assert {:ok, response} =
+               Lisp.run(
+                 ~S|(get (evidence/read "summary") "content")|,
+                 prelude: Config.prelude_source(),
+                 tools: Config.with_evidence_tools(%{})
+               )
+
+      assert response.return == "operator-selected facts\n"
+    end
+
+    @tag :tmp_dir
+    test "set/1 composes evidence prelude when installing evidence bundle directly", %{
+      tmp_dir: dir
+    } do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(%{
+        Config.get()
+        | evidence_bundle_path: evidence_manifest,
+          evidence_bundle: EvidenceBundle.load!(evidence_manifest),
+          prelude_source: nil,
+          runtime_prelude: nil
+      })
+
+      assert "evidence" in Config.runtime_prelude().namespaces
+
+      assert {:ok, response} =
+               Lisp.run(
+                 ~S|(get (evidence/read "summary") "content")|,
+                 prelude: Config.prelude_source(),
+                 tools: Config.with_evidence_tools(%{})
+               )
+
+      assert response.return == "operator-selected facts\n"
+    end
+
+    @tag :tmp_dir
+    test "evidence tool grant rejects atom and keyword name collisions", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(%{
+        Config.get()
+        | evidence_bundle_path: evidence_manifest,
+          evidence_bundle: EvidenceBundle.load!(evidence_manifest),
+          prelude_source: nil,
+          runtime_prelude: nil
+      })
+
+      assert_raise ArgumentError, ~r/evidence_read/, fn ->
+        Config.with_evidence_tools(%{evidence_read: fn _args -> :bad end})
+      end
+
+      assert_raise ArgumentError, ~r/evidence_page/, fn ->
+        Config.with_evidence_tools(evidence_page: fn _args -> :bad end)
+      end
+    end
+
+    @tag :tmp_dir
+    test "set/1 fails closed on non-official evidence namespace collisions", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      assert_raise ArgumentError, ~r/namespace `evidence` is declared more than once/, fn ->
+        Config.set(%{
+          Config.get()
+          | evidence_bundle_path: evidence_manifest,
+            evidence_bundle: EvidenceBundle.load!(evidence_manifest),
+            prelude_source: """
+            (ns evidence)
+            (defn bogus [] 1)
+            """,
+            runtime_prelude: nil
+        })
+      end
+    end
+
+    @tag :tmp_dir
+    test "set/1 refreshes stale evidence holders when restoring saved config", %{tmp_dir: dir} do
+      first_manifest = write_evidence_bundle!(Path.join(dir, "first"), "first facts\n")
+      second_manifest = write_evidence_bundle!(Path.join(dir, "second"), "second facts\n")
+
+      Config.set(%{
+        Config.get()
+        | evidence_bundle_path: first_manifest,
+          evidence_bundle: EvidenceBundle.load!(first_manifest),
+          prelude_source: nil,
+          runtime_prelude: nil
+      })
+
+      saved = Config.get()
+      saved_holder = saved.evidence_holder
+
+      Config.set(%{
+        Config.get()
+        | evidence_bundle_path: second_manifest,
+          evidence_bundle: EvidenceBundle.load!(second_manifest),
+          prelude_source: nil,
+          runtime_prelude: nil
+      })
+
+      refute Process.alive?(saved_holder)
+
+      Config.set(saved)
+      restored = Config.get()
+
+      assert is_pid(restored.evidence_holder)
+      assert restored.evidence_holder != saved_holder
+      assert Process.alive?(restored.evidence_holder)
+
+      assert {:ok, response} =
+               Lisp.run(
+                 ~S|(get (evidence/read "summary") "content")|,
+                 prelude: Config.prelude_source(),
+                 tools: Config.with_evidence_tools(%{})
+               )
+
+      assert response.return == "first facts\n"
     end
 
     test "resolve/1 honors CLI keys and parses integer strings" do
@@ -1657,6 +2040,36 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     (ns smoke {:visibility :prompt})
     (defn plus-one "Increment a number." [x] (+ x 1))
     """
+  end
+
+  defp operator_prelude_source_with_evidence do
+    """
+    (ns operator {:visibility :prompt})
+    (defn list-store [] (tool/prelude_store_list {}))
+    """ <>
+      "\n\n;; --- ptc_runner evidence prelude ---\n\n" <> PtcRunner.Evidence.prelude_source()
+  end
+
+  defp write_evidence_bundle!(dir, content \\ "operator-selected facts\n") do
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "summary.md"), content)
+
+    manifest = %{
+      "schema_version" => 1,
+      "bundle_id" => "mcp/evidence",
+      "items" => [
+        %{
+          "id" => "summary",
+          "kind" => "markdown",
+          "path" => "summary.md",
+          "model_visible" => true
+        }
+      ]
+    }
+
+    path = Path.join(dir, "manifest.json")
+    File.write!(path, Jason.encode!(manifest, pretty: true))
+    path
   end
 
   defp inspect_view(sid, view) do

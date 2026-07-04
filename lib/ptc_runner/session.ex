@@ -181,6 +181,8 @@ defmodule PtcRunner.Session do
   # nothing is recording so the common no-trace path pays nothing.
   defp emit_turn_event(prev, next, source, %Native{} = step, attempt, committed?, started_at) do
     if TraceLog.recording?() do
+      tool_calls = tool_call_summaries(step.tool_calls)
+
       %{
         driver: :session,
         session_id: next.session_id,
@@ -194,7 +196,8 @@ defmodule PtcRunner.Session do
         result_preview: TurnEvent.preview(step.return),
         prints: step.prints,
         memory_diff: TurnEvent.memory_diff(prev.memory, step.memory),
-        tool_calls: tool_call_summaries(step.tool_calls),
+        tool_calls: tool_calls,
+        evidence_reads: evidence_reads(tool_calls),
         catalog_ops: catalog_op_summaries(step.catalog_ops),
         fail: step.fail,
         preludes: TurnEvent.prelude_provenance(step.prelude_trace)
@@ -208,6 +211,10 @@ defmodule PtcRunner.Session do
 
   defp tool_call_summaries(tool_calls) when is_list(tool_calls) do
     Enum.map(tool_calls, &TurnEvent.tool_call_summary/1)
+  end
+
+  defp evidence_reads(tool_call_summaries) do
+    Enum.flat_map(tool_call_summaries, &Map.get(&1, "evidence_reads", []))
   end
 
   defp catalog_op_summaries(catalog_ops) when is_list(catalog_ops) do

@@ -34,7 +34,8 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   ## `data` bag
 
       program, raw_response, result_preview, prints, memory_diff,
-      tool_calls, catalog_ops, limits_hit, preludes, fail, turn_type
+      tool_calls, catalog_ops, evidence_reads, limits_hit, preludes, fail,
+      turn_type
 
   Per-driver fields that don't apply are nil/empty. `raw_response` carries what
   the driver's LLM generated when there is no parsed `program` (SubAgent
@@ -43,6 +44,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   that is where memory-diff values and prints get their byte bounds.
   """
 
+  alias PtcRunner.Evidence.ReadProjection, as: EvidenceReadProjection
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Step.Public, as: PublicStep
@@ -301,6 +303,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "duration_ms" => get_key(call, :duration_ms),
       "outcome" => tool_outcome(call)
     }
+    |> maybe_put_evidence_reads(tool, call)
   end
 
   def tool_call_summary(_), do: %{}
@@ -338,6 +341,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "memory_diff" => normalize_memory_diff(Map.get(attrs, :memory_diff)),
       "tool_calls" => Map.get(attrs, :tool_calls) || [],
       "catalog_ops" => Map.get(attrs, :catalog_ops) || [],
+      "evidence_reads" => EvidenceReadProjection.normalize(Map.get(attrs, :evidence_reads)),
       "limits_hit" => Map.get(attrs, :limits_hit) || [],
       "preludes" => Map.get(attrs, :preludes) || [],
       "fail" => normalize_fail(Map.get(attrs, :fail)),
@@ -359,6 +363,22 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   end
 
   defp normalize_fail(_), do: nil
+
+  defp maybe_put_evidence_reads(summary, tool, call)
+       when tool in ["evidence_read", "evidence_page"] do
+    reads =
+      case EvidenceReadProjection.normalize(get_key(call, :evidence_reads)) do
+        [] -> EvidenceReadProjection.from_result(get_key(call, :result))
+        reads -> reads
+      end
+
+    case reads do
+      [] -> summary
+      reads -> Map.put(summary, "evidence_reads", reads)
+    end
+  end
+
+  defp maybe_put_evidence_reads(summary, _tool, _call), do: summary
 
   defp normalize_tags(tags) when is_map(tags) do
     Enum.reduce(tags, %{}, fn {key, value}, acc ->

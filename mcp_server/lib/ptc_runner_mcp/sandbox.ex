@@ -204,7 +204,7 @@ defmodule PtcRunnerMcp.Sandbox do
          caller: :mcp,
          profile: profile,
          memory: %{},
-         tools: tools,
+         tools: SessionsConfig.with_evidence_tools(tools),
          tool_cache: %{},
          context: context,
          timeout: timeout_ms,

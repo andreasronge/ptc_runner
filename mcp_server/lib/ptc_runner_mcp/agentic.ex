@@ -98,7 +98,7 @@ defmodule PtcRunnerMcp.Agentic do
     SubAgent.new(
       prompt: assembled.user_message,
       system_prompt: assembled.system_prompt,
-      tools: %{},
+      tools: Config.with_evidence_tools(%{}),
       max_turns: cfg.max_turns,
       retry_turns: cfg.retry_turns,
       completion_mode: :explicit,

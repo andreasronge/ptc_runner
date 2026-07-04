@@ -223,6 +223,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
           _ -> {false, :error}
         end
 
+      tool_calls = turn_tool_calls(turn)
+
       %{
         driver: :sub_agent,
         agent_id: state.agent_id,
@@ -242,7 +244,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         raw_response: if(is_nil(program), do: Keyword.get(fields, :raw_response)),
         result_preview: Keyword.fetch!(fields, :result_preview),
         prints: Keyword.fetch!(fields, :prints),
-        tool_calls: turn_tool_calls(turn),
+        tool_calls: tool_calls,
+        evidence_reads: evidence_reads(tool_calls),
         catalog_ops: turn_catalog_ops(turn),
         fail: turn_fail(turn),
         # The ACTUAL prelude trace from this turn's Lisp execution (nil when
@@ -295,6 +298,10 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   end
 
   defp turn_tool_calls(_), do: []
+
+  defp evidence_reads(tool_call_summaries) do
+    Enum.flat_map(tool_call_summaries, &Map.get(&1, "evidence_reads", []))
+  end
 
   defp turn_catalog_ops(%Turn{catalog_ops: catalog_ops}) when is_list(catalog_ops) do
     Enum.map(catalog_ops, &TurnEvent.catalog_op_summary/1)

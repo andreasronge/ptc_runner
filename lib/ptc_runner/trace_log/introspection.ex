@@ -206,6 +206,9 @@ defmodule PtcRunner.TraceLog.Introspection do
   defp counters(events, args) do
     turns = filtered_turns(events, args)
     tool_calls = Enum.flat_map(turns, &(get_in(&1, ["data", "tool_calls"]) || []))
+    input_tokens = sum_observed_field(turns, "input_tokens")
+    output_tokens = sum_observed_field(turns, "output_tokens")
+    total_tokens = sum_observed_field(turns, "total_tokens")
 
     %{
       "sessions" => turns |> Enum.map(&turn_correlation_id/1) |> Enum.uniq() |> length(),
@@ -217,9 +220,12 @@ defmodule PtcRunner.TraceLog.Introspection do
       "tool_calls" => length(tool_calls),
       "upstream_calls" => Enum.count(tool_calls, &upstream_call?/1),
       "duration_ms" => sum_field(turns, "duration_ms"),
-      "input_tokens" => sum_field(turns, "input_tokens"),
-      "output_tokens" => sum_field(turns, "output_tokens"),
-      "total_tokens" => sum_field(turns, "total_tokens")
+      "input_tokens" => observed_sum(input_tokens),
+      "input_tokens_known_count" => observed_count(input_tokens),
+      "output_tokens" => observed_sum(output_tokens),
+      "output_tokens_known_count" => observed_count(output_tokens),
+      "total_tokens" => observed_sum(total_tokens),
+      "total_tokens_known_count" => observed_count(total_tokens)
     }
   end
 
@@ -403,6 +409,20 @@ defmodule PtcRunner.TraceLog.Introspection do
       end
     end)
   end
+
+  defp sum_observed_field(events, field) do
+    Enum.reduce(events, {0, 0}, fn event, {sum, count} ->
+      case event[field] do
+        value when is_integer(value) -> {sum + value, count + 1}
+        _ -> {sum, count}
+      end
+    end)
+  end
+
+  defp observed_sum({_sum, 0}), do: nil
+  defp observed_sum({sum, _count}), do: sum
+
+  defp observed_count({_sum, count}), do: count
 
   defp upstream_call?(%{"server" => server}) when is_binary(server) and server != "", do: true
   defp upstream_call?(_), do: false

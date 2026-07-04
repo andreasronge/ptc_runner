@@ -5,6 +5,9 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
   # program with NO provider/network call, then restores the original env.
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.Analyzer
   alias PtcRunnerMcp.Agentic
   alias PtcRunnerMcp.Agentic.{CapabilitySummary, Planner}
   alias PtcRunnerMcp.AgenticConfig
@@ -91,6 +94,20 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
     end
   end
 
+  defmodule EvidenceStubPlanner do
+    @moduledoc false
+    def call(model, prompt, _opts) do
+      {:ok, ~S|(return (get (evidence/read "summary") "content"))|,
+       %{
+         "model" => model,
+         "duration_ms" => 2,
+         "prompt_bytes" => byte_size(prompt),
+         "completion_bytes" => 52,
+         "tokens" => %{}
+       }}
+    end
+  end
+
   setup do
     original = Application.get_env(:ptc_runner_mcp, :agentic_planner)
     original_config = Config.get()
@@ -130,6 +147,27 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
     """
   end
 
+  defp write_evidence_bundle!(dir) do
+    File.write!(Path.join(dir, "summary.md"), "operator-selected facts\n")
+
+    manifest = %{
+      "schema_version" => 1,
+      "bundle_id" => "agentic/evidence",
+      "items" => [
+        %{
+          "id" => "summary",
+          "kind" => "markdown",
+          "path" => "summary.md",
+          "model_visible" => true
+        }
+      ]
+    }
+
+    path = Path.join(dir, "manifest.json")
+    File.write!(path, Jason.encode!(manifest, pretty: true))
+    path
+  end
+
   describe "run_validated/2 success projection via stub planner" do
     test "literal PTC-Lisp program executes in-VM and yields answer 3" do
       install_planner(StubPlanner)
@@ -160,6 +198,48 @@ defmodule PtcRunnerMcp.Agentic.OrchestrationTest do
       assert sc["status"] == "ok"
       assert sc["answer"] == "41"
       assert sc["structured_result"] == 41
+    end
+
+    @tag :tmp_dir
+    test "configured evidence bundle is backed by tools in lisp_task", %{tmp_dir: dir} do
+      install_planner(EvidenceStubPlanner)
+      manifest = write_evidence_bundle!(dir)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:evidence_bundle_path, manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+      )
+
+      trace_path = Path.join(dir, "agentic-evidence.jsonl")
+
+      {:ok, envelope, ^trace_path} =
+        TraceLog.with_trace(
+          fn -> Agentic.run_validated(validated(), request_id: "req-evidence") end,
+          path: trace_path
+        )
+
+      sc = structured(envelope)
+
+      assert envelope["isError"] == false
+      assert sc["status"] == "ok"
+      assert sc["answer"] == "operator-selected facts\n"
+      assert sc["structured_result"] == "operator-selected facts\n"
+
+      [turn] = trace_path |> Analyzer.load() |> Analyzer.turn_events()
+
+      assert [
+               %{
+                 "bundle_id" => "agentic/evidence",
+                 "item_id" => "summary",
+                 "source_ref" => "summary.md",
+                 "checksum" => "sha256:" <> _,
+                 "bytes" => 24,
+                 "truncated" => false
+               }
+             ] = get_in(turn, ["data", "evidence_reads"])
     end
 
     test "planner block reports the single planner call and its meta" do
