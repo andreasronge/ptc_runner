@@ -316,6 +316,8 @@ defmodule PtcRunner.TraceLog.Introspection do
       "attempt" => event["attempt"],
       "committed" => event["committed"],
       "status" => event["status"],
+      "role" => event["role"],
+      "grant_fingerprint" => event["grant_fingerprint"],
       "tags" => event["tags"] || %{},
       "program" => get_in(event, ["data", "program"]),
       "result_preview" => get_in(event, ["data", "result_preview"]),
@@ -332,6 +334,8 @@ defmodule PtcRunner.TraceLog.Introspection do
       %{
         "correlation_id" => id,
         "driver" => grouped |> List.first() |> Map.get("driver"),
+        "role" => grouped |> List.first() |> Map.get("role"),
+        "grant_fingerprint" => grouped |> List.first() |> Map.get("grant_fingerprint"),
         "tags" => grouped |> List.first() |> Map.get("tags", %{}),
         "turns" => length(grouped),
         "committed" => Enum.count(grouped, & &1["committed"]),

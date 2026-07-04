@@ -246,27 +246,40 @@ Non-metrics:
 
 ## What This Demo Still Does Not Solve
 
-The `5055deac` baseline fixes measurement and read-only prelude introspection,
-but it is not yet a full experiment platform or policy gateway:
+Current baseline after Slice A (`85ffa253`), Slice B (`3c1d0514`), and the
+Slice C role-policy implementation:
+
+- the HTTP MCP server has an admin-token-gated live PreludeStore
+  snapshot/export surface;
+- stateful sessions can stamp structured tags, `log/` can query and aggregate
+  turn logs, and `log/counters` preserves unknown-token semantics;
+- the `evidence/` prelude can expose curated evidence bundles over static
+  fixtures, turn-log projections, counters, and PreludeStore exports;
+- stateful sessions can self-declare configured roles, receive exact
+  mode/prelude/prelude-store/PTC-tool grants, echo a grant fingerprint, and
+  stamp role/grant audit fields into turn logs;
+- a process-level outer policy can filter the MCP `tools/list` / `tools/call`
+  surface for stage-specific server processes.
+
+The remaining policy-track gaps are:
 
 - no role-scoped credentials or per-role upstream authority;
-- no native replacement for the external MCP tool-filter proxy;
-- no built-in evidence/fixture upstream beyond the existing trace-log
-  introspection surface;
-- no live MCP admin endpoint for snapshotting/exporting the already-running
-  HTTP server's volatile `PreludeStore` from outside the BEAM VM.
+- no native replacement for stage-specific server processes or the external MCP
+  tool-filter proxy when one server must present different outer catalogs to
+  different credentials;
+- no built-in fixture upstream beyond evidence projections over packaged files
+  and existing turn logs.
 
-The current store lifecycle verbs are library/operator APIs:
-`PtcRunner.PreludeStore.snapshot/1`, `restore/2`, `diff/2`, and `export/3`.
-The MCP server can also seed a volatile store at boot via
-`--prelude-store-seed`. That is enough for local operator code and
-boot-time reproducibility, but not enough for an external experiment harness to
-capture a live server's store state without VM access.
+That means the next demo can avoid the old hand-scripted snapshot and evidence
+plumbing, but still needs stage-specific server processes or an external proxy
+when different roles must see different outer MCP tool catalogs.
 
 ## Recommended Independent Implementation Slices
 
 These should land as independent slices. Each slice should have its own tests,
 docs, and turn-log/audit story, and none should require the others to be useful.
+Slices A-C are implemented; keep their sections as the historical contract and
+use D-E as the remaining implementation queue.
 
 ### Slice A — Live PreludeStore Admin Snapshot/Export
 
@@ -851,14 +864,23 @@ Slice B tests:
 Goal: introduce a first-class role/grant model without changing credential
 storage yet.
 
+Implementation boundary:
+
+- this slice is MCP-session scoped, not a full authorization system;
+- role selection is self-declared in `lisp_session_start`;
+- outer MCP `tools/list` and pre-session `tools/call` remain process-level;
+- `lisp_eval` and `lisp_task` remain process-level unless the process-level
+  policy says otherwise;
+- credentials stay unchanged until Slice D.
+
 Recommended first pass:
 
 - define one policy subject shape for every call path that can expose or invoke
   model-facing capability: outer MCP `tools/list` / `tools/call`, stateless
   `lisp_eval`, stateful `lisp_session_eval`, and SubAgent-backed `lisp_task`;
-- add a session `role` field with a configured grant map for stateful sessions,
-  and either keep stateless calls under process-level policy or add an explicit
-  stateless role/policy input with the same audit fields;
+- add a session `role` field with a configured grant map for stateful sessions;
+- keep stateless calls under the process-level outer policy in this slice, and
+  document that they are not per-role until Slice D/E;
 - keep outer MCP `tools/list` / pre-session `tools/call` under a process-level
   policy in Slice C. MCP discovery happens before `lisp_session_start`, so it
   cannot vary by a self-declared session role. Stage-specific launchers can
@@ -866,33 +888,53 @@ Recommended first pass:
   discovery starts inside the accepted stateful session unless a later slice
   adds credential-bound role selection before `tools/list`;
 - filter pre-session outer MCP discovery by the process-level outer policy, and
-  filter in-session discovery by role across upstream tools, host PTC tools,
-  prelude-store tools, and selected prelude exports;
+  filter in-session discovery by role across host PTC tools, prelude-store
+  tools, and selected prelude exports;
 - enforce the same grant at execution time, including for tools that are still
   known to the host runtime but hidden from the model-facing catalog;
 - echo accepted `role`, normalized `tags`, and grant fingerprint in
   `lisp_session_start` responses;
 - record role and grant fingerprint in session start and turn logs;
 - keep credential resolution process-wide for this slice, but verify a role
-  cannot call ungranted tools even when the upstream runtime knows they exist.
+  cannot call ungranted host PTC/prelude-store tools even when the host runtime
+  knows they exist.
 
-Conceptual config:
+Concrete config:
+
+Add a file/env flag pair:
+
+```text
+--session-roles PATH
+PTC_RUNNER_MCP_SESSION_ROLES=PATH
+```
+
+The file is JSON. Keep it deliberately small and process-wide:
 
 ```json
 {
+  "default_role": "analyst",
+  "outer_policy": {
+    "mcp_tools": [
+      "lisp_session_start",
+      "lisp_session_eval",
+      "lisp_session_list",
+      "lisp_session_list_preludes",
+      "lisp_session_inspect",
+      "lisp_session_forget",
+      "lisp_session_close"
+    ]
+  },
   "roles": {
     "analyst": {
-      "mcp_tools": ["lisp_session_start", "lisp_session_eval"],
       "ptc_tools": ["evidence_bundle", "evidence_read", "evidence_page"],
-      "upstream_tools": ["upstream:observatory/list-traces"],
+      "upstream_tools": [],
       "prelude_store": "read",
       "preludes": ["paged_base@1", "paged_audit@1"],
       "modes": ["read_only"]
     },
     "editor": {
-      "mcp_tools": ["lisp_session_start", "lisp_session_eval"],
       "ptc_tools": ["evidence_bundle", "evidence_read", "evidence_page"],
-      "upstream_tools": ["upstream:observatory/list-traces"],
+      "upstream_tools": [],
       "prelude_store": "write",
       "preludes": ["paged_base@1", "paged_audit@1"],
       "modes": ["read_only", "write_capable"]
@@ -901,6 +943,23 @@ Conceptual config:
 }
 ```
 
+Absence of `--session-roles` preserves current behavior: every session starts
+with `role: nil`, `grant_fingerprint: nil`, and the effective grant is
+unrestricted except for existing feature flags such as
+`--sessions-allow-prelude-write`.
+
+When the config is present, `lisp_session_start` accepts:
+
+```json
+{"role": "analyst", "tags": {"run": "demo-07", "stage": "analyst"}}
+```
+
+If `role` is omitted, use `default_role` when configured. Reject unknown roles,
+empty/non-string role values, and role names that are not bounded ASCII ids
+(`A-Za-z0-9_.-`, 1-64 bytes). Normalize grants once at boot and compute a
+stable `grant_fingerprint` from canonical JSON over the normalized effective
+grant, including resolved defaults.
+
 Grant vocabulary:
 
 - `mcp_tools`: outer MCP tools the client may see or call, such as
@@ -908,19 +967,106 @@ Grant vocabulary:
   In Slice C this is a process-level outer policy until there is a
   credential-bound role source before `tools/list`;
 - `ptc_tools`: host-bound PTC-Lisp tools injected into the sandbox, such as
-  `evidence_read` or prelude-store backing tools;
-- `upstream_tools`: external upstream operations, including literal
-  `upstream:server/tool` ids inferred from `(tool/call ...)`;
+  `evidence_read` or prelude-store backing tools. Slice C also prunes attached
+  prelude exports whose declared or collected host-tool refs are not granted, so
+  `ns-publics` and start-response discovery do not advertise denied host-tool
+  wrappers. The filtered prelude must also prune `source_index`; otherwise a
+  denied wrapper can still leak through `(source ns/name)` when the model knows
+  or guesses the ref. Preserve source entries for retained public exports and
+  their transitive private helpers, but do not preserve denied public export
+  source;
+- `upstream_tools`: reserved for Slice E. In Slice C it must parse and
+  normalize, but any non-empty value should be rejected with a clear config
+  error so the role grant cannot imply authority the runtime does not enforce;
 - `prelude_store`: none/read/write authority for the built-in `prelude/`
   namespace and backing tools;
-- `preludes`: selected prelude ids/refs the role may attach;
+- `preludes`: exact selected prelude refs the role may request, normalized to
+  `id@version` or `{id, version, checksum}`. Bare ids are not a role-policy
+  grant because they allow silent version drift. Object grants must reject
+  unknown keys, so a typo such as `checksumm` cannot silently become an
+  unchecksummed `{id, version}` grant;
 - `modes`: accepted built-in session modes.
+
+Transitive dependency policy: a granted exact ref may bring in its pinned
+dependency closure through `PreludeStore.Selection`. Those dependency exports
+are visible at runtime because they are part of the frozen compiled bundle, but
+they are not directly requestable by the role unless their own exact refs are
+also listed. Start responses and turn events must record the resolved closure
+so gates can see which dependency versions actually attached.
+
+Suggested normalized internal shape:
+
+```elixir
+%PtcRunnerMcp.Sessions.Policy{
+  default_role: "analyst" | nil,
+  outer_policy: %OuterPolicy{mcp_tools: MapSet.t(String.t())},
+  roles: %{"analyst" => %Grant{}}
+}
+
+%Grant{
+  role: "analyst" | nil,
+  ptc_tools: :all | MapSet.t(String.t()),
+  upstream_tools: :all | MapSet.t(String.t()),
+  prelude_store: :none | :read | :write,
+  preludes: :all | %{{String.t(), pos_integer()} => %{id: String.t(), version: pos_integer(), checksum: String.t() | nil}},
+  modes: MapSet.t([:read_only | :write_capable]),
+  fingerprint: "sha256:..."
+}
+```
+
+Avoid atoms from untrusted JSON role/tool names. The struct may store binaries
+and existing closed-set atoms only. Parse the JSON schema strictly at every
+level: top-level config, `outer_policy`, each role grant, and each prelude grant
+object all reject unknown keys.
 
 `mode` remains narrower than `role`: `mode: "write_capable"` controls the
 built-in session capability class, while `role` controls the full model-facing
 grant. `mode` must not be the only enforcement point for write-capable
 prelude-store tools; the effective grant is the intersection of role policy,
 mode, server feature flags, and selected preludes.
+
+Enforcement points:
+
+1. `PtcRunnerMcp.Application.parse_args/1` and
+   `PtcRunnerMcp.Sessions.Config.resolve/1` load `--session-roles` and store a
+   normalized policy in `Sessions.Config`.
+2. `lisp_session_start` validates the requested `role` before resolving
+   preludes or compiling capabilities. It rejects a requested `mode` not listed
+   in the role grant.
+3. Requested `preludes` are checked against `grant.preludes` before
+   `PreludeStore.Selection.resolve_with_prefix!/4`. Match exact normalized
+   refs, not just ids, so granting `base@1` does not allow `base@3`.
+4. Read-only prelude introspection is available only when
+   `grant.prelude_store in [:read, :write]`; write-capable sessions require
+   `grant.prelude_store == :write` in addition to the existing
+   `--sessions-allow-prelude-write` and configured-store checks.
+5. `Session.lisp_opts/3` filters the final host PTC tool map through
+   `grant.ptc_tools` before passing it to `PtcRunner.Lisp.run/2`, and filters
+   the attached compiled prelude to exports whose `tool:` requirements /
+   collected host-tool refs are granted. Execution therefore fails closed even
+   if a hidden tool exists in the host runtime, without breaking unrelated
+   exports in the same prelude. The same filtered prelude must be used for
+   discovery, evaluation, and live-session projection; filter both `exports`
+   and `source_index` so `doc`, `meta`, `ns-publics`, `apropos`, and `source`
+   have the same role-shaped view. Use the compiled `form_graph` rather than
+   parsing rendered source hints when retaining private helper source for
+   allowed exports.
+6. Do not implement `upstream_tools` enforcement in Slice C. The current
+   session path builds both `(tool/call ...)` and `catalog/*` from one root
+   `RunContext`, so discovery filtering without execution filtering would be a
+   false boundary. Keep non-empty `upstream_tools` configs invalid until Slice E
+   adds a single filtered runtime/run-context path for discovery and execution.
+7. Add top-level `role` and `grant_fingerprint` fields to
+   `PtcRunner.TraceLog.TurnEvent`. `Session.emit_turn_event/8` fills them from
+   session state; `PtcRunner.TraceLog.Introspection` projects them from grouped
+   turn events in `log/sessions` and individual turns in `log/turns`. The full
+   grant is not written to turn logs.
+8. Start responses and live session summaries include `role` and
+   `grant_fingerprint`. Turn logs remain turn logs: a session that starts and
+   never evaluates has no `turn` event and therefore will not appear in
+   `log/sessions`. Demo gate runners that audit roles from turn logs must require
+   at least one accepted eval attempt for every stage session, or use the live
+   session list/admin surface while the session still exists.
 
 Interim trust model: until Slice D binds roles to credentials/tokens, the role
 is self-declared at session start. That is acceptable for bench harnesses, not
@@ -946,14 +1092,21 @@ Slice C tests:
 - `lisp_session_start` rejects unknown roles and malformed role values;
 - accepted role/tags/grant fingerprint are echoed in start response;
 - turn events include role, tags, and grant fingerprint;
-- discovery hides outer MCP tools, host PTC tools, upstream tools, and prelude
-  exports not granted to the role;
+- process-level `outer_policy.mcp_tools` filters outer `tools/list` /
+  `tools/call`; role-scoped in-session discovery covers granted host PTC
+  wrappers, prelude-store forms, and selected prelude exports, not MCP
+  `tools/list`;
+- prelude role grants are exact refs: granting `base@1` does not allow
+  `base@2`, while pinned transitive dependencies attach and are recorded in the
+  resolved closure;
 - execution rejects an ungranted tool even if the host runtime can call it;
 - stateless `lisp_eval` and `lisp_task` have an explicit policy subject, or are
   clearly kept under process-level policy until role-scoped stateless calls are
   designed;
 - `mode: "write_capable"` remains insufficient to grant unrelated upstream
-  tools or prelude-store write tools that the role does not grant.
+  tools or prelude-store write tools that the role does not grant;
+- non-empty `upstream_tools` in a Slice C role config is rejected so the server
+  cannot advertise a grant it does not enforce.
 
 ### Slice D — Role-Scoped Credentials
 

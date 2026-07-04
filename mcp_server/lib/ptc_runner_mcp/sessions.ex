@@ -26,7 +26,7 @@ defmodule PtcRunnerMcp.Sessions do
     Tools
   }
 
-  alias PtcRunnerMcp.Sessions.{Config, Owner, Projection, Registry, Session, Supervisor}
+  alias PtcRunnerMcp.Sessions.{Config, Owner, Policy, Projection, Registry, Session, Supervisor}
 
   @names_registry PtcRunnerMcp.Sessions.Names
 
@@ -104,10 +104,15 @@ defmodule PtcRunnerMcp.Sessions do
         session_forget_tool(),
         session_close_tool()
       ]
+      |> Enum.filter(&Policy.mcp_tool_allowed?(Config.policy(), &1["name"]))
     else
       []
     end
   end
+
+  @doc "True when an outer MCP session tool is allowed by process-level policy."
+  @spec outer_tool_allowed?(String.t()) :: boolean()
+  def outer_tool_allowed?(name), do: Policy.mcp_tool_allowed?(Config.policy(), name)
 
   @doc "Handle a session `tools/call` outer params map and return an MCP envelope."
   @spec call(map()) :: map()
@@ -646,6 +651,7 @@ defmodule PtcRunnerMcp.Sessions do
           |> maybe_put(:preludes, Map.get(args, "preludes"))
           |> maybe_put(:mode, Map.get(args, "mode"))
           |> maybe_put(:tags, Map.get(args, "tags"))
+          |> maybe_put(:role, Map.get(args, "role"))
 
         start_session(owner_context(args), opts)
 
@@ -722,22 +728,38 @@ defmodule PtcRunnerMcp.Sessions do
   defp prepare_start_opts(opts) when is_map(opts) or is_list(opts) do
     opts = Map.new(opts)
 
-    case validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")) do
-      {:ok, :write_capable} ->
-        prepare_write_capable_start_opts(opts)
-
-      {:ok, mode} ->
+    with {:ok, grant} <-
+           Policy.resolve_grant(Config.policy(), Map.get(opts, :role) || Map.get(opts, "role")),
+         {:ok, mode} <- validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")),
+         :ok <- validate_grant_mode(grant, mode) do
+      opts =
         opts
-        |> Map.delete("mode")
-        |> Map.put(:mode, mode)
-        |> prepare_read_only_start_opts()
+        |> Map.delete("role")
+        |> Map.put(:role, if(grant, do: grant.role))
+        |> Map.put(:grant, grant)
+        |> Map.put(:grant_fingerprint, if(grant, do: grant.fingerprint))
 
-      {:error, message} ->
-        {:error, message}
+      case mode do
+        :write_capable ->
+          prepare_write_capable_start_opts(opts)
+
+        mode ->
+          opts |> Map.delete("mode") |> Map.put(:mode, mode) |> prepare_read_only_start_opts()
+      end
     end
   end
 
   defp prepare_start_opts(_opts), do: {:error, "session start options must be an object"}
+
+  defp validate_grant_mode(nil, _mode), do: :ok
+
+  defp validate_grant_mode(grant, mode) do
+    if Policy.mode_allowed?(grant, mode) do
+      :ok
+    else
+      {:error, "mode #{mode} is not granted for role #{grant.role}"}
+    end
+  end
 
   defp prepare_read_only_start_opts(opts) do
     case Map.get(opts, :preludes) || Map.get(opts, "preludes") do
@@ -751,6 +773,7 @@ defmodule PtcRunnerMcp.Sessions do
 
       refs when is_list(refs) ->
         with {:ok, refs} <- normalize_prelude_refs(refs),
+             :ok <- Policy.preludes_allowed?(Map.get(opts, :grant), refs),
              {:ok, selected} <- resolve_start_preludes(refs, opts) do
           start_opts =
             opts
@@ -781,6 +804,9 @@ defmodule PtcRunnerMcp.Sessions do
 
       Config.prelude_store() == nil ->
         {:error, "write_capable sessions require a configured prelude store"}
+
+      Policy.prelude_store_level(Map.get(opts, :grant)) != :write ->
+        {:error, "write_capable sessions require a role with prelude_store write grant"}
 
       (Map.get(opts, :preludes) || Map.get(opts, "preludes")) not in [nil, []] ->
         {:error,
@@ -932,7 +958,7 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp start_arg_key?(key)
-       when key in ["title", "ttl_ms", "preludes", "mode", "tags", "owner", :owner],
+       when key in ["title", "ttl_ms", "preludes", "mode", "tags", "role", "owner", :owner],
        do: true
 
   defp start_arg_key?(_key), do: false
@@ -986,6 +1012,9 @@ defmodule PtcRunnerMcp.Sessions do
   defp read_prelude_prefixes(opts) do
     cond do
       Config.prelude_store() == nil ->
+        configured_prelude_prefixes()
+
+      Policy.prelude_store_level(Map.get(opts, :grant)) == :none ->
         configured_prelude_prefixes()
 
       configured_prelude_opts(opts) != [] ->
@@ -1149,6 +1178,7 @@ defmodule PtcRunnerMcp.Sessions do
             "type" => "string",
             "enum" => ["read_only", "write_capable"]
           },
+          "role" => %{"type" => "string"},
           "preludes" => %{
             "type" => "array",
             "items" => %{

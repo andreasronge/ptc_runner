@@ -230,6 +230,22 @@ defmodule PtcRunnerMcp.JsonRpc do
 
         {:reply, success_reply(id, envelope), :drain}
 
+      not Tools.outer_tool_allowed?(Map.get(params, "name")) ->
+        envelope =
+          traced_tools_call(id, params, fn -> Tools.call(params) end,
+            protocol_version: protocol_version,
+            transport_request_id: Keyword.get(opts, :transport_request_id),
+            owner_hash: Keyword.get(opts, :owner_hash),
+            mcp_session_hash: Keyword.get(opts, :mcp_session_hash)
+          )
+
+        Log.log(:info, "tools_call_stop", %{
+          request_id: id,
+          is_error: Map.get(envelope, "isError")
+        })
+
+        {:reply, success_reply(id, envelope), :continue}
+
       DebugConfig.enabled?() and Map.get(params, "name") == DebugTool.tool_name() ->
         # `lisp_debug` (only when `--debug-tool` is set): handled synchronously,
         # NO concurrency permit, NOT through the async `Tools.call/1` path, and

@@ -7,8 +7,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.SubAgent.Loop.TurnFeedback
   alias PtcRunner.SubAgent.Namespace.{ExecutionHistory, User}
-  alias PtcRunnerMcp.Sessions.Config
-  alias PtcRunnerMcp.Sessions.Limits
+  alias PtcRunnerMcp.Sessions.{Config, Limits, Policy}
 
   @session_feedback_max_chars 2048
   @collection_hint_min_items 20
@@ -23,8 +22,13 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
+    |> maybe_put("role", Map.get(state, :role))
+    |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
     |> maybe_put("prelude_refs", selected_preludes_or_nil(state))
-    |> maybe_put("preludes", prelude_discovery(session_runtime_prelude(state)))
+    |> maybe_put(
+      "preludes",
+      prelude_discovery(session_runtime_prelude(state), Map.get(state, :grant))
+    )
   end
 
   @doc "Render a successful eval response."
@@ -112,12 +116,15 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     end
   end
 
-  defp session_runtime_prelude(%{runtime_prelude: %Prelude{} = prelude}), do: prelude
-  defp session_runtime_prelude(_state), do: Config.runtime_prelude()
+  defp session_runtime_prelude(%{runtime_prelude: %Prelude{} = prelude} = state),
+    do: Policy.filter_prelude(prelude, Map.get(state, :grant))
 
-  defp prelude_discovery(nil), do: nil
+  defp session_runtime_prelude(state),
+    do: Policy.filter_prelude(Config.runtime_prelude(), Map.get(state, :grant))
 
-  defp prelude_discovery(%Prelude{} = prelude) do
+  defp prelude_discovery(nil, _grant), do: nil
+
+  defp prelude_discovery(%Prelude{} = prelude, _grant) do
     prelude
     |> Prelude.prompt_exports()
     |> Enum.group_by(& &1.namespace)
@@ -446,6 +453,8 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "created_at" => DateTime.to_iso8601(state.created_at),
       "updated_at" => DateTime.to_iso8601(state.updated_at),
       "expires_at" => DateTime.to_iso8601(state.expires_at),
+      "role" => Map.get(state, :role),
+      "grant_fingerprint" => Map.get(state, :grant_fingerprint),
       "eval_status" => if(state.eval, do: "running", else: "idle"),
       "memory_bytes" => usage.memory_bytes,
       "binding_count" => usage.binding_count

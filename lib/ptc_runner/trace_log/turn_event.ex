@@ -19,7 +19,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
 
       schema_version, event ("turn"),
       driver ("session" | "sub_agent"),
-      session_id, agent_id, agent_name,
+      session_id, agent_id, agent_name, role, grant_fingerprint,
       turn, attempt, committed, status,
       duration_ms, input_tokens, output_tokens, total_tokens,
       data
@@ -82,6 +82,8 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "session_id" => Map.get(attrs, :session_id),
       "agent_id" => Map.get(attrs, :agent_id),
       "agent_name" => Map.get(attrs, :agent_name),
+      "role" => stringify(Map.get(attrs, :role)),
+      "grant_fingerprint" => stringify(Map.get(attrs, :grant_fingerprint)),
       "turn" => Map.get(attrs, :turn),
       "attempt" => Map.get(attrs, :attempt),
       "committed" => Map.get(attrs, :committed, false) == true,

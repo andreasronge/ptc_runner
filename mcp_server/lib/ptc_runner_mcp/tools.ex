@@ -445,7 +445,7 @@ defmodule PtcRunnerMcp.Tools do
         base
       end
 
-    %{"tools" => tools ++ Sessions.tool_entries()}
+    %{"tools" => Enum.filter(tools ++ Sessions.tool_entries(), &outer_tool_allowed?(&1["name"]))}
   end
 
   @doc false
@@ -453,6 +453,11 @@ defmodule PtcRunnerMcp.Tools do
   def agentic_advertised? do
     configured_aggregator_mode?() and AgenticConfig.enabled?()
   end
+
+  @doc false
+  @spec outer_tool_allowed?(String.t()) :: boolean()
+  def outer_tool_allowed?(name) when is_binary(name), do: Sessions.outer_tool_allowed?(name)
+  def outer_tool_allowed?(_name), do: true
 
   @doc """
   Handle a `tools/call` request.
@@ -481,7 +486,7 @@ defmodule PtcRunnerMcp.Tools do
   """
   @spec call(map()) :: map()
   def call(%{"name" => @tool_name, "arguments" => args}) when is_map(args) do
-    if Sessions.enabled?() do
+    if Sessions.enabled?() or not outer_tool_allowed?(@tool_name) do
       Envelope.unknown_tool(@tool_name)
     else
       handle_execute_with_gate(args)
@@ -489,23 +494,35 @@ defmodule PtcRunnerMcp.Tools do
   end
 
   def call(%{"name" => @tool_name}) do
-    if Sessions.enabled?() do
+    if Sessions.enabled?() or not outer_tool_allowed?(@tool_name) do
       Envelope.unknown_tool(@tool_name)
     else
       handle_execute_with_gate(%{})
     end
   end
 
-  def call(%{"name" => "lisp_task", "arguments" => args}) when is_map(args),
-    do: handle_agentic_call(args)
+  def call(%{"name" => "lisp_task", "arguments" => args}) when is_map(args) do
+    if outer_tool_allowed?("lisp_task"),
+      do: handle_agentic_call(args),
+      else: Envelope.unknown_tool("lisp_task")
+  end
 
-  def call(%{"name" => "lisp_task"}), do: handle_agentic_call(%{})
+  def call(%{"name" => "lisp_task"}) do
+    if outer_tool_allowed?("lisp_task"),
+      do: handle_agentic_call(%{}),
+      else: Envelope.unknown_tool("lisp_task")
+  end
 
   def call(%{"name" => name} = params) when is_binary(name) do
-    if Sessions.tool_name?(name) do
-      Sessions.call(params)
-    else
-      Envelope.unknown_tool(name)
+    cond do
+      Sessions.tool_name?(name) and outer_tool_allowed?(name) ->
+        Sessions.call(params)
+
+      Sessions.tool_name?(name) ->
+        Envelope.unknown_tool(name)
+
+      true ->
+        Envelope.unknown_tool(name)
     end
   end
 

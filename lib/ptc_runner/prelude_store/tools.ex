@@ -35,6 +35,15 @@ defmodule PtcRunner.PreludeStore.Tools do
     @form_tool,
     @edit_tool
   ]
+  @read_tool_names [
+    @list_tool,
+    @history_tool,
+    @read_tool,
+    @forms_tool,
+    @form_deps_tool,
+    @deps_tool,
+    @form_tool
+  ]
   @max_public_string_bytes 1_024
   # Mirrors `PreludeCandidate`'s own `@default_source_bytes` (also 64 KB): a
   # single form's exact source text is bounded the same way `prelude/source`
@@ -155,6 +164,10 @@ defmodule PtcRunner.PreludeStore.Tools do
   @doc "Reserved private backing tool names."
   @spec reserved_names() :: [String.t()]
   def reserved_names, do: @reserved_names
+
+  @doc "Reserved read-effect private backing tool names."
+  @spec read_names() :: [String.t()]
+  def read_names, do: @read_tool_names
 
   @doc "Source for the public `prelude/` capability prelude."
   @spec prelude_source() :: String.t()

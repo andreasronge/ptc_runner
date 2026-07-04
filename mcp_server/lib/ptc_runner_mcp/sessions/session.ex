@@ -18,7 +18,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
   alias PtcRunnerMcp.Limits, as: McpLimits
   alias PtcRunnerMcp.PayloadMetrics
   alias PtcRunnerMcp.Sandbox
-  alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Registry}
+  alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Policy, Projection, Registry}
   alias PtcRunnerMcp.TurnLogConfig
   alias PtcRunnerMcp.UpstreamResultFeedback
 
@@ -30,6 +30,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :owner,
     :title,
     :mode,
+    :role,
+    :grant,
+    :grant_fingerprint,
     :tags,
     :created_at,
     :updated_at,
@@ -55,6 +58,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
           owner: Owner.t(),
           title: String.t() | nil,
           mode: :read_only | :write_capable,
+          role: String.t() | nil,
+          grant: Policy.grant() | nil,
+          grant_fingerprint: String.t() | nil,
           tags: map(),
           created_at: DateTime.t(),
           updated_at: DateTime.t(),
@@ -104,6 +110,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
       owner: Keyword.fetch!(opts, :owner),
       title: Keyword.get(opts, :title),
       mode: Keyword.get(opts, :mode, :read_only),
+      role: Keyword.get(opts, :role),
+      grant: Keyword.get(opts, :grant),
+      grant_fingerprint: Keyword.get(opts, :grant_fingerprint),
       tags: Keyword.get(opts, :tags, %{}),
       created_at: now,
       updated_at: now,
@@ -404,6 +413,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
         turn: state.turn,
         attempts: state.attempts,
         mode: state.mode,
+        role: state.role,
+        grant: state.grant,
+        grant_fingerprint: state.grant_fingerprint,
         limits: state.limits,
         runtime_prelude: state.runtime_prelude
       }
@@ -691,6 +703,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
             status: status,
             duration_ms: System.monotonic_time(:millisecond) - Map.get(eval, :started_at),
             tags: current.tags,
+            role: current.role,
+            grant_fingerprint: current.grant_fingerprint,
             program: Map.get(eval, :program),
             result_preview: TurnEvent.preview(Map.get(step, :return)),
             prints: Map.get(step, :prints, []),
@@ -935,15 +949,20 @@ defmodule PtcRunnerMcp.Sessions.Session do
     |> maybe_put(:runtime, Map.get(opts, :runtime))
   end
 
-  defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude}), do: prelude
-  defp snapshot_prelude(_snapshot), do: Config.runtime_prelude() || Config.prelude_source()
+  defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude} = snapshot),
+    do: Policy.filter_prelude(prelude, Map.get(snapshot, :grant))
+
+  defp snapshot_prelude(snapshot),
+    do:
+      Policy.filter_prelude(Config.runtime_prelude(), Map.get(snapshot, :grant)) ||
+        Config.prelude_source()
 
   # A write_capable session (gated by --sessions-allow-prelude-write) is granted
   # the full private prelude_store_* backing tool set so the attached `prelude/`
   # capability can author into the configured store. Read-only sessions receive
   # only read-effect backing tools for the read-only `prelude/` introspection
   # wrapper.
-  defp session_eval_tools(%{mode: :write_capable}, base) do
+  defp session_eval_tools(%{mode: :write_capable} = snapshot, base) do
     tools =
       if Config.allow_prelude_write?() do
         case Config.prelude_store() do
@@ -954,10 +973,12 @@ defmodule PtcRunnerMcp.Sessions.Session do
         base
       end
 
-    Config.with_evidence_tools(tools)
+    tools
+    |> Config.with_evidence_tools()
+    |> Policy.filter_ptc_tools(Map.get(snapshot, :grant))
   end
 
-  defp session_eval_tools(%{mode: :read_only, runtime_prelude: runtime_prelude}, base) do
+  defp session_eval_tools(%{mode: :read_only, runtime_prelude: runtime_prelude} = snapshot, base) do
     tools =
       if read_prelude_attached?(runtime_prelude) do
         case Config.prelude_store() do
@@ -968,10 +989,16 @@ defmodule PtcRunnerMcp.Sessions.Session do
         base
       end
 
-    Config.with_evidence_tools(tools)
+    tools
+    |> Config.with_evidence_tools()
+    |> Policy.filter_ptc_tools(Map.get(snapshot, :grant))
   end
 
-  defp session_eval_tools(_snapshot, base), do: Config.with_evidence_tools(base)
+  defp session_eval_tools(snapshot, base) do
+    base
+    |> Config.with_evidence_tools()
+    |> Policy.filter_ptc_tools(Map.get(snapshot, :grant))
+  end
 
   defp read_prelude_attached?(%PtcRunner.Lisp.Prelude{metadata: %{components: components}})
        when is_list(components) do

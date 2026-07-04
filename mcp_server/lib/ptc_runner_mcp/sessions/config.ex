@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
   alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
   alias PtcRunner.Evidence.Holder, as: EvidenceHolder
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunnerMcp.Sessions.Policy
 
   @default_max_sessions 64
   @default_max_sessions_per_owner 16
@@ -38,6 +39,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @default_evidence_bundle nil
   @default_evidence_holder nil
   @default_evidence_tools nil
+  @default_roles_path nil
+  @default_policy Policy.unrestricted()
 
   @typedoc "Process-wide sessions configuration."
   @type t :: %{
@@ -66,7 +69,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
           evidence_bundle_path: String.t() | nil,
           evidence_bundle: EvidenceBundle.t() | nil,
           evidence_holder: pid() | nil,
-          evidence_tools: map() | nil
+          evidence_tools: map() | nil,
+          roles_path: String.t() | nil,
+          policy: Policy.t()
         }
 
   @doc "Default session config. Sessions are disabled by default."
@@ -98,7 +103,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
       evidence_bundle_path: @default_evidence_bundle_path,
       evidence_bundle: @default_evidence_bundle,
       evidence_holder: @default_evidence_holder,
-      evidence_tools: @default_evidence_tools
+      evidence_tools: @default_evidence_tools,
+      roles_path: @default_roles_path,
+      policy: @default_policy
     }
   end
 
@@ -216,6 +223,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
          {:ok, prelude_path, prelude_source, _runtime_prelude} <- read_prelude(args, defaults),
          {:ok, prelude_store} <- read_prelude_store(args, defaults),
          {:ok, evidence_bundle_path, evidence_bundle} <- read_evidence_bundle(args, defaults),
+         {:ok, roles_path, policy} <- read_policy(args, defaults),
          {:ok, runtime_prelude} <-
            compile_composed_prelude(compose_prelude_source(prelude_source, evidence_bundle)) do
       composed_prelude_source = compose_prelude_source(prelude_source, evidence_bundle)
@@ -259,7 +267,9 @@ defmodule PtcRunnerMcp.Sessions.Config do
          evidence_bundle_path: evidence_bundle_path,
          evidence_bundle: evidence_bundle,
          evidence_holder: nil,
-         evidence_tools: nil
+         evidence_tools: nil,
+         roles_path: roles_path,
+         policy: policy
        }}
     end
   end
@@ -333,6 +343,10 @@ defmodule PtcRunnerMcp.Sessions.Config do
   @spec evidence_bundle() :: EvidenceBundle.t() | nil
   def evidence_bundle, do: get().evidence_bundle
 
+  @doc "Configured role policy for MCP sessions."
+  @spec policy() :: Policy.t()
+  def policy, do: get().policy
+
   @doc "Merge evidence tools into an eval tool map/list when evidence is configured."
   @spec with_evidence_tools(map() | keyword() | nil) :: map() | keyword() | nil
   def with_evidence_tools(base) do
@@ -394,6 +408,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
       {:evidence_bundle, %EvidenceBundle{} = value} -> {:evidence_bundle, value}
       {:evidence_holder, value} when is_pid(value) -> {:evidence_holder, value}
       {:evidence_tools, value} when is_map(value) -> {:evidence_tools, value}
+      {:roles_path, value} when is_binary(value) -> {:roles_path, value}
+      {:policy, %Policy{} = value} -> {:policy, value}
       {:prelude_path, _value} -> {:prelude_path, defaults.prelude_path}
       {:prelude_source, _value} -> {:prelude_source, defaults.prelude_source}
       {:runtime_prelude, _value} -> {:runtime_prelude, defaults.runtime_prelude}
@@ -402,6 +418,8 @@ defmodule PtcRunnerMcp.Sessions.Config do
       {:evidence_bundle, _value} -> {:evidence_bundle, defaults.evidence_bundle}
       {:evidence_holder, _value} -> {:evidence_holder, defaults.evidence_holder}
       {:evidence_tools, _value} -> {:evidence_tools, defaults.evidence_tools}
+      {:roles_path, _value} -> {:roles_path, defaults.roles_path}
+      {:policy, _value} -> {:policy, defaults.policy}
       {key, value} when is_integer(value) and value > 0 -> {key, value}
       {key, _value} -> {key, Map.fetch!(defaults, key)}
     end)
@@ -463,6 +481,27 @@ defmodule PtcRunnerMcp.Sessions.Config do
       value ->
         {:error,
          "--evidence-bundle / PTC_RUNNER_MCP_EVIDENCE_BUNDLE must be a file path, got: " <>
+           inspect(value)}
+    end
+  end
+
+  defp read_policy(args, defaults) do
+    case env_or(args, :session_roles, "PTC_RUNNER_MCP_SESSION_ROLES") do
+      nil ->
+        {:ok, defaults.roles_path, defaults.policy}
+
+      path when is_binary(path) ->
+        case Policy.load_file(path) do
+          {:ok, policy} ->
+            {:ok, path, policy}
+
+          {:error, message} ->
+            {:error, "--session-roles / PTC_RUNNER_MCP_SESSION_ROLES is invalid: #{message}"}
+        end
+
+      value ->
+        {:error,
+         "--session-roles / PTC_RUNNER_MCP_SESSION_ROLES must be a file path, got: " <>
            inspect(value)}
     end
   end

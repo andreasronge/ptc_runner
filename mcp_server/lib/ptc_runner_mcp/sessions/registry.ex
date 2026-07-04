@@ -29,6 +29,8 @@ defmodule PtcRunnerMcp.Sessions.Registry do
           owner_hash: String.t(),
           title: String.t() | nil,
           mode: :read_only | :write_capable,
+          role: String.t() | nil,
+          grant_fingerprint: String.t() | nil,
           tags: map(),
           created_at: DateTime.t()
         }
@@ -245,6 +247,9 @@ defmodule PtcRunnerMcp.Sessions.Registry do
     id = Map.get(opts, :session_id) || generate_id()
     title = string_or_nil(Map.get(opts, :title))
     mode = parse_mode(Map.get(opts, :mode))
+    role = Map.get(opts, :role)
+    grant = Map.get(opts, :grant)
+    grant_fingerprint = Map.get(opts, :grant_fingerprint)
     tags = normalize_tags(Map.get(opts, :tags, %{}))
     ttl_ms = Config.clamp_ttl_ms(Map.get(opts, :ttl_ms))
     created_at = DateTime.utc_now()
@@ -255,6 +260,8 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       owner_hash: owner_hash,
       title: title,
       mode: mode,
+      role: role,
+      grant_fingerprint: grant_fingerprint,
       tags: tags,
       created_at: created_at
     }
@@ -265,6 +272,9 @@ defmodule PtcRunnerMcp.Sessions.Registry do
         owner: owner,
         title: title,
         mode: mode,
+        role: role,
+        grant: grant,
+        grant_fingerprint: grant_fingerprint,
         tags: tags,
         ttl_ms: ttl_ms,
         limits: Config.session_limits(),

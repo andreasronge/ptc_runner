@@ -23,8 +23,9 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   alias PtcRunner.Lisp
   alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
-  alias PtcRunnerMcp.{ResponseProfile, Sessions, Tools}
+  alias PtcRunnerMcp.{JsonRpc, ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Session}
+  alias PtcRunnerMcp.Sessions.Policy
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.TestSupport.SoakHelpers
   alias PtcRunnerMcp.{TurnLogCollector, TurnLogConfig}
@@ -116,6 +117,120 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["isError"] == false
       assert eval["structuredContent"]["status"] == "ok"
       assert eval["structuredContent"]["result"] == "user=> 42"
+    end
+
+    @tag :tmp_dir
+    test "role policy echoes role and filters ungranted PTC tools", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      Config.set(
+        Config.get()
+        |> Map.put(:evidence_bundle_path, evidence_manifest)
+        |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
+        |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
+        |> Map.put(:runtime_prelude, nil)
+        |> Map.put(:policy, role_policy!("analyst", ptc_tools: ["evidence_bundle"]))
+      )
+
+      start = call("lisp_session_start", %{"role" => "analyst"})
+
+      assert start["isError"] == false
+      assert start["structuredContent"]["role"] == "analyst"
+      assert start["structuredContent"]["grant_fingerprint"] =~ "sha256:"
+      sid = start["structuredContent"]["session_id"]
+
+      unrelated =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(+ 1 2)"
+        })
+
+      assert unrelated["isError"] == false
+      assert unrelated["structuredContent"]["result"] == "user=> 3"
+
+      publics =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(keys (ns-publics 'evidence))"
+        })
+
+      assert publics["isError"] == false
+      assert publics["structuredContent"]["result"] =~ "bundle"
+      refute publics["structuredContent"]["result"] =~ "read"
+      refute publics["structuredContent"]["result"] =~ "page"
+
+      source =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(source evidence/read)"
+        })
+
+      assert source["isError"] == false
+      assert source["structuredContent"]["prints"] == ["no source available for evidence/read"]
+
+      helper_source =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => "(source evidence/first-opts)"
+        })
+
+      assert helper_source["isError"] == false
+      assert [private_helper] = helper_source["structuredContent"]["prints"]
+      assert private_helper =~ "(defn- first-opts"
+
+      eval =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(evidence/read "summary")|
+        })
+
+      assert eval["isError"] == true
+      assert eval["structuredContent"]["message"] =~ "evidence/read"
+    end
+
+    test "outer policy filters session tools/list and tools/call" do
+      Config.set(%{Config.get() | policy: outer_policy!(["lisp_session_start"])})
+
+      names = Tools.list()["tools"] |> Enum.map(& &1["name"])
+      assert "lisp_session_start" in names
+      refute "lisp_session_eval" in names
+
+      env = call("lisp_session_eval", %{"session_id" => "ptcs_nope", "program" => "(+ 1 2)"})
+      assert env["isError"] == true
+      assert env["structuredContent"]["reason"] == "unknown_tool"
+    end
+
+    test "outer policy filters JSON-RPC async session eval path" do
+      Config.set(%{Config.get() | policy: outer_policy!(["lisp_session_start"])})
+
+      frame = %{
+        "jsonrpc" => "2.0",
+        "id" => 41,
+        "method" => "tools/call",
+        "params" => %{
+          "name" => "lisp_session_eval",
+          "arguments" => %{"session_id" => "ptcs_nope", "program" => "(+ 1 2)"}
+        }
+      }
+
+      assert {:reply, reply, :continue} = JsonRpc.dispatch({:ok, frame})
+      refute match?({:async_call, _, _, _, _, _}, reply)
+      assert reply["result"]["isError"] == true
+      assert reply["result"]["structuredContent"]["reason"] == "unknown_tool"
+    end
+
+    test "role policy rejects malformed and unknown requested roles" do
+      Config.set(%{Config.get() | policy: role_policy!("analyst")})
+
+      malformed = call("lisp_session_start", %{"role" => "bad role"})
+      assert malformed["isError"] == true
+      assert malformed["structuredContent"]["reason"] == "session_args_error"
+      assert malformed["structuredContent"]["message"] =~ "invalid role"
+
+      unknown = call("lisp_session_start", %{"role" => "reviewer"})
+      assert unknown["isError"] == true
+      assert unknown["structuredContent"]["reason"] == "session_args_error"
+      assert unknown["structuredContent"]["message"] =~ "unknown session role"
     end
 
     test "explicit empty selected preludes keeps configured runtime prelude available" do
@@ -282,6 +397,35 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["structuredContent"]["status"] == "ok"
       assert eval["structuredContent"]["result"] =~ "7"
       assert eval["structuredContent"]["result"] =~ "operator-selected facts"
+    end
+
+    test "role policy requires exact prelude refs" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _first} =
+        PreludeStore.write(store, "picked", """
+        (ns picked {:visibility :prompt})
+        (defn value [] 1)
+        """)
+
+      {:ok, _second} =
+        PreludeStore.write(store, "picked", """
+        (ns picked {:visibility :prompt})
+        (defn value [] 2)
+        """)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:policy, role_policy!("analyst", preludes: ["picked@1"]))
+      )
+
+      allowed = call("lisp_session_start", %{"role" => "analyst", "preludes" => ["picked@1"]})
+      assert allowed["isError"] == false
+
+      denied = call("lisp_session_start", %{"role" => "analyst", "preludes" => ["picked@2"]})
+      assert denied["isError"] == true
+      assert denied["structuredContent"]["message"] =~ "not granted"
     end
 
     @tag :tmp_dir
@@ -968,6 +1112,39 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "turn logs and log prelude project role and grant fingerprint", %{tmp_dir: dir} do
+      Config.set(%{Config.get() | policy: role_policy!("editor")})
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      start =
+        call("lisp_session_start", %{
+          "role" => "editor",
+          "tags" => %{"run" => "demo", "stage" => "editor"}
+        })
+
+      sid = start["structuredContent"]["session_id"]
+      fingerprint = start["structuredContent"]["grant_fingerprint"]
+
+      assert {:ok, _response} = Sessions.eval(sid, "(+ 1 2)")
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert turn["role"] == "editor"
+      assert turn["grant_fingerprint"] == fingerprint
+
+      tools = Introspection.tools(path)
+      %{"items" => [summary]} = tools["log_sessions"].(%{"tags" => %{"stage" => "editor"}})
+      assert summary["role"] == "editor"
+      assert summary["grant_fingerprint"] == fingerprint
+
+      %{"items" => [projected_turn]} = tools["log_turns"].(%{"session-id" => sid})
+      assert projected_turn["role"] == "editor"
+      assert projected_turn["grant_fingerprint"] == fingerprint
+    end
+
+    @tag :tmp_dir
     test "configured evidence bundle is readable in sessions and stamps evidence_reads", %{
       tmp_dir: dir
     } do
@@ -1107,6 +1284,57 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert response["status"] == "ok"
       assert response["result"] =~ "operator-selected facts"
+    end
+
+    test "write_capable requires role prelude_store write grant" do
+      {:ok, store} = PreludeStore.new()
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:allow_prelude_write, true)
+        |> Map.put(
+          :policy,
+          role_policy!("analyst", prelude_store: "read", modes: ["write_capable"])
+        )
+      )
+
+      denied = call("lisp_session_start", %{"role" => "analyst", "mode" => "write_capable"})
+      assert denied["isError"] == true
+      assert denied["structuredContent"]["message"] =~ "prelude_store write grant"
+    end
+
+    test "prelude_store write grant supplies private backing tools outside ptc_tools allowlist" do
+      {:ok, store} = PreludeStore.new()
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:allow_prelude_write, true)
+        |> Map.put(
+          :policy,
+          role_policy!("editor",
+            prelude_store: "write",
+            modes: ["write_capable"],
+            ptc_tools: ["evidence_read"]
+          )
+        )
+      )
+
+      start = call("lisp_session_start", %{"role" => "editor", "mode" => "write_capable"})
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      write =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" =>
+            ~S|(prelude/write {:id "created" :source "(ns created {:visibility :prompt})\n(defn value [] 1)"})|
+        })
+
+      assert write["isError"] == false
+      assert {:ok, candidate} = PreludeStore.read(store, "created")
+      assert candidate.id == "created"
     end
 
     @tag :tmp_dir
@@ -1331,6 +1559,67 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert config.runtime_prelude != nil
       assert "smoke" in config.runtime_prelude.namespaces
       assert "evidence" in config.runtime_prelude.namespaces
+    end
+
+    @tag :tmp_dir
+    test "resolve/1 loads session roles and rejects non-empty upstream grants", %{tmp_dir: dir} do
+      path =
+        write_role_policy!(dir, %{
+          "roles" => %{"analyst" => %{"upstream_tools" => ["upstream:x/y"]}}
+        })
+
+      assert {:error, message} = Config.resolve(%{session_roles: path})
+      assert message =~ "--session-roles"
+      assert message =~ "reserved for Slice E"
+
+      path = write_role_policy!(dir, role_policy_json("analyst"))
+
+      assert {:ok, config} = Config.resolve(%{session_roles: path})
+      assert config.roles_path == path
+      assert config.policy.default_role == "analyst"
+      assert config.policy.roles["analyst"].fingerprint =~ "sha256:"
+    end
+
+    @tag :tmp_dir
+    test "resolve/1 rejects unknown session role policy keys", %{tmp_dir: dir} do
+      bad_top =
+        write_role_policy!(dir, Map.put(role_policy_json("analyst"), "default_roles", "typo"))
+
+      assert {:error, top_message} = Config.resolve(%{session_roles: bad_top})
+      assert top_message =~ "unknown key"
+      assert top_message =~ "default_roles"
+
+      bad_outer =
+        write_role_policy!(dir, %{
+          "outer_policy" => %{"mcp_toolz" => ["lisp_session_start"]},
+          "roles" => %{"analyst" => %{}}
+        })
+
+      assert {:error, outer_message} = Config.resolve(%{session_roles: bad_outer})
+      assert outer_message =~ "unknown key"
+      assert outer_message =~ "mcp_toolz"
+
+      bad_role =
+        write_role_policy!(dir, %{
+          "roles" => %{"analyst" => %{"prelude_stroe" => "write"}}
+        })
+
+      assert {:error, role_message} = Config.resolve(%{session_roles: bad_role})
+      assert role_message =~ "unknown key"
+      assert role_message =~ "prelude_stroe"
+
+      bad_prelude =
+        write_role_policy!(dir, %{
+          "roles" => %{
+            "analyst" => %{
+              "preludes" => [%{"id" => "base", "version" => 1, "checksumm" => "typo"}]
+            }
+          }
+        })
+
+      assert {:error, prelude_message} = Config.resolve(%{session_roles: bad_prelude})
+      assert prelude_message =~ "unknown key"
+      assert prelude_message =~ "checksumm"
     end
 
     @tag :tmp_dir
@@ -2048,6 +2337,49 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     (defn list-store [] (tool/prelude_store_list {}))
     """ <>
       "\n\n;; --- ptc_runner evidence prelude ---\n\n" <> PtcRunner.Evidence.prelude_source()
+  end
+
+  defp role_policy!(role, opts \\ []) do
+    {:ok, policy} =
+      role
+      |> role_policy_json(opts)
+      |> Policy.from_map()
+
+    policy
+  end
+
+  defp outer_policy!(mcp_tools) do
+    {:ok, policy} =
+      %{"outer_policy" => %{"mcp_tools" => mcp_tools}}
+      |> Policy.from_map()
+
+    policy
+  end
+
+  defp role_policy_json(role, opts \\ []) do
+    grant =
+      %{}
+      |> maybe_put_json("ptc_tools", Keyword.get(opts, :ptc_tools))
+      |> maybe_put_json("upstream_tools", Keyword.get(opts, :upstream_tools, []))
+      |> maybe_put_json("prelude_store", Keyword.get(opts, :prelude_store))
+      |> maybe_put_json("preludes", Keyword.get(opts, :preludes))
+      |> maybe_put_json("modes", Keyword.get(opts, :modes))
+
+    %{
+      "default_role" => role,
+      "roles" => %{
+        role => grant
+      }
+    }
+  end
+
+  defp maybe_put_json(map, _key, nil), do: map
+  defp maybe_put_json(map, key, value), do: Map.put(map, key, value)
+
+  defp write_role_policy!(dir, policy) do
+    path = Path.join(dir, "roles.json")
+    File.write!(path, Jason.encode!(policy, pretty: true))
+    path
   end
 
   defp write_evidence_bundle!(dir, content \\ "operator-selected facts\n") do

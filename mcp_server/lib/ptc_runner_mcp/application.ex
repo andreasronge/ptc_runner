@@ -29,6 +29,7 @@ defmodule PtcRunnerMcp.Application do
     * `--debug-ring-size <int>` / `PTC_RUNNER_MCP_DEBUG_RING_SIZE`
     * `--max-debug-response-bytes <int>` / `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES`
     * `--max-session-preview-chars <int>` / `PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS`
+    * `--session-roles <path>` / `PTC_RUNNER_MCP_SESSION_ROLES`
     * `--response-profile <slim|structured|debug>` / `PTC_RUNNER_MCP_RESPONSE_PROFILE`
 
   Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
@@ -259,6 +260,7 @@ defmodule PtcRunnerMcp.Application do
           max_session_upstream_call_entries: :integer,
           max_session_upstream_call_bytes: :integer,
           max_session_preview_chars: :integer,
+          session_roles: :string,
           collection_hint: :boolean,
           log_level: :string,
           trace_dir: :string,
