@@ -263,7 +263,14 @@ Slice C role-policy implementation:
 
 The remaining policy-track gaps are:
 
-- no role-scoped credentials or per-role upstream authority;
+- no bearer-token-bound role authority yet: sessions can self-declare roles, so
+  D3 still needs to bind bearer tokens to roles before this is more than
+  harness discipline;
+- no projection-scoped MCP HTTP clients yet: D2a fails closed for denied
+  credentialed MCP HTTP calls, but D2b is still needed before a restricted role
+  can call a credentialed MCP HTTP upstream through its own projected client;
+- no per-role upstream tool visibility yet: credentials can be scoped, but
+  upstream tool catalogs are not independently filtered per role until Slice E;
 - no native replacement for stage-specific server processes or the external MCP
   tool-filter proxy when one server must present different outer catalogs to
   different credentials;
@@ -1129,11 +1136,15 @@ Slice C tests:
 
 Goal: bind credentials to roles after role-level tool enforcement exists.
 
-This should be implemented as independent sub-slices. D1 and D2 are the useful
-minimum for the next demo; D3 is the production hardening step that turns the
-same mechanism into bearer-token authority rather than harness discipline.
+This should be implemented as independent sub-slices. D1 and the D2a session
+projection path are implemented, including the MCP-session regression test for
+credentialed MCP HTTP denial/no-root-client reuse. D3 is the production
+hardening step that turns the same mechanism into bearer-token authority rather
+than harness discipline.
 
 #### D1 — Credential Grants In Session Roles
+
+Status: implemented.
 
 Extend the existing `--session-roles` policy file instead of adding a second
 role config. The policy is already the server's authority object for modes,
@@ -1193,16 +1204,20 @@ Policy parser work:
 Validation work:
 
 - when the root upstream runtime is configured, reject role policies that grant
-  unknown credential binding names. This can be a startup validation in
-  `Application` after the upstream runtime config is loaded, or a lazy
-  fail-closed validation when the first role session starts. Prefer startup
-  validation so typos do not become mid-run tool failures;
+  unknown credential binding names. Current implementation does this as lazy
+  fail-closed validation during `lisp_session_start`, after the root runtime is
+  available; this is acceptable for the demo and keeps root runtime loading
+  order simple. A later startup preflight may turn the same check into an
+  earlier operator error, but it is not required for Slice D;
 - keep non-empty `upstream_tools` invalid until Slice E. Slice D controls
   credential authority, not upstream tool visibility;
 - role credentials do not grant local host PTC tools and do not bypass mode or
   prelude-store grants.
 
 #### D2 — Runtime Credential Projection
+
+Status: D2a implemented for stateful MCP sessions and OpenAPI upstream calls;
+D2b projection-scoped MCP HTTP clients remain open.
 
 Add a role-shaped upstream runtime projection instead of teaching every caller
 to inspect credential grants. The invariant should be:
@@ -1297,6 +1312,17 @@ HTTP upstream's auth bindings. In that implementation:
 Projection-scoped MCP HTTP clients remain D2b and are required before a
 restricted role can call a credentialed MCP HTTP upstream with a non-root
 credential subset.
+
+The D2a MCP-session regression coverage now includes credentialed MCP HTTP
+denial/no-root-client reuse. The session-level test configures a credentialed
+MCP HTTP upstream, starts a role with `credentials: []`, calls it through
+`lisp_session_eval`, and verifies:
+
+- the result is a generic credential-unavailable upstream failure;
+- no credential binding id or plaintext secret appears in the model-facing
+  envelope;
+- the fixture server observes no request, proving the session path stripped the
+  root-authenticated client and failed before network I/O.
 
 Projection-scoped client lifecycle:
 

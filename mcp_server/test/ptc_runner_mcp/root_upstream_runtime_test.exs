@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
   alias PtcRunnerMcp.RootUpstreamRuntime
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
   alias PtcRunnerMcp.Sessions.Policy
+  alias PtcRunnerMcp.Test.FakeHttpServer
   alias PtcRunnerMcp.TestSupport.SoakHelpers
   alias PtcRunnerMcp.Tools
 
@@ -234,6 +235,80 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
     end
   end
 
+  test "stateful sessions denied MCP HTTP credentials do not reuse root client" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+
+    server =
+      start_supervised!(
+        {FakeHttpServer,
+         scenario: :handshake_success,
+         opts: %{
+           toolset: [
+             %{
+               "name" => "echo",
+               "description" => "Echo arguments",
+               "inputSchema" => %{"type" => "object"}
+             }
+           ]
+         }}
+      )
+
+    url = "http://127.0.0.1:#{FakeHttpServer.port(server)}/mcp"
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "credentials" => []
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: mcp_http_credential_root_config("session-secret", url),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    requests = FakeHttpServer.received_requests(server)
+
+    assert Enum.map(requests, &get_in(&1, [:decoded, "method"])) == [
+             "initialize",
+             "notifications/initialized",
+             "tools/list"
+           ]
+
+    initialize = hd(requests)
+
+    assert Enum.any?(initialize.headers, fn {key, value} ->
+             String.downcase(key) == "authorization" and value == "Bearer session-secret"
+           end)
+
+    start = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+    session_id = start["structuredContent"]["session_id"]
+
+    result =
+      Tools.call(%{
+        "name" => "lisp_session_eval",
+        "arguments" => %{
+          "session_id" => session_id,
+          "program" => ~S|(tool/call {:server "fixture" :tool "echo" :args {:message "denied"}})|
+        }
+      })
+
+    assert result["isError"] == false
+    assert result["structuredContent"]["status"] == "ok"
+    assert result["structuredContent"]["result"] =~ "upstream fixture is unavailable"
+    refute result["structuredContent"]["result"] =~ "api_token"
+    refute inspect(result) =~ "session-secret"
+
+    assert FakeHttpServer.received_requests(server) == requests
+  end
+
   test "stateful sessions reject roles with unknown root credential grants" do
     SoakHelpers.setup_sessions(%{enabled: true})
 
@@ -327,6 +402,23 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
       ["upstreams", "observatory", "auth"],
       [%{"scheme" => "bearer", "binding" => "api_token"}]
     )
+  end
+
+  defp mcp_http_credential_root_config(secret, url) do
+    %{
+      "credentials" => %{
+        "api_token" => %{"source" => "literal", "value" => secret, "scheme_hint" => "bearer"}
+      },
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => url,
+          "allow_insecure_http" => true,
+          "allow_insecure_auth" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "api_token"}]
+        }
+      }
+    }
   end
 
   defp start_http_fixture(response_body) do
