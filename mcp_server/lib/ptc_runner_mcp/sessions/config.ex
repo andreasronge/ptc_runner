@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
   alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
   alias PtcRunner.Evidence.Holder, as: EvidenceHolder
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunnerMcp.{Lifecycle, Log}
   alias PtcRunnerMcp.Sessions.Policy
 
   @default_max_sessions 64
@@ -426,6 +427,7 @@ defmodule PtcRunnerMcp.Sessions.Config do
     |> ensure_evidence_prelude_source()
     |> compile_runtime_prelude_from_source()
     |> install_evidence_tools()
+    |> warn_unreachable_evidence_roles()
   end
 
   defp read_prelude(args, defaults) do
@@ -565,6 +567,34 @@ defmodule PtcRunnerMcp.Sessions.Config do
   end
 
   defp install_evidence_tools(config), do: config
+
+  # Flags roles whose explicit `ptc_tools` allowlist cannot reach any
+  # configured evidence tool. Partial evidence grants (some but not all of
+  # evidence_bundle/evidence_read/evidence_page) are an intentional, tested
+  # scoping pattern and are not flagged; only the zero-overlap case is, since
+  # it is indistinguishable at parse time from an operator forgetting to list
+  # the evidence tools.
+  defp warn_unreachable_evidence_roles(%{evidence_bundle: %EvidenceBundle{}} = config) do
+    evidence_tool_names = MapSet.new(Map.keys(config.evidence_tools))
+
+    Enum.each(config.policy.roles, fn {role, grant} ->
+      unless Enum.any?(evidence_tool_names, &Policy.ptc_tool_allowed?(grant, &1)) do
+        Log.log(
+          :warn,
+          "role_evidence_tools_unreachable",
+          Lifecycle.lifecycle_fields(%{
+            role: role,
+            grant_fingerprint: grant.fingerprint,
+            evidence_tools: Enum.sort(evidence_tool_names)
+          })
+        )
+      end
+    end)
+
+    config
+  end
+
+  defp warn_unreachable_evidence_roles(config), do: config
 
   defp merge_evidence_tools!(base, evidence_tools) do
     base_map = as_tool_map(base)

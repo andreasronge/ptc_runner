@@ -23,7 +23,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   alias PtcRunner.Lisp
   alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
-  alias PtcRunnerMcp.{JsonRpc, ResponseProfile, Sessions, Tools}
+  alias PtcRunnerMcp.{JsonRpc, Log, McpTestHelpers, ResponseProfile, Sessions, Tools}
   alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Session}
   alias PtcRunnerMcp.Sessions.Policy
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
@@ -1850,6 +1850,112 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
   end
 
+  describe "evidence tool grant diagnostics" do
+    setup do
+      original_log_level = Log.level()
+      Log.set_level(:info)
+
+      on_exit(fn ->
+        Log.set_level(original_log_level)
+        Config.reset()
+      end)
+
+      :ok
+    end
+
+    @tag :tmp_dir
+    test "partial evidence grant does not warn", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      roles_path =
+        write_role_policy!(dir, role_policy_json("analyst", ptc_tools: ["evidence_bundle"]))
+
+      logs =
+        install_config_and_capture_logs!(
+          evidence_bundle: evidence_manifest,
+          session_roles: roles_path
+        )
+
+      refute Enum.any?(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+    end
+
+    @tag :tmp_dir
+    test "zero-overlap ptc_tools allowlist warns with role and grant fingerprint", %{
+      tmp_dir: dir
+    } do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      roles_path =
+        write_role_policy!(dir, role_policy_json("guest", ptc_tools: ["some_unrelated_tool"]))
+
+      logs =
+        install_config_and_capture_logs!(
+          evidence_bundle: evidence_manifest,
+          session_roles: roles_path
+        )
+
+      assert [warning] = Enum.filter(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+      assert warning["level"] == "warn"
+      assert warning["fields"]["role"] == "guest"
+
+      assert warning["fields"]["grant_fingerprint"] ==
+               Config.get().policy.roles["guest"].fingerprint
+
+      assert warning["fields"]["evidence_tools"] == [
+               "evidence_bundle",
+               "evidence_page",
+               "evidence_read"
+             ]
+    end
+
+    @tag :tmp_dir
+    test "explicit deny-all ptc_tools allowlist warns", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+      roles_path = write_role_policy!(dir, role_policy_json("locked_out", ptc_tools: []))
+
+      logs =
+        install_config_and_capture_logs!(
+          evidence_bundle: evidence_manifest,
+          session_roles: roles_path
+        )
+
+      assert Enum.any?(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+    end
+
+    @tag :tmp_dir
+    test "ptc_tools: :all never warns", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+      roles_path = write_role_policy!(dir, role_policy_json("admin"))
+
+      logs =
+        install_config_and_capture_logs!(
+          evidence_bundle: evidence_manifest,
+          session_roles: roles_path
+        )
+
+      refute Enum.any?(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+    end
+
+    @tag :tmp_dir
+    test "no evidence bundle configured never warns", %{tmp_dir: dir} do
+      roles_path =
+        write_role_policy!(dir, role_policy_json("guest", ptc_tools: ["some_unrelated_tool"]))
+
+      logs = install_config_and_capture_logs!(session_roles: roles_path)
+
+      refute Enum.any?(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+    end
+
+    @tag :tmp_dir
+    test "unrestricted policy with no configured roles never warns", %{tmp_dir: dir} do
+      evidence_manifest = write_evidence_bundle!(Path.join(dir, "evidence"))
+
+      logs = install_config_and_capture_logs!(evidence_bundle: evidence_manifest)
+
+      refute Enum.any?(logs, &(&1["event"] == "role_evidence_tools_unreachable"))
+    end
+  end
+
   describe "Sessions.Limits table behavior" do
     setup do
       Config.set(%{enabled: true})
@@ -2436,6 +2542,13 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     path = Path.join(dir, "manifest.json")
     File.write!(path, Jason.encode!(manifest, pretty: true))
     path
+  end
+
+  defp install_config_and_capture_logs!(resolve_args) do
+    McpTestHelpers.capture_json_logs(fn ->
+      {:ok, config} = Config.resolve(Map.new(resolve_args))
+      Config.set(config)
+    end)
   end
 
   defp inspect_view(sid, view) do

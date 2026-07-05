@@ -1,13 +1,12 @@
 defmodule PtcRunnerMcp.LifecycleLoggingTest do
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureIO
-
   alias PtcRunnerMcp.Application
   alias PtcRunnerMcp.Http.Config, as: HttpConfig
   alias PtcRunnerMcp.Http.SessionRegistry, as: HttpSessionRegistry
   alias PtcRunnerMcp.Lifecycle
   alias PtcRunnerMcp.Log
+  alias PtcRunnerMcp.McpTestHelpers
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.TurnLogCollector
   alias PtcRunnerMcp.TurnLogConfig
@@ -46,7 +45,7 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
     File.write!(path, source)
 
     lines =
-      capture_json_logs(fn ->
+      McpTestHelpers.capture_json_logs(fn ->
         assert %{prelude_store: _store} =
                  Application.maybe_seed_prelude_store(%{prelude_store_seed: path})
       end)
@@ -69,7 +68,7 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
     name = :"turn_log_collector_#{System.unique_integer([:positive])}"
 
     logs =
-      capture_json_logs(fn ->
+      McpTestHelpers.capture_json_logs(fn ->
         {:ok, pid} = TurnLogCollector.start_link(dir: dir, name: name)
         Process.unlink(pid)
         path = TurnLogCollector.path(pid)
@@ -98,7 +97,7 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
     name = :"registry_#{System.unique_integer([:positive])}"
 
     logs =
-      capture_json_logs(fn ->
+      McpTestHelpers.capture_json_logs(fn ->
         {:ok, pid} = SessionsRegistry.start_link(name: name)
         Process.unlink(pid)
         GenServer.stop(pid, :shutdown)
@@ -112,7 +111,7 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
     name = :"registry_#{System.unique_integer([:positive])}"
 
     logs =
-      capture_json_logs(fn ->
+      McpTestHelpers.capture_json_logs(fn ->
         {:ok, sup} =
           Supervisor.start_link(
             [{SessionsRegistry, [name: name, trap_exit: true]}],
@@ -160,7 +159,7 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
       })
 
     logs =
-      capture_json_logs(fn ->
+      McpTestHelpers.capture_json_logs(fn ->
         name = :"http_registry_#{System.unique_integer([:positive])}"
         {:ok, pid} = HttpSessionRegistry.start_link(config: cfg, name: name)
         Process.unlink(pid)
@@ -174,13 +173,6 @@ defmodule PtcRunnerMcp.LifecycleLoggingTest do
     assert get_in(start, ["fields", "instance"]) == "lifecycle-test"
     assert get_in(terminate, ["fields", "transport"]) == "http"
     assert get_in(terminate, ["fields", "reason"]) == ":shutdown"
-  end
-
-  defp capture_json_logs(fun) do
-    :stderr
-    |> capture_io(fun)
-    |> String.split("\n", trim: true)
-    |> Enum.map(&Jason.decode!/1)
   end
 
   defp sha256_hex(source) do

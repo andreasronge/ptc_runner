@@ -48,4 +48,20 @@ defmodule PtcRunnerMcp.McpTestHelpers do
       timeout -> :ok
     end
   end
+
+  @doc """
+  Run `fun`, capturing everything it writes to stderr as decoded
+  `PtcRunnerMcp.Log` JSON lines.
+
+  `Log` writes structured JSON via `IO.puts(:stderr, ...)`, not via
+  `Logger`, so `ExUnit.CaptureLog` does not observe it — capture stderr
+  directly instead.
+  """
+  @spec capture_json_logs((-> any())) :: [map()]
+  def capture_json_logs(fun) do
+    :stderr
+    |> ExUnit.CaptureIO.capture_io(fun)
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
 end

@@ -980,7 +980,18 @@ Grant vocabulary:
   tools from an injected set, but it never grants a tool that session mode,
   prelude-store level, evidence-bundle setup, or host configuration did not
   inject. Explicit evidence-backed allowlists must include
-  `evidence_bundle`, `evidence_read`, and `evidence_page`;
+  `evidence_bundle`, `evidence_read`, and `evidence_page`.
+
+  Status: enforced by a config-install-time diagnostic (not a session-start
+  error). When an evidence bundle is configured and a role's `ptc_tools`
+  allowlist has zero overlap with the three evidence tool names,
+  `Sessions.Config.set/1` logs a `role_evidence_tools_unreachable` warning
+  (role, grant fingerprint, evidence tool names) once per config install.
+  Partial evidence grants (some but not all three tools) are not flagged —
+  that is a deliberate, tested scoping pattern, not a misconfiguration. This
+  is a warning, not a hard error, because `evidence_bundle` is a
+  process-global setting: a role with zero evidence access on a multi-role
+  server is a legitimate least-privilege config, not necessarily a mistake;
 - `upstream_tools`: reserved for Slice E. In Slice C it must parse and
   normalize, but any non-empty value should be rejected with a clear config
   error so the role grant cannot imply authority the runtime does not enforce;
