@@ -10,6 +10,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   @role_pattern ~r/\A[A-Za-z0-9_.-]{1,64}\z/
   @prelude_id_pattern ~r/\A[A-Za-z][A-Za-z0-9_.-]*\z/
+  @grant_fingerprint_schema_version 2
   # Dialyzer reports generated boolean branch code at module line 1; lifecycle
   # tests cover the denied-role/tool/prelude branches that trigger it.
   @dialyzer :no_match
@@ -95,6 +96,9 @@ defmodule PtcRunnerMcp.Sessions.Policy do
   @spec ptc_tool_allowed?(grant() | nil, String.t()) :: boolean()
   def ptc_tool_allowed?(nil, _name), do: true
 
+  # Tool injection is the authority boundary. This filter can only remove tools
+  # from a host-provided set; it never grants backing tools that were not already
+  # injected by the session mode/prelude-store/evidence configuration.
   def ptc_tool_allowed?(%Grant{} = grant, name) when is_binary(name) do
     store_tool_allowed?(grant, name) or configured_ptc_tool_allowed?(grant, name)
   end
@@ -535,6 +539,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   defp fingerprint(%Grant{} = grant) do
     data = %{
+      "schema_version" => @grant_fingerprint_schema_version,
       "modes" => grant.modes |> MapSet.to_list() |> Enum.map(&Atom.to_string/1) |> Enum.sort(),
       "prelude_store" => Atom.to_string(grant.prelude_store),
       "preludes" => prelude_fingerprint(grant.preludes),

@@ -779,7 +779,8 @@ Recommended implementation outline:
 6. Keep redaction as operator-supplied selection. In Slice B, "redaction" means
    only:
 
-   - hidden items are not readable by model-facing tools;
+   - hidden items are not readable by model-facing tools, and public read errors
+     for hidden ids are indistinguishable from unknown ids;
    - selected log fields are projected through existing `log/` projections;
    - file items are served exactly as selected, under byte bounds and checksum;
    - malformed manifests or paths outside the bundle root fail closed.
@@ -836,8 +837,9 @@ Slice B tests:
   in boot/start evidence;
 - hidden/operator-only item ids and content are absent from model-facing
   `bundle` and `page` responses;
-- `evidence_read` refuses hidden/operator-only ids, `bundle_checksum` excludes
-  hidden items, and `manifest_checksum` remains harness-only;
+- `evidence_read` refuses hidden/operator-only ids with the same public error as
+  unknown ids, `bundle_checksum` excludes hidden items, and
+  `manifest_checksum` remains harness-only;
 - model-visible `log_turns` defaults exclude raw programs, result previews,
   raw failure messages, and raw tool-call args/results;
 - `log_turns` supports filter-only and filter-plus-session selection with
@@ -974,7 +976,11 @@ Grant vocabulary:
   denied wrapper can still leak through `(source ns/name)` when the model knows
   or guesses the ref. Preserve source entries for retained public exports and
   their transitive private helpers, but do not preserve denied public export
-  source;
+  source. Injection remains the authority boundary: this filter can remove
+  tools from an injected set, but it never grants a tool that session mode,
+  prelude-store level, evidence-bundle setup, or host configuration did not
+  inject. Explicit evidence-backed allowlists must include
+  `evidence_bundle`, `evidence_read`, and `evidence_page`;
 - `upstream_tools`: reserved for Slice E. In Slice C it must parse and
   normalize, but any non-empty value should be rejected with a clear config
   error so the role grant cannot imply authority the runtime does not enforce;
@@ -1134,7 +1140,13 @@ Proposed shape:
   "roles": {
     "analyst": {
       "modes": ["read_only"],
-      "ptc_tools": ["log_list", "log_read"],
+      "ptc_tools": [
+        "evidence_bundle",
+        "evidence_read",
+        "evidence_page",
+        "log_list",
+        "log_read"
+      ],
       "prelude_store": "read",
       "preludes": [{"id": "paged_base", "version": 1}],
       "credentials": []
@@ -1160,7 +1172,9 @@ Policy parser work:
 
 - add `credentials` to `roles.<role>` allowed keys;
 - normalize to `MapSet.t()` or `:all` on `%Policy.Grant{}`;
-- include the sorted credential grant list in `grant.fingerprint`;
+- include a fingerprint schema version and the sorted credential grant list in
+  `grant.fingerprint`. Gate checks should compare the fingerprint together with
+  the server commit/build stamp when runs may span upgrades;
 - expose a helper such as `credential_allowed?/2` and `credential_grants/1`;
 - keep the full grant out of turn logs and responses; only role and grant
   fingerprint are model-facing.

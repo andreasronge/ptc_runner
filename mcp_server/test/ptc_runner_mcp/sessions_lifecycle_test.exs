@@ -1156,13 +1156,19 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
         |> Map.put(:evidence_bundle, EvidenceBundle.load!(evidence_manifest))
         |> Map.put(:prelude_source, PtcRunner.Evidence.prelude_source())
         |> Map.put(:runtime_prelude, nil)
+        |> Map.put(
+          :policy,
+          role_policy!("analyst",
+            ptc_tools: ["evidence_bundle", "evidence_page", "evidence_read"]
+          )
+        )
       )
 
       TurnLogConfig.set(%{turn_log_dir: Path.join(dir, "turn-log")})
       start_supervised!({TurnLogCollector, [dir: TurnLogConfig.turn_log_dir()]})
       path = TurnLogCollector.path()
 
-      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{})
+      {:ok, %{"session_id" => sid}} = Sessions.start_session(nil, %{role: "analyst"})
 
       assert {:ok, response} =
                Sessions.eval(sid, ~S|(get (evidence/read "summary") "content")|)
@@ -1578,6 +1584,9 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert config.roles_path == path
       assert config.policy.default_role == "analyst"
       assert config.policy.roles["analyst"].fingerprint =~ "sha256:"
+
+      assert config.policy.roles["analyst"].fingerprint ==
+               "sha256:b833c348a8904802ec353f77ebbfb9f17a30d8d07141106a518165a7cafedf10"
     end
 
     @tag :tmp_dir

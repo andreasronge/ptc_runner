@@ -38,8 +38,12 @@ defmodule PtcRunner.EvidenceTest do
 
     refute inspect(tools["evidence_bundle"].(%{})) =~ "expected-layer"
 
-    assert_raise ArgumentError, ~r/not model-visible/, fn ->
+    assert_raise ArgumentError, ~r/unknown evidence item "expected-layer"/, fn ->
       tools["evidence_read"].(%{"id" => "expected-layer"})
+    end
+
+    assert_raise ArgumentError, ~r/unknown evidence item "missing"/, fn ->
+      tools["evidence_read"].(%{"id" => "missing"})
     end
   end
 

@@ -63,14 +63,16 @@ defmodule PtcRunner.Evidence.Bundle do
         item.envelope
 
       {:ok, _hidden} ->
-        raise ArgumentError, "evidence item #{inspect(id)} is not model-visible"
+        unknown_item!(id)
 
       :error ->
-        raise ArgumentError, "unknown evidence item #{inspect(id)}"
+        unknown_item!(id)
     end
   end
 
   def read(_bundle, _args), do: raise(ArgumentError, "evidence_read args must be a map")
+
+  defp unknown_item!(id), do: raise(ArgumentError, "unknown evidence item #{inspect(id)}")
 
   defp from_manifest!(manifest, opts) do
     unless Map.get(manifest, "schema_version") == @schema_version do
