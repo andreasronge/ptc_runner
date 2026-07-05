@@ -26,6 +26,7 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
     Process.flag(:trap_exit, true)
     config = Keyword.fetch!(opts, :config)
     register_auth_token_redaction(config)
+    config = clear_role_token_redaction_secrets(config)
     ref = Process.send_after(self(), :cleanup, @cleanup_interval_ms)
 
     Log.log(
@@ -358,4 +359,14 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
   end
 
   defp register_role_token_redaction_secrets(_config), do: :ok
+
+  # Plaintext role-token secrets are only needed to register them with the
+  # ETS-backed redaction set above; the registry's own state must not keep
+  # carrying them for the process lifetime once that registration is done.
+  defp clear_role_token_redaction_secrets(%{role_token_redaction_secrets: secrets} = config)
+       when secrets != [] do
+    %{config | role_token_redaction_secrets: []}
+  end
+
+  defp clear_role_token_redaction_secrets(config), do: config
 end

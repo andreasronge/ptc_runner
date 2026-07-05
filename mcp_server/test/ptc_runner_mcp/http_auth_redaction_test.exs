@@ -44,4 +44,16 @@ defmodule PtcRunnerMcp.HttpAuthRedactionTest do
 
     assert Redactor.scrub("no token here") == "no token here"
   end
+
+  test "role-token redaction secrets are registered then scrubbed from registry state" do
+    role_secret = "role-token-secret-" <> String.duplicate("y", 32)
+
+    config = Map.put(minimal_http_config(nil), :role_token_redaction_secrets, [role_secret])
+
+    pid =
+      start_supervised!({SessionRegistry, [name: unique_registry_name(), config: config]})
+
+    assert Redactor.scrub("token: #{role_secret}") == "token: [REDACTED]"
+    assert :sys.get_state(pid).config.role_token_redaction_secrets == []
+  end
 end

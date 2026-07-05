@@ -3,7 +3,7 @@ defmodule PtcRunnerMcp.Http.Session do
 
   use GenServer
 
-  alias PtcRunnerMcp.Http.Telemetry
+  alias PtcRunnerMcp.Http.{AuthClaims, Telemetry}
 
   alias PtcRunnerMcp.{
     ConcurrencyGate,
@@ -14,6 +14,14 @@ defmodule PtcRunnerMcp.Http.Session do
     Sessions,
     Version
   }
+
+  # Tools that never consult a caller's `auth_claims` (see
+  # `Sessions.prepare_start_opts/1`, the only place role grants are enforced).
+  # A role-bound HTTP credential invoking either would run under full
+  # process-level authority instead of its bound role, so both are denied at
+  # this transport boundary — the one place that knows about the bound
+  # credential — before routing reaches `JsonRpc.dispatch/2`.
+  @role_blind_tools MapSet.new(["lisp_eval", "lisp_task"])
 
   defstruct id: nil,
             owner: nil,
@@ -217,17 +225,43 @@ defmodule PtcRunnerMcp.Http.Session do
   end
 
   defp dispatch(frame, state, context) do
-    frame = maybe_put_http_context(frame, state)
+    case role_blind_tool_denial(frame, state.owner) do
+      {:deny, id, envelope} ->
+        {:reply, success_reply(id, envelope), :continue}
 
-    JsonRpc.dispatch({:ok, frame},
-      draining: state.draining,
-      protocol_version: state.protocol_version,
-      transport: Keyword.get(context, :transport, :http),
-      transport_request_id: Keyword.get(context, :transport_request_id),
-      owner_hash: Keyword.get(context, :owner_hash, state.owner_hash),
-      mcp_session_hash: Keyword.get(context, :mcp_session_hash)
-    )
+      :allow ->
+        frame = maybe_put_http_context(frame, state)
+
+        JsonRpc.dispatch({:ok, frame},
+          draining: state.draining,
+          protocol_version: state.protocol_version,
+          transport: Keyword.get(context, :transport, :http),
+          transport_request_id: Keyword.get(context, :transport_request_id),
+          owner_hash: Keyword.get(context, :owner_hash, state.owner_hash),
+          mcp_session_hash: Keyword.get(context, :mcp_session_hash)
+        )
+    end
   end
+
+  defp role_blind_tool_denial(
+         %{"method" => "tools/call", "params" => %{"name" => name}} = frame,
+         owner
+       )
+       when is_binary(name) do
+    if MapSet.member?(@role_blind_tools, name) and trusted_auth_claims?(owner) do
+      Log.log(:warn, "http_role_credential_denied_tool", %{tool: name})
+      {:deny, Map.get(frame, "id"), Envelope.role_credential_denied(name)}
+    else
+      :allow
+    end
+  end
+
+  defp role_blind_tool_denial(_frame, _owner), do: :allow
+
+  defp trusted_auth_claims?(%{auth_claims: %AuthClaims{} = claims}),
+    do: AuthClaims.trusted?(claims)
+
+  defp trusted_auth_claims?(_owner), do: false
 
   defp start_async(state, request_id, work_fn, on_busy, on_discard, waiter, from) do
     cond do

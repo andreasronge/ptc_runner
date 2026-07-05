@@ -10,8 +10,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   """
   use ExUnit.Case, async: false
 
-  alias PtcRunnerMcp.{Application, Limits, TurnLogConfig}
+  alias PtcRunnerMcp.{Application, Limits, Log, TurnLogConfig}
+  alias PtcRunnerMcp.Http.AuthClaims
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
+  alias PtcRunnerMcp.Sessions.Policy
+  alias PtcRunnerMcp.Sessions.Policy.OuterPolicy
 
   setup do
     # Snapshot env vars we touch so we can restore them.
@@ -324,6 +327,77 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
 
       assert TurnLogConfig.turn_log_dir() == "/tmp/from-cli"
     end
+  end
+
+  describe "validate_role_tokens_boot!/1" do
+    import ExUnit.CaptureIO
+
+    setup do
+      prior = Log.level()
+      Log.set_level(:warn)
+      on_exit(fn -> Log.set_level(prior) end)
+      :ok
+    end
+
+    test "no-op when no role tokens are configured" do
+      assert :ok = Application.validate_role_tokens_boot!(%{role_tokens: %{}})
+    end
+
+    test "raises when role tokens are configured without --sessions" do
+      assert :ok = Application.apply_sessions_config(%{})
+
+      assert_raise RuntimeError, ~r/--http-role-tokens requires --sessions/, fn ->
+        Application.validate_role_tokens_boot!(role_tokens_config(["analyst"]))
+      end
+    end
+
+    test "raises when outer_policy.mcp_tools is left at the implicit :all default" do
+      assert :ok = Application.apply_sessions_config(%{sessions: true})
+
+      assert_raise RuntimeError, ~r/outer_policy\.mcp_tools/, fn ->
+        Application.validate_role_tokens_boot!(role_tokens_config(["analyst"]))
+      end
+    end
+
+    test "warns but does not raise when a token declares a role absent from --session-roles" do
+      set_sessions_policy!(mcp_tools: MapSet.new(["lisp_session_start"]), roles: %{})
+
+      log =
+        capture_io(:stderr, fn ->
+          assert :ok = Application.validate_role_tokens_boot!(role_tokens_config(["analyst"]))
+        end)
+
+      assert log =~ "http_role_token_unknown_role"
+      assert log =~ "analyst"
+    end
+
+    test "passes silently when every declared role is defined" do
+      set_sessions_policy!(
+        mcp_tools: MapSet.new(["lisp_session_start"]),
+        roles: %{"analyst" => :placeholder}
+      )
+
+      log =
+        capture_io(:stderr, fn ->
+          assert :ok = Application.validate_role_tokens_boot!(role_tokens_config(["analyst"]))
+        end)
+
+      refute log =~ "http_role_token_unknown_role"
+    end
+  end
+
+  defp role_tokens_config(allowed_roles) do
+    claims = AuthClaims.new("subject-1", "hash1234abcd", allowed_roles)
+    %{role_tokens: %{"tokenhash1" => claims}}
+  end
+
+  defp set_sessions_policy!(mcp_tools: mcp_tools, roles: roles) do
+    policy = %Policy{
+      outer_policy: %OuterPolicy{mcp_tools: mcp_tools},
+      roles: roles
+    }
+
+    SessionsConfig.set(%{SessionsConfig.defaults() | enabled: true, policy: policy})
   end
 
   # Re-run the same apply path Application.start/2 uses. Phase 0

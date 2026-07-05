@@ -54,6 +54,7 @@ defmodule PtcRunnerMcp.Envelope do
           | :unknown_tool
           | :shutting_down
           | :cancelled
+          | :role_credential_denied
 
   @doc """
   Build the `unknown_tool` envelope for any `tools/call` whose
@@ -101,6 +102,22 @@ defmodule PtcRunnerMcp.Envelope do
   @spec cancelled(String.t()) :: t()
   def cancelled(message) when is_binary(message) do
     render_error(:cancelled, message)
+  end
+
+  @doc """
+  Build a `role_credential_denied` envelope for `tools/call` against a
+  role-blind tool (`lisp_eval` / `lisp_task`) invoked with an HTTP role-token
+  credential. Role grants are enforced only for `lisp_session_*` tools; this
+  denies the bound credential reaching unbound process-level authority
+  instead of masquerading as `unknown_tool`.
+  """
+  @spec role_credential_denied(String.t()) :: t()
+  def role_credential_denied(name) when is_binary(name) do
+    render_error(
+      :role_credential_denied,
+      "#{name} is not available to role-token credentials",
+      tool_name: name
+    )
   end
 
   @doc """
@@ -211,6 +228,27 @@ defmodule PtcRunnerMcp.Envelope do
     %{
       "status" => "error",
       "reason" => "cancelled",
+      "message" => message,
+      "feedback" => feedback
+    }
+  end
+
+  def render_error_payload(:role_credential_denied, message, opts) when is_binary(message) do
+    name = Keyword.get(opts, :tool_name)
+
+    feedback =
+      Keyword.get(opts, :feedback) ||
+        "This MCP session is authenticated with a role-bound HTTP credential. " <>
+          "Role grants are enforced for lisp_session_* tools only" <>
+          if is_binary(name) and name != "" do
+            "; #{name} does not consult them."
+          else
+            "."
+          end
+
+    %{
+      "status" => "error",
+      "reason" => "role_credential_denied",
       "message" => message,
       "feedback" => feedback
     }

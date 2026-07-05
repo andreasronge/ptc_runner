@@ -94,7 +94,8 @@ defmodule PtcRunnerMcp.Application do
     args = maybe_seed_prelude_store(args)
     apply_sessions_config(args)
     {:ok, http_config} = Config.resolve(args)
-    Application.put_env(:ptc_runner_mcp, :http_config, http_config)
+    validate_role_tokens_boot!(http_config)
+    Application.put_env(:ptc_runner_mcp, :http_config, redact_role_token_secrets(http_config))
     validate_agentic_boot!([], root_runtime_opts != nil)
     apply_trace_config(args)
     apply_turn_log_config(args)
@@ -637,6 +638,71 @@ defmodule PtcRunnerMcp.Application do
       {:error, message} -> raise message
     end
   end
+
+  # Role-bound HTTP bearer credentials are only enforced at the
+  # `lisp_session_start` boundary (`Sessions.prepare_start_opts/1`); `lisp_eval`
+  # / `lisp_task` never consult a caller's `auth_claims` (see
+  # `Http.Session`'s dispatch-time denial for those two tools). A role-token
+  # deployment that leaves either gap open would have configured bearer
+  # credentials whose `allowed_roles` are decorative, so both fail closed at
+  # boot rather than silently behaving as unrestricted.
+  @doc false
+  @spec validate_role_tokens_boot!(map()) :: :ok
+  def validate_role_tokens_boot!(%{role_tokens: role_tokens}) when map_size(role_tokens) == 0,
+    do: :ok
+
+  def validate_role_tokens_boot!(%{role_tokens: role_tokens}) do
+    unless SessionsConfig.enabled?() do
+      raise """
+      HTTP role token configuration invalid: --http-role-tokens requires --sessions.
+      Role grants are enforced only for stateful session tools (lisp_session_start);
+      without --sessions a bound credential's roles would never be checked.
+      """
+    end
+
+    policy = SessionsConfig.policy()
+
+    if policy.outer_policy.mcp_tools == :all do
+      raise """
+      HTTP role token configuration invalid: --session-roles must set an explicit
+      outer_policy.mcp_tools allowlist when --http-role-tokens is configured. The
+      implicit :all default exposes lisp_eval / lisp_task, which do not enforce
+      bearer-bound roles. List the tools you intend to expose (typically the
+      lisp_session_* tools) in outer_policy.mcp_tools.
+      """
+    end
+
+    warn_unknown_role_token_roles(role_tokens, policy.roles)
+    :ok
+  end
+
+  # A typo'd role in the token file otherwise fails closed only when a
+  # session actually starts with it ("unknown session role"), mid-run rather
+  # than at boot. Warn-level: the runtime path already fails closed
+  # correctly, so this is an operability signal, not a security gap.
+  defp warn_unknown_role_token_roles(role_tokens, roles) do
+    known = MapSet.new(Map.keys(roles))
+
+    role_tokens
+    |> Map.values()
+    |> Enum.each(fn %{allowed_roles: allowed_roles, subject_id: subject_id} ->
+      Enum.each(allowed_roles, fn role ->
+        unless MapSet.member?(known, role) do
+          Log.log(:warn, "http_role_token_unknown_role", %{token_id: subject_id, role: role})
+        end
+      end)
+    end)
+  end
+
+  # Plaintext role-token secrets are needed only to register them with the
+  # ETS-backed redaction set (`Http.SessionRegistry.init/1`); the shared
+  # `Application.env` copy of `http_config` must never carry them.
+  defp redact_role_token_secrets(%{role_token_redaction_secrets: secrets} = config)
+       when secrets != [] do
+    %{config | role_token_redaction_secrets: []}
+  end
+
+  defp redact_role_token_secrets(config), do: config
 
   # `--prelude-store-seed <path>` / `PTC_RUNNER_MCP_PRELUDE_STORE_SEED` boots a
   # volatile in-memory `PreludeStore`, writes each seed `.clj` into it (the

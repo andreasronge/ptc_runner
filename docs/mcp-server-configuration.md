@@ -159,6 +159,21 @@ production deployments should use env or file sources. When
 role allowed by the authenticated bearer token.
 `MCP-Session-Id` values are not logged.
 
+`--http-role-tokens` requires `--sessions` and a `--session-roles` file whose
+`outer_policy.mcp_tools` explicitly enumerates the tools the server exposes
+(the implicit `:all` default is rejected at boot). Role grants are enforced
+only for `lisp_session_*` tools, so a deployment without `--sessions`, or one
+that leaves `lisp_eval` / `lisp_task` reachable via the `:all` default, would
+have bearer credentials whose `allowed_roles` are never checked; the server
+fails to boot rather than serve that silently. `lisp_eval` and `lisp_task`
+never consult bearer role claims at all — `tools/call` for either is denied
+with `role_credential_denied` when the caller authenticated with a role
+token, even if an operator explicitly lists them in `outer_policy.mcp_tools`.
+A role token whose `roles` name a role absent from `--session-roles` logs an
+`http_role_token_unknown_role` warning at boot (a likely typo) but does not
+fail the boot — the role-selection path already fails closed at
+`lisp_session_start`.
+
 When `--http-admin-token` is set, two operator-only admin endpoints are
 available:
 

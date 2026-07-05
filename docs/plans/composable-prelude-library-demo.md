@@ -1527,6 +1527,46 @@ Tests:
 - existing single-token HTTP behavior and stdio self-declared roles remain
   unchanged when no role-token file is configured.
 
+Post-ship hardening (review follow-up on the initial D3 commit):
+
+- Plaintext role-token secrets are only needed transiently, to register them
+  with the process-wide redaction set at boot. `Http.SessionRegistry.init/1`
+  now clears `role_token_redaction_secrets` from its own GenServer state
+  immediately after registering, and `Application.start/2` never stores the
+  plaintext list into `Application.env` in the first place — the resolved
+  `http_config` is scrubbed before `Application.put_env(:ptc_runner_mcp,
+  :http_config, ...)`. Nothing outside `Http.Config.resolve/1`'s return value
+  (used once, at boot, to register the secrets) sees plaintext role tokens.
+- `Application.validate_role_tokens_boot!/1` runs at boot whenever
+  `--http-role-tokens` is configured, after both `--session-roles` and
+  `--http-role-tokens` have resolved:
+  - fails closed if `--sessions` is not also enabled — role grants are only
+    enforced for stateful session tools, so without sessions a bound
+    credential's `allowed_roles` would never be checked;
+  - fails closed if `--session-roles`' `outer_policy.mcp_tools` is left at its
+    implicit `:all` default — that default would leave `lisp_eval` /
+    `lisp_task` advertised (see below), which do not enforce bearer-bound
+    roles. Operators must explicitly enumerate the tools they intend to
+    expose (typically the `lisp_session_*` tools);
+  - warns (does not fail boot) when a token's `allowed_roles` names a role not
+    defined in `--session-roles` — the runtime path already fails closed
+    correctly at `lisp_session_start` ("unknown session role"), so this is
+    purely an operability signal to catch a typo before first use instead of
+    mid-run.
+- `lisp_eval` and `lisp_task` never consult a caller's `auth_claims` — role
+  grants are enforced only in `Sessions.prepare_start_opts/1`, i.e. only for
+  `lisp_session_*` tools. `lisp_eval` is already structurally unreachable
+  whenever `--sessions` is enabled (`Tools.call/1` returns `unknown_tool`
+  unconditionally), which the boot check above now guarantees is always the
+  case in a role-token deployment. `lisp_task` has no such structural gate,
+  so `Http.Session`'s dispatch (`maybe_put_http_context`'s call site) now
+  denies `tools/call` for either tool up front, before `JsonRpc.dispatch/2`
+  is reached, whenever the HTTP owner carries trusted `AuthClaims`. The
+  denial is a distinct `role_credential_denied` reason
+  (`Envelope.role_credential_denied/1`) rather than the generic
+  `unknown_tool`, so it is unambiguous in server logs/audits that this was a
+  credential-scope denial and not "tool not registered."
+
 #### Relationship To Existing Credential Systems
 
 There are two credential-related systems today:
