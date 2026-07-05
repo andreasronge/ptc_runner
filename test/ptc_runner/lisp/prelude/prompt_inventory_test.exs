@@ -55,6 +55,20 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
       assert out =~ "read"
     end
 
+    test "honors a presentation export mask without changing the prelude" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns base "Base helpers." {:visibility :prompt})
+        (defn helper "Used helper." [x] x)
+        (defn unused "Debug helper." [x] x)
+        """)
+
+      out = PromptInventory.render(prelude, export_mask: %{"base" => ["base/helper"]})
+
+      assert out =~ "base/helper"
+      refute out =~ "base/unused"
+    end
+
     test "renders the [read] hint but omits [unknown]" do
       {:ok, prelude} =
         Compiler.compile("""

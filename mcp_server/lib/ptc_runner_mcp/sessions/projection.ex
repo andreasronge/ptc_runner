@@ -25,10 +25,15 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     |> maybe_put("role", Map.get(state, :role))
     |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
     |> maybe_put_true("scoped_base_surface", Map.get(state, :scoped_base_surface))
+    |> maybe_put("prelude_presentation", prelude_presentation(state))
     |> maybe_put("prelude_refs", selected_preludes_or_nil(state))
     |> maybe_put(
       "preludes",
-      prelude_discovery(session_runtime_prelude(state), Map.get(state, :grant))
+      prelude_discovery(
+        session_runtime_prelude(state),
+        Map.get(state, :grant),
+        prelude_export_mask(state)
+      )
     )
   end
 
@@ -127,11 +132,12 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   defp session_runtime_prelude(state),
     do: Policy.filter_prelude(Config.runtime_prelude(), Map.get(state, :grant))
 
-  defp prelude_discovery(nil, _grant), do: nil
+  defp prelude_discovery(nil, _grant, _export_mask), do: nil
 
-  defp prelude_discovery(%Prelude{} = prelude, _grant) do
+  defp prelude_discovery(%Prelude{} = prelude, _grant, export_mask) do
     prelude
     |> Prelude.prompt_exports()
+    |> visible_exports(export_mask)
     |> Enum.group_by(& &1.namespace)
     |> Enum.sort_by(fn {namespace, _exports} -> namespace end)
     |> Enum.map(fn {namespace, exports} ->
@@ -164,6 +170,44 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       [] -> nil
     end
   end
+
+  defp prelude_export_mask(%{scoped_base_surface: true, prelude_presentation: presentation})
+       when is_map(presentation) do
+    Map.get(presentation, :export_mask)
+  end
+
+  defp prelude_export_mask(_state), do: nil
+
+  defp prelude_presentation(%{scoped_base_surface: true, prelude_presentation: presentation})
+       when is_map(presentation) do
+    %{
+      "scoped_base_surface" => true,
+      "masked_namespaces" => export_mask_namespaces(Map.get(presentation, :export_mask)),
+      "fallback_warnings" => Map.get(presentation, :warnings, [])
+    }
+  end
+
+  defp prelude_presentation(_state), do: nil
+
+  defp export_mask_namespaces(mask) when is_map(mask), do: mask |> Map.keys() |> Enum.sort()
+  defp export_mask_namespaces(_mask), do: []
+
+  defp visible_exports(exports, nil), do: exports
+
+  defp visible_exports(exports, export_mask) when is_map(export_mask) do
+    Enum.filter(exports, fn export ->
+      case Map.fetch(export_mask, export.namespace) do
+        {:ok, refs} -> masked_ref_member?(refs, export.ref)
+        :error -> true
+      end
+    end)
+  end
+
+  defp visible_exports(exports, _export_mask), do: exports
+
+  defp masked_ref_member?(%MapSet{} = refs, ref), do: MapSet.member?(refs, ref)
+  defp masked_ref_member?(refs, ref) when is_list(refs), do: ref in refs
+  defp masked_ref_member?(_refs, _ref), do: true
 
   defp compact_doc(nil), do: nil
 

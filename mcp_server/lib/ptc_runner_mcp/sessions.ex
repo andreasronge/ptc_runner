@@ -11,6 +11,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
+  alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
   alias PtcRunner.Upstream.{Eval, RunContext, Runtime}
@@ -952,6 +953,7 @@ defmodule PtcRunnerMcp.Sessions do
             |> Map.delete(:preludes)
             |> maybe_put(:runtime_prelude, Map.get(selected, :runtime_prelude))
             |> maybe_put(:preludes, Map.get(selected, :preludes))
+            |> maybe_put(:prelude_presentation, Map.get(selected, :prelude_presentation))
             |> maybe_put(:direct_namespaces, Map.get(selected, :direct_namespaces))
             |> maybe_put(
               :transitive_namespace_requirers,
@@ -1057,10 +1059,21 @@ defmodule PtcRunnerMcp.Sessions do
         {:ok, %{}}
 
       {runtime_prelude, resolved} ->
+        filtered_prelude = Policy.filter_prelude(runtime_prelude, Map.get(opts, :grant))
+
+        presentation =
+          prelude_presentation(
+            resolved,
+            refs,
+            Map.get(opts, :scoped_base_surface),
+            filtered_prelude
+          )
+
         {:ok,
          %{
            runtime_prelude: runtime_prelude,
            preludes: resolved,
+           prelude_presentation: presentation,
            direct_namespaces: direct_namespaces(runtime_prelude, refs),
            transitive_namespace_requirers:
              transitive_namespace_requirers(runtime_prelude, resolved, refs)
@@ -1101,6 +1114,329 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp transitive_namespace_requirers(_prelude, _resolved, _refs), do: %{}
+
+  defp prelude_presentation(_resolved, _refs, false, _filtered_prelude), do: nil
+  defp prelude_presentation(_resolved, _refs, nil, _filtered_prelude), do: nil
+
+  defp prelude_presentation(resolved, refs, true, filtered_prelude) do
+    direct_ids = refs |> Enum.map(&prelude_ref_id/1) |> MapSet.new()
+
+    case scoped_base_export_mask(resolved, direct_ids, filtered_prelude) do
+      {:ok, mask} when map_size(mask) == 0 ->
+        nil
+
+      {:ok, mask} ->
+        %{export_mask: mask, warnings: []}
+
+      {:fallback, warnings} ->
+        %{export_mask: nil, warnings: warnings}
+    end
+  end
+
+  @doc false
+  def __prelude_presentation_for_test__(
+        resolved,
+        refs,
+        scoped_base_surface,
+        filtered_prelude \\ nil
+      ) do
+    prelude_presentation(resolved, refs, scoped_base_surface, filtered_prelude)
+  end
+
+  defp scoped_base_export_mask(resolved, direct_ids, filtered_prelude) do
+    resolved_by_id = Map.new(resolved, &{Map.get(&1, :id), &1})
+    allowed_direct_refs = allowed_direct_export_refs(filtered_prelude, resolved, direct_ids)
+
+    with :ok <- validate_mask_components(resolved, resolved_by_id, direct_ids),
+         {:ok, refs} <-
+           reachable_dependency_refs(resolved_by_id, allowed_direct_refs) do
+      {:ok, Enum.reduce(resolved, %{}, &add_component_mask(&1, &2, refs, direct_ids))}
+    end
+  end
+
+  defp add_component_mask(component, acc, refs, direct_ids) do
+    id = Map.get(component, :id)
+
+    cond do
+      id in [nil, ""] or MapSet.member?(direct_ids, id) ->
+        acc
+
+      Map.get(component, :required_by, []) == [] ->
+        acc
+
+      true ->
+        Enum.reduce(Map.get(component, :namespaces, []), acc, &add_namespace_mask(&2, &1, refs))
+    end
+  end
+
+  defp add_namespace_mask(acc, namespace, refs) do
+    namespace_refs = Enum.filter(refs, &String.starts_with?(&1, namespace <> "/"))
+
+    Map.update(
+      acc,
+      namespace,
+      Enum.sort(namespace_refs),
+      &Enum.sort(Enum.uniq(&1 ++ namespace_refs))
+    )
+  end
+
+  defp validate_mask_components(resolved, resolved_by_id, direct_ids) do
+    Enum.reduce_while(resolved, :ok, fn component, :ok ->
+      id = Map.get(component, :id)
+
+      cond do
+        id in [nil, ""] ->
+          {:cont, :ok}
+
+        Map.get(component, :required_by, []) == [] and not MapSet.member?(direct_ids, id) ->
+          {:cont, :ok}
+
+        not valid_mask_component?(component) ->
+          {:halt,
+           {:fallback, ["missing presentation metadata for prelude #{Kernel.inspect(id)}"]}}
+
+        true ->
+          case validate_requirers(component, resolved_by_id) do
+            :ok -> {:cont, :ok}
+            {:fallback, warning} -> {:halt, {:fallback, [warning]}}
+          end
+      end
+    end)
+  end
+
+  defp validate_requirers(component, resolved_by_id) do
+    component
+    |> Map.get(:required_by, [])
+    |> Enum.reduce_while(:ok, fn requirer_id, :ok ->
+      case Map.fetch(resolved_by_id, requirer_id) do
+        {:ok, requirer} ->
+          if valid_mask_component?(requirer) do
+            {:cont, :ok}
+          else
+            {:halt, {:fallback, missing_requirer_metadata_warning(component, requirer_id)}}
+          end
+
+        :error ->
+          {:halt, {:fallback, missing_requirer_metadata_warning(component, requirer_id)}}
+      end
+    end)
+  end
+
+  defp missing_requirer_metadata_warning(component, requirer_id) do
+    component_id = Map.get(component, :id)
+
+    "missing presentation metadata for prelude #{Kernel.inspect(requirer_id)} required by #{Kernel.inspect(component_id)}"
+  end
+
+  defp valid_mask_component?(component) do
+    non_empty_binary?(Map.get(component, :id)) and positive_integer?(Map.get(component, :version)) and
+      non_empty_binary?(Map.get(component, :checksum)) and valid_namespace_list?(component) and
+      valid_form_graph_metadata?(component) and valid_required_by_list?(component)
+  end
+
+  defp allowed_direct_export_refs(nil, resolved, direct_ids) do
+    resolved
+    |> Enum.filter(&(Map.get(&1, :id) in MapSet.to_list(direct_ids)))
+    |> Enum.flat_map(&public_form_refs/1)
+    |> MapSet.new()
+  end
+
+  defp allowed_direct_export_refs(%Prelude{exports: exports}, resolved, direct_ids) do
+    namespace_to_component_id = namespace_component_index(resolved)
+
+    exports
+    |> Enum.flat_map(fn
+      %Export{ref: ref, namespace: namespace} when is_binary(ref) and is_binary(namespace) ->
+        if Map.get(namespace_to_component_id, namespace) in MapSet.to_list(direct_ids) do
+          [ref]
+        else
+          []
+        end
+
+      _other ->
+        []
+    end)
+    |> MapSet.new()
+  end
+
+  defp reachable_dependency_refs(resolved_by_id, allowed_direct_refs) do
+    namespace_to_component_id = namespace_component_index(Map.values(resolved_by_id))
+
+    with {:ok, initial_refs} <-
+           reduce_direct_dependency_refs(
+             MapSet.to_list(allowed_direct_refs),
+             namespace_to_component_id,
+             resolved_by_id
+           ),
+         {:ok, refs} <-
+           expand_dependency_refs(
+             initial_refs,
+             [],
+             namespace_to_component_id,
+             resolved_by_id
+           ) do
+      {:ok, Enum.sort(refs)}
+    end
+  end
+
+  defp reduce_direct_dependency_refs(refs, namespace_to_component_id, resolved_by_id) do
+    Enum.reduce_while(refs, {:ok, []}, fn ref, {:ok, acc} ->
+      case dependency_refs_for_public_ref(ref, namespace_to_component_id, resolved_by_id) do
+        {:ok, dep_refs} -> {:cont, {:ok, acc ++ dep_refs}}
+        {:fallback, _warnings} = fallback -> {:halt, fallback}
+      end
+    end)
+  end
+
+  defp dependency_refs_for_public_ref(ref, namespace_to_component_id, resolved_by_id) do
+    with {:ok, entry} <- public_form_entry_for_ref(ref, namespace_to_component_id, resolved_by_id),
+         {:ok, dep_refs} <- entry_dep_calls(entry) do
+      {:ok, dep_refs}
+    else
+      _error -> mask_metadata_fallback(ref)
+    end
+  end
+
+  defp expand_dependency_refs([], seen, _namespace_to_component_id, _resolved_by_id),
+    do: {:ok, seen}
+
+  defp expand_dependency_refs([ref | rest], seen, namespace_to_component_id, resolved_by_id) do
+    if ref in seen do
+      expand_dependency_refs(rest, seen, namespace_to_component_id, resolved_by_id)
+    else
+      seen = [ref | seen]
+
+      next_refs =
+        case public_form_entry_for_ref(ref, namespace_to_component_id, resolved_by_id) do
+          {:ok, entry} ->
+            case entry_dep_calls(entry) do
+              {:ok, dep_refs} -> dep_refs
+              :error -> :invalid_metadata
+            end
+
+          {:error, :not_found} ->
+            []
+
+          {:error, :invalid_metadata} ->
+            :invalid_metadata
+        end
+
+      case next_refs do
+        :invalid_metadata ->
+          mask_metadata_fallback(ref)
+
+        refs ->
+          expand_dependency_refs(rest ++ refs, seen, namespace_to_component_id, resolved_by_id)
+      end
+    end
+  end
+
+  defp namespace_component_index(components) do
+    components
+    |> Enum.flat_map(fn component ->
+      id = Map.get(component, :id)
+      Enum.map(Map.get(component, :namespaces, []), &{&1, id})
+    end)
+    |> Map.new()
+  end
+
+  defp public_form_entry_for_ref(ref, namespace_to_component_id, resolved_by_id) do
+    with [namespace, symbol] <- String.split(ref, "/", parts: 2),
+         component_id when is_binary(component_id) <-
+           Map.get(namespace_to_component_id, namespace),
+         %{form_graph: form_graph} <- Map.get(resolved_by_id, component_id),
+         namespace_graph when is_map(namespace_graph) <- Map.get(form_graph, namespace),
+         entry when is_map(entry) <- Map.get(namespace_graph, symbol),
+         true <- valid_public_form_entry?(entry) do
+      {:ok, entry}
+    else
+      %{visibility: :public} -> {:error, :invalid_metadata}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp public_form_refs(component) do
+    component
+    |> Map.get(:form_graph, %{})
+    |> Enum.flat_map(fn {namespace, namespace_graph}
+                        when is_binary(namespace) and is_map(namespace_graph) ->
+      namespace_graph
+      |> Enum.flat_map(fn
+        {symbol, entry} when is_binary(symbol) and is_map(entry) ->
+          if Map.get(entry, :visibility) == :public, do: ["#{namespace}/#{symbol}"], else: []
+
+        _other ->
+          []
+      end)
+    end)
+  end
+
+  defp non_empty_binary?(value), do: is_binary(value) and value != ""
+  defp positive_integer?(value), do: is_integer(value) and value > 0
+
+  defp valid_form_graph_metadata?(component) do
+    case Map.get(component, :form_graph) do
+      form_graph when is_map(form_graph) ->
+        Enum.all?(form_graph, fn
+          {namespace, namespace_graph} when is_binary(namespace) and is_map(namespace_graph) ->
+            Enum.all?(namespace_graph, fn
+              {symbol, entry} when is_binary(symbol) and is_map(entry) ->
+                Map.get(entry, :visibility) != :public or valid_public_form_entry?(entry)
+
+              _other ->
+                false
+            end)
+
+          _other ->
+            false
+        end)
+
+      _other ->
+        false
+    end
+  end
+
+  defp valid_public_form_entry?(entry) when is_map(entry) do
+    Map.get(entry, :visibility) == :public and
+      entry
+      |> Map.get(:dep_calls)
+      |> case do
+        %{transitive: refs} when is_list(refs) -> Enum.all?(refs, &is_binary/1)
+        _other -> false
+      end
+  end
+
+  defp valid_namespace_list?(component) do
+    component
+    |> Map.get(:namespaces)
+    |> valid_non_empty_binary_list?()
+  end
+
+  defp valid_required_by_list?(component) do
+    component
+    |> Map.get(:required_by)
+    |> valid_non_empty_binary_list?()
+  end
+
+  defp valid_non_empty_binary_list?(values) when is_list(values) do
+    Enum.all?(values, &non_empty_binary?/1)
+  end
+
+  defp valid_non_empty_binary_list?(_values), do: false
+
+  defp entry_dep_calls(entry) when is_map(entry) do
+    case Map.get(entry, :dep_calls) do
+      %{transitive: refs} when is_list(refs) ->
+        if Enum.all?(refs, &is_binary/1), do: {:ok, refs}, else: :error
+
+      _other ->
+        :error
+    end
+  end
+
+  defp mask_metadata_fallback(ref) do
+    {:fallback, ["missing presentation metadata for prelude export #{Kernel.inspect(ref)}"]}
+  end
 
   defp prelude_components(%Prelude{metadata: %{components: components}}) when is_list(components),
     do: components

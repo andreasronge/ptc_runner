@@ -638,6 +638,368 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "scoped_base_surface masks transitive prelude discovery without restricting execution",
+         %{
+           tmp_dir: dir
+         } do
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "base", """
+        (ns base "Base helpers." {:visibility :prompt})
+        (defn helper "Used helper." [x] (str "helper:" x))
+        (defn unused "Debug helper." [x] (str "unused:" x))
+        """)
+
+      {:ok, _audit} =
+        PreludeStore.write(
+          store,
+          "audit",
+          """
+          (ns audit "Audit helpers." {:visibility :prompt})
+          (defn check [x] (base/helper x))
+          (defn- unused-path [x] (base/unused x))
+          """,
+          %{"requires_preludes" => ["base"]}
+        )
+
+      Config.set(%{Config.get() | prelude_store: store})
+
+      start =
+        call("lisp_session_start", %{
+          "preludes" => ["audit"],
+          "scoped_base_surface" => true
+        })
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+      assert start["structuredContent"]["scoped_base_surface"] == true
+
+      assert start["structuredContent"]["prelude_presentation"] == %{
+               "scoped_base_surface" => true,
+               "masked_namespaces" => ["base"],
+               "fallback_warnings" => []
+             }
+
+      assert %{"namespace" => "base", "source" => "(source base/helper)"} =
+               Enum.find(start["structuredContent"]["preludes"], &(&1["namespace"] == "base"))
+
+      refute inspect(start["structuredContent"]["preludes"]) =~ "unused"
+
+      ns_publics =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(ns-publics 'base)|
+        })
+
+      assert ns_publics["isError"] == false
+      assert ns_publics["structuredContent"]["result"] =~ "helper"
+      refute ns_publics["structuredContent"]["result"] =~ "unused"
+
+      masked_dir =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(dir 'base)|
+        })
+
+      assert masked_dir["structuredContent"]["result"] =~ "helper"
+      refute masked_dir["structuredContent"]["result"] =~ "unused"
+
+      full_dir =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(dir 'base {:full true})|
+        })
+
+      assert full_dir["structuredContent"]["result"] =~ "helper"
+      assert full_dir["structuredContent"]["result"] =~ "unused"
+
+      apropos =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(apropos "unused")|
+        })
+
+      refute apropos["structuredContent"]["result"] =~ "base/unused"
+
+      meta =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(meta 'base/unused)|
+        })
+
+      assert meta["structuredContent"]["result"] =~ "base/unused"
+
+      source =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(source 'base/unused)|
+        })
+
+      assert source["structuredContent"]["prints"] |> Enum.join("\n") =~ "defn unused"
+
+      direct_call =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(base/unused "x")|
+        })
+
+      assert direct_call["structuredContent"]["result"] == ~S|user=> "unused:x"|
+
+      {:ok, %{"session_id" => direct_sid}} =
+        Sessions.start_session(nil, %{
+          preludes: ["audit", "base"],
+          scoped_base_surface: true
+        })
+
+      direct_ns = Sessions.eval(direct_sid, ~S|(ns-publics 'base)|)
+      assert {:ok, direct_response} = direct_ns
+      assert direct_response["result"] =~ "helper"
+      assert direct_response["result"] =~ "unused"
+
+      stop_turn_log!()
+
+      turns = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+
+      full_dir_turn =
+        Enum.find(turns, fn turn ->
+          preview = get_in(turn, ["data", "result_preview"])
+          is_binary(preview) and preview =~ "unused"
+        end)
+
+      assert [catalog_op] = get_in(full_dir_turn, ["data", "catalog_ops"])
+      assert catalog_op["operation"] == "dir"
+      assert catalog_op["args"] == %{"server" => "base", "opts" => %{"full" => true}}
+      assert catalog_op["outcome"] == "ok"
+
+      assert get_in(full_dir_turn, [
+               "data",
+               "prelude_presentation",
+               "scoped_base_surface"
+             ]) == true
+
+      assert get_in(full_dir_turn, [
+               "data",
+               "prelude_presentation",
+               "masked_namespaces"
+             ]) == ["base"]
+
+      apropos_turn =
+        Enum.find(turns, fn turn ->
+          get_in(turn, ["data", "program"]) == ~S|(apropos "unused")|
+        end)
+
+      assert [apropos_op] = get_in(apropos_turn, ["data", "catalog_ops"])
+      assert apropos_op["operation"] == "apropos"
+      assert apropos_op["args"] == %{"query" => "unused"}
+      assert apropos_op["outcome"] == "ok"
+    end
+
+    test "scoped_base_surface fails open when pinned presentation metadata is missing" do
+      direct = %{
+        id: "audit",
+        version: 1,
+        checksum: "audit-checksum",
+        namespaces: ["audit"],
+        form_graph: %{
+          "audit" => %{
+            "check" => %{dep_calls: %{transitive: ["base/helper"]}}
+          }
+        },
+        required_by: []
+      }
+
+      transitive = %{
+        id: "base",
+        namespaces: ["base"],
+        form_graph: %{"base" => %{}},
+        required_by: ["audit"]
+      }
+
+      assert %{export_mask: nil, warnings: [warning]} =
+               Sessions.__prelude_presentation_for_test__([transitive, direct], ["audit"], true)
+
+      assert warning =~ "missing presentation metadata"
+    end
+
+    test "scoped_base_surface fails open when public graph entries lack dependency metadata" do
+      direct = %{
+        id: "audit",
+        version: 1,
+        checksum: "audit-checksum",
+        namespaces: ["audit"],
+        form_graph: %{
+          "audit" => %{
+            "check" => %{visibility: :public}
+          }
+        },
+        required_by: []
+      }
+
+      transitive = %{
+        id: "base",
+        version: 1,
+        checksum: "base-checksum",
+        namespaces: ["base"],
+        form_graph: %{
+          "base" => %{
+            "helper" => %{visibility: :public, dep_calls: %{transitive: []}}
+          }
+        },
+        required_by: ["audit"]
+      }
+
+      assert %{export_mask: nil, warnings: [warning]} =
+               Sessions.__prelude_presentation_for_test__([transitive, direct], ["audit"], true)
+
+      assert warning =~ "missing presentation metadata"
+    end
+
+    test "start projection surfaces scoped_base_surface fallback warnings" do
+      response =
+        Projection.start(%{
+          id: "sess-warning",
+          expires_at: DateTime.utc_now(),
+          limits: Config.session_limits(),
+          scoped_base_surface: true,
+          prelude_presentation: %{export_mask: nil, warnings: ["missing metadata"]},
+          preludes: []
+        })
+
+      assert response["prelude_presentation"] == %{
+               "scoped_base_surface" => true,
+               "masked_namespaces" => [],
+               "fallback_warnings" => ["missing metadata"]
+             }
+    end
+
+    test "scoped_base_surface follows reachable exports through dependency chains" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "base", """
+        (ns base "Base helpers." {:visibility :prompt})
+        (defn helper [x] (str "helper:" x))
+        (defn unused [x] (str "unused:" x))
+        """)
+
+      {:ok, _mid} =
+        PreludeStore.write(
+          store,
+          "mid",
+          """
+          (ns mid "Middle helpers." {:visibility :prompt})
+          (defn run [x] (base/helper x))
+          """,
+          %{"requires_preludes" => ["base"]}
+        )
+
+      {:ok, _app} =
+        PreludeStore.write(
+          store,
+          "app",
+          """
+          (ns app "App helpers." {:visibility :prompt})
+          (defn go [x] (mid/run x))
+          """,
+          %{"requires_preludes" => ["mid"]}
+        )
+
+      Config.set(%{Config.get() | prelude_store: store})
+
+      start =
+        call("lisp_session_start", %{
+          "preludes" => ["app"],
+          "scoped_base_surface" => true
+        })
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+
+      assert %{"namespace" => "mid", "source" => "(source mid/run)"} =
+               Enum.find(start["structuredContent"]["preludes"], &(&1["namespace"] == "mid"))
+
+      assert %{"namespace" => "base", "source" => "(source base/helper)"} =
+               Enum.find(start["structuredContent"]["preludes"], &(&1["namespace"] == "base"))
+
+      refute inspect(start["structuredContent"]["preludes"]) =~ "unused"
+
+      base_publics =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(ns-publics 'base)|
+        })
+
+      assert base_publics["structuredContent"]["result"] =~ "helper"
+      refute base_publics["structuredContent"]["result"] =~ "unused"
+
+      app_call =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(app/go "x")|
+        })
+
+      assert app_call["structuredContent"]["result"] == ~S|user=> "helper:x"|
+    end
+
+    test "scoped_base_surface derives reachability from role-filtered direct exports" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "base", """
+        (ns base "Base helpers." {:visibility :prompt})
+        (defn helper [x] (str "helper:" x))
+        (defn unused [x] (str "unused:" x))
+        """)
+
+      {:ok, _audit} =
+        PreludeStore.write(
+          store,
+          "audit",
+          """
+          (ns audit "Audit helpers." {:visibility :prompt})
+          (defn visible [x] (base/helper x))
+          (defn blocked [x]
+            (tool/call {:server "crm" :tool "get_user" :args {}})
+            (base/unused x))
+          """,
+          %{"requires_preludes" => ["base"]}
+        )
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:policy, role_policy!("analyst", upstream_tools: []))
+      )
+
+      start =
+        call("lisp_session_start", %{
+          "role" => "analyst",
+          "preludes" => ["audit"],
+          "scoped_base_surface" => true
+        })
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+
+      assert inspect(start["structuredContent"]["preludes"]) =~ "base/helper"
+      refute inspect(start["structuredContent"]["preludes"]) =~ "base/unused"
+      refute inspect(start["structuredContent"]["preludes"]) =~ "audit/blocked"
+
+      base_publics =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(ns-publics 'base)|
+        })
+
+      assert base_publics["structuredContent"]["result"] =~ "helper"
+      refute base_publics["structuredContent"]["result"] =~ "unused"
+    end
+
+    @tag :tmp_dir
     test "relaxed transitive prelude sessions are marked in turn evidence", %{tmp_dir: dir} do
       {:ok, store} = PreludeStore.new()
 

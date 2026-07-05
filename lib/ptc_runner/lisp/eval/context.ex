@@ -97,6 +97,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     strict_transitive_calls: false,
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
+    prelude_export_mask: nil,
     # Capability Prelude V1 (plan §5): the attached compiled prelude's PUBLIC
     # export table, a map from string ref (e.g. "crm/get-user") to a
     # `{callable, ns_env}` tuple — the callable captured from `private_env` plus
@@ -231,6 +232,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           strict_transitive_calls: boolean(),
           direct_namespaces: MapSet.t(String.t()),
           transitive_namespace_requirers: %{String.t() => [String.t()]},
+          prelude_export_mask: %{String.t() => MapSet.t(String.t())} | nil,
           prelude_exports: %{String.t() => {term(), map()}},
           prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
@@ -312,6 +314,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
       transitive_namespace_requirers:
         normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
+      prelude_export_mask: normalize_export_mask(Keyword.get(opts, :prelude_export_mask)),
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude)),
       prints: [],
@@ -366,6 +369,39 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   defp normalize_namespace_requirers(_requirers), do: %{}
+
+  defp normalize_export_mask(nil), do: nil
+
+  defp normalize_export_mask(mask) when is_map(mask) do
+    normalized =
+      mask
+      |> Enum.flat_map(fn
+        {namespace, refs} when is_binary(namespace) ->
+          [{namespace, normalize_ref_set(refs)}]
+
+        {_namespace, _refs} ->
+          []
+      end)
+      |> Map.new()
+
+    if map_size(normalized) == 0, do: nil, else: normalized
+  end
+
+  defp normalize_export_mask(_mask), do: nil
+
+  defp normalize_ref_set(%MapSet{} = refs) do
+    refs
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp normalize_ref_set(refs) when is_list(refs) do
+    refs
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp normalize_ref_set(_refs), do: MapSet.new()
 
   @doc """
   Appends a print message to the context.
@@ -585,6 +621,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         strict_transitive_calls: source.strict_transitive_calls,
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
+        prelude_export_mask: source.prelude_export_mask,
         origin_stack: source.origin_stack,
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }

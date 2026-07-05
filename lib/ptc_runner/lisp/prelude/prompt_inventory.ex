@@ -57,10 +57,12 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   @doc """
   Renders the prompt inventory for `prelude`.
 
-  ## Options
+   ## Options
 
-    * `:ledger` — a `%{tool_calls: n, tool_errors: m}` map or a raw `tool_calls`
-      list; when present, a compact ledger summary is appended.
+     * `:ledger` — a `%{tool_calls: n, tool_errors: m}` map or a raw `tool_calls`
+       list; when present, a compact ledger summary is appended.
+     * `:export_mask` — optional `%{namespace => refs}` presentation mask for
+       prompt inventory only. Unlisted namespaces remain full surface.
 
   Returns the rendered block string, or `nil` when there is no prelude or no
   `:prompt`-visible export to show.
@@ -71,7 +73,10 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   def render(nil, _opts), do: nil
 
   def render(%Prelude{} = prelude, opts) do
-    prompt_exports = Prelude.prompt_exports(prelude)
+    prompt_exports =
+      prelude
+      |> Prelude.prompt_exports()
+      |> visible_exports(Keyword.get(opts, :export_mask))
 
     if prompt_exports == [] do
       nil
@@ -147,6 +152,23 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   defp effect_hint(effect), do: " [#{effect}]"
 
   defp signature(%Export{} = export), do: Export.signature(export)
+
+  defp visible_exports(exports, nil), do: exports
+
+  defp visible_exports(exports, export_mask) when is_map(export_mask) do
+    Enum.filter(exports, fn %Export{} = export ->
+      case Map.fetch(export_mask, export.namespace) do
+        {:ok, refs} -> masked_ref_member?(refs, export.ref)
+        :error -> true
+      end
+    end)
+  end
+
+  defp visible_exports(exports, _export_mask), do: exports
+
+  defp masked_ref_member?(%MapSet{} = refs, ref), do: MapSet.member?(refs, ref)
+  defp masked_ref_member?(refs, ref) when is_list(refs), do: ref in refs
+  defp masked_ref_member?(_refs, _ref), do: true
 
   defp namespace_doc(%Prelude{metadata: metadata}, namespace) do
     metadata

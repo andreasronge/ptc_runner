@@ -2059,15 +2059,15 @@ defmodule PtcRunner.Lisp.Eval do
         invoke_ns_name_discovery(eval_ctx, args)
 
       :dir ->
-        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_dir/3, &Discovery.dir/2)
+        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_dir/4, &Discovery.dir/2)
 
       :doc ->
         eval_ctx
-        |> invoke_prelude_ref_discovery(operation, args, &prelude_doc/3, &local_doc/2)
+        |> invoke_prelude_ref_discovery(operation, args, &prelude_doc/4, &local_doc/2)
         |> route_doc_to_prints()
 
       :meta ->
-        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_meta/3, &local_meta/2)
+        invoke_prelude_ref_discovery(eval_ctx, operation, args, &prelude_meta/4, &local_meta/2)
 
       :source ->
         invoke_source_discovery(eval_ctx, args)
@@ -2112,9 +2112,9 @@ defmodule PtcRunner.Lisp.Eval do
   # `(ns-publics 'crm)` — prelude namespace exports first, then local-only
   # namespaces (clojure.*, json). Never falls through to MCP discovery.
   defp invoke_ns_publics_discovery(%EvalContext{prelude: prelude} = eval_ctx, operation, [ref]) do
-    case Discovery.prelude_ns_publics(prelude, ref) do
+    case Discovery.prelude_ns_publics(prelude, ref, eval_ctx.prelude_export_mask) do
       {:ok, result} ->
-        {:ok, result, eval_ctx}
+        {:ok, result, append_local_catalog_op(eval_ctx, operation, [ref], :ok, nil)}
 
       :unknown ->
         invoke_local_only_discovery(eval_ctx, operation, [ref], &local_ns_publics/2)
@@ -2149,12 +2149,18 @@ defmodule PtcRunner.Lisp.Eval do
       # Prelude exports + local/built-in matches share the non-MCP bucket; their
       # source ranks (prelude=0, local=1) keep prelude ahead of local, and both
       # ahead of MCP (rank 2) under `sort_matches/1` (plan §8).
-      prelude_matches = Discovery.prelude_apropos_matches(eval_ctx.prelude, query)
+      prelude_matches =
+        Discovery.prelude_apropos_matches(eval_ctx.prelude, query, eval_ctx.prelude_export_mask)
+
       local_matches = prelude_matches ++ Discovery.apropos_matches(query, opts)
 
       case eval_ctx.discovery_exec do
         nil ->
-          render_unified_apropos(eval_ctx, local_matches, opts)
+          args = if rest == [], do: [query], else: [query, opts]
+
+          eval_ctx
+          |> append_local_catalog_op(:apropos, args, :ok, nil)
+          |> render_unified_apropos(local_matches, opts)
 
         discovery_exec ->
           invoke_mcp_apropos_discovery(eval_ctx, discovery_exec, query, opts, local_matches)
@@ -2234,9 +2240,9 @@ defmodule PtcRunner.Lisp.Eval do
        ) do
     opts = List.first(rest, %{})
 
-    case prelude_fun.(prelude, ref, opts) do
+    case prelude_fun.(eval_ctx, prelude, ref, opts) do
       {:ok, result} ->
-        {:ok, result, eval_ctx}
+        {:ok, result, append_local_catalog_op(eval_ctx, operation, args, :ok, nil)}
 
       :unknown ->
         invoke_ref_discovery(eval_ctx, operation, args, local_fun)
@@ -2299,7 +2305,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     case local_fun.(ref, opts) do
       {:ok, result} ->
-        {:ok, result, eval_ctx}
+        {:ok, result, append_local_catalog_op(eval_ctx, operation, args, :ok, nil)}
 
       :unknown ->
         invoke_mcp_only_discovery(eval_ctx, operation, args)
@@ -2318,7 +2324,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp invoke_local_only_discovery(%EvalContext{} = eval_ctx, operation, [ref], local_fun) do
     case local_fun.(ref, %{}) do
       {:ok, result} ->
-        {:ok, result, eval_ctx}
+        {:ok, result, append_local_catalog_op(eval_ctx, operation, [ref], :ok, nil)}
 
       :unknown ->
         raise ExecutionError,
@@ -2332,6 +2338,16 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp invoke_discovery_exec(%EvalContext{} = eval_ctx, discovery_exec, operation, args) do
     invoke_discovery_exec(eval_ctx, discovery_exec, operation, args, operation)
+  end
+
+  defp append_local_catalog_op(%EvalContext{} = eval_ctx, operation, args, outcome, reason) do
+    EvalContext.append_catalog_op(eval_ctx, %{
+      operation: operation,
+      args: catalog_op_args(operation, args),
+      outcome: outcome,
+      reason: reason,
+      duration_ms: 0
+    })
   end
 
   defp invoke_discovery_exec(
@@ -2435,9 +2451,11 @@ defmodule PtcRunner.Lisp.Eval do
   defp local_meta(ref, _opts), do: Discovery.meta(ref)
   defp local_ns_publics(ref, _opts), do: Discovery.ns_publics(ref)
 
-  defp prelude_doc(prelude, ref, _opts), do: Discovery.prelude_doc(prelude, ref)
-  defp prelude_meta(prelude, ref, _opts), do: Discovery.prelude_meta(prelude, ref)
-  defp prelude_dir(prelude, ref, opts), do: Discovery.prelude_dir(prelude, ref, opts)
+  defp prelude_doc(_eval_ctx, prelude, ref, _opts), do: Discovery.prelude_doc(prelude, ref)
+  defp prelude_meta(_eval_ctx, prelude, ref, _opts), do: Discovery.prelude_meta(prelude, ref)
+
+  defp prelude_dir(%EvalContext{} = eval_ctx, prelude, ref, opts),
+    do: Discovery.prelude_dir(prelude, ref, opts, eval_ctx.prelude_export_mask)
 
   defp catalog_op_args(:servers, []), do: %{}
   defp catalog_op_args(:dir, [server]), do: %{server: server}

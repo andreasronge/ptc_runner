@@ -486,6 +486,7 @@ defmodule PtcRunner.Lisp do
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
+      prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       link: Keyword.get(opts, :link, false)
     }
@@ -781,6 +782,7 @@ defmodule PtcRunner.Lisp do
       strict_transitive_calls: strict_transitive_calls,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
+      prelude_export_mask: prelude_export_mask,
       discovery_exec: discovery_exec
     } = opts
 
@@ -818,6 +820,7 @@ defmodule PtcRunner.Lisp do
         strict_transitive_calls: strict_transitive_calls,
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
+        prelude_export_mask: prelude_export_mask,
         discovery_exec: discovery_exec,
         prelude: prelude
       ]

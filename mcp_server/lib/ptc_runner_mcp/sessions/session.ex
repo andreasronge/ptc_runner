@@ -42,6 +42,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :registry,
     :runtime_prelude,
     :scoped_base_surface,
+    :prelude_presentation,
     :direct_namespaces,
     :transitive_namespace_requirers,
     ttl_timer: nil,
@@ -78,6 +79,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
           preludes: [map()],
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
           scoped_base_surface: boolean(),
+          prelude_presentation: map() | nil,
           direct_namespaces: [String.t()],
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           eval: nil | map(),
@@ -125,6 +127,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
       expires_at: expires_at,
       runtime_prelude: Keyword.get(opts, :runtime_prelude),
       scoped_base_surface: Keyword.get(opts, :scoped_base_surface, false),
+      prelude_presentation: Keyword.get(opts, :prelude_presentation),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       preludes: Keyword.get(opts, :preludes, []),
@@ -428,6 +431,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
         limits: state.limits,
         runtime_prelude: state.runtime_prelude,
         scoped_base_surface: state.scoped_base_surface,
+        prelude_presentation: state.prelude_presentation,
         direct_namespaces: state.direct_namespaces,
         transitive_namespace_requirers: state.transitive_namespace_requirers
       }
@@ -727,7 +731,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
             fail: Keyword.get(opts, :fail),
             limits_hit: Keyword.get(opts, :limits_hit, []),
             preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace)),
-            prelude_call_policy: prelude_call_policy(current)
+            prelude_call_policy: prelude_call_policy(current),
+            prelude_presentation: prelude_presentation_policy(current)
           )
 
         Collector.write_event(collector, event)
@@ -781,6 +786,29 @@ defmodule PtcRunnerMcp.Sessions.Session do
       "transitive_namespaces" => transitive_namespaces
     }
   end
+
+  defp prelude_presentation_policy(%__MODULE__{scoped_base_surface: false}), do: nil
+
+  defp prelude_presentation_policy(%__MODULE__{} = state) do
+    presentation = state.prelude_presentation || %{}
+    export_mask = Map.get(presentation, :export_mask)
+
+    %{
+      "scoped_base_surface" => state.scoped_base_surface,
+      "masked_namespaces" => export_mask_namespaces(export_mask),
+      "fallback_warnings" => Map.get(presentation, :warnings, [])
+    }
+  end
+
+  defp export_mask_namespaces(mask) when is_map(mask), do: mask |> Map.keys() |> Enum.sort()
+  defp export_mask_namespaces(_mask), do: []
+
+  defp prelude_export_mask(%{scoped_base_surface: true, prelude_presentation: presentation})
+       when is_map(presentation) do
+    Map.get(presentation, :export_mask)
+  end
+
+  defp prelude_export_mask(_snapshot), do: nil
 
   # No signature supplied — skip validation; commit_success won't emit a
   # `validated` field. Distinct from `{:ok, nil}` (a contract supplied
@@ -974,6 +1002,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        strict_transitive_calls: Policy.strict_transitive_calls?(Map.get(snapshot, :grant)),
        direct_namespaces: Map.get(snapshot, :direct_namespaces, []),
        transitive_namespace_requirers: Map.get(snapshot, :transitive_namespace_requirers, %{}),
+       prelude_export_mask: prelude_export_mask(snapshot),
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
     |> maybe_put(:prelude, snapshot_prelude(snapshot))

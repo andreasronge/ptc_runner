@@ -283,6 +283,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       |> maybe_put(:runtime_prelude, Map.get(opts, :runtime_prelude))
       |> maybe_put(:scoped_base_surface, Map.get(opts, :scoped_base_surface))
       |> maybe_put(:preludes, Map.get(opts, :preludes))
+      |> maybe_put(:prelude_presentation, Map.get(opts, :prelude_presentation))
       |> maybe_put(:direct_namespaces, Map.get(opts, :direct_namespaces))
       |> maybe_put(
         :transitive_namespace_requirers,

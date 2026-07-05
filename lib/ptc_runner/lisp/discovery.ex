@@ -208,11 +208,11 @@ defmodule PtcRunner.Lisp.Discovery do
   Public exports of a prelude namespace as a `{symbol-string => meta}` map, or
   `:unknown` when `ref` is not a declared prelude namespace.
   """
-  @spec prelude_ns_publics(Prelude.t() | nil, term()) ::
+  @spec prelude_ns_publics(Prelude.t() | nil, term(), map() | nil) ::
           {:ok, map()} | :unknown | {:programmer_fault, String.t()}
-  def prelude_ns_publics(prelude, ref) do
+  def prelude_ns_publics(prelude, ref, export_mask \\ nil) do
     with {:ok, name} <- normalize_ref(ref, "ns-publics") do
-      case prelude_namespace_exports(prelude, name) do
+      case prelude_namespace_exports(prelude, name, export_mask) do
         :unknown ->
           :unknown
 
@@ -289,12 +289,14 @@ defmodule PtcRunner.Lisp.Discovery do
   is not a declared prelude namespace. Honors the same `:limit`/`:offset`
   pagination opts as the local/MCP `dir` paths.
   """
-  @spec prelude_dir(Prelude.t() | nil, term(), map()) ::
+  @spec prelude_dir(Prelude.t() | nil, term(), map(), map() | nil) ::
           {:ok, [String.t()]} | :unknown | {:programmer_fault, String.t()}
-  def prelude_dir(prelude, ref, opts \\ %{}) do
+  def prelude_dir(prelude, ref, opts \\ %{}, export_mask \\ nil) do
     with {:ok, opts} <- parse_dir_opts(opts),
          {:ok, name} <- normalize_ref(ref, "dir") do
-      case prelude_namespace_exports(prelude, name) do
+      mask = if Map.get(opts, :full) == true, do: nil, else: export_mask
+
+      case prelude_namespace_exports(prelude, name, mask) do
         :unknown ->
           :unknown
 
@@ -376,16 +378,20 @@ defmodule PtcRunner.Lisp.Discovery do
   Structured prelude apropos matches (`@prelude_source_rank`) for unified
   ordering. Scored over each public export's ref/symbol/doc/namespace.
   """
-  @spec prelude_apropos_matches(Prelude.t() | nil, String.t()) :: [map()]
-  def prelude_apropos_matches(%Prelude{exports: exports}, query) when is_binary(query) do
+  @spec prelude_apropos_matches(Prelude.t() | nil, String.t(), map() | nil) :: [map()]
+  def prelude_apropos_matches(prelude, query, export_mask \\ nil)
+
+  def prelude_apropos_matches(%Prelude{exports: exports}, query, export_mask)
+      when is_binary(query) do
     query_tokens = tokenize(query)
 
     exports
+    |> visible_exports(export_mask)
     |> Enum.map(&score_prelude_export(&1, query_tokens))
     |> Enum.reject(&(&1.score <= 0))
   end
 
-  def prelude_apropos_matches(_prelude, query) when is_binary(query), do: []
+  def prelude_apropos_matches(_prelude, query, _export_mask) when is_binary(query), do: []
 
   @doc """
   Shared lexical token scoring. Exact matches outrank prefixes; prefixes
@@ -462,6 +468,7 @@ defmodule PtcRunner.Lisp.Discovery do
     with {:ok, opts} <- normalize_opts(opts) do
       limit = Map.get(opts, :limit, 50)
       offset = Map.get(opts, :offset, 0)
+      full = Map.get(opts, :full, false)
 
       cond do
         not is_integer(limit) or limit < 1 or limit > 200 ->
@@ -470,6 +477,9 @@ defmodule PtcRunner.Lisp.Discovery do
         not is_integer(offset) or offset < 0 ->
           {:programmer_fault,
            "dir :offset must be a non-negative integer, got #{inspect(offset)}"}
+
+        not is_boolean(full) ->
+          {:programmer_fault, "dir :full must be a boolean, got #{inspect(full)}"}
 
         true ->
           {:ok, opts}
@@ -512,6 +522,7 @@ defmodule PtcRunner.Lisp.Discovery do
   defp safe_to_atom("limit"), do: :limit
   defp safe_to_atom("offset"), do: :offset
   defp safe_to_atom("load"), do: :load
+  defp safe_to_atom("full"), do: :full
   defp safe_to_atom(other), do: other
 
   defp normalize_ref({:symbol_ref, name}, form) when is_binary(name),
@@ -730,15 +741,36 @@ defmodule PtcRunner.Lisp.Discovery do
 
   # Public exports of a declared prelude namespace, or `:unknown` when `name`
   # is not a namespace the attached prelude declares.
-  defp prelude_namespace_exports(%Prelude{} = prelude, name) do
+  defp prelude_namespace_exports(prelude, name, export_mask)
+
+  defp prelude_namespace_exports(%Prelude{} = prelude, name, export_mask) do
     if name in Prelude.namespaces(prelude) do
-      Enum.filter(prelude.exports, &(&1.namespace == name))
+      prelude.exports
+      |> Enum.filter(&(&1.namespace == name))
+      |> visible_exports(export_mask)
     else
       :unknown
     end
   end
 
-  defp prelude_namespace_exports(_prelude, _name), do: :unknown
+  defp prelude_namespace_exports(_prelude, _name, _export_mask), do: :unknown
+
+  defp visible_exports(exports, nil), do: exports
+
+  defp visible_exports(exports, export_mask) when is_map(export_mask) do
+    Enum.filter(exports, fn %Export{} = export ->
+      case Map.fetch(export_mask, export.namespace) do
+        {:ok, refs} -> masked_ref_member?(refs, export.ref)
+        :error -> true
+      end
+    end)
+  end
+
+  defp visible_exports(exports, _export_mask), do: exports
+
+  defp masked_ref_member?(%MapSet{} = refs, ref), do: MapSet.member?(refs, ref)
+  defp masked_ref_member?(refs, ref) when is_list(refs), do: ref in refs
+  defp masked_ref_member?(_refs, _ref), do: true
 
   defp fetch_prelude_export(%Prelude{} = prelude, ref), do: Prelude.fetch_export(prelude, ref)
   defp fetch_prelude_export(_prelude, _ref), do: :error
