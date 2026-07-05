@@ -347,7 +347,15 @@ defmodule PtcRunnerMcp.Http.SessionRegistry do
   defp register_auth_token_redaction(%{auth_token: token})
        when is_binary(token) and byte_size(token) > 0 do
     Credentials.register_redaction_secrets([token])
+    register_role_token_redaction_secrets(%{role_token_redaction_secrets: []})
   end
 
-  defp register_auth_token_redaction(_config), do: :ok
+  defp register_auth_token_redaction(config), do: register_role_token_redaction_secrets(config)
+
+  defp register_role_token_redaction_secrets(%{role_token_redaction_secrets: secrets})
+       when is_list(secrets) do
+    Credentials.register_redaction_secrets(secrets)
+  end
+
+  defp register_role_token_redaction_secrets(_config), do: :ok
 end

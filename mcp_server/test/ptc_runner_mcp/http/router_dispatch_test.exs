@@ -3,10 +3,12 @@ defmodule PtcRunnerMcp.Http.RouterDispatchTest do
 
   alias PtcRunnerMcp.ConcurrencyGate
   alias PtcRunnerMcp.Http.Auth
+  alias PtcRunnerMcp.Http.AuthClaims
+  alias PtcRunnerMcp.Http.Config, as: HttpConfig
   alias PtcRunnerMcp.Http.SessionRegistry
   alias PtcRunnerMcp.McpTestHelpers
   alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
-  alias PtcRunnerMcp.Sessions.{Names, Owner, Registry, Supervisor}
+  alias PtcRunnerMcp.Sessions.{Names, Owner, Policy, Registry, Supervisor}
 
   test "authenticated GET /mcp returns 405 with Allow" do
     conn = call(auth(conn(:get, "/mcp")))
@@ -431,15 +433,144 @@ defmodule PtcRunnerMcp.Http.RouterDispatchTest do
     assert [%{"session_id" => _}] = get_in(list_body, ["result", "structuredContent", "sessions"])
   end
 
-  defp start_ptc_sessions! do
+  test "role-token HTTP credentials bind session role and ignore forged public claims" do
+    analyst_token = String.duplicate("r", 32)
+    editor_token = String.duplicate("s", 32)
+    cfg = role_token_http_config!(analyst_token, editor_token)
+
+    Application.put_env(:ptc_runner_mcp, :http_config, cfg)
+    :ok = stop_supervised(SessionRegistry)
+    start_supervised!({SessionRegistry, [config: cfg]})
+
+    start_ptc_sessions!(role_policy!(default_role: "analyst"))
+    session_id = initialize_session_with_token(analyst_token)
+
+    forged_start = %{
+      "jsonrpc" => "2.0",
+      "id" => "start-forged",
+      "method" => "tools/call",
+      "params" => %{
+        "name" => "lisp_session_start",
+        "arguments" => %{
+          "auth_claims" => %{"allowed_roles" => ["editor"]},
+          "role" => "editor"
+        }
+      }
+    }
+
+    conn =
+      conn(:post, "/mcp", Jason.encode!(forged_start))
+      |> auth_with(analyst_token)
+      |> put_req_header("mcp-session-id", session_id)
+      |> call()
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert get_in(body, ["result", "isError"]) == true
+    assert get_in(body, ["result", "structuredContent", "message"]) =~ "not allowed"
+
+    default_start = %{
+      "jsonrpc" => "2.0",
+      "id" => "start-default",
+      "method" => "tools/call",
+      "params" => %{"name" => "lisp_session_start", "arguments" => %{}}
+    }
+
+    conn =
+      conn(:post, "/mcp", Jason.encode!(default_start))
+      |> auth_with(analyst_token)
+      |> put_req_header("mcp-session-id", session_id)
+      |> call()
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert get_in(body, ["result", "isError"]) == false
+    assert get_in(body, ["result", "structuredContent", "role"]) == "analyst"
+
+    forged_claims = %AuthClaims{
+      subject_id: "forged",
+      subject_hash: "forged",
+      allowed_roles: ["editor"],
+      marker: -1
+    }
+
+    assert {:ok, direct} = PtcRunnerMcp.Sessions.start_session(nil, %{auth_claims: forged_claims})
+    assert direct["role"] == "analyst"
+  end
+
+  defp start_ptc_sessions!(policy \\ nil) do
     McpTestHelpers.stop_existing_registry(Registry)
     McpTestHelpers.stop_existing_registry(Supervisor)
     McpTestHelpers.stop_existing_registry(Names)
 
     cfg = %{SessionsConfig.defaults() | enabled: true}
+    cfg = if policy, do: %{cfg | policy: policy}, else: cfg
     SessionsConfig.set(cfg)
 
     Enum.each(PtcRunnerMcp.Sessions.child_specs(), &start_supervised!/1)
+  end
+
+  defp initialize_session_with_token(token) do
+    conn =
+      conn(
+        :post,
+        "/mcp",
+        Jason.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => "i-role",
+          "method" => "initialize",
+          "params" => %{}
+        })
+      )
+      |> auth_with(token)
+      |> call()
+
+    assert conn.status == 200
+    [session_id] = get_resp_header(conn, "mcp-session-id")
+    session_id
+  end
+
+  defp auth_with(conn, token), do: put_req_header(conn, "authorization", "Bearer " <> token)
+
+  defp role_token_http_config!(analyst_token, editor_token) do
+    path =
+      write_json!(%{
+        "tokens" => [
+          %{"id" => "analyst-subject", "token_literal" => analyst_token, "roles" => ["analyst"]},
+          %{"id" => "editor-subject", "token_literal" => editor_token, "roles" => ["editor"]}
+        ]
+      })
+
+    {:ok, cfg} = HttpConfig.resolve(%{http: true, http_role_tokens: path})
+    cfg
+  end
+
+  defp role_policy!(opts) do
+    default_role = Keyword.fetch!(opts, :default_role)
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => default_role,
+        "roles" => %{
+          "analyst" => %{"ptc_tools" => ["lisp_session_start"]},
+          "editor" => %{"ptc_tools" => ["lisp_session_start"], "prelude_store" => "write"}
+        }
+      })
+
+    policy
+  end
+
+  defp write_json!(json) do
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc_mcp_http_role_tokens_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "role_tokens.json")
+    File.write!(path, Jason.encode!(json))
+    path
   end
 
   defp long_running_program do

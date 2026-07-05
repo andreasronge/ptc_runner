@@ -217,7 +217,7 @@ defmodule PtcRunnerMcp.Http.Session do
   end
 
   defp dispatch(frame, state, context) do
-    frame = maybe_put_http_owner(frame, state.id)
+    frame = maybe_put_http_context(frame, state)
 
     JsonRpc.dispatch({:ok, frame},
       draining: state.draining,
@@ -352,20 +352,32 @@ defmodule PtcRunnerMcp.Http.Session do
   defp classify_response(%{"id" => _, "error" => _}), do: true
   defp classify_response(_), do: false
 
-  defp maybe_put_http_owner(%{"method" => "tools/call", "params" => params} = frame, session_id)
+  defp maybe_put_http_context(%{"method" => "tools/call", "params" => params} = frame, state)
        when is_map(params) do
     args = Map.get(params, "arguments", %{})
 
     if is_map(args) and Sessions.tool_name?(Map.get(params, "name")) do
-      owner = %{transport: :http, mcp_session_id: session_id}
-      args = args |> Map.drop(["owner", :owner]) |> Map.put(:owner, owner)
+      owner = %{transport: :http, mcp_session_id: state.id}
+
+      args =
+        args
+        |> Map.drop(["owner", :owner, "auth_claims", :auth_claims])
+        |> Map.put(:owner, owner)
+        |> maybe_put(:auth_claims, auth_claims(state.owner))
+
       put_in(frame, ["params", "arguments"], args)
     else
       frame
     end
   end
 
-  defp maybe_put_http_owner(frame, _session_id), do: frame
+  defp maybe_put_http_context(frame, _state), do: frame
+
+  defp auth_claims(%{auth_claims: claims}), do: claims
+  defp auth_claims(_owner), do: nil
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp success_reply(id, result) when is_map(result) do
     %{"jsonrpc" => "2.0", "id" => id, "result" => Map.delete(result, "__lisp_debug_structured")}

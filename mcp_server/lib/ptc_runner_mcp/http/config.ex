@@ -1,6 +1,7 @@
 defmodule PtcRunnerMcp.Http.Config do
   @moduledoc false
 
+  alias PtcRunnerMcp.Http.RoleTokens
   alias PtcRunnerMcp.{Limits, Log}
 
   @default_host "127.0.0.1"
@@ -25,6 +26,9 @@ defmodule PtcRunnerMcp.Http.Config do
           path: String.t(),
           auth_token: String.t() | nil,
           admin_token: String.t() | nil,
+          role_tokens_path: String.t() | nil,
+          role_tokens: map(),
+          role_token_redaction_secrets: [String.t()],
           auth_disabled: boolean(),
           allowed_origins: [String.t()],
           request_timeout_ms: pos_integer(),
@@ -65,6 +69,10 @@ defmodule PtcRunnerMcp.Http.Config do
             :http_admin_token,
             "PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN"
           ),
+        role_tokens_path:
+          read_optional_string(args, :http_role_tokens, "PTC_RUNNER_MCP_HTTP_ROLE_TOKENS"),
+        role_tokens: %{},
+        role_token_redaction_secrets: [],
         auth_disabled:
           read_bool(args, :http_disable_auth, "PTC_RUNNER_MCP_HTTP_DISABLE_AUTH", false),
         allowed_origins:
@@ -173,6 +181,7 @@ defmodule PtcRunnerMcp.Http.Config do
   defp validate(cfg) do
     with :ok <- validate_bind_host(cfg.host),
          :ok <- validate_path_collisions(cfg),
+         {:ok, cfg} <- load_role_tokens(cfg),
          :ok <- validate_auth(cfg) do
       maybe_warn_single_token_caps(cfg)
       {:ok, cfg}
@@ -220,13 +229,25 @@ defmodule PtcRunnerMcp.Http.Config do
     {:error, "HTTP admin token must be different from HTTP auth token"}
   end
 
+  defp validate_auth(%{auth_token: token, role_tokens_path: path})
+       when is_binary(token) and is_binary(path) do
+    {:error, "--http-auth-token cannot be combined with --http-role-tokens"}
+  end
+
   defp validate_auth(%{auth_disabled: true, allow_unsafe_network: true}),
     do: {:error, "--http-disable-auth cannot be combined with --http-allow-unsafe-network"}
+
+  defp validate_auth(%{auth_disabled: true, role_tokens_path: path}) when is_binary(path),
+    do: {:error, "--http-disable-auth cannot be combined with --http-role-tokens"}
 
   defp validate_auth(%{auth_disabled: true, host: host}) when is_binary(host),
     do: auth_disabled_loopback(host)
 
   defp validate_auth(%{auth_token: token}) when is_binary(token), do: :ok
+
+  defp validate_auth(%{role_tokens: role_tokens})
+       when is_map(role_tokens) and map_size(role_tokens) > 0,
+       do: :ok
 
   defp validate_auth(%{host: host}) do
     if loopback_host?(host) do
@@ -242,6 +263,18 @@ defmodule PtcRunnerMcp.Http.Config do
       :ok
     else
       {:error, "--http-disable-auth is only permitted on loopback binds"}
+    end
+  end
+
+  defp load_role_tokens(%{role_tokens_path: nil} = cfg), do: {:ok, cfg}
+
+  defp load_role_tokens(%{role_tokens_path: path, admin_token: admin_token} = cfg) do
+    case RoleTokens.load_file(path, admin_token: admin_token) do
+      {:ok, %{by_hash: by_hash, redaction_secrets: secrets}} ->
+        {:ok, %{cfg | role_tokens: by_hash, role_token_redaction_secrets: secrets}}
+
+      {:error, message} ->
+        {:error, message}
     end
   end
 

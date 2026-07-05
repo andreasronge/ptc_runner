@@ -30,6 +30,7 @@ defmodule PtcRunnerMcp.Application do
     * `--max-debug-response-bytes <int>` / `PTC_RUNNER_MCP_MAX_DEBUG_RESPONSE_BYTES`
     * `--max-session-preview-chars <int>` / `PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS`
     * `--session-roles <path>` / `PTC_RUNNER_MCP_SESSION_ROLES`
+    * `--http-role-tokens <path>` / `PTC_RUNNER_MCP_HTTP_ROLE_TOKENS`
     * `--response-profile <slim|structured|debug>` / `PTC_RUNNER_MCP_RESPONSE_PROFILE`
 
   Phase 0 of `Plans/ptc-runner-mcp-aggregator.md` (§11.6 / §9) wires
@@ -280,6 +281,7 @@ defmodule PtcRunnerMcp.Application do
           http_path: :string,
           http_auth_token: :string,
           http_admin_token: :string,
+          http_role_tokens: :string,
           http_disable_auth: :boolean,
           http_allowed_origin: [:string, :keep],
           http_request_timeout_ms: :integer,

@@ -75,6 +75,114 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     assert message =~ "different"
   end
 
+  test "loads role-token file and rejects legacy MCP token coexistence" do
+    token = String.duplicate("r", 32)
+
+    path =
+      write_role_tokens!(%{
+        "tokens" => [%{"id" => "analyst-a", "token_literal" => token, "roles" => ["analyst"]}]
+      })
+
+    assert {:ok, cfg} = Config.resolve(%{http: true, http_role_tokens: path})
+    assert cfg.auth_token == nil
+    assert map_size(cfg.role_tokens) == 1
+    assert cfg.role_token_redaction_secrets == [token]
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_auth_token: String.duplicate("a", 32),
+               http_role_tokens: path
+             })
+
+    assert message =~ "cannot be combined"
+  end
+
+  test "role-token file satisfies non-loopback auth requirement" do
+    path =
+      write_role_tokens!(%{
+        "tokens" => [
+          %{
+            "id" => "analyst-a",
+            "token_literal" => String.duplicate("r", 32),
+            "roles" => ["analyst"]
+          }
+        ]
+      })
+
+    assert {:ok, cfg} =
+             Config.resolve(%{http: true, http_host: "0.0.0.0", http_role_tokens: path})
+
+    assert cfg.host == "0.0.0.0"
+  end
+
+  test "rejects malformed role-token files" do
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_role_tokens: write_role_tokens!(%{"tokenz" => []})
+             })
+
+    assert message =~ "tokens array"
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_role_tokens:
+                 write_role_tokens!(%{
+                   "tokens" => [
+                     %{
+                       "id" => "bad role",
+                       "token_literal" => String.duplicate("r", 32),
+                       "roles" => ["analyst"]
+                     }
+                   ]
+                 })
+             })
+
+    assert message =~ "tokens[0].id"
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_admin_token: String.duplicate("r", 32),
+               http_role_tokens:
+                 write_role_tokens!(%{
+                   "tokens" => [
+                     %{
+                       "id" => "analyst",
+                       "token_literal" => String.duplicate("r", 32),
+                       "roles" => ["analyst"]
+                     }
+                   ]
+                 })
+             })
+
+    assert message =~ "different from HTTP admin token"
+
+    assert {:error, message} =
+             Config.resolve(%{
+               http: true,
+               http_role_tokens:
+                 write_role_tokens!(%{
+                   "tokens" => [
+                     %{
+                       "id" => "duplicate",
+                       "token_literal" => String.duplicate("r", 32),
+                       "roles" => ["analyst"]
+                     },
+                     %{
+                       "id" => "duplicate",
+                       "token_literal" => String.duplicate("s", 32),
+                       "roles" => ["editor"]
+                     }
+                   ]
+                 })
+             })
+
+    assert message =~ "duplicates"
+  end
+
   test "requires auth for non-loopback binds" do
     assert {:error, message} = Config.resolve(%{http: true, http_host: "0.0.0.0"})
     assert message =~ "required"
@@ -257,5 +365,15 @@ defmodule PtcRunnerMcp.HttpConfigTest do
     :ok = PtcRunnerMcp.Application.apply_limits(args)
     assert {:ok, cfg} = Config.resolve(args)
     assert cfg.max_body_bytes == 12_345
+  end
+
+  defp write_role_tokens!(json) do
+    dir =
+      Path.join(System.tmp_dir!(), "ptc_mcp_role_tokens_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "role_tokens.json")
+    File.write!(path, Jason.encode!(json))
+    path
   end
 end

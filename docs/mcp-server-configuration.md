@@ -111,6 +111,7 @@ the deployment runbook.
 | `--http-path` | `PTC_RUNNER_MCP_HTTP_PATH` | `/mcp` | Streamable HTTP MCP endpoint. Must differ from `/health`, `/ready`, admin endpoints, and `--http-metrics-path`. |
 | `--http-auth-token` | `PTC_RUNNER_MCP_HTTP_AUTH_TOKEN` | unset | Static bearer token. Must be at least 32 characters; generate it from a CSPRNG. |
 | `--http-admin-token` | `PTC_RUNNER_MCP_HTTP_ADMIN_TOKEN` | unset | Separate operator bearer token for live prelude-store admin endpoints. Must be at least 32 characters. When unset, admin endpoints return `404`. |
+| `--http-role-tokens` | `PTC_RUNNER_MCP_HTTP_ROLE_TOKENS` | unset | JSON file mapping bearer tokens to allowed session roles. Mutually exclusive with `--http-auth-token`; may coexist with `--http-admin-token`. |
 | `--http-disable-auth` | `PTC_RUNNER_MCP_HTTP_DISABLE_AUTH` | `false` | Disable bearer auth. Only permitted on explicit loopback binds; cannot be combined with `--http-allow-unsafe-network`. |
 | `--http-allowed-origin` | `PTC_RUNNER_MCP_HTTP_ALLOWED_ORIGIN` | unset | Browser `Origin` allow-list. May be repeated or comma-separated. This is a DNS-rebinding check, not full CORS support. |
 | `--http-request-timeout-ms` | `PTC_RUNNER_MCP_HTTP_REQUEST_TIMEOUT_MS` | `15000` | HTTP request read timeout. |
@@ -128,6 +129,34 @@ the deployment runbook.
 
 HTTP emits sanitized telemetry under `[:ptc_lisp, :http, ...]`
 and logs request stop lines to stderr. Raw bearer tokens and raw
+role-token values are registered with the credential redactor at boot.
+
+Role-token files have this strict shape:
+
+```json
+{
+  "tokens": [
+    {
+      "id": "bench-analyst",
+      "token_env": "PTC_BENCH_ANALYST_TOKEN",
+      "roles": ["analyst"]
+    },
+    {
+      "id": "bench-editor",
+      "token_file": "/run/secrets/ptc_editor_token",
+      "roles": ["editor"]
+    }
+  ]
+}
+```
+
+Each entry requires a non-secret `id`, exactly one token source
+(`token_env`, `token_file`, or `token_literal`), and at least one role.
+Tokens must be at least 32 characters, unique, and different from the
+admin token when one is configured. `token_literal` exists for tests;
+production deployments should use env or file sources. When
+`--http-role-tokens` is active, `lisp_session_start` may only select a
+role allowed by the authenticated bearer token.
 `MCP-Session-Id` values are not logged.
 
 When `--http-admin-token` is set, two operator-only admin endpoints are

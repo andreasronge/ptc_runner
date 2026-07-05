@@ -3,11 +3,23 @@ defmodule PtcRunnerMcp.Http.Auth do
 
   @www_authenticate "Bearer"
 
-  @type owner :: %{id: String.t(), hash: String.t()}
+  @type owner :: %{id: String.t(), hash: String.t(), auth_claims: map() | nil}
 
   @spec authenticate(Plug.Conn.t(), map()) :: {:ok, owner()} | {:error, :missing | :invalid}
   def authenticate(_conn, %{auth_disabled: true}) do
     {:ok, owner_for("disabled")}
+  end
+
+  def authenticate(conn, %{role_tokens: role_tokens})
+      when is_map(role_tokens) and map_size(role_tokens) > 0 do
+    with ["Bearer " <> presented] <- Plug.Conn.get_req_header(conn, "authorization"),
+         hash <- token_hash(presented),
+         {:ok, claims} <- Map.fetch(role_tokens, hash) do
+      {:ok, owner_for_claims(hash, claims)}
+    else
+      [] -> {:error, :missing}
+      _ -> {:error, :invalid}
+    end
   end
 
   def authenticate(conn, %{auth_token: token}) when is_binary(token) do
@@ -28,8 +40,17 @@ defmodule PtcRunnerMcp.Http.Auth do
 
   @spec owner_for(String.t()) :: owner()
   def owner_for(value) when is_binary(value) do
-    hash = :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
-    %{id: hash, hash: String.slice(hash, 0, 16)}
+    hash = token_hash(value)
+    %{id: hash, hash: String.slice(hash, 0, 16), auth_claims: nil}
+  end
+
+  @spec token_hash(String.t()) :: String.t()
+  def token_hash(value) when is_binary(value) do
+    :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
+  end
+
+  defp owner_for_claims(hash, claims) do
+    %{id: hash, hash: claims.subject_hash, auth_claims: claims}
   end
 
   defp constant_time_equal(a, b) when is_binary(a) and is_binary(b) do

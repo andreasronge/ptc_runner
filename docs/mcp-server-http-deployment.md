@@ -192,6 +192,7 @@ sessions return `404` on later use.
 | `--http-port` | `7332` | Bind port. |
 | `--http-path` | `/mcp` | MCP endpoint path. |
 | `--http-auth-token` | unset | Static bearer token; minimum 32 characters. |
+| `--http-role-tokens` | unset | JSON file mapping bearer tokens to allowed session roles; mutually exclusive with `--http-auth-token`. |
 | `--http-allowed-origin` | unset | Exact allowed browser `Origin`; repeatable or comma-separated. |
 | `--http-max-sessions` | `256` | Global HTTP protocol-session cap. |
 | `--http-max-sessions-per-owner` | `32` | Per-owner protocol-session cap. |

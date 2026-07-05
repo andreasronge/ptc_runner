@@ -26,6 +26,7 @@ defmodule PtcRunnerMcp.Sessions do
     Tools
   }
 
+  alias PtcRunnerMcp.Http.AuthClaims
   alias PtcRunnerMcp.Sessions.{Config, Owner, Policy, Projection, Registry, Session, Supervisor}
 
   @names_registry PtcRunnerMcp.Sessions.Names
@@ -653,6 +654,7 @@ defmodule PtcRunnerMcp.Sessions do
           |> maybe_put(:mode, Map.get(args, "mode"))
           |> maybe_put(:tags, Map.get(args, "tags"))
           |> maybe_put(:role, Map.get(args, "role"))
+          |> maybe_put(:auth_claims, Map.get(args, :auth_claims))
 
         start_session(owner_context(args), opts)
 
@@ -728,15 +730,21 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp prepare_start_opts(opts) when is_map(opts) or is_list(opts) do
     opts = Map.new(opts)
+    policy = Config.policy()
+    role_arg = Map.get(opts, :role) || Map.get(opts, "role")
+    auth_claims = trusted_auth_claims(Map.get(opts, :auth_claims))
 
-    with {:ok, grant} <-
-           Policy.resolve_grant(Config.policy(), Map.get(opts, :role) || Map.get(opts, "role")),
+    with {:ok, role_arg} <- effective_role_arg(policy, role_arg, auth_claims),
+         {:ok, grant} <- Policy.resolve_grant(policy, role_arg),
+         :ok <- validate_auth_claims_grant(grant, auth_claims),
          {:ok, mode} <- validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")),
          :ok <- validate_grant_credentials(grant),
          :ok <- validate_grant_mode(grant, mode) do
       opts =
         opts
         |> Map.delete("role")
+        |> Map.delete("auth_claims")
+        |> Map.delete(:auth_claims)
         |> Map.put(:role, if(grant, do: grant.role))
         |> Map.put(:grant, grant)
         |> Map.put(:grant_fingerprint, if(grant, do: grant.fingerprint))
@@ -752,6 +760,42 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp prepare_start_opts(_opts), do: {:error, "session start options must be an object"}
+
+  defp trusted_auth_claims(%AuthClaims{} = claims) do
+    if AuthClaims.trusted?(claims), do: claims, else: nil
+  end
+
+  defp trusted_auth_claims(_claims), do: nil
+
+  defp effective_role_arg(_policy, role_arg, nil), do: {:ok, role_arg}
+
+  defp effective_role_arg(policy, nil, %AuthClaims{allowed_roles: allowed_roles}) do
+    cond do
+      is_binary(policy.default_role) and policy.default_role in allowed_roles ->
+        {:ok, policy.default_role}
+
+      length(allowed_roles) == 1 ->
+        {:ok, hd(allowed_roles)}
+
+      true ->
+        {:error, "role is required for this credential"}
+    end
+  end
+
+  defp effective_role_arg(_policy, role_arg, %AuthClaims{}), do: {:ok, role_arg}
+
+  defp validate_auth_claims_grant(_grant, nil), do: :ok
+
+  defp validate_auth_claims_grant(%{role: role}, %AuthClaims{allowed_roles: allowed_roles}) do
+    if role in allowed_roles do
+      :ok
+    else
+      {:error, "role is not allowed for this credential"}
+    end
+  end
+
+  defp validate_auth_claims_grant(_grant, %AuthClaims{}),
+    do: {:error, "role is not allowed for this credential"}
 
   defp validate_grant_mode(nil, _mode), do: :ok
 
@@ -988,7 +1032,17 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp start_arg_key?(key)
-       when key in ["title", "ttl_ms", "preludes", "mode", "tags", "role", "owner", :owner],
+       when key in [
+              "title",
+              "ttl_ms",
+              "preludes",
+              "mode",
+              "tags",
+              "role",
+              "owner",
+              :owner,
+              :auth_claims
+            ],
        do: true
 
   defp start_arg_key?(_key), do: false

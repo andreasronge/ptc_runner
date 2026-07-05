@@ -1356,6 +1356,11 @@ Expected runtime behavior:
 
 #### D3 — Bearer Tokens Bind To Roles
 
+Status: implemented in `mcp_server` as the first HTTP role-credential slice.
+The shipped shape uses a separate internal `AuthClaims` struct rather than
+extending the public owner map, so downstream PTC session ownership and cleanup
+continue to use `PtcOwner.http(mcp_session_id)`.
+
 Slice C's interim trust model lets the model/harness self-declare `role` at
 `lisp_session_start`. D3 makes that role server-authenticated for HTTP by
 binding bearer credentials to allowed roles.
@@ -1367,10 +1372,14 @@ Keep this intentionally small and forward-compatible:
 - add an optional `--http-role-tokens` / `PTC_RUNNER_MCP_HTTP_ROLE_TOKENS`
   JSON file whose entries define bearer tokens by non-secret id and allowed
   roles;
+- treat `--http-auth-token` and `--http-role-tokens` as mutually exclusive for
+  the model-facing MCP surface. The single-token path stays the unrestricted
+  compatibility mode; the role-token file is the policy-bound mode. Admin token
+  auth remains separate and may coexist with either mode;
 - never log plaintext tokens; register all token values in the existing
   redaction set at boot;
-- authentication should return an owner containing an auth subject fingerprint
-  and `allowed_roles`;
+- authentication should return the normal HTTP owner plus internal auth claims
+  containing an auth subject fingerprint and `allowed_roles`;
 - `lisp_session_start` must reject a requested role that is not in the
   authenticated subject's allowed role set;
 - when a token allows exactly one role, omitting `role` should select that role;
@@ -1403,27 +1412,120 @@ source style. Literal tokens are acceptable for tests only; production examples
 should use env/file. The token `id` is non-secret operator metadata and may be
 used in diagnostics after hashing, but should not be echoed to models.
 
+Parsing and validation:
+
+- add `PtcRunnerMcp.Http.RoleTokens` as the narrow loader for this file. It
+  should read JSON from the configured path and return a map keyed by a token
+  hash, not by plaintext token;
+- file root shape is exactly `%{"tokens" => [...]}`. Reject unknown root keys
+  and unknown entry keys so typos do not silently disable policy;
+- each entry requires `id`, one token source (`token_env`, `token_file`, or
+  `token_literal`), and non-empty `roles`;
+- `id` follows the same bounded role-name style (`[A-Za-z0-9_.-]{1,64}`) and
+  must be unique. Role names should be validated against the same role parser as
+  the session policy;
+- materialized token values must be at least `Http.Config.token_min_bytes()`,
+  non-empty after trimming file values, unique by value/hash, and different from
+  the admin token when one is configured;
+- `token_env` reads a non-empty env var, `token_file` reads a UTF-8/plaintext
+  file and trims trailing whitespace, and `token_literal` exists for tests only.
+  Do not persist plaintext values in the resolved HTTP config;
+- when a role-token file is configured, `Http.Config.resolve/1` should fail if
+  HTTP auth is disabled, if `--http-auth-token` is also supplied, or if any role
+  token is invalid. For non-loopback binds, the role-token file satisfies the
+  same "auth required" condition as the existing single token.
+
 HTTP auth threading detail:
 
 - extend `PtcRunnerMcp.Http.Auth.authenticate/2` so the returned owner carries
-  `allowed_roles` and an `auth_subject_hash` when a role-token file is active;
+  an internal `AuthClaims` struct when a role-token file is active;
 - store the authenticated owner on the HTTP session process at creation time,
   as it is today, and include the same claims in the internal request context
   passed through `Http.Session.dispatch/3`;
 - when HTTP dispatch injects the internal `owner` argument for session tools,
-  include only non-secret auth claims needed for policy checks, for example
-  `%{transport: :http, mcp_session_id: id, allowed_roles: [...],
-  auth_subject_hash: "..."}`;
-- extend `Sessions.Owner` normalization to preserve these non-secret fields, or
-  add a separate internal `auth_claims` field in the session-tool args. Do not
-  trust model-supplied `allowed_roles`; public clients should not be able to
-  send or override this field;
+  also inject non-secret auth claims through an atom-keyed internal
+  `:auth_claims` argument after dropping any caller-supplied `"auth_claims"` or
+  `:auth_claims`;
+- do not extend `Sessions.Owner` normalization with role authority. The
+  internal `:auth_claims` field is the authority path. Public string-keyed
+  `"auth_claims"` / `"allowed_roles"` fields are rejected or ignored and cannot
+  widen role authority;
 - run the allowed-role check in `Sessions.prepare_start_opts/1` immediately
   around `Policy.resolve_grant/2`: choose/resolve the requested role, then
   reject it if authenticated HTTP claims exist and the role is not allowed. For
   single-role tokens, the authenticated role may become the default when the
   client omits `role`; for multi-role tokens, require an explicit role unless
   the configured policy default is also in the allowed set.
+
+Concrete minimal implementation:
+
+1. `Http.Config.resolve/1` accepts `:http_role_tokens` and env
+   `PTC_RUNNER_MCP_HTTP_ROLE_TOKENS`, validates the file, and stores only a
+   resolved role-token index such as `%{role_tokens: %{hash => subject}}`.
+   `subject` contains `id`, short `auth_subject_hash`, and sorted
+   `allowed_roles`; it does not contain the token value.
+2. `Http.Auth.authenticate/2` branches before the single-token branch when
+   `cfg.role_tokens` is non-empty: parse `Authorization: Bearer <token>`, hash
+   it, look up the subject, and return the current owner shape plus internal
+   `auth_claims`. Missing/invalid challenges remain identical to existing
+   bearer auth.
+3. Add the new CLI option to the strict `Application.parse_args/1` switch table
+   and update the HTTP option tables in `docs/mcp-server-configuration.md` and
+   `docs/mcp-server-http-deployment.md`. Do not ship an env-only feature while
+   documenting a CLI flag.
+4. Avoid extending the public `"owner"` argument shape with forgeable role
+   claims. Prefer a separate internal owner/auth-claims path:
+   - `Http.Session` stores the authenticated owner from HTTP auth;
+   - when dispatching session tools, it continues to overwrite any model-supplied
+     `"owner"` argument, but it also passes non-secret auth claims through an
+     internal atom-keyed field or direct call option that normal JSON clients
+     cannot supply;
+   - `Sessions.owner_context/1` must not accept string-keyed `"allowed_roles"` or
+     `"auth_subject_hash"` from public request JSON as authority;
+   - stdio owners do not carry HTTP role claims.
+5. `Sessions.start_session/2` passes trusted auth claims into
+   `prepare_start_opts/1`. That helper derives the effective role in this
+   order:
+   - explicit `role` argument, if present;
+   - policy default role, if present and allowed by the token;
+   - the sole allowed role when HTTP role claims contain exactly one role.
+   If no role can be derived, return a deterministic `session_args_error`.
+6. The role-allow check happens after `Policy.resolve_grant/2` so unknown roles
+   still use the existing policy error. If an HTTP role token is present and the
+   resolved role is not in its allowed set, reject with
+   `"role is not allowed for this HTTP credential"` or equivalent generic text
+   that does not name other allowed roles.
+7. HTTP session cleanup keeps closing downstream PTC sessions with
+   `PtcOwner.http(mcp_session_id)` because D3 does not change the downstream PTC
+   owner shape. Tests should continue to prove registry termination closes
+   downstream sessions when the authenticated HTTP session used role-token
+   claims.
+8. Registry ownership and telemetry continue to use non-secret owner hashes.
+   Plaintext tokens never enter logs or owner maps.
+
+Tests:
+
+- config accepts a valid role-token file from CLI/env and rejects malformed
+  roots, unknown keys, duplicate ids, duplicate token values, short tokens,
+  missing env/file sources, multiple token sources, empty roles, bad role names,
+  coexistence with `--http-auth-token`, and equality with `--http-admin-token`;
+- `Http.Auth.authenticate/2` accepts a role token, rejects an invalid token with
+  the existing challenge, and returns non-secret `allowed_roles` plus stable
+  auth subject hashes;
+- HTTP `lisp_session_start` with an analyst token can start `analyst` and cannot
+  start `editor`;
+- a single-role token may omit `role` and gets that role even when no policy
+  default is configured;
+- a multi-role token without explicit role uses the configured policy default
+  only when the default is allowed, otherwise it fails closed;
+- model-supplied `"owner"` / `"allowed_roles"` cannot widen authority through
+  `tools/call`, direct stdio-style `Tools.call`, or direct `Sessions.start_session`
+  inputs;
+- deleting an HTTP protocol session and terminating the HTTP session registry
+  both close downstream PTC sessions when the authenticated HTTP subject carries
+  role-token claims;
+- existing single-token HTTP behavior and stdio self-declared roles remain
+  unchanged when no role-token file is configured.
 
 #### Relationship To Existing Credential Systems
 
