@@ -21,7 +21,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
   @doc """
   Build the `Lisp.run/2` opts list.
 
-  Reads from `agent` and `state` and emits the canonical 14-key
+  Reads from `agent` and `state` and emits the canonical option
   keyword list, optionally appending `:max_heap` and `:max_tool_calls`
   when set.
   """
@@ -50,6 +50,7 @@ defmodule PtcRunner.SubAgent.Loop.LispOpts do
     # Opaque upstream runtime handle, forwarded only so `Lisp.run/2`'s
     # attach-time prelude `requires` validation runs against it. `nil` is inert.
     |> maybe_put(:runtime, Map.get(state, :runtime))
+    |> maybe_put(:upstream_tools, Map.get(state, :upstream_tools))
   end
 
   defp maybe_put(opts, _key, nil), do: opts

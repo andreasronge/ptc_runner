@@ -2,7 +2,7 @@ defmodule PtcRunner.Upstream.Discovery do
   @moduledoc false
 
   alias PtcRunner.Lisp.Discovery, as: LocalDiscovery
-  alias PtcRunner.Upstream.{RunContext, Runtime}
+  alias PtcRunner.Upstream.RunContext
 
   @spec build(RunContext.t()) :: (atom(), list() -> term())
   def build(%RunContext{} = context) do
@@ -22,7 +22,7 @@ defmodule PtcRunner.Upstream.Discovery do
 
   defp dispatch(context, :servers, []) do
     result =
-      Runtime.catalog_snapshot(context.runtime)
+      RunContext.catalog_snapshot(context)
       |> Enum.map(fn server ->
         %{
           "name" => server["name"],
@@ -127,7 +127,7 @@ defmodule PtcRunner.Upstream.Discovery do
   defp enforce_result_limit(other, _context), do: other
 
   defp server_entry(context, name) do
-    Enum.find(Runtime.catalog_snapshot(context.runtime), &(Map.get(&1, "name") == name))
+    Enum.find(RunContext.catalog_snapshot(context), &(Map.get(&1, "name") == name))
   end
 
   defp find_tool(context, server, tool) do
@@ -158,7 +158,7 @@ defmodule PtcRunner.Upstream.Discovery do
     query_tokens = LocalDiscovery.tokenize(query)
     limit = Map.get(opts, :limit, 8)
 
-    Runtime.catalog_snapshot(context.runtime)
+    RunContext.catalog_snapshot(context)
     |> Enum.flat_map(fn server ->
       Enum.map(server["tools"], fn tool ->
         name = tool["name"]

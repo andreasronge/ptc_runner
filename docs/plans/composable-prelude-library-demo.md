@@ -269,8 +269,9 @@ The remaining policy-track gaps are:
 - no projection-scoped MCP HTTP clients yet: D2a fails closed for denied
   credentialed MCP HTTP calls, but D2b is still needed before a restricted role
   can call a credentialed MCP HTTP upstream through its own projected client;
-- no per-role upstream tool visibility yet: credentials can be scoped, but
-  upstream tool catalogs are not independently filtered per role until Slice E;
+- per-role upstream tool visibility is implemented for stateful sessions:
+  projected upstream catalogs, prelude attach/filtering, and `(tool/call ...)`
+  dispatch all honor the role's `upstream_tools` grant;
 - no native replacement for stage-specific server processes or the external MCP
   tool-filter proxy when one server must present different outer catalogs to
   different credentials;
@@ -873,6 +874,14 @@ Slice B tests:
 Goal: introduce a first-class role/grant model without changing credential
 storage yet.
 
+Status: core implemented via `--session-roles` /
+`PTC_RUNNER_MCP_SESSION_ROLES` (`mcp_server/lib/ptc_runner_mcp/sessions/policy.ex`),
+except where a sub-bullet below has its own narrower status note.
+[`../future/prelude-selected-capability-namespaces.md`](../future/prelude-selected-capability-namespaces.md)
+proposes folding the `mode: "write_capable"` special case into prelude
+selection on top of this now-implemented grant model — read that doc against
+this slice, not as a standalone redesign.
+
 Implementation boundary:
 
 - this slice is MCP-session scoped, not a full authorization system;
@@ -999,9 +1008,13 @@ Grant vocabulary:
   is a warning, not a hard error, because `evidence_bundle` is a
   process-global setting: a role with zero evidence access on a multi-role
   server is a legitimate least-privilege config, not necessarily a mistake;
-- `upstream_tools`: reserved for Slice E. In Slice C it must parse and
-  normalize, but any non-empty value should be rejected with a clear config
-  error so the role grant cannot imply authority the runtime does not enforce;
+- `upstream_tools`: `[]` denies all upstream operations for the configured role,
+  `"all"` grants the role every configured upstream operation, and an array of
+  canonical `upstream:<server>/<tool>` ids grants only those operations.
+  Materialized projected catalogs are filtered to the same set. Lazy catalogs do
+  not weaken enforcement because prelude attach checks explicit grants and
+  `(tool/call ...)` dispatch denies ungranted resolved operations before
+  upstream dispatch;
 - `prelude_store`: none/read/write authority for the built-in `prelude/`
   namespace and backing tools;
 - `preludes`: exact selected prelude refs the role may request, normalized to
@@ -1067,19 +1080,18 @@ Enforcement points:
 5. `Session.lisp_opts/3` filters the final host PTC tool map through
    `grant.ptc_tools` before passing it to `PtcRunner.Lisp.run/2`, and filters
    the attached compiled prelude to exports whose `tool:` requirements /
-   collected host-tool refs are granted. Execution therefore fails closed even
-   if a hidden tool exists in the host runtime, without breaking unrelated
-   exports in the same prelude. The same filtered prelude must be used for
-   discovery, evaluation, and live-session projection; filter both `exports`
-   and `source_index` so `doc`, `meta`, `ns-publics`, `apropos`, and `source`
-   have the same role-shaped view. Use the compiled `form_graph` rather than
-   parsing rendered source hints when retaining private helper source for
-   allowed exports.
-6. Do not implement `upstream_tools` enforcement in Slice C. The current
-   session path builds both `(tool/call ...)` and `catalog/*` from one root
-   `RunContext`, so discovery filtering without execution filtering would be a
-   false boundary. Keep non-empty `upstream_tools` configs invalid until Slice E
-   adds a single filtered runtime/run-context path for discovery and execution.
+   collected host-tool refs and `upstream:` requirements are granted. Execution
+   therefore fails closed even if a hidden tool exists in the host runtime,
+   without breaking unrelated exports in the same prelude. The same filtered
+   prelude must be used for discovery, evaluation, and live-session projection;
+   filter both `exports` and `source_index` so `doc`, `meta`, `ns-publics`,
+   `apropos`, and `source` have the same role-shaped view. Use the compiled
+   `form_graph` rather than parsing rendered source hints when retaining private
+   helper source for allowed exports.
+6. `Sessions.projected_root_runtime/1` projects both credential grants and
+   upstream operation grants. Discovery sees the projected catalog, prelude
+   attach receives the explicit upstream grant set, and `tool/call` checks the
+   same projected authority at dispatch time.
 7. Add top-level `role` and `grant_fingerprint` fields to
    `PtcRunner.TraceLog.TurnEvent`. `Session.emit_turn_event/8` fills them from
    session state; `PtcRunner.TraceLog.Introspection` projects them from grouped
@@ -1129,8 +1141,8 @@ Slice C tests:
   designed;
 - `mode: "write_capable"` remains insufficient to grant unrelated upstream
   tools or prelude-store write tools that the role does not grant;
-- non-empty `upstream_tools` in a Slice C role config is rejected so the server
-  cannot advertise a grant it does not enforce.
+- `upstream_tools` grants may name explicit upstream operations or `"all"`; the
+  server enforces them in catalogs, prelude attach/filtering, and dispatch.
 
 ### Slice D — Role-Scoped Credentials
 
@@ -1209,8 +1221,9 @@ Validation work:
   available; this is acceptable for the demo and keeps root runtime loading
   order simple. A later startup preflight may turn the same check into an
   earlier operator error, but it is not required for Slice D;
-- keep non-empty `upstream_tools` invalid until Slice E. Slice D controls
-  credential authority, not upstream tool visibility;
+- upstream operation grants and credential grants are independent: Slice E
+  controls which `server/tool` operations a role may see and call, while Slice D
+  controls which credentials those allowed calls may use;
 - role credentials do not grant local host PTC tools and do not bypass mode or
   prelude-store grants.
 
@@ -1642,6 +1655,14 @@ Slice D tests:
 
 Goal: remove the external MCP tool-filter proxy once the server owns both
 discovery filtering and execution enforcement.
+
+Status: native operation filtering is implemented for stateful session roles.
+Role policies accept `upstream_tools` as `[]`, `"all"`, or explicit
+`upstream:<server>/<tool>` ids. Projected runtime catalogs hide denied tools,
+prelude filtering/attach fail closed on denied `upstream:` requirements, and
+`tool/call` dispatch returns `:upstream_tool_denied` for denied resolved
+operations. D2b projection-scoped MCP HTTP clients remain a credential/client
+isolation follow-up, not an operation-authorization prerequisite.
 
 Prerequisites:
 

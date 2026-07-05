@@ -175,6 +175,7 @@ defmodule PtcRunner.SubAgent.Loop do
     # prelude `requires` validation only; the bridge (`Upstream.Eval.run_subagent/3`)
     # owns the RunContext lifecycle. Caller-owned, not inherited by children.
     runtime = Keyword.get(opts, :runtime)
+    upstream_tools = Keyword.get(opts, :upstream_tools)
 
     # Extract Lisp.run resource limits (propagated to child agents)
     max_heap = Keyword.get(opts, :max_heap)
@@ -226,6 +227,7 @@ defmodule PtcRunner.SubAgent.Loop do
             tool_cache: tool_cache,
             discovery_exec: discovery_exec,
             runtime: runtime,
+            upstream_tools: upstream_tools,
             on_chunk: on_chunk,
             initial_messages: initial_messages,
             initial_memory: initial_memory
@@ -332,6 +334,7 @@ defmodule PtcRunner.SubAgent.Loop do
       tool_cache: run_opts.tool_cache,
       discovery_exec: run_opts.discovery_exec,
       runtime: run_opts.runtime,
+      upstream_tools: run_opts.upstream_tools,
       agent_name: agent.name,
       agent_id: run_opts.agent_id,
       on_chunk: run_opts.on_chunk,

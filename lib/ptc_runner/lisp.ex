@@ -64,6 +64,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Signature
   alias PtcRunner.Tool
+  alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
 
   @valid_callers [:in_process_v1, :text_mode, :mcp]
   @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
@@ -400,20 +401,42 @@ defmodule PtcRunner.Lisp do
          journal: journal
        )}
     else
+      upstream_tools =
+        Keyword.get(opts, :upstream_tools, UpstreamRuntime.upstream_tool_grants(runtime))
+
       # Attach-time: compile prelude source if needed and validate its
       # `requires` against the selected upstream runtime BEFORE parsing user
       # code. On failure, return {:error, Step} :prelude_attach_failed (or the
       # original compile reason). No prelude attached -> nil, unchanged path.
-      case attach_prelude(prelude_opt, runtime, tools, memory, journal) do
-        {:ok, prelude} ->
-          source
-          |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
-          |> stamp_prelude_trace(prelude)
+      case UpstreamRuntime.constrain_upstream_tool_grants(runtime, upstream_tools) do
+        {:ok, upstream_tools} ->
+          attach_and_run(
+            source,
+            opts,
+            prelude_opt,
+            runtime,
+            tools,
+            upstream_tools,
+            memory,
+            journal
+          )
 
-        {:error, %Step{}} = err ->
-          # Attach FAILED — there is no compiled artifact to summarize.
-          err
+        {:error, message} ->
+          {:error, Step.error(:prelude_attach_failed, message, memory, %{}, journal: journal)}
       end
+    end
+  end
+
+  defp attach_and_run(source, opts, prelude_opt, runtime, tools, upstream_tools, memory, journal) do
+    case attach_prelude(prelude_opt, runtime, tools, upstream_tools, memory, journal) do
+      {:ok, prelude} ->
+        source
+        |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
+        |> stamp_prelude_trace(prelude)
+
+      {:error, %Step{}} = err ->
+        # Attach FAILED — there is no compiled artifact to summarize.
+        err
     end
   end
 
@@ -471,10 +494,11 @@ defmodule PtcRunner.Lisp do
   # `upstream:` requirements validate against the runtime (skipped when none is
   # configured — see `PtcRunner.Lisp.Prelude.Attach`); `tool:` requirements
   # validate against the granted tools map and fail closed when ungranted.
-  defp attach_prelude(nil, _runtime, _tools, _memory, _journal), do: {:ok, nil}
+  defp attach_prelude(nil, _runtime, _tools, _upstream_tools, _memory, _journal), do: {:ok, nil}
 
-  defp attach_prelude(prelude_opt, runtime, tools, memory, journal) do
-    context = PreludeAttachContext.new(runtime: runtime, tools: tools)
+  defp attach_prelude(prelude_opt, runtime, tools, upstream_tools, memory, journal) do
+    context =
+      PreludeAttachContext.new(runtime: runtime, tools: tools, upstream_tools: upstream_tools)
 
     case PreludeAttach.attach(prelude_opt, context) do
       {:ok, prelude} ->

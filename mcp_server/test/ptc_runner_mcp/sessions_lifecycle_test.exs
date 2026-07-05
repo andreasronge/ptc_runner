@@ -21,6 +21,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
   alias PtcRunner.Evidence.Bundle, as: EvidenceBundle
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
   alias PtcRunnerMcp.{JsonRpc, Log, McpTestHelpers, ResponseProfile, Sessions, Tools}
@@ -1568,15 +1569,30 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
-    test "resolve/1 loads session roles and rejects non-empty upstream grants", %{tmp_dir: dir} do
+    test "resolve/1 loads session roles with upstream tool grants", %{tmp_dir: dir} do
       path =
         write_role_policy!(dir, %{
-          "roles" => %{"analyst" => %{"upstream_tools" => ["upstream:x/y"]}}
+          "roles" => %{"analyst" => %{"upstream_tools" => ["upstream:x/y"]}},
+          "default_role" => "analyst"
         })
 
-      assert {:error, message} = Config.resolve(%{session_roles: path})
+      assert {:ok, config} = Config.resolve(%{session_roles: path})
+      grant = config.policy.roles["analyst"]
+
+      assert Policy.upstream_tool_allowed?(grant, "upstream:x/y")
+      assert Policy.upstream_tool_allowed?(grant, "x", "y")
+      refute Policy.upstream_tool_allowed?(grant, "upstream:x/z")
+      assert Policy.upstream_tool_grants(grant) == MapSet.new(["upstream:x/y"])
+
+      bad_path =
+        write_role_policy!(dir, %{
+          "roles" => %{"analyst" => %{"upstream_tools" => ["x/y"]}},
+          "default_role" => "analyst"
+        })
+
+      assert {:error, message} = Config.resolve(%{session_roles: bad_path})
       assert message =~ "--session-roles"
-      assert message =~ "reserved for Slice E"
+      assert message =~ "upstream:<server>/<tool>"
 
       path = write_role_policy!(dir, role_policy_json("analyst"))
 
@@ -1587,6 +1603,48 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert config.policy.roles["analyst"].fingerprint ==
                "sha256:b833c348a8904802ec353f77ebbfb9f17a30d8d07141106a518165a7cafedf10"
+    end
+
+    test "role prelude filtering removes exports with denied upstream requirements" do
+      {:ok, prelude} =
+        PreludeCompiler.compile("""
+        (ns crm {:visibility :prompt})
+        (defn allowed [] (tool/call {:server "crm" :tool "get_user" :args {}}))
+        (defn denied [] (tool/call {:server "crm" :tool "delete_user" :args {}}))
+        (defn dynamic [server tool] (tool/call {:server server :tool tool :args {}}))
+        """)
+
+      policy =
+        role_policy!("analyst", ptc_tools: [], upstream_tools: ["upstream:crm/get_user"])
+
+      grant = policy.roles["analyst"]
+
+      filtered = Policy.filter_prelude(prelude, grant)
+
+      assert Enum.map(filtered.exports, & &1.ref) == ["crm/allowed"]
+      assert Map.has_key?(filtered.source_index, "crm/allowed")
+      refute Map.has_key?(filtered.source_index, "crm/denied")
+      refute Map.has_key?(filtered.source_index, "crm/dynamic")
+
+      assert Policy.filter_ptc_tools(%{"call" => fn _args -> :ok end}, grant)
+             |> Map.has_key?("call")
+
+      no_upstream_policy = role_policy!("analyst", ptc_tools: [], upstream_tools: [])
+
+      assert Policy.filter_ptc_tools(
+               %{"call" => fn _args -> :ok end},
+               no_upstream_policy.roles["analyst"]
+             )
+             |> Map.has_key?("call")
+
+      broad_policy = role_policy!("analyst", upstream_tools: "all")
+      broad_filtered = Policy.filter_prelude(prelude, broad_policy.roles["analyst"])
+
+      assert Enum.map(broad_filtered.exports, & &1.ref) == [
+               "crm/allowed",
+               "crm/denied",
+               "crm/dynamic"
+             ]
     end
 
     @tag :tmp_dir

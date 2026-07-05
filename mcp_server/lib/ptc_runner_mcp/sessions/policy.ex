@@ -130,13 +130,30 @@ defmodule PtcRunnerMcp.Sessions.Policy do
   def credential_grants(nil), do: :all
   def credential_grants(%Grant{credentials: credentials}), do: credentials
 
+  @spec upstream_tool_allowed?(grant() | nil, String.t()) :: boolean()
+  def upstream_tool_allowed?(nil, _id), do: true
+  def upstream_tool_allowed?(%Grant{upstream_tools: :all}, _id), do: true
+
+  def upstream_tool_allowed?(%Grant{upstream_tools: upstream_tools}, id) when is_binary(id) do
+    MapSet.member?(upstream_tools, id)
+  end
+
+  def upstream_tool_allowed?(%Grant{} = grant, server, tool)
+      when is_binary(server) and is_binary(tool) do
+    upstream_tool_allowed?(grant, "upstream:#{server}/#{tool}")
+  end
+
+  @spec upstream_tool_grants(grant() | nil) :: :all | MapSet.t()
+  def upstream_tool_grants(nil), do: :all
+  def upstream_tool_grants(%Grant{upstream_tools: upstream_tools}), do: upstream_tools
+
   @spec filter_ptc_tools(map() | keyword() | nil, grant() | nil) :: map() | keyword() | nil
   def filter_ptc_tools(base, nil), do: base
 
   def filter_ptc_tools(base, %Grant{} = grant) do
     base
     |> as_tool_map()
-    |> Enum.filter(fn {name, _tool} -> ptc_tool_allowed?(grant, to_string(name)) end)
+    |> Enum.filter(fn {name, _tool} -> eval_tool_allowed?(grant, to_string(name)) end)
     |> Map.new()
   end
 
@@ -158,9 +175,11 @@ defmodule PtcRunnerMcp.Sessions.Policy do
   def prelude_export_allowed?(nil, %Export{}), do: true
 
   def prelude_export_allowed?(%Grant{} = grant, %Export{} = export) do
-    export
-    |> export_tool_requirements()
-    |> Enum.all?(&ptc_tool_allowed?(grant, &1))
+    upstream_requirements = export_upstream_requirements(export)
+
+    Enum.all?(export_tool_requirements(export), &ptc_tool_allowed?(grant, &1)) and
+      Enum.all?(upstream_requirements, &upstream_tool_allowed?(grant, &1)) and
+      dynamic_upstream_export_allowed?(grant, export, upstream_requirements)
   end
 
   @spec preludes_allowed?(grant() | nil, [term()]) :: :ok | {:error, String.t()}
@@ -213,9 +232,36 @@ defmodule PtcRunnerMcp.Sessions.Policy do
       "tool:" <> name when name != "" -> [name]
       _other -> []
     end)
-    |> Kernel.++(tool_refs)
+    |> Kernel.++(Enum.reject(tool_refs, &(&1 == "call")))
     |> Enum.uniq()
   end
+
+  defp eval_tool_allowed?(%Grant{} = grant, "call"), do: upstream_call_tool_allowed?(grant)
+  defp eval_tool_allowed?(%Grant{} = grant, name), do: ptc_tool_allowed?(grant, name)
+
+  defp upstream_call_tool_allowed?(%Grant{}), do: true
+
+  defp export_upstream_requirements(%Export{requires: requires}) do
+    Enum.flat_map(requires, fn
+      "upstream:" <> rest = id ->
+        case String.split(rest, "/", parts: 2) do
+          [server, tool] when server != "" and tool != "" -> [id]
+          _ -> []
+        end
+
+      _other ->
+        []
+    end)
+  end
+
+  defp dynamic_upstream_export_allowed?(%Grant{upstream_tools: :all}, %Export{}, _requirements),
+    do: true
+
+  defp dynamic_upstream_export_allowed?(_grant, %Export{tool_refs: tool_refs}, []) do
+    "call" not in tool_refs
+  end
+
+  defp dynamic_upstream_export_allowed?(_grant, %Export{}, _requirements), do: true
 
   defp filtered_source_index(%Prelude{source_index: source_index} = prelude, allowed_exports)
        when is_map(source_index) do
@@ -337,7 +383,8 @@ defmodule PtcRunnerMcp.Sessions.Policy do
            ),
          {:ok, ptc_tools} <-
            string_set(Map.get(map, "ptc_tools", :all), "roles.#{role}.ptc_tools"),
-         {:ok, upstream_tools} <- upstream_tools(Map.get(map, "upstream_tools", []), role),
+         {:ok, upstream_tools} <-
+           upstream_tools(Map.get(map, "upstream_tools", []), role),
          {:ok, credentials} <-
            string_set(Map.get(map, "credentials", []), "roles.#{role}.credentials"),
          {:ok, prelude_store} <- prelude_store_level(Map.get(map, "prelude_store", "read"), role),
@@ -422,18 +469,40 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   defp string_set(_value, label), do: {:error, "#{label} must be an array of strings"}
 
-  defp upstream_tools(nil, _role), do: {:ok, MapSet.new()}
-  defp upstream_tools([], _role), do: {:ok, MapSet.new()}
+  defp upstream_tools(:all, _role), do: {:ok, :all}
+  defp upstream_tools("all", _role), do: {:ok, :all}
 
-  defp upstream_tools(value, role) when is_list(value) do
-    case value do
-      [] -> {:ok, MapSet.new()}
-      _ -> {:error, "roles.#{role}.upstream_tools is reserved for Slice E and must be empty"}
-    end
+  defp upstream_tools(values, role) when is_list(values) do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, MapSet.new()}, fn {value, index}, {:ok, acc} ->
+      case parse_upstream_tool_grant(value) do
+        {:ok, id} ->
+          {:cont, {:ok, MapSet.put(acc, id)}}
+
+        {:error, message} ->
+          {:halt, {:error, "roles.#{role}.upstream_tools[#{index}] #{message}"}}
+      end
+    end)
   end
 
   defp upstream_tools(_value, role),
-    do: {:error, "roles.#{role}.upstream_tools must be an empty array in Slice C"}
+    do:
+      {:error,
+       "roles.#{role}.upstream_tools must be \"all\" or an array of upstream:<server>/<tool> strings"}
+
+  defp parse_upstream_tool_grant("upstream:" <> rest = id) do
+    case String.split(rest, "/", parts: 2) do
+      [server, tool] when server != "" and tool != "" -> {:ok, id}
+      _ -> {:error, "must use upstream:<server>/<tool>"}
+    end
+  end
+
+  defp parse_upstream_tool_grant(value) when is_binary(value),
+    do: {:error, "must use upstream:<server>/<tool>, got: #{inspect(value)}"}
+
+  defp parse_upstream_tool_grant(value),
+    do: {:error, "must be a string, got: #{inspect(value)}"}
 
   defp prelude_store_level(value, _role) when value in ["none", :none], do: {:ok, :none}
   defp prelude_store_level(value, _role) when value in ["read", :read], do: {:ok, :read}
@@ -546,7 +615,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
       "ptc_tools" => set_fingerprint(grant.ptc_tools),
       "credentials" => set_fingerprint(grant.credentials),
       "role" => grant.role,
-      "upstream_tools" => []
+      "upstream_tools" => set_fingerprint(grant.upstream_tools)
     }
 
     data

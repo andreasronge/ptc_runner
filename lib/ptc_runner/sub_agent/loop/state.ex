@@ -113,6 +113,11 @@ defmodule PtcRunner.SubAgent.Loop.State do
     # `discovery_exec`, it is caller-owned and NOT inherited by child SubAgents.
     runtime: nil,
 
+    # Optional upstream operation grant set (`:all` or `MapSet`/list of
+    # `upstream:<server>/<tool>` ids). Forwarded with `runtime` so prelude attach
+    # validation sees the same policy as the bridge-owned RunContext.
+    upstream_tools: nil,
+
     # Pluggable progress renderer state (opaque, owned by progress_fn)
     progress_state: nil,
 
@@ -208,6 +213,8 @@ defmodule PtcRunner.SubAgent.Loop.State do
           discovery_exec: (atom(), list() -> term()) | nil,
           # Optional upstream runtime handle (opaque; attach-time validation only)
           runtime: struct() | pid() | nil,
+          # Optional upstream operation grants for attach-time validation
+          upstream_tools: :all | MapSet.t() | [String.t()] | nil,
           # Pluggable progress renderer state
           progress_state: term(),
           # Child steps

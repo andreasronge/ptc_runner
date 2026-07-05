@@ -19,6 +19,10 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
     * `:tools` — the granted `tools:` map (`%{name => closure | Tool}`) whose
       keys name the typed-tool capabilities the host has granted. Validates
       `tool:<name>` requirements.
+    * `:upstream_tools` — `:all` or a set of canonical
+      `"upstream:<server>/<tool>"` ids granted for upstream `(tool/call ...)`
+      dispatch. Validates `upstream:<server>/<tool>` requirements independent
+      of runtime catalog materialization.
 
   Tool names are **strings**, matching `PtcRunner.Lisp.run/2`'s execution
   contract (a `(tool/foo ...)` call resolves the tool by the string `"foo"`).
@@ -33,10 +37,11 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
 
   @type t :: %__MODULE__{
           runtime: Attach.runtime(),
-          tools: %{optional(String.t()) => term()}
+          tools: %{optional(String.t()) => term()},
+          upstream_tools: :all | MapSet.t(String.t())
         }
 
-  defstruct runtime: nil, tools: %{}
+  defstruct runtime: nil, tools: %{}, upstream_tools: :all
 
   @doc """
   Builds an attach context from options.
@@ -47,12 +52,15 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
     * `:tools` - granted tools, in any shape `PtcRunner.Lisp.run/2` accepts (a
       `%{name => tool}` map OR a `[{name, tool}, ...]` tuple/keyword list);
       canonicalized to a map so grant checks are shape-agnostic (default: `%{}`)
+    * `:upstream_tools` - `:all` or granted canonical upstream operation ids
+      (default: `:all`)
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) when is_list(opts) do
     %__MODULE__{
       runtime: Keyword.get(opts, :runtime),
-      tools: Map.new(Keyword.get(opts, :tools, %{}))
+      tools: Map.new(Keyword.get(opts, :tools, %{})),
+      upstream_tools: normalize_upstream_tools(Keyword.get(opts, :upstream_tools, :all))
     }
   end
 
@@ -61,4 +69,20 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
   def grants_tool?(%__MODULE__{tools: tools}, name) when is_binary(name) do
     Map.has_key?(tools, name)
   end
+
+  @doc "True when upstream operation `server/tool` is granted."
+  @spec grants_upstream_tool?(t(), String.t(), String.t()) :: boolean()
+  def grants_upstream_tool?(%__MODULE__{upstream_tools: :all}, server, tool)
+      when is_binary(server) and is_binary(tool),
+      do: true
+
+  def grants_upstream_tool?(%__MODULE__{upstream_tools: tools}, server, tool)
+      when is_struct(tools, MapSet) and is_binary(server) and is_binary(tool) do
+    MapSet.member?(tools, "upstream:#{server}/#{tool}")
+  end
+
+  defp normalize_upstream_tools(:all), do: :all
+  defp normalize_upstream_tools(%MapSet{} = tools), do: tools
+  defp normalize_upstream_tools(tools) when is_list(tools), do: MapSet.new(tools)
+  defp normalize_upstream_tools(_tools), do: MapSet.new()
 end

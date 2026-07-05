@@ -7,6 +7,7 @@ defmodule PtcRunner.Upstream.Eval do
   `discovery_exec:`), and runs PTC-Lisp programs against them.
   """
 
+  alias PtcRunner.Step.Native, as: NativeStep
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.{Definition, Runner}
   alias PtcRunner.Upstream.{CallTool, Discovery, RunContext, SideEffectGuard}
@@ -18,6 +19,8 @@ defmodule PtcRunner.Upstream.Eval do
     :max_response_bytes,
     :max_catalog_result_bytes
   ]
+
+  @run_context_keys @context_keys ++ [:upstream_tools]
 
   @spec run_context(struct() | pid(), keyword()) :: {:ok, struct()} | {:error, term()}
   def run_context(runtime, opts \\ []), do: RunContext.new(runtime, opts)
@@ -34,15 +37,16 @@ defmodule PtcRunner.Upstream.Eval do
           {term(), [map()]}
   def with_run_context(runtime, opts, fun) when is_function(fun, 1) do
     {:ok, context} = run_context(runtime, opts)
+    with_open_context(context, fun)
+  end
 
-    try do
-      result = fun.(context)
-      RunContext.mark_closed(context)
-      records = RunContext.drain_calls(context)
-      {result, records}
-    after
-      RunContext.close(context)
-    end
+  defp with_open_context(context, fun) when is_function(fun, 1) do
+    result = fun.(context)
+    RunContext.mark_closed(context)
+    records = RunContext.drain_calls(context)
+    {result, records}
+  after
+    RunContext.close(context)
   end
 
   @spec run_lisp(struct() | pid(), String.t(), keyword()) ::
@@ -56,32 +60,41 @@ defmodule PtcRunner.Upstream.Eval do
   @spec run_lisp_with_records(struct() | pid(), String.t(), keyword()) ::
           {{:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}, [map()]}
   def run_lisp_with_records(runtime, program, opts \\ []) do
-    context_opts = Keyword.take(opts, @context_keys)
+    context_opts = Keyword.take(opts, @run_context_keys)
     lisp_opts = Keyword.drop(opts, @context_keys)
 
-    with_run_context(runtime, context_opts, fn context ->
-      eval_opts = eval_options(context)
+    case run_context(runtime, context_opts) do
+      {:ok, context} ->
+        with_open_context(context, fn context ->
+          eval_opts = eval_options(context)
 
-      # The bridge owns the synthetic `"call"` tool; merge it OVER the caller's
-      # `:tools` rather than replacing them, so host-granted `tool:` capabilities
-      # (e.g. the `log/` introspection prelude) survive on the upstream path and
-      # attach-time `tool:` validation can see them. `Map.new/1` canonicalizes the
-      # caller's tools from either shape `Lisp.run/2` accepts (map or tuple list).
-      merged_tools =
-        Map.merge(Map.new(Keyword.get(lisp_opts, :tools, %{})), Keyword.fetch!(eval_opts, :tools))
+          # The bridge owns the synthetic `"call"` tool; merge it OVER the caller's
+          # `:tools` rather than replacing them, so host-granted `tool:` capabilities
+          # (e.g. the `log/` introspection prelude) survive on the upstream path and
+          # attach-time `tool:` validation can see them. `Map.new/1` canonicalizes the
+          # caller's tools from either shape `Lisp.run/2` accepts (map or tuple list).
+          merged_tools =
+            Map.merge(
+              Map.new(Keyword.get(lisp_opts, :tools, %{})),
+              Keyword.fetch!(eval_opts, :tools)
+            )
 
-      # Expose the selected upstream runtime to the prelude attach path so an
-      # attached prelude's `requires` are validated against it BEFORE user code
-      # runs (plan §6A). `put_new` lets an explicit `:runtime` opt win; absent a
-      # prelude this key is inert.
-      opts =
-        lisp_opts
-        |> Keyword.merge(eval_opts)
-        |> Keyword.put(:tools, merged_tools)
-        |> Keyword.put_new(:runtime, runtime)
+          # Expose the selected upstream runtime to the prelude attach path so an
+          # attached prelude's `requires` are validated against it BEFORE user code
+          # runs (plan §6A). `put_new` lets an explicit `:runtime` opt win; absent a
+          # prelude this key is inert.
+          opts =
+            lisp_opts
+            |> Keyword.merge(eval_opts)
+            |> Keyword.put(:tools, merged_tools)
+            |> Keyword.put_new(:runtime, runtime)
 
-      PtcRunner.Lisp.run_native(program, opts)
-    end)
+          PtcRunner.Lisp.run_native(program, opts)
+        end)
+
+      {:error, message} ->
+        {{:error, NativeStep.error(:prelude_attach_failed, message, %{})}, []}
+    end
   end
 
   @doc """
@@ -125,30 +138,37 @@ defmodule PtcRunner.Upstream.Eval do
   @spec run_subagent(struct() | pid(), Definition.t(), keyword()) ::
           {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
   def run_subagent(runtime, agent, opts \\ []) do
-    context_opts = Keyword.take(opts, @context_keys)
+    context_opts = Keyword.take(opts, @run_context_keys)
     decorate = Keyword.get(opts, :on_upstream_call)
     allow_override = Keyword.get(opts, :allow_call_override, false)
     sub_opts = Keyword.drop(opts, @context_keys ++ @bridge_keys)
 
-    with_run_context(runtime, context_opts, fn context ->
-      eval_opts = eval_options(context)
-      call_tool = maybe_decorate(eval_opts[:tools], decorate)
-      enriched = enrich_agent(agent, call_tool, allow_override)
+    case run_context(runtime, context_opts) do
+      {:ok, context} ->
+        with_open_context(context, fn context ->
+          eval_opts = eval_options(context)
+          call_tool = maybe_decorate(eval_opts[:tools], decorate)
+          enriched = enrich_agent(agent, call_tool, allow_override)
 
-      run_opts =
-        sub_opts
-        |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
-        |> Keyword.put(:runtime, runtime)
-        |> Keyword.put_new(:continuation_guard, SideEffectGuard.default(runtime))
+          run_opts =
+            sub_opts
+            |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
+            |> Keyword.put(:runtime, runtime)
+            |> Keyword.put_new(:continuation_guard, SideEffectGuard.default(runtime))
 
-      # Internal runner, not the public facade -- pre-empts facade/bridge recursion
-      # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).
-      # Behaviour-preserving today: the %Definition{} clause of SubAgent.run/2 is a
-      # pure forward to Runner.run/2.
-      enriched
-      |> Runner.run(run_opts)
-      |> render_subagent_result()
-    end)
+          # Internal runner, not the public facade -- pre-empts facade/bridge recursion
+          # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).
+          # Behaviour-preserving today: the %Definition{} clause of SubAgent.run/2 is a
+          # pure forward to Runner.run/2.
+          enriched
+          |> Runner.run(run_opts)
+          |> render_subagent_result()
+        end)
+
+      {:error, message} ->
+        step = NativeStep.error(:prelude_attach_failed, message, %{})
+        {{:error, PublicStep.from_native(step)}, []}
+    end
   end
 
   defp render_subagent_result({:ok, step}), do: {:ok, PublicStep.from_native(step)}

@@ -2,7 +2,11 @@
 
 **Status:** future direction, not scheduled implementation. This is a cleanup
 direction for the session capability model after store-backed prelude
-dependencies and composition settle.
+dependencies and composition settle. It proposes replacing the `mode` /
+`role` grant model implemented in
+[`composable-prelude-library-demo.md`](../composable-prelude-library-demo.md)
+Slice C — read that slice first for the baseline this doc is simplifying, not
+as a still-open design.
 
 ## Problem
 

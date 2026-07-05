@@ -233,6 +233,57 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
         {:error, step} -> refute step.fail.reason == :prelude_attach_failed
       end
     end
+
+    test "explicit upstream_tools grants constrain SubAgent prelude attach",
+         %{runtime: runtime} do
+      prelude = literal_prelude("observatory", "get-trace")
+
+      agent =
+        SubAgent.new(
+          prompt: "List.",
+          runtime_prelude: prelude,
+          output: :ptc_lisp,
+          max_turns: 1
+        )
+
+      {result, _records} =
+        Eval.run_subagent(runtime, agent,
+          llm: stub_llm(~S|(crm/list-traces "o")|),
+          upstream_tools: ["upstream:observatory/list-traces"]
+        )
+
+      assert {:error, step} = result
+      assert step.fail.reason == :prelude_attach_failed
+      assert step.fail.message =~ "upstream:observatory/get-trace"
+      assert step.fail.message =~ "did not grant"
+    end
+
+    test "explicit upstream_tools cannot widen a projected SubAgent runtime",
+         %{runtime: runtime} do
+      assert {:ok, projected} =
+               Runtime.project(runtime,
+                 upstream_tool_grants: ["upstream:observatory/list-traces"]
+               )
+
+      agent =
+        SubAgent.new(
+          prompt: "List.",
+          runtime_prelude: literal_prelude("observatory", "get-trace"),
+          output: :ptc_lisp,
+          max_turns: 1
+        )
+
+      {result, records} =
+        Eval.run_subagent(projected, agent,
+          llm: stub_llm(~S|(crm/list-traces "o")|),
+          upstream_tools: :all
+        )
+
+      assert records == []
+      assert {:error, step} = result
+      assert step.fail.reason == :prelude_attach_failed
+      assert step.fail.message == "upstream tool grants cannot expand a projected runtime"
+    end
   end
 
   # ------------------------------------------------------------------

@@ -107,6 +107,13 @@ approved evidence, the run artifact must show how it found that evidence.
 
 ## Relationship To Capability Namespaces
 
+Distinguish this from role-scoped tool-catalog filtering
+([`composable-prelude-library-demo.md`](../composable-prelude-library-demo.md)
+Slice C and Slice E, implemented): that axis controls which
+*tools* a role's catalog shows. This doc is about a different axis — once a
+tool is granted, enumerating which *paths/artifacts* are approved to read
+through it. Both get called "discovery"; a fixture upstream needs both.
+
 This pairs with selected capability namespaces.
 
 Launcher-level process flags are invisible to the session turn log. A
@@ -142,4 +149,3 @@ read/discovery authority and prove:
 3. The turn log records both the discovery operation and the file read.
 4. No host filesystem, host resource-listing, or unrelated connector discovery
    is required.
-

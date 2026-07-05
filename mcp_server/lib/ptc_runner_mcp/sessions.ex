@@ -739,6 +739,7 @@ defmodule PtcRunnerMcp.Sessions do
          :ok <- validate_auth_claims_grant(grant, auth_claims),
          {:ok, mode} <- validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")),
          :ok <- validate_grant_credentials(grant),
+         :ok <- validate_grant_upstream_tools(grant),
          :ok <- validate_grant_mode(grant, mode) do
       opts =
         opts
@@ -824,6 +825,24 @@ defmodule PtcRunnerMcp.Sessions do
     end
   end
 
+  defp validate_grant_upstream_tools(nil), do: :ok
+
+  defp validate_grant_upstream_tools(grant) do
+    if RootUpstreamRuntime.configured?() do
+      unknown_granted_upstream_tools(grant)
+      |> case do
+        [] ->
+          :ok
+
+        unknown ->
+          {:error,
+           "role #{grant.role} grants unknown upstream operation(s): #{Enum.join(unknown, ", ")}"}
+      end
+    else
+      :ok
+    end
+  end
+
   defp unknown_granted_credentials(grant) do
     case Policy.credential_grants(grant) do
       :all ->
@@ -834,6 +853,66 @@ defmodule PtcRunnerMcp.Sessions do
         grants |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort()
     end
   end
+
+  defp unknown_granted_upstream_tools(grant) do
+    case Policy.upstream_tool_grants(grant) do
+      :all ->
+        []
+
+      grants when is_struct(grants, MapSet) ->
+        if MapSet.size(grants) == 0 do
+          []
+        else
+          unknown_granted_upstream_tool_ids(grants)
+        end
+    end
+  end
+
+  defp unknown_granted_upstream_tool_ids(grants) do
+    snapshot = Runtime.catalog_snapshot(RootUpstreamRuntime.runtime(), materialize: false)
+
+    loaded_servers =
+      snapshot
+      |> Enum.filter(&(Map.get(&1, "catalog_loaded") == true))
+      |> MapSet.new(&Map.get(&1, "name"))
+
+    configured_servers = MapSet.new(snapshot, &Map.get(&1, "name"))
+
+    known_loaded_ops =
+      snapshot
+      |> Enum.filter(&(Map.get(&1, "catalog_loaded") == true))
+      |> Enum.flat_map(fn server ->
+        server_name = Map.get(server, "name")
+
+        Enum.map(Map.get(server, "tools", []), fn tool ->
+          "upstream:#{server_name}/#{Map.get(tool, "name")}"
+        end)
+      end)
+      |> MapSet.new()
+
+    grants
+    |> Enum.reject(fn id ->
+      case parse_upstream_tool_id(id) do
+        {:ok, server} ->
+          (MapSet.member?(configured_servers, server) and
+             not MapSet.member?(loaded_servers, server)) or
+            MapSet.member?(known_loaded_ops, id)
+
+        :error ->
+          false
+      end
+    end)
+    |> Enum.sort()
+  end
+
+  defp parse_upstream_tool_id("upstream:" <> rest) do
+    case String.split(rest, "/", parts: 2) do
+      [server, tool] when server != "" and tool != "" -> {:ok, server}
+      _ -> :error
+    end
+  end
+
+  defp parse_upstream_tool_id(_id), do: :error
 
   defp prepare_read_only_start_opts(opts) do
     case Map.get(opts, :preludes) || Map.get(opts, "preludes") do
@@ -1252,7 +1331,8 @@ defmodule PtcRunnerMcp.Sessions do
   defp projected_root_runtime(grant) do
     {:ok, runtime} =
       Runtime.project(RootUpstreamRuntime.runtime(),
-        credential_grants: Policy.credential_grants(grant)
+        credential_grants: Policy.credential_grants(grant),
+        upstream_tool_grants: Policy.upstream_tool_grants(grant)
       )
 
     runtime

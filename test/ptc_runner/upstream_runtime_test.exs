@@ -1,6 +1,7 @@
 defmodule PtcRunner.UpstreamRuntimeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.TraceLog.{Analyzer, Introspection}
   alias PtcRunner.Upstream.Credentials
   alias PtcRunner.Upstream.Eval
@@ -1605,6 +1606,29 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert {:error, all_message} = Runtime.project(allowed, credential_grants: :all)
       assert all_message == "credential grants cannot expand a projected runtime"
 
+      assert {:ok, credential_then_upstream} =
+               Runtime.project(denied,
+                 upstream_tool_grants: ["upstream:observatory/list-traces"]
+               )
+
+      assert Runtime.credential_grants(credential_then_upstream) == MapSet.new()
+
+      assert Runtime.upstream_tool_grants(credential_then_upstream) ==
+               MapSet.new(["upstream:observatory/list-traces"])
+
+      assert {:ok, upstream_only} =
+               Runtime.project(runtime,
+                 upstream_tool_grants: ["upstream:observatory/list-traces"]
+               )
+
+      assert {:ok, upstream_then_credential} =
+               Runtime.project(upstream_only, credential_grants: [])
+
+      assert Runtime.credential_grants(upstream_then_credential) == MapSet.new()
+
+      assert Runtime.upstream_tool_grants(upstream_then_credential) ==
+               MapSet.new(["upstream:observatory/list-traces"])
+
       {{:ok, allowed_step}, allowed_records} = Eval.run_lisp_with_records(allowed, program)
 
       assert allowed_step.return.ok == true
@@ -1612,6 +1636,192 @@ defmodule PtcRunner.UpstreamRuntimeTest do
 
       assert_receive {:http_fixture_request, request}, 1_000
       assert request =~ "authorization: Bearer project-secret"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "projected runtime narrows upstream tools in catalogs and dispatch" do
+    {:ok, server} =
+      start_http_fixture(%{
+        "traces" => [
+          %{"id" => "trace-1", "org_id" => "acme"}
+        ]
+      })
+
+    {:ok, runtime} =
+      Runtime.start_link(config: config(base_url: server.base_url, allow_insecure_http: true))
+
+    try do
+      assert {:ok, projected} =
+               Runtime.project(runtime,
+                 upstream_tool_grants: ["upstream:observatory/list-traces"]
+               )
+
+      assert [%{"tools" => [%{"name" => "list-traces"}], "tool_count" => 1}] =
+               Runtime.catalog_snapshot(projected)
+
+      assert Runtime.upstream_tool_allowed?(projected, "observatory", "list-traces")
+      refute Runtime.upstream_tool_allowed?(projected, "observatory", "get-trace")
+
+      assert Runtime.call_tool(projected, "observatory", "get-trace", %{}, []) ==
+               {:error, :upstream_tool_denied,
+                "upstream operation observatory/get-trace is not granted for this run"}
+
+      denied_program =
+        ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:id "trace-1"}})|
+
+      {{:ok, denied_step}, denied_records} = Eval.run_lisp_with_records(projected, denied_program)
+
+      assert denied_step.return == %{
+               ok: false,
+               reason: :upstream_tool_denied,
+               message: "upstream operation observatory/get-trace is not granted for this run"
+             }
+
+      assert [
+               %{
+                 "server" => "observatory",
+                 "tool" => "get-trace",
+                 "status" => "error",
+                 "reason" => "upstream_tool_denied"
+               }
+             ] = denied_records
+
+      allowed_program =
+        ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme" :limit 1}})|
+
+      {{:ok, allowed_step}, allowed_records} =
+        Eval.run_lisp_with_records(projected, allowed_program)
+
+      assert allowed_step.return.ok == true
+      assert [%{"status" => "ok"}] = allowed_records
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request =~ "GET /api/v1/traces"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "explicit upstream_tools option narrows eval discovery and dispatch" do
+    {:ok, server} =
+      start_http_fixture(%{
+        "traces" => [
+          %{"id" => "trace-1", "org_id" => "acme"}
+        ]
+      })
+
+    {:ok, runtime} =
+      Runtime.start_link(config: config(base_url: server.base_url, allow_insecure_http: true))
+
+    opts = [upstream_tools: ["upstream:observatory/list-traces"]]
+
+    try do
+      assert {:ok, servers_step} = Eval.run_lisp(runtime, "(tool/servers)", opts)
+      assert [%{"name" => "observatory", "tool_count" => 1}] = servers_step.return
+
+      assert {:ok, dir_step} = Eval.run_lisp(runtime, "(dir 'observatory)", opts)
+      assert ["observatory/list-traces - List traces"] = dir_step.return
+
+      denied_program =
+        ~S|(tool/call {:server "observatory" :tool "get-trace" :args {:id "trace-1"}})|
+
+      {{:ok, denied_step}, denied_records} =
+        Eval.run_lisp_with_records(runtime, denied_program, opts)
+
+      assert denied_step.return == %{
+               ok: false,
+               reason: :upstream_tool_denied,
+               message: "upstream operation observatory/get-trace is not granted for this run"
+             }
+
+      assert [
+               %{
+                 "server" => "observatory",
+                 "tool" => "get-trace",
+                 "status" => "error",
+                 "reason" => "upstream_tool_denied"
+               }
+             ] = denied_records
+
+      {{:ok, capped_step}, capped_records} =
+        Eval.run_lisp_with_records(runtime, denied_program,
+          upstream_tools: ["upstream:observatory/list-traces"],
+          max_tool_calls: 0
+        )
+
+      assert capped_step.return == %{ok: false, reason: :cap_exhausted, message: "cap_exhausted"}
+
+      assert [
+               %{
+                 "server" => "observatory",
+                 "tool" => "get-trace",
+                 "status" => "error",
+                 "reason" => "cap_exhausted"
+               }
+             ] = capped_records
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "projected runtime grants feed prelude attach on the Eval bridge" do
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    try do
+      assert {:ok, projected} = Runtime.project(runtime, upstream_tool_grants: [])
+
+      {:ok, dynamic_prelude} =
+        PreludeCompiler.compile("""
+        (ns crm {:visibility :prompt})
+        (defn proxy [server tool] (tool/call {:server server :tool tool :args {}}))
+        """)
+
+      assert {:error, step} =
+               Eval.run_lisp(projected, ~S|(crm/proxy "observatory" "list-traces")|,
+                 prelude: dynamic_prelude
+               )
+
+      assert step.fail.reason == :prelude_attach_failed
+      assert step.fail.message =~ "dynamic upstream `tool/call`"
+
+      assert {:error, widened_step} =
+               Eval.run_lisp(projected, ~S|(crm/proxy "observatory" "list-traces")|,
+                 prelude: dynamic_prelude,
+                 upstream_tools: :all
+               )
+
+      assert widened_step.fail.reason == :prelude_attach_failed
+      assert widened_step.fail.message == "upstream tool grants cannot expand a projected runtime"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "projected runtime cannot widen upstream tool grants" do
+    {:ok, runtime} = Runtime.start_link(config: config())
+
+    try do
+      assert {:ok, projected} =
+               Runtime.project(runtime,
+                 upstream_tool_grants: ["upstream:observatory/list-traces"]
+               )
+
+      assert {:ok, _narrowed} = Runtime.project(projected, upstream_tool_grants: [])
+
+      assert {:error, message} =
+               Runtime.project(projected,
+                 upstream_tool_grants: [
+                   "upstream:observatory/list-traces",
+                   "upstream:observatory/get-trace"
+                 ]
+               )
+
+      assert message == "upstream tool grants cannot expand a projected runtime"
+
+      assert {:error, all_message} = Runtime.project(projected, upstream_tool_grants: :all)
+      assert all_message == "upstream tool grants cannot expand a projected runtime"
     after
       Runtime.stop(runtime)
     end

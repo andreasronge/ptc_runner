@@ -147,7 +147,8 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
         "default_role" => "analyst",
         "roles" => %{
           "analyst" => %{
-            "credentials" => []
+            "credentials" => [],
+            "upstream_tools" => ["upstream:observatory/list-traces"]
           }
         }
       })
@@ -190,7 +191,8 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
         "default_role" => "analyst",
         "roles" => %{
           "analyst" => %{
-            "credentials" => ["api_token"]
+            "credentials" => ["api_token"],
+            "upstream_tools" => ["upstream:observatory/list-traces"]
           }
         }
       })
@@ -260,7 +262,8 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
         "default_role" => "analyst",
         "roles" => %{
           "analyst" => %{
-            "credentials" => []
+            "credentials" => [],
+            "upstream_tools" => ["upstream:fixture/echo"]
           }
         }
       })
@@ -340,6 +343,72 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
              "role analyst grants unknown credential(s): missing_token"
 
     refute inspect(result) =~ "session-secret"
+  end
+
+  test "stateful sessions reject roles with unknown root upstream tool grants" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "upstream_tools" => ["upstream:fixture/missing-tool"]
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: root_config(),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    result = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+
+    assert result["isError"] == true
+    assert result["structuredContent"]["reason"] == "session_args_error"
+
+    assert result["structuredContent"]["message"] =~
+             "role analyst grants unknown upstream operation(s): upstream:fixture/missing-tool"
+  end
+
+  test "stateful sessions do not reject upstream grants for unloaded configured catalogs" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "upstream_tools" => ["upstream:missing/echo"]
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: %{
+          "upstreams" => %{
+            "missing" => %{
+              "transport" => "mcp_stdio",
+              "command" => "/definitely/not/a/real/command"
+            }
+          }
+        },
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :live
+      )
+
+    result = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+
+    assert result["isError"] == false
+    assert result["structuredContent"]["status"] == "ok"
   end
 
   test "MCP catalog mode and inline caps are applied to root runtime descriptions" do

@@ -10,19 +10,22 @@ defmodule PtcRunner.Upstream.RunContext do
     :collector,
     :call_counter,
     :catalog_op_counter,
+    :upstream_tool_grants,
     :limits,
     :closed
   ]
 
   @spec new(term(), keyword()) :: {:ok, struct()} | {:error, term()}
   def new(runtime, opts \\ []) do
-    with {:ok, collector} <- Collector.start_link() do
+    with {:ok, upstream_tool_grants} <- upstream_tool_grants(runtime, opts),
+         {:ok, collector} <- Collector.start_link() do
       {:ok,
        %__MODULE__{
          runtime: runtime,
          collector: collector,
          call_counter: :atomics.new(1, signed: false),
          catalog_op_counter: :atomics.new(1, signed: false),
+         upstream_tool_grants: upstream_tool_grants,
          limits: limits(runtime, opts),
          closed: :atomics.new(1, signed: false)
        }}
@@ -81,6 +84,21 @@ defmodule PtcRunner.Upstream.RunContext do
     if slot <= max_ops, do: :proceed, else: :cap_exhausted
   end
 
+  @spec upstream_tool_allowed?(struct(), String.t(), String.t()) :: boolean()
+  def upstream_tool_allowed?(%__MODULE__{upstream_tool_grants: grants}, server, tool)
+      when is_binary(server) and is_binary(tool) do
+    upstream_tool_granted?(grants, server, tool)
+  end
+
+  def upstream_tool_allowed?(_context, _server, _tool), do: false
+
+  @spec catalog_snapshot(struct()) :: [map()]
+  def catalog_snapshot(%__MODULE__{runtime: runtime, upstream_tool_grants: grants}) do
+    runtime
+    |> Runtime.catalog_snapshot()
+    |> Enum.map(&filter_server_tools(&1, grants))
+  end
+
   @spec success_entry(String.t(), String.t(), non_neg_integer(), keyword()) :: map()
   def success_entry(server, tool, duration_ms, opts \\ []) do
     %{
@@ -131,4 +149,39 @@ defmodule PtcRunner.Upstream.RunContext do
 
   defp result_bytes(n) when is_integer(n) and n >= 0, do: n
   defp result_bytes(_), do: nil
+
+  defp upstream_tool_grants(runtime, opts) do
+    opts
+    |> Keyword.fetch(:upstream_tools)
+    |> case do
+      {:ok, grants} -> Runtime.constrain_upstream_tool_grants(runtime, grants)
+      :error -> {:ok, Runtime.upstream_tool_grants(runtime)}
+    end
+  end
+
+  defp filter_server_tools(server, :all), do: server
+
+  defp filter_server_tools(%{"name" => server_name, "tools" => tools} = server, grants)
+       when is_binary(server_name) and is_list(tools) and is_struct(grants, MapSet) do
+    tools =
+      Enum.filter(tools, fn tool ->
+        tool_name = Map.get(tool, "name")
+        is_binary(tool_name) and upstream_tool_granted?(grants, server_name, tool_name)
+      end)
+
+    server
+    |> Map.put("tools", tools)
+    |> Map.put("tool_count", length(tools))
+  end
+
+  defp filter_server_tools(server, _grants), do: server
+
+  defp upstream_tool_granted?(:all, _server, _tool), do: true
+
+  defp upstream_tool_granted?(grants, server, tool)
+       when is_struct(grants, MapSet) and is_binary(server) and is_binary(tool) do
+    MapSet.member?(grants, "upstream:#{server}/#{tool}")
+  end
+
+  defp upstream_tool_granted?(_grants, _server, _tool), do: false
 end

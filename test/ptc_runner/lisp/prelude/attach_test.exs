@@ -133,6 +133,18 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
       prelude = dynamic_prelude()
       assert :ok = Attach.validate_requires(prelude, ctx(runtime))
     end
+
+    test "dynamic-backed export fails without explicit requires for restricted upstream grants",
+         %{
+           runtime: runtime
+         } do
+      prelude = dynamic_prelude()
+      context = AttachContext.new(runtime: runtime, upstream_tools: [])
+
+      assert {:error, err} = Attach.validate_requires(prelude, context)
+      assert err.reason == :prelude_attach_failed
+      assert err.message =~ "dynamic upstream `tool/call`"
+    end
   end
 
   describe "validate_requires/2 with no runtime selected" do
@@ -158,6 +170,16 @@ defmodule PtcRunner.Lisp.Prelude.AttachTest do
 
       {:ok, prelude} = Compiler.compile(source)
       assert :ok = Attach.validate_requires(prelude, ctx(nil))
+    end
+
+    test "fails upstream requirements against explicit denied upstream grants without a runtime" do
+      prelude = literal_prelude("observatory", "list-traces")
+      context = AttachContext.new(runtime: nil, upstream_tools: [])
+
+      assert {:error, err} = Attach.validate_requires(prelude, context)
+      assert err.reason == :prelude_attach_failed
+      assert err.message =~ "upstream:observatory/list-traces"
+      assert err.message =~ "did not grant"
     end
   end
 

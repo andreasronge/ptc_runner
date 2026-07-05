@@ -947,6 +947,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     |> maybe_put(:prelude, snapshot_prelude(snapshot))
     |> maybe_put(:discovery_exec, Map.get(opts, :discovery_exec))
     |> maybe_put(:runtime, Map.get(opts, :runtime))
+    |> maybe_put(:upstream_tools, Policy.upstream_tool_grants(Map.get(snapshot, :grant)))
   end
 
   defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude} = snapshot),

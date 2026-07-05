@@ -27,13 +27,18 @@ defmodule PtcRunner.Upstream.CallTool do
 
   defp call_open(%RunContext{} = context, args) when is_map(args) do
     {server, tool, call_args} = validate_args!(args, context)
-    check_configured!(context, server, tool)
-    check_args_encodable!(server, tool, call_args)
-    check_cached_schema!(context, server, tool, call_args)
 
     case RunContext.check_call_cap(context, server, tool) do
-      :proceed -> dispatch(context, server, tool, call_args)
-      :cap_exhausted -> Result.error(:cap_exhausted, "cap_exhausted")
+      :proceed ->
+        check_upstream_grant(context, server, tool, fn ->
+          check_configured!(context, server, tool)
+          check_args_encodable!(server, tool, call_args)
+          check_cached_schema!(context, server, tool, call_args)
+          dispatch(context, server, tool, call_args)
+        end)
+
+      :cap_exhausted ->
+        Result.error(:cap_exhausted, "cap_exhausted")
     end
   end
 
@@ -79,6 +84,21 @@ defmodule PtcRunner.Upstream.CallTool do
 
       true ->
         {server, tool, call_args}
+    end
+  end
+
+  defp check_upstream_grant(context, server, tool, fun) when is_function(fun, 0) do
+    if RunContext.upstream_tool_allowed?(context, server, tool) do
+      fun.()
+    else
+      message = "upstream operation #{server}/#{tool} is not granted for this run"
+
+      RunContext.record(
+        context,
+        RunContext.error_entry(server, tool, :upstream_tool_denied, message, 0)
+      )
+
+      Result.error(:upstream_tool_denied, message)
     end
   end
 

@@ -46,12 +46,11 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
       present in that upstream's tool list (mirroring the upstream runtime's
       configured-tool checks). When an upstream's
       tool list is not yet materialized (lazy MCP transports report `nil`
-      tools), the specific tool cannot be checked and the requirement passes on
-      the configured server alone. When **no** upstream runtime is configured
-      for the run, upstream requirements are *skipped* (there is no runtime to
-      check; the granted `(tool/call ...)` closure plus `check_undefined_tools`
-      still guard the actual surface) — preserving direct-`Lisp.run`-with-stub
-      use.
+      tools), the specific tool cannot be checked against runtime catalog facts
+      and the requirement passes on the configured server alone. Role-provided
+      upstream operation grants are still checked independently. When **no**
+      upstream runtime is configured for the run, runtime existence checks are
+      skipped, but explicit upstream operation grants are still enforced.
 
     * `"tool:<name>"` — validated against the run's granted `tools:` map (a
       host-bound typed-tool capability). Fails closed when the host did not
@@ -144,12 +143,14 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   # ============================================================
 
   defp validate_export(%Export{requires: requires} = export, context) do
-    Enum.reduce_while(requires, :ok, fn required, :ok ->
-      case validate_required(required, export, context) do
-        :ok -> {:cont, :ok}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
+    with :ok <- validate_dynamic_upstream_export(export, context) do
+      Enum.reduce_while(requires, :ok, fn required, :ok ->
+        case validate_required(required, export, context) do
+          :ok -> {:cont, :ok}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+    end
   end
 
   # Dispatch by backing id shape: "tool:<name>" (granted-tools check),
@@ -158,11 +159,13 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
     check_tool_grant(name, export, context)
   end
 
-  defp validate_required(required, export, %AttachContext{runtime: runtime})
+  defp validate_required(required, export, %AttachContext{runtime: runtime} = context)
        when is_binary(required) do
     case parse_upstream_ref(required) do
       {:ok, server, tool} ->
-        check_upstream_op(server, tool, required, export, runtime)
+        with :ok <- check_upstream_op(server, tool, required, export, runtime) do
+          check_upstream_grant(server, tool, required, export, context)
+        end
 
       :error ->
         {:error,
@@ -198,6 +201,36 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
     end
   end
 
+  defp validate_dynamic_upstream_export(
+         %Export{tool_refs: tool_refs} = export,
+         %AttachContext{upstream_tools: upstream_tools}
+       ) do
+    if upstream_tools != :all and "call" in tool_refs and upstream_requirements(export) == [] do
+      {:error,
+       attach_error(
+         "export `#{export.ref}` uses dynamic upstream `tool/call` without explicit " <>
+           "`upstream:<server>/<tool>` requirements, and this run does not have a broad " <>
+           "upstream operation grant",
+         export
+       )}
+    else
+      :ok
+    end
+  end
+
+  defp upstream_requirements(%Export{requires: requires}) do
+    Enum.flat_map(requires, fn
+      "upstream:" <> rest = id ->
+        case String.split(rest, "/", parts: 2) do
+          [server, tool] when server != "" and tool != "" -> [id]
+          _ -> []
+        end
+
+      _other ->
+        []
+    end)
+  end
+
   # "upstream:server/tool" -> {:ok, server, tool}. The tool segment is split on
   # the FIRST slash after the "upstream:" prefix; server names contain no
   # slashes, but tool names are taken verbatim (they may themselves not, in
@@ -212,10 +245,8 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   defp parse_upstream_ref(_), do: :error
 
   # No runtime selected: there is no runtime to validate an upstream requirement
-  # against, so skip it. The `(tool/call ...)` closure the host granted plus the
-  # analyzer's `check_undefined_tools` still guard the actual tool surface; this
-  # preserves direct `Lisp.run` with a stub `tools:` map and no configured
-  # runtime. `tool:<name>` requirements are still checked (handled earlier).
+  # against, so skip runtime existence checks. Explicit upstream operation grants
+  # are still checked by `check_upstream_grant/5`.
   defp check_upstream_op(_server, _tool, _required, _export, nil), do: :ok
 
   defp check_upstream_op(server, tool, required, export, runtime) do
@@ -244,6 +275,19 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
              export
            )}
         end
+    end
+  end
+
+  defp check_upstream_grant(server, tool, required, export, %AttachContext{} = context) do
+    if AttachContext.grants_upstream_tool?(context, server, tool) do
+      :ok
+    else
+      {:error,
+       attach_error(
+         "export `#{export.ref}` requires upstream operation `#{required}`, " <>
+           "but the host did not grant that upstream operation for this run",
+         export
+       )}
     end
   end
 
