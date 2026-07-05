@@ -67,6 +67,43 @@ export metadata. Session start resolves the selected preludes, grants only the
 backing tools allowed by host policy, attaches the bundle, and fails closed when
 any selected export requires unavailable authority.
 
+## Dependent Surface Variant
+
+The `composable-demo-2-20260705` gated loop produced and accepted a concrete
+variant of this direction for dependency-heavy read-only sessions:
+`scoped_base_surface`.
+
+When a session attaches dependent prelude `P` with base dependency `B`, and
+`scoped_base_surface` is explicitly enabled, the catalog/discovery surface
+contributed by `B` is narrowed to the `B` exports that `P` actually references.
+Execution still resolves the full dependency closure; only the presented
+surface changes. The option is default-off, recommended for read-only
+inspection sessions, and must not change authoring or direct-base attach
+behavior.
+
+Required shape from the accepted review:
+
+- **Opt-in, default off.** With the option disabled, dependent attach behavior is
+  byte-for-byte unchanged.
+- **Full-surface escape hatches.** Direct attach of `B` always presents all of
+  `B`'s exports, and dependent attach provides an explicit `reveal_full_base`
+  discovery path.
+- **Deterministic derivation.** The narrowed set is derived from pinned
+  dependency metadata: the union of `dep_calls.transitive` references from
+  `P`'s forms into the pinned `(id, version, checksum)` for `B`.
+- **Fail closed on stale pins.** If the pinned checksum no longer matches the
+  live base, do not silently re-derive. Present the full base surface and flag
+  the split for re-review.
+- **Measured promotion.** Acceptance requires a `catalog_ops` before/after on
+  the motivating split with no task-output regression. If the measurement shows
+  no reduction, the request demotes to no-change.
+
+The demo split that produced this request had `paged_audit` depend on
+`paged_base`; recomputing cross-layer references over all audit forms yielded
+`{paged_base/sample}`, so the scoped catalog would present one base export
+instead of six. The request is provenance-tracked as specified and reviewed by
+the `ptc-bench-comparison` gated loop, not as an implementation commitment.
+
 ## Store Capability Shape
 
 Prefer capability-split store preludes over one dynamically configured
