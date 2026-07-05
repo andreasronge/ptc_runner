@@ -798,6 +798,76 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert apropos_op["outcome"] == "ok"
     end
 
+    @tag :tmp_dir
+    test "scoped_base_surface records before after catalog measurement with no task regression",
+         %{tmp_dir: dir} do
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "paged_base", """
+        (ns paged_base "Paged base helpers." {:visibility :prompt})
+        (defn sample [x] (str "sample:" x))
+        (defn page-count [x] (str "count:" x))
+        (defn page-window [x] (str "window:" x))
+        (defn page-token [x] (str "token:" x))
+        (defn fold-pages [x] (str "fold:" x))
+        (defn describe-page [x] (str "describe:" x))
+        """)
+
+      {:ok, _audit} =
+        PreludeStore.write(
+          store,
+          "paged_audit",
+          """
+          (ns paged_audit "Paged audit helpers." {:visibility :prompt})
+          (defn check [x] (paged_base/sample x))
+          """,
+          %{"requires_preludes" => ["paged_base"]}
+        )
+
+      Config.set(%{Config.get() | prelude_store: store})
+
+      before_measurement = measured_scoped_base_session("before", false)
+      after_measurement = measured_scoped_base_session("after", true)
+
+      stop_turn_log!()
+
+      events = Analyzer.load(path)
+      tools = Introspection.tools(path)
+
+      assert %{"catalog_ops" => 1, "failed" => 0} =
+               tools["log_counters"].(%{"tags" => %{"stage" => "before", "cell" => "dir"}})
+
+      assert %{"catalog_ops" => 1, "failed" => 0} =
+               tools["log_counters"].(%{"tags" => %{"stage" => "after", "cell" => "dir"}})
+
+      before_dir = single_tagged_turn(events, "before", "dir")
+      after_dir = single_tagged_turn(events, "after", "dir")
+
+      assert [before_op] = get_in(before_dir, ["data", "catalog_ops"])
+      assert [after_op] = get_in(after_dir, ["data", "catalog_ops"])
+      assert before_op["operation"] == "dir"
+      assert after_op["operation"] == "dir"
+      assert before_op["args"] == %{"server" => "paged_base"}
+      assert after_op["args"] == %{"server" => "paged_base"}
+
+      before_preview = get_in(before_dir, ["data", "result_preview"])
+      after_preview = get_in(after_dir, ["data", "result_preview"])
+
+      assert before_preview =~ "sample"
+      assert before_preview =~ "fold-pages"
+      assert before_preview =~ "describe-page"
+      assert after_preview =~ "sample"
+      refute after_preview =~ "fold-pages"
+      refute after_preview =~ "describe-page"
+
+      assert before_measurement.result == ~S|user=> "sample:case-1"|
+      assert after_measurement.result == before_measurement.result
+    end
+
     test "scoped_base_surface fails open when pinned presentation metadata is missing" do
       direct = %{
         id: "audit",
@@ -3018,6 +3088,67 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   defp call(name, args) do
     Tools.call(%{"name" => name, "arguments" => args})
   end
+
+  defp measured_scoped_base_session(stage, scoped?) do
+    start =
+      call("lisp_session_start", %{
+        "tags" => %{"stage" => stage, "cell" => "dir"},
+        "preludes" => ["paged_audit"],
+        "scoped_base_surface" => scoped?
+      })
+
+    assert start["isError"] == false
+    assert %{"session_id" => sid} = start["structuredContent"]
+
+    dir =
+      call("lisp_session_eval", %{
+        "session_id" => sid,
+        "program" => ~S|(dir 'paged_base)|
+      })
+
+    assert dir["isError"] == false
+
+    call("lisp_session_close", %{
+      "session_id" => sid,
+      "reason" => "retag measurement"
+    })
+
+    start =
+      call("lisp_session_start", %{
+        "tags" => %{"stage" => stage, "cell" => "task"},
+        "preludes" => ["paged_audit"],
+        "scoped_base_surface" => scoped?
+      })
+
+    assert start["isError"] == false
+    assert %{"session_id" => sid} = start["structuredContent"]
+
+    task =
+      call("lisp_session_eval", %{
+        "session_id" => sid,
+        "program" => ~S|(paged_audit/check "case-1")|
+      })
+
+    assert task["isError"] == false
+    %{dir: dir["structuredContent"], result: task["structuredContent"]["result"]}
+  end
+
+  defp single_tagged_turn(events, stage, cell) do
+    tags = %{"stage" => stage, "cell" => cell}
+
+    assert [turn] =
+             Enum.filter(Analyzer.turn_events(events), fn turn ->
+               turn_matches_tags?(turn, tags)
+             end)
+
+    turn
+  end
+
+  defp turn_matches_tags?(%{"tags" => event_tags}, tags) when is_map(event_tags) do
+    Enum.all?(tags, fn {key, value} -> Map.get(event_tags, key) == value end)
+  end
+
+  defp turn_matches_tags?(_turn, _tags), do: false
 
   defp test_prelude_source do
     """
