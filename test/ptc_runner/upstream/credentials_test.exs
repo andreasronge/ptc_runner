@@ -108,6 +108,36 @@ defmodule PtcRunner.Upstream.CredentialsTest do
     end
   end
 
+  describe "subset/2" do
+    test "projects allowed bindings without re-reading or exposing denied bindings" do
+      c =
+        creds(%{
+          "reader" => literal("read-secret"),
+          "writer" => literal("write-secret")
+        })
+
+      assert {:ok, projected} = Credentials.subset(c, ["reader"])
+      assert Credentials.binding_names(projected) == ["reader"]
+      assert Credentials.redaction_secrets(projected) == ["read-secret"]
+
+      assert {:ok, [{"authorization", "Bearer read-secret"}]} =
+               Credentials.headers(projected, [%{"scheme" => "bearer", "binding" => "reader"}])
+
+      assert {:error, :upstream_unavailable, message} =
+               Credentials.headers(projected, [%{"scheme" => "bearer", "binding" => "writer"}])
+
+      assert message == "credential unavailable for this role"
+      refute message =~ "writer"
+    end
+
+    test "rejects unknown projected bindings at validation time" do
+      c = creds(%{"reader" => literal("read-secret")})
+
+      assert {:error, message} = Credentials.subset(c, ["reader", "ghost"])
+      assert message =~ "unknown credential binding(s): ghost"
+    end
+  end
+
   describe "scrub/2 redaction" do
     test "redacts a literal secret inside a string" do
       c = creds(%{"token" => literal("s3cr3t")})

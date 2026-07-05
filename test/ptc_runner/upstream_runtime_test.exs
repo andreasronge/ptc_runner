@@ -433,6 +433,30 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "projected runtime keeps MCP stdio clients callable" do
+    script = write_stdio_fixture!()
+
+    {:ok, runtime} =
+      Runtime.start_link(config: stdio_fixture_config(script), catalog_snapshot_mode: :frozen)
+
+    try do
+      {:ok, projected} = Runtime.project(runtime, credential_grants: [])
+
+      program = ~S|(tool/call 'fixture/echo {:message "projected"})|
+      {{:ok, step}, records} = Eval.run_lisp_with_records(projected, program)
+
+      assert step.return == %{
+               ok: true,
+               value: %{"echo" => %{"message" => "projected"}},
+               value_kind: :json
+             }
+
+      assert [%{"server" => "fixture", "tool" => "echo", "status" => "ok"}] = records
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "run context drains all records from pmap tool calls" do
     script = write_stdio_fixture!()
 
@@ -788,6 +812,223 @@ defmodule PtcRunner.UpstreamRuntimeTest do
       assert_receive {:mcp_http_fixture_request, "tools/call", _headers}, 1_000
     after
       Runtime.stop(runtime)
+    end
+  end
+
+  test "projected runtime keeps unauthenticated MCP HTTP clients callable" do
+    {:ok, server} = start_mcp_http_fixture()
+
+    config = %{
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+
+    try do
+      {:ok, projected} = Runtime.project(runtime, credential_grants: [])
+
+      assert [%{"name" => "fixture", "tool_count" => 1}] = Runtime.catalog_snapshot(projected)
+
+      program = ~S|(tool/call 'fixture/echo {:message "projected"})|
+      {{:ok, step}, records} = Eval.run_lisp_with_records(projected, program)
+
+      assert step.return == %{
+               ok: true,
+               value: %{"echo" => %{"message" => "projected"}},
+               value_kind: :json
+             }
+
+      assert [%{"server" => "fixture", "tool" => "echo", "status" => "ok"}] = records
+
+      assert_receive {:mcp_http_fixture_request, "initialize", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "notifications/initialized", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "tools/list", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "tools/call", _headers}, 1_000
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
+  test "projected runtime exposes only granted MCP HTTP credential bindings" do
+    {:ok, server} = start_mcp_http_fixture()
+
+    config = %{
+      "credentials" => %{
+        "fixture-token" => %{
+          "source" => "literal",
+          "value" => "http-secret",
+          "scheme_hint" => "bearer"
+        },
+        "other-token" => %{
+          "source" => "literal",
+          "value" => "other-secret",
+          "scheme_hint" => "bearer"
+        }
+      },
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true,
+          "allow_insecure_auth" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "fixture-token"}]
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+
+    try do
+      {:ok, projected} = Runtime.project(runtime, credential_grants: ["fixture-token"])
+
+      assert %{config: %{credentials: projected_credentials}} =
+               Runtime.upstream(projected, "fixture")
+
+      assert Credentials.binding_names(projected_credentials) == ["fixture-token"]
+      assert Credentials.redaction_secrets(projected_credentials) == ["http-secret"]
+      refute inspect(projected_credentials) =~ "other-token"
+      refute inspect(projected_credentials) =~ "other-secret"
+
+      assert %{config: %{credentials: root_credentials}} = Runtime.upstream(runtime, "fixture")
+
+      assert Credentials.binding_names(root_credentials) |> Enum.sort() == [
+               "fixture-token",
+               "other-token"
+             ]
+
+      assert Credentials.redaction_secrets(root_credentials) |> Enum.sort() == [
+               "http-secret",
+               "other-secret"
+             ]
+
+      assert_receive {:mcp_http_fixture_request, "initialize", headers}, 1_000
+
+      assert Enum.any?(headers, fn {key, value} ->
+               String.downcase(key) == "authorization" and value == "Bearer http-secret"
+             end)
+
+      assert_receive {:mcp_http_fixture_request, "notifications/initialized", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "tools/list", _headers}, 1_000
+      refute_receive {:mcp_http_fixture_request, _method, _headers}, 200
+    after
+      Runtime.stop(runtime)
+      Process.exit(server.pid, :kill)
+    end
+  end
+
+  test "projected runtime does not use root MCP HTTP credentials for discovery" do
+    {:ok, server} = start_mcp_http_fixture()
+
+    config = %{
+      "credentials" => %{
+        "fixture-token" => %{
+          "source" => "literal",
+          "value" => "http-secret",
+          "scheme_hint" => "bearer"
+        }
+      },
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true,
+          "allow_insecure_auth" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "fixture-token"}]
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config)
+
+    try do
+      assert [%{"name" => "fixture", "catalog_loaded" => true}] =
+               Runtime.catalog_snapshot(runtime)
+
+      assert_receive {:mcp_http_fixture_request, "initialize", headers}, 1_000
+
+      assert Enum.any?(headers, fn {key, value} ->
+               String.downcase(key) == "authorization" and value == "Bearer http-secret"
+             end)
+
+      assert_receive {:mcp_http_fixture_request, "notifications/initialized", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "tools/list", _headers}, 1_000
+
+      {:ok, projected} = Runtime.project(runtime, credential_grants: [])
+
+      assert [%{"name" => "fixture", "catalog_loaded" => false}] =
+               Runtime.catalog_snapshot(projected)
+
+      refute_receive {:mcp_http_fixture_request, _method, _headers}, 200
+
+      program = ~S|(tool/call 'fixture/echo {:message "projected"})|
+      {{:ok, step}, records} = Eval.run_lisp_with_records(projected, program)
+
+      assert step.return == %{
+               ok: false,
+               reason: :upstream_unavailable,
+               message: "upstream fixture is unavailable"
+             }
+
+      assert [%{"server" => "fixture", "tool" => "echo", "status" => "error"}] = records
+      refute_receive {:mcp_http_fixture_request, _method, _headers}, 200
+    after
+      Runtime.stop(runtime)
+      Process.exit(server.pid, :kill)
+    end
+  end
+
+  test "projected runtime hides frozen MCP HTTP catalogs loaded with root credentials" do
+    {:ok, server} = start_mcp_http_fixture()
+
+    config = %{
+      "credentials" => %{
+        "fixture-token" => %{
+          "source" => "literal",
+          "value" => "http-secret",
+          "scheme_hint" => "bearer"
+        }
+      },
+      "upstreams" => %{
+        "fixture" => %{
+          "transport" => "mcp_http",
+          "url" => server.url,
+          "allow_insecure_http" => true,
+          "allow_insecure_auth" => true,
+          "auth" => [%{"scheme" => "bearer", "binding" => "fixture-token"}]
+        }
+      }
+    }
+
+    {:ok, runtime} = Runtime.start_link(config: config, catalog_snapshot_mode: :frozen)
+
+    try do
+      assert_receive {:mcp_http_fixture_request, "initialize", headers}, 1_000
+
+      assert Enum.any?(headers, fn {key, value} ->
+               String.downcase(key) == "authorization" and value == "Bearer http-secret"
+             end)
+
+      assert_receive {:mcp_http_fixture_request, "notifications/initialized", _headers}, 1_000
+      assert_receive {:mcp_http_fixture_request, "tools/list", _headers}, 1_000
+
+      assert [%{"name" => "fixture", "catalog_loaded" => true}] =
+               Runtime.catalog_snapshot(runtime)
+
+      {:ok, projected} = Runtime.project(runtime, credential_grants: [])
+
+      assert [%{"name" => "fixture", "catalog_loaded" => false, "tools" => []}] =
+               Runtime.catalog_snapshot(projected)
+
+      refute_receive {:mcp_http_fixture_request, _method, _headers}, 200
+    after
+      Runtime.stop(runtime)
+      Process.exit(server.pid, :kill)
     end
   end
 
@@ -1293,6 +1534,89 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     end
   end
 
+  test "projected runtime uses only granted OpenAPI credentials while scrubbing globally" do
+    {:ok, server} =
+      start_http_fixture(%{
+        "traces" => [
+          %{"id" => "trace-1", "org_id" => "acme"}
+        ]
+      })
+
+    {:ok, runtime} =
+      Runtime.start_link(
+        config:
+          credential_config("project-secret",
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            allow_insecure_auth: true
+          ),
+        catalog_snapshot_mode: :frozen
+      )
+
+    try do
+      assert Runtime.credential_binding_names(runtime) == ["observatory-token"]
+
+      assert {:ok, unrestricted} = Runtime.project(runtime.pid, credential_grants: :all)
+      assert Runtime.catalog_snapshot(unrestricted) == Runtime.catalog_snapshot(runtime)
+
+      assert {:error, message} =
+               Runtime.project(runtime, credential_grants: ["missing-token"])
+
+      assert message =~ "unknown credential binding(s): missing-token"
+
+      assert {:ok, denied} = Runtime.project(runtime, credential_grants: [])
+      assert Runtime.scrub(denied, "project-secret") == "[REDACTED]"
+      assert Runtime.credential_binding_names(denied) == ["observatory-token"]
+      assert Runtime.redaction_secrets(denied) == ["project-secret"]
+      assert %{upstreams: ["observatory"]} = Runtime.diagnostics(denied)
+
+      assert {:error, widen_message} =
+               Runtime.project(denied, credential_grants: ["observatory-token"])
+
+      assert widen_message == "credential grants cannot expand a projected runtime"
+
+      program =
+        ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme" :limit 1}})|
+
+      {{:ok, denied_step}, denied_records} = Eval.run_lisp_with_records(denied, program)
+
+      assert denied_step.return == %{
+               ok: false,
+               reason: :upstream_unavailable,
+               message: "credential unavailable for this role"
+             }
+
+      refute inspect(denied_step.return) =~ "observatory-token"
+
+      assert [
+               %{
+                 "server" => "observatory",
+                 "tool" => "list-traces",
+                 "status" => "error",
+                 "reason" => "upstream_unavailable",
+                 "error" => "credential unavailable for this role"
+               }
+             ] = denied_records
+
+      assert {:ok, allowed} =
+               Runtime.project(runtime, credential_grants: ["observatory-token"])
+
+      assert {:ok, _narrowed} = Runtime.project(allowed, credential_grants: [])
+      assert {:error, all_message} = Runtime.project(allowed, credential_grants: :all)
+      assert all_message == "credential grants cannot expand a projected runtime"
+
+      {{:ok, allowed_step}, allowed_records} = Eval.run_lisp_with_records(allowed, program)
+
+      assert allowed_step.return.ok == true
+      assert [%{"status" => "ok"}] = allowed_records
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request =~ "authorization: Bearer project-secret"
+    after
+      Runtime.stop(runtime)
+    end
+  end
+
   test "catalog and discovery outputs scrub credential material" do
     secret = "catalog-secret-token"
 
@@ -1407,8 +1731,20 @@ defmodule PtcRunner.UpstreamRuntimeTest do
     }
   end
 
-  defp credential_config(secret \\ "root-runtime-secret") do
+  defp credential_config(secret \\ "root-runtime-secret", opts \\ []) do
     config()
+    |> put_in(
+      ["upstreams", "observatory", "base_url"],
+      Keyword.get(opts, :base_url, "https://observatory.example")
+    )
+    |> put_in(
+      ["upstreams", "observatory", "allow_insecure_http"],
+      Keyword.get(opts, :allow_insecure_http, false)
+    )
+    |> put_in(
+      ["upstreams", "observatory", "allow_insecure_auth"],
+      Keyword.get(opts, :allow_insecure_auth, false)
+    )
     |> Map.put("credentials", %{
       "observatory-token" => %{
         "source" => "literal",

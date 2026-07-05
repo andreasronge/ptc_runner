@@ -1581,6 +1581,30 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "resolve/1 loads role credential grants into grant fingerprints", %{tmp_dir: dir} do
+      path =
+        write_role_policy!(
+          dir,
+          role_policy_json("analyst", credentials: ["reader_token", "audit_token"])
+        )
+
+      assert {:ok, config} = Config.resolve(%{session_roles: path})
+      grant = config.policy.roles["analyst"]
+
+      assert Policy.credential_allowed?(grant, "reader_token")
+      assert Policy.credential_allowed?(grant, "audit_token")
+      refute Policy.credential_allowed?(grant, "writer_token")
+      assert Policy.credential_grants(grant) == MapSet.new(["audit_token", "reader_token"])
+
+      path_without_credentials = write_role_policy!(dir, role_policy_json("analyst"))
+
+      assert {:ok, config_without_credentials} =
+               Config.resolve(%{session_roles: path_without_credentials})
+
+      refute config_without_credentials.policy.roles["analyst"].fingerprint == grant.fingerprint
+    end
+
+    @tag :tmp_dir
     test "resolve/1 rejects unknown session role policy keys", %{tmp_dir: dir} do
       bad_top =
         write_role_policy!(dir, Map.put(role_policy_json("analyst"), "default_roles", "typo"))
@@ -2361,6 +2385,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       %{}
       |> maybe_put_json("ptc_tools", Keyword.get(opts, :ptc_tools))
       |> maybe_put_json("upstream_tools", Keyword.get(opts, :upstream_tools, []))
+      |> maybe_put_json("credentials", Keyword.get(opts, :credentials))
       |> maybe_put_json("prelude_store", Keyword.get(opts, :prelude_store))
       |> maybe_put_json("preludes", Keyword.get(opts, :preludes))
       |> maybe_put_json("modes", Keyword.get(opts, :modes))

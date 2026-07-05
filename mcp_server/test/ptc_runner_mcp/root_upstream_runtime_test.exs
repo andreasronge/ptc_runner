@@ -8,19 +8,25 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
   alias PtcRunnerMcp.Credentials.Redactor
   alias PtcRunnerMcp.PromptRegistry
   alias PtcRunnerMcp.RootUpstreamRuntime
+  alias PtcRunnerMcp.Sessions.Config, as: SessionsConfig
+  alias PtcRunnerMcp.Sessions.Policy
+  alias PtcRunnerMcp.TestSupport.SoakHelpers
   alias PtcRunnerMcp.Tools
 
   @schema Path.expand("../fixtures/openapi/observatory.openapi.json", __DIR__)
+  @fixture_recv_timeout_ms 5_000
 
   setup do
     Runtime.stop(RootUpstreamRuntime.name())
     AgenticConfig.set(AgenticConfig.defaults())
     CatalogConfig.set(CatalogConfig.defaults())
+    SessionsConfig.reset()
 
     on_exit(fn ->
       Runtime.stop(RootUpstreamRuntime.name())
       AgenticConfig.set(AgenticConfig.defaults())
       CatalogConfig.set(CatalogConfig.defaults())
+      SessionsConfig.reset()
     end)
 
     :ok
@@ -132,6 +138,135 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
     end
   end
 
+  test "stateful sessions use role-projected root runtime credentials" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "credentials" => []
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: credential_root_config("session-secret"),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    start = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+    session_id = start["structuredContent"]["session_id"]
+
+    result =
+      Tools.call(%{
+        "name" => "lisp_session_eval",
+        "arguments" => %{
+          "session_id" => session_id,
+          "program" =>
+            ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme"}})|
+        }
+      })
+
+    assert result["isError"] == false
+    assert result["structuredContent"]["status"] == "ok"
+    assert result["structuredContent"]["result"] =~ "credential unavailable for this role"
+    refute result["structuredContent"]["result"] =~ "api_token"
+    refute inspect(result) =~ "session-secret"
+  end
+
+  test "stateful sessions can use root credentials granted to their role" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+    {:ok, server} = start_http_fixture(%{"traces" => [%{"id" => "trace-1", "org_id" => "acme"}]})
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "credentials" => ["api_token"]
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config:
+          credential_root_config("session-secret",
+            base_url: server.base_url,
+            allow_insecure_http: true,
+            allow_insecure_auth: true
+          ),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    try do
+      start = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+      session_id = start["structuredContent"]["session_id"]
+
+      result =
+        Tools.call(%{
+          "name" => "lisp_session_eval",
+          "arguments" => %{
+            "session_id" => session_id,
+            "program" =>
+              ~S|(tool/call {:server "observatory" :tool "list-traces" :args {:org_id "acme" :limit 1}})|
+          }
+        })
+
+      assert result["isError"] == false
+      assert result["structuredContent"]["status"] == "ok"
+      assert result["structuredContent"]["result"] =~ "trace-1"
+      refute inspect(result) =~ "session-secret"
+
+      assert_receive {:http_fixture_request, request}, 1_000
+      assert request =~ "authorization: Bearer session-secret"
+    after
+      Process.exit(server.pid, :kill)
+    end
+  end
+
+  test "stateful sessions reject roles with unknown root credential grants" do
+    SoakHelpers.setup_sessions(%{enabled: true})
+
+    {:ok, policy} =
+      Policy.from_map(%{
+        "default_role" => "analyst",
+        "roles" => %{
+          "analyst" => %{
+            "credentials" => ["missing_token"]
+          }
+        }
+      })
+
+    SessionsConfig.set(%{SessionsConfig.get() | policy: policy})
+
+    {:ok, _pid} =
+      Runtime.start_supervised(
+        config: credential_root_config("session-secret"),
+        name: RootUpstreamRuntime.name(),
+        catalog_snapshot_mode: :frozen
+      )
+
+    result = Tools.call(%{"name" => "lisp_session_start", "arguments" => %{"role" => "analyst"}})
+
+    assert result["isError"] == true
+    assert result["structuredContent"]["reason"] == "session_args_error"
+
+    assert result["structuredContent"]["message"] =~
+             "role analyst grants unknown credential(s): missing_token"
+
+    refute inspect(result) =~ "session-secret"
+  end
+
   test "MCP catalog mode and inline caps are applied to root runtime descriptions" do
     CatalogConfig.set(%{
       catalog_mode: :lazy,
@@ -169,6 +304,67 @@ defmodule PtcRunnerMcp.RootUpstreamRuntimeTest do
         }
       }
     }
+  end
+
+  defp credential_root_config(secret, opts \\ []) do
+    root_config()
+    |> Map.put("credentials", %{
+      "api_token" => %{"source" => "literal", "value" => secret, "scheme_hint" => "bearer"}
+    })
+    |> put_in(
+      ["upstreams", "observatory", "base_url"],
+      Keyword.get(opts, :base_url, "https://observatory.example")
+    )
+    |> put_in(
+      ["upstreams", "observatory", "allow_insecure_http"],
+      Keyword.get(opts, :allow_insecure_http, false)
+    )
+    |> put_in(
+      ["upstreams", "observatory", "allow_insecure_auth"],
+      Keyword.get(opts, :allow_insecure_auth, false)
+    )
+    |> put_in(
+      ["upstreams", "observatory", "auth"],
+      [%{"scheme" => "bearer", "binding" => "api_token"}]
+    )
+  end
+
+  defp start_http_fixture(response_body) do
+    parent = self()
+    response_json = Jason.encode!(response_body)
+
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        ip: {127, 0, 0, 1}
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        {:ok, request} = :gen_tcp.recv(socket, 0, @fixture_recv_timeout_ms)
+        send(parent, {:http_fixture_request, request})
+
+        response = [
+          "HTTP/1.1 200 OK\r\n",
+          "content-type: application/json\r\n",
+          "content-length: #{byte_size(response_json)}\r\n",
+          "connection: close\r\n",
+          "\r\n",
+          response_json
+        ]
+
+        :ok = :gen_tcp.send(socket, response)
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    {:ok, %{pid: pid, base_url: "http://127.0.0.1:#{port}"}}
   end
 
   defp write_config!(config) do

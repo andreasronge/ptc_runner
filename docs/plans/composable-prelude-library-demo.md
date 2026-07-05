@@ -1112,6 +1112,286 @@ Slice C tests:
 
 Goal: bind credentials to roles after role-level tool enforcement exists.
 
+This should be implemented as independent sub-slices. D1 and D2 are the useful
+minimum for the next demo; D3 is the production hardening step that turns the
+same mechanism into bearer-token authority rather than harness discipline.
+
+#### D1 — Credential Grants In Session Roles
+
+Extend the existing `--session-roles` policy file instead of adding a second
+role config. The policy is already the server's authority object for modes,
+host PTC tools, preludes, and prelude-store access; credential grants should
+live in the same grant fingerprint so the bench runner can audit one value.
+
+Proposed shape:
+
+```json
+{
+  "default_role": "analyst",
+  "outer_policy": {
+    "mcp_tools": ["lisp_session_start", "lisp_session_eval", "lisp_session_inspect"]
+  },
+  "roles": {
+    "analyst": {
+      "modes": ["read_only"],
+      "ptc_tools": ["log_list", "log_read"],
+      "prelude_store": "read",
+      "preludes": [{"id": "paged_base", "version": 1}],
+      "credentials": []
+    },
+    "editor": {
+      "modes": ["write_capable"],
+      "ptc_tools": ["prelude_store_write"],
+      "prelude_store": "write",
+      "preludes": [],
+      "credentials": ["github_writer"]
+    }
+  }
+}
+```
+
+`credentials` entries are upstream credential binding names from the root
+upstreams config, not secret values and not env var names. `:all` is allowed
+only for test/operator roles; normal demo roles should use an explicit list.
+Absent `credentials` should mean `[]`, not `:all`, so adding this field does
+not silently grant existing roles process-wide upstream authority.
+
+Policy parser work:
+
+- add `credentials` to `roles.<role>` allowed keys;
+- normalize to `MapSet.t()` or `:all` on `%Policy.Grant{}`;
+- include the sorted credential grant list in `grant.fingerprint`;
+- expose a helper such as `credential_allowed?/2` and `credential_grants/1`;
+- keep the full grant out of turn logs and responses; only role and grant
+  fingerprint are model-facing.
+
+Validation work:
+
+- when the root upstream runtime is configured, reject role policies that grant
+  unknown credential binding names. This can be a startup validation in
+  `Application` after the upstream runtime config is loaded, or a lazy
+  fail-closed validation when the first role session starts. Prefer startup
+  validation so typos do not become mid-run tool failures;
+- keep non-empty `upstream_tools` invalid until Slice E. Slice D controls
+  credential authority, not upstream tool visibility;
+- role credentials do not grant local host PTC tools and do not bypass mode or
+  prelude-store grants.
+
+#### D2 — Runtime Credential Projection
+
+Add a role-shaped upstream runtime projection instead of teaching every caller
+to inspect credential grants. The invariant should be:
+
+> Every upstream discovery result and upstream call for a session is evaluated
+> against a runtime view whose credential set is exactly the active role's
+> credential grant set.
+
+Current seam:
+
+- MCP sessions build a root `RunContext` in `Sessions.root_aggregator_run_opts/1`;
+- stateless `lisp_eval` / `lisp_task` build a root `RunContext` in
+  `Tools.execute_with_root_runtime/4`;
+- both paths call `Eval.run_context(RootUpstreamRuntime.runtime(), ...)`;
+- `PtcRunner.Upstream.Runtime` owns parsed upstream config and a
+  process-wide `%PtcRunner.Upstream.Credentials{}` value;
+- OpenAPI and MCP HTTP transports materialize auth through
+  `Credentials.headers(config.credentials, auth_emitters)`.
+
+Implementation outline:
+
+1. Add a projection API on `PtcRunner.Upstream.Runtime`, for example
+   `Runtime.project(runtime, credential_grants: grants)`. Also expose a
+   non-secret `Runtime.credential_binding_names/1` helper for policy startup
+   validation.
+2. The projection should preserve upstream definitions, tool catalogs, limits,
+   and catalog exposure settings, but split **auth credentials** from
+   **scrub credentials**. Auth credentials are the role-granted subset used to
+   build outgoing headers. Scrub credentials remain the root/global credential
+   set so `Runtime.scrub(projected_runtime, value)` still redacts any plaintext
+   secret known to the process.
+3. Add an explicit subset/project API on `PtcRunner.Upstream.Credentials`, for
+   example `Credentials.subset(credentials, grants)`. This must copy only
+   already-materialized binding values and metadata into an auth-only credential
+   struct; it must not re-read env/files, expose secret values, or mutate the
+   global redaction set. Unknown grant names fail during policy/runtime
+   validation. Missing emitter bindings in a projected credential set fail
+   locally before network I/O.
+4. If an upstream auth emitter references a binding outside the projection,
+   discovery may still show the upstream/tool for D2, but execution must fail
+   closed with a scrubbed `:upstream_unavailable` / `:auth_unavailable`-style
+   error before any network call is attempted. Do not fall back to the root
+   credentials.
+5. Use the projected runtime when constructing a session `RunContext`. The
+   session's grant is already available in start opts and session state.
+6. Leave stateless `lisp_eval` and `lisp_task` on the unrestricted root runtime
+   unless/until they accept an explicit policy subject. If this slice adds a
+   `role` argument to those stateless tools, it must use the same
+   `Policy.resolve_grant/2` path and the same runtime projection as sessions;
+   otherwise the docs and tests should state that Slice D is session-scoped.
+7. Keep direct root/operator APIs unrestricted unless they explicitly carry a
+   role grant. The role boundary is for MCP session/user execution, not for
+   internal admin code.
+
+The projection can be a lightweight wrapper for pure/local transports only if
+the call path actually consumes the projected config. Be careful with current
+MCP HTTP and MCP stdio clients: once a transport client is started, it owns
+state such as `config.credentials` and, for MCP HTTP, `session_id`. Passing a
+projected upstream map that still contains a root `client_pid` would reuse the
+root client's credentials and violate the slice. D2 must choose one of these
+explicit designs:
+
+- add per-call/per-list auth override support in the transport client and prove
+  the upstream protocol does not bind session state to the original auth
+  subject; or
+- maintain projection-scoped transport clients keyed by
+  `{upstream_name, credential_grant_fingerprint}` and never reuse a root client
+  for a restricted projection.
+
+Default to projection-scoped clients for MCP HTTP/stdio unless the per-call
+override invariant is proven in tests. OpenAPI can use a lightweight projected
+config because it builds request headers for each call and does not keep a
+long-lived authenticated session in the runtime process.
+
+Minimum D2a behavior may deliberately avoid projection-scoped MCP clients if it
+fails closed before network I/O whenever a projected role lacks one of an MCP
+HTTP upstream's auth bindings. In that implementation:
+
+- OpenAPI uses lightweight projected configs and is fully callable with granted
+  credentials;
+- MCP stdio is passed through unchanged because it has no upstream credential
+  binding path today;
+- unauthenticated MCP HTTP can reuse the root client, because there is no
+  credential authority to partition;
+- credentialed MCP HTTP may reuse the root client only when every auth binding
+  required by that upstream is included in the projection;
+- credentialed MCP HTTP with a missing grant must strip any root `client_pid`,
+  use projected credentials for discovery and validation paths, and fail
+  locally before `initialize`, `tools/list`, or `tools/call` can leave the
+  process.
+
+Projection-scoped MCP HTTP clients remain D2b and are required before a
+restricted role can call a credentialed MCP HTTP upstream with a non-root
+credential subset.
+
+Projection-scoped client lifecycle:
+
+- the root `Runtime` process owns the projection-client cache in its GenServer
+  state; projected runtime handles are lightweight references into that owner,
+  not independent owners of OS processes;
+- cache keys include upstream name, transport, auth credential grant
+  fingerprint, and any upstream config fingerprint that affects client state;
+- clients are reference-counted or TTL-cleaned when no live session/run context
+  can still use them. A simpler first implementation may close projection
+  clients at the end of each session, but it must not leak long-lived OS ports
+  or HTTP sessions;
+- `Runtime.terminate/2` stops both root clients and projection clients;
+- when building a projected upstream map, strip any root `client_pid` before
+  starting/looking up a projection client. Tests must cover that a restricted
+  projection cannot call through a root-authenticated client.
+
+Expected runtime behavior:
+
+- `Runtime.scrub(projected_runtime, value)` still uses the global credential
+  redaction set. Global scrubbing is allowed and preferred as
+  defense-in-depth;
+- model-facing payloads never include credential binding ids. Error text should
+  say the upstream is not authorized for the role or that required auth is not
+  available, without naming the missing binding;
+- operator diagnostics may include binding ids only on non-model paths and only
+  after plaintext redaction has run;
+- discovery filtering by upstream tool remains Slice E. D2 may leave a visible
+  upstream tool that is uncallable because its credential is not granted, but
+  the error must be deterministic, local, and pre-network.
+
+#### D3 — Bearer Tokens Bind To Roles
+
+Slice C's interim trust model lets the model/harness self-declare `role` at
+`lisp_session_start`. D3 makes that role server-authenticated for HTTP by
+binding bearer credentials to allowed roles.
+
+Keep this intentionally small and forward-compatible:
+
+- retain the existing single `--http-auth-token` behavior as the unrestricted
+  legacy/operator mode when no role-token file is configured;
+- add an optional `--http-role-tokens` / `PTC_RUNNER_MCP_HTTP_ROLE_TOKENS`
+  JSON file whose entries define bearer tokens by non-secret id and allowed
+  roles;
+- never log plaintext tokens; register all token values in the existing
+  redaction set at boot;
+- authentication should return an owner containing an auth subject fingerprint
+  and `allowed_roles`;
+- `lisp_session_start` must reject a requested role that is not in the
+  authenticated subject's allowed role set;
+- when a token allows exactly one role, omitting `role` should select that role;
+  when it allows multiple roles and no policy default exists, the client must
+  choose one explicitly;
+- stdio may stay self-declared/operator-trusted for this slice, but the docs
+  and tests must say so.
+
+Proposed file shape:
+
+```json
+{
+  "tokens": [
+    {
+      "id": "bench-analyst",
+      "token_env": "PTC_BENCH_ANALYST_TOKEN",
+      "roles": ["analyst"]
+    },
+    {
+      "id": "bench-editor",
+      "token_file": "/run/secrets/ptc_editor_token",
+      "roles": ["editor"]
+    }
+  ]
+}
+```
+
+`token_env`, `token_file`, and `token_literal` mirror the existing credential
+source style. Literal tokens are acceptable for tests only; production examples
+should use env/file. The token `id` is non-secret operator metadata and may be
+used in diagnostics after hashing, but should not be echoed to models.
+
+HTTP auth threading detail:
+
+- extend `PtcRunnerMcp.Http.Auth.authenticate/2` so the returned owner carries
+  `allowed_roles` and an `auth_subject_hash` when a role-token file is active;
+- store the authenticated owner on the HTTP session process at creation time,
+  as it is today, and include the same claims in the internal request context
+  passed through `Http.Session.dispatch/3`;
+- when HTTP dispatch injects the internal `owner` argument for session tools,
+  include only non-secret auth claims needed for policy checks, for example
+  `%{transport: :http, mcp_session_id: id, allowed_roles: [...],
+  auth_subject_hash: "..."}`;
+- extend `Sessions.Owner` normalization to preserve these non-secret fields, or
+  add a separate internal `auth_claims` field in the session-tool args. Do not
+  trust model-supplied `allowed_roles`; public clients should not be able to
+  send or override this field;
+- run the allowed-role check in `Sessions.prepare_start_opts/1` immediately
+  around `Policy.resolve_grant/2`: choose/resolve the requested role, then
+  reject it if authenticated HTTP claims exist and the role is not allowed. For
+  single-role tokens, the authenticated role may become the default when the
+  client omits `role`; for multi-role tokens, require an explicit role unless
+  the configured policy default is also in the allowed set.
+
+#### Relationship To Existing Credential Systems
+
+There are two credential-related systems today:
+
+- `PtcRunner.Upstream.Credentials` is the root upstream-runtime credential set
+  used to build upstream auth headers;
+- `PtcRunnerMcp.Credentials` owns MCP-side redaction and HTTP credential
+  helpers.
+
+Slice D should extend the upstream-runtime credentials for authority and
+continue to feed every materialized secret into MCP redaction. Do not create a
+third credential registry. The role policy grants binding names; the runtime
+projection decides which of those bindings may be used for outgoing auth in a
+session; the redactor remains global so accidental plaintext leaks are scrubbed
+even when a value belongs to another role. A projected runtime therefore needs
+two credential views internally: `auth_credentials` for authority and
+`scrub_credentials` for redaction.
+
 Minimal shape:
 
 - keep credential definitions host-side;

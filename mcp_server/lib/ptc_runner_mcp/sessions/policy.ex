@@ -114,6 +114,18 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   defp store_tool_allowed?(%Grant{prelude_store: :none}, _name), do: false
 
+  @spec credential_allowed?(grant() | nil, String.t()) :: boolean()
+  def credential_allowed?(nil, _name), do: true
+  def credential_allowed?(%Grant{credentials: :all}, _name), do: true
+
+  def credential_allowed?(%Grant{credentials: credentials}, name) when is_binary(name) do
+    MapSet.member?(credentials, name)
+  end
+
+  @spec credential_grants(grant() | nil) :: :all | MapSet.t()
+  def credential_grants(nil), do: :all
+  def credential_grants(%Grant{credentials: credentials}), do: credentials
+
   @spec filter_ptc_tools(map() | keyword() | nil, grant() | nil) :: map() | keyword() | nil
   def filter_ptc_tools(base, nil), do: base
 
@@ -316,12 +328,14 @@ defmodule PtcRunnerMcp.Sessions.Policy do
     with :ok <-
            validate_keys(
              map,
-             ["ptc_tools", "upstream_tools", "prelude_store", "preludes", "modes"],
+             ["ptc_tools", "upstream_tools", "credentials", "prelude_store", "preludes", "modes"],
              "roles.#{role}"
            ),
          {:ok, ptc_tools} <-
            string_set(Map.get(map, "ptc_tools", :all), "roles.#{role}.ptc_tools"),
          {:ok, upstream_tools} <- upstream_tools(Map.get(map, "upstream_tools", []), role),
+         {:ok, credentials} <-
+           string_set(Map.get(map, "credentials", []), "roles.#{role}.credentials"),
          {:ok, prelude_store} <- prelude_store_level(Map.get(map, "prelude_store", "read"), role),
          {:ok, preludes} <- prelude_grants(Map.get(map, "preludes", :all), role),
          {:ok, modes} <- modes(Map.get(map, "modes", ["read_only"]), role) do
@@ -329,6 +343,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
         role: role,
         ptc_tools: ptc_tools,
         upstream_tools: upstream_tools,
+        credentials: credentials,
         prelude_store: prelude_store,
         preludes: preludes,
         modes: modes
@@ -524,6 +539,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
       "prelude_store" => Atom.to_string(grant.prelude_store),
       "preludes" => prelude_fingerprint(grant.preludes),
       "ptc_tools" => set_fingerprint(grant.ptc_tools),
+      "credentials" => set_fingerprint(grant.credentials),
       "role" => grant.role,
       "upstream_tools" => []
     }

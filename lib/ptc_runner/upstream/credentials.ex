@@ -1,7 +1,7 @@
 defmodule PtcRunner.Upstream.Credentials do
   @moduledoc false
 
-  defstruct bindings: %{}, secrets: []
+  defstruct bindings: %{}, secrets: [], missing_detail: :named
 
   @type t :: %__MODULE__{bindings: map(), secrets: [String.t()]}
 
@@ -59,6 +59,37 @@ defmodule PtcRunner.Upstream.Credentials do
 
   def scrub(_credentials, term), do: term
 
+  @spec subset(t(), :all | MapSet.t() | [String.t()]) :: {:ok, t()} | {:error, String.t()}
+  def subset(%__MODULE__{} = credentials, :all),
+    do: {:ok, %{credentials | missing_detail: :generic}}
+
+  def subset(%__MODULE__{} = credentials, grants) when is_list(grants) do
+    subset(credentials, MapSet.new(grants))
+  end
+
+  def subset(%__MODULE__{bindings: bindings}, %MapSet{} = grants) do
+    known = MapSet.new(Map.keys(bindings))
+    unknown = grants |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort()
+
+    case unknown do
+      [] ->
+        projected_bindings = Map.take(bindings, MapSet.to_list(grants))
+        projected_secrets = Enum.map(projected_bindings, fn {_name, {value, _meta}} -> value end)
+
+        {:ok,
+         %__MODULE__{
+           bindings: projected_bindings,
+           secrets: projected_secrets,
+           missing_detail: :generic
+         }}
+
+      _ ->
+        {:error, "unknown credential binding(s): #{Enum.join(unknown, ", ")}"}
+    end
+  end
+
+  def subset(%__MODULE__{}, _grants), do: {:error, "credential grants must be :all or strings"}
+
   @spec binding_names(t()) :: [String.t()]
   def binding_names(%__MODULE__{bindings: bindings}) do
     Map.keys(bindings)
@@ -100,16 +131,21 @@ defmodule PtcRunner.Upstream.Credentials do
   defp materialize_binding(name, _spec),
     do: {:error, :upstream_unavailable, "invalid credential binding #{inspect(name)}"}
 
-  defp fetch_binding(%__MODULE__{bindings: bindings}, %{"binding" => name})
+  defp fetch_binding(%__MODULE__{bindings: bindings} = credentials, %{"binding" => name})
        when is_binary(name) do
     case Map.fetch(bindings, name) do
       {:ok, binding} -> {:ok, binding}
-      :error -> {:error, :upstream_unavailable, "unknown credential binding #{name}"}
+      :error -> {:error, :upstream_unavailable, missing_binding_detail(credentials, name)}
     end
   end
 
   defp fetch_binding(_credentials, emitter),
     do: {:error, :upstream_unavailable, "invalid auth emitter #{inspect(emitter)}"}
+
+  defp missing_binding_detail(%__MODULE__{missing_detail: :generic}, _name),
+    do: "credential unavailable for this role"
+
+  defp missing_binding_detail(_credentials, name), do: "unknown credential binding #{name}"
 
   defp header_for({value, _meta}, %{"scheme" => "bearer"}),
     do: {:ok, {"authorization", "Bearer #{value}"}}

@@ -9,7 +9,7 @@ defmodule PtcRunner.Upstream.Runtime do
   alias PtcRunner.Upstream.Transport.McpHttp
   alias PtcRunner.Upstream.Transport.McpStdio
 
-  defstruct [:pid, :catalog_exposure_mode, :catalog_snapshot_mode]
+  defstruct [:pid, :catalog_exposure_mode, :catalog_snapshot_mode, :credential_grants]
 
   @defaults %{
     max_tool_calls: 50,
@@ -73,6 +73,26 @@ defmodule PtcRunner.Upstream.Runtime do
 
   @spec defaults(struct() | pid()) :: map()
   def defaults(runtime), do: call(runtime, :defaults)
+
+  @spec project(struct() | pid(), keyword()) :: {:ok, struct()} | {:error, String.t()}
+  def project(runtime, opts) do
+    grants = Keyword.get(opts, :credential_grants, :all)
+
+    with {:ok, grants} <- normalize_credential_grants(grants),
+         :ok <- validate_projection_narrows(runtime, grants),
+         :ok <- call(runtime, {:validate_credential_grants, grants}) do
+      {:ok,
+       %__MODULE__{
+         pid: runtime_pid(runtime),
+         catalog_exposure_mode: catalog_exposure_mode(runtime),
+         catalog_snapshot_mode: catalog_snapshot_mode(runtime),
+         credential_grants: grants
+       }}
+    end
+  end
+
+  @spec credential_binding_names(struct() | pid()) :: [String.t()]
+  def credential_binding_names(runtime), do: call(runtime, :credential_binding_names)
 
   @spec upstream(struct() | pid(), String.t()) :: map() | nil
   def upstream(runtime, name), do: call(runtime, {:upstream, name})
@@ -157,8 +177,58 @@ defmodule PtcRunner.Upstream.Runtime do
   @impl GenServer
   def handle_call(:defaults, _from, state), do: {:reply, state.defaults, state}
 
+  def handle_call(:credential_binding_names, _from, state),
+    do: {:reply, Credentials.binding_names(state.credentials) |> Enum.sort(), state}
+
+  def handle_call({:validate_credential_grants, grants}, _from, state) do
+    reply =
+      case Credentials.subset(state.credentials, grants) do
+        {:ok, _credentials} -> :ok
+        {:error, message} -> {:error, message}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call(:upstream_names, _from, state),
     do: {:reply, Map.keys(state.upstreams) |> Enum.sort(), state}
+
+  def handle_call({:projected, _grants, :defaults}, _from, state),
+    do: {:reply, state.defaults, state}
+
+  def handle_call({:projected, _grants, :upstream_names}, _from, state),
+    do: {:reply, Map.keys(state.upstreams) |> Enum.sort(), state}
+
+  def handle_call({:projected, grants, {:upstream, name}}, _from, state) do
+    case Map.get(state.upstreams, name) do
+      nil ->
+        {:reply, nil, state}
+
+      upstream ->
+        {upstream, state} = projected_upstream_with_tools(upstream, state, grants)
+        {:reply, upstream, state}
+    end
+  end
+
+  def handle_call({:projected, grants, :catalog_snapshot}, _from, state) do
+    {snapshot, state} = current_projected_snapshot(state, grants)
+    {:reply, snapshot, state}
+  end
+
+  def handle_call({:projected, grants, :catalog_text}, _from, state) do
+    {snapshot, state} = current_projected_snapshot(state, grants)
+
+    text =
+      Catalog.render_text(snapshot, state.catalog_exposure_mode,
+        catalog_inline_max_chars: state.catalog_inline_max_chars,
+        catalog_inline_max_tools: state.catalog_inline_max_tools
+      )
+
+    {:reply, text, state}
+  end
+
+  def handle_call({:projected, _grants, {:scrub, term}}, _from, state),
+    do: {:reply, Credentials.scrub(state.credentials, term), state}
 
   def handle_call({:upstream, name}, _from, state) do
     case Map.get(state.upstreams, name) do
@@ -220,9 +290,72 @@ defmodule PtcRunner.Upstream.Runtime do
     :exit, _ -> :ok
   end
 
+  defp call(%__MODULE__{pid: pid, credential_grants: grants}, message) when grants != nil do
+    if projected_message?(message) do
+      GenServer.call(pid, {:projected, grants, message})
+    else
+      GenServer.call(pid, message)
+    end
+  end
+
   defp call(%__MODULE__{pid: pid}, message), do: GenServer.call(pid, message)
   defp call(pid, message) when is_pid(pid), do: GenServer.call(pid, message)
   defp call(name, message) when is_atom(name), do: GenServer.call(name, message)
+
+  defp projected_message?(:defaults), do: true
+  defp projected_message?(:upstream_names), do: true
+  defp projected_message?(:catalog_snapshot), do: true
+  defp projected_message?(:catalog_text), do: true
+  defp projected_message?({:upstream, _name}), do: true
+  defp projected_message?({:scrub, _term}), do: true
+  defp projected_message?(_message), do: false
+
+  defp runtime_pid(%__MODULE__{pid: pid}), do: pid
+  defp runtime_pid(pid) when is_pid(pid), do: pid
+  defp runtime_pid(name) when is_atom(name), do: name
+
+  defp catalog_exposure_mode(%__MODULE__{catalog_exposure_mode: mode}), do: mode
+  defp catalog_exposure_mode(_runtime), do: :auto
+
+  defp catalog_snapshot_mode(%__MODULE__{catalog_snapshot_mode: mode}), do: mode
+  defp catalog_snapshot_mode(_runtime), do: :live
+
+  defp normalize_credential_grants(:all), do: {:ok, :all}
+
+  defp normalize_credential_grants(%MapSet{} = grants) do
+    if Enum.all?(grants, &(is_binary(&1) and &1 != "")) do
+      {:ok, grants}
+    else
+      {:error, "credential grants must be non-empty strings"}
+    end
+  end
+
+  defp normalize_credential_grants(grants) when is_list(grants) do
+    normalize_credential_grants(MapSet.new(grants))
+  end
+
+  defp normalize_credential_grants(_grants),
+    do: {:error, "credential_grants must be :all or strings"}
+
+  defp validate_projection_narrows(%__MODULE__{credential_grants: nil}, _requested), do: :ok
+  defp validate_projection_narrows(%__MODULE__{credential_grants: :all}, _requested), do: :ok
+
+  defp validate_projection_narrows(%__MODULE__{credential_grants: current}, :all)
+       when current not in [nil, :all],
+       do: {:error, "credential grants cannot expand a projected runtime"}
+
+  defp validate_projection_narrows(_runtime, :all), do: :ok
+
+  defp validate_projection_narrows(%__MODULE__{credential_grants: current}, requested)
+       when is_struct(current, MapSet) and is_struct(requested, MapSet) do
+    if MapSet.subset?(requested, current) do
+      :ok
+    else
+      {:error, "credential grants cannot expand a projected runtime"}
+    end
+  end
+
+  defp validate_projection_narrows(_runtime, _requested), do: :ok
 
   defp start_process(opts) do
     name_opts = if name = Keyword.get(opts, :name), do: [name: name], else: []
@@ -244,6 +377,39 @@ defmodule PtcRunner.Upstream.Runtime do
   end
 
   defp current_snapshot(state), do: {state.snapshot, state}
+
+  defp current_projected_snapshot(%{catalog_snapshot_mode: :live} = state, grants) do
+    {upstreams, state} =
+      state.upstreams
+      |> Map.values()
+      |> Enum.reduce({[], state}, fn upstream, {acc, state} ->
+        {upstream, state} = projected_upstream_with_tools(upstream, state, grants)
+        {[upstream | acc], state}
+      end)
+
+    snapshot = scrubbed_snapshot(state.credentials, Enum.reverse(upstreams))
+    {snapshot, state}
+  end
+
+  defp current_projected_snapshot(state, grants) do
+    upstreams =
+      state.upstreams
+      |> Map.values()
+      |> Enum.map(&project_upstream(&1, state.credentials, grants))
+
+    {scrubbed_snapshot(state.credentials, upstreams), state}
+  end
+
+  defp projected_upstream_with_tools(upstream, state, grants) do
+    if root_client_reusable_before_projection?(upstream, grants) do
+      {upstream, state} = ensure_upstream_tools(upstream, state)
+      {project_upstream(upstream, state.credentials, grants), state}
+    else
+      upstream = project_upstream(upstream, state.credentials, grants)
+      {upstream, _state} = ensure_upstream_tools(upstream, state)
+      {upstream, state}
+    end
+  end
 
   defp ensure_upstream_tools(%{tools: tools} = upstream, state) when is_list(tools),
     do: {upstream, state}
@@ -279,6 +445,62 @@ defmodule PtcRunner.Upstream.Runtime do
   defp scrubbed_snapshot(credentials, upstreams) do
     Credentials.scrub(credentials, Catalog.snapshot(upstreams))
   end
+
+  defp project_upstream(upstream, _credentials, :all), do: upstream
+
+  defp project_upstream(%{transport: :openapi, config: config} = upstream, credentials, grants)
+       when is_map(config) do
+    put_projected_credentials(upstream, credentials, grants)
+  end
+
+  defp project_upstream(%{transport: :mcp_http, config: config} = upstream, credentials, grants)
+       when is_map(config) do
+    if auth_bindings_granted?(Map.get(config, :auth, []), grants) do
+      put_projected_credentials(upstream, credentials, grants)
+    else
+      upstream
+      |> Map.delete(:client_pid)
+      |> Map.put(:tools, nil)
+      |> put_projected_credentials(credentials, grants)
+    end
+  end
+
+  defp project_upstream(%{transport: :mcp_stdio} = upstream, _credentials, _grants), do: upstream
+
+  defp project_upstream(%{config: config} = upstream, credentials, grants) when is_map(config) do
+    put_projected_credentials(upstream, credentials, grants)
+  end
+
+  defp project_upstream(upstream, _credentials, _grants), do: upstream
+
+  defp root_client_reusable_before_projection?(%{transport: :mcp_stdio}, _grants), do: true
+
+  defp root_client_reusable_before_projection?(%{transport: :mcp_http, config: config}, grants)
+       when is_map(config) do
+    auth_bindings_granted?(Map.get(config, :auth, []), grants)
+  end
+
+  defp root_client_reusable_before_projection?(_upstream, _grants), do: false
+
+  defp put_projected_credentials(%{config: config} = upstream, credentials, grants)
+       when is_map(config) do
+    case Credentials.subset(credentials, grants) do
+      {:ok, projected_credentials} ->
+        put_in(upstream, [:config, :credentials], projected_credentials)
+
+      {:error, _message} ->
+        put_in(upstream, [:config, :credentials], %Credentials{missing_detail: :generic})
+    end
+  end
+
+  defp auth_bindings_granted?(emitters, grants) when is_list(emitters) do
+    emitters
+    |> Enum.map(&Map.get(&1, "binding"))
+    |> Enum.reject(&is_nil/1)
+    |> Enum.all?(fn binding -> grants == :all or MapSet.member?(grants, binding) end)
+  end
+
+  defp auth_bindings_granted?(_emitters, _grants), do: false
 
   defp maybe_register_redaction_secrets(credentials, opts) do
     case Keyword.get(opts, :redaction_sink) do

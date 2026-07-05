@@ -12,7 +12,7 @@ defmodule PtcRunnerMcp.Sessions do
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
-  alias PtcRunner.Upstream.{Eval, RunContext}
+  alias PtcRunner.Upstream.{Eval, RunContext, Runtime}
 
   alias PtcRunnerMcp.{
     CatalogConfig,
@@ -561,6 +561,7 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp execute_and_commit(pid, owner, request_id, snapshot, program, opts) do
+    opts = Map.put(opts, :grant, Map.get(snapshot, :grant))
     {run_opts, drain_upstream_calls} = aggregator_run_opts(opts, request_id)
     result = run_snapshot(snapshot, program, run_opts)
     commit_opts = Map.put(opts, :upstream_calls, drain_upstream_calls.())
@@ -731,6 +732,7 @@ defmodule PtcRunnerMcp.Sessions do
     with {:ok, grant} <-
            Policy.resolve_grant(Config.policy(), Map.get(opts, :role) || Map.get(opts, "role")),
          {:ok, mode} <- validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")),
+         :ok <- validate_grant_credentials(grant),
          :ok <- validate_grant_mode(grant, mode) do
       opts =
         opts
@@ -758,6 +760,34 @@ defmodule PtcRunnerMcp.Sessions do
       :ok
     else
       {:error, "mode #{mode} is not granted for role #{grant.role}"}
+    end
+  end
+
+  defp validate_grant_credentials(nil), do: :ok
+
+  defp validate_grant_credentials(grant) do
+    if RootUpstreamRuntime.configured?() do
+      unknown_granted_credentials(grant)
+      |> case do
+        [] ->
+          :ok
+
+        unknown ->
+          {:error, "role #{grant.role} grants unknown credential(s): #{Enum.join(unknown, ", ")}"}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp unknown_granted_credentials(grant) do
+    case Policy.credential_grants(grant) do
+      :all ->
+        []
+
+      grants ->
+        known = MapSet.new(Runtime.credential_binding_names(RootUpstreamRuntime.runtime()))
+        grants |> MapSet.difference(known) |> MapSet.to_list() |> Enum.sort()
     end
   end
 
@@ -1132,9 +1162,10 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp root_aggregator_run_opts(opts) do
     catalog_config = CatalogConfig.get()
+    runtime = projected_root_runtime(Map.get(opts, :grant))
 
     {:ok, context} =
-      Eval.run_context(RootUpstreamRuntime.runtime(),
+      Eval.run_context(runtime,
         max_tool_calls: Limits.max_upstream_calls_per_program(),
         max_catalog_ops: catalog_config.max_catalog_ops_per_program,
         call_timeout_ms: Limits.upstream_call_timeout_ms(),
@@ -1148,7 +1179,7 @@ defmodule PtcRunnerMcp.Sessions do
       opts
       |> Map.put(:tools, eval_opts[:tools])
       |> Map.put(:discovery_exec, eval_opts[:discovery_exec])
-      |> Map.put(:runtime, RootUpstreamRuntime.runtime())
+      |> Map.put(:runtime, runtime)
       |> Map.put(:profile, :mcp_aggregator)
 
     drain = fn ->
@@ -1160,6 +1191,17 @@ defmodule PtcRunnerMcp.Sessions do
     end
 
     {run_opts, drain}
+  end
+
+  defp projected_root_runtime(nil), do: RootUpstreamRuntime.runtime()
+
+  defp projected_root_runtime(grant) do
+    {:ok, runtime} =
+      Runtime.project(RootUpstreamRuntime.runtime(),
+        credential_grants: Policy.credential_grants(grant)
+      )
+
+    runtime
   end
 
   defp maybe_put(map, _key, nil), do: map
