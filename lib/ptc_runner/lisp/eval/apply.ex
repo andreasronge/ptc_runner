@@ -1002,6 +1002,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     context
   end
 
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_ns: ns}, _caller_ctx)
+       when is_binary(ns) do
+    EvalContext.push_prelude_returned_origin(context, ns)
+  end
+
   defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do
     EvalContext.push_user_origin(context)
   end
@@ -1028,7 +1033,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # mirroring `Eval.bind_prelude_ref/2` on the direct `(crm/export …)` path.
   defp tag_prelude_ns(value, nil), do: value
 
-  defp tag_prelude_ns({:closure, params, body, env, th, meta}, ns) when is_binary(ns) do
+  defp tag_prelude_ns({:closure, params, body, env, th, %{prelude_internal: true} = meta}, ns)
+       when is_binary(ns) do
     meta =
       meta
       |> Map.delete(:prelude_internal)

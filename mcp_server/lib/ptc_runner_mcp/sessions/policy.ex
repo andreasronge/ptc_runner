@@ -147,6 +147,10 @@ defmodule PtcRunnerMcp.Sessions.Policy do
   def upstream_tool_grants(nil), do: :all
   def upstream_tool_grants(%Grant{upstream_tools: upstream_tools}), do: upstream_tools
 
+  @spec strict_transitive_calls?(grant() | nil) :: boolean()
+  def strict_transitive_calls?(nil), do: false
+  def strict_transitive_calls?(%Grant{strict_transitive_calls: value}), do: value
+
   @spec filter_ptc_tools(map() | keyword() | nil, grant() | nil) :: map() | keyword() | nil
   def filter_ptc_tools(base, nil), do: base
 
@@ -378,7 +382,15 @@ defmodule PtcRunnerMcp.Sessions.Policy do
     with :ok <-
            validate_keys(
              map,
-             ["ptc_tools", "upstream_tools", "credentials", "prelude_store", "preludes", "modes"],
+             [
+               "ptc_tools",
+               "upstream_tools",
+               "credentials",
+               "prelude_store",
+               "preludes",
+               "modes",
+               "strict_transitive_calls"
+             ],
              "roles.#{role}"
            ),
          {:ok, ptc_tools} <-
@@ -389,7 +401,9 @@ defmodule PtcRunnerMcp.Sessions.Policy do
            string_set(Map.get(map, "credentials", []), "roles.#{role}.credentials"),
          {:ok, prelude_store} <- prelude_store_level(Map.get(map, "prelude_store", "read"), role),
          {:ok, preludes} <- prelude_grants(Map.get(map, "preludes", :all), role),
-         {:ok, modes} <- modes(Map.get(map, "modes", ["read_only"]), role) do
+         {:ok, modes} <- modes(Map.get(map, "modes", ["read_only"]), role),
+         {:ok, strict_transitive_calls} <-
+           strict_transitive_calls(Map.get(map, "strict_transitive_calls", false), role) do
       grant = %Grant{
         role: role,
         ptc_tools: ptc_tools,
@@ -397,7 +411,8 @@ defmodule PtcRunnerMcp.Sessions.Policy do
         credentials: credentials,
         prelude_store: prelude_store,
         preludes: preludes,
-        modes: modes
+        modes: modes,
+        strict_transitive_calls: strict_transitive_calls
       }
 
       {:ok, %{grant | fingerprint: fingerprint(grant)}}
@@ -541,6 +556,12 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   defp modes(_values, role), do: {:error, "roles.#{role}.modes must be an array"}
 
+  defp strict_transitive_calls(value, _role) when is_boolean(value), do: {:ok, value}
+
+  defp strict_transitive_calls(value, role),
+    do:
+      {:error, "roles.#{role}.strict_transitive_calls must be a boolean, got: #{inspect(value)}"}
+
   defp prelude_grants(:all, _role), do: {:ok, :all}
 
   defp prelude_grants(values, role) when is_list(values) do
@@ -615,6 +636,7 @@ defmodule PtcRunnerMcp.Sessions.Policy do
       "ptc_tools" => set_fingerprint(grant.ptc_tools),
       "credentials" => set_fingerprint(grant.credentials),
       "role" => grant.role,
+      "strict_transitive_calls" => grant.strict_transitive_calls,
       "upstream_tools" => set_fingerprint(grant.upstream_tools)
     }
 

@@ -9,6 +9,7 @@ defmodule PtcRunnerMcp.Sessions do
 
   import Kernel, except: [inspect: 1]
 
+  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.PreludeStore.Tools, as: PreludeStoreTools
@@ -934,6 +935,11 @@ defmodule PtcRunnerMcp.Sessions do
             |> Map.delete(:preludes)
             |> maybe_put(:runtime_prelude, Map.get(selected, :runtime_prelude))
             |> maybe_put(:preludes, Map.get(selected, :preludes))
+            |> maybe_put(:direct_namespaces, Map.get(selected, :direct_namespaces))
+            |> maybe_put(
+              :transitive_namespace_requirers,
+              Map.get(selected, :transitive_namespace_requirers)
+            )
 
           {:ok, start_opts}
         end
@@ -1021,11 +1027,62 @@ defmodule PtcRunnerMcp.Sessions do
         {:ok, %{}}
 
       {runtime_prelude, resolved} ->
-        {:ok, %{runtime_prelude: runtime_prelude, preludes: resolved}}
+        {:ok,
+         %{
+           runtime_prelude: runtime_prelude,
+           preludes: resolved,
+           direct_namespaces: direct_namespaces(runtime_prelude, refs),
+           transitive_namespace_requirers:
+             transitive_namespace_requirers(runtime_prelude, resolved, refs)
+         }}
     end
   rescue
     error in ArgumentError -> {:error, Exception.message(error)}
   end
+
+  defp direct_namespaces(%Prelude{} = prelude, refs) do
+    direct_ids = refs |> Enum.map(&prelude_ref_id/1) |> MapSet.new()
+
+    prelude
+    |> prelude_components()
+    |> Enum.filter(&(Map.get(&1, :id) in direct_ids))
+    |> Enum.flat_map(&Map.get(&1, :namespaces, []))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp direct_namespaces(_prelude, _refs), do: []
+
+  defp transitive_namespace_requirers(%Prelude{} = prelude, resolved, refs) do
+    direct_ids = refs |> Enum.map(&prelude_ref_id/1) |> MapSet.new()
+    components_by_id = Map.new(prelude_components(prelude), &{Map.get(&1, :id), &1})
+
+    resolved
+    |> Enum.reject(&(Map.get(&1, :id) in direct_ids))
+    |> Enum.flat_map(fn ref ->
+      namespaces =
+        components_by_id
+        |> Map.get(Map.get(ref, :id), %{})
+        |> Map.get(:namespaces, [])
+
+      Enum.map(namespaces, &{&1, Map.get(ref, :required_by, [])})
+    end)
+    |> Map.new()
+  end
+
+  defp transitive_namespace_requirers(_prelude, _resolved, _refs), do: %{}
+
+  defp prelude_components(%Prelude{metadata: %{components: components}}) when is_list(components),
+    do: components
+
+  defp prelude_components(_prelude), do: []
+
+  defp prelude_ref_id(ref) when is_binary(ref) do
+    ref |> String.split("@", parts: 2) |> hd()
+  end
+
+  defp prelude_ref_id(%{id: id}) when is_binary(id), do: id
+  defp prelude_ref_id(%{"id" => id}) when is_binary(id), do: id
 
   defp normalize_prelude_refs(refs) do
     refs

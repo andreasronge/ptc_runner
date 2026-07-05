@@ -65,6 +65,7 @@ defmodule PtcRunner.Lisp.Eval do
           | {:invalid_keyword_call, atom(), [term()]}
           | {:arity_error, String.t()}
           | {:destructure_error, String.t()}
+          | {:transitive_call_unauthorized, String.t(), String.t(), [String.t()]}
 
   @spec eval(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           {:ok, value(), map()} | {:error, runtime_error()}
@@ -799,12 +800,14 @@ defmodule PtcRunner.Lisp.Eval do
          {:prelude_ref, ref},
          %EvalContext{prelude_exports: exports} = eval_ctx
        ) do
-    case Map.fetch(exports, ref) do
-      {:ok, {callable, _ns_env, export}} ->
-        {:ok, bind_prelude_ref(callable, export), eval_ctx}
+    with :ok <- authorize_prelude_resolution(ref, eval_ctx) do
+      case Map.fetch(exports, ref) do
+        {:ok, {callable, _ns_env, export}} ->
+          {:ok, bind_prelude_ref(callable, export), eval_ctx}
 
-      :error ->
-        {:error, {:unbound_var, ref}}
+        :error ->
+          {:error, {:unbound_var, ref}}
+      end
     end
   end
 
@@ -815,27 +818,16 @@ defmodule PtcRunner.Lisp.Eval do
   # prints, cache, ...) are carried IN from and OUT to the caller's context so
   # the wrapped `(tool/call ...)` records exactly once in the existing ledger.
   defp do_eval({:prelude_call, ref, arg_asts}, %EvalContext{prelude_exports: exports} = eval_ctx) do
-    case Map.fetch(exports, ref) do
-      {:ok, {callable, ns_env, export}} ->
-        with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
-          case callable do
-            {:closure, _params, _body, _env, _th, _meta} ->
-              invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx2)
-
-            # A constant export (`def name value`) captures a plain value, not a
-            # closure. The analyzer only admits a zero-arg call here, which
-            # yields the captured value (Clojure-style: `cfg/answer` is the
-            # value, not a function to apply).
-            value when arg_vals == [] ->
-              {:ok, value, eval_ctx2}
-
-            _ ->
-              invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx2)
+    with :ok <- authorize_prelude_resolution(ref, eval_ctx) do
+      case Map.fetch(exports, ref) do
+        {:ok, {callable, ns_env, export}} ->
+          with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
+            eval_prelude_callable(callable, arg_vals, ns_env, export, eval_ctx2)
           end
-        end
 
-      :error ->
-        {:error, {:unbound_var, ref}}
+        :error ->
+          {:error, {:unbound_var, ref}}
+      end
     end
   end
 
@@ -876,6 +868,25 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  defp eval_prelude_callable(
+         {:closure, _params, _body, _env, _th, _meta} = callable,
+         arg_vals,
+         ns_env,
+         export,
+         eval_ctx
+       ) do
+    invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx)
+  end
+
+  # A constant export (`def name value`) captures a plain value, not a closure.
+  # The analyzer only admits a zero-arg call here, which yields the captured
+  # value (Clojure-style: `cfg/answer` is the value, not a function to apply).
+  defp eval_prelude_callable(value, [], _ns_env, _export, eval_ctx), do: {:ok, value, eval_ctx}
+
+  defp eval_prelude_callable(callable, arg_vals, ns_env, export, eval_ctx) do
+    invoke_prelude_export(callable, arg_vals, ns_env, export, eval_ctx)
+  end
+
   # ============================================================
   # Prelude export invocation
   # ============================================================
@@ -900,7 +911,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp bind_prelude_ref(callable, _export), do: callable
 
-  defp tag_prelude_ns({:closure, params, body, captured_env, turn_history, meta}, ns_name)
+  defp tag_prelude_ns(
+         {:closure, params, body, captured_env, turn_history, %{prelude_internal: true} = meta},
+         ns_name
+       )
        when is_binary(ns_name) do
     meta =
       meta
@@ -979,6 +993,47 @@ defmodule PtcRunner.Lisp.Eval do
         journal: export_ctx.journal,
         iteration_count: export_ctx.iteration_count
     }
+  end
+
+  defp authorize_prelude_resolution(
+         ref,
+         %EvalContext{strict_transitive_calls: true} = eval_ctx
+       )
+       when is_binary(ref) do
+    namespace = ref_namespace(ref)
+
+    cond do
+      namespace == nil ->
+        :ok
+
+      not session_authored_origin?(EvalContext.current_origin(eval_ctx)) ->
+        :ok
+
+      EvalContext.direct_namespace?(eval_ctx, namespace) ->
+        :ok
+
+      true ->
+        requirers = EvalContext.transitive_namespace_requirers(eval_ctx, namespace)
+
+        if requirers == [] do
+          :ok
+        else
+          {:error, {:transitive_call_unauthorized, ref, namespace, requirers}}
+        end
+    end
+  end
+
+  defp authorize_prelude_resolution(_ref, %EvalContext{}), do: :ok
+
+  defp session_authored_origin?(nil), do: true
+  defp session_authored_origin?(%{type: :user_closure}), do: true
+  defp session_authored_origin?(_origin), do: false
+
+  defp ref_namespace(ref) when is_binary(ref) do
+    case String.split(ref, "/", parts: 2) do
+      [namespace, _symbol] when namespace != "" -> namespace
+      _ -> nil
+    end
   end
 
   # ============================================================
@@ -1869,6 +1924,11 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_internal: true}, _caller_ctx) do
     context
+  end
+
+  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_ns: ns}, _caller_ctx)
+       when is_binary(ns) do
+    EvalContext.push_prelude_returned_origin(context, ns)
   end
 
   defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do

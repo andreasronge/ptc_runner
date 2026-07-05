@@ -9,6 +9,7 @@ defmodule PtcRunnerMcp.Sessions.Policy.Grant do
     credentials: MapSet.new(),
     prelude_store: :read,
     preludes: :all,
-    modes: MapSet.new([:read_only])
+    modes: MapSet.new([:read_only]),
+    strict_transitive_calls: false
   ]
 end

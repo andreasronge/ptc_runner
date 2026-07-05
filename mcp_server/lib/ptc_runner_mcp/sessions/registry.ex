@@ -282,6 +282,11 @@ defmodule PtcRunnerMcp.Sessions.Registry do
       ]
       |> maybe_put(:runtime_prelude, Map.get(opts, :runtime_prelude))
       |> maybe_put(:preludes, Map.get(opts, :preludes))
+      |> maybe_put(:direct_namespaces, Map.get(opts, :direct_namespaces))
+      |> maybe_put(
+        :transitive_namespace_requirers,
+        Map.get(opts, :transitive_namespace_requirers)
+      )
       |> maybe_put_name(state.names_registry, id, Map.put(meta, :registry_pid, self()))
 
     case Supervisor.start_session(child_opts, state.session_supervisor) do

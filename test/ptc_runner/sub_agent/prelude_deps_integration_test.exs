@@ -9,7 +9,9 @@ defmodule PtcRunner.SubAgent.PreludeDepsIntegrationTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.PreludeStore
+  alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Session
 
   @base_source """
@@ -30,6 +32,10 @@ defmodule PtcRunner.SubAgent.PreludeDepsIntegrationTest do
   (defn tag-all [xs] (map base/helper xs))
 
   (defn mk [] (fn [x] (base/helper x)))
+
+  (defn apply-cb [f] (f "x"))
+
+  (defn return-cb [f] f)
   """
 
   defp store_with_deps do
@@ -47,6 +53,17 @@ defmodule PtcRunner.SubAgent.PreludeDepsIntegrationTest do
       Agent.update(agent, &[args | &1])
       %{"id" => args["id"], "name" => "Ada"}
     end
+  end
+
+  defp strict_opts(prelude, opts \\ []) do
+    [
+      prelude: prelude,
+      tools: %{"fetch_user" => fn args -> %{"id" => args["id"]} end},
+      strict_transitive_calls: true,
+      direct_namespaces: Keyword.get(opts, :direct_namespaces, ["audit"]),
+      transitive_namespace_requirers:
+        Keyword.get(opts, :transitive_namespace_requirers, %{"base" => ["audit"]})
+    ]
   end
 
   describe "Session attach (entry point 1)" do
@@ -191,6 +208,84 @@ defmodule PtcRunner.SubAgent.PreludeDepsIntegrationTest do
 
       assert step.return["user"] == %{"id" => "u3"}
       assert agent.runtime_prelude == nil
+    end
+  end
+
+  describe "strict transitive calls" do
+    test "session-authored calls into transitive namespaces fail with a teaching error" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit"], [])
+
+      assert {:error, step} =
+               Lisp.run(~S|(base/helper "x")|, strict_opts(prelude))
+
+      assert step.fail.message =~ "transitive dependency of `audit`"
+      assert step.fail.message =~ "attach it directly"
+      assert step.fail.message =~ "base/helper"
+    end
+
+    test "value-position transitive refs fail before they become callable" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit"], [])
+
+      for program <- [
+            ~S|(let [f base/helper] (f "x"))|,
+            ~S|(map base/helper ["a"])|
+          ] do
+        assert {:error, step} =
+                 Lisp.run(program, strict_opts(prelude))
+
+        assert step.fail.message =~ "attach it directly"
+        assert step.fail.message =~ "base/helper"
+      end
+    end
+
+    test "compiled prelude-internal calls and deliberate returned closures still work" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit"], [])
+
+      opts = strict_opts(prelude)
+
+      assert {:ok, step} = Lisp.run(~S|(audit/tag-all ["a" "b"])|, opts)
+      assert step.return == ["helper:n:a", "helper:n:b"]
+
+      assert {:ok, step} = Lisp.run(~S|((audit/mk) "v")|, opts)
+      assert step.return == "helper:n:v"
+    end
+
+    test "user callbacks invoked by a prelude export cannot name transitive namespaces" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit"], [])
+
+      assert {:error, step} =
+               Lisp.run(~S|(audit/apply-cb (fn [x] (base/helper x)))|, strict_opts(prelude))
+
+      assert step.fail.message =~ "attach it directly"
+      assert step.fail.message =~ "base/helper"
+    end
+
+    test "user callbacks returned by a prelude export keep user-origin strictness" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit"], [])
+
+      assert {:error, step} =
+               Lisp.run(
+                 ~S|((audit/return-cb (fn [x] (base/helper x))) "x")|,
+                 strict_opts(prelude)
+               )
+
+      assert step.fail.message =~ "attach it directly"
+      assert step.fail.message =~ "base/helper"
+    end
+
+    test "directly attached dependency namespaces remain callable" do
+      {prelude, _resolved} = Selection.resolve!(store_with_deps(), ["audit", "base"], [])
+
+      assert {:ok, step} =
+               Lisp.run(
+                 ~S|(base/helper "x")|,
+                 strict_opts(prelude,
+                   direct_namespaces: ["audit", "base"],
+                   transitive_namespace_requirers: %{}
+                 )
+               )
+
+      assert step.return == "helper:n:x"
     end
   end
 end

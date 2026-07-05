@@ -576,6 +576,109 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert eval["structuredContent"]["result"] == "user=> 1"
     end
 
+    test "strict_transitive_calls rejects MCP session calls into transitive preludes" do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "base", """
+        (ns base)
+        (defn helper [x] (str "helper:" x))
+        """)
+
+      {:ok, _audit} =
+        PreludeStore.write(
+          store,
+          "audit",
+          """
+          (ns audit)
+          (defn check [x] (base/helper x))
+          """,
+          %{"requires_preludes" => ["base"]}
+        )
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:policy, role_policy!("strict", strict_transitive_calls: true))
+      )
+
+      {:ok, %{"session_id" => sid}} =
+        Sessions.start_session(nil, %{role: "strict", preludes: ["audit"]})
+
+      internal =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(audit/check "x")|
+        })
+
+      assert internal["isError"] == false
+      assert internal["structuredContent"]["result"] == ~S|user=> "helper:x"|
+
+      transitive =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(base/helper "x")|
+        })
+
+      assert transitive["isError"] == true
+      assert transitive["structuredContent"]["message"] =~ "transitive dependency of `audit`"
+      assert transitive["structuredContent"]["message"] =~ "attach it directly"
+
+      {:ok, %{"session_id" => direct_sid}} =
+        Sessions.start_session(nil, %{role: "strict", preludes: ["audit", "base"]})
+
+      direct =
+        call("lisp_session_eval", %{
+          "session_id" => direct_sid,
+          "program" => ~S|(base/helper "x")|
+        })
+
+      assert direct["isError"] == false
+      assert direct["structuredContent"]["result"] == ~S|user=> "helper:x"|
+    end
+
+    @tag :tmp_dir
+    test "relaxed transitive prelude sessions are marked in turn evidence", %{tmp_dir: dir} do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _base} =
+        PreludeStore.write(store, "base", """
+        (ns base)
+        (defn helper [x] (str "helper:" x))
+        """)
+
+      {:ok, _audit} =
+        PreludeStore.write(
+          store,
+          "audit",
+          """
+          (ns audit)
+          (defn check [x] (base/helper x))
+          """,
+          %{"requires_preludes" => ["base"]}
+        )
+
+      Config.set(%{Config.get() | prelude_store: store, policy: role_policy!("relaxed")})
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      {:ok, %{"session_id" => sid}} =
+        Sessions.start_session(nil, %{role: "relaxed", preludes: ["audit"]})
+
+      assert {:ok, _response} = Sessions.eval(sid, ~S|(base/helper "x")|)
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+
+      assert turn["data"]["prelude_call_policy"] == %{
+               "strict_transitive_calls" => false,
+               "relaxed_transitive_calls" => true,
+               "direct_namespaces" => ["audit"],
+               "transitive_namespaces" => ["base"]
+             }
+    end
+
     test "start rejects selected preludes when a configured prelude is already attached" do
       {:ok, store} = PreludeStore.new()
 
@@ -1583,6 +1686,25 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert Policy.upstream_tool_allowed?(grant, "x", "y")
       refute Policy.upstream_tool_allowed?(grant, "upstream:x/z")
       assert Policy.upstream_tool_grants(grant) == MapSet.new(["upstream:x/y"])
+      refute Policy.strict_transitive_calls?(grant)
+
+      strict_path =
+        write_role_policy!(dir, role_policy_json("analyst", strict_transitive_calls: true))
+
+      assert {:ok, strict_config} = Config.resolve(%{session_roles: strict_path})
+      strict_grant = strict_config.policy.roles["analyst"]
+      assert Policy.strict_transitive_calls?(strict_grant)
+      refute strict_grant.fingerprint == grant.fingerprint
+
+      bad_strict_path =
+        write_role_policy!(
+          dir,
+          role_policy_json("analyst", strict_transitive_calls: "true")
+        )
+
+      assert {:error, strict_message} = Config.resolve(%{session_roles: bad_strict_path})
+      assert strict_message =~ "strict_transitive_calls"
+      assert strict_message =~ "boolean"
 
       bad_path =
         write_role_policy!(dir, %{
@@ -1602,7 +1724,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert config.policy.roles["analyst"].fingerprint =~ "sha256:"
 
       assert config.policy.roles["analyst"].fingerprint ==
-               "sha256:b833c348a8904802ec353f77ebbfb9f17a30d8d07141106a518165a7cafedf10"
+               "sha256:210d4e3bc41c7d11aa99c8a0aedf0a6bc5a9a15e2a9da18e29b01405f26caea5"
     end
 
     test "role prelude filtering removes exports with denied upstream requirements" do
@@ -2562,6 +2684,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       |> maybe_put_json("prelude_store", Keyword.get(opts, :prelude_store))
       |> maybe_put_json("preludes", Keyword.get(opts, :preludes))
       |> maybe_put_json("modes", Keyword.get(opts, :modes))
+      |> maybe_put_json("strict_transitive_calls", Keyword.get(opts, :strict_transitive_calls))
 
     %{
       "default_role" => role,

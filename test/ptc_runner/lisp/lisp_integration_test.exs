@@ -623,6 +623,15 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert step.return == %{"kind" => "novel-runtime-keyword"}
     end
 
+    test "successful tool data shaped like an error tuple remains return data" do
+      tools = %{
+        "result" => fn _args -> {:ok, {:error, :as_data}} end
+      }
+
+      assert {:ok, step} = Lisp.run(~S|(tool/result {})|, tools: tools)
+      assert step.return == {:error, :as_data}
+    end
+
     test "single novel keyword arg keeps the named-args validation error" do
       tools = %{
         "echo" => fn args -> args end

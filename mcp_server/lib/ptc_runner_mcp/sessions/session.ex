@@ -41,6 +41,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :limits,
     :registry,
     :runtime_prelude,
+    :direct_namespaces,
+    :transitive_namespace_requirers,
     ttl_timer: nil,
     idle_timer: nil,
     turn: 0,
@@ -74,6 +76,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
           upstream_calls: [map()],
           preludes: [map()],
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
+          direct_namespaces: [String.t()],
+          transitive_namespace_requirers: %{String.t() => [String.t()]},
           eval: nil | map(),
           limits: Limits.t()
         }
@@ -118,6 +122,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
       updated_at: now,
       expires_at: expires_at,
       runtime_prelude: Keyword.get(opts, :runtime_prelude),
+      direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
+      transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       preludes: Keyword.get(opts, :preludes, []),
       limits: limits,
       registry: Keyword.get(opts, :registry, Registry)
@@ -417,7 +423,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
         grant: state.grant,
         grant_fingerprint: state.grant_fingerprint,
         limits: state.limits,
-        runtime_prelude: state.runtime_prelude
+        runtime_prelude: state.runtime_prelude,
+        direct_namespaces: state.direct_namespaces,
+        transitive_namespace_requirers: state.transitive_namespace_requirers
       }
 
       eval = %{
@@ -714,7 +722,8 @@ defmodule PtcRunnerMcp.Sessions.Session do
             catalog_ops: Enum.map(step_catalog_ops(step), &TurnEvent.catalog_op_summary/1),
             fail: Keyword.get(opts, :fail),
             limits_hit: Keyword.get(opts, :limits_hit, []),
-            preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace))
+            preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace)),
+            prelude_call_policy: prelude_call_policy(current)
           )
 
         Collector.write_event(collector, event)
@@ -752,6 +761,22 @@ defmodule PtcRunnerMcp.Sessions.Session do
     do: %{step | return: value}
 
   defp unwrap_return_sentinel(step), do: step
+
+  defp prelude_call_policy(%__MODULE__{} = state) do
+    transitive_namespaces =
+      state.transitive_namespace_requirers
+      |> Map.keys()
+      |> Enum.sort()
+
+    strict? = Policy.strict_transitive_calls?(state.grant)
+
+    %{
+      "strict_transitive_calls" => strict?,
+      "relaxed_transitive_calls" => not strict? and transitive_namespaces != [],
+      "direct_namespaces" => Enum.sort(state.direct_namespaces),
+      "transitive_namespaces" => transitive_namespaces
+    }
+  end
 
   # No signature supplied — skip validation; commit_success won't emit a
   # `validated` field. Distinct from `{:ok, nil}` (a contract supplied
@@ -942,6 +967,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
        max_heap: max_heap,
        setup_max_heap: setup_max_heap,
        strict_data: true,
+       strict_transitive_calls: Policy.strict_transitive_calls?(Map.get(snapshot, :grant)),
+       direct_namespaces: Map.get(snapshot, :direct_namespaces, []),
+       transitive_namespace_requirers: Map.get(snapshot, :transitive_namespace_requirers, %{}),
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
     |> maybe_put(:prelude, snapshot_prelude(snapshot))

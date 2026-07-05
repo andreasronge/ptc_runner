@@ -91,6 +91,12 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # of returning `nil`. Off by default (preserves existing in-process
     # behaviour); MCP requests pass `strict_data: true` per § 9.3.
     strict_data: false,
+    # When true, session-authored code may only name prelude namespaces that
+    # were directly attached. Prelude-internal calls remain allowed because the
+    # compiler already validated their declared namespace deps.
+    strict_transitive_calls: false,
+    direct_namespaces: MapSet.new(),
+    transitive_namespace_requirers: %{},
     # Capability Prelude V1 (plan §5): the attached compiled prelude's PUBLIC
     # export table, a map from string ref (e.g. "crm/get-user") to a
     # `{callable, ns_env}` tuple — the callable captured from `private_env` plus
@@ -222,6 +228,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_cache: map(),
           tools_meta: %{String.t() => %{cache: boolean()}},
           strict_data: boolean(),
+          strict_transitive_calls: boolean(),
+          direct_namespaces: MapSet.t(String.t()),
+          transitive_namespace_requirers: %{String.t() => [String.t()]},
           prelude_exports: %{String.t() => {term(), map()}},
           prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
@@ -299,6 +308,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
+      strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
+      direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
+      transitive_namespace_requirers:
+        normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude)),
       prints: [],
@@ -325,6 +338,34 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   defp prelude_artifact(nil), do: nil
   defp prelude_artifact(%PtcRunner.Lisp.Prelude{} = prelude), do: prelude
+
+  defp namespace_set(namespaces) when is_list(namespaces) do
+    namespaces
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp namespace_set(%MapSet{} = namespaces), do: namespaces
+  defp namespace_set(_namespaces), do: MapSet.new()
+
+  defp normalize_namespace_requirers(requirers) when is_map(requirers) do
+    Map.new(requirers, fn
+      {namespace, ids} when is_binary(namespace) and is_list(ids) ->
+        {namespace, ids |> Enum.filter(&is_binary/1) |> Enum.sort()}
+
+      {namespace, id} when is_binary(namespace) and is_binary(id) ->
+        {namespace, [id]}
+
+      {namespace, _ids} when is_binary(namespace) ->
+        {namespace, []}
+
+      {_namespace, _ids} ->
+        {"", []}
+    end)
+    |> Map.delete("")
+  end
+
+  defp normalize_namespace_requirers(_requirers), do: %{}
 
   @doc """
   Appends a print message to the context.
@@ -541,9 +582,29 @@ defmodule PtcRunner.Lisp.Eval.Context do
       context
       | prelude_exports: source.prelude_exports,
         prelude: source.prelude,
+        strict_transitive_calls: source.strict_transitive_calls,
+        direct_namespaces: source.direct_namespaces,
+        transitive_namespace_requirers: source.transitive_namespace_requirers,
         origin_stack: source.origin_stack,
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }
+  end
+
+  @doc "Returns true when a namespace was directly selected by the session."
+  @spec direct_namespace?(t(), String.t()) :: boolean()
+  def direct_namespace?(%__MODULE__{direct_namespaces: namespaces}, namespace)
+      when is_binary(namespace) do
+    MapSet.member?(namespaces, namespace)
+  end
+
+  @doc "Returns the direct prelude ids that pulled a transitive namespace in."
+  @spec transitive_namespace_requirers(t(), String.t()) :: [String.t()]
+  def transitive_namespace_requirers(
+        %__MODULE__{transitive_namespace_requirers: requirers},
+        namespace
+      )
+      when is_binary(namespace) do
+    Map.get(requirers, namespace, [])
   end
 
   @doc "Pushes a prelude-export origin for private tool authorization."
@@ -564,6 +625,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec push_user_origin(t()) :: t()
   def push_user_origin(%__MODULE__{origin_stack: stack} = context) do
     %{context | origin_stack: [%{type: :user_closure} | stack]}
+  end
+
+  @doc "Pushes a prelude returned-closure origin without granting private tool authority."
+  @spec push_prelude_returned_origin(t(), String.t()) :: t()
+  def push_prelude_returned_origin(%__MODULE__{origin_stack: stack} = context, namespace)
+      when is_binary(namespace) do
+    %{context | origin_stack: [%{type: :prelude_returned_closure, namespace: namespace} | stack]}
   end
 
   @doc "Saves the user namespace active before entering a prelude export."

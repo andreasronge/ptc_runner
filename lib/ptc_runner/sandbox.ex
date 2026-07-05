@@ -119,7 +119,10 @@ defmodule PtcRunner.Sandbox do
   """
   @type eval_fn :: (any(), Context.t() ->
                       {:ok, any(), map()}
-                      | {:error, {atom(), String.t()} | {atom(), String.t(), any()}})
+                      | {:error,
+                         {atom(), String.t()}
+                         | {atom(), String.t(), any()}
+                         | {atom(), String.t(), any(), any()}})
 
   @doc """
   Executes an AST in an isolated sandbox process.
@@ -148,7 +151,8 @@ defmodule PtcRunner.Sandbox do
              {atom(), memory_exceeded_info()}
              | {atom(), non_neg_integer()}
              | {atom(), String.t()}
-             | {atom(), String.t(), any()}}
+             | {atom(), String.t(), any()}
+             | {atom(), String.t(), any(), any()}}
 
   def execute(ast, context, opts \\ []) do
     default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)

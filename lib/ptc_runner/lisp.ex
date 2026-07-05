@@ -483,6 +483,9 @@ defmodule PtcRunner.Lisp do
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       strict_data: Keyword.get(opts, :strict_data, false),
+      strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
+      direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
+      transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       link: Keyword.get(opts, :link, false)
     }
@@ -757,9 +760,6 @@ defmodule PtcRunner.Lisp do
       memory: memory,
       normalized_tools: normalized_tools,
       tool_executor: tool_executor,
-      parsed_signature: parsed_signature,
-      signature_str: signature_str,
-      float_precision: float_precision,
       timeout: timeout,
       max_heap: max_heap,
       setup_max_heap: setup_max_heap,
@@ -778,6 +778,9 @@ defmodule PtcRunner.Lisp do
       max_tool_calls: max_tool_calls,
       max_tool_call_result_bytes: max_tool_call_result_bytes,
       strict_data: strict_data,
+      strict_transitive_calls: strict_transitive_calls,
+      direct_namespaces: direct_namespaces,
+      transitive_namespace_requirers: transitive_namespace_requirers,
       discovery_exec: discovery_exec
     } = opts
 
@@ -812,6 +815,9 @@ defmodule PtcRunner.Lisp do
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
+        strict_transitive_calls: strict_transitive_calls,
+        direct_namespaces: direct_namespaces,
+        transitive_namespace_requirers: transitive_namespace_requirers,
         discovery_exec: discovery_exec,
         prelude: prelude
       ]
@@ -849,94 +855,136 @@ defmodule PtcRunner.Lisp do
       ]
       |> put_setup_max_heap(setup_max_heap)
 
-    case PtcRunner.Sandbox.execute(core_ast, context, sandbox_opts) do
-      {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
-        step =
-          apply_memory_contract({:__ptc_return__, value}, float_precision, eval_ctx)
+    core_ast
+    |> PtcRunner.Sandbox.execute(context, sandbox_opts)
+    |> handle_execute_result(opts)
+  end
 
-        {:ok, %{step | usage: metrics}}
+  defp handle_execute_result(
+         {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx},
+         %{float_precision: float_precision}
+       ) do
+    step = apply_memory_contract({:__ptc_return__, value}, float_precision, eval_ctx)
+    {:ok, %{step | usage: metrics}}
+  end
 
-      {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx} ->
-        step =
-          apply_memory_contract({:__ptc_fail__, value}, float_precision, eval_ctx)
+  defp handle_execute_result(
+         {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx},
+         %{float_precision: float_precision}
+       ) do
+    step = apply_memory_contract({:__ptc_fail__, value}, float_precision, eval_ctx)
+    {:ok, %{step | usage: metrics}}
+  end
 
-        {:ok, %{step | usage: metrics}}
+  defp handle_execute_result(
+         {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx},
+         %{memory: memory}
+       ) do
+    eval_error_step(reason, metrics, memory, eval_ctx)
+  end
 
-      {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx} ->
-        reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+  defp handle_execute_result({:ok, value, metrics, %EvalContext{} = eval_ctx}, opts) do
+    %{float_precision: float_precision, parsed_signature: parsed_signature, signature_str: sig} =
+      opts
 
-        tool_child_traces =
-          eval_ctx.tool_calls
-          |> Enum.filter(&Map.has_key?(&1, :child_trace_id))
-          |> Enum.map(& &1.child_trace_id)
+    step =
+      value
+      |> apply_memory_contract(float_precision, eval_ctx)
+      |> Map.put(:usage, metrics)
 
-        pmap_child_traces =
-          eval_ctx.pmap_calls
-          |> Enum.flat_map(& &1.child_trace_ids)
-
-        child_traces = tool_child_traces ++ pmap_child_traces
-
-        tool_child_steps =
-          eval_ctx.tool_calls
-          |> Enum.filter(&Map.has_key?(&1, :child_step))
-          |> Enum.map(& &1.child_step)
-
-        pmap_child_steps =
-          eval_ctx.pmap_calls
-          |> Enum.flat_map(&Map.get(&1, :child_steps, []))
-
-        child_steps = tool_child_steps ++ pmap_child_steps
-
-        cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
-        cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
-
-        step = %Step{
-          return: nil,
-          fail: %{reason: reason_atom, message: format_error(reason)},
-          memory: memory,
-          signature: nil,
-          usage: metrics,
-          turns: nil,
-          trace_id: nil,
-          parent_trace_id: nil,
-          field_descriptions: nil,
-          prints: eval_ctx.prints,
-          tool_calls: cleaned_tool_calls,
-          pmap_calls: cleaned_pmap_calls,
-          catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
-          child_traces: child_traces,
-          child_steps: child_steps,
-          journal: eval_ctx.journal,
-          summaries: eval_ctx.summaries,
-          tool_cache: eval_ctx.tool_cache
-        }
-
-        {:error, step}
-
-      {:ok, value, metrics, %EvalContext{} = eval_ctx} ->
-        step =
-          apply_memory_contract(value, float_precision, eval_ctx)
-
-        step_with_usage = %{step | usage: metrics}
-
-        case validate_return_value(parsed_signature, signature_str, step_with_usage) do
-          {:ok, validated_step} -> {:ok, validated_step}
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:error, {:timeout, ms}} ->
-        {:error,
-         Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
-
-      {:error, {:memory_exceeded, info}} ->
-        memory_exceeded_step(info, memory, journal)
-
-      {:error, {reason_atom, _, _} = reason} when is_atom(reason_atom) ->
-        {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
-
-      {:error, {reason_atom, _} = reason} when is_atom(reason_atom) ->
-        {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+    case validate_return_value(parsed_signature, sig, step) do
+      {:ok, validated_step} -> {:ok, validated_step}
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp handle_execute_result({:error, {:timeout, ms}}, %{memory: memory, journal: journal}) do
+    {:error,
+     Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
+  end
+
+  defp handle_execute_result({:error, {:memory_exceeded, info}}, %{
+         memory: memory,
+         journal: journal
+       }) do
+    memory_exceeded_step(info, memory, journal)
+  end
+
+  defp handle_execute_result({:error, {reason_atom, _, _} = reason}, %{
+         memory: memory,
+         journal: journal
+       })
+       when is_atom(reason_atom) do
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+  end
+
+  defp handle_execute_result({:error, {reason_atom, _} = reason}, %{
+         memory: memory,
+         journal: journal
+       })
+       when is_atom(reason_atom) do
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+  end
+
+  defp handle_execute_result({:error, reason}, %{memory: memory, journal: journal}) do
+    {:error,
+     Step.error(direct_error_reason_atom(reason), format_error(reason), memory, %{},
+       journal: journal
+     )}
+  end
+
+  defp direct_error_reason_atom(reason), do: elem(reason, 0)
+
+  defp eval_error_step(reason, metrics, memory, %EvalContext{} = eval_ctx) do
+    reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+
+    tool_child_traces =
+      eval_ctx.tool_calls
+      |> Enum.filter(&Map.has_key?(&1, :child_trace_id))
+      |> Enum.map(& &1.child_trace_id)
+
+    pmap_child_traces =
+      eval_ctx.pmap_calls
+      |> Enum.flat_map(& &1.child_trace_ids)
+
+    child_traces = tool_child_traces ++ pmap_child_traces
+
+    tool_child_steps =
+      eval_ctx.tool_calls
+      |> Enum.filter(&Map.has_key?(&1, :child_step))
+      |> Enum.map(& &1.child_step)
+
+    pmap_child_steps =
+      eval_ctx.pmap_calls
+      |> Enum.flat_map(&Map.get(&1, :child_steps, []))
+
+    child_steps = tool_child_steps ++ pmap_child_steps
+
+    cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
+    cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
+
+    step = %Step{
+      return: nil,
+      fail: %{reason: reason_atom, message: format_error(reason)},
+      memory: memory,
+      signature: nil,
+      usage: metrics,
+      turns: nil,
+      trace_id: nil,
+      parent_trace_id: nil,
+      field_descriptions: nil,
+      prints: eval_ctx.prints,
+      tool_calls: cleaned_tool_calls,
+      pmap_calls: cleaned_pmap_calls,
+      catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
+      child_traces: child_traces,
+      child_steps: child_steps,
+      journal: eval_ctx.journal,
+      summaries: eval_ctx.summaries,
+      tool_cache: eval_ctx.tool_cache
+    }
+
+    {:error, step}
   end
 
   @doc """
@@ -1009,6 +1057,18 @@ defmodule PtcRunner.Lisp do
 
   def format_error({:private_tool_args_error, name, details}),
     do: "Private tool '#{name}' arguments failed validation: #{details}"
+
+  def format_error({:transitive_call_unauthorized, ref, namespace, []}) do
+    "Prelude namespace '#{namespace}' is attached only as a transitive dependency; " <>
+      "attach it directly to use #{ref}."
+  end
+
+  def format_error({:transitive_call_unauthorized, ref, namespace, requirers}) do
+    pulled_by = Enum.map_join(requirers, ", ", &"`#{&1}`")
+
+    "Prelude namespace '#{namespace}' is a transitive dependency of #{pulled_by}; " <>
+      "attach it directly to use #{ref}."
+  end
 
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
   def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
