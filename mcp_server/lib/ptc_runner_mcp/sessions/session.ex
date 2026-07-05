@@ -41,6 +41,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :limits,
     :registry,
     :runtime_prelude,
+    :scoped_base_surface,
     :direct_namespaces,
     :transitive_namespace_requirers,
     ttl_timer: nil,
@@ -76,6 +77,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
           upstream_calls: [map()],
           preludes: [map()],
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
+          scoped_base_surface: boolean(),
           direct_namespaces: [String.t()],
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           eval: nil | map(),
@@ -122,6 +124,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
       updated_at: now,
       expires_at: expires_at,
       runtime_prelude: Keyword.get(opts, :runtime_prelude),
+      scoped_base_surface: Keyword.get(opts, :scoped_base_surface, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       preludes: Keyword.get(opts, :preludes, []),
@@ -424,6 +427,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
         grant_fingerprint: state.grant_fingerprint,
         limits: state.limits,
         runtime_prelude: state.runtime_prelude,
+        scoped_base_surface: state.scoped_base_surface,
         direct_namespaces: state.direct_namespaces,
         transitive_namespace_requirers: state.transitive_namespace_requirers
       }

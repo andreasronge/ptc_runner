@@ -225,6 +225,8 @@ defmodule PtcRunner.PreludeStore.Selection do
       id: candidate.id,
       version: candidate.version,
       checksum: PreludeCandidate.checksum(candidate),
+      namespaces: candidate.compiled.namespaces,
+      form_graph: candidate.compiled.form_graph,
       origin: PreludeCandidate.public_origin(candidate.origin),
       required_by: Enum.sort(required_by)
     }

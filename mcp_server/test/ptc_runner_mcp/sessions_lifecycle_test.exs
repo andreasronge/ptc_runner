@@ -1034,6 +1034,20 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       assert env["structuredContent"]["reason"] == "session_args_error"
       assert env["structuredContent"]["message"] =~ "bogus"
     end
+
+    test "lisp_session_start accepts scoped_base_surface only as a boolean" do
+      default = call("lisp_session_start", %{})
+      refute Map.has_key?(default["structuredContent"], "scoped_base_surface")
+
+      enabled = call("lisp_session_start", %{"scoped_base_surface" => true})
+      assert enabled["isError"] == false
+      assert enabled["structuredContent"]["scoped_base_surface"] == true
+
+      malformed = call("lisp_session_start", %{"scoped_base_surface" => "true"})
+      assert malformed["isError"] == true
+      assert malformed["structuredContent"]["reason"] == "session_args_error"
+      assert malformed["structuredContent"]["message"] =~ "scoped_base_surface"
+    end
   end
 
   describe "authorization boundary (forged owner)" do

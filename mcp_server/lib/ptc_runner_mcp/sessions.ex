@@ -655,6 +655,7 @@ defmodule PtcRunnerMcp.Sessions do
           |> maybe_put(:mode, Map.get(args, "mode"))
           |> maybe_put(:tags, Map.get(args, "tags"))
           |> maybe_put(:role, Map.get(args, "role"))
+          |> maybe_put(:scoped_base_surface, Map.get(args, "scoped_base_surface"))
           |> maybe_put(:auth_claims, Map.get(args, :auth_claims))
 
         start_session(owner_context(args), opts)
@@ -693,8 +694,13 @@ defmodule PtcRunnerMcp.Sessions do
 
   defp validate_start_args(args) when is_map(args) do
     case Enum.find(Map.keys(args), &(not start_arg_key?(&1))) do
-      nil -> validate_tags_arg(Map.get(args, "tags"))
-      key -> {:error, "unexpected lisp_session_start argument: #{key}"}
+      nil ->
+        with :ok <- validate_tags_arg(Map.get(args, "tags")) do
+          validate_scoped_base_surface_arg(Map.get(args, "scoped_base_surface"))
+        end
+
+      key ->
+        {:error, "unexpected lisp_session_start argument: #{key}"}
     end
   end
 
@@ -715,6 +721,12 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp validate_tags_arg(_tags), do: {:error, "tags must be an object when supplied"}
+
+  defp validate_scoped_base_surface_arg(nil), do: :ok
+  defp validate_scoped_base_surface_arg(value) when is_boolean(value), do: :ok
+
+  defp validate_scoped_base_surface_arg(_value),
+    do: {:error, "scoped_base_surface must be a boolean when supplied"}
 
   defp validate_tag_entries(tags) do
     Enum.reduce_while(tags, :ok, fn
@@ -741,11 +753,16 @@ defmodule PtcRunnerMcp.Sessions do
          {:ok, mode} <- validate_mode(Map.get(opts, :mode) || Map.get(opts, "mode")),
          :ok <- validate_grant_credentials(grant),
          :ok <- validate_grant_upstream_tools(grant),
+         {:ok, scoped_base_surface?} <-
+           normalize_scoped_base_surface(start_option(opts, :scoped_base_surface)),
          :ok <- validate_grant_mode(grant, mode) do
       opts =
         opts
         |> Map.delete("role")
+        |> Map.delete("scoped_base_surface")
+        |> Map.delete(:scoped_base_surface)
         |> Map.delete("auth_claims")
+        |> Map.put(:scoped_base_surface, scoped_base_surface?)
         |> Map.delete(:auth_claims)
         |> Map.put(:role, if(grant, do: grant.role))
         |> Map.put(:grant, grant)
@@ -1000,6 +1017,19 @@ defmodule PtcRunnerMcp.Sessions do
   defp validate_mode(other),
     do: {:error, "mode must be \"read_only\" or \"write_capable\", got: #{Kernel.inspect(other)}"}
 
+  defp normalize_scoped_base_surface(nil), do: {:ok, false}
+  defp normalize_scoped_base_surface(value) when is_boolean(value), do: {:ok, value}
+
+  defp normalize_scoped_base_surface(_value),
+    do: {:error, "scoped_base_surface must be a boolean when supplied"}
+
+  defp start_option(opts, key) when is_atom(key) do
+    case Map.fetch(opts, key) do
+      {:ok, value} -> value
+      :error -> Map.get(opts, Atom.to_string(key))
+    end
+  end
+
   defp write_capable_runtime_prelude do
     configured_source = Config.prelude_source()
 
@@ -1175,6 +1205,7 @@ defmodule PtcRunnerMcp.Sessions do
               "mode",
               "tags",
               "role",
+              "scoped_base_surface",
               "owner",
               :owner,
               :auth_claims
@@ -1412,6 +1443,11 @@ defmodule PtcRunnerMcp.Sessions do
             "enum" => ["read_only", "write_capable"]
           },
           "role" => %{"type" => "string"},
+          "scoped_base_surface" => %{
+            "type" => "boolean",
+            "description" =>
+              "When true, future discovery may narrow transitive base namespaces to exports used by directly selected preludes. Execution authority is unchanged."
+          },
           "preludes" => %{
             "type" => "array",
             "items" => %{

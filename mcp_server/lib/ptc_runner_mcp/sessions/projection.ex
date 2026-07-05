@@ -24,6 +24,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     }
     |> maybe_put("role", Map.get(state, :role))
     |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
+    |> maybe_put_true("scoped_base_surface", Map.get(state, :scoped_base_surface))
     |> maybe_put("prelude_refs", selected_preludes_or_nil(state))
     |> maybe_put(
       "preludes",
@@ -104,7 +105,11 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   end
 
   defp selected_preludes(%{preludes: preludes}) when is_list(preludes) do
-    Enum.map(preludes, &stringify_keys/1)
+    Enum.map(preludes, fn prelude ->
+      prelude
+      |> Map.take([:id, :version, :checksum, :origin, :required_by])
+      |> stringify_keys()
+    end)
   end
 
   defp selected_preludes(_state), do: []
@@ -191,6 +196,9 @@ defmodule PtcRunnerMcp.Sessions.Projection do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
+  defp maybe_put_true(map, _key, _value), do: map
 
   # The collection hint (opt-in via --collection-hint) is more specific than
   # the generic truncation hint, so it replaces it when both would apply.

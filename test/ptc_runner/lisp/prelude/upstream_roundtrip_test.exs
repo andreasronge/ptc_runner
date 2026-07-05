@@ -79,7 +79,8 @@ defmodule PtcRunner.Lisp.Prelude.UpstreamRoundtripTest do
       try do
         {{:ok, step}, records} =
           Eval.run_lisp_with_records(runtime, ~S|(api/list-traces "acme")|,
-            prelude: direct_prelude()
+            prelude: direct_prelude(),
+            timeout: 5_000
           )
 
         # The export's value IS the recoverable tool/call result map (branchable
@@ -116,7 +117,7 @@ defmodule PtcRunner.Lisp.Prelude.UpstreamRoundtripTest do
       """
 
       try do
-        {:ok, step} = Eval.run_lisp(runtime, program, prelude: direct_prelude())
+        {:ok, step} = Eval.run_lisp(runtime, program, prelude: direct_prelude(), timeout: 5_000)
         assert step.return == %{count: 0}
       after
         Runtime.stop(runtime)
@@ -131,7 +132,10 @@ defmodule PtcRunner.Lisp.Prelude.UpstreamRoundtripTest do
 
       try do
         {:ok, step} =
-          Eval.run_lisp(runtime, ~S|(api/list-traces "acme")|, prelude: transitive_prelude())
+          Eval.run_lisp(runtime, ~S|(api/list-traces "acme")|,
+            prelude: transitive_prelude(),
+            timeout: 5_000
+          )
 
         # Transitive `requires` validated against the reachable runtime AND the
         # round-trip ran through the private helper.

@@ -80,6 +80,16 @@ defmodule PtcRunner.SubAgent.PreludeDepsIntegrationTest do
       assert {:ok, [base_ref, audit_ref]} = Session.preludes(session)
       assert %{id: "base", version: 1, required_by: ["audit"]} = base_ref
       assert %{id: "audit", version: 1, required_by: []} = audit_ref
+      assert base_ref.namespaces == ["base"]
+      assert audit_ref.namespaces == ["audit"]
+
+      assert get_in(audit_ref.form_graph, ["audit", "check", :dep_calls, :transitive]) == [
+               "base/fetch"
+             ]
+
+      assert get_in(audit_ref.form_graph, ["audit", "tag-all", :dep_calls, :transitive]) == [
+               "base/helper"
+             ]
     end
 
     test "compiled cross-namespace calls run at session runtime with one ledger entry" do
