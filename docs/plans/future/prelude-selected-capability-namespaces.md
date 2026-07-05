@@ -1,16 +1,15 @@
 # Prelude-Selected Capability Namespaces
 
-**Status:** reviewed for implementation (2026-07-05), then tightened after an
-independent implementation-readiness pass. This doc now holds three tiers with
-different maturity:
+**Status:** tiers 1-2 implemented for MCP stateful sessions (2026-07-06) after
+independent implementation-readiness and post-implementation review passes.
+This doc now holds three tiers with different maturity:
 
 1. **Dependent Surface Variant** (`scoped_base_surface`) — accepted by the
-   `composable-demo-2-20260705` gated loop; implementation candidate. Solution
-   outline below, verified against current source.
+   `composable-demo-2-20260705` gated loop; implemented as an opt-in session
+   presentation mask with measured before/after trace validation.
 2. **Contract Line Variant** (`strict_transitive_calls`) — design note filed
-   alongside it; implementation candidate. Solution outline verified against
-   current source, including one enforcement-site correction found in review
-   (the `:prelude_ref` value path).
+   alongside it; implemented as an opt-in role grant, including the
+   `:prelude_ref` value-position guard found in review.
 3. **Namespace unification** (the original direction: selected preludes as
    the main enable/disable surface, `mode: "write_capable"` collapsing into
    `preludes: ["prelude/write"]`) — long-term cleanup, *not* a prerequisite
