@@ -70,6 +70,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   @type error_reason ::
           {:invalid_form, String.t()}
+          | {:grant_filtered_prelude_export, String.t(), atom() | nil}
           | {:invalid_arity, atom(), String.t()}
           | {:invalid_cond_form, String.t()}
           | {:invalid_thread_form, atom(), String.t()}
@@ -161,10 +162,10 @@ defmodule PtcRunner.Lisp.Analyze do
   `do_analyze/2` clauses do not each have to thread it. Passing `nil` keeps the
   pre-prelude behavior unchanged.
   """
-  @spec analyze(term(), PtcRunner.Lisp.Prelude.t() | nil) ::
+  @spec analyze(term(), PtcRunner.Lisp.Prelude.t() | nil, [map()]) ::
           {:ok, CoreAST.t()} | {:error, error_reason()}
-  def analyze(raw_ast, prelude \\ nil) do
-    PreludeScope.with_prelude(prelude, fn -> do_analyze(raw_ast, false) end)
+  def analyze(raw_ast, prelude \\ nil, filtered_exports \\ []) do
+    PreludeScope.with_prelude(prelude, filtered_exports, fn -> do_analyze(raw_ast, false) end)
   end
 
   # ============================================================
@@ -1495,10 +1496,18 @@ defmodule PtcRunner.Lisp.Analyze do
   # A prelude namespace is known but `func` is not one of its public exports
   # (unknown export, or a private helper that has no export record).
   defp unknown_export_error(ns, func) do
-    {:error,
-     {:invalid_form,
-      "#{ns}/#{func} is not a public export of namespace #{ns}. " <>
-        "Discover its public exports with (ns-publics '#{ns}) or (apropos \"#{func}\")."}}
+    case PreludeScope.filtered_export(ns, func) do
+      nil ->
+        {:error,
+         {:invalid_form,
+          "#{ns}/#{func} is not a public export of namespace #{ns}. " <>
+            "Discover its public exports with (ns-publics '#{ns}) or (apropos \"#{func}\")."}}
+
+      filtered ->
+        ref = Map.get(filtered, :ref) || "#{ns}/#{func}"
+        reason = Map.get(filtered, :reason)
+        {:error, {:grant_filtered_prelude_export, ref, reason}}
+    end
   end
 
   # A qualified definition target `(def ns/sym ...)` / `(defn ns/sym ...)`.

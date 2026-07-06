@@ -487,6 +487,7 @@ defmodule PtcRunner.Lisp do
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
+      prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
       discovery_exec: Keyword.get(opts, :discovery_exec),
       link: Keyword.get(opts, :link, false)
     }
@@ -661,6 +662,7 @@ defmodule PtcRunner.Lisp do
     } = opts
 
     prelude = Map.get(opts, :prelude)
+    prelude_filtered_exports = Map.get(opts, :prelude_filtered_exports, [])
 
     # The compile sandbox closure must capture ONLY what parse/analyze need:
     # tool NAMES and memory KEYS, never the tool closures or memory values
@@ -682,7 +684,7 @@ defmodule PtcRunner.Lisp do
     compile_fn = fn ->
       with {:ok, raw_ast} <- Parser.parse(source),
            :ok <- check_symbol_limit(raw_ast, max_symbols),
-           {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude),
+           {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
            :ok <- check_undefined_vars(core_ast, memory_keys),
            :ok <-
              check_undefined_tools(
@@ -1073,12 +1075,27 @@ defmodule PtcRunner.Lisp do
       "attach it directly to use #{ref}."
   end
 
+  def format_error({:grant_filtered_prelude_export, ref, reason}) do
+    "#{ref} is public in an attached prelude but was removed from this session by " <>
+      "the role grant (#{grant_filter_reason(reason)}); see prelude_projection " <>
+      "in the session start result."
+  end
+
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
   def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
   # Handle other 3-tuple error formats from Eval: {type, message, data}
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
+
+  defp grant_filter_reason(:ptc_tool_denied), do: "ptc_tool_denied"
+  defp grant_filter_reason(:upstream_tool_denied), do: "upstream_tool_denied"
+
+  defp grant_filter_reason(:dynamic_upstream_requires_broad_grant),
+    do: "dynamic_upstream_requires_broad_grant"
+
+  defp grant_filter_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp grant_filter_reason(_reason), do: "grant_filtered"
 
   # Human-readable kill message from `PtcRunner.Sandbox.memory_exceeded_info/0`
   # diagnostics (setup-phase kills are a grant problem, not a program

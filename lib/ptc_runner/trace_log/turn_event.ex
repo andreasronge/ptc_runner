@@ -35,7 +35,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
 
       program, raw_response, result_preview, prints, memory_diff,
       tool_calls, catalog_ops, evidence_reads, limits_hit, preludes,
-      prelude_call_policy, prelude_presentation, fail, turn_type
+      prelude_projection, prelude_call_policy, prelude_presentation, fail, turn_type
 
   Per-driver fields that don't apply are nil/empty. `raw_response` carries what
   the driver's LLM generated when there is no parsed `program` (SubAgent
@@ -346,6 +346,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "evidence_reads" => EvidenceReadProjection.normalize(Map.get(attrs, :evidence_reads)),
       "limits_hit" => Map.get(attrs, :limits_hit) || [],
       "preludes" => Map.get(attrs, :preludes) || [],
+      "prelude_projection" => Map.get(attrs, :prelude_projection),
       "prelude_call_policy" => Map.get(attrs, :prelude_call_policy),
       "prelude_presentation" => Map.get(attrs, :prelude_presentation),
       "fail" => normalize_fail(Map.get(attrs, :fail)),

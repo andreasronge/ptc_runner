@@ -41,6 +41,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
     :limits,
     :registry,
     :runtime_prelude,
+    :prelude_projection,
     :scoped_base_surface,
     :prelude_presentation,
     :direct_namespaces,
@@ -78,6 +79,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
           upstream_calls: [map()],
           preludes: [map()],
           runtime_prelude: PtcRunner.Lisp.Prelude.t() | nil,
+          prelude_projection: map() | nil,
           scoped_base_surface: boolean(),
           prelude_presentation: map() | nil,
           direct_namespaces: [String.t()],
@@ -126,6 +128,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
       updated_at: now,
       expires_at: expires_at,
       runtime_prelude: Keyword.get(opts, :runtime_prelude),
+      prelude_projection: Keyword.get(opts, :prelude_projection),
       scoped_base_surface: Keyword.get(opts, :scoped_base_surface, false),
       prelude_presentation: Keyword.get(opts, :prelude_presentation),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
@@ -731,6 +734,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
             fail: Keyword.get(opts, :fail),
             limits_hit: Keyword.get(opts, :limits_hit, []),
             preludes: TurnEvent.prelude_provenance(Map.get(step, :prelude_trace)),
+            prelude_projection: prelude_projection_policy(current),
             prelude_call_policy: prelude_call_policy(current),
             prelude_presentation: prelude_presentation_policy(current)
           )
@@ -803,12 +807,38 @@ defmodule PtcRunnerMcp.Sessions.Session do
   defp export_mask_namespaces(mask) when is_map(mask), do: mask |> Map.keys() |> Enum.sort()
   defp export_mask_namespaces(_mask), do: []
 
+  defp prelude_projection_policy(%__MODULE__{} = state) do
+    Projection.prelude_projection(state)
+  end
+
   defp prelude_export_mask(%{scoped_base_surface: true, prelude_presentation: presentation})
        when is_map(presentation) do
     Map.get(presentation, :export_mask)
   end
 
   defp prelude_export_mask(_snapshot), do: nil
+
+  defp prelude_filtered_exports(snapshot) do
+    snapshot
+    |> prelude_projection()
+    |> Map.get(:filtered_exports, [])
+  end
+
+  defp prelude_projection(%{prelude_projection: projection}) when is_map(projection),
+    do: projection
+
+  defp prelude_projection(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude} = snapshot),
+    do: Policy.project_prelude(prelude, Map.get(snapshot, :grant))
+
+  defp prelude_projection(snapshot) do
+    case Config.runtime_prelude() do
+      %PtcRunner.Lisp.Prelude{} = prelude ->
+        Policy.project_prelude(prelude, Map.get(snapshot, :grant))
+
+      _other ->
+        %{prelude: nil, filtered_exports: []}
+    end
+  end
 
   # No signature supplied — skip validation; commit_success won't emit a
   # `validated` field. Distinct from `{:ok, nil}` (a contract supplied
@@ -1003,6 +1033,7 @@ defmodule PtcRunnerMcp.Sessions.Session do
        direct_namespaces: Map.get(snapshot, :direct_namespaces, []),
        transitive_namespace_requirers: Map.get(snapshot, :transitive_namespace_requirers, %{}),
        prelude_export_mask: prelude_export_mask(snapshot),
+       prelude_filtered_exports: prelude_filtered_exports(snapshot),
        link: true
      ] ++ Sandbox.parallel_limit_opts(max_heap))
     |> maybe_put(:prelude, snapshot_prelude(snapshot))
@@ -1010,6 +1041,9 @@ defmodule PtcRunnerMcp.Sessions.Session do
     |> maybe_put(:runtime, Map.get(opts, :runtime))
     |> maybe_put(:upstream_tools, Policy.upstream_tool_grants(Map.get(snapshot, :grant)))
   end
+
+  defp snapshot_prelude(%{prelude_projection: %{prelude: %PtcRunner.Lisp.Prelude{} = prelude}}),
+    do: prelude
 
   defp snapshot_prelude(%{runtime_prelude: %PtcRunner.Lisp.Prelude{} = prelude} = snapshot),
     do: Policy.filter_prelude(prelude, Map.get(snapshot, :grant))

@@ -36,9 +36,14 @@ defmodule PtcRunner.Lisp.Analyze.PreludeScope do
   restoring any previously installed scope afterward.
   """
   @spec with_prelude(Prelude.t() | nil, (-> result)) :: result when result: term()
-  def with_prelude(prelude, fun) when is_function(fun, 0) do
+  def with_prelude(prelude, fun) when is_function(fun, 0),
+    do: with_prelude(prelude, [], fun)
+
+  @spec with_prelude(Prelude.t() | nil, [map()], (-> result)) :: result when result: term()
+  def with_prelude(prelude, filtered_exports, fun) when is_function(fun, 0) do
     previous = Process.get(@key, :__none__)
-    Process.put(@key, prelude)
+
+    Process.put(@key, %{prelude: prelude, filtered_exports: filtered_export_map(filtered_exports)})
 
     try do
       fun.()
@@ -54,7 +59,20 @@ defmodule PtcRunner.Lisp.Analyze.PreludeScope do
   @spec current() :: Prelude.t() | nil
   def current do
     case Process.get(@key, nil) do
+      %{prelude: %Prelude{} = prelude} -> prelude
       %Prelude{} = prelude -> prelude
+      _ -> nil
+    end
+  end
+
+  @doc "Returns metadata for a prelude export removed by session grant projection."
+  @spec filtered_export(term(), term()) :: map() | nil
+  def filtered_export(ns, symbol) do
+    with ns_str when is_binary(ns_str) <- to_string_or_nil(ns),
+         symbol_str when is_binary(symbol_str) <- to_string_or_nil(symbol),
+         %{filtered_exports: filtered_exports} <- Process.get(@key, nil) do
+      Map.get(filtered_exports, "#{ns_str}/#{symbol_str}")
+    else
       _ -> nil
     end
   end
@@ -112,4 +130,13 @@ defmodule PtcRunner.Lisp.Analyze.PreludeScope do
     do: Atom.to_string(value)
 
   defp to_string_or_nil(_), do: nil
+
+  defp filtered_export_map(entries) when is_list(entries) do
+    Map.new(entries, fn entry ->
+      ref = Map.get(entry, :ref) || Map.get(entry, "ref")
+      {ref, entry}
+    end)
+  end
+
+  defp filtered_export_map(_entries), do: %{}
 end

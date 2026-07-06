@@ -163,27 +163,42 @@ defmodule PtcRunnerMcp.Sessions.Policy do
 
   @spec filter_prelude(Prelude.t() | nil, grant() | nil) :: Prelude.t() | nil
   def filter_prelude(nil, _grant), do: nil
-  def filter_prelude(%Prelude{} = prelude, nil), do: prelude
+  def filter_prelude(%Prelude{} = prelude, grant), do: project_prelude(prelude, grant).prelude
 
-  def filter_prelude(%Prelude{exports: exports} = prelude, %Grant{} = grant) do
-    allowed_exports = Enum.filter(exports, &prelude_export_allowed?(grant, &1))
+  @spec project_prelude(Prelude.t() | nil, grant() | nil) :: %{
+          prelude: Prelude.t() | nil,
+          filtered_exports: [map()]
+        }
+  def project_prelude(nil, _grant), do: %{prelude: nil, filtered_exports: []}
 
-    %{
+  def project_prelude(%Prelude{} = prelude, nil),
+    do: %{prelude: prelude, filtered_exports: []}
+
+  def project_prelude(%Prelude{exports: exports} = prelude, %Grant{} = grant) do
+    {allowed_exports, filtered_exports} =
+      Enum.reduce(exports, {[], []}, fn export, {allowed, filtered} ->
+        case prelude_export_filter_reason(grant, export) do
+          nil -> {[export | allowed], filtered}
+          reason -> {allowed, [filtered_export(export, reason) | filtered]}
+        end
+      end)
+
+    allowed_exports = Enum.reverse(allowed_exports)
+
+    filtered_prelude = %{
       prelude
       | exports: allowed_exports,
         source_index: filtered_source_index(prelude, allowed_exports)
     }
+
+    %{prelude: filtered_prelude, filtered_exports: Enum.reverse(filtered_exports)}
   end
 
   @spec prelude_export_allowed?(grant() | nil, Export.t()) :: boolean()
   def prelude_export_allowed?(nil, %Export{}), do: true
 
   def prelude_export_allowed?(%Grant{} = grant, %Export{} = export) do
-    upstream_requirements = export_upstream_requirements(export)
-
-    Enum.all?(export_tool_requirements(export), &ptc_tool_allowed?(grant, &1)) and
-      Enum.all?(upstream_requirements, &upstream_tool_allowed?(grant, &1)) and
-      dynamic_upstream_export_allowed?(grant, export, upstream_requirements)
+    is_nil(prelude_export_filter_reason(grant, export))
   end
 
   @spec preludes_allowed?(grant() | nil, [term()]) :: :ok | {:error, String.t()}
@@ -238,6 +253,33 @@ defmodule PtcRunnerMcp.Sessions.Policy do
     end)
     |> Kernel.++(Enum.reject(tool_refs, &(&1 == "call")))
     |> Enum.uniq()
+  end
+
+  defp prelude_export_filter_reason(%Grant{} = grant, %Export{} = export) do
+    upstream_requirements = export_upstream_requirements(export)
+
+    cond do
+      Enum.any?(export_tool_requirements(export), &(not ptc_tool_allowed?(grant, &1))) ->
+        :ptc_tool_denied
+
+      Enum.any?(upstream_requirements, &(not upstream_tool_allowed?(grant, &1))) ->
+        :upstream_tool_denied
+
+      not dynamic_upstream_export_allowed?(grant, export, upstream_requirements) ->
+        :dynamic_upstream_requires_broad_grant
+
+      true ->
+        nil
+    end
+  end
+
+  defp filtered_export(%Export{} = export, reason) do
+    %{
+      ref: export.ref,
+      namespace: export.namespace,
+      name: export.symbol,
+      reason: reason
+    }
   end
 
   defp eval_tool_allowed?(%Grant{} = grant, "call"), do: upstream_call_tool_allowed?(grant)

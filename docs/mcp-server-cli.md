@@ -197,6 +197,16 @@ discoverable-only exports remain available through `(all-ns)`, `(ns-publics ...)
 form (prelude-only) to help repair incorrect usage when the docstring is not
 enough.
 
+When a session role grant removes attached prelude exports from the callable
+surface, the start response includes `prelude_projection` with
+`filtered_export_count`, any `empty_namespaces`, per-namespace filtered counts,
+and a bounded `filtered_exports` sample of `{ref, namespace, name, reason}`
+entries. If the sample is capped, `filtered_exports_truncated` is `true`.
+`ns-publics` and `dir` still show the reduced session surface; calling a
+filtered export reports that it is public in an attached prelude but removed by
+the role grant, and points back to `prelude_projection` instead of suggesting
+store-discovery forms.
+
 For store-backed prelude selection, use `--prelude-store-seed <file-or-dir>` to
 seed the server's volatile in-memory store at boot. A stateful session can then
 start with `preludes: ["id", "id@version"]`; those refs are frozen for the

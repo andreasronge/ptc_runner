@@ -12,6 +12,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   @session_feedback_max_chars 2048
   @collection_hint_min_items 20
   @max_prelude_doc_bytes 1_024
+  @max_filtered_export_entries 50
 
   @doc "Render a session-start response."
   @spec start(map()) :: map()
@@ -26,6 +27,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
     |> maybe_put_true("scoped_base_surface", Map.get(state, :scoped_base_surface))
     |> maybe_put("prelude_presentation", prelude_presentation(state))
+    |> maybe_put("prelude_projection", prelude_projection(state))
     |> maybe_put("prelude_refs", selected_preludes_or_nil(state))
     |> maybe_put(
       "preludes",
@@ -188,6 +190,84 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   end
 
   defp prelude_presentation(_state), do: nil
+
+  @doc "Render the bounded grant-projection payload shared by start responses and turn logs."
+  @spec prelude_projection(map()) :: map() | nil
+  def prelude_projection(state) do
+    filtered =
+      state
+      |> prelude_projection_report()
+      |> Map.get(:filtered_exports, [])
+
+    case filtered do
+      [] ->
+        nil
+
+      entries ->
+        bounded_entries =
+          entries |> Enum.sort_by(&Map.get(&1, :ref)) |> Enum.take(@max_filtered_export_entries)
+
+        %{
+          "filtered_export_count" => length(entries),
+          "filtered_exports_truncated" => length(entries) > length(bounded_entries),
+          "empty_namespaces" => empty_filtered_namespaces(state, entries),
+          "filtered_namespaces" => filtered_namespaces(entries),
+          "filtered_exports" => Enum.map(bounded_entries, &project_filtered_export/1)
+        }
+    end
+  end
+
+  defp prelude_projection_report(%{prelude_projection: projection}) when is_map(projection),
+    do: projection
+
+  defp prelude_projection_report(%{runtime_prelude: %Prelude{} = prelude} = state),
+    do: Policy.project_prelude(prelude, Map.get(state, :grant))
+
+  defp prelude_projection_report(state) do
+    case Config.runtime_prelude() do
+      %Prelude{} = prelude -> Policy.project_prelude(prelude, Map.get(state, :grant))
+      _other -> %{prelude: nil, filtered_exports: []}
+    end
+  end
+
+  defp empty_filtered_namespaces(state, filtered) do
+    callable_by_namespace =
+      state
+      |> session_runtime_prelude()
+      |> case do
+        %Prelude{exports: exports} ->
+          exports
+          |> Enum.group_by(& &1.namespace)
+          |> Map.new(fn {namespace, exports} -> {namespace, length(exports)} end)
+
+        _other ->
+          %{}
+      end
+
+    filtered
+    |> Enum.map(&Map.get(&1, :namespace))
+    |> Enum.uniq()
+    |> Enum.filter(&(Map.get(callable_by_namespace, &1, 0) == 0))
+    |> Enum.sort()
+  end
+
+  defp filtered_namespaces(filtered) do
+    filtered
+    |> Enum.group_by(&Map.get(&1, :namespace))
+    |> Enum.map(fn {namespace, entries} ->
+      %{"namespace" => namespace, "filtered_export_count" => length(entries)}
+    end)
+    |> Enum.sort_by(& &1["namespace"])
+  end
+
+  defp project_filtered_export(entry) when is_map(entry) do
+    %{
+      "ref" => Map.get(entry, :ref),
+      "namespace" => Map.get(entry, :namespace),
+      "name" => Map.get(entry, :name),
+      "reason" => entry |> Map.get(:reason) |> Atom.to_string()
+    }
+  end
 
   defp export_mask_namespaces(mask) when is_map(mask), do: mask |> Map.keys() |> Enum.sort()
   defp export_mask_namespaces(_mask), do: []

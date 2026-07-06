@@ -953,6 +953,7 @@ defmodule PtcRunnerMcp.Sessions do
             |> Map.delete(:preludes)
             |> maybe_put(:runtime_prelude, Map.get(selected, :runtime_prelude))
             |> maybe_put(:preludes, Map.get(selected, :preludes))
+            |> maybe_put(:prelude_projection, Map.get(selected, :prelude_projection))
             |> maybe_put(:prelude_presentation, Map.get(selected, :prelude_presentation))
             |> maybe_put(:direct_namespaces, Map.get(selected, :direct_namespaces))
             |> maybe_put(
@@ -1059,7 +1060,8 @@ defmodule PtcRunnerMcp.Sessions do
         {:ok, %{}}
 
       {runtime_prelude, resolved} ->
-        filtered_prelude = Policy.filter_prelude(runtime_prelude, Map.get(opts, :grant))
+        projection = Policy.project_prelude(runtime_prelude, Map.get(opts, :grant))
+        filtered_prelude = projection.prelude
 
         presentation =
           prelude_presentation(
@@ -1073,6 +1075,7 @@ defmodule PtcRunnerMcp.Sessions do
          %{
            runtime_prelude: runtime_prelude,
            preludes: resolved,
+           prelude_projection: projection,
            prelude_presentation: presentation,
            direct_namespaces: direct_namespaces(runtime_prelude, refs),
            transitive_namespace_requirers:
@@ -2003,6 +2006,11 @@ defmodule PtcRunnerMcp.Sessions do
             },
             "additionalProperties" => true
           }
+        },
+        "prelude_projection" => %{
+          "type" => "object",
+          "description" =>
+            "Grant projection summary for attached preludes, including exports removed from this session's callable surface."
         },
         "limits" => %{"type" => "object"},
         "memory" => %{"type" => "object"},

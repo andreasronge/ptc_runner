@@ -2188,8 +2188,26 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       grant = policy.roles["analyst"]
 
       filtered = Policy.filter_prelude(prelude, grant)
+      projection = Policy.project_prelude(prelude, grant)
 
       assert Enum.map(filtered.exports, & &1.ref) == ["crm/allowed"]
+      assert Enum.map(projection.prelude.exports, & &1.ref) == ["crm/allowed"]
+
+      assert projection.filtered_exports == [
+               %{
+                 ref: "crm/denied",
+                 namespace: "crm",
+                 name: "denied",
+                 reason: :upstream_tool_denied
+               },
+               %{
+                 ref: "crm/dynamic",
+                 namespace: "crm",
+                 name: "dynamic",
+                 reason: :dynamic_upstream_requires_broad_grant
+               }
+             ]
+
       assert Map.has_key?(filtered.source_index, "crm/allowed")
       refute Map.has_key?(filtered.source_index, "crm/denied")
       refute Map.has_key?(filtered.source_index, "crm/dynamic")
@@ -2213,6 +2231,101 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
                "crm/denied",
                "crm/dynamic"
              ]
+    end
+
+    @tag :tmp_dir
+    test "grant-filtered prelude exports are explained at start, call, and turn log", %{
+      tmp_dir: dir
+    } do
+      {:ok, store} = PreludeStore.new()
+
+      {:ok, _candidate} =
+        PreludeStore.write(store, "crm", """
+        (ns crm "CRM helpers." {:visibility :prompt})
+        (defn dynamic [server tool] (tool/call {:server server :tool tool :args {}}))
+        """)
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(:policy, role_policy!("analyst", upstream_tools: ["upstream:crm/get_user"]))
+      )
+
+      TurnLogConfig.set(%{turn_log_dir: dir})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      start =
+        call("lisp_session_start", %{
+          "role" => "analyst",
+          "preludes" => ["crm"]
+        })
+
+      assert start["isError"] == false
+      assert %{"session_id" => sid} = start["structuredContent"]
+
+      assert start["structuredContent"]["prelude_projection"] == %{
+               "filtered_export_count" => 1,
+               "filtered_exports_truncated" => false,
+               "empty_namespaces" => ["crm"],
+               "filtered_namespaces" => [
+                 %{"namespace" => "crm", "filtered_export_count" => 1}
+               ],
+               "filtered_exports" => [
+                 %{
+                   "ref" => "crm/dynamic",
+                   "namespace" => "crm",
+                   "name" => "dynamic",
+                   "reason" => "dynamic_upstream_requires_broad_grant"
+                 }
+               ]
+             }
+
+      ns_publics =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(ns-publics 'crm)|
+        })
+
+      assert ns_publics["isError"] == false
+      assert ns_publics["structuredContent"]["result"] == "user=> {}"
+
+      filtered_call =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(crm/dynamic "crm" "get_user")|
+        })
+
+      assert filtered_call["isError"] == true
+
+      assert filtered_call["structuredContent"]["message"] =~
+               "crm/dynamic is public in an attached prelude but was removed"
+
+      assert filtered_call["structuredContent"]["message"] =~
+               "dynamic_upstream_requires_broad_grant"
+
+      assert filtered_call["structuredContent"]["message"] =~ "prelude_projection"
+
+      missing_call =
+        call("lisp_session_eval", %{
+          "session_id" => sid,
+          "program" => ~S|(crm/missing)|
+        })
+
+      assert missing_call["isError"] == true
+
+      assert missing_call["structuredContent"]["message"] =~
+               "crm/missing is not a public export of namespace crm. " <>
+                 "Discover its public exports with (ns-publics 'crm) or (apropos \"missing\")."
+
+      stop_turn_log!()
+
+      turns = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+
+      assert Enum.any?(turns, fn turn ->
+               get_in(turn, ["data", "prelude_projection"]) ==
+                 start["structuredContent"]["prelude_projection"]
+             end)
     end
 
     @tag :tmp_dir
