@@ -5,8 +5,12 @@ independent implementation-readiness and post-implementation review passes.
 This doc now holds three tiers with different maturity:
 
 1. **Dependent Surface Variant** (`scoped_base_surface`) — accepted by the
-   `composable-demo-2-20260705` gated loop; implemented as an opt-in session
-   presentation mask with measured before/after trace validation.
+   `composable-demo-2-20260705` gated loop; implemented as an opt-in,
+   default-off session presentation mask. The bench promotion run
+   `scoped-base-surface-promotion-20260706` at `ptc-bench-comparison`
+   commit `3250c16` validated the mechanism but demoted the attention-cost
+   claim to no-change: task output still matched, the scoped surface narrowed
+   6 -> 1, but `catalog_ops` increased 4 -> 8 on the motivating split.
 2. **Contract Line Variant** (`strict_transitive_calls`) — design note filed
    alongside it; implemented as an opt-in role grant, including the
    `:prelude_ref` value-position guard found in review.
@@ -111,7 +115,11 @@ need to touch, the contract line.
 
 The `composable-demo-2-20260705` gated loop produced and accepted a concrete
 variant of this direction for dependency-heavy read-only sessions:
-`scoped_base_surface`.
+`scoped_base_surface`. A follow-up bench promotion run on 2026-07-06
+demoted the feature's attention-cost claim under the accepted gate: the
+implementation mechanics held, but the measured task did not get cheaper.
+The option therefore remains experimental/default-off and should be treated as
+a diagnostic presentation knob, not a promoted default.
 
 When a session attaches dependent prelude `P` with base dependency `B`, and
 `scoped_base_surface` is explicitly enabled, the catalog/discovery surface
@@ -143,8 +151,13 @@ Required shape from the accepted review:
 The demo split that produced this request had `paged_audit` depend on
 `paged_base`; recomputing cross-layer references over all audit forms yielded
 `{paged_base/sample}`, so the scoped catalog would present one base export
-instead of six. The request is provenance-tracked as specified and reviewed by
-the `ptc-bench-comparison` gated loop, not as an implementation commitment.
+instead of six. The promotion measurement confirmed that mechanical narrowing
+and task-output parity, but the model traversed source into private base
+helpers rather than relying on public export browsing. The mask was therefore
+off the dominant path and added reconciliation work instead of reducing it.
+The request is provenance-tracked as specified, reviewed, implemented, and
+measured by the `ptc-bench-comparison` gated loop; the measured outcome is
+demotion to no-change for promotion purposes.
 
 ### Solution Outline
 
@@ -234,6 +247,13 @@ promotion run:
   because `PromptInventory.render` and `Discovery` are distinct code paths;
 - the motivating split gets a `catalog_ops` before/after with no task-output
   regression before this option is promoted beyond experimental/default-off.
+
+Result: `scoped-base-surface-promotion-20260706` recorded task-output parity
+and the expected 6 -> 1 public-surface narrowing, but `catalog_ops` moved
+4 -> 8. Under the accepted measured-promotion rule, this demotes the option to
+no-change for the motivating split. Do not search for a friendlier workload to
+retrofit promotion; any later measurement should have its own pre-registered
+reason and workload.
 
 ## Contract Line Variant (Strict Transitive Calls)
 
