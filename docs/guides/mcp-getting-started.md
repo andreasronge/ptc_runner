@@ -288,14 +288,16 @@ session with the current default version of `paged`:
 }
 ```
 
-Use `"paged@3"` to pin an explicit version. The MCP layer only projects the core
-session/store behavior: it lists, resolves, and freezes selected preludes; it
-does not compile, diff, promote defaults, or persist preludes itself.
+Use `"paged@3"` to pin an explicit version. For role-scoped sessions,
+transitive prelude dependencies, scoped discovery, and improvement loops, see
+[MCP Prelude Roles](mcp-prelude-roles.md).
 
 ## What's next
 
 - [`docs/mcp-server.md`](../mcp-server.md) — security model, comparison
   with Python / JS execution servers, architecture diagram.
+- [`docs/guides/mcp-prelude-roles.md`](mcp-prelude-roles.md) — selected
+  preludes, role grants, scoped base surfaces, and improvement loops.
 - [`docs/ptc-lisp-specification.md`](../ptc-lisp-specification.md) —
   the PTC-Lisp language reference (a Clojure subset).
 - [`docs/function-reference.md`](../function-reference.md) — every

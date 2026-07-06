@@ -314,6 +314,7 @@ llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
 - **[Patterns](docs/guides/subagent-patterns.md)** - Chaining, orchestration, and composition
 - **[Root Upstream Runtime](docs/upstream-runtime.md)** - Embed OpenAPI/MCP upstream tools in Elixir callers or `mix ptc.repl`
 - **[MCP Aggregator Mode](docs/aggregator-mode.md)** - Expose the same upstream runtime through `ptc_runner_mcp`
+- **[MCP Prelude Roles](docs/guides/mcp-prelude-roles.md)** - Selected preludes, role grants, scoped dependency surfaces, and improvement loops
 - **[Testing](docs/guides/subagent-testing.md)** - Mocking LLMs and integration testing
 - **[Troubleshooting](docs/guides/subagent-troubleshooting.md)** - Common issues and solutions
 - **[MCP Getting Started](docs/guides/mcp-getting-started.md)** - Using `ptc_runner_mcp` from MCP clients or server-side agent runtimes (overview: [`docs/mcp-server.md`](docs/mcp-server.md))

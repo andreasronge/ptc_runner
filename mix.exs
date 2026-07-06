@@ -301,6 +301,7 @@ defmodule PtcRunner.MixProject do
         "docs/mcp-server-cli.md",
         "docs/mcp-server.md",
         "docs/guides/mcp-getting-started.md",
+        "docs/guides/mcp-prelude-roles.md",
         "docs/upstream-runtime.md",
         "docs/aggregator-mode.md",
         "docs/agentic-mode.md",
@@ -348,7 +349,7 @@ defmodule PtcRunner.MixProject do
         "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
         "Upstream Runtime": ~r/docs\/(upstream-runtime|aggregator-mode)\.md/,
         "MCP Server":
-          ~r/mcp_server\/(README|DEVELOPMENT)\.md|docs\/(mcp-server|mcp-server-cli|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|agentic-mode)\.md|docs\/guides\/mcp-getting-started\.md/,
+          ~r/mcp_server\/(README|DEVELOPMENT)\.md|docs\/(mcp-server|mcp-server-cli|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|agentic-mode)\.md|docs\/guides\/mcp-(getting-started|prelude-roles)\.md/,
         Reference:
           ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md|docs\/conformance\/.+\.md/,
         Livebooks: ~r/livebooks\/.+\.livemd/
