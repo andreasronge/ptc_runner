@@ -294,6 +294,13 @@ use D-E as the remaining implementation queue.
 Goal: make the running HTTP MCP server's volatile prelude store externally
 capturable by an operator/harness.
 
+Status: implemented. `mcp_server/lib/ptc_runner_mcp/http/router.ex` registers
+the admin routes below when `--http-admin-token` is configured; the root
+library functions they call (`PtcRunner.PreludeStore.snapshot/1`, `restore/2`,
+`diff/2`, `export/3`) are specced in full in
+[`future/experiment-platform-affordances.md`](future/experiment-platform-affordances.md)'s
+"Slice 1 Implemented API" section rather than repeated here.
+
 Minimal shape:
 
 - add an operator-only admin surface for store snapshot/export, not a
@@ -877,7 +884,7 @@ storage yet.
 Status: core implemented via `--session-roles` /
 `PTC_RUNNER_MCP_SESSION_ROLES` (`mcp_server/lib/ptc_runner_mcp/sessions/policy.ex`),
 except where a sub-bullet below has its own narrower status note.
-[`../future/prelude-selected-capability-namespaces.md`](../future/prelude-selected-capability-namespaces.md)
+[`future/prelude-selected-capability-namespaces.md`](future/prelude-selected-capability-namespaces.md)
 proposes folding the `mode: "write_capable"` special case into prelude
 selection on top of this now-implemented grant model — read that doc against
 this slice, not as a standalone redesign.

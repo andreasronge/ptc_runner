@@ -9,6 +9,14 @@ incorporated: `prelude/form` moved behind the span scanner (no rendered
 fallback), scanner test coverage is a hard gate for `prelude/edit`,
 direct/transitive authority split in the dep surface, explicit-only
 `add-form` placement, base version + parent checksum in the edit result.
+
+Known follow-on gap, not covered by this plan: `PreludeStore.edit/4` always
+reads the *current* candidate as its base and overrides any caller-supplied
+`parent_checksum`/`parent_version`, so it cannot express "apply these deltas
+only if version N is still current" across a prepare-then-submit gap. See
+[`future/prelude-edit-expected-base.md`](future/prelude-edit-expected-base.md)
+for the expected-base guard this would need.
+
 Derived from the MCP-native prelude
 self-improvement experiments (external repo `ptc-bench-comparison`,
 `docs/mcp-native-prelude-self-improvement-plan.md`), whose Stage 4/5 replay

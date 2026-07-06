@@ -24,12 +24,17 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
   alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
   alias PtcRunner.PreludeStore
   alias PtcRunner.TraceLog.{Analyzer, Collector, Introspection}
-  alias PtcRunnerMcp.{JsonRpc, Log, McpTestHelpers, ResponseProfile, Sessions, Tools}
+  alias PtcRunner.Upstream.Runtime
+  alias PtcRunnerMcp.{Application, JsonRpc, Log, McpTestHelpers, ResponseProfile, Sessions, Tools}
+  alias PtcRunnerMcp.RootUpstreamRuntime
   alias PtcRunnerMcp.Sessions.{Config, Limits, Owner, Projection, Session}
   alias PtcRunnerMcp.Sessions.Policy
   alias PtcRunnerMcp.Sessions.Registry, as: SessionsRegistry
   alias PtcRunnerMcp.TestSupport.SoakHelpers
   alias PtcRunnerMcp.{TurnLogCollector, TurnLogConfig}
+
+  @schema Path.expand("../fixtures/openapi/observatory.openapi.json", __DIR__)
+  @fixture_recv_timeout_ms 5_000
 
   # A second stdio owner with a *different* instance id. Because the
   # session is created under the process-wide stdio owner, this map is a
@@ -49,6 +54,7 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       ResponseProfile.set(old_profile)
       TurnLogConfig.set(old_turn_log_config)
       TurnLogConfig.put_collector(nil)
+      Runtime.stop(RootUpstreamRuntime.name())
     end)
 
     :ok
@@ -2329,6 +2335,143 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "seeded explicit upstream requires attach and filter under finite role grants", %{
+      tmp_dir: dir
+    } do
+      seed_dir = Path.join(dir, "seed")
+      File.mkdir_p!(seed_dir)
+
+      File.write!(Path.join(seed_dir, "seeded.clj"), """
+      (ns seeded "Seeded dynamic upstream helpers." {:visibility :prompt})
+
+      (defn- fetch [server tool args]
+        (tool/call {:server server :tool tool :args args}))
+
+      (defn collect
+        "Collect traces through dynamic upstream dispatch."
+        {:requires ["upstream:observatory/list-traces"]}
+        [org]
+        (fetch "observatory" "list-traces" {:org_id org :limit 1}))
+
+      (defn ungranted-control
+        "Control export whose declared operation is not role-granted."
+        {:requires ["upstream:observatory/get-trace"]}
+        [trace-id]
+        (fetch "observatory" "get-trace" {:trace_id trace-id}))
+      """)
+
+      File.write!(Path.join(seed_dir, "unmarked.clj"), """
+      (ns unmarked "Seeded helper without explicit upstream metadata." {:visibility :prompt})
+
+      (defn- fetch [server tool args]
+        (tool/call {:server server :tool tool :args args}))
+
+      (defn collect [org]
+        (fetch "observatory" "list-traces" {:org_id org :limit 1}))
+      """)
+
+      %{prelude_store: store} =
+        Application.maybe_seed_prelude_store(%{prelude_store_seed: seed_dir})
+
+      {:ok, server} = start_http_fixture(%{"traces" => [%{"id" => "trace-1"}]})
+
+      {:ok, _pid} =
+        Runtime.start_supervised(
+          config: observatory_root_config(server.base_url),
+          name: RootUpstreamRuntime.name(),
+          catalog_snapshot_mode: :frozen
+        )
+
+      Config.set(
+        Config.get()
+        |> Map.put(:prelude_store, store)
+        |> Map.put(
+          :policy,
+          role_policy!("analyst",
+            upstream_tools: ["upstream:observatory/list-traces"],
+            strict_transitive_calls: true
+          )
+        )
+      )
+
+      try do
+        start =
+          call("lisp_session_start", %{
+            "role" => "analyst",
+            "preludes" => ["seeded", "unmarked"]
+          })
+
+        assert start["isError"] == false
+        assert %{"session_id" => sid} = start["structuredContent"]
+
+        assert %{
+                 "filtered_export_count" => 2,
+                 "filtered_exports" => filtered_exports
+               } = start["structuredContent"]["prelude_projection"]
+
+        assert Enum.any?(filtered_exports, fn export ->
+                 match?(
+                   %{
+                     "ref" => "seeded/ungranted-control",
+                     "reason" => "upstream_tool_denied"
+                   },
+                   export
+                 )
+               end)
+
+        assert Enum.any?(filtered_exports, fn export ->
+                 match?(
+                   %{
+                     "ref" => "unmarked/collect",
+                     "reason" => "dynamic_upstream_requires_broad_grant"
+                   },
+                   export
+                 )
+               end)
+
+        publics =
+          call("lisp_session_eval", %{
+            "session_id" => sid,
+            "program" => ~S|(ns-publics 'seeded)|
+          })
+
+        assert publics["isError"] == false
+        assert publics["structuredContent"]["result"] =~ "collect"
+        refute publics["structuredContent"]["result"] =~ "ungranted-control"
+
+        result =
+          call("lisp_session_eval", %{
+            "session_id" => sid,
+            "program" => ~S|(seeded/collect "acme")|
+          })
+
+        assert result["isError"] == false
+        assert result["structuredContent"]["result"] =~ "trace-1"
+
+        assert_receive {:http_fixture_request, request}, 1_000
+        assert request =~ "GET /api/v1/traces?"
+        assert request =~ "org_id=acme"
+
+        unmarked =
+          call("lisp_session_eval", %{
+            "session_id" => sid,
+            "program" => ~S|(unmarked/collect "acme")|
+          })
+
+        assert unmarked["isError"] == true
+
+        assert unmarked["structuredContent"]["message"] =~
+                 "dynamic_upstream_requires_broad_grant"
+      after
+        Process.unlink(server.pid)
+
+        if Process.alive?(server.pid) do
+          Process.exit(server.pid, :kill)
+        end
+      end
+    end
+
+    @tag :tmp_dir
     test "resolve/1 loads role credential grants into grant fingerprints", %{tmp_dir: dir} do
       path =
         write_role_policy!(
@@ -3268,6 +3411,58 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     (ns smoke {:visibility :prompt})
     (defn plus-one "Increment a number." [x] (+ x 1))
     """
+  end
+
+  defp observatory_root_config(base_url) do
+    %{
+      "upstreams" => %{
+        "observatory" => %{
+          "transport" => "openapi",
+          "base_url" => base_url,
+          "schema_file" => @schema,
+          "include_operations" => ["list_traces", "get_trace"],
+          "allow_insecure_http" => true
+        }
+      }
+    }
+  end
+
+  defp start_http_fixture(response_body) do
+    parent = self()
+    response_json = Jason.encode!(response_body)
+
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :raw,
+        active: false,
+        reuseaddr: true,
+        ip: {127, 0, 0, 1}
+      ])
+
+    {:ok, port} = :inet.port(listen_socket)
+
+    pid =
+      spawn_link(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket)
+        {:ok, request} = :gen_tcp.recv(socket, 0, @fixture_recv_timeout_ms)
+        send(parent, {:http_fixture_request, request})
+
+        response = [
+          "HTTP/1.1 200 OK\r\n",
+          "content-type: application/json\r\n",
+          "content-length: #{byte_size(response_json)}\r\n",
+          "connection: close\r\n",
+          "\r\n",
+          response_json
+        ]
+
+        :ok = :gen_tcp.send(socket, response)
+        :gen_tcp.close(socket)
+        :gen_tcp.close(listen_socket)
+      end)
+
+    {:ok, %{pid: pid, base_url: "http://127.0.0.1:#{port}"}}
   end
 
   defp operator_prelude_source_with_evidence do

@@ -163,7 +163,8 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
         """).exports
 
       # Dynamic dispatch is invisible to inference: no requires, and "call" is
-      # never promoted — so it attaches unguarded unless declared explicitly.
+      # never promoted. Finite upstream grants therefore require explicit
+      # upstream metadata at attach/projection time.
       assert implicit.requires == []
       refute "tool:call" in implicit.requires
 
