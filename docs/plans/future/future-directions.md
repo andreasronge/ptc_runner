@@ -10,7 +10,9 @@ Companion docs:
 [`capability-prelude-discovery.md`](../archive/capability-prelude-discovery.md)
 (authority model),
 [`function-passing-between-subagents.md`](function-passing-between-subagents.md)
-(closure passing).
+(closure passing),
+[`model-visible-content-surfaces.md`](model-visible-content-surfaces.md)
+(bounded presentation and drill-down surfaces).
 
 The common thread: every idea here leans on strengths the library already has
 — cheap isolated sandbox processes, immutable program/memory/closure values,
