@@ -36,13 +36,21 @@ Interleave three activities, cheapest-first:
 One blessed path per tier. Future work (human or agent) extends these paths;
 inventing a parallel harness is a review-blocking finding. All live tiers
 resolve the model through the existing seam
-`PtcRunner.TestSupport.LLMSupport.model/0` — `PTC_TEST_MODEL` env var, default
-in the main checkout's `.env` pinned to
-`openrouter:google/gemini-3.1-flash-lite`; the registry alias
-`gemini-flash-lite` resolves to the same model (default_registry.ex:83-88) —
-and gate on `LLMSupport.ensure_api_key!/1`. Note: this worktree has no `.env`
-(Dotenv's upward walk finds none) — copy it from the main checkout or export
-`OPENROUTER_API_KEY` before running live tiers.
+`PtcRunner.TestSupport.LLMSupport.model/0` (`PTC_TEST_MODEL` env var,
+resolved via `LLM.Registry`) and gate on `LLMSupport.ensure_api_key!/1`.
+
+**Canonical model for this experiment** (owner decision, 2026-07-07):
+`openrouter:deepseek/deepseek-v4-flash` — registry alias `deepseek`
+(default_registry.ex:89-93) — chosen as capable and cheap. This worktree's
+`.env` pins `PTC_TEST_MODEL` accordingly (the main checkout's `.env` still
+pins `gemini-3.1-flash-lite` for the pre-existing e2e suites; changing that
+repo-wide default is a separate decision). Two consequences to keep honest:
+
+- numbers from this experiment are **not comparable** to the flash-lite
+  Treatment-A / demo baselines; every comparison that matters (kernel vs
+  incumbent, bundle-A vs bundle-B) runs both cells on deepseek, same-model;
+- deepseek-v4-flash has never run this repo's harnesses — R12's shakedown
+  must precede any conclusion-bearing run.
 
 ### Tier 0 — Deterministic ExUnit (every commit)
 
@@ -78,7 +86,7 @@ Stochastic evaluation is not assertion; it lives outside ExUnit as a mix task
 in the existing `ptc.*` namespace (no LLM-eval task exists in `lib/` today;
 `bench.check` is deterministic-only):
 
-    mix ptc.kernel_eval --suite smoke --model gemini-flash-lite \
+    mix ptc.kernel_eval --suite smoke --model deepseek \
       --runs 5 --variant kernel --report reports/kernel_eval.md
 
 `--model` overrides `PTC_TEST_MODEL` for that invocation; both inputs resolve
@@ -200,6 +208,18 @@ the answer.
   per-case outcomes, aggregate pass rates), the persistent trace/report
   directory layout, and how Tier 3 preregistration docs reference report
   artifacts.
+- [ ] **R12 — deepseek shakedown** (live, needs key; do before any
+  conclusion-bearing run): establish that `deepseek`
+  (openrouter:deepseek/deepseek-v4-flash) can do PTC-Lisp at all by running
+  the *incumbent* SubAgent on demo cases #1 and #3 with it. If the incumbent
+  fails on deepseek, kernel failures on deepseek attribute to the model, not
+  the architecture — without this baseline we cannot tell those apart.
+- [ ] **R13 — Copy-volume/setup-pressure inputs**: define S5's representative
+  payload sizes and measurements: large mission context, growing memory map,
+  large return value, large prints, projected-step caps, setup failure shape,
+  `baseline_bytes`, and term-size estimates. This turns BEAM process-copy
+  pressure into a measured budget rather than an anecdote. (Feeds S5, D1, D5,
+  Tier 2 thresholds.)
 - [ ] **R9 — Teardown inventory** (see §Teardown below): classify every
   module/test/doc under `lib/ptc_runner/sub_agent/`, related guides, and
   prompt templates into **keep** (kernel substrate), **absorb** (policy that
@@ -210,14 +230,17 @@ the answer.
 ## M0 — Spikes
 
 Pre-registered in [`spikes.md`](spikes.md). Order matters: S1 → S2 gate the
-design; S3 gates the live path; S4 de-risks the prelude before the kernel
-exists.
+design; S5 gates copy-volume/memory strategy; S3 gates the live path; S4
+de-risks the prelude before the kernel exists.
 
 - [ ] **S1 — Re-entrancy**: nested `Lisp.run` from inside a sandboxed tool
   closure.
 - [ ] **S2 — Memory round-trip**: model-defined closures surviving
   loop-threaded memory across the tool boundary. → Decides D1.
-- [ ] **S3 — Blocking LLM call in the sandbox**: real flash-lite call from a
+- [ ] **S5 — Copy-volume/setup pressure**: nested kernel-shaped runs with large
+  grants, growing memory, large returns, and large prints; measure setup cost,
+  baseline bytes, projection size, and failure modes. → Decides D1/D5 caps.
+- [ ] **S3 — Blocking LLM call in the sandbox**: real deepseek call from a
   tool closure under relaxed outer limits; timeout accounting; kill-mid-HTTP
   behavior.
 - [ ] **S4 — Loop expressiveness**: write `extract-code` + a minimal
@@ -225,8 +248,9 @@ exists.
   (no kernel, no network, plain `Lisp.run`). Proves the language carries the
   loop comfortably; its source seeds `agent.core`.
 
-**Exit gate:** D1 decided; no spike revealed a mechanism gap that requires
-new evaluator machinery. If one did — stop, update architecture.md, rethink.
+**Exit gate:** D1 decided; D5 has initial projection caps; no spike revealed a
+mechanism gap that requires new evaluator machinery. If one did — stop, update
+architecture.md, rethink.
 
 ## M1 — Kernel + `agent.core`, single mission
 

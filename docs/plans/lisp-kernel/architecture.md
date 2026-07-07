@@ -81,6 +81,40 @@ Known wrinkle: if the outer sandbox is timeout-killed, an in-flight inner
 sandbox is orphaned until its own 1s limit fires (acceptable; `link:` exists
 if not). See spike S1.
 
+## Copy-Volume Budget (risk)
+
+The two-level sandbox is a security/resource-boundary design, not a free data
+movement design. BEAM process isolation copies ordinary terms between process
+heaps at every boundary:
+
+1. host -> outer sandbox: loop AST, context, memory, tools/closures, compiled
+   prelude environment;
+2. outer sandbox -> inner sandbox: model source/AST, mission context, memory,
+   and domain tools passed through `eval-program`;
+3. inner sandbox -> outer sandbox: projected result, prints, memory/result
+   values;
+4. outer sandbox -> host: final loop result and telemetry/projection.
+
+Large ref-counted binaries are a partial exception; nested maps/lists/tuples
+are copied. `Sandbox.execute/3` re-baselines after the host grant is copied in,
+so granted data is not billed against normal program heap headroom, but setup
+copy time, setup heap, and GC pressure are still real. Oversized grants can
+still die during setup via `:setup_max_heap`.
+
+Design rule for the kernel:
+
+- `eval-program` returns a bounded projection, never a raw `Step`.
+- Inner eval context is mission data only; no language spec, prompt state,
+  loop config, or full catalogs unless the model program needs them.
+- Memory defaults toward host-held native state or opaque handles; the prelude
+  may see bounded summaries/diffs/keys, not the full growing native memory map
+  by default.
+- Tool results and prints crossing back into the loop are capped before they
+  become loop memory or feedback text.
+
+Spike S5 measures this explicitly. Copy volume is treated as a third budget
+beside wall-clock and heap.
+
 ## Capability Model
 
 Kernel capabilities are entries in the **outer** run's `tools:` map, declared
@@ -208,17 +242,23 @@ Claims above rest on these, checked 2026-07-07 on `main`:
    value-threaded through `eval-program` args keeps closures but is lossy for
    keyword values — a semantic change vs today's host-side memory threading.
    This tilts D1 toward host-held memory; S2 measures it.
+9. Sandbox heap re-baselining excludes copied-in host grants from the program's
+   post-baseline heap headroom, but it does not eliminate BEAM term-copy cost or
+   setup pressure. Host grants still consume setup heap/time and can fail during
+   setup when `:setup_max_heap` is too low (sandbox.ex moduledoc). S5 measures
+   the copy-volume budget for the nested kernel path.
 
 ## Open decisions
 
 Record the resolution here when made:
 
 - **D1 — Memory threading.** Value-threaded through `eval-program` args
-  (elegant: memory is just data in the loop) vs host-held in the closure.
-  Decided by spike S2. Verified fact 8 already shows value-threading is lossy
-  for keyword values at the arg boundary, so the likely outcome is host-held
-  memory (or an opaque memory token) unless S2 shows the lossiness doesn't
-  bite in practice.
+  (elegant: memory is just data in the loop) vs host-held native state or an
+  opaque memory token. Decided by spikes S2 and S5. Verified fact 8 shows
+  value-threading is lossy for keyword values at the arg boundary; fact 9 adds
+  copy/setup pressure for a growing memory map. The likely default is
+  host-held memory unless the spikes show both semantics and copy volume remain
+  acceptable.
 - **D2 — Kernel module home.** `PtcRunner.Kernel` in `lib/ptc_runner/kernel/`
   (working assumption; 0.x, breaking changes fine) vs a separate Mix project.
 - **D3 — Prelude file home.** `priv/preludes/agent/*.lisp` compiled in via

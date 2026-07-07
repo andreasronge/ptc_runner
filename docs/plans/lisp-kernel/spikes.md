@@ -95,7 +95,7 @@ HTTP client's process ownership (req/finch pools are outside the sandbox)
 deserves one honest look.
 
 **Method.** Outer `Lisp.run` (`timeout: 60_000`) with a tool closure calling
-`PtcRunner.LLM.callback("gemini-flash-lite")`-built fn. Cases: (a) normal
+`PtcRunner.LLM.callback("deepseek")`-built fn. Cases: (a) normal
 completion, response text visible to the program; (b) outer `timeout: 500` so
 the kill lands mid-request — check for orphaned/stuck processes and pool
 health afterwards (second call still works). Skip live cases if
@@ -139,10 +139,50 @@ kernel-adjacent work items.
 
 ---
 
+## S5 — Copy-volume and setup-pressure budget
+
+**Question.** How expensive is the nested kernel-shaped path when ordinary BEAM
+terms are copied host -> outer sandbox -> inner sandbox -> outer sandbox ->
+host, and where do setup heap/time or result projection sizes become the
+limiting factor?
+
+**Why it gates.** The two-level sandbox is sound as a limits/authority design,
+but it can still copy large maps/lists/tuples at every process boundary. D1
+memory threading is the main risk: value-threading the full evolving memory map
+through `eval-program` copies it into the inner sandbox and back out every turn,
+which may become quadratic-feeling as memory grows. D5 also depends on this:
+`eval-program` must return a bounded projection, not a raw `Step`.
+
+**Method.** Using the S1 nested-run harness shape, run fixed-size scenarios from
+R13:
+
+- large mission context copied into the outer sandbox;
+- growing memory map passed through `eval-program` for N turns;
+- large inner return value;
+- large `println` output;
+- projected step with and without memory/prints caps.
+
+Record wall-clock duration, `baseline_bytes`, setup failures
+(`:memory_exceeded` with `phase: :setup`), projected result term sizes, and any
+GC/process fallout. Use representative payloads first; only then increase sizes
+until one limit fails so the failure mode is known.
+
+**Pass.** The bounded projection path has predictable setup/runtime growth, no
+unexpected process fallout, and yields concrete initial caps for
+`eval-program` args/results/prints. D1 may still choose host-held memory, but
+the copy-volume reason is quantified.
+
+**Fail.** Copy/setup pressure is high enough that full memory threading or large
+result projection is untenable even for representative payloads -> D1 =
+host-held memory or opaque memory token, D5 = stricter projection caps, and the
+kernel design forbids returning raw large memory/results through the loop.
+
+**Result.** _pending_
+
+---
+
 ## Candidate later spikes (register properly before running)
 
-- **S5 — Outer-heap headroom:** long mission (20 turns, large responses)
-  under the relaxed cap; where does message-list accumulation actually bite?
 - **S6 — Bundle swap provenance:** two bundles differing in one
   `agent.feedback` component; confirm `prelude.metadata.components` +
   `source_hash` are sufficient to attribute a run to a policy variant in turn
