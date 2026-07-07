@@ -113,13 +113,13 @@ Kernel.run(mission, cfg)
                           {:ok, text} from test lambdas) into one prelude-facing
                           map %{content, tokens}; tokens feed metrics + budget,
                           visibility: :private},
-       "eval-program"  => fn %{"src" => s, "memory" => m, ...} ->
-                            PtcRunner.Lisp.run(s, context: mission_ctx, memory: m,
-                                               tools: mission_tools,
-                                               timeout: 1_000, max_heap: strict)
-                            |> project_step()   # -> {:ok :return :fail :prints :memory}
-                          end,
-       "log"           => telemetry sink }
+       "eval-program"  => {fn %{"src" => s, "memory" => m, ...} ->
+                             PtcRunner.Lisp.run(s, context: mission_ctx, memory: m,
+                                                tools: mission_tools,
+                                                timeout: 1_000, max_heap: strict)
+                             |> project_step()  # -> {:ok :return :fail :prints :memory}
+                           end, visibility: :private},
+       "log"           => {telemetry sink, visibility: :private} }
   3. PtcRunner.Lisp.run("(agent/run-mission data/mission data/cfg)",
                         prelude: bundle, tools: capabilities,
                         context: %{mission: ..., cfg: ..., language_spec: ...},

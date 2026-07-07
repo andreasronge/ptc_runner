@@ -81,6 +81,12 @@ in the existing `ptc.*` namespace (no LLM-eval task exists in `lib/` today;
     mix ptc.kernel_eval --suite smoke --model gemini-flash-lite \
       --runs 5 --variant kernel --report reports/kernel_eval.md
 
+`--model` overrides `PTC_TEST_MODEL` for that invocation; both inputs resolve
+through the same seam (`LLMSupport.resolve_model/1` →
+`PtcRunner.LLM.Registry.resolve/1`), so any registry alias (e.g. `deepseek`)
+is valid. One model seam, not two — the flag is a per-run override of the env
+var, never a second resolution path.
+
 - **Cases are data, not test code** — lifted from demo per R10: the four
   dependency-free files recon verified as entanglement-free
   (`TestCase` case maps, the oracle core in `TestRunner.Base`, `SampleData`,
