@@ -10,11 +10,11 @@ defmodule PtcRunnerMcp.TurnLogConfig do
   @config_key {__MODULE__, :config}
   @collector_key {__MODULE__, :collector}
 
-  @type t :: %{turn_log_dir: String.t() | nil}
+  @type t :: %{turn_log_dir: String.t() | nil, default_tags: %{String.t() => String.t()}}
 
   @doc "Default config — MCP turn logging disabled."
   @spec defaults() :: t()
-  def defaults, do: %{turn_log_dir: nil}
+  def defaults, do: %{turn_log_dir: nil, default_tags: %{}}
 
   @doc "Set process-wide turn-log config."
   @spec set(map()) :: :ok
@@ -26,7 +26,13 @@ defmodule PtcRunnerMcp.TurnLogConfig do
         value when is_binary(value) -> value
       end
 
-    :persistent_term.put(@config_key, %{turn_log_dir: dir})
+    default_tags =
+      case Map.get(overrides, :default_tags, defaults().default_tags) do
+        tags when is_map(tags) and not is_struct(tags) -> tags
+        _other -> %{}
+      end
+
+    :persistent_term.put(@config_key, %{turn_log_dir: dir, default_tags: default_tags})
     :ok
   end
 
@@ -37,6 +43,10 @@ defmodule PtcRunnerMcp.TurnLogConfig do
   @doc "Configured destination directory, or nil when disabled."
   @spec turn_log_dir() :: String.t() | nil
   def turn_log_dir, do: get().turn_log_dir
+
+  @doc "Boot-stamped tags applied to every MCP session turn-log row."
+  @spec default_tags() :: %{String.t() => String.t()}
+  def default_tags, do: Map.get(get(), :default_tags, %{})
 
   @doc "True when MCP turn logging is enabled."
   @spec enabled?() :: boolean()

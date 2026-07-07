@@ -1668,6 +1668,75 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
     end
 
     @tag :tmp_dir
+    test "boot-stamped turn-log tags are applied when caller omits tags", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir, default_tags: %{"run" => "r", "stage" => "s"}})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      start = call("lisp_session_start", %{})
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+      assert start["structuredContent"]["tags"] == %{"run" => "r", "stage" => "s"}
+
+      assert {:ok, _response} = Sessions.eval(sid, "(+ 1 2)")
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert turn["tags"] == %{"run" => "r", "stage" => "s"}
+    end
+
+    @tag :tmp_dir
+    test "boot-stamped tags accept matching caller tags and merge additions", %{tmp_dir: dir} do
+      TurnLogConfig.set(%{turn_log_dir: dir, default_tags: %{"run" => "r", "stage" => "s"}})
+      start_supervised!({TurnLogCollector, [dir: dir]})
+      path = TurnLogCollector.path()
+
+      start =
+        call("lisp_session_start", %{
+          "tags" => %{"run" => "r", "stage" => "s", "attempt" => 1}
+        })
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+
+      assert start["structuredContent"]["tags"] == %{
+               "run" => "r",
+               "stage" => "s",
+               "attempt" => 1
+             }
+
+      assert {:ok, _response} = Sessions.eval(sid, "(+ 1 2)")
+      stop_turn_log!()
+
+      [turn] = path |> Analyzer.load() |> Analyzer.session_turns(sid)
+      assert turn["tags"] == %{"run" => "r", "stage" => "s", "attempt" => 1}
+    end
+
+    test "lisp_session_start rejects caller tags conflicting with boot-stamped tags" do
+      TurnLogConfig.set(%{default_tags: %{"stage" => "stage2"}})
+
+      rejected = call("lisp_session_start", %{"tags" => %{"stage" => 2}})
+
+      assert rejected["isError"] == true
+      assert rejected["structuredContent"]["reason"] == "session_args_error"
+
+      assert rejected["structuredContent"]["message"] =~
+               ~s|tag "stage" is boot-stamped to "stage2"|
+    end
+
+    test "internal session creators are server-stamped with default tags" do
+      TurnLogConfig.set(%{default_tags: %{"stage" => "server", "run" => "r"}})
+
+      assert {:ok, %{"session_id" => sid, "tags" => tags}} =
+               Sessions.start_session(nil, %{tags: %{"stage" => "caller", "cell" => "dir"}})
+
+      assert tags == %{"stage" => "server", "run" => "r", "cell" => "dir"}
+      assert {:ok, %{"session" => %{"tags" => inspected_tags}}} = Sessions.inspect(sid)
+      assert inspected_tags == tags
+    end
+
+    @tag :tmp_dir
     test "turn logs and log prelude project role and grant fingerprint", %{tmp_dir: dir} do
       Config.set(%{Config.get() | policy: role_policy!("editor")})
       TurnLogConfig.set(%{turn_log_dir: dir})

@@ -8,7 +8,7 @@ defmodule PtcRunnerMcp.Sessions.Registry do
 
   use GenServer
 
-  alias PtcRunnerMcp.{Lifecycle, Log}
+  alias PtcRunnerMcp.{Lifecycle, Log, TurnLogConfig}
   alias PtcRunnerMcp.Sessions.{Config, Owner, Supervisor}
 
   @max_tombstones 1024
@@ -250,7 +250,12 @@ defmodule PtcRunnerMcp.Sessions.Registry do
     role = Map.get(opts, :role)
     grant = Map.get(opts, :grant)
     grant_fingerprint = Map.get(opts, :grant_fingerprint)
-    tags = normalize_tags(Map.get(opts, :tags, %{}))
+
+    tags =
+      Map.get(opts, :tags, %{})
+      |> normalize_tags()
+      |> Map.merge(TurnLogConfig.default_tags())
+
     ttl_ms = Config.clamp_ttl_ms(Map.get(opts, :ttl_ms))
     created_at = DateTime.utc_now()
 

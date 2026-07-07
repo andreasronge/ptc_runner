@@ -25,7 +25,8 @@ defmodule PtcRunnerMcp.Sessions do
     PromptRegistry,
     ResponseProfile,
     RootUpstreamRuntime,
-    Tools
+    Tools,
+    TurnLogConfig
   }
 
   alias PtcRunnerMcp.Http.AuthClaims
@@ -696,7 +697,8 @@ defmodule PtcRunnerMcp.Sessions do
   defp validate_start_args(args) when is_map(args) do
     case Enum.find(Map.keys(args), &(not start_arg_key?(&1))) do
       nil ->
-        with :ok <- validate_tags_arg(Map.get(args, "tags")) do
+        with :ok <- validate_tags_arg(Map.get(args, "tags")),
+             :ok <- validate_no_default_tag_conflicts(Map.get(args, "tags")) do
           validate_scoped_base_surface_arg(Map.get(args, "scoped_base_surface"))
         end
 
@@ -722,6 +724,35 @@ defmodule PtcRunnerMcp.Sessions do
   end
 
   defp validate_tags_arg(_tags), do: {:error, "tags must be an object when supplied"}
+
+  defp validate_no_default_tag_conflicts(tags) do
+    caller_tags = normalize_tags_for_conflict_check(tags)
+    default_tags = TurnLogConfig.default_tags()
+
+    case Enum.find(default_tags, fn {key, boot_value} ->
+           Map.has_key?(caller_tags, key) and Map.fetch!(caller_tags, key) != boot_value
+         end) do
+      nil ->
+        :ok
+
+      {key, boot_value} ->
+        {:error, "tag #{Kernel.inspect(key)} is boot-stamped to #{Kernel.inspect(boot_value)}"}
+    end
+  end
+
+  defp normalize_tags_for_conflict_check(tags) when is_map(tags) and not is_struct(tags) do
+    Enum.reduce(tags, %{}, fn
+      {key, value}, acc
+      when is_binary(key) and
+             (is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value)) ->
+        Map.put(acc, key, value)
+
+      _other, acc ->
+        acc
+    end)
+  end
+
+  defp normalize_tags_for_conflict_check(_tags), do: %{}
 
   defp validate_scoped_base_surface_arg(nil), do: :ok
   defp validate_scoped_base_surface_arg(value) when is_boolean(value), do: :ok

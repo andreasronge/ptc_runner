@@ -18,6 +18,7 @@ defmodule PtcRunnerMcp.Application do
     * `--trace-payloads <none|summary|full>` / `PTC_RUNNER_MCP_TRACE_PAYLOADS`
     * `--trace-max-files <int>` / `PTC_RUNNER_MCP_TRACE_MAX_FILES`
     * `--turn-log-dir <path>` / `PTC_RUNNER_MCP_TURN_LOG_DIR`
+    * `--turn-log-tags <json object>` / `PTC_RUNNER_MCP_TURN_LOG_TAGS`
     * `--prelude <path>` / `PTC_RUNNER_MCP_PRELUDE`
     * `--agentic-max-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_MAX_TURNS`
     * `--agentic-retry-turns <int>` / `PTC_RUNNER_MCP_AGENTIC_RETRY_TURNS`
@@ -269,6 +270,7 @@ defmodule PtcRunnerMcp.Application do
           trace_payloads: :string,
           trace_max_files: :integer,
           turn_log_dir: :string,
+          turn_log_tags: :string,
           prelude: :string,
           evidence_bundle: :string,
           # `Plans/ptc-runner-mcp-debug-tool.md` § 4 — opt-in diagnostics tool.
@@ -1042,9 +1044,42 @@ defmodule PtcRunnerMcp.Application do
         v when is_binary(v) -> v
       end
 
-    TurnLogConfig.set(%{turn_log_dir: turn_log_dir})
+    default_tags = read_turn_log_tags(args)
+
+    TurnLogConfig.set(%{turn_log_dir: turn_log_dir, default_tags: default_tags})
     TurnLogConfig.put_collector(nil)
     :ok
+  end
+
+  defp read_turn_log_tags(args) do
+    case env_or(args, :turn_log_tags, "PTC_RUNNER_MCP_TURN_LOG_TAGS", nil) do
+      nil -> %{}
+      "" -> %{}
+      json when is_binary(json) -> parse_turn_log_tags!(json)
+    end
+  end
+
+  defp parse_turn_log_tags!(json) do
+    case Jason.decode(json) do
+      {:ok, tags} when is_map(tags) and not is_struct(tags) ->
+        validate_turn_log_tags!(tags)
+
+      {:ok, _other} ->
+        raise "--turn-log-tags / PTC_RUNNER_MCP_TURN_LOG_TAGS must be a JSON object"
+
+      {:error, error} ->
+        raise "--turn-log-tags / PTC_RUNNER_MCP_TURN_LOG_TAGS must be valid JSON: #{Exception.message(error)}"
+    end
+  end
+
+  defp validate_turn_log_tags!(tags) do
+    Enum.reduce(tags, %{}, fn
+      {key, value}, acc when is_binary(key) and key != "" and is_binary(value) and value != "" ->
+        Map.put(acc, key, value)
+
+      _other, _acc ->
+        raise "--turn-log-tags / PTC_RUNNER_MCP_TURN_LOG_TAGS must be an object with non-empty string keys and non-empty string values"
+    end)
   end
 
   defp read_int(args, key, env_name, default) do
@@ -1399,6 +1434,7 @@ defmodule PtcRunnerMcp.Application do
     Lifecycle.lifecycle_fields(%{
       http_requested: read_bool(args, :http, "PTC_RUNNER_MCP_HTTP", false),
       turn_log_dir: configured_turn_log_dir(args),
+      turn_log_tags: configured_turn_log_tags(args),
       prelude_store_seed_path:
         env_or(args, :prelude_store_seed, "PTC_RUNNER_MCP_PRELUDE_STORE_SEED", nil)
     })
@@ -1409,6 +1445,14 @@ defmodule PtcRunnerMcp.Application do
       nil -> nil
       "" -> nil
       v when is_binary(v) -> v
+    end
+  end
+
+  defp configured_turn_log_tags(args) do
+    case env_or(args, :turn_log_tags, "PTC_RUNNER_MCP_TURN_LOG_TAGS", nil) do
+      nil -> %{}
+      "" -> %{}
+      json when is_binary(json) -> parse_turn_log_tags!(json)
     end
   end
 

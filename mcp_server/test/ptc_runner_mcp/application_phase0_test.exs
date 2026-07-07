@@ -25,6 +25,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       max_session_preview_chars: System.get_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS"),
       max_upstream_response_bytes: System.get_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES"),
       turn_log_dir: System.get_env("PTC_RUNNER_MCP_TURN_LOG_DIR"),
+      turn_log_tags: System.get_env("PTC_RUNNER_MCP_TURN_LOG_TAGS"),
       prelude: System.get_env("PTC_RUNNER_MCP_PRELUDE"),
       evidence_bundle: System.get_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE"),
       prelude_store_seed: System.get_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
@@ -42,6 +43,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
       )
 
       restore_env("PTC_RUNNER_MCP_TURN_LOG_DIR", original.turn_log_dir)
+      restore_env("PTC_RUNNER_MCP_TURN_LOG_TAGS", original.turn_log_tags)
       restore_env("PTC_RUNNER_MCP_PRELUDE", original.prelude)
       restore_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE", original.evidence_bundle)
       restore_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED", original.prelude_store_seed)
@@ -58,6 +60,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     System.delete_env("PTC_RUNNER_MCP_MAX_SESSION_PREVIEW_CHARS")
     System.delete_env("PTC_RUNNER_MCP_MAX_UPSTREAM_RESPONSE_BYTES")
     System.delete_env("PTC_RUNNER_MCP_TURN_LOG_DIR")
+    System.delete_env("PTC_RUNNER_MCP_TURN_LOG_TAGS")
     System.delete_env("PTC_RUNNER_MCP_PRELUDE")
     System.delete_env("PTC_RUNNER_MCP_EVIDENCE_BUNDLE")
     System.delete_env("PTC_RUNNER_MCP_PRELUDE_STORE_SEED")
@@ -91,6 +94,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     test "accepts --turn-log-dir" do
       args = Application.parse_args(["--turn-log-dir", "/tmp/ptc-turns"])
       assert args[:turn_log_dir] == "/tmp/ptc-turns"
+    end
+
+    test "accepts --turn-log-tags" do
+      args = Application.parse_args(["--turn-log-tags", ~s|{"run":"r","stage":"s"}|])
+      assert args[:turn_log_tags] == ~s|{"run":"r","stage":"s"}|
     end
 
     test "accepts --prelude" do
@@ -306,6 +314,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
     test "defaults to disabled" do
       assert :ok = Application.apply_turn_log_config(%{})
       assert TurnLogConfig.turn_log_dir() == nil
+      assert TurnLogConfig.default_tags() == %{}
       refute TurnLogConfig.enabled?()
     end
 
@@ -314,6 +323,7 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
 
       assert :ok = Application.apply_turn_log_config(%{})
       assert TurnLogConfig.turn_log_dir() == "/tmp/from-env"
+      assert TurnLogConfig.default_tags() == %{}
       assert TurnLogConfig.enabled?()
     end
 
@@ -326,6 +336,44 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
                })
 
       assert TurnLogConfig.turn_log_dir() == "/tmp/from-cli"
+    end
+
+    test "env var configures default turn-log tags" do
+      System.put_env("PTC_RUNNER_MCP_TURN_LOG_TAGS", ~s|{"run":"r","stage":"s"}|)
+
+      assert :ok = Application.apply_turn_log_config(%{})
+      assert TurnLogConfig.default_tags() == %{"run" => "r", "stage" => "s"}
+    end
+
+    test "CLI turn-log tags override env var" do
+      System.put_env("PTC_RUNNER_MCP_TURN_LOG_TAGS", ~s|{"run":"env"}|)
+
+      assert :ok = Application.apply_turn_log_config(%{turn_log_tags: ~s|{"run":"cli"}|})
+      assert TurnLogConfig.default_tags() == %{"run" => "cli"}
+    end
+
+    test "turn-log tags reject non-string and empty entries" do
+      assert_raise RuntimeError,
+                   ~r/non-empty string keys and non-empty string values/,
+                   fn -> Application.apply_turn_log_config(%{turn_log_tags: ~s|{"stage":2}|}) end
+
+      assert_raise RuntimeError,
+                   ~r/non-empty string keys and non-empty string values/,
+                   fn -> Application.apply_turn_log_config(%{turn_log_tags: ~s|{"stage":""}|}) end
+
+      assert_raise RuntimeError,
+                   ~r/non-empty string keys and non-empty string values/,
+                   fn -> Application.apply_turn_log_config(%{turn_log_tags: ~s|{"":"s"}|}) end
+    end
+
+    test "turn-log tags reject malformed JSON and non-object JSON" do
+      assert_raise RuntimeError, ~r/must be valid JSON/, fn ->
+        Application.apply_turn_log_config(%{turn_log_tags: "{"})
+      end
+
+      assert_raise RuntimeError, ~r/must be a JSON object/, fn ->
+        Application.apply_turn_log_config(%{turn_log_tags: ~s|["stage"]|})
+      end
     end
   end
 
@@ -392,10 +440,11 @@ defmodule PtcRunnerMcp.ApplicationPhase0Test do
   end
 
   defp set_sessions_policy!(mcp_tools: mcp_tools, roles: roles) do
-    policy = %Policy{
-      outer_policy: %OuterPolicy{mcp_tools: mcp_tools},
-      roles: roles
-    }
+    policy =
+      struct(Policy,
+        outer_policy: struct(OuterPolicy, mcp_tools: mcp_tools),
+        roles: roles
+      )
 
     SessionsConfig.set(%{SessionsConfig.defaults() | enabled: true, policy: policy})
   end

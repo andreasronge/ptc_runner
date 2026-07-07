@@ -20,6 +20,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     %{
       "status" => "ok",
       "session_id" => state.id,
+      "tags" => Map.get(state, :tags, %{}),
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
@@ -585,6 +586,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "created_at" => DateTime.to_iso8601(state.created_at),
       "updated_at" => DateTime.to_iso8601(state.updated_at),
       "expires_at" => DateTime.to_iso8601(state.expires_at),
+      "tags" => Map.get(state, :tags, %{}),
       "role" => Map.get(state, :role),
       "grant_fingerprint" => Map.get(state, :grant_fingerprint),
       "eval_status" => if(state.eval, do: "running", else: "idle"),
