@@ -87,9 +87,9 @@ defmodule PtcRunner.LLM.DefaultRegistry do
       }
     },
     "deepseek" => %{
-      description: "DeepSeek Chat V3 - Cost-effective reasoning",
+      description: "DeepSeek V4 Flash - Fast, cost-effective reasoning",
       providers: %{
-        openrouter: "deepseek/deepseek-chat-v3-0324"
+        openrouter: "deepseek/deepseek-v4-flash"
       }
     },
     "devstral" => %{

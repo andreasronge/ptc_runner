@@ -140,7 +140,7 @@ defmodule LLMSetup do
     [
       {"openrouter:anthropic/claude-haiku-4.5", "haiku - Claude Haiku 4.5"},
       {"openrouter:google/gemini-2.5-flash", "gemini - Gemini 2.5 Flash"},
-      {"openrouter:deepseek/deepseek-chat-v3-0324", "deepseek - DeepSeek V3"}
+      {"openrouter:deepseek/deepseek-v4-flash", "deepseek - DeepSeek V4 Flash"}
     ]
   end
 

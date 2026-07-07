@@ -53,7 +53,7 @@ automatically through `PtcRunner.LLM.Registry`:
 | `haiku` | Claude Haiku 4.5 - Fast, cost-effective | openrouter, bedrock, anthropic |
 | `sonnet` | Claude Sonnet 4.5 - Balanced performance | openrouter, bedrock, anthropic |
 | `gemini` | Gemini 2.5 Flash - Google's fast model | openrouter, google |
-| `deepseek` | DeepSeek Chat V3 - Cost-effective reasoning | openrouter |
+| `deepseek` | DeepSeek V4 Flash - Fast, cost-effective reasoning | openrouter |
 | `gpt` | GPT-4.1 Mini - OpenAI's efficient model | openrouter, openai |
 | `qwen-local` | Qwen 2.5 Coder 7B - Local via Ollama | ollama |
 

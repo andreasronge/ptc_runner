@@ -71,7 +71,7 @@ defmodule PtcRunner.LLM.RegistryTest do
     test "auto-selects sole provider for bare alias with default provider miss" do
       # deepseek only has openrouter, and default provider is openrouter, so this works
       # But if default were bedrock, a bare "deepseek" would auto-select openrouter
-      assert {:ok, "openrouter:deepseek/deepseek-chat-v3-0324"} = Registry.resolve("deepseek")
+      assert {:ok, "openrouter:deepseek/deepseek-v4-flash"} = Registry.resolve("deepseek")
     end
   end
 
