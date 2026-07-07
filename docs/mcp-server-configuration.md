@@ -23,6 +23,7 @@ All configuration is read once at boot, either from a CLI flag or the equivalent
 | `--trace-payloads` | `PTC_RUNNER_MCP_TRACE_PAYLOADS` | `summary` | One of `none`, `summary`, `full`. Controls program / context / result inclusion in traces. |
 | `--trace-max-files` | `PTC_RUNNER_MCP_TRACE_MAX_FILES` | `1000` | Rolling-deletion cap on `--trace-dir`. |
 | `--turn-log-dir` | `PTC_RUNNER_MCP_TURN_LOG_DIR` | unset | Directory for the canonical stateful-session turn log. When set, all accepted `lisp_session_eval` attempts write `event: "turn"` records to one JSONL file. |
+| `--turn-log-tags` | `PTC_RUNNER_MCP_TURN_LOG_TAGS` | unset | JSON object of non-empty string keys and non-empty string values stamped onto every stateful-session turn-log row for this server boot. |
 | `--prelude` | `PTC_RUNNER_MCP_PRELUDE` | unset | Path to a Capability Prelude source file attached to every `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task` run. The file is read once at boot; attach-time `requires` still fail closed against configured upstreams and granted tools. |
 | `--evidence-bundle` | `PTC_RUNNER_MCP_EVIDENCE_BUNDLE` | unset | Path to a versioned evidence-bundle manifest. When set, the server composes the read-only `evidence/` prelude with any configured runtime prelude and grants bounded `evidence_bundle`, `evidence_page`, and `evidence_read` tools to `lisp_eval`, `lisp_session_eval`, and agentic `lisp_task`. Stateful session and SubAgent turn logs record safe `evidence_reads` audit entries for evidence reads. |
 | `--prelude-store-seed` | `PTC_RUNNER_MCP_PRELUDE_STORE_SEED` | unset | File or directory of `.clj` Capability Prelude sources used to seed a volatile in-memory `PreludeStore` at boot. Each file's id is derived from its compiled namespace, not its filename. |
@@ -78,6 +79,15 @@ monotonic attempt number, committed turn counter, status, result preview,
 credential-free tool-call summaries, and session-level failure/limit reasons.
 Owner mismatches, stale request ids, expiry races, and aborted evals do not emit
 turn events because no accepted session work can be attributed.
+
+Use `--turn-log-tags '{"run":"bench-42","stage":"stage2"}'` to make the boot
+stamp audit identity onto every session created by that server process. Boot
+tags must be a JSON object with non-empty string keys and non-empty string
+values. `lisp_session_start` may still supply compatible scalar JSON `tags`; the
+effective session tags are caller tags merged with boot tags, with boot tags
+winning. A public `lisp_session_start` call that supplies the same key with a
+different value is rejected with a `session_args_error`, while matching duplicate
+values and additional caller-only keys are accepted.
 
 `--evidence-bundle` serves only the operator-selected manifest contents. For
 the MCP server flag, file items and log sources must stay under the manifest

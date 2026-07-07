@@ -1,22 +1,21 @@
 # Server-Stamped Turn-Log Tags
 
-**Status:** future issue, surfaced 2026-07-06 by the `autonomous-shakedown-1`
-Stage 2 gate fail in `ptc-bench-comparison` (bench commit `6d747c2`, rerun
-governed by `amendment-a-stage2-apparatus-rerun.md`, which files this as its
-runner follow-up). Related: the gate-evidence principle in
+**Status:** implemented in `ptc_runner_mcp` after the issue surfaced
+2026-07-06 in the `autonomous-shakedown-1` Stage 2 gate fail in
+`ptc-bench-comparison` (bench commit `6d747c2`, rerun governed by
+`amendment-a-stage2-apparatus-rerun.md`, which filed this as its runner
+follow-up). Related: the gate-evidence principle in
 [`grant-projection-legibility.md`](grant-projection-legibility.md) — audit
 surfaces must not depend on the audited party's cooperation.
 
 ## Problem
 
 Turn-log rows carry `tags` so downstream gate audits can select exactly the
-rows belonging to one run/stage. Today the only source of those tags is the
-session caller: `lisp_session_start` accepts a `tags` argument
-(`mcp_server/lib/ptc_runner_mcp/sessions.ex:699` validates it, the session
-struct stores it at `sessions/session.ex:126`, and
-`sessions/registry.ex:253` normalizes it). `TurnLogConfig`
-(`mcp_server/lib/ptc_runner_mcp/turn_log_config.ex`) is boot-static and
-holds only `turn_log_dir` — the server has no way to stamp tags itself.
+rows belonging to one run/stage. Before this change, the only source of those
+tags was the session caller: `lisp_session_start` accepted a `tags` argument,
+the session struct stored it, and `sessions/registry.ex` normalized it.
+`TurnLogConfig` held only `turn_log_dir`, so the server had no way to stamp tags
+itself.
 
 That makes tag provenance model-cooperative: the audited party must volunteer
 its own audit identity. The failure mode is not hypothetical. In
@@ -29,7 +28,7 @@ on an empty set, even though the raw log showed a fully compliant 22-turn
 session. The failure was fail-closed (good), but the audit's evidence stream
 should never have been contingent on prompt wording in the first place.
 
-## Direction
+## Design
 
 Let the boot own audit identity. The one-boot-per-stage protocol already
 makes the boot the natural run/stage boundary (`start-stage-server.sh`
@@ -81,7 +80,7 @@ config. Roles are stage-agnostic in the bench protocol (the `proposer` role
 serves stage3 and stage3r; `reviewer` serves stage4 and stage4r), so role
 config cannot carry the stage half of the identity. The boot can.
 
-## Consumer changes once this lands
+## Consumer Changes
 
 - `start-stage-server.sh` in bench run scaffolds passes
   `--turn-log-tags "{\"run\":\"<run-tag>\",\"stage\":\"$STAGE\"}"` per boot.
