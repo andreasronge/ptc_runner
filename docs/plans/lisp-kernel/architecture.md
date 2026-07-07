@@ -44,11 +44,12 @@ becomes a prelude diff, A/B-measurable with zero Elixir changes.**
 | --- | --- |
 | Outer wall-clock deadline + heap cap | Turn loop structure, stop conditions below the backstop |
 | LLM transport + call-counter budget (fail-closed) | Prompt assembly, message list construction |
-| Strict sandbox for model programs (1s/10MB) | Program extraction from LLM text |
-| Capability grants (which tools each level sees) | Feedback rendering, truncation caps + hint wording |
-| `(return v)` / `(fail v)` sentinel protocol | Retry phrasing, must-return nudges |
-| Telemetry / turn-event emission | What context/memory slices the model is shown |
-| Prelude compilation + bundle provenance | Domain helpers |
+| Native model-action protocol validation | Retry phrasing, must-return nudges |
+| Strict sandbox for model programs (1s/10MB) | Feedback rendering, truncation caps + hint wording |
+| Capability grants (which tools each level sees) | Context/memory slices the model is shown |
+| `(return v)` / `(fail v)` sentinel protocol | Domain helpers and policy data |
+| Telemetry / turn-event emission | Event annotations and policy labels |
+| Prelude compilation + bundle provenance | Swappable policy components |
 
 A buggy loop prelude may waste its budget; it must never be able to exceed it.
 A crashed loop prelude surfaces as a kernel error with the bundle provenance
@@ -115,6 +116,62 @@ Design rule for the kernel:
 Spike S5 measures this explicitly. Copy volume is treated as a third budget
 beside wall-clock and heap.
 
+## Model Action Protocol (V1)
+
+V1 uses **native provider tool calling** as the only model action protocol. The
+model receives normal chat messages plus exactly one model-visible tool:
+
+```
+run_ptc_lisp({
+  "program": "(return ...)"
+})
+```
+
+The PTC-Lisp source comes from the `program` tool argument, not from Markdown or
+free-text code-fence extraction. Normal assistant text is a protocol error
+unless D14 explicitly admits a terminal final-answer state. The default M1
+posture is stricter: `(return v)` from an evaluated PTC-Lisp program is the
+only successful model answer. That gives the experiment a sharper boundary:
+
+- no code-fence parser in the loop prelude;
+- every accepted model action is a tool call; everything else is a protocol
+  error unless D14 later admits a terminal final-answer state;
+- retry feedback can say "call `run_ptc_lisp` with a valid program" instead of
+  explaining extraction rules;
+- provider mechanics live at the LLM transport boundary.
+
+The cost is that `llm-complete` is no longer `%{content, tokens}` only. It must
+normalize provider responses into a transport-neutral action envelope:
+
+```
+%{
+  content: String.t() | nil,
+  tool_calls: [%{name: String.t(), arguments: map()}],
+  tokens: map(),
+  model: String.t(),
+  provider: String.t() | nil,
+  provider_meta: map()
+}
+```
+
+The kernel then validates that envelope into one prelude-facing action:
+
+- `{:tool_call, %{program: source, tokens: ..., meta: ...}}`
+- `{:final, %{content: text, tokens: ..., meta: ...}}` only if D14 admits an
+  explicit terminal final-answer state;
+- `{:protocol_error, reason}` for missing/multiple/wrong tool calls, invalid
+  arguments, or disallowed free text.
+
+Free-text code extraction, Markdown parsing, structured-output-only mode, and
+legacy text-code fallback are out of scope for V1. They may remain useful as
+incumbent behavior to compare against, but they are not part of the kernel
+action protocol.
+
+`commentary` is deliberately excluded from the V1 schema until a spike shows it
+improves trace quality or model compliance enough to justify the extra model
+surface. If admitted later, it is metadata only: never executable program text,
+never feedback instructions, and never a second answer channel.
+
 ## Capability Model
 
 Kernel capabilities are entries in the **outer** run's `tools:` map, declared
@@ -142,10 +199,10 @@ Kernel.run(mission, cfg)
        # all three use the {fun, visibility: :private} options form —
        # a bare closure normalizes to :public (tool.ex:159, 270-299)
        "llm-complete"  => {counted, budget-capped wrapper over the LLM callback;
-                          normalizes both callback shapes ({:ok, %{content:,
-                          tokens:}} from LLM.callback/2 per llm.ex:78, and bare
-                          {:ok, text} from test lambdas) into one prelude-facing
-                          map %{content, tokens}; tokens feed metrics + budget,
+                          sends the run_ptc_lisp tool schema, normalizes provider
+                          responses into the action envelope above, validates the
+                          V1 model-action protocol, and returns a prelude-facing
+                          action value; tokens feed metrics + budget,
                           visibility: :private},
        "eval-program"  => {fn %{"src" => s, "memory" => m, ...} ->
                              PtcRunner.Lisp.run(s, context: mission_ctx, memory: m,
@@ -154,6 +211,9 @@ Kernel.run(mission, cfg)
                              |> project_step()  # -> {:ok :return :fail :prints :memory}
                            end, visibility: :private},
        "log"           => {telemetry sink, visibility: :private} }
+     # M1 hardcodes this trio. R24/S10 decide whether additional private
+     # capabilities can be supplied by config/bundle selection without editing
+     # PtcRunner.Kernel.run/2.
   3. PtcRunner.Lisp.run("(agent/run-mission data/mission data/cfg)",
                         prelude: bundle, tools: capabilities,
                         context: %{mission: ..., cfg: ..., language_spec: ...},
@@ -224,10 +284,11 @@ Claims above rest on these, checked 2026-07-07 on `main`:
    (priv/functions.exs).
 5. LLM callback contract: 1-arity fn over `%{system:, messages: [%{role:,
    content:}]}`. Real callbacks built by `PtcRunner.LLM.callback/2` return
-   `{:ok, %{content: String.t(), tokens: tokens()}}` (`@spec` llm.ex:153,
-   response type llm.ex:78); inline test lambdas may return bare
-   `{:ok, text}`. The kernel's `llm-complete` must normalize both and must
-   not drop `tokens`.
+   `{:ok, %{content: String.t(), tokens: tokens()}}` for text responses and may
+   return native tool-call response shapes (`llm.ex` response types). Inline
+   test lambdas may return bare text/action fixtures. The kernel's
+   `llm-complete` must normalize supported shapes into the V1 action envelope
+   and must not drop `tokens`.
 6. `Step` carries `return`, `fail`, `memory`, `prints: [String.t()]`, `usage`
    (lib/ptc_runner/step.ex) — the source fields for `project_step/1`.
 7. Direct tools are `tools: %{"name" => closure}` called as `(tool/name args)`;
@@ -288,10 +349,48 @@ Record the resolution here when made:
   deleted or promoted with the verdict. Alternatives (demo/ stays entangled
   with its singleton Agent; `test/support/` is invisible to mix tasks)
   rejected for the reasons in parentheses.
+- **D9 — Model action protocol.** RESOLVED 2026-07-07: V1 is native
+  tool-call-only. The model must call `run_ptc_lisp`; free-text code
+  extraction, Markdown parsing, structured-output-only mode, and legacy
+  text-code fallback are out of scope.
+- **D10 — Kernel error envelope.** Stable categories and rendering for prelude
+  compile/runtime errors, private capability denial, LLM failure, protocol
+  error, inner eval parse/eval/fail, timeout, heap/setup heap, and budget
+  exhaustion. R15/R16/D5 feed the exact shape.
+- **D11 — LLM budget and provider controls.** Preflight prompt budget, max
+  output/reasoning budget, retry accounting, provider routing/fallback,
+  generation controls, and token/cost fields. R16 resolves the contract.
+- **D12 — Parallel policy.** Whether `agent.core` may use `pmap`/`pcalls`, what
+  shared counters back LLM/eval budgets, and outer/inner `pmap_*`/worker heap
+  settings. R21 resolves this before M1/M2 code relies on parallelism.
+- **D13 — Host-held state lifecycle.** If D1 chooses host-held memory or opaque
+  handles, define owner process, monitors, timeout/crash cleanup, token
+  invalidation, caps, and journal/tool-cache policy.
+- **D14 — Minimal model action surface.** Whether V1 remains `program`-only
+  forever, admits optional `commentary` as non-instruction metadata, or admits
+  any terminal final-answer text. Default M1 stance: `program` only, no final
+  text; S6/R23 must justify any expansion.
+- **D15 — Extension seam.** Whether future private capabilities are configured
+  through a generic kernel extension contract or require explicit
+  `PtcRunner.Kernel` edits. R24/S10 resolve before any promotion claim that
+  policy changes are prelude-only beyond the first feedback A/B.
+- **D16 — Soak and deployment envelope.** Long-run accumulation limits,
+  per-node/concurrent mission caps, trace backpressure behavior, and HTTP pool
+  health. R22/S11 resolve before M2/M3 claims.
+- **D17 — Prelude source exposure.** Whether model programs may inspect
+  `agent.*` / `feedback.*` implementation source via source-discovery
+  mechanisms. If yes, the domain-blind audit includes exposed source; if no,
+  source discovery for kernel policy components must be masked.
+- **D18 — Release/API shape.** Whether kernel modules, eval harnesses, and
+  preludes are experiment-internal, public experimental API, or shipped stable
+  surface; includes package/release-smoke treatment for `priv/preludes`.
 
 ## Out of scope for the experiment
 
-MCP server, compaction, journal/plans/progress, text mode, `tool_call`
-transport, compiled agents, budget introspection, sessions, upstream runtime.
-Nothing here migrates the existing SubAgent — `exp/lisp-kernel` is additive
-until the experiment earns a verdict.
+MCP server, compaction, journal/plans/progress, legacy SubAgent text mode,
+legacy SubAgent `tool_call` transport, compiled agents, budget introspection,
+sessions, upstream runtime.
+Nothing here migrates the measured incumbent SubAgent loop until the experiment
+earns a verdict. The branch may still delete obsolete non-baseline docs,
+config, tests, prompts, or scaffolding when the new boundary has replaced them
+and the repo stays coherent at each step.
