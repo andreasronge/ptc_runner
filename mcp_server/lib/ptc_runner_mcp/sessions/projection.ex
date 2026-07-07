@@ -8,6 +8,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   alias PtcRunner.SubAgent.Loop.TurnFeedback
   alias PtcRunner.SubAgent.Namespace.{ExecutionHistory, User}
   alias PtcRunnerMcp.Sessions.{Config, Limits, Policy}
+  alias PtcRunnerMcp.TurnLogConfig
 
   @session_feedback_max_chars 2048
   @collection_hint_min_items 20
@@ -23,7 +24,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
-    |> maybe_put("tags", non_empty_tags(state))
+    |> maybe_put("tags", projection_tags(state))
     |> maybe_put("role", Map.get(state, :role))
     |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
     |> maybe_put_true("scoped_base_surface", Map.get(state, :scoped_base_surface))
@@ -325,6 +326,13 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
   defp maybe_put_true(map, _key, _value), do: map
 
+  defp projection_tags(state) do
+    case TurnLogConfig.default_tags() do
+      defaults when is_map(defaults) and map_size(defaults) > 0 -> non_empty_tags(state)
+      _defaults -> nil
+    end
+  end
+
   defp non_empty_tags(%{tags: tags}) when is_map(tags) and map_size(tags) > 0, do: tags
   defp non_empty_tags(_state), do: nil
 
@@ -595,7 +603,7 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "memory_bytes" => usage.memory_bytes,
       "binding_count" => usage.binding_count
     }
-    |> maybe_put("tags", non_empty_tags(state))
+    |> maybe_put("tags", projection_tags(state))
   end
 
   defp session_usage(state) do

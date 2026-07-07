@@ -1668,6 +1668,12 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
 
       assert start["isError"] == false
       sid = start["structuredContent"]["session_id"]
+      refute Map.has_key?(start["structuredContent"], "tags")
+
+      inspect = call("lisp_session_inspect", %{"session_id" => sid, "view" => "overview"})
+
+      assert inspect["isError"] == false
+      refute Map.has_key?(inspect["structuredContent"]["session"], "tags")
 
       assert {:ok, _response} = Sessions.eval(sid, "(+ 1 2)")
       stop_turn_log!()
