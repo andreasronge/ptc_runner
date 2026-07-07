@@ -111,6 +111,19 @@ defmodule PtcRunnerMcp.SessionsLifecycleTest do
       refute Map.has_key?(start["structuredContent"], "preludes")
     end
 
+    test "start and inspect projections omit tags when the session has none" do
+      start = call("lisp_session_start", %{})
+
+      assert start["isError"] == false
+      sid = start["structuredContent"]["session_id"]
+      refute Map.has_key?(start["structuredContent"], "tags")
+
+      inspect = call("lisp_session_inspect", %{"session_id" => sid, "view" => "overview"})
+
+      assert inspect["isError"] == false
+      refute Map.has_key?(inspect["structuredContent"]["session"], "tags")
+    end
+
     test "configured prelude is attached to session evals" do
       Config.set(Map.put(Config.get(), :prelude_source, test_prelude_source()))
       sid = SoakHelpers.start_session()

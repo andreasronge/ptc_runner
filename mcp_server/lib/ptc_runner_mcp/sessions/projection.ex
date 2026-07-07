@@ -20,10 +20,10 @@ defmodule PtcRunnerMcp.Sessions.Projection do
     %{
       "status" => "ok",
       "session_id" => state.id,
-      "tags" => Map.get(state, :tags, %{}),
       "expires_at" => DateTime.to_iso8601(state.expires_at),
       "limits" => Limits.project_limits(state.limits)
     }
+    |> maybe_put("tags", non_empty_tags(state))
     |> maybe_put("role", Map.get(state, :role))
     |> maybe_put("grant_fingerprint", Map.get(state, :grant_fingerprint))
     |> maybe_put_true("scoped_base_surface", Map.get(state, :scoped_base_surface))
@@ -325,6 +325,9 @@ defmodule PtcRunnerMcp.Sessions.Projection do
   defp maybe_put_true(map, key, true), do: Map.put(map, key, true)
   defp maybe_put_true(map, _key, _value), do: map
 
+  defp non_empty_tags(%{tags: tags}) when is_map(tags) and map_size(tags) > 0, do: tags
+  defp non_empty_tags(_state), do: nil
+
   # The collection hint (opt-in via --collection-hint) is more specific than
   # the generic truncation hint, so it replaces it when both would apply.
   # Two triggers: the eval result itself is a large collection of maps
@@ -586,13 +589,13 @@ defmodule PtcRunnerMcp.Sessions.Projection do
       "created_at" => DateTime.to_iso8601(state.created_at),
       "updated_at" => DateTime.to_iso8601(state.updated_at),
       "expires_at" => DateTime.to_iso8601(state.expires_at),
-      "tags" => Map.get(state, :tags, %{}),
       "role" => Map.get(state, :role),
       "grant_fingerprint" => Map.get(state, :grant_fingerprint),
       "eval_status" => if(state.eval, do: "running", else: "idle"),
       "memory_bytes" => usage.memory_bytes,
       "binding_count" => usage.binding_count
     }
+    |> maybe_put("tags", non_empty_tags(state))
   end
 
   defp session_usage(state) do
