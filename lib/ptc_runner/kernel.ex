@@ -36,13 +36,6 @@ defmodule PtcRunner.Kernel do
     "agent.core" => ["agent.prompt", "agent.feedback"]
   }
 
-  @spec prelude_source() :: String.t()
-  def prelude_source do
-    @prelude_sources
-    |> Enum.sort_by(fn {namespace, _source} -> namespace end)
-    |> Enum.map_join("\n", fn {_namespace, source} -> source end)
-  end
-
   @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
   def compile_prelude(opts \\ []) when is_list(opts) do
     overrides = Keyword.get(opts, :prelude_source_overrides, %{})

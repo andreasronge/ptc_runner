@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Ptc.KernelEval do
 
       mix ptc.kernel_eval --suite mini
       mix ptc.kernel_eval --suite mini --live --model deepseek
+      mix ptc.kernel_eval --suite mini --live --model deepseek --allow-failures
       mix ptc.kernel_eval --suite mini --runs 3 --case eval_retry
   """
 
@@ -24,7 +25,8 @@ defmodule Mix.Tasks.Ptc.KernelEval do
           case: :string,
           model: :string,
           live: :boolean,
-          mock: :boolean
+          mock: :boolean,
+          allow_failures: :boolean
         ]
       )
 
@@ -42,6 +44,10 @@ defmodule Mix.Tasks.Ptc.KernelEval do
     case Eval.run(eval_opts) do
       {:ok, report} ->
         Mix.shell().info(Eval.render_markdown(report))
+
+        if opts[:allow_failures] != true and not Eval.passed?(report) do
+          Mix.raise("kernel eval failed: #{Eval.failure_count(report)} case(s) failed")
+        end
 
       {:error, {:missing_api_key, key, model}} ->
         Mix.raise("#{key} is required for live model #{model}")

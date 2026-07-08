@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert report.model == nil
     assert length(report.cases) == 5
     assert Enum.all?(report.cases, &(&1.status == :pass))
+    assert Eval.passed?(report)
+    assert Eval.failure_count(report) == 0
 
     assert Map.new(report.cases, &{&1.case, &1.value}) == %{
              "arithmetic" => 42,
@@ -69,6 +71,8 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert case_result.status == :fail
     assert case_result.value == 0
     assert case_result.failure_reason =~ "expected_mismatch"
+    refute Eval.passed?(report)
+    assert Eval.failure_count(report) == 1
   end
 
   test "live mode reports provider-specific missing key" do

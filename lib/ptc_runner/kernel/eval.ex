@@ -73,6 +73,16 @@ defmodule PtcRunner.Kernel.Eval do
     |> String.trim()
   end
 
+  @spec passed?(result()) :: boolean()
+  def passed?(%{cases: cases}) when is_list(cases) do
+    Enum.all?(cases, &(&1.status == :pass))
+  end
+
+  @spec failure_count(result()) :: non_neg_integer()
+  def failure_count(%{cases: cases}) when is_list(cases) do
+    Enum.count(cases, &(&1.status != :pass))
+  end
+
   @spec mini_cases() :: [map()]
   def mini_cases do
     [

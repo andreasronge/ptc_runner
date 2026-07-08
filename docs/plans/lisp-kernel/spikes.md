@@ -147,10 +147,10 @@ record the specific gaps; consider builtins/prelude-compiler relaxations as
 kernel-adjacent work items.
 
 **Result.** PASS for the autonomous M1 vertical slice, 2026-07-07. The initial
-single-namespace prelude embedded in `PtcRunner.Kernel.prelude_source/0`
-compiled and used `loop`/`recur`, `case`, message-list construction, private
-`llm-complete`, private `eval-program`, protocol-error feedback,
-model-program fail handling, and return handling. Evidence:
+single-namespace prelude embedded in `PtcRunner.Kernel` compiled and used
+`loop`/`recur`, `case`, message-list construction, private `llm-complete`,
+private `eval-program`, protocol-error feedback, model-program fail handling,
+and return handling. Evidence:
 `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs`
 passed with scripted responses covering happy path, protocol retry,
 program-fail, private capability denial, bounded projection, and prompt
@@ -523,7 +523,8 @@ tool-call program to omit `(return ...)` so the retry path is deterministic.
 Reports print per-case status, action count, eval count, and failure reason
 without raw prompts/messages/provider dumps. The kernel return trace keeps
 action summaries only; generated programs and public tool-call args stay out of
-default success traces.
+default success traces. The mix task exits non-zero on failed cases unless
+`--allow-failures` is set for report-only probes.
 
 **Pass.** Mock mode passes against expected values and the redaction test proves
 reports omit API-key strings, raw system prompt text, message payloads,
@@ -551,6 +552,7 @@ as a single live case in 2 actions/2 evals, `context_aggregation` passed as a
 single live case in 1 action/1 eval, and the first full live mini run passed
 4/5 under the original runtime-success-only status rule. After the harness was
 tightened to require expected-value matches, the oracle-checked full live run
+(`mix ptc.kernel_eval --suite mini --live --model deepseek --allow-failures`)
 passed 3/5:
 
 | case | status | actions | evals | failure |

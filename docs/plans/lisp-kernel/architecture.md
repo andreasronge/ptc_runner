@@ -380,9 +380,10 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     `prelude: nil`, `runtime: nil`, and `discovery_exec: nil`; evidence:
     `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`.
     Live DeepSeek evidence after prompt-prelude context/tool syntax changes:
-    `mix ptc.kernel_eval --suite mini --live --model deepseek` returned 3/5
-    pass in the oracle-checked full run: arithmetic 1/1, context filter/count
-    2/2, context aggregation failed after 5/5 with `turn_limit_exceeded`,
+    `mix ptc.kernel_eval --suite mini --live --model deepseek --allow-failures`
+    returned 3/5 pass in the oracle-checked full run: arithmetic 1/1, context
+    filter/count 2/2, context aggregation failed after 5/5 with
+    `turn_limit_exceeded`,
     domain tool failed after 2/2 with `expected_mismatch` because the model
     returned `%{"score" => 9}` instead of scalar `9`, forced eval retry 2/2. A
     separate single-case aggregation probe
