@@ -28,31 +28,36 @@ defmodule PtcRunner.Kernel do
     "Run the minimal native-action loop."
     [mission cfg]
     (loop [turn 0
-           messages [{"role" "system" "content" (cfg "system_prompt")}
-                     {"role" "user" "content" (mission "task")}]]
+           messages [{"role" "user" "content" (mission "task")}]
+           actions []]
       (if (>= turn (cfg "max_turns"))
         (fail {"reason" "turn_limit_exceeded" "turns" turn})
         (let [action (tool/llm-complete {"messages" messages "turn" turn})]
           (tool/log {"event" "action" "turn" turn "action" action})
-          (case (action "kind")
+          (let [actions2 (conj actions action)]
+            (case (action "kind")
             "tool_call"
               (let [result (tool/eval-program {"program" (action "program")})]
                 (tool/log {"event" "eval" "turn" turn "result" result})
                 (case (result "status")
                   "return" (return {"value" (result "value")
                                     "trace" {"turns" (inc turn)
-                                             "actions" (conj (cfg "actions") action)}})
+                                             "actions" actions2}})
                   "fail" (fail {"reason" "model_program_failed" "eval" result})
                   (recur (inc turn)
                          (conj messages
                                {"role" "assistant" "tool_calls" [(action "public_tool_call")]}
                                {"role" "tool" "tool_call_id" (action "tool_call_id")
-                                "content" (eval-feedback result)}))))
+                                "content" (eval-feedback result)})
+                         actions2)))
             "protocol_error"
               (recur (inc turn)
                      (conj messages
-                           {"role" "user" "content" (protocol-feedback action)}))
-            (fail {"reason" "unknown_action" "action" action}))))))
+                           {"role" "user" "content" (protocol-feedback action)})
+                     actions2)
+            "transport_error"
+              (fail {"reason" "llm_transport_error" "error" action})
+            (fail {"reason" "unknown_action" "action" action})))))))
   """
 
   @spec prelude_source() :: String.t()
@@ -73,9 +78,7 @@ defmodule PtcRunner.Kernel do
     with {:ok, prelude} <- Compiler.compile(@prelude_source),
          {:ok, tools} <- kernel_tools(mission, opts) do
       cfg = %{
-        "system_prompt" => Keyword.get(opts, :system_prompt, render_system_prompt()),
-        "max_turns" => Keyword.get(opts, :max_turns, 3),
-        "actions" => []
+        "max_turns" => Keyword.get(opts, :max_turns, 3)
       }
 
       program = ~S|(agent/run-mission data/mission data/cfg)|
@@ -99,23 +102,21 @@ defmodule PtcRunner.Kernel do
     llm = Keyword.fetch!(opts, :llm)
     events = Keyword.get(opts, :events)
     mission_tools = Keyword.get(opts, :tools, %{})
+    system_prompt = Keyword.get(opts, :system_prompt, render_system_prompt())
 
     tools = %{
       "llm-complete" =>
         {fn args ->
            request = %{
-             system: render_system_prompt(),
-             messages: Map.get(args, "messages", []),
+             system: system_prompt,
+             messages: normalize_messages(Map.get(args, "messages", [])),
              tools: [Action.tool_schema()],
              tool_choice: %{type: "tool", name: "run_ptc_lisp"}
            }
 
-           llm.(request)
-           |> case do
-             {:ok, response} -> response
-             response -> response
-           end
-           |> Action.normalize()
+           request
+           |> llm.()
+           |> normalize_llm_result()
            |> add_public_tool_call()
          end, [signature: "(messages :any, turn :int) -> :map", visibility: :private]},
       "eval-program" =>
@@ -133,6 +134,103 @@ defmodule PtcRunner.Kernel do
 
     {:ok, tools}
   end
+
+  defp normalize_llm_result({:ok, response}) do
+    response
+    |> Action.normalize()
+    |> Map.put(:transport_error, nil)
+  end
+
+  defp normalize_llm_result({:error, reason}) do
+    %{
+      kind: "transport_error",
+      program: nil,
+      reason: inspect(reason, limit: 10, printable_limit: 500),
+      content: nil,
+      tokens: %{},
+      model: nil,
+      provider: nil,
+      provider_meta: %{},
+      transport_error: true
+    }
+  end
+
+  defp normalize_llm_result(response) do
+    response
+    |> Action.normalize()
+    |> Map.put(:transport_error, nil)
+  end
+
+  defp normalize_messages(messages) when is_list(messages),
+    do: Enum.map(messages, &normalize_message/1)
+
+  defp normalize_messages(_), do: []
+
+  defp normalize_message(%{} = message) do
+    role = message_value(message, "role")
+
+    %{}
+    |> maybe_put(:role, normalize_role(role))
+    |> maybe_put(:content, message_value(message, "content"))
+    |> maybe_put(:tool_call_id, message_value(message, "tool_call_id"))
+    |> maybe_put(:tool_calls, normalize_tool_calls(message_value(message, "tool_calls")))
+  end
+
+  defp normalize_message(message), do: message
+
+  defp normalize_role(role) when role in [:system, :user, :assistant, :tool], do: role
+  defp normalize_role("system"), do: :system
+  defp normalize_role("user"), do: :user
+  defp normalize_role("assistant"), do: :assistant
+  defp normalize_role("tool"), do: :tool
+  defp normalize_role(role), do: role
+
+  defp normalize_tool_calls(nil), do: nil
+
+  defp normalize_tool_calls(calls) when is_list(calls) do
+    Enum.map(calls, fn
+      %{} = call ->
+        call
+        |> atomize_known_key(:id, "id")
+        |> atomize_known_key(:type, "type")
+        |> atomize_function()
+
+      other ->
+        other
+    end)
+  end
+
+  defp normalize_tool_calls(other), do: other
+
+  defp atomize_function(call) do
+    case message_value(call, "function") do
+      %{} = function ->
+        Map.put(call, :function, %{
+          name: message_value(function, "name"),
+          arguments: message_value(function, "arguments")
+        })
+
+      _ ->
+        call
+    end
+  end
+
+  defp atomize_known_key(map, atom_key, string_key) do
+    case message_value(map, string_key) do
+      nil -> map
+      value -> Map.put(map, atom_key, value)
+    end
+  end
+
+  defp message_value(%{} = map, key) when is_binary(key) do
+    Map.get(map, key, Map.get(map, String.to_existing_atom(key)))
+  rescue
+    ArgumentError -> Map.get(map, key)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, []), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp add_public_tool_call(%{kind: "tool_call", program: program} = action) do
     id = "run_ptc_lisp_#{System.unique_integer([:positive])}"

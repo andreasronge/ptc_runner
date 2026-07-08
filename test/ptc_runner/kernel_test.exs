@@ -11,7 +11,7 @@ defmodule PtcRunner.KernelTest do
         %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}]}
       ])
 
-    assert {:ok, %{"value" => 42, "trace" => %{"turns" => 1}}} =
+    assert {:ok, %{"value" => 42, "trace" => %{"turns" => 1, "actions" => [_]}}} =
              Kernel.run(%{"task" => "compute"}, llm: llm)
   end
 
@@ -27,16 +27,46 @@ defmodule PtcRunner.KernelTest do
         parent
       )
 
-    assert {:ok, %{"value" => "ok", "trace" => %{"turns" => 2}}} =
+    assert {:ok, %{"value" => "ok", "trace" => %{"turns" => 2, "actions" => [_, _]}}} =
              Kernel.run(%{"task" => "compute"}, llm: llm)
 
-    assert_received {:llm_request, %{messages: first_messages}}
+    assert_received {:llm_request, %{system: system_prompt, messages: first_messages}}
     assert_received {:llm_request, %{messages: retry_messages}}
 
-    assert length(first_messages) == 2
-    assert [%{"role" => "user", "content" => feedback}] = Enum.drop(retry_messages, 2)
+    assert system_prompt == Kernel.render_system_prompt()
+    assert first_messages == [%{role: :user, content: "compute"}]
+    assert [%{role: :user, content: feedback}] = Enum.drop(retry_messages, 1)
     assert feedback =~ "Protocol error"
     assert feedback =~ "run_ptc_lisp"
+  end
+
+  test "caller-supplied system prompt is sent once through the request system channel" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 1}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, system_prompt: "custom system")
+
+    assert_received {:llm_request, %{system: "custom system", messages: messages}}
+    assert [%{role: :user, content: "compute"}] = messages
+    refute Enum.any?(messages, &(&1.role == :system))
+  end
+
+  test "transport errors surface as kernel errors instead of model protocol feedback" do
+    llm = fn _request -> {:error, :econnrefused} end
+
+    assert {:error, %{"reason" => "llm_transport_error", "error" => error}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert error.kind == "transport_error"
+    assert error.reason == ":econnrefused"
   end
 
   test "model program fail path returns a kernel error without another eval" do
@@ -50,11 +80,16 @@ defmodule PtcRunner.KernelTest do
   end
 
   test "continue projection is bounded and does not expose raw Step" do
+    parent = self()
+
     llm =
-      scripted_llm([
-        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(+ 1 2)"}}]},
-        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}]}
-      ])
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(+ 1 2)"}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}]}
+        ],
+        parent
+      )
 
     {:ok, events} = Agent.start(fn -> [] end)
     on_exit(fn -> if Process.alive?(events), do: Agent.stop(events) end)
@@ -75,6 +110,30 @@ defmodule PtcRunner.KernelTest do
              %{"result" => %{"status" => "continue", "prints" => []}}
            ] =
              eval_events
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+
+    assert_received {:llm_request,
+                     %{
+                       messages: [
+                         %{role: :user},
+                         %{
+                           role: :assistant,
+                           tool_calls: [
+                             %{
+                               id: tool_call_id,
+                               type: "function",
+                               function: %{name: "run_ptc_lisp", arguments: arguments}
+                             }
+                           ]
+                         },
+                         %{role: :tool, tool_call_id: tool_call_id, content: feedback}
+                       ]
+                     }}
+
+    assert is_binary(tool_call_id)
+    assert Jason.decode!(arguments)["program"] == "(+ 1 2)"
+    assert feedback =~ "Program did not return successfully"
   end
 
   test "private kernel capabilities are denied to model programs" do
