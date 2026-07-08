@@ -4,6 +4,10 @@ defmodule PtcRunner.KernelTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.LLM.ReqLLMAdapter
+  alias ReqLLM.Message
+  alias ReqLLM.Message.ContentPart
+  alias ReqLLM.ToolCall
 
   test "happy path: mock LLM tool call is evaluated by strict inner Lisp and returned" do
     llm =
@@ -119,6 +123,7 @@ defmodule PtcRunner.KernelTest do
                          %{role: :user},
                          %{
                            role: :assistant,
+                           content: nil,
                            tool_calls: [
                              %{
                                id: tool_call_id,
@@ -134,6 +139,39 @@ defmodule PtcRunner.KernelTest do
     assert is_binary(tool_call_id)
     assert Jason.decode!(arguments)["program"] == "(+ 1 2)"
     assert feedback =~ "Program did not return successfully"
+  end
+
+  test "retry request messages cross the ReqLLM adapter boundary as tool-call structs" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(+ 1 2)"}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 7}} = Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, retry_request}
+
+    [_system, _user, assistant, tool] =
+      ReqLLMAdapter.build_messages(retry_request)
+
+    assert %Message{role: :assistant, content: [], tool_calls: [%ToolCall{} = call]} = assistant
+
+    assert call.id
+    assert call.type == "function"
+    assert call.function.name == "run_ptc_lisp"
+    assert Jason.decode!(call.function.arguments)["program"] == "(+ 1 2)"
+
+    assert %Message{role: :tool, tool_call_id: tool_call_id, content: [content]} = tool
+    assert tool_call_id == call.id
+    assert %ContentPart{type: :text, text: text} = content
+    assert text =~ "Program did not return successfully"
   end
 
   test "private kernel capabilities are denied to model programs" do

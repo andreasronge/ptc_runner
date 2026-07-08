@@ -168,12 +168,13 @@ defmodule PtcRunner.Kernel do
 
   defp normalize_message(%{} = message) do
     role = message_value(message, "role")
+    tool_calls = normalize_tool_calls(message_value(message, "tool_calls"))
 
     %{}
     |> maybe_put(:role, normalize_role(role))
-    |> maybe_put(:content, message_value(message, "content"))
+    |> maybe_put_content(message_value(message, "content"), tool_calls)
     |> maybe_put(:tool_call_id, message_value(message, "tool_call_id"))
-    |> maybe_put(:tool_calls, normalize_tool_calls(message_value(message, "tool_calls")))
+    |> maybe_put(:tool_calls, tool_calls)
   end
 
   defp normalize_message(message), do: message
@@ -190,10 +191,11 @@ defmodule PtcRunner.Kernel do
   defp normalize_tool_calls(calls) when is_list(calls) do
     Enum.map(calls, fn
       %{} = call ->
-        call
-        |> atomize_known_key(:id, "id")
-        |> atomize_known_key(:type, "type")
-        |> atomize_function()
+        %{
+          id: message_value(call, "id"),
+          type: message_value(call, "type") || "function",
+          function: normalize_tool_call_function(message_value(call, "function"))
+        }
 
       other ->
         other
@@ -202,25 +204,14 @@ defmodule PtcRunner.Kernel do
 
   defp normalize_tool_calls(other), do: other
 
-  defp atomize_function(call) do
-    case message_value(call, "function") do
-      %{} = function ->
-        Map.put(call, :function, %{
-          name: message_value(function, "name"),
-          arguments: message_value(function, "arguments")
-        })
-
-      _ ->
-        call
-    end
+  defp normalize_tool_call_function(%{} = function) do
+    %{
+      name: message_value(function, "name"),
+      arguments: message_value(function, "arguments")
+    }
   end
 
-  defp atomize_known_key(map, atom_key, string_key) do
-    case message_value(map, string_key) do
-      nil -> map
-      value -> Map.put(map, atom_key, value)
-    end
-  end
+  defp normalize_tool_call_function(function), do: function
 
   defp message_value(%{} = map, key) when is_binary(key) do
     Map.get(map, key, Map.get(map, String.to_existing_atom(key)))
@@ -231,6 +222,11 @@ defmodule PtcRunner.Kernel do
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, []), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_content(map, nil, tool_calls) when is_list(tool_calls),
+    do: Map.put(map, :content, nil)
+
+  defp maybe_put_content(map, content, _tool_calls), do: maybe_put(map, :content, content)
 
   defp add_public_tool_call(%{kind: "tool_call", program: program} = action) do
     id = "run_ptc_lisp_#{System.unique_integer([:positive])}"
