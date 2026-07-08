@@ -192,7 +192,7 @@ Kernel.run(mission, cfg)
        NOTE: raw Bundle.compile/1 is dep-blind BY DESIGN (bundle.ex:56-61) —
        each namespace compiles in isolation (namespace_deps defaults to %{},
        compiler.ex:145-167), so an undeclared cross-namespace ref like
-       (feedback/config) fails "unknown namespace" even within one source
+       (agent.feedback/config) fails "unknown namespace" even within one source
        blob. The layered bundle REQUIRES declared deps via
        compile_precompiled/2 or a store-resolved attach.
   2. capabilities = %{
@@ -249,15 +249,14 @@ agent.core      — the loop: turn iteration, return/fail handling, budget wind-
                 domain.*        — optional problem helpers (never required by agent.*)
 ```
 
-**Naming.** Dotted names (`agent.core`, `agent.feedback`) are *component/file
-ids* in the bundle list. The declared PTC-Lisp namespace names are the bare
-`agent`, `prompt`, `feedback` — hence call sites `(agent/run-mission ...)`
-and `feedback/config`. Whether dotted namespace names are even legal in
-`(ns ...)` is unverified; R5 settles it, and the two schemes may then be
-collapsed into one.
+**Naming.** Dotted names (`agent.core`, `agent.prompt`, `agent.feedback`) are
+the declared PTC-Lisp namespaces for M2, not only component/file IDs. A source
+probe on 2026-07-08 confirmed `(ns agent.core ...)` compiles, so the loop call
+site becomes `(agent.core/run-mission ...)`, with cross-namespace policy calls
+such as `agent.feedback/eval-feedback`.
 
 - Policy *data* is a constant export: `(def config {:max-chars 1200 ...})` in
-  a policy namespace; the loop reads `feedback/config`.
+  a policy namespace; the loop reads `agent.feedback/config`.
 - **Swapping a policy = swapping one component in the bundle list** (same
   namespace name, different source). Bundle provenance records which version
   ran. An A/B cell is two bundles differing in one component.
@@ -373,10 +372,13 @@ Record the resolution here when made:
   M2 may revise this after S2/S5.
 - **D6 — turn_history.** Whether inner evals get `*1`/`*2`/`*3` threading in
   V1 (probably not; loop can pass prior results as context/memory).
-- **D7 — capability visibility.** RESOLVED 2026-07-07: `llm-complete`,
-  `eval-program`, `log` are `visibility: :private` tools declared by
-  `agent.core`'s exports — reuses shipped private-tool authority instead of
-  relying on "the outer env is trusted anyway". (Review round 1 finding.)
+- **D7 — capability visibility.** RESOLVED 2026-07-07, sharpened for M2
+  2026-07-08: `llm-complete`, `eval-program`, `log` are
+  `visibility: :private` tools authorized by inferred export `tool_refs`, not
+  namespace membership alone. M2 should keep `agent.prompt/*` and
+  `agent.feedback/*` exports tool-free and assert that only the loop export
+  carries the kernel trio. This reuses shipped private-tool authority instead
+  of relying on "the outer env is trusted anyway". (Review round 1 finding.)
 - **D8 — Eval harness home.** Where the lifted case data, oracle core,
   SampleData, and SearchTool live so that `mix ptc.kernel_eval` (a `lib/`
   mix task) can reach them without `MIX_ENV=test`. Working recommendation:

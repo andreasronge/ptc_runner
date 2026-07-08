@@ -213,7 +213,7 @@ the answer.
   (Feeds `agent.prompt`, D11.)
 - [ ] **R5 — Bundle + deps API**: exact call shape for layered preludes
   without a `PreludeStore` (raw `Bundle.compile/1` is dep-blind by design —
-  confirm whether `agent.core` calling `feedback/*` requires
+  confirm whether `agent.core` calling `agent.feedback/*` requires
   `namespace_deps:` via `compile_precompiled/2` or a store-resolved attach).
   (Feeds M2 prelude split.)
 - [x] **R6 — Tool-arg/result normalization path** (answered by review round 1,
@@ -263,7 +263,9 @@ the answer.
 - [ ] **R14 — Kernel eval model/config seam**: Tier 2 is a `lib/` mix task, so
   it cannot depend on `test/support/LLMSupport`. Move/reuse env loading, model
   alias resolution, and API-key checks from a lib-visible module; tests call
-  that seam, not the reverse.
+  that seam, not the reverse. The autonomous M2 mini-eval spike must implement
+  this seam before enabling live `mix ptc.kernel_eval` mode; no second
+  live-eval env/key path.
 - [ ] **R15 — Security/redaction and trust policy**: define private
   kernel-tool ledger projection, prompt/action redaction, unsafe debug artifact
   policy, prelude trust/provenance policy, and inner eval denial defaults
@@ -452,8 +454,8 @@ as the goal brief.
 
 - [ ] Multi-turn loop in `agent.core`: feedback message construction,
   max-turns wind-down, memory threading (per D1).
-- [ ] Split `agent.prompt` and `agent.feedback` into their own namespaces/
-  components; wire deps per R5. Policy constants (`feedback/config`) as
+- [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
+  PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.
 - [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
   wording).

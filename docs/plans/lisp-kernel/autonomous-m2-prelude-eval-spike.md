@@ -87,6 +87,9 @@ the worktree, stop and report it before touching anything.
 
    Move the minimal loop toward separate policy components:
 
+   Use dotted PTC-Lisp namespaces for the split. These are the declared
+   `(ns ...)` names and the public call contract, not only file/component IDs:
+
    - `agent.core`: turn loop, action dispatch, eval result handling,
      return/fail control flow;
    - `agent.prompt`: system/task message construction and compact PTC-Lisp
@@ -156,10 +159,12 @@ the worktree, stop and report it before touching anything.
      V1 makes `private_env` namespace-scoped with transitive fail-closed
      guards. Record how the kernel capabilities (`llm-complete`,
      `eval-program`, `log`) distribute across `agent.*` namespaces, grant them
-     as narrowly as the model allows (intended: `agent.core` only), and pin
-     the observed behavior with a test — including whether
-     `agent.prompt`/`agent.feedback` (which need no tools) can reach kernel
-     tools or fail closed.
+     as narrowly as the model allows, and pin the observed behavior with a
+     test. The authority rule is export/tool-ref based, not namespace-only:
+     assert `agent.prompt/*` and `agent.feedback/*` exports have empty
+     `tool_refs`, while only the loop export carries `llm-complete`,
+     `eval-program`, and `log`. Also assert prompt/feedback exports cannot
+     reach kernel tools and fail closed.
 
    If the split cannot compile cleanly, stop and document the compiler/API gap.
 
@@ -187,19 +192,22 @@ the worktree, stop and report it before touching anything.
 
    - named suite, initially `mini`;
    - 3-5 cases;
-   - model selection through `PTC_TEST_MODEL` / `--model`, resolved with the
-     lib-visible `PtcRunner.LLM.Registry` (what `LLM.callback/2` already
-     uses). The mix task lives under `lib/` and must not reference
-     `test/support` — `LLMSupport` only compiles in the test env, and CI
-     dialyzer (MIX_ENV=test) would not catch the leak; it breaks dev/prod
-     compile instead. Inline minimal `.env`/env-var handling for API keys or
-     require exported env vars; record the choice;
+   - first implement the roadmap's R14 lib-visible model/config seam, then use
+     it for model selection through `PTC_TEST_MODEL` / `--model`, resolved with
+     `PtcRunner.LLM.Registry` (what `LLM.callback/2` already uses). The mix task
+     lives under `lib/` and must not reference `test/support` — `LLMSupport`
+     only compiles in the test env, and CI dialyzer (MIX_ENV=test) would not
+     catch the leak; it breaks dev/prod compile instead. Do not create a second
+     live-eval env/key path;
    - deterministic mock mode and optional live DeepSeek mode;
    - markdown or JSON-ish report printed to stdout or written under
      `reports/kernel_eval/` — gitignore that directory; summarized results
      belong in these docs, not committed raw reports;
    - per-case outcome, action count, eval count, and failure reason;
    - sanitized action/eval trace, no raw API key or unsafe raw provider dump.
+     Before any live run, add a deterministic mock report test proving the
+     runner excludes raw API keys, raw provider dumps, and full prompt/message
+     payloads by default.
 
 5. **Mini case set**
 
@@ -275,9 +283,10 @@ Run, in order:
 2. new prelude-split tests;
 3. new mini eval tests or runner in mock mode;
 4. `mix format`;
-5. live DeepSeek mini run, if `OPENROUTER_API_KEY` is present;
-6. `mix precommit` if the spike touches normal repo code;
-7. `codex review` over the session's commits as the final gate — fix or
+5. deterministic report-redaction test;
+6. live DeepSeek mini run, if `OPENROUTER_API_KEY` is present;
+7. `mix precommit` if the spike touches normal repo code;
+8. `codex review` over the session's commits as the final gate — fix or
    explicitly defer each finding in the final report.
 
 If `mix precommit` fails due unrelated incumbent issues, record the exact
