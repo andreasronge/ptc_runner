@@ -289,7 +289,8 @@ if Code.ensure_loaded?(ReqLLM) do
         :provider_options,
         :receive_timeout,
         :req_http_options,
-        :temperature
+        :temperature,
+        :tool_choice
       ])
       |> Enum.into([])
     end
@@ -365,7 +366,7 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -395,7 +396,7 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -424,7 +425,7 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature])
+        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)

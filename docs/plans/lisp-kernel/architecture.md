@@ -308,6 +308,21 @@ Claims above rest on these, checked 2026-07-07 on `main`:
    setup pressure. Host grants still consume setup heap/time and can fail during
    setup when `:setup_max_heap` is too low (sandbox.ex moduledoc). S5 measures
    the copy-volume budget for the nested kernel path.
+10. Vertical-slice kernel evidence, 2026-07-07: `PtcRunner.Kernel.run/2`
+    can compile a minimal `agent/run-mission` prelude, grant private
+    `llm-complete`/`eval-program`/`log` tools, normalize one native
+    `run_ptc_lisp` action, run the model program through strict inner
+    `Lisp.run/2`, and return a bounded eval projection. Mock coverage is in
+    `test/ptc_runner/kernel*_test.exs`; live smoke
+    `mix test test/ptc_runner/kernel/e2e_test.exs --include e2e` passed on
+    `openrouter:deepseek/deepseek-v4-flash`.
+11. ReqLLM/OpenRouter mechanics observed in the live smoke: `temperature`
+    must be a float (`0.0`, not `0`); `tool_choice` must be forwarded by
+    `PtcRunner.LLM.ReqLLMAdapter` and uses map form
+    `%{type: "tool", name: "run_ptc_lisp"}`. With that shape, a direct
+    DeepSeek/OpenRouter probe returned exactly one tool call with
+    `args: %{"program" => "(return 42)"}` plus token fields
+    `input`, `output`, `cache_read`, `cache_creation`, and `total_cost`.
 
 ## Open decisions
 
@@ -320,8 +335,10 @@ Record the resolution here when made:
   copy/setup pressure for a growing memory map. The likely default is
   host-held memory unless the spikes show both semantics and copy volume remain
   acceptable.
-- **D2 — Kernel module home.** `PtcRunner.Kernel` in `lib/ptc_runner/kernel/`
-  (working assumption; 0.x, breaking changes fine) vs a separate Mix project.
+- **D2 — Kernel module home.** RESOLVED for M1 spike 2026-07-07:
+  `PtcRunner.Kernel` in core `lib/ptc_runner/`, with helpers under
+  `lib/ptc_runner/kernel/`. This keeps the slice close to `Lisp.run/2`,
+  `Tool`, and `LLM` contracts. Release/API stability remains D18.
 - **D3 — Prelude file home.** `priv/preludes/agent/*.lisp` compiled in via
   `@external_resource` (mirrors `priv/prompts/` convention) vs plain files
   loaded at runtime.
@@ -333,9 +350,12 @@ Record the resolution here when made:
   `test/ptc_runner/trace_log/turn_log_integration_test.exs` asserts both
   drivers emit the same top-level event shape — the kernel would become the
   third driver under the same emission point and parity test.
-- **D5 — Step projection shape.** Exact map `eval-program` returns to the
-  loop; start minimal (`:ok :return :fail :prints :memory`) and grow only on
-  demonstrated need.
+- **D5 — Step projection shape.** Initial M1 spike shape, verified
+  2026-07-07: `eval-program` returns a bounded map with string status
+  `"return" | "fail" | "error" | "continue"`, public `value` only for
+  return/fail/continue, bounded `prints`, and error reason/message for host
+  eval errors. It deliberately does not expose raw `%Step{}` or native memory.
+  M2 may revise this after S2/S5.
 - **D6 — turn_history.** Whether inner evals get `*1`/`*2`/`*3` threading in
   V1 (probably not; loop can pass prior results as context/memory).
 - **D7 — capability visibility.** RESOLVED 2026-07-07: `llm-complete`,

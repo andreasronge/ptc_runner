@@ -268,7 +268,16 @@ the answer.
   kernel-tool ledger projection, prompt/action redaction, unsafe debug artifact
   policy, prelude trust/provenance policy, and inner eval denial defaults
   (`prelude: nil`, `runtime: nil`, `discovery_exec: nil`). (Feeds D5, D10.)
-- [ ] **R16 — Native action/provider mechanics**: normalize content/tool-call
+- [x] **R16a — Native action/provider mechanics, M1 slice** (answered by
+  vertical slice, 2026-07-07): `PtcRunner.Kernel.Action.normalize/2`
+  accepts exactly one `run_ptc_lisp` call and rejects free text, mixed text
+  plus tool call, missing/multiple/wrong calls, invalid/non-map args, missing/
+  empty/non-string/oversized `program`, and extra args such as `commentary`.
+  ReqLLM/OpenRouter requires `temperature: 0.0` and map tool choice
+  `%{type: "tool", name: "run_ptc_lisp"}`. The adapter now forwards
+  `:tool_choice`; the blessed DeepSeek smoke passed and preserved token usage.
+- [ ] **R16b — Native action/provider mechanics, full provider audit**:
+  normalize content/tool-call
   response shapes into the V1 action envelope; document DeepSeek/OpenRouter
   reasoning fields, provider routing/fallback metadata, generation controls
   (`temperature`, `top_p`, `seed`, `max_tokens`, `reasoning.effort`,
@@ -357,11 +366,11 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
 - [ ] **S3 — Blocking LLM call in the sandbox**: real deepseek call from a
   tool closure under relaxed outer limits; timeout accounting; kill-mid-HTTP
   behavior.
-- [ ] **S4 — Loop expressiveness**: write a minimal `run-mission` loop as a
+- [x] **S4 — Loop expressiveness**: write a minimal `run-mission` loop as a
   plain prelude against a *scripted stub* native-action llm tool (no kernel, no
   network, plain `Lisp.run`). Proves the language carries the V1 action
   protocol and turn loop comfortably; its source seeds `agent.core`.
-- [ ] **S6 — Native action protocol hardening**: scripted tool-call, final,
+- [x] **S6 — Native action protocol hardening**: scripted tool-call, final,
   and protocol-error responses; reject free-text code, missing/multiple/wrong
   tool calls, invalid arguments, and disallowed finals.
 - [ ] **S7 — Capability confused-deputy + untrusted envelope**: attempts to
@@ -399,18 +408,21 @@ architecture.md, rethink.
 Smallest real slice: one bundled prelude (core only, prompt/feedback inlined),
 one mission, mock-llm tests, one live smoke.
 
-- [ ] `PtcRunner.Kernel.run/2` per architecture.md §Capability Model
+- [x] `PtcRunner.Kernel.run/2` per architecture.md §Capability Model
   (capabilities, backstops, bundle compile, outer run).
-- [ ] `agent.core` prelude v0: single-turn mission — render prompt, one
+- [x] `agent.core` prelude v0: single-turn mission — render prompt, one
   `llm-complete`, accept exactly one `run_ptc_lisp` action, one `eval-program`,
   return/fail.
 - [ ] Tier 0 suite: scripted llm lambdas covering happy path, unparseable
   response/protocol error, program `fail`, LLM budget exhaustion, outer deadline
   kill, private-capability authorization, inner eval isolation, redacted
   tracing, untrusted envelope, golden prompt hygiene, extension-contract smoke,
-  turn-event shape parity.
-- [ ] Tier 1 smoke file with eval-case #1 ("how many products", no tools,
-  `{:eq, 500}` oracle) live on the blessed command.
+  turn-event shape parity. Partial M1 spike coverage landed for happy path,
+  protocol retry, action hardening, program `fail`, private capability denial,
+  bounded projection, and prompt hygiene; budget/deadline/trace parity remain.
+- [x] Tier 1 smoke file with a tiny no-tool arithmetic mission live on the
+  blessed command. The original eval-case #1 product-count oracle remains for
+  the later Tier 2 harness.
 - [ ] First `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel`
   run recorded (Tier 2, kernel variant only — the task can exist in minimal
   form this early).

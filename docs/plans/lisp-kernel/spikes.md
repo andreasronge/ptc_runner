@@ -146,7 +146,15 @@ value and message sequence; author judges the source maintainable.
 record the specific gaps; consider builtins/prelude-compiler relaxations as
 kernel-adjacent work items.
 
-**Result.** _pending_
+**Result.** PASS for the autonomous M1 vertical slice, 2026-07-07. The
+prelude embedded in `PtcRunner.Kernel.prelude_source/0` compiles and uses
+`loop`/`recur`, `case`, message-list construction, private `llm-complete`,
+private `eval-program`, protocol-error feedback, model-program fail handling,
+and return handling. Evidence:
+`mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs`
+passed with scripted responses covering happy path, protocol retry,
+program-fail, private capability denial, bounded projection, and prompt
+hygiene.
 
 ---
 
@@ -220,7 +228,15 @@ token usage, model/provider metadata, and response mode.
 **Fail.** Any malformed response reaches `eval-program`, or the prelude must
 parse free text/code fences to recover the program.
 
-**Result.** _pending_
+**Result.** PASS for M1 hardening scope, 2026-07-07. Implemented
+`PtcRunner.Kernel.Action.normalize/2` and tests for valid one-tool calls,
+free text, assistant text plus tool call, missing tool call, multiple calls,
+wrong tool name, invalid JSON arguments, decoded non-map arguments, missing/
+empty/non-string/oversized `program`, and extra args including `commentary`.
+Valid actions preserve `program`, token usage, model, provider, and
+provider metadata. Malformed responses become deterministic
+`protocol_error` values before `eval-program` is invoked. Structured-output
+only and reasoning-metadata provider variants still belong to R16b.
 
 ---
 
