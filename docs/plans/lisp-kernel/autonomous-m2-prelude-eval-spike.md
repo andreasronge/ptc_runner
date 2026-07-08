@@ -19,11 +19,11 @@ repeatable eval runner, and test DeepSeek on 3-5 tasks beyond arithmetic. Prove
 at least one prompt/feedback behavior can change by swapping a prelude, with no
 Elixir loop-logic change.
 
-Work risk-first: prove the cross-namespace prelude compile path (Build Task 2,
-minimal two-namespace form) before anything else. Commit after each proven
-task. Keep scope bounded. Do not build full Tier 2, sessions, compaction, MCP,
-or self-improvement. Update docs with evidence, blockers, commands, and live
-results.
+Work risk-first: prove the cross-namespace prelude compile path (Build Task
+2a, minimal two-namespace form) before anything else. Commit after each
+coherent batch. Keep scope bounded. Do not build full Tier 2, sessions,
+compaction, MCP, or self-improvement. Update docs with evidence, blockers,
+commands, and live results.
 ```
 
 ## Objective
@@ -73,13 +73,15 @@ Avoid:
 
 ## Build Tasks
 
-**Sequencing (risk-first).** Task 2's minimal two-namespace compile proof
+**Sequencing (risk-first).** Task 2a's minimal two-namespace compile proof
 comes first — it is the highest-information step and the only one with a hard
-stop condition. Then the full split (task 1), swappable policy (task 3), and
-only then the runner and live work (tasks 4-6). Commit after each task that
-proves out; never leave the worktree dirty between tasks — the M1 session left
-the entire slice uncommitted for hours, which is an unacceptable risk in this
-repo (concurrent automations share it).
+stop condition. Then the full split (task 1 + 2b), swappable policy (task 3),
+and only then the runner and live work (tasks 4-6). Commit after each coherent
+batch — code together with its tests and doc updates — rather than after every
+isolated fact, and do not let uncommitted work grow past one batch (the M1
+session left the entire slice uncommitted for hours, an unacceptable risk in a
+repo shared with concurrent automations). If unrelated dirty state appears in
+the worktree, stop and report it before touching anything.
 
 1. **Prelude file split**
 
@@ -94,6 +96,18 @@ repo (concurrent automations share it).
    The split may live under `priv/preludes/agent/`, `lib/ptc_runner/kernel/`,
    or a clearly marked spike path. Record the chosen home and why.
 
+   **Policy interface.** Treat public exports as the swap contract:
+
+   - `agent.prompt/system-message [cfg]`;
+   - `agent.prompt/task-message [mission cfg]`;
+   - `agent.feedback/protocol-error [action cfg]`;
+   - `agent.feedback/eval-feedback [result cfg]`.
+
+   Variants may add private helpers, but a variant that renames these functions
+   or changes their arity is non-conforming. Use `defn-` by default for
+   composition helpers; cross-namespace callers only get declared public exports,
+   while source-level improvement tooling can still inspect reachable helpers.
+
    **System-prompt channel contract.** The kernel sends the system prompt
    through exactly one channel: the request-level `:system` field, set
    host-side (fixed in `b49d822d` after a dual-channel bug). Moving prompt
@@ -101,10 +115,21 @@ repo (concurrent automations share it).
    `llm-complete` args with a `"system"` field that the host forwards as
    request-level `:system`. Do **not** re-embed a system-role message inside
    `messages` (that reintroduces the dual-channel bug), and do not leave
-   default prompt rendering in Elixir (that defeats the swap thesis). Decide
-   and record what happens to the `:system_prompt` Elixir opt — expected:
-   prompt policy becomes a prelude concern and the opt is removed (0.x,
-   breaking changes fine).
+   default prompt rendering in Elixir (that defeats the swap thesis). Keep the
+   `:system_prompt` Elixir opt as an override for tests and live probes —
+   removing it is a separate API-cleanup decision that needs M2 evidence, not
+   part of this spike. What the spike must pin is precedence: when both the
+   opt and prelude-rendered prompt policy are present, exactly one wins
+   (suggested: the opt overrides the prelude, as an explicit test escape
+   hatch) and the request still carries a single system channel. Record the
+   decision and cover it with a test.
+
+   The prompt prelude should give compact, domain-blind PTC-Lisp orientation:
+   PTC-Lisp is Clojure-like prefix syntax; call exactly one `run_ptc_lisp`
+   action; successful programs end with `(return value)`; explicit failures use
+   `(fail value)`; read mission context by map keys; and call only granted tools
+   from inside the program. Treat this as a topic checklist, not fixed prose —
+   wording is exactly what prompt-prelude variants exist to explore.
 
    Keep `agent.*` domain-blind. No product/order/employee/search benchmark
    hints in prompt or feedback preludes.
@@ -121,11 +146,12 @@ repo (concurrent automations share it).
      be declared via `Compiler.compile/2` `:namespace_deps`
      (`%{ns => [dep_ns]}`) or `Bundle.compile_precompiled/2`, which forwards
      it;
-   - prove the minimal two-namespace case first (`agent.core` +
-     `agent.feedback`) before attempting the three-way split;
+   - **2a (first):** prove the minimal two-namespace case — `agent.core`
+     calling `agent.feedback` exports — with a deterministic test, before any
+     three-way split;
+   - **2b (after task 1):** prove the full graph — `agent.core` calling both
+     `agent.prompt` and `agent.feedback` — with a deterministic test;
    - record the exact API shape that works;
-   - add a deterministic test that `agent.core` calls `agent.prompt` and
-     `agent.feedback` successfully;
    - investigate and pin private-tool authority across the bundle: capability
      V1 makes `private_env` namespace-scoped with transitive fail-closed
      guards. Record how the kernel capabilities (`llm-complete`,
@@ -161,7 +187,13 @@ repo (concurrent automations share it).
 
    - named suite, initially `mini`;
    - 3-5 cases;
-   - model selection through `PTC_TEST_MODEL` / `--model`;
+   - model selection through `PTC_TEST_MODEL` / `--model`, resolved with the
+     lib-visible `PtcRunner.LLM.Registry` (what `LLM.callback/2` already
+     uses). The mix task lives under `lib/` and must not reference
+     `test/support` — `LLMSupport` only compiles in the test env, and CI
+     dialyzer (MIX_ENV=test) would not catch the leak; it breaks dev/prod
+     compile instead. Inline minimal `.env`/env-var handling for API keys or
+     require exported env vars; record the choice;
    - deterministic mock mode and optional live DeepSeek mode;
    - markdown or JSON-ish report printed to stdout or written under
      `reports/kernel_eval/` — gitignore that directory; summarized results
@@ -206,9 +238,9 @@ repo (concurrent automations share it).
 Wrap eval output in an untrusted envelope in **both** variants, and vary only
 the instruction wording. Two reasons:
 
-- the current embedded `eval-feedback` interpolates untrusted eval output
-  directly into instruction text via `str` — exactly the pattern R15/S7 flag.
-  Making the envelope the core default fixes that regardless of variant;
+- `a0683eb8` already moved the embedded M1 retry feedback to a JSON envelope
+  with `untrusted_eval_result`; the M2 split must preserve that safer default
+  when moving feedback policy into preludes;
 - with the envelope held constant, A vs B is a single-variable comparison
   (wording only), so an observed difference actually means something.
 
