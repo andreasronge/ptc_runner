@@ -132,8 +132,9 @@ report it before touching anything.
 
 2. **Bounded `memory_summary` in the eval projection**
 
-   Extend the `eval-program` result map with a `memory_summary` containing
-   only:
+   Extend the `eval-program` result map with a `memory_summary` — the full
+   boundary shape and its invariants are pinned in the Prelude Contract
+   section below. The summary contains only:
 
    - defined names (sorted);
    - names changed by this eval;
@@ -164,7 +165,8 @@ report it before touching anything.
 
    **Policy-interface note.** `eval-feedback [result cfg]` keeps its arity,
    but `result` grows the `memory_summary` key that conforming variants are
-   expected to render. Update the policy-interface section of the M2 brief's
+   expected to render (see the Prelude Contract section for the shape and
+   the variant obligations). Update the policy-interface section of the M2 brief's
    contract in `architecture.md`/`roadmap.md` where recorded, and amend the
    S19 preregistration so A/B variants are written against the new result
    shape rather than a stale contract.
@@ -204,6 +206,66 @@ report it before touching anything.
    Record results honestly either way — "memory did not move the red cases"
    is a valid, useful outcome that sharpens S19's scope. Retry-behavior
    cases need `max_turns` headroom (4–6), not the default 3.
+
+## Prelude Contract
+
+The host↔prelude boundary for memory is part of the spike's deliverable.
+Invariants are fixed; the default shape below is adjustable only through
+task 2's compatibility decision.
+
+Invariants:
+
+- Elixir owns raw memory. It never enters the outer run's context, the
+  prelude's data structures, traces, or reports — only the bounded
+  `memory_summary` crosses the boundary.
+- The host commits memory after each inner eval, subject to the byte-cap
+  order pinned in task 1.
+- The next LLM turn learns about memory only because prior eval results are
+  rendered into feedback messages. There is no other channel: no state in
+  the system prompt, none in the task message.
+- `agent.core` treats `memory_summary` as opaque payload: it may pass it to
+  `agent.feedback/eval-feedback` and to `tool/log`, but must not render,
+  filter, or branch on it. Only `agent.feedback/eval-feedback` turns it into
+  model-facing text.
+- Feedback variants may change wording freely but must preserve the
+  security boundary: bounded previews only, no raw memory dump, rendered
+  inside the existing `untrusted_eval_result` envelope. Swapping
+  `agent.feedback` changes how memory updates are described — never what
+  raw state exists or whether state persists.
+- `protocol-error` feedback carries no `memory_summary` — no eval ran.
+- S19 A/B variants must be written against this contract; task 3 amends the
+  S19 preregistration accordingly.
+
+Default shape. `eval-program` keeps its existing projection — `status` of
+`"return" | "fail" | "error" | "continue"`, `value`, `prints`, and error
+`reason`/`message` — and gains one key. Do **not** replace the four-status
+protocol; `agent.core` dispatches on it.
+
+```
+%{
+  "status" => "continue",
+  "value" => ...,
+  "prints" => [...],
+  "memory_summary" => %{
+    "defined" => ["inc2", "x"],        # all names, sorted, bounded
+    "changed" => ["x"],                # changed by this eval only
+    "entries" => [
+      %{"name" => "x",
+        "kind" => "value",             # "value" | "function"
+        "preview" => "41",
+        "truncated" => false}
+    ],
+    "truncated" => false,              # summary-level marker
+    "omitted_count" => 0
+  }
+}
+```
+
+Field names are the default, not the decision: the task 2 compatibility
+check against `PtcToolProtocol`/`TurnFeedback` may rename keys to match the
+incumbent vocabulary — record the outcome either way. The structure is
+fixed: bounded name lists, per-entry kind/preview/truncation, and a
+summary-level truncation marker with an omitted count.
 
 ## Verification
 
