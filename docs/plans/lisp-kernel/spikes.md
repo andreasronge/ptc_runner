@@ -621,6 +621,50 @@ Memory persistence is live-green. It did not reliably fix
 feedback ownership probe. `domain_tool` stayed red as expected, consistent
 with scalar extraction rather than memory.
 
+### S19 — Bundle swap provenance + feedback-only A/B preregistration
+
+**Question.** Can a kernel run be attributed to a specific `agent.feedback`
+variant by component `source_hash` in sanitized evidence, before any
+feedback-policy A/B is run?
+
+**Method.** Add committed feedback variants under
+`priv/kernel_feedback_variants/`. Compile the default graph twice with
+only the `agent.feedback` component overridden, then inspect
+`Prelude.trace_summary/1` and the sanitized `PtcRunner.Kernel.Eval` report
+trace. Keep D4 TurnEvents out of scope; S19 evidence is the current sanitized
+event/report path sourced from `prelude.metadata.components`.
+
+**Pass.** PASS, 2026-07-08. `Kernel.run/2` now emits a run-start `prelude`
+event sourced from `Prelude.trace_summary/1` when an `events` callback is
+supplied, and the eval report sanitizer preserves only aggregate
+hashes/namespaces and component
+`id`/`checksum`/`source_hash`/`namespaces`/bounded-redacted `origin`. Tests
+prove the report does not leak raw prelude source, raw model programs, or
+feedback wording.
+
+Frozen component evidence:
+
+| Component | Cell A hash | Cell B hash |
+| --- | --- | --- |
+| `agent.prompt` | `827d9850b274a809f36782f3cd2c36191a5daf9b61fed3ebef381e4096cec29e` | `827d9850b274a809f36782f3cd2c36191a5daf9b61fed3ebef381e4096cec29e` |
+| `agent.feedback` | `b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474` | `ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe` |
+| `agent.core` | `04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f` | `04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f` |
+
+Commands:
+
+- `mix test test/ptc_runner/kernel/eval_test.exs test/ptc_runner/kernel/prelude_split_test.exs`
+- `mix ptc.kernel_eval --suite mini`
+
+The preregistration for the later feedback-only A/B is
+[`experiments/s19-feedback-ab-prereg.md`](experiments/s19-feedback-ab-prereg.md).
+A post-prereg live shakedown was later run with:
+`mix ptc.kernel_feedback_ab --live --model deepseek --runs 5 --allow-failures --report reports/kernel_eval/s19-feedback-ab-live.md`.
+It is explicitly non-M3 descriptive evidence because D4 canonical turn logs
+are absent. Summary: A = 22/30 pass, B = 25/30 pass; primary
+`context_aggregation` was A = 2/5 and B = 5/5; `memory_persistence` stayed
+green at 5/5 in both cells; `domain_tool` stayed red at 0/5 in both cells.
+Do not treat these counts as statistical superiority evidence.
+
 ---
 
 ## Candidate later spikes (register properly before running)
@@ -628,21 +672,6 @@ with scalar extraction rather than memory.
 Spike IDs are claimed by both the registered sections above and this list —
 take the next unused number (S20 at time of writing); do not reuse an ID.
 
-- **S19 — Bundle swap provenance:** two bundles differing in one
-  `agent.feedback` component; confirm `prelude.metadata.components` +
-  `source_hash` are sufficient to attribute a run to a policy variant in turn
-  logs (M3 depends on this attribution). Pre-register the follow-on
-  feedback-only A/B before running it: feedback prelude is the only variable;
-  prompt prelude, cases, `max_turns`, model, eval runner, and host-held memory
-  behavior stay fixed; variants must preserve
-  `untrusted_eval_result.memory_summary` and may only change how they describe
-  it. Run N repeats per case per variant via `--runs`; report pass counts per
-  case/variant. At temperature 0.0, repeats are highly correlated provider
-  nondeterminism, so the result is directional evidence that a policy variant
-  can or cannot recover a failure mode, not a statistical superiority claim.
-  Treat `domain_tool` scalar extraction and `context_aggregation` turn-limit
-  burn as separate ownership probes: a feedback-only miss on aggregation is
-  evidence that prompt policy may own that failure, not a stop condition.
 - **S15 — Streaming envelope:** mock streamed chunks from `llm-complete` and
   decide whether the prelude sees incremental events, the host callback sees
   them, or both. Gate: no provider-specific stream shape leaks into

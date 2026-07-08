@@ -6,8 +6,8 @@
 **Worktree state:** dirty with the S19 provenance/report/preregistration
 changes; no unrelated dirty files were present before the spike edits.
 **Preregistration status:** completed before outcome-bearing runs.
-**Post-prereg shakedown status:** not run in this preregistration/
-implementation commit.
+**Post-prereg shakedown status:** live descriptive shakedown run on 2026-07-08;
+not M3 evidence.
 
 This preregistration freezes a feedback-only comparison for a later run. It is
 valid only if the cells vary `agent.feedback` wording/rendering policy and
@@ -230,10 +230,38 @@ orders by seed `s19-feedback-ab-order-v1` and records both cells per block.
 
 ## Outcome
 
-Not run in this preregistration/implementation commit. Any later live shakedown
-must use the frozen cells above and remain labeled non-M3 descriptive evidence
-unless a new conclusion-bearing preregistration supplies the full inferential
-plan and D4 canonical turn logs provide the required metric source.
+Preregistration completed before the run. A later live descriptive shakedown
+was run on 2026-07-08 with the frozen cells and blocked order:
+
+```bash
+mix ptc.kernel_feedback_ab --live --model deepseek --runs 5 --allow-failures --report reports/kernel_eval/s19-feedback-ab-live.md
+```
+
+Generated report path: `reports/kernel_eval/s19-feedback-ab-live.md` (ignored
+generated artifact).
+
+Summary:
+
+| Cell | Pass | Fail | Total |
+| --- | ---: | ---: | ---: |
+| A | 22 | 8 | 30 |
+| B | 25 | 5 | 30 |
+
+Primary endpoint:
+
+| Case | Cell A | Cell B |
+| --- | ---: | ---: |
+| `context_aggregation` | 2/5 pass | 5/5 pass |
+
+Guard/control endpoints:
+
+| Case | Cell A | Cell B | Interpretation |
+| --- | ---: | ---: | --- |
+| `memory_persistence` | 5/5 pass | 5/5 pass | host-held memory behavior stayed green |
+| `domain_tool` | 0/5 pass | 0/5 pass | scalar-extraction control stayed red in both cells |
+
+This is a non-M3 descriptive shakedown because D4 canonical TurnEvents are
+still absent. Do not use these counts as statistical evidence of superiority.
 
 ## Claim Boundary
 

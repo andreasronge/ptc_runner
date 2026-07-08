@@ -448,7 +448,7 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   task/tool/oracle family instead of aggregate only.
 - [ ] **S14 — Release/replay artifact smoke**: package/release visibility for
   preludes plus offline replay from a sanitized Tier 2 report, no API key.
-- [ ] **S19 — Bundle swap provenance + feedback-only A/B preregistration**:
+- [x] **S19 — Bundle swap provenance + feedback-only A/B preregistration**:
   prove `prelude.metadata.components` plus source hashes attribute a run to a
   specific prelude variant before M3 compares feedback policies. Register the
   A/B shape before running it: feedback prelude only varies; prompt prelude,
@@ -457,6 +457,14 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   boundary and may only change wording. N repeats per case per variant report
   pass counts as directional evidence, not statistics. Autonomous brief:
   [`autonomous-s19-feedback-provenance-prereg.md`](autonomous-s19-feedback-provenance-prereg.md).
+  Result, 2026-07-08: sanitized eval reports now carry bounded fields from the
+  run-start `prelude` event sourced from `Prelude.trace_summary/1`; frozen
+  variants A/B
+  differ only in `agent.feedback` source hash. Preregistration:
+  [`experiments/s19-feedback-ab-prereg.md`](experiments/s19-feedback-ab-prereg.md).
+  A later live shakedown used the frozen cells and remains non-M3 descriptive
+  evidence only: A = 22/30, B = 25/30; primary `context_aggregation` A = 2/5,
+  B = 5/5.
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is
