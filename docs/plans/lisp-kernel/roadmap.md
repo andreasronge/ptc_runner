@@ -492,8 +492,9 @@ as the goal brief.
   cross-dataset case, via Tier 2. M3 mini runner now has 6 tiny cases:
   arithmetic, context filter/count, context aggregation, one granted domain
   tool, forced eval retry, and memory persistence. Mock mode passes 6/6; the
-  latest recorded live DeepSeek full-suite run before memory passed 4/5 on
-  2026-07-08, with aggregation still unstable.
+  latest recorded live DeepSeek full-suite run passed 4/6 on 2026-07-08:
+  memory persistence passed, domain-tool scalar extraction stayed red, and
+  aggregation remained unstable.
 - [ ] Kernel emits turn events (per D4) so runs are measurable with existing
   tooling.
 - [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22

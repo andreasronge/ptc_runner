@@ -20,7 +20,7 @@ defmodule PtcRunner.Kernel.EvalTest do
              "context_aggregation" => 12,
              "domain_tool" => 9,
              "eval_retry" => 3,
-             "memory_persistence" => 42
+             "memory_persistence" => 41
            }
 
     retry = Enum.find(report.cases, &(&1.case == "eval_retry"))

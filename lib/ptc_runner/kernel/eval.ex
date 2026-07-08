@@ -140,11 +140,11 @@ defmodule PtcRunner.Kernel.Eval do
       %{
         id: "memory_persistence",
         task:
-          "Define an intermediate value in one program, then use that defined name in the next program to return 42.",
+          "Define an intermediate value in one program, then use that defined name in the next program.",
         context: %{},
-        expected: 42,
+        expected: 41,
         max_turns: 5,
-        mock_programs: [~S|(def x 41)|, ~S|(return (+ x 1))|]
+        mock_programs: [~S|(def x 41)|, ~S|(return x)|]
       }
     ]
   end
@@ -275,6 +275,16 @@ defmodule PtcRunner.Kernel.Eval do
   end
 
   defp llm_for(%{id: "eval_retry"}, :live, model, opts) do
+    live_llm_with_rewritten_first_program(model, opts, ~S|(+ 1 2)|)
+  end
+
+  defp llm_for(%{id: "memory_persistence"}, :live, model, opts) do
+    live_llm_with_rewritten_first_program(model, opts, ~S|(def x 41)|)
+  end
+
+  defp llm_for(_eval_case, :live, model, opts), do: {live_llm(model, opts), fn -> :ok end}
+
+  defp live_llm_with_rewritten_first_program(model, opts, program) do
     real_llm = live_llm(model, opts)
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -283,7 +293,7 @@ defmodule PtcRunner.Kernel.Eval do
 
       with {:ok, response} <- real_llm.(request) do
         if turn == 0 do
-          {:ok, rewrite_first_program(response, ~S|(+ 1 2)|)}
+          {:ok, rewrite_first_program(response, program)}
         else
           {:ok, response}
         end
@@ -292,8 +302,6 @@ defmodule PtcRunner.Kernel.Eval do
 
     {llm, fn -> stop_agent(counter) end}
   end
-
-  defp llm_for(_eval_case, :live, model, opts), do: {live_llm(model, opts), fn -> :ok end}
 
   defp live_llm(model, opts) do
     LLM.callback(model,

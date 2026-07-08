@@ -390,6 +390,10 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     returned `%{"score" => 9}` instead of scalar `9`, forced eval retry 2/2. A
     separate single-case aggregation probe
     passed 1/1, so aggregation is possible but unstable.
+    M3 host-held memory update: the suite now includes `memory_persistence`;
+    a focused live memory run passed 1/1, and the full six-case live run passed
+    4/6. `context_aggregation` still failed after 5/5 in that full run, while
+    `domain_tool` stayed red with the same scalar-extraction mismatch.
 
 ## Open decisions
 

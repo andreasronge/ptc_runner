@@ -99,8 +99,11 @@ Pinned failure fact: the host commits whatever `Lisp.run/2` returns. A
 terminal fail projection includes that in `memory_summary`. A runtime error
 after a prior `def`, such as calling `41` as a function, currently returns the
 prior memory from `Lisp.run/2`; the host cannot commit partial definitions that
-the runtime does not return without extending evaluator semantics. Command:
-`mix test test/ptc_runner/kernel_test.exs` passed 18/18.
+the runtime does not return without extending evaluator semantics. Commands:
+`mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`
+passed 27/27; `mix ptc.kernel_eval --suite mini --case memory_persistence
+--live --model deepseek --allow-failures` passed 1/1 after the live harness
+forced turn 1 to `(def x 41)` and the model returned the stored `x` on turn 2.
 
 ---
 
@@ -603,6 +606,25 @@ passed 3/5:
 Conclusion: compact prompt-prelude wording materially changes live behavior,
 but aggregation recovery and exact scalar extraction from tool results remain
 unstable and should not be promoted as solved.
+
+M3 host-held memory update, 2026-07-08: the mini suite now has six cases,
+adding `memory_persistence`. The memory case is forced in live mode to start
+with `(def x 41)` so the second turn measures persistence rather than first
+turn strategy. A focused live run passed 1/1. The full six-case live run:
+
+| case | status | actions | evals | failure |
+| --- | --- | ---: | ---: | --- |
+| arithmetic | pass | 1 | 1 | |
+| context_filter_count | pass | 1 | 1 | |
+| context_aggregation | fail | 5 | 5 | turn_limit_exceeded |
+| domain_tool | fail | 2 | 2 | `expected_mismatch expected=9 actual=%{"score" => 9}` |
+| eval_retry | pass | 2 | 2 | |
+| memory_persistence | pass | 2 | 2 | |
+
+Memory persistence is live-green. It did not reliably fix
+`context_aggregation` in the full run; that case remains an unstable retry/
+feedback ownership probe. `domain_tool` stayed red as expected, consistent
+with scalar extraction rather than memory.
 
 ---
 
