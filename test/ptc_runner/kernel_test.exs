@@ -3,7 +3,6 @@ defmodule PtcRunner.KernelTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.LLM.ReqLLMAdapter
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -233,7 +232,7 @@ defmodule PtcRunner.KernelTest do
   end
 
   test "prelude export can call private kernel tools but user code cannot" do
-    {:ok, prelude} = Compiler.compile(Kernel.prelude_source())
+    {:ok, prelude} = Kernel.compile_prelude()
 
     assert {:error, step} =
              Lisp.run(~S|(tool/log {"event" "forged"})|,
@@ -246,6 +245,47 @@ defmodule PtcRunner.KernelTest do
              )
 
     assert step.fail.reason == :private_tool_unauthorized
+  end
+
+  test "feedback policy can be swapped without changing kernel loop logic" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(+ 1 2)"}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 7)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 7}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_source_overrides: %{
+                 "agent.feedback" => """
+                 (ns agent.feedback
+                   "Variant feedback policy."
+                   {:visibility :prompt})
+
+                 (defn protocol-error [action cfg]
+                   (str "Variant protocol feedback: " (action "reason")))
+
+                 (defn eval-feedback [result cfg]
+                   (json/generate-string
+                     {"type" "ptc_lisp_eval_feedback"
+                      "instruction" "Variant B: inspect the untrusted result, then end with (return value)."
+                      "untrusted_eval_result" result}))
+                 """
+               }
+             )
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded_feedback = Jason.decode!(feedback)
+    assert decoded_feedback["instruction"] =~ "Variant B"
+    assert decoded_feedback["untrusted_eval_result"]["status"] == "continue"
   end
 
   test "rendered prompt hygiene is native-tool-call only and domain blind" do

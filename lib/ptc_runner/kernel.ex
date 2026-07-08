@@ -3,6 +3,8 @@ defmodule PtcRunner.Kernel do
 
   alias PtcRunner.Kernel.Action
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Step.Public
 
@@ -11,79 +13,67 @@ defmodule PtcRunner.Kernel do
   @inner_timeout 1_000
   @inner_heap_words 1_250_000
 
-  @prelude_source """
-  (ns agent
-    "Minimal native-action kernel spike loop."
-    {:visibility :prompt})
-
-  (defn- protocol-feedback [action]
-    (str "Protocol error: " (action "reason")
-         ". Call `run_ptc_lisp` with exactly one valid `program` string."))
-
-  (defn- eval-feedback [result]
-    (json/generate-string
-      {"type" "ptc_lisp_eval_feedback"
-       "instruction" "Previous PTC-Lisp program did not return successfully. Call run_ptc_lisp again with a corrected program."
-       "untrusted_eval_result" result}))
-
-  (defn run-mission
-    "Run the minimal native-action loop."
-    [mission cfg]
-    (loop [turn 0
-           messages [{"role" "user" "content" (mission "task")}]
-           actions []]
-      (if (>= turn (cfg "max_turns"))
-        (fail {"reason" "turn_limit_exceeded" "turns" turn})
-        (let [action (tool/llm-complete {"messages" messages "turn" turn})]
-          (tool/log {"event" "action" "turn" turn "action" action})
-          (let [actions2 (conj actions action)]
-            (case (action "kind")
-            "tool_call"
-              (let [result (tool/eval-program {"program" (action "program")})]
-                (tool/log {"event" "eval" "turn" turn "result" result})
-                (case (result "status")
-                  "return" (return {"value" (result "value")
-                                    "trace" {"turns" (inc turn)
-                                             "actions" actions2}})
-                  "fail" (fail {"reason" "model_program_failed" "eval" result})
-                  (recur (inc turn)
-                         (conj messages
-                               {"role" "assistant" "tool_calls" [(action "public_tool_call")]}
-                               {"role" "tool" "tool_call_id" (action "tool_call_id")
-                                "content" (eval-feedback result)})
-                         actions2)))
-            "protocol_error"
-              (recur (inc turn)
-                     (conj messages
-                           {"role" "user" "content" (protocol-feedback action)})
-                     actions2)
-            "transport_error"
-              (fail {"reason" "llm_transport_error" "error" action})
-            (fail {"reason" "unknown_action" "action" action})))))))
-  """
+  @prelude_dir Path.expand("../../priv/preludes/agent", __DIR__)
+  @prelude_paths %{
+    "agent.prompt" => Path.join(@prelude_dir, "prompt.lisp"),
+    "agent.feedback" => Path.join(@prelude_dir, "feedback.lisp"),
+    "agent.core" => Path.join(@prelude_dir, "core.lisp")
+  }
+  @external_resource @prelude_paths["agent.prompt"]
+  @external_resource @prelude_paths["agent.feedback"]
+  @external_resource @prelude_paths["agent.core"]
+  @namespace_deps %{
+    "agent.core" => ["agent.prompt", "agent.feedback"]
+  }
 
   @spec prelude_source() :: String.t()
-  def prelude_source, do: @prelude_source
+  def prelude_source do
+    @prelude_paths
+    |> Enum.sort_by(fn {namespace, _path} -> namespace end)
+    |> Enum.map_join("\n", fn {_namespace, path} -> File.read!(path) end)
+  end
+
+  @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
+  def compile_prelude(opts \\ []) when is_list(opts) do
+    overrides = Keyword.get(opts, :prelude_source_overrides, %{})
+
+    with {:ok, prompt} <- compile_component("agent.prompt", overrides),
+         {:ok, feedback} <- compile_component("agent.feedback", overrides),
+         {:ok, core} <-
+           compile_component("agent.core", overrides,
+             deps: [prompt, feedback],
+             namespace_deps: @namespace_deps
+           ) do
+      Bundle.compile_precompiled(
+        [
+          component("agent.prompt", prompt, overrides),
+          component("agent.feedback", feedback, overrides),
+          component("agent.core", core, overrides)
+        ],
+        namespace_deps: @namespace_deps
+      )
+    end
+  end
 
   @spec render_system_prompt() :: String.t()
   def render_system_prompt do
-    """
-    You are controlling PTC-Lisp through native tool calling.
-    You must call run_ptc_lisp exactly once per turn with JSON arguments {"program": "..."}.
-    The program must produce the answer via (return value) or report failure via (fail value).
-    Do not answer in prose.
-    """
+    "You are controlling PTC-Lisp through native tool calling.\n" <>
+      "PTC-Lisp uses Clojure-like prefix syntax.\n" <>
+      ~s|Call run_ptc_lisp exactly once per turn with JSON arguments {"program": "..."}.\n| <>
+      "Successful programs end with (return value); explicit failures use (fail value).\n" <>
+      "Read mission context by map keys and call only granted tools from inside the program.\n" <>
+      "Do not answer in prose."
   end
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
-    with {:ok, prelude} <- Compiler.compile(@prelude_source),
+    with {:ok, prelude} <- compile_prelude(opts),
          {:ok, tools} <- kernel_tools(mission, opts) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3)
       }
 
-      program = ~S|(agent/run-mission data/mission data/cfg)|
+      program = ~S|(agent.core/run-mission data/mission data/cfg)|
 
       case Lisp.run(program,
              prelude: prelude,
@@ -104,13 +94,13 @@ defmodule PtcRunner.Kernel do
     llm = Keyword.fetch!(opts, :llm)
     events = Keyword.get(opts, :events)
     mission_tools = Keyword.get(opts, :tools, %{})
-    system_prompt = Keyword.get(opts, :system_prompt, render_system_prompt())
+    system_prompt = Keyword.get(opts, :system_prompt)
 
     tools = %{
       "llm-complete" =>
         {fn args ->
            request = %{
-             system: system_prompt,
+             system: system_prompt || Map.get(args, "system") || render_system_prompt(),
              messages: normalize_messages(Map.get(args, "messages", [])),
              tools: [Action.tool_schema()],
              tool_choice: %{type: "tool", name: "run_ptc_lisp"}
@@ -135,6 +125,36 @@ defmodule PtcRunner.Kernel do
     }
 
     {:ok, tools}
+  end
+
+  defp compile_component(namespace, overrides, opts \\ []) do
+    namespace
+    |> component_source(overrides)
+    |> Compiler.compile(opts)
+  end
+
+  defp component(namespace, %Prelude{} = prelude, overrides) do
+    %{
+      id: namespace,
+      source: component_source(namespace, overrides),
+      prelude: prelude,
+      origin: component_origin(namespace, overrides)
+    }
+  end
+
+  defp component_source(namespace, overrides) do
+    case Map.get(overrides, namespace, Map.get(overrides, String.to_atom(namespace))) do
+      source when is_binary(source) -> source
+      nil -> File.read!(Map.fetch!(@prelude_paths, namespace))
+    end
+  end
+
+  defp component_origin(namespace, overrides) do
+    if Map.has_key?(overrides, namespace) or Map.has_key?(overrides, String.to_atom(namespace)) do
+      :memory
+    else
+      {:file, Map.fetch!(@prelude_paths, namespace)}
+    end
   end
 
   defp normalize_llm_result({:ok, response}) do

@@ -352,6 +352,19 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     `agent.core/run-once` carries exactly `eval-program`, `llm-complete`, and
     `log`; direct model/user calls to private kernel tools still fail with
     `:private_tool_unauthorized`.
+15. M2 full split evidence, 2026-07-08: default kernel policy source now lives
+    in `priv/preludes/agent/core.lisp`, `prompt.lisp`, and `feedback.lisp`.
+    `PtcRunner.Kernel.compile_prelude/1` compiles the full graph
+    `agent.core -> [agent.prompt, agent.feedback]` with
+    `Bundle.compile_precompiled/2`; `PtcRunner.Kernel.run/2` invokes
+    `(agent.core/run-mission data/mission data/cfg)`. Prompt policy renders
+    the request-level system string in `agent.prompt/system-message`, and the
+    host forwards it as the single request `:system` channel through the
+    private `llm-complete` args. The explicit Elixir `:system_prompt` opt still
+    wins as a test/live override. Focused evidence:
+    `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/prelude_split_test.exs`.
+    The same tests prove a feedback-only source override changes retry wording
+    without changing the Elixir loop path.
 
 ## Open decisions
 
@@ -368,9 +381,12 @@ Record the resolution here when made:
   `PtcRunner.Kernel` in core `lib/ptc_runner/`, with helpers under
   `lib/ptc_runner/kernel/`. This keeps the slice close to `Lisp.run/2`,
   `Tool`, and `LLM` contracts. Release/API stability remains D18.
-- **D3 — Prelude file home.** `priv/preludes/agent/*.lisp` compiled in via
-  `@external_resource` (mirrors `priv/prompts/` convention) vs plain files
-  loaded at runtime.
+- **D3 — Prelude file home.** RESOLVED for M2 spike 2026-07-08:
+  `priv/preludes/agent/*.lisp`, referenced by `@external_resource` and included
+  in the package file list. This mirrors the inspectable `priv/prompts/`
+  convention while keeping the split policy source swappable in tests via
+  `PtcRunner.Kernel.compile_prelude/1` source overrides. Release/API stability
+  remains D18.
 - **D4 — Turn events.** Kernel emits `PtcRunner.TraceLog.TurnEvent` per
   llm/eval pair (recommended: keeps existing metrics/introspection working for
   A/B measurement) vs new minimal log. Supporting precedent:

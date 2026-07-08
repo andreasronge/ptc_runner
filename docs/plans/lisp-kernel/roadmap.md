@@ -463,7 +463,10 @@ as the goal brief.
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.
   2026-07-08 M2 2a proof is complete for `agent.core -> agent.feedback`;
-  full `agent.core -> agent.prompt` + `agent.feedback` remains open.
+  2b full graph is complete for `agent.core -> [agent.prompt, agent.feedback]`
+  in `priv/preludes/agent/*.lisp`, with focused tests proving empty
+  prompt/feedback `tool_refs`, single-channel system prompt forwarding, and a
+  feedback-only source override. Policy constants as exports remain open.
 - [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
   wording).
 - [ ] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn

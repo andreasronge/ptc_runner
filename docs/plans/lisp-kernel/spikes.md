@@ -146,11 +146,11 @@ value and message sequence; author judges the source maintainable.
 record the specific gaps; consider builtins/prelude-compiler relaxations as
 kernel-adjacent work items.
 
-**Result.** PASS for the autonomous M1 vertical slice, 2026-07-07. The
-prelude embedded in `PtcRunner.Kernel.prelude_source/0` compiles and uses
-`loop`/`recur`, `case`, message-list construction, private `llm-complete`,
-private `eval-program`, protocol-error feedback, model-program fail handling,
-and return handling. Evidence:
+**Result.** PASS for the autonomous M1 vertical slice, 2026-07-07. The initial
+single-namespace prelude embedded in `PtcRunner.Kernel.prelude_source/0`
+compiled and used `loop`/`recur`, `case`, message-list construction, private
+`llm-complete`, private `eval-program`, protocol-error feedback,
+model-program fail handling, and return handling. Evidence:
 `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs`
 passed with scripted responses covering happy path, protocol retry,
 program-fail, private capability denial, bounded projection, and prompt
@@ -161,6 +161,13 @@ atom-keyed `ReqLLMAdapter.build_messages/1` contract, emits assistant
 retry messages with `content: nil` plus structured tool calls, and wraps eval
 feedback as JSON containing `untrusted_eval_result`. A live two-turn
 DeepSeek/OpenRouter smoke now exercises that retry path.
+
+M2 update, 2026-07-08: the loop moved to
+`priv/preludes/agent/core.lisp`, with prompt and feedback policy in
+`agent.prompt` and `agent.feedback`. The full graph compiles and preserves the
+same scripted kernel behavior. Evidence:
+`mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/prelude_split_test.exs`
+passed with 20 tests.
 
 ---
 
@@ -332,11 +339,18 @@ direct `(tool/log ...)` fails with `:private_tool_unauthorized`.
 `Bundle.compile/1` accidentally gains dep visibility, or policy exports inherit
 private kernel tools.
 
-**Result.** PASS, 2026-07-08. Evidence:
+**Result.** PASS for 2a, 2026-07-08. Evidence:
 `mix test test/ptc_runner/kernel/prelude_split_test.exs` passed with 3 tests.
 The exact API shape is recorded in `architecture.md` fact 14 and `roadmap.md`
 R5. This proves Build Task 2a only; the full `agent.core -> agent.prompt` +
 `agent.feedback` graph is still unproven.
+
+2b update, 2026-07-08: PASS for the default full graph. The kernel bundle now
+compiles `agent.core -> [agent.prompt, agent.feedback]` from
+`priv/preludes/agent/*.lisp`; `agent.core/run-mission` carries only
+`eval-program`, `llm-complete`, and `log`, while all prompt/feedback public
+exports carry empty `tool_refs`. The same focused suite proves raw direct
+private-tool calls still fail closed.
 
 ---
 

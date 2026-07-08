@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.PreludeSplitTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Bundle
@@ -112,6 +113,32 @@ defmodule PtcRunner.Kernel.PreludeSplitTest do
              )
 
     assert step.fail.reason == :private_tool_unauthorized
+  end
+
+  test "2b: default kernel bundle compiles full agent.core prompt and feedback graph" do
+    assert {:ok, prelude} = Kernel.compile_prelude()
+
+    assert Prelude.namespaces(prelude) == ["agent.core", "agent.feedback", "agent.prompt"]
+
+    assert {:ok, core} = Prelude.fetch_export(prelude, "agent.core/run-mission")
+    assert {:ok, system_message} = Prelude.fetch_export(prelude, "agent.prompt/system-message")
+    assert {:ok, task_message} = Prelude.fetch_export(prelude, "agent.prompt/task-message")
+    assert {:ok, protocol_error} = Prelude.fetch_export(prelude, "agent.feedback/protocol-error")
+    assert {:ok, eval_feedback} = Prelude.fetch_export(prelude, "agent.feedback/eval-feedback")
+
+    assert Enum.sort(core.tool_refs) == ["eval-program", "llm-complete", "log"]
+
+    for export <- [system_message, task_message, protocol_error, eval_feedback] do
+      assert export.tool_refs == []
+    end
+
+    assert {:ok, step} =
+             Lisp.run(~S|(agent.prompt/system-message {})|,
+               prelude: prelude,
+               tools: kernel_private_tools()
+             )
+
+    assert step.return == Kernel.render_system_prompt()
   end
 
   defp kernel_private_tools do
