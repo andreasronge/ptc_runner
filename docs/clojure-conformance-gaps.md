@@ -3044,7 +3044,7 @@ PTC-Lisp already treats strings as seqable in adjacent helpers such as `seq`,
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | Manual conformance case `core/juxt-multiple-args-bug-001` |
 
 ```clojure
@@ -3052,13 +3052,11 @@ PTC-Lisp already treats strings as seqable in adjacent helpers such as `seq`,
 ((juxt + vector) 1 2 3)   ;=> [6 [1 2 3]]
 
 ;; PTC-Lisp current behavior
-((juxt + vector) 1 2 3)   ;=> arity error
+((juxt + vector) 1 2 3)   ;=> [6 [1 2 3]]
 ```
 
-**Decision:** BUG. `juxt` is a supported Clojure-named higher-order helper.
-The resulting function should forward all call arguments to every wrapped
-function, just like `partial`, `complement`, and the predicate combinators
-already do for multi-argument calls.
+**Decision:** Fixed. `juxt` forwards all call arguments to every wrapped
+function.
 
 ### GAP-S110: Zero-arity `juxt` returns a function instead of raising
 
@@ -4120,21 +4118,21 @@ divergence.
 (clojure.walk/walk {:a :x} identity [:a :b]) ;=> type_error
 (clojure.walk/walk #{:a} identity [:a :b])   ;=> type_error
 (clojure.walk/walk [10 20] identity [1])     ;=> type_error
-((comp inc {:a 1}) :a)                   ;=> runtime_error
-((comp boolean #{:a}) :a)                ;=> runtime_error
+((comp inc {:a 1}) :a)                   ;=> 2
+((comp boolean #{:a}) :a)                ;=> true
 ((comp [10 20]) 1)                       ;=> runtime_error
-((partial {:a 1}) :a)                    ;=> runtime_error
-((partial #{:a}) :a)                     ;=> runtime_error
+((partial {:a 1}) :a)                    ;=> 1
+((partial #{:a}) :a)                     ;=> :a
 ((partial [10 20]) 1)                    ;=> runtime_error
-((juxt #{:a} {:a 1}) :a)                 ;=> runtime_error
+((juxt #{:a} {:a 1}) :a)                 ;=> [:a 1]
 ((juxt [10 20] :a) 1)                    ;=> runtime_error
-((complement {:a true}) :b)              ;=> runtime_error
-((complement #{:a}) :b)                  ;=> runtime_error
-((every-pred {:a true} {:a 1}) :a)       ;=> runtime_error
-((every-pred #{:a}) :a)                  ;=> runtime_error
+((complement {:a true}) :b)              ;=> true
+((complement #{:a}) :b)                  ;=> true
+((every-pred {:a true} {:a 1}) :a)       ;=> true
+((every-pred #{:a}) :a)                  ;=> true
 ((every-pred [true]) 0)                  ;=> runtime_error
-((some-fn {:a nil} {:b 2}) :b)           ;=> runtime_error
-((some-fn #{:a}) :a)                     ;=> runtime_error
+((some-fn {:a nil} {:b 2}) :b)           ;=> 2
+((some-fn #{:a}) :a)                     ;=> :a
 ((some-fn [nil :x]) 1)                   ;=> runtime_error
 ((fnil {:a 1} :x) nil)                   ;=> type_error
 ((fnil :a :x) nil)                       ;=> type_error

@@ -24,6 +24,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.SubAgent.Namespace.TypeVocabulary
 
@@ -38,6 +39,43 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           {:ok, term(), EvalContext.t()} | {:error, term()}
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
+  end
+
+  defp do_apply_fun(
+         %Builtin{name: name, binding: {:normal, fun}} = builtin,
+         args,
+         %EvalContext{} = eval_ctx,
+         do_eval_fn
+       )
+       when name in [:fnil, :complement, :constantly] and is_function(fun) do
+    with :ok <- maybe_validate_builtin_args(builtin, args) do
+      try do
+        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
+      rescue
+        FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
+        e in BadArityError -> {:error, {:arity_error, Exception.message(e)}}
+        e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
+        e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
+      end
+    end
+  end
+
+  defp do_apply_fun(
+         %Builtin{name: name, binding: {:collect, fun}} = builtin,
+         args,
+         %EvalContext{} = eval_ctx,
+         do_eval_fn
+       )
+       when name in [:comp, :partial, :"every-pred", :"some-fn"] and is_function(fun, 1) do
+    with :ok <- maybe_validate_builtin_args(builtin, args) do
+      try do
+        with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(args) end)
+      rescue
+        FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
+        e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
+        e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
+      end
+    end
   end
 
   defp do_apply_fun(%Builtin{} = builtin, args, %EvalContext{} = eval_ctx, do_eval_fn) do
@@ -339,6 +377,78 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
   end
 
+  defp do_apply_fun({:juxt_fn, fns}, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_list(fns) do
+    Enum.reduce_while(fns, {:ok, [], eval_ctx}, fn fun, {:ok, acc, ctx} ->
+      case do_apply_fun(fun, args, ctx, do_eval_fn) do
+        {:ok, value, next_ctx} -> {:cont, {:ok, [value | acc], next_ctx}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, values, next_ctx} -> {:ok, Enum.reverse(values), next_ctx}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp do_apply_fun({:partial_fn, f, fixed}, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_list(fixed) do
+    do_apply_fun(f, fixed ++ args, eval_ctx, do_eval_fn)
+  end
+
+  defp do_apply_fun({:comp_fn, []}, args, %EvalContext{} = eval_ctx, do_eval_fn) do
+    do_apply_fun({:normal, &Predicates.identity/1}, args, eval_ctx, do_eval_fn)
+  end
+
+  defp do_apply_fun({:comp_fn, fns}, args, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_list(fns) do
+    [last_fn | rest] = Enum.reverse(fns)
+
+    case do_apply_fun(last_fn, args, eval_ctx, do_eval_fn) do
+      {:ok, value, next_ctx} ->
+        apply_comp_rest(rest, value, next_ctx, do_eval_fn)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp do_apply_fun({:complement_fn, f}, args, %EvalContext{} = eval_ctx, do_eval_fn) do
+    case do_apply_fun(f, args, eval_ctx, do_eval_fn) do
+      {:ok, value, next_ctx} -> {:ok, not truthy?(value), next_ctx}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp do_apply_fun({:constantly_fn, value}, _args, %EvalContext{} = eval_ctx, _do_eval_fn),
+    do: {:ok, value, eval_ctx}
+
+  defp do_apply_fun({:every_pred_fn, preds}, vals, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_list(preds) do
+    Enum.reduce_while(preds, {:ok, true, eval_ctx}, fn pred, {:ok, _acc, ctx} ->
+      case every_pred_values(pred, vals, ctx, do_eval_fn) do
+        {:ok, true, next_ctx} -> {:cont, {:ok, true, next_ctx}}
+        {:ok, false, next_ctx} -> {:halt, {:ok, false, next_ctx}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp do_apply_fun({:some_fn, fns}, vals, %EvalContext{} = eval_ctx, do_eval_fn)
+       when is_list(fns) do
+    Enum.reduce_while(fns, {:ok, nil, eval_ctx}, fn f, {:ok, last_result, ctx} ->
+      case some_fn_values(f, vals, last_result, ctx, do_eval_fn) do
+        {:found, result, next_ctx} -> {:halt, {:ok, result, next_ctx}}
+        {:ok, result, next_ctx} -> {:cont, {:ok, result, next_ctx}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp do_apply_fun({:fnil_fn, f, default}, args, %EvalContext{} = eval_ctx, do_eval_fn) do
+    do_apply_fun(f, substitute_nil(args, default), eval_ctx, do_eval_fn)
+  end
+
   # Map as function: (map key) → Map.get(map, key)
   # Supports any key type (atoms, strings, integers, etc.) like Clojure
   defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_map(m) do
@@ -602,6 +712,41 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   def closure_to_fun(%RuntimeCallable{} = callable, %EvalContext{}, _do_eval_fn), do: callable
 
+  def closure_to_fun({:juxt_fn, fns}, %EvalContext{} = eval_ctx, do_eval_fn) when is_list(fns) do
+    {:juxt_fn, Enum.map(fns, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
+  end
+
+  def closure_to_fun({:partial_fn, f, fixed}, %EvalContext{} = eval_ctx, do_eval_fn)
+      when is_list(fixed) do
+    {:partial_fn, closure_to_fun(f, eval_ctx, do_eval_fn),
+     Enum.map(fixed, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
+  end
+
+  def closure_to_fun({:comp_fn, fns}, %EvalContext{} = eval_ctx, do_eval_fn) when is_list(fns) do
+    {:comp_fn, Enum.map(fns, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
+  end
+
+  def closure_to_fun({:complement_fn, f}, %EvalContext{} = eval_ctx, do_eval_fn) do
+    {:complement_fn, closure_to_fun(f, eval_ctx, do_eval_fn)}
+  end
+
+  def closure_to_fun({:constantly_fn, _value} = callable, %EvalContext{}, _do_eval_fn),
+    do: callable
+
+  def closure_to_fun({:every_pred_fn, preds}, %EvalContext{} = eval_ctx, do_eval_fn)
+      when is_list(preds) do
+    {:every_pred_fn, Enum.map(preds, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
+  end
+
+  def closure_to_fun({:some_fn, fns}, %EvalContext{} = eval_ctx, do_eval_fn) when is_list(fns) do
+    {:some_fn, Enum.map(fns, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
+  end
+
+  def closure_to_fun({:fnil_fn, f, default}, %EvalContext{} = eval_ctx, do_eval_fn) do
+    {:fnil_fn, closure_to_fun(f, eval_ctx, do_eval_fn),
+     closure_to_fun(default, eval_ctx, do_eval_fn)}
+  end
+
   # Special forms like println - convert to a function
   def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do
     fn arg ->
@@ -644,6 +789,56 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp format_for_println(v), do: Format.to_clojure(v) |> elem(0)
+
+  defp apply_comp_rest(rest, value, %EvalContext{} = eval_ctx, do_eval_fn) do
+    Enum.reduce_while(rest, {:ok, value, eval_ctx}, fn f, {:ok, acc, ctx} ->
+      case do_apply_fun(f, [acc], ctx, do_eval_fn) do
+        {:ok, value, next_ctx} -> {:cont, {:ok, value, next_ctx}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp substitute_nil([nil | rest], default), do: [default | rest]
+  defp substitute_nil(args, _default), do: args
+
+  defp every_pred_values(_pred, [], %EvalContext{} = eval_ctx, _do_eval_fn),
+    do: {:ok, true, eval_ctx}
+
+  defp every_pred_values(pred, [value | rest], %EvalContext{} = eval_ctx, do_eval_fn) do
+    case do_apply_fun(pred, [value], eval_ctx, do_eval_fn) do
+      {:ok, result, next_ctx} ->
+        if truthy?(result) do
+          every_pred_values(pred, rest, next_ctx, do_eval_fn)
+        else
+          {:ok, false, next_ctx}
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp some_fn_values(_f, [], last_result, %EvalContext{} = eval_ctx, _do_eval_fn),
+    do: {:ok, last_result, eval_ctx}
+
+  defp some_fn_values(f, [value | rest], _last_result, %EvalContext{} = eval_ctx, do_eval_fn) do
+    case do_apply_fun(f, [value], eval_ctx, do_eval_fn) do
+      {:ok, result, next_ctx} ->
+        if truthy?(result) do
+          {:found, result, next_ctx}
+        else
+          some_fn_values(f, rest, result, next_ctx, do_eval_fn)
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp truthy?(nil), do: false
+  defp truthy?(false), do: false
+  defp truthy?(_), do: true
 
   # A char list is a list where all elements are single-character strings
   defp char_list?([]), do: false

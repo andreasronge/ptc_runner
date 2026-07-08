@@ -460,10 +460,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:juxt, func_asts}, %EvalContext{} = eval_ctx) do
     case eval_all(func_asts, eval_ctx) do
       {:ok, fns, eval_ctx2} ->
-        # Convert each fn to Erlang function (handles closures, keywords, builtins)
-        erlang_fns = Enum.map(fns, &value_to_erlang_fn(&1, eval_ctx2))
-        fun = build_juxt_fn(erlang_fns)
-        {:ok, fun, eval_ctx2}
+        {:ok, {:juxt_fn, fns}, eval_ctx2}
 
       {:error, _} = err ->
         err
@@ -1711,17 +1708,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp value_to_erlang_fn(value, %EvalContext{} = eval_ctx) do
     Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
-  end
-
-  # ============================================================
-  # Juxt helpers
-  # ============================================================
-
-  # Build juxt function that applies all functions and returns vector of results
-  # Uses Callable.call/2 to properly dispatch to builtin tuples
-  defp build_juxt_fn(fns) do
-    alias PtcRunner.Lisp.Runtime.Callable
-    fn arg -> Enum.map(fns, &Callable.call(&1, [arg])) end
   end
 
   # ============================================================

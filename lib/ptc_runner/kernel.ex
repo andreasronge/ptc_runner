@@ -68,8 +68,10 @@ defmodule PtcRunner.Kernel do
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
-    with {:ok, prelude} <- compile_prelude(opts),
-         {:ok, memory} <- Agent.start_link(fn -> %{} end),
+    with {:ok, memory_cap} <- memory_byte_cap(opts),
+         opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
+         {:ok, prelude} <- compile_prelude(opts),
+         {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
          {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
@@ -206,6 +208,21 @@ defmodule PtcRunner.Kernel do
     |> Map.put(:transport_error, nil)
   end
 
+  defp memory_byte_cap(opts) do
+    case Keyword.get(opts, :kernel_memory_byte_cap, @memory_byte_cap) do
+      cap when is_integer(cap) and cap > 0 ->
+        {:ok, cap}
+
+      cap ->
+        {:error,
+         %{
+           reason: "invalid_kernel_memory_byte_cap",
+           message: "kernel_memory_byte_cap must be a positive integer",
+           value: inspect(cap, limit: 5, printable_limit: 100)
+         }}
+    end
+  end
+
   defp normalize_messages(messages) when is_list(messages),
     do: Enum.map(messages, &normalize_message/1)
 
@@ -291,38 +308,90 @@ defmodule PtcRunner.Kernel do
   defp add_public_tool_call(action), do: action
 
   defp eval_program(program, mission, mission_tools, opts, memory_agent, events) do
-    prior_memory = Agent.get(memory_agent, & &1)
-
     result =
-      case Lisp.run(program,
-             context: Map.get(mission, "context", %{}),
-             tools: mission_tools,
-             prelude: nil,
-             runtime: nil,
-             discovery_exec: nil,
-             memory: prior_memory,
-             timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
-             max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
-             max_tool_calls:
-               Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
-           ) do
-        {:ok, step} -> commit_and_project_step(:ok, step, prior_memory, opts, memory_agent)
-        {:error, step} -> commit_and_project_step(:error, step, prior_memory, opts, memory_agent)
+      case checkout_memory(memory_agent) do
+        {:ok, prior_memory} ->
+          try do
+            {result, next_memory} =
+              run_inner_program(program, mission, mission_tools, opts, prior_memory)
+
+            checkin_memory(memory_agent, next_memory)
+            result
+          rescue
+            e ->
+              release_memory(memory_agent)
+              reraise e, __STACKTRACE__
+          catch
+            kind, reason ->
+              release_memory(memory_agent)
+              :erlang.raise(kind, reason, __STACKTRACE__)
+          end
+
+        {:busy, prior_memory} ->
+          concurrent_eval_error(prior_memory)
       end
 
     log_memory_size(events, result)
     result
   end
 
-  defp commit_and_project_step(tag, step, prior_memory, opts, memory_agent) do
+  defp run_inner_program(program, mission, mission_tools, opts, prior_memory) do
+    case Lisp.run_native(program,
+           context: Map.get(mission, "context", %{}),
+           tools: mission_tools,
+           prelude: nil,
+           runtime: nil,
+           discovery_exec: nil,
+           memory: prior_memory,
+           preserve_runtime_callables: true,
+           timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
+           max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
+           max_tool_calls:
+             Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
+         ) do
+      {:ok, step} -> commit_and_project_step(:ok, step, prior_memory, opts)
+      {:error, step} -> commit_and_project_step(:error, step, prior_memory, opts)
+    end
+  end
+
+  defp checkout_memory(memory_agent) do
+    Agent.get_and_update(memory_agent, fn
+      %{memory: memory, busy?: false} = state ->
+        {{:ok, memory}, %{state | busy?: true}}
+
+      %{memory: memory} = state ->
+        {{:busy, memory}, state}
+    end)
+  end
+
+  defp checkin_memory(memory_agent, memory) do
+    Agent.update(memory_agent, fn state -> %{state | memory: memory, busy?: false} end)
+  end
+
+  defp release_memory(memory_agent) do
+    Agent.update(memory_agent, fn state -> %{state | busy?: false} end)
+  end
+
+  defp concurrent_eval_error(prior_memory) do
+    error_step =
+      Step.error(
+        :concurrent_eval_program,
+        "eval-program cannot be called concurrently; run PTC-Lisp programs sequentially.",
+        prior_memory,
+        %{}
+      )
+
+    project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
+  end
+
+  defp commit_and_project_step(tag, step, prior_memory, opts) do
     candidate_memory = step.memory || prior_memory
-    candidate_bytes = RetainedSize.bytes(candidate_memory)
     cap = Keyword.get(opts, :kernel_memory_byte_cap, @memory_byte_cap)
+    candidate_bytes = RetainedSize.bytes_with_cap(candidate_memory, cap)
 
     case candidate_bytes do
       bytes when is_integer(bytes) and bytes <= cap ->
-        Agent.update(memory_agent, fn _ -> candidate_memory end)
-        project_step(tag, step, prior_memory, candidate_memory, bytes)
+        {project_step(tag, step, prior_memory, candidate_memory, bytes), candidate_memory}
 
       bytes ->
         error_step =
@@ -333,7 +402,13 @@ defmodule PtcRunner.Kernel do
             %{limit_bytes: cap, candidate_bytes: candidate_bytes_detail(bytes)}
           )
 
-        project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
+        {project_step(
+           :error,
+           error_step,
+           prior_memory,
+           prior_memory,
+           retained_size(prior_memory)
+         ), prior_memory}
     end
   end
 
@@ -366,7 +441,7 @@ defmodule PtcRunner.Kernel do
           "status" => "error",
           "reason" => to_string(step.fail.reason),
           "message" => step.fail.message,
-          "details" => Public.value(Map.get(step.fail, :details, %{})),
+          "details" => public_eval_value(Map.get(step.fail, :details, %{})),
           "prints" => bound_list(step.prints),
           "memory_summary" => memory_summary
         }
@@ -435,6 +510,16 @@ defmodule PtcRunner.Kernel do
   end
 
   defp memory_kind({:closure, _params, _body, _env, _history, _metadata}), do: "function"
+  defp memory_kind({:juxt_fn, fns}) when is_list(fns), do: "function"
+  defp memory_kind({:partial_fn, _f, fixed}) when is_list(fixed), do: "function"
+  defp memory_kind({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "function"
+
+  defp memory_kind({tag, fns}) when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
+    do: "function"
+
+  defp memory_kind({:fnil_fn, _f, _default}), do: "function"
+  defp memory_kind(%PtcRunner.Lisp.RuntimeCallable{}), do: "function"
+  defp memory_kind(f) when is_function(f), do: "function"
   defp memory_kind(_), do: "value"
 
   defp public_eval_value(value) do

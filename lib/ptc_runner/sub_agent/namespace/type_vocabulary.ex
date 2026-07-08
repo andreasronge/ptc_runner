@@ -77,6 +77,14 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
   def type_of(nil), do: "nil"
   def type_of(a) when is_atom(a), do: "keyword"
   def type_of({:closure, _, _, _, _, _}), do: "#fn[...]"
+  def type_of({:juxt_fn, fns}) when is_list(fns), do: "fn"
+  def type_of({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "fn"
+
+  def type_of({tag, fns}) when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
+    do: "fn"
+
+  def type_of({:partial_fn, _f, fixed}) when is_list(fixed), do: "fn"
+  def type_of({:fnil_fn, _f, _default}), do: "fn"
   def type_of(f) when is_function(f), do: "fn"
   def type_of(_), do: "unknown"
 end

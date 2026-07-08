@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
+  alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.TypeError
 
@@ -50,6 +51,40 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   def call(f, args) when is_function(f), do: apply(f, args)
 
+  def call(%MapSet{} = set, [arg]), do: if(MapSet.member?(set, arg), do: arg, else: nil)
+
+  def call({:juxt_fn, fns}, args) when is_list(fns) do
+    Enum.map(fns, &call(&1, args))
+  end
+
+  def call({:partial_fn, f, fixed}, args) when is_list(fixed), do: call(f, fixed ++ args)
+
+  def call({:comp_fn, []}, args), do: call({:normal, &Predicates.identity/1}, args)
+
+  def call({:comp_fn, fns}, args) when is_list(fns) do
+    [last_fn | rest] = Enum.reverse(fns)
+    initial = call(last_fn, args)
+    Enum.reduce(rest, initial, fn f, acc -> call(f, [acc]) end)
+  end
+
+  def call({:complement_fn, f}, args), do: not truthy?(call(f, args))
+  def call({:constantly_fn, value}, _args), do: value
+
+  def call({:every_pred_fn, preds}, vals) when is_list(preds) do
+    Enum.all?(preds, fn pred -> Enum.all?(vals, fn val -> truthy?(call(pred, [val])) end) end)
+  end
+
+  def call({:some_fn, fns}, vals) when is_list(fns) do
+    Enum.reduce_while(fns, nil, fn f, last_result ->
+      case some_fn_values(f, vals, last_result) do
+        {:found, result} -> {:halt, result}
+        last -> {:cont, last}
+      end
+    end)
+  end
+
+  def call({:fnil_fn, f, default}, args), do: call(f, substitute_nil(args, default))
+
   def call(%LispKeyword{} = k, [m]) when is_map(m), do: FlexAccess.flex_get(m, k)
   def call(%LispKeyword{}, [nil]), do: nil
   def call(%LispKeyword{}, [_]), do: nil
@@ -62,6 +97,15 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call(%LispKeyword{}, [nil, default]), do: default
+
+  def call(m, [k]) when is_map(m) and not is_struct(m), do: FlexAccess.flex_get(m, k)
+
+  def call(m, [k, default]) when is_map(m) and not is_struct(m) do
+    case FlexAccess.flex_fetch(m, k) do
+      {:ok, val} -> val
+      :error -> default
+    end
+  end
 
   # Keyword as function: (:key map) → map lookup
   def call(k, [m]) when is_keyword(k) and is_map(m), do: FlexAccess.flex_get(m, k)
@@ -116,6 +160,21 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call({:collect, fun}, args), do: fun.(args)
+
+  defp substitute_nil([nil | rest], default), do: [default | rest]
+  defp substitute_nil(args, _default), do: args
+
+  defp some_fn_values(f, vals, last_result) do
+    Enum.reduce_while(vals, last_result, fn val, _acc ->
+      result = call(f, [val])
+
+      if truthy?(result), do: {:halt, {:found, result}}, else: {:cont, result}
+    end)
+  end
+
+  defp truthy?(nil), do: false
+  defp truthy?(false), do: false
+  defp truthy?(_), do: true
 
   defp raise_type_error_or_reraise(fun2, args, stacktrace) do
     if Enum.all?(args, &is_number/1) do

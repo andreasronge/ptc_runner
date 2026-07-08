@@ -133,6 +133,14 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   # Surface them as "function" rather than the leaky "unknown".
   def describe_type({tag, _}) when tag in [:normal, :collect], do: "function"
   def describe_type({:special, :println}), do: "function"
+  def describe_type({:juxt_fn, fns}) when is_list(fns), do: "function"
+  def describe_type({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "function"
+
+  def describe_type({tag, fns}) when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
+    do: "function"
+
+  def describe_type({:partial_fn, _f, fixed}) when is_list(fixed), do: "function"
+  def describe_type({:fnil_fn, _f, _default}), do: "function"
 
   def describe_type({tag, _, _}) when tag in [:variadic, :variadic_nonempty, :multi_arity],
     do: "function"

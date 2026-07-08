@@ -9,6 +9,10 @@ defmodule PtcRunner.KernelTest do
   alias ReqLLM.Message.ContentPart
   alias ReqLLM.ToolCall
 
+  defmodule MemoryStruct do
+    defstruct [:body]
+  end
+
   test "happy path: mock LLM tool call is evaluated by strict inner Lisp and returned" do
     llm =
       scripted_llm([
@@ -334,6 +338,206 @@ defmodule PtcRunner.KernelTest do
     assert preview =~ "#fn"
   end
 
+  test "inner eval captured closure persists through host-held memory across retry turns" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{
+                name: "run_ptc_lisp",
+                args: %{"program" => "(def add-base (let [base 40] (fn [n] (+ base n))))"}
+              }
+            ]
+          },
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => "(return (add-base 2))"}}
+            ]
+          }
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42}} = Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+    assert summary["defined"] == ["add-base"]
+    assert summary["changed"] == ["add-base"]
+
+    assert [%{"name" => "add-base", "kind" => "function", "preview" => preview}] =
+             summary["entries"]
+
+    assert preview =~ "#fn"
+    assert is_integer(summary["memory_bytes"]) and summary["memory_bytes"] > 0
+  end
+
+  test "inner eval runtime callable persists through host-held memory across retry turns" do
+    llm =
+      scripted_llm([
+        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def add +)"}}]},
+        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (add 1 2))"}}]}
+      ])
+
+    assert {:ok, %{"value" => 3}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: 3_000_000)
+  end
+
+  test "inner eval tool callable alias persists through host-held memory across retry turns" do
+    parent = self()
+    calls = :counters.new(1, [:atomics])
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def fetch tool/lookup)"}}]
+          },
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => ~S|(return (fetch {:id 7}))|}}
+            ]
+          }
+        ],
+        parent
+      )
+
+    tools = %{
+      "lookup" => fn args ->
+        :counters.add(calls, 1, 1)
+        args["id"]
+      end
+    }
+
+    assert {:ok, %{"value" => 7}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               tools: tools,
+               kernel_memory_byte_cap: 3_000_000
+             )
+
+    assert :counters.get(calls, 1) == 1
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+    assert [%{"name" => "fetch", "kind" => "function", "preview" => preview}] = summary["entries"]
+    assert preview =~ "#fn"
+  end
+
+  test "inner eval juxt callable persists through host-held memory across retry turns" do
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def both (juxt inc dec))"}}]
+        },
+        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (both 2))"}}]}
+      ])
+
+    assert {:ok, %{"value" => [3, 1]}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: 3_000_000)
+  end
+
+  test "inner eval juxt with Lisp closures persists through host-held memory across retry turns" do
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{"program" => "(def both (juxt #(+ % 1) #(* % 2)))"}
+            }
+          ]
+        },
+        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (both 2))"}}]}
+      ])
+
+    assert {:ok, %{"value" => [3, 4]}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: 3_000_000)
+  end
+
+  test "inner eval combinators with Lisp closures persist through host-held memory across retry turns" do
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{
+                "program" =>
+                  "(def add1 (partial (fn [x] (+ x 1)))) (def add2 (comp (fn [x] (+ x 2)) identity))"
+              }
+            }
+          ]
+        },
+        %{
+          tool_calls: [
+            %{name: "run_ptc_lisp", args: %{"program" => "(return (+ (add1 40) (add2 0)))"}}
+          ]
+        }
+      ])
+
+    assert {:ok, %{"value" => 43}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: 3_000_000)
+  end
+
+  test "variant prelude parallel eval-program calls fail closed instead of racing memory" do
+    parent = self()
+
+    tools = %{
+      "barrier" => fn args ->
+        send(parent, {:barrier, args["id"], self()})
+
+        receive do
+          :release -> args["id"]
+        after
+          1_000 -> args["id"]
+        end
+      end
+    }
+
+    task =
+      Task.async(fn ->
+        Kernel.run(%{"task" => "compute"},
+          llm: fn _ -> {:error, :unexpected_llm_call} end,
+          tools: tools,
+          prelude_source_overrides: %{
+            "agent.core" => """
+            (ns agent.core
+              "Variant that evaluates two programs in parallel."
+              {:visibility :prompt})
+
+            (defn run-mission [mission cfg]
+              (let [parallel (pcalls
+                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"a\\"}) (def a 1))"}))
+                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"b\\"}) (def b 2))"})))
+                    statuses (map #(% "status") parallel)
+                    reasons (map #(% "reason") parallel)]
+                (return {"statuses" statuses
+                         "reasons" reasons})))
+            """
+          }
+        )
+      end)
+
+    assert_receive {:barrier, _first_id, first_pid}
+
+    refute_receive {:barrier, _second_id, _second_pid}, 100
+    send(first_pid, :release)
+
+    assert {:ok, %{"statuses" => statuses, "reasons" => reasons}} = Task.await(task, 5_000)
+    assert Enum.sort(statuses) == ["continue", "error"]
+    assert "concurrent_eval_program" in reasons
+  end
+
   test "retry feedback renders bounded memory summary without dumping large values" do
     parent = self()
     large = String.duplicate("SECRET-BOUNDARY-", 40)
@@ -370,6 +574,79 @@ defmodule PtcRunner.KernelTest do
 
     assert preview =~ "SECRET-BOUNDARY-"
     refute feedback =~ large
+  end
+
+  test "retry feedback bounds custom struct memory previews" do
+    parent = self()
+    secret = String.duplicate("STRUCT-SECRET-", 40)
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => ~S|(def payload (tool/struct {}))|}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    tools = %{"struct" => fn _args -> %MemoryStruct{body: secret} end}
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, tools: tools)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+
+    assert [%{"name" => "payload", "kind" => "value", "preview" => preview, "truncated" => true}] =
+             summary["entries"]
+
+    assert preview =~ "STRUCT-SECRET-"
+    refute feedback =~ secret
+  end
+
+  test "retry feedback renders struct memory without invoking custom Inspect" do
+    parent = self()
+    secret = String.duplicate("RAISING-STRUCT-", 40)
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => ~S|(def payload (tool/struct {}))|}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    tools = %{
+      "struct" => fn _args -> %PtcRunner.TestSupport.RaisingInspectStruct{body: secret} end
+    }
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, tools: tools)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+
+    assert [%{"name" => "payload", "kind" => "value", "preview" => preview, "truncated" => true}] =
+             summary["entries"]
+
+    assert preview =~ "#struct"
+    assert preview =~ "RAISING-STRUCT-"
+    refute feedback =~ secret
   end
 
   test "def before model fail is projected in memory summary before terminal failure" do
@@ -444,7 +721,127 @@ defmodule PtcRunner.KernelTest do
     assert is_integer(candidate_bytes) and candidate_bytes > 100
   end
 
-  test "unmeasurable memory candidate fails closed under custom cap above default" do
+  test "memory byte cap short-circuits large flat heap candidates" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => "(def too-big (range 0 5000))"}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               kernel_memory_byte_cap: 1_000,
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "status" => "error",
+                         "reason" => "memory_limit_exceeded",
+                         "details" => %{
+                           "limit_bytes" => 1_000,
+                           "candidate_bytes" => candidate_bytes
+                         },
+                         "memory_summary" => %{
+                           "defined" => [],
+                           "changed" => [],
+                           "entries" => []
+                         }
+                       }
+                     }}
+
+    assert is_integer(candidate_bytes) and candidate_bytes > 1_000
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    eval = decoded["untrusted_eval_result"]
+    assert eval["status"] == "error"
+    assert eval["reason"] == "memory_limit_exceeded"
+    assert eval["details"]["limit_bytes"] == 1_000
+    assert is_integer(eval["details"]["candidate_bytes"])
+    assert eval["memory_summary"]["defined"] == []
+  end
+
+  test "invalid memory byte cap fails closed before the first LLM call" do
+    parent = self()
+
+    llm = fn request ->
+      send(parent, {:llm_request, request})
+      {:ok, %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :bad)"}}]}}
+    end
+
+    assert {:error,
+            %{
+              reason: "invalid_kernel_memory_byte_cap",
+              message: "kernel_memory_byte_cap must be a positive integer",
+              value: value
+            }} = Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: "100")
+
+    assert value == ~s("100")
+    refute_received {:llm_request, _}
+  end
+
+  test "plain BEAM functions in memory fail closed as oversized" do
+    parent = self()
+    secret = String.duplicate("FUN-SECRET-", 40)
+    fun = fn -> secret end
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def f (tool/fn {}))"}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    tools = %{"fn" => fn _args -> fun end}
+
+    assert RetainedSize.bytes(fun) == :oversized
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               tools: tools,
+               kernel_memory_byte_cap: 3_000_000,
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "status" => "error",
+                         "reason" => "memory_limit_exceeded",
+                         "details" => %{"candidate_bytes" => "oversized"},
+                         "memory_summary" => %{
+                           "defined" => [],
+                           "changed" => [],
+                           "entries" => []
+                         }
+                       }
+                     }}
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+    refute feedback =~ secret
+  end
+
+  test "safe data structs in memory are measured instead of failing closed" do
     parent = self()
 
     llm =
@@ -462,7 +859,7 @@ defmodule PtcRunner.KernelTest do
 
     tools = %{"bad" => fn _args -> ~D[2026-07-08] end}
 
-    assert RetainedSize.bytes(%{bad: ~D[2026-07-08]}) == :oversized
+    assert is_integer(RetainedSize.bytes(%{bad: ~D[2026-07-08]}))
 
     assert {:ok, %{"value" => "ok"}} =
              Kernel.run(%{"task" => "compute"},
@@ -476,16 +873,11 @@ defmodule PtcRunner.KernelTest do
                      %{
                        "event" => "eval",
                        "result" => %{
-                         "status" => "error",
-                         "reason" => "memory_limit_exceeded",
-                         "details" => %{
-                           "limit_bytes" => 3_000_000,
-                           "candidate_bytes" => "oversized"
-                         },
+                         "status" => "continue",
                          "memory_summary" => %{
-                           "defined" => [],
-                           "changed" => [],
-                           "entries" => []
+                           "defined" => ["bad"],
+                           "changed" => ["bad"],
+                           "entries" => [%{"name" => "bad", "preview" => "\"2026-07-08\""}]
                          }
                        }
                      }}

@@ -13,6 +13,7 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
 
@@ -318,6 +319,13 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(ifn? inc)") == true
     end
 
+    test "ifn? true for native function combinators" do
+      assert eval!("(ifn? (partial +))") == true
+      assert eval!("(ifn? (comp inc inc))") == true
+      assert eval!("(ifn? (juxt inc dec))") == true
+      assert eval!("(ifn? (every-pred number? pos?))") == true
+    end
+
     test "ifn? false for vectors, numbers, strings, and nil" do
       assert eval!("(ifn? [1 2])") == false
       assert eval!("(ifn? 5)") == false
@@ -431,6 +439,13 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert eval!("(type +)") == :function
       assert eval!("(type #\"a\")") == :regex
     end
+
+    test "type of native function combinators" do
+      assert eval!("(type (partial +))") == :function
+      assert eval!("(type (comp inc inc))") == :function
+      assert eval!("(type (juxt inc dec))") == :function
+      assert eval!("(type (some-fn :a :b))") == :function
+    end
   end
 
   describe "type_of (direct, every clause)" do
@@ -458,6 +473,14 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert Predicates.type_of({:closure, 1, 2, 3, 4, 5}) == :function
       assert Predicates.type_of({:normal, fn -> 1 end}) == :function
       assert Predicates.type_of({:collect, fn -> 1 end}) == :function
+      assert Predicates.type_of({:juxt_fn, []}) == :function
+      assert Predicates.type_of({:comp_fn, []}) == :function
+      assert Predicates.type_of({:complement_fn, :f}) == :function
+      assert Predicates.type_of({:constantly_fn, 1}) == :function
+      assert Predicates.type_of({:every_pred_fn, []}) == :function
+      assert Predicates.type_of({:some_fn, []}) == :function
+      assert Predicates.type_of({:partial_fn, :f, []}) == :function
+      assert Predicates.type_of({:fnil_fn, :f, nil}) == :function
       assert Predicates.type_of({:variadic, 1, 2}) == :function
       assert Predicates.type_of({:variadic_nonempty, 1, 2}) == :function
       assert Predicates.type_of({:multi_arity, 1, 2}) == :function
@@ -492,6 +515,10 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
       assert {:normal, fun} = Predicates.comp_variadic([])
       assert fun.(:x) == :x
     end
+
+    test "empty native comp callable behaves like identity" do
+      assert Callable.call({:comp_fn, []}, [42]) == 42
+    end
   end
 
   describe "partial (via evaluator + direct errors)" do
@@ -502,6 +529,14 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
 
     test "partial with only the fn forwards all args" do
       assert eval!("((partial +) 1 2 3)") == 6
+    end
+
+    test "partial carries Lisp closures through map dispatch" do
+      assert eval!("(map (partial (fn [x] (+ x 1))) [1 2])") == [2, 3]
+    end
+
+    test "partial carries Lisp closures as fixed callback args through map dispatch" do
+      assert eval!("(map (partial map (fn [x] (+ x 1))) [[1 2] [3]])") == [[2, 3], [4]]
     end
 
     test "partial with no arguments raises ArgumentError" do
@@ -541,6 +576,10 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     test "every-pred short-circuits to false on first falsy result" do
       assert eval!("((every-pred number? pos?) 5 -1)") == false
       assert eval!("((every-pred number?) \"x\")") == false
+    end
+
+    test "every-pred carries Lisp closures through filter dispatch" do
+      assert eval!("(filter (every-pred #(> % 0) even?) [-1 0 1 2 3 4])") == [2, 4]
     end
 
     test "every-pred with no predicates raises ArgumentError" do
@@ -584,66 +623,95 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     test "fnil works inside map over a vector containing nil" do
       assert eval!("(map (fnil inc 0) [nil 1 2])") == [1, 2, 3]
     end
+
+    test "fnil accepts Lisp closures" do
+      assert eval!("((fnil (fn [x] (+ x 1)) 0) nil)") == 1
+      assert eval!("((fnil (fn [x] (+ x 1)) 0) 4)") == 5
+    end
+
+    test "fnil accepts native function combinators" do
+      assert eval!("((fnil (partial + 1) 0) nil)") == 1
+      assert eval!("((fnil (comp inc inc) 0) nil)") == 2
+    end
+
+    test "fnil carries Lisp closure defaults through map dispatch" do
+      assert eval!("(map (fnil map (fn [x] (+ x 1))) [nil] [[1 2]])") == [[2, 3]]
+    end
+
+    test "fnil default callable renders opaquely at public return boundary" do
+      assert {:ok, %{return: "#fn[...]"}} =
+               Lisp.run("((fnil identity (fn [x] x)) nil)")
+
+      assert {:ok, %{return: ["#fn[...]"]}} =
+               Lisp.run("(map (fnil identity (fn [x] x)) [nil])")
+    end
   end
 
   describe "fnil internal forms (direct)" do
     test "plain arity-1 function: nil maps to default" do
-      f = Predicates.fnil(&(&1 + 100), 7)
-      assert f.(nil) == 107
-      assert f.(3) == 103
+      callable = Predicates.fnil(&(&1 + 100), 7)
+      assert match?({:fnil_fn, {:normal, _}, 7}, callable)
+      assert Callable.call(callable, [nil]) == 107
+      assert Callable.call(callable, [3]) == 103
     end
 
     test "plain arity-2 function: nil first arg maps to default" do
-      f = Predicates.fnil(&Math.add/2, 10)
-      assert f.(nil, 5) == 15
-      assert f.(2, 5) == 7
+      callable = Predicates.fnil(&Math.add/2, 10)
+      assert match?({:fnil_fn, {:normal, _}, 10}, callable)
+      assert Callable.call(callable, [nil, 5]) == 15
+      assert Callable.call(callable, [2, 5]) == 7
     end
 
-    test "{:normal, fun} arity 1 dispatch" do
-      f = Predicates.fnil({:normal, &(&1 + 1)}, 9)
-      assert f.(nil) == 10
-      assert f.(4) == 5
+    test "{:normal, fun} arity 1 wraps into a native fnil callable" do
+      callable = Predicates.fnil({:normal, &(&1 + 1)}, 9)
+      assert match?({:fnil_fn, {:normal, _}, 9}, callable)
+      assert Callable.call(callable, [nil]) == 10
+      assert Callable.call(callable, [4]) == 5
     end
 
-    test "{:normal, fun} arity 2 dispatch" do
-      f = Predicates.fnil({:normal, &Math.add/2}, 100)
-      assert f.(nil, 5) == 105
-      assert f.(2, 5) == 7
+    test "{:normal, fun} arity 2 wraps into a native fnil callable" do
+      callable = Predicates.fnil({:normal, &Math.add/2}, 100)
+      assert match?({:fnil_fn, {:normal, _}, 100}, callable)
+      assert Callable.call(callable, [nil, 5]) == 105
+      assert Callable.call(callable, [2, 5]) == 7
     end
 
-    test "{:normal, fun} arity >= 3 falls back to a {:collect, fn} wrapper" do
+    test "{:normal, fun} arity >= 3 wraps into a native fnil callable" do
       add3 = fn a, b, c -> a + b + c end
-      assert {:collect, fun} = Predicates.fnil({:normal, add3}, 1)
-      assert fun.([nil, 2, 3]) == 6
-      assert fun.([10, 2, 3]) == 15
+      assert callable = {:fnil_fn, {:normal, ^add3}, 1} = Predicates.fnil({:normal, add3}, 1)
+      assert Callable.call(callable, [nil, 2, 3]) == 6
+      assert Callable.call(callable, [10, 2, 3]) == 15
     end
 
-    test "{:variadic, …} forms wrap into a {:collect, fn} substituting nil" do
-      assert {:collect, fun} = Predicates.fnil({:variadic, &Math.add/2, 0}, 100)
-      assert fun.([nil, 1, 2]) == 103
-      assert fun.([5, 1, 2]) == 8
+    test "{:variadic, …} forms wrap into a native fnil callable" do
+      callable = Predicates.fnil({:variadic, &Math.add/2, 0}, 100)
+      assert match?({:fnil_fn, {:variadic, _, 0}, 100}, callable)
+      assert Callable.call(callable, [nil, 1, 2]) == 103
+      assert Callable.call(callable, [5, 1, 2]) == 8
     end
 
     test "{:collect, fun} form substitutes only the first nil argument" do
-      assert {:collect, fun} =
-               Predicates.fnil({:collect, fn args -> Enum.sum(args) end}, 50)
+      callable = Predicates.fnil({:collect, fn args -> Enum.sum(args) end}, 50)
 
-      assert fun.([nil, 1, 2]) == 53
-      assert fun.([3, 1, 2]) == 6
+      assert match?({:fnil_fn, {:collect, _}, 50}, callable)
+      assert Callable.call(callable, [nil, 1, 2]) == 53
+      assert Callable.call(callable, [3, 1, 2]) == 6
     end
 
-    test "%Builtin{binding: {:normal, fun}} dispatches by arity (arity 1)" do
+    test "%Builtin{binding: {:normal, fun}} wraps into a native fnil callable" do
       builtin = Builtin.wrap(:inc, {:normal, &(&1 + 1)})
-      f = Predicates.fnil(builtin, 9)
-      assert f.(nil) == 10
-      assert f.(4) == 5
+      callable = Predicates.fnil(builtin, 9)
+      assert match?({:fnil_fn, %Builtin{name: :inc}, 9}, callable)
+      assert Callable.call(callable, [nil]) == 10
+      assert Callable.call(callable, [4]) == 5
     end
 
-    test "%Builtin{} non-normal binding wraps into {:collect, fn}" do
+    test "%Builtin{} non-normal binding wraps into a native fnil callable" do
       builtin = Builtin.wrap(:sum, {:collect, fn args -> Enum.sum(args) end})
-      assert {:collect, fun} = Predicates.fnil(builtin, 5)
-      assert fun.([nil, 1]) == 6
-      assert fun.([3, 1]) == 4
+      callable = Predicates.fnil(builtin, 5)
+      assert match?({:fnil_fn, %Builtin{name: :sum}, 5}, callable)
+      assert Callable.call(callable, [nil, 1]) == 6
+      assert Callable.call(callable, [3, 1]) == 4
     end
   end
 

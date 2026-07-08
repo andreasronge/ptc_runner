@@ -117,6 +117,17 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
   end
 
   describe "tool runtime callables" do
+    test "tagged combinators dispatch map and set callables through collection helpers" do
+      assert {:ok, juxt_step} = Lisp.run(~S|(map (juxt #{:a} {:a 1}) [:a :b])|)
+      assert juxt_step.return == [["a", 1], [nil, nil]]
+
+      assert {:ok, complement_step} = Lisp.run(~S|(map (complement #{:a}) [:a :b])|)
+      assert complement_step.return == [false, true]
+
+      assert {:ok, some_step} = Lisp.run(~S|(map (some-fn #{:a} {:b 2}) [:a :b :c])|)
+      assert some_step.return == ["a", 2, nil]
+    end
+
     test "map can invoke a bare tool callable" do
       clear_runtime_callable_process_state!()
 
@@ -287,6 +298,20 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
 
       assert second.fail.reason == :unknown_tool
       assert second.fail.message =~ "Unknown tool: echo"
+    end
+
+    test "runtime callable captured as a partial fixed arg uses next run tool context" do
+      tools = %{
+        "echo" => fn args -> args["x"] end
+      }
+
+      assert {:ok, first} = Lisp.run(~S|(def f (partial map tool/echo))|, tools: tools)
+      assert Map.has_key?(first.memory, "f")
+      assert_no_persisted_runtime_context!(first.memory)
+
+      assert {:ok, second} = Lisp.run(~S|(f [{:x 7}])|, memory: first.memory, tools: tools)
+      assert second.return == [7]
+      assert Enum.map(second.tool_calls, & &1.args["x"]) == [7]
     end
 
     test "runtime callable captured by comp still works in same run" do

@@ -112,6 +112,7 @@ defmodule PtcRunner.Lisp.Format do
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Interop.Duration
+  alias PtcRunner.Lisp.RuntimeCallable
 
   @doc """
   Format a Lisp value as a string for display.
@@ -284,7 +285,7 @@ defmodule PtcRunner.Lisp.Format do
     {"#duration[#{milliseconds}ms]", false}
   end
 
-  defp format_clojure(%_{} = struct, _opts), do: {inspect(struct), false}
+  defp format_clojure(%_{} = struct, opts), do: inspect_struct(struct, opts)
 
   defp format_clojure(list, opts) when is_list(list) do
     limit = Keyword.get(opts, :limit, :infinity)
@@ -411,6 +412,15 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  defp inspect_struct(struct, opts) do
+    module = struct.__struct__ |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
+    {fields, truncated?} = struct |> Map.from_struct() |> sanitize() |> format_clojure(opts)
+
+    {"#struct[#{module} #{fields}]", truncated?}
+  rescue
+    _ -> {"#struct[unrenderable]", true}
+  end
+
   # Recursively replace internal types with inspectable wrappers
   defp sanitize({:closure, params, _body, _env, _history, _metadata}) do
     names = Enum.map_join(params, " ", &extract_param_name/1)
@@ -421,6 +431,7 @@ defmodule PtcRunner.Lisp.Format do
     do: %Fn{params: "..."}
 
   defp sanitize(%EnvBuiltin{}), do: %Builtin{}
+  defp sanitize(%RuntimeCallable{}), do: %Fn{params: "..."}
 
   defp sanitize({:normal, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
@@ -431,6 +442,14 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize({:multi_arity, name, funs}) when is_atom(name) and is_tuple(funs), do: %Builtin{}
   # {:collect, fun} is used by fnil to wrap variadic functions - display as #fn
   defp sanitize({:collect, fun}) when is_function(fun), do: %Fn{params: "..."}
+  defp sanitize({:juxt_fn, fns}) when is_list(fns), do: %Fn{params: "..."}
+  defp sanitize({tag, _}) when tag in [:complement_fn, :constantly_fn], do: %Fn{params: "..."}
+
+  defp sanitize({tag, fns}) when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
+    do: %Fn{params: "..."}
+
+  defp sanitize({:partial_fn, _f, fixed}) when is_list(fixed), do: %Fn{params: "..."}
+  defp sanitize({:fnil_fn, _f, _default}), do: %Fn{params: "..."}
 
   # Var references - convert to Var struct for display
   defp sanitize({:var, name}) when is_atom(name) or is_binary(name), do: %Var{name: name}
@@ -449,7 +468,7 @@ defmodule PtcRunner.Lisp.Format do
     Map.new(map, fn {k, v} -> {k, sanitize(v)} end)
   end
 
-  # Structs pass through unchanged (let Inspect handle them)
+  # Structs pass through unchanged here; inspect_struct/2 sanitizes their fields.
   defp sanitize(%_{} = struct), do: struct
 
   defp sanitize(list) when is_list(list) do

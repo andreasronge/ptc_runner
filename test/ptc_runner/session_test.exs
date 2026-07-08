@@ -122,6 +122,51 @@ defmodule PtcRunner.SessionTest do
       assert step.return == [7]
     end
 
+    test "preserves runtime callables captured by persisted combinators" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, step}, session} =
+        Session.eval(session, ~S|(def echo7 (partial tool/echo {"x" 7}))|)
+
+      assert step.memory == %{"echo7" => "#fn[...]"}
+
+      {{:ok, step}, _session} =
+        Session.eval(session, "(echo7)")
+
+      assert step.return == 7
+    end
+
+    test "preserves runtime callables captured as constantly values" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, step}, session} =
+        Session.eval(session, ~S|(def get-echo (constantly tool/echo))|)
+
+      assert step.memory == %{"get-echo" => "#fn[...]"}
+
+      {{:ok, step}, _session} =
+        Session.eval(session, ~S|((get-echo) {"x" 7})|)
+
+      assert step.return == 7
+    end
+
+    test "preserves runtime callables captured as fnil defaults" do
+      tools = %{"echo" => fn args -> args["x"] end}
+      session = Session.new(tools: tools)
+
+      {{:ok, step}, session} =
+        Session.eval(session, ~S|(def echo-or-value (fnil identity tool/echo))|)
+
+      assert step.memory == %{"echo-or-value" => "#fn[...]"}
+
+      {{:ok, step}, _session} =
+        Session.eval(session, ~S|((echo-or-value nil) {"x" 7})|)
+
+      assert step.return == 7
+    end
+
     test "returns public closure previews while storing native closures internally" do
       session = Session.new()
 

@@ -24,10 +24,9 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def identity(x), do: x
 
   @doc """
-  Returns a function that replaces nil first argument with a default value.
+  Returns a native callable that replaces nil first argument with a default value.
 
-  Automatically detects arity of the wrapped function and returns a function
-  with matching arity. Supports plain functions and builtin tuples.
+  Supports plain functions and builtin tuples.
 
   Commonly used with update: `(update m :count (fnil inc 0))` or
   `(update m :count (fnil + 0) 5)` to provide default values for nil.
@@ -35,85 +34,75 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   ## Examples
 
       iex> f = PtcRunner.Lisp.Runtime.Predicates.fnil(&Kernel.+/2, 0)
-      iex> f.(nil, 5)
+      iex> PtcRunner.Lisp.Runtime.Callable.call(f, [nil, 5])
       5
-      iex> f.(3, 5)
+      iex> PtcRunner.Lisp.Runtime.Callable.call(f, [3, 5])
       8
 
       iex> f = PtcRunner.Lisp.Runtime.Predicates.fnil(&(&1 + 1), 0)
-      iex> f.(nil)
+      iex> PtcRunner.Lisp.Runtime.Callable.call(f, [nil])
       1
-      iex> f.(5)
+      iex> PtcRunner.Lisp.Runtime.Callable.call(f, [5])
       6
   """
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Lisp.Runtime.Callable
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
 
-  # Plain 1-arity function
-  def fnil(f, default) when is_function(f, 1) do
-    fn
-      nil -> f.(default)
-      arg -> f.(arg)
-    end
-  end
-
-  # Plain 2-arity function
-  def fnil(f, default) when is_function(f, 2) do
-    fn
-      nil, arg2 -> f.(default, arg2)
-      arg1, arg2 -> f.(arg1, arg2)
-    end
-  end
+  def fnil(f, default) when is_function(f), do: {:fnil_fn, {:normal, f}, default}
 
   # Builtin tuple {:normal, fun} - detect arity from the function
   def fnil({:normal, fun} = callable, default) when is_function(fun),
     do: fnil_by_arity(callable, fun, default)
 
+  def fnil({:closure, _params, _body, _env, _history, _metadata} = callable, default) do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil(%RuntimeCallable{} = callable, default) do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil({:juxt_fn, fns} = callable, default) when is_list(fns) do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil({tag, _} = callable, default) when tag in [:complement_fn, :constantly_fn] do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil({tag, fns} = callable, default)
+      when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns) do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil({:partial_fn, _f, fixed} = callable, default) when is_list(fixed) do
+    {:fnil_fn, callable, default}
+  end
+
+  def fnil({:fnil_fn, _f, _default} = callable, default) do
+    {:fnil_fn, callable, default}
+  end
+
   # Variadic, multi-arity, and collect builtins - all use {:collect, fn} wrapper
   def fnil({tag, _, _} = callable, default)
       when tag in [:variadic, :variadic_nonempty, :multi_arity] do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+    {:fnil_fn, callable, default}
   end
 
   def fnil({:collect, _fun} = callable, default) do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+    {:fnil_fn, callable, default}
   end
 
   def fnil(%Builtin{binding: {:normal, fun}} = callable, default) when is_function(fun),
     do: fnil_by_arity(callable, fun, default)
 
   def fnil(%Builtin{} = callable, default) do
-    {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
+    {:fnil_fn, callable, default}
   end
 
-  # Build an arity-aware `fnil` wrapper for a `{:normal, fun}`-style builtin
-  # (bare tuple or `%Builtin{}`). Arity 1/2 get direct closures that substitute
-  # nil with `default`; higher arities fall back to a `{:collect, fn}` wrapper.
-  defp fnil_by_arity(callable, fun, default) do
-    case :erlang.fun_info(fun, :arity) do
-      {:arity, 1} ->
-        fn
-          nil -> Callable.call(callable, [default])
-          arg -> Callable.call(callable, [arg])
-        end
-
-      {:arity, 2} ->
-        fn
-          nil, arg2 -> Callable.call(callable, [default, arg2])
-          arg1, arg2 -> Callable.call(callable, [arg1, arg2])
-        end
-
-      {:arity, _n} ->
-        # For higher arities, use {:collect, fn} so evaluator passes args as list
-        {:collect, fn args -> Callable.call(callable, substitute_nil(args, default)) end}
-    end
-  end
-
-  # Substitute nil first argument with default, safely handling empty lists
-  defp substitute_nil([nil | rest], default), do: [default | rest]
-  defp substitute_nil(args, _default), do: args
+  defp fnil_by_arity(callable, _fun, default), do: {:fnil_fn, callable, default}
 
   # ============================================================
   # HOF Combinators
@@ -127,13 +116,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def comp_variadic([f]), do: f
 
   def comp_variadic(fns) do
-    [last_fn | rest] = Enum.reverse(fns)
-
-    {:collect,
-     fn args ->
-       initial = Callable.call(last_fn, args)
-       Enum.reduce(rest, initial, fn f, acc -> Callable.call(f, [acc]) end)
-     end}
+    {:comp_fn, fns}
   end
 
   @doc """
@@ -145,25 +128,25 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   def partial_variadic([f]) do
-    {:collect, fn args -> Callable.call(f, args) end}
+    {:partial_fn, f, []}
   end
 
   def partial_variadic([f | fixed]) do
-    {:collect, fn extra -> Callable.call(f, fixed ++ extra) end}
+    {:partial_fn, f, fixed}
   end
 
   @doc """
   Returns a function that returns the boolean opposite of `f`.
   """
   def complement(f) do
-    {:collect, fn args -> not truthy?(Callable.call(f, args)) end}
+    {:complement_fn, f}
   end
 
   @doc """
   Returns a function that always returns `value`, ignoring any arguments.
   """
   def constantly(value) do
-    {:collect, fn _args -> value end}
+    {:constantly_fn, value}
   end
 
   @doc """
@@ -175,12 +158,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   def every_pred_variadic(preds) do
-    {:collect,
-     fn vals ->
-       Enum.all?(preds, fn p ->
-         Enum.all?(vals, fn v -> truthy?(Callable.call(p, [v])) end)
-       end)
-     end}
+    {:every_pred_fn, preds}
   end
 
   @doc """
@@ -192,23 +170,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   def some_fn_variadic(fns) do
-    {:collect,
-     fn vals ->
-       Enum.reduce_while(fns, nil, fn f, last_result ->
-         case Enum.reduce_while(vals, last_result, fn v, _acc ->
-                result = Callable.call(f, [v])
-
-                if truthy?(result) do
-                  {:halt, {:found, result}}
-                else
-                  {:cont, result}
-                end
-              end) do
-           {:found, result} -> {:halt, result}
-           last -> {:cont, last}
-         end
-       end)
-     end}
+    {:some_fn, fns}
   end
 
   alias PtcRunner.Lisp.Runtime.SpecialValues
@@ -314,11 +276,9 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def seqable?(x) when is_binary(x), do: true
   def seqable?(_), do: false
 
-  # ifn? - invokable via direct call syntax in apply.ex: functions, keywords, maps, sets
+  # ifn? - invokable via direct call syntax and Runtime.Callable: functions, keywords,
+  # maps, sets, and tagged Lisp combinators.
   # Vectors are NOT invokable (no do_apply_fun clause for lists).
-  # Note: maps and sets are invokable via (my-map :key) but NOT passable to HOFs
-  # like mapv/group-by because Callable.call/2 doesn't dispatch on them.
-  # Wrap in a lambda: (mapv #(my-map %) coll)
   def ifn?(%MapSet{}), do: true
   def ifn?(%LispKeyword{}), do: true
   def ifn?(x) when is_map(x) and not is_struct(x), do: true
@@ -358,7 +318,12 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     case x do
       {:re_mp, _, _, _} -> :regex
       {:closure, _, _, _, _, _} -> :function
+      {:juxt_fn, fns} when is_list(fns) -> :function
       {tag, _} when tag in [:normal, :collect] -> :function
+      {tag, _} when tag in [:complement_fn, :constantly_fn] -> :function
+      {tag, fns} when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns) -> :function
+      {:partial_fn, _f, fixed} when is_list(fixed) -> :function
+      {:fnil_fn, _f, _default} -> :function
       {tag, _, _} when tag in [:variadic, :variadic_nonempty, :multi_arity, :special] -> :function
       _ -> :unknown
     end

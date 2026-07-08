@@ -1600,7 +1600,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S57",
         "Clojure concat treats strings as seqable; PTC-Lisp currently rejects them."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/juxt-multiple-args-bug-001",
         "clojure.core",
         ["juxt"],
@@ -2798,7 +2798,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure walk accepts vectors as invokable inner transform functions; PTC-Lisp currently rejects vectors."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/comp-map-function-bug-001",
         "clojure.core",
         ["comp"],
@@ -2806,7 +2806,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure comp accepts maps as invokable functions; PTC-Lisp currently rejects maps inside composed functions."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/comp-set-function-bug-001",
         "clojure.core",
         ["comp"],
@@ -2822,7 +2822,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure comp accepts vectors as invokable index lookup functions; PTC-Lisp currently rejects vectors inside composed functions."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/partial-map-function-bug-001",
         "clojure.core",
         ["partial"],
@@ -2830,7 +2830,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure partial accepts maps as invokable functions; PTC-Lisp currently rejects maps."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/partial-set-function-bug-001",
         "clojure.core",
         ["partial"],
@@ -2846,7 +2846,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure partial accepts vectors as invokable index lookup functions; PTC-Lisp currently rejects vectors."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/juxt-map-set-function-bug-001",
         "clojure.core",
         ["juxt"],
@@ -2862,7 +2862,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure juxt accepts vectors as invokable index lookup functions; PTC-Lisp currently rejects vectors."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/complement-map-function-bug-001",
         "clojure.core",
         ["complement"],
@@ -2870,7 +2870,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure complement accepts maps as invokable predicates; PTC-Lisp currently rejects maps."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/complement-set-function-bug-001",
         "clojure.core",
         ["complement"],
@@ -2878,7 +2878,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure complement accepts sets as invokable predicates; PTC-Lisp currently rejects sets."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/every-pred-map-function-bug-001",
         "clojure.core",
         ["every-pred"],
@@ -2886,7 +2886,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure every-pred accepts maps as invokable predicates; PTC-Lisp currently rejects maps."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/every-pred-set-function-bug-001",
         "clojure.core",
         ["every-pred"],
@@ -2902,7 +2902,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure every-pred accepts vectors as invokable predicates; PTC-Lisp currently rejects vectors."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/some-fn-map-function-bug-001",
         "clojure.core",
         ["some-fn"],
@@ -2910,7 +2910,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S71",
         "Clojure some-fn accepts maps as invokable predicates; PTC-Lisp currently rejects maps."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/some-fn-set-function-bug-001",
         "clojure.core",
         ["some-fn"],

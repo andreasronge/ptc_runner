@@ -109,6 +109,11 @@ defmodule PtcRunner.Lisp.FormatTest do
       result = Format.to_string(%{outer: %{inner: closure}})
       assert result =~ "#fn[n]"
     end
+
+    test "formats juxt native callable opaquely" do
+      closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
+      assert Format.to_clojure({:juxt_fn, [closure]}) == {"#fn[...]", false}
+    end
   end
 
   describe "to_string/2 with vars" do
@@ -213,6 +218,16 @@ defmodule PtcRunner.Lisp.FormatTest do
     test "handles MapSet as Clojure set syntax" do
       {result, _truncated} = Format.to_clojure(MapSet.new(["meals"]))
       assert result == ~S|#{"meals"}|
+    end
+
+    test "sanitizes internal callable values nested in struct fields" do
+      closure = {:closure, [{:var, :x}], {:var, :secret_body}, %{secret: "S"}, [], %{}}
+      {result, _truncated} = Format.to_clojure(struct(URI, path: closure))
+
+      assert result =~ "#struct[URI"
+      assert result =~ ":path #fn[x]"
+      refute result =~ ":closure"
+      refute result =~ "secret_body"
     end
   end
 

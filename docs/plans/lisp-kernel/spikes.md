@@ -86,20 +86,22 @@ host-side threading — D1 weighs that against the purity win.
 
 **Result.** Partial kernel-path evidence, 2026-07-08. The M3 host-held memory
 implementation now starts a per-`Kernel.run/2` Agent, passes its native map to
-each inner `Lisp.run/2`, commits returned `step.memory` under a heap-oriented
-byte cap, and returns only a bounded `memory_summary` to `agent.core`.
+each inner `Lisp.run_native/2` with `preserve_runtime_callables: true`, commits
+returned `step.memory` under a heap-oriented byte cap, and returns only a
+bounded `memory_summary` to `agent.core`.
 Deterministic kernel tests prove `(def x 41)` on turn 1 and `(return (+ x 1))`
 on turn 2 returns `42`; `(defn inc2 [n] (+ n 2))` on turn 1 and
 `(return (inc2 40))` on turn 2 also returns `42`, so closures round-trip
 through the host-held boundary. This resolves the closure survival risk for
 the kernel path without threading raw memory through the prelude.
 
-Pinned failure fact: the host commits whatever `Lisp.run/2` returns. A
+Pinned failure fact: the host commits whatever `Lisp.run_native/2` returns. A
 `(do (def x 41) (fail :bad))` step returns memory containing `x`, and the
 terminal fail projection includes that in `memory_summary`. A runtime error
 after a prior `def`, such as calling `41` as a function, currently returns the
-prior memory from `Lisp.run/2`; the host cannot commit partial definitions that
-the runtime does not return without extending evaluator semantics. Commands:
+prior memory from the native eval result; the host cannot commit partial
+definitions that the runtime does not return without extending evaluator
+semantics. Commands:
 `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`
 passed 27/27; `mix ptc.kernel_eval --suite mini --case memory_persistence
 --live --model deepseek --allow-failures` passed 1/1 after the live harness

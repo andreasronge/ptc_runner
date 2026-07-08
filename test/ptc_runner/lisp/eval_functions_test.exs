@@ -535,19 +535,23 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
     test "single keyword juxt" do
       env = Env.initial()
       juxt_ast = {:juxt, [{:keyword, :name}]}
+      call_ast = {:call, juxt_ast, [{:literal, %{name: "Alice"}}]}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert is_function(fun, 1)
-      assert fun.(%{name: "Alice"}) == ["Alice"]
+      assert {:ok, {:juxt_fn, [:name]}, %{}} =
+               Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert {:ok, ["Alice"], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "multiple keywords juxt extracts multiple values" do
       env = Env.initial()
       juxt_ast = {:juxt, [{:keyword, :name}, {:keyword, :age}]}
+      call_ast = {:call, juxt_ast, [{:literal, %{name: "Alice", age: 30}}]}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert is_function(fun, 1)
-      assert fun.(%{name: "Alice", age: 30}) == ["Alice", 30]
+      assert {:ok, {:juxt_fn, [:name, :age]}, %{}} =
+               Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert {:ok, ["Alice", 30], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "juxt with closures" do
@@ -557,19 +561,31 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       add_one = {:fn, [{:var, :x}], {:call, {:var, :+}, [{:var, :x}, 1]}}
       times_two = {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}
       juxt_ast = {:juxt, [add_one, times_two]}
+      call_ast = {:call, juxt_ast, [{:literal, 5}]}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert is_function(fun, 1)
-      assert fun.(5) == [6, 10]
+      assert {:ok, {:juxt_fn, [_add_one, _times_two]}, %{}} =
+               Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert {:ok, [6, 10], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "juxt with builtin functions first and last" do
       env = Env.initial()
       juxt_ast = {:juxt, [{:var, :first}, {:var, :last}]}
+      call_ast = {:call, juxt_ast, [{:vector, [1, 2, 3]}]}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert is_function(fun, 1)
-      assert fun.([1, 2, 3]) == [1, 3]
+      assert {:ok, {:juxt_fn, [_first, _last]}, %{}} =
+               Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert {:ok, [1, 3], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "juxt forwards all call arguments to each function" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:var, :+}, {:var, :vector}]}
+      call_ast = {:call, juxt_ast, [1, 2, 3]}
+
+      assert {:ok, [6, [1, 2, 3]], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "juxt works with sort-by for multi-criteria sorting" do
@@ -610,12 +626,45 @@ defmodule PtcRunner.Lisp.EvalFunctionsTest do
       assert result == [[1, 2], [3, 4]]
     end
 
+    test "juxt carries Lisp closures through map dispatch" do
+      env = Env.initial()
+
+      juxt_ast =
+        {:juxt,
+         [
+           {:fn, [{:var, :x}], {:call, {:var, :+}, [{:var, :x}, 1]}},
+           {:fn, [{:var, :x}], {:call, {:var, :*}, [{:var, :x}, 2]}}
+         ]}
+
+      call_ast = {:call, {:var, :map}, [juxt_ast, {:vector, [1, 2]}]}
+
+      assert {:ok, [[2, 2], [3, 4]], %{}} =
+               Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
+    end
+
+    test "juxt works through multi-collection map dispatch" do
+      env = Env.initial()
+      juxt_ast = {:juxt, [{:var, :+}, {:var, :vector}]}
+      call_ast = {:call, {:var, :map}, [juxt_ast, {:var, :xs}, {:var, :ys}]}
+
+      assert {:ok, result, %{}} =
+               Eval.eval(
+                 call_ast,
+                 %{},
+                 %{},
+                 Map.merge(env, %{xs: [1, 2], ys: [10, 20]}),
+                 &dummy_tool/2
+               )
+
+      assert result == [[11, [1, 10]], [22, [2, 20]]]
+    end
+
     test "juxt handles nil values from keywords" do
       env = Env.initial()
       juxt_ast = {:juxt, [{:keyword, :name}, {:keyword, :missing}]}
+      call_ast = {:call, juxt_ast, [{:literal, %{name: "Alice"}}]}
 
-      assert {:ok, fun, %{}} = Eval.eval(juxt_ast, %{}, %{}, env, &dummy_tool/2)
-      assert fun.(%{name: "Alice"}) == ["Alice", nil]
+      assert {:ok, ["Alice", nil], %{}} = Eval.eval(call_ast, %{}, %{}, env, &dummy_tool/2)
     end
   end
 end

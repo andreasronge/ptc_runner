@@ -460,6 +460,7 @@ defmodule PtcRunner.Lisp do
       raw_tools: Keyword.get(opts, :tools, %{}),
       signature_str: Keyword.get(opts, :signature),
       float_precision: Keyword.get(opts, :float_precision),
+      preserve_runtime_callables: Keyword.get(opts, :preserve_runtime_callables, false),
       timeout: Keyword.get(opts, :timeout, 1000),
       max_heap: max_heap,
       setup_max_heap: Keyword.get(opts, :setup_max_heap),
@@ -867,17 +868,37 @@ defmodule PtcRunner.Lisp do
 
   defp handle_execute_result(
          {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx},
-         %{float_precision: float_precision}
+         %{
+           float_precision: float_precision,
+           preserve_runtime_callables: preserve_runtime_callables
+         }
        ) do
-    step = apply_memory_contract({:__ptc_return__, value}, float_precision, eval_ctx)
+    step =
+      apply_memory_contract(
+        {:__ptc_return__, value},
+        float_precision,
+        eval_ctx,
+        preserve_runtime_callables
+      )
+
     {:ok, %{step | usage: metrics}}
   end
 
   defp handle_execute_result(
          {:ok, {:fail_signal, value}, metrics, %EvalContext{} = eval_ctx},
-         %{float_precision: float_precision}
+         %{
+           float_precision: float_precision,
+           preserve_runtime_callables: preserve_runtime_callables
+         }
        ) do
-    step = apply_memory_contract({:__ptc_fail__, value}, float_precision, eval_ctx)
+    step =
+      apply_memory_contract(
+        {:__ptc_fail__, value},
+        float_precision,
+        eval_ctx,
+        preserve_runtime_callables
+      )
+
     {:ok, %{step | usage: metrics}}
   end
 
@@ -889,12 +910,17 @@ defmodule PtcRunner.Lisp do
   end
 
   defp handle_execute_result({:ok, value, metrics, %EvalContext{} = eval_ctx}, opts) do
-    %{float_precision: float_precision, parsed_signature: parsed_signature, signature_str: sig} =
+    %{
+      float_precision: float_precision,
+      parsed_signature: parsed_signature,
+      signature_str: sig,
+      preserve_runtime_callables: preserve_runtime_callables
+    } =
       opts
 
     step =
       value
-      |> apply_memory_contract(float_precision, eval_ctx)
+      |> apply_memory_contract(float_precision, eval_ctx, preserve_runtime_callables)
       |> Map.put(:usage, metrics)
 
     case validate_return_value(parsed_signature, sig, step) do
@@ -1132,7 +1158,7 @@ defmodule PtcRunner.Lisp do
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
-  defp apply_memory_contract(value, precision, %EvalContext{} = ctx) do
+  defp apply_memory_contract(value, precision, %EvalContext{} = ctx, preserve_runtime_callables) do
     reversed_tool_calls = Enum.reverse(ctx.tool_calls)
     reversed_pmap_calls = Enum.reverse(ctx.pmap_calls)
 
@@ -1167,7 +1193,7 @@ defmodule PtcRunner.Lisp do
     %Step{
       return: round_floats(value, precision),
       fail: nil,
-      memory: native_memory(ctx.user_ns),
+      memory: native_memory(ctx.user_ns, preserve_runtime_callables),
       journal: ctx.journal,
       summaries: ctx.summaries,
       tool_cache: ctx.tool_cache,
@@ -1183,38 +1209,84 @@ defmodule PtcRunner.Lisp do
     }
   end
 
-  defp native_memory(memory) when is_map(memory) do
+  defp native_memory(memory, preserve_runtime_callables) when is_map(memory) do
     memory
-    |> Enum.reject(fn {_k, v} -> match?(%RuntimeCallable{}, v) end)
-    |> Map.new(fn {k, v} -> {k, native_memory_value(v)} end)
+    |> Enum.reject(fn {_k, v} ->
+      not preserve_runtime_callables and match?(%RuntimeCallable{}, v)
+    end)
+    |> Map.new(fn {k, v} -> {k, native_memory_value(v, preserve_runtime_callables)} end)
   end
 
-  defp native_memory_value(%RuntimeCallable{} = callable), do: RuntimeCallable.label(callable)
+  defp native_memory_value(%RuntimeCallable{} = callable, true), do: callable
 
-  defp native_memory_value(value) when is_list(value) do
-    Enum.map(value, &native_memory_value/1)
+  defp native_memory_value(%RuntimeCallable{} = callable, false),
+    do: RuntimeCallable.label(callable)
+
+  defp native_memory_value(value, preserve_runtime_callables) when is_list(value) do
+    Enum.map(value, &native_memory_value(&1, preserve_runtime_callables))
   end
 
-  defp native_memory_value(value) when is_map(value) and not is_struct(value) do
-    Map.new(value, fn {k, v} -> {native_memory_value(k), native_memory_value(v)} end)
+  defp native_memory_value(value, preserve_runtime_callables)
+       when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {k, v} ->
+      {native_memory_value(k, preserve_runtime_callables),
+       native_memory_value(v, preserve_runtime_callables)}
+    end)
   end
 
-  defp native_memory_value({:__ptc_return__, inner}),
-    do: {:__ptc_return__, native_memory_value(inner)}
+  defp native_memory_value({:__ptc_return__, inner}, preserve_runtime_callables),
+    do: {:__ptc_return__, native_memory_value(inner, preserve_runtime_callables)}
 
-  defp native_memory_value({:__ptc_fail__, inner}),
-    do: {:__ptc_fail__, native_memory_value(inner)}
+  defp native_memory_value({:__ptc_fail__, inner}, preserve_runtime_callables),
+    do: {:__ptc_fail__, native_memory_value(inner, preserve_runtime_callables)}
 
-  defp native_memory_value({:closure, _params, _body, _env, _turn_history, _metadata} = closure),
-    do: closure
+  defp native_memory_value({:juxt_fn, fns}, _preserve_runtime_callables) when is_list(fns) do
+    {:juxt_fn, Enum.map(fns, &native_memory_value(&1, true))}
+  end
 
-  defp native_memory_value(%MapSet{} = set) do
+  defp native_memory_value({:partial_fn, f, fixed}, _preserve_runtime_callables)
+       when is_list(fixed) do
+    {:partial_fn, native_memory_value(f, true), Enum.map(fixed, &native_memory_value(&1, true))}
+  end
+
+  defp native_memory_value({:comp_fn, fns}, _preserve_runtime_callables) when is_list(fns) do
+    {:comp_fn, Enum.map(fns, &native_memory_value(&1, true))}
+  end
+
+  defp native_memory_value({:complement_fn, f}, _preserve_runtime_callables) do
+    {:complement_fn, native_memory_value(f, true)}
+  end
+
+  defp native_memory_value({:constantly_fn, value}, _preserve_runtime_callables) do
+    {:constantly_fn, native_memory_value(value, true)}
+  end
+
+  defp native_memory_value({:every_pred_fn, preds}, _preserve_runtime_callables)
+       when is_list(preds) do
+    {:every_pred_fn, Enum.map(preds, &native_memory_value(&1, true))}
+  end
+
+  defp native_memory_value({:some_fn, fns}, _preserve_runtime_callables) when is_list(fns) do
+    {:some_fn, Enum.map(fns, &native_memory_value(&1, true))}
+  end
+
+  defp native_memory_value({:fnil_fn, f, default}, _preserve_runtime_callables) do
+    {:fnil_fn, native_memory_value(f, true), native_memory_value(default, true)}
+  end
+
+  defp native_memory_value(
+         {:closure, _params, _body, _env, _turn_history, _metadata} = closure,
+         _preserve_runtime_callables
+       ),
+       do: closure
+
+  defp native_memory_value(%MapSet{} = set, preserve_runtime_callables) do
     set
-    |> Enum.map(&native_memory_value/1)
+    |> Enum.map(&native_memory_value(&1, preserve_runtime_callables))
     |> MapSet.new()
   end
 
-  defp native_memory_value(value), do: value
+  defp native_memory_value(value, _preserve_runtime_callables), do: value
 
   # Round floats recursively in nested structures
   defp round_floats(value, nil), do: value
@@ -1254,6 +1326,8 @@ defmodule PtcRunner.Lisp do
     RuntimeCallable.label(callable)
   end
 
+  defp externalize_lisp_values(value) when is_function(value), do: "#fn[...]"
+
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
     %{var | name: existing_atom_or(name, name)}
   end
@@ -1265,6 +1339,15 @@ defmodule PtcRunner.Lisp do
   defp externalize_lisp_values({:__ptc_fail__, inner}) do
     {:__ptc_fail__, externalize_lisp_values(inner)}
   end
+
+  defp externalize_lisp_values({:juxt_fn, _fns}), do: "#fn[...]"
+  defp externalize_lisp_values({:partial_fn, _f, _fixed}), do: "#fn[...]"
+  defp externalize_lisp_values({:comp_fn, _fns}), do: "#fn[...]"
+  defp externalize_lisp_values({:complement_fn, _f}), do: "#fn[...]"
+  defp externalize_lisp_values({:constantly_fn, _value}), do: "#fn[...]"
+  defp externalize_lisp_values({:every_pred_fn, _preds}), do: "#fn[...]"
+  defp externalize_lisp_values({:some_fn, _fns}), do: "#fn[...]"
+  defp externalize_lisp_values({:fnil_fn, _f, _default}), do: "#fn[...]"
 
   defp externalize_lisp_values(value) when is_list(value) do
     Enum.map(value, &externalize_lisp_values/1)

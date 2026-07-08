@@ -408,9 +408,9 @@ Record the resolution here when made:
   acceptable. M3 partial evidence, 2026-07-08: host-held native memory in
   `Kernel.run/2` proves both value and closure persistence across retry turns
   without exposing raw memory to the prelude. The host commits the memory map
-  returned by `Lisp.run/2`; runtime errors currently return prior memory, so
-  partial definitions before runtime errors are not commit-visible without a
-  lower-level evaluator change.
+  returned by `Lisp.run_native/2` with `preserve_runtime_callables: true`;
+  runtime errors currently return prior memory, so partial definitions before
+  runtime errors are not commit-visible without a lower-level evaluator change.
 - **D2 — Kernel module home.** RESOLVED for M1 spike 2026-07-07:
   `PtcRunner.Kernel` in core `lib/ptc_runner/`, with helpers under
   `lib/ptc_runner/kernel/`. This keeps the slice close to `Lisp.run/2`,

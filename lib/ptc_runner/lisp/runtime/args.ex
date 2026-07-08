@@ -38,6 +38,15 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   @spec valid_callable?(term()) :: boolean()
   def valid_callable?(x) when is_function(x), do: true
   def valid_callable?(%RuntimeCallable{}), do: true
+  def valid_callable?({:juxt_fn, fns}) when is_list(fns), do: true
+  def valid_callable?({tag, _}) when tag in [:complement_fn, :constantly_fn], do: true
+
+  def valid_callable?({tag, fns})
+      when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns),
+      do: true
+
+  def valid_callable?({:partial_fn, _f, fixed}) when is_list(fixed), do: true
+  def valid_callable?({:fnil_fn, _f, _default}), do: true
   def valid_callable?({:special, :println}), do: true
   def valid_callable?(%LispKeyword{}), do: true
   def valid_callable?(x) when is_atom(x) and x not in [nil, true, false], do: true

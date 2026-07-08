@@ -301,8 +301,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "juxt threaded with ->" do
-      assert {:ok, %{return: f}} = Lisp.run("(-> 5 (juxt inc dec))")
-      assert is_function(f, 1)
+      assert {:ok, %{return: "#fn[...]"}} = Lisp.run("(-> 5 (juxt inc dec))")
     end
 
     test "apply threaded with ->>" do
@@ -311,13 +310,11 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "special form threaded through some->" do
-      assert {:ok, %{return: f}} = Lisp.run("(some-> 5 (juxt inc dec))")
-      assert is_function(f, 1)
+      assert {:ok, %{return: "#fn[...]"}} = Lisp.run("(some-> 5 (juxt inc dec))")
     end
 
     test "special form threaded through cond->" do
-      assert {:ok, %{return: f}} = Lisp.run("(cond-> 5 true (juxt inc dec))")
-      assert is_function(f, 1)
+      assert {:ok, %{return: "#fn[...]"}} = Lisp.run("(cond-> 5 true (juxt inc dec))")
     end
   end
 end
