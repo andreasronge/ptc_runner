@@ -31,7 +31,7 @@ defmodule PtcRunner.Kernel.Eval do
     with :ok <- validate_suite(suite),
          :ok <- validate_runs(runs),
          {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)),
-         cases <- select_cases(Keyword.get(opts, :case)) do
+         {:ok, cases} <- select_cases(Keyword.get(opts, :case)) do
       results =
         for run_index <- 1..runs,
             eval_case <- cases do
@@ -143,30 +143,36 @@ defmodule PtcRunner.Kernel.Eval do
     end
   end
 
-  defp select_cases(nil), do: mini_cases()
+  defp select_cases(nil), do: {:ok, mini_cases()}
 
   defp select_cases(case_id) do
-    Enum.filter(mini_cases(), &(&1.id == case_id))
+    case Enum.filter(mini_cases(), &(&1.id == case_id)) do
+      [] -> {:error, {:unknown_case, case_id}}
+      cases -> {:ok, cases}
+    end
   end
 
   defp run_case(eval_case, run_index, mode, model, opts) do
     started = System.monotonic_time()
     {:ok, events} = Agent.start_link(fn -> [] end)
+    {llm, cleanup_llm} = llm_for(eval_case, mode, model, opts)
 
-    llm = llm_for(eval_case, mode, model, opts)
+    try do
+      result =
+        KernelRunner.run(mission(eval_case),
+          llm: llm,
+          tools: Map.get(eval_case, :tools, %{}),
+          max_turns: eval_case.max_turns,
+          events: &Agent.update(events, fn current -> [sanitize_event(&1) | current] end)
+        )
 
-    result =
-      KernelRunner.run(mission(eval_case),
-        llm: llm,
-        tools: Map.get(eval_case, :tools, %{}),
-        max_turns: eval_case.max_turns,
-        events: &Agent.update(events, fn current -> [sanitize_event(&1) | current] end)
-      )
+      sanitized_events = Agent.get(events, &Enum.reverse/1)
 
-    sanitized_events = Agent.get(events, &Enum.reverse/1)
-    Agent.stop(events)
-
-    build_case_result(eval_case, run_index, result, sanitized_events, started)
+      build_case_result(eval_case, run_index, result, sanitized_events, started)
+    after
+      cleanup_llm.()
+      stop_agent(events)
+    end
   end
 
   defp mission(eval_case) do
@@ -179,23 +185,29 @@ defmodule PtcRunner.Kernel.Eval do
   defp llm_for(eval_case, :mock, _model, _opts) do
     {:ok, agent} = Agent.start_link(fn -> eval_case.mock_programs end)
 
-    fn _request ->
-      Agent.get_and_update(agent, fn
-        [program | rest] ->
-          response = %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => program}}]}
-          {{:ok, response}, rest}
+    llm = fn _request ->
+      if Process.alive?(agent) do
+        Agent.get_and_update(agent, fn
+          [program | rest] ->
+            response = %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => program}}]}
+            {{:ok, response}, rest}
 
-        [] ->
-          {{:ok, %{content: "no scripted response"}}, []}
-      end)
+          [] ->
+            {{:ok, %{content: "no scripted response"}}, []}
+        end)
+      else
+        {:error, :mock_llm_stopped}
+      end
     end
+
+    {llm, fn -> stop_agent(agent) end}
   end
 
   defp llm_for(%{id: "eval_retry"}, :live, model, opts) do
     real_llm = live_llm(model, opts)
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
-    fn request ->
+    llm = fn request ->
       turn = Agent.get_and_update(counter, fn n -> {n, n + 1} end)
 
       with {:ok, response} <- real_llm.(request) do
@@ -206,9 +218,11 @@ defmodule PtcRunner.Kernel.Eval do
         end
       end
     end
+
+    {llm, fn -> stop_agent(counter) end}
   end
 
-  defp llm_for(_eval_case, :live, model, opts), do: live_llm(model, opts)
+  defp llm_for(_eval_case, :live, model, opts), do: {live_llm(model, opts), fn -> :ok end}
 
   defp live_llm(model, opts) do
     LLM.callback(model,
@@ -275,5 +289,9 @@ defmodule PtcRunner.Kernel.Eval do
     System.monotonic_time()
     |> Kernel.-(started)
     |> System.convert_time_unit(:native, :millisecond)
+  end
+
+  defp stop_agent(pid) do
+    if Process.alive?(pid), do: Agent.stop(pid)
   end
 end

@@ -40,4 +40,9 @@ defmodule PtcRunner.Kernel.EvalTest do
   test "model seam resolves aliases through the registry" do
     assert {:ok, "openrouter:deepseek/deepseek-v4-flash"} = Eval.resolve_model("deepseek")
   end
+
+  test "unknown case fails instead of producing an empty passing report" do
+    assert {:error, {:unknown_case, "missing"}} =
+             Eval.run(suite: "mini", mode: :mock, case: "missing")
+  end
 end

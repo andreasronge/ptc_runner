@@ -19,18 +19,28 @@ defmodule PtcRunner.Kernel do
     "agent.feedback" => Path.join(@prelude_dir, "feedback.lisp"),
     "agent.core" => Path.join(@prelude_dir, "core.lisp")
   }
+  @prelude_origin_paths %{
+    "agent.prompt" => "priv/preludes/agent/prompt.lisp",
+    "agent.feedback" => "priv/preludes/agent/feedback.lisp",
+    "agent.core" => "priv/preludes/agent/core.lisp"
+  }
   @external_resource @prelude_paths["agent.prompt"]
   @external_resource @prelude_paths["agent.feedback"]
   @external_resource @prelude_paths["agent.core"]
+  @prelude_sources %{
+    "agent.prompt" => File.read!(@prelude_paths["agent.prompt"]),
+    "agent.feedback" => File.read!(@prelude_paths["agent.feedback"]),
+    "agent.core" => File.read!(@prelude_paths["agent.core"])
+  }
   @namespace_deps %{
     "agent.core" => ["agent.prompt", "agent.feedback"]
   }
 
   @spec prelude_source() :: String.t()
   def prelude_source do
-    @prelude_paths
-    |> Enum.sort_by(fn {namespace, _path} -> namespace end)
-    |> Enum.map_join("\n", fn {_namespace, path} -> File.read!(path) end)
+    @prelude_sources
+    |> Enum.sort_by(fn {namespace, _source} -> namespace end)
+    |> Enum.map_join("\n", fn {_namespace, source} -> source end)
   end
 
   @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
@@ -146,7 +156,7 @@ defmodule PtcRunner.Kernel do
   defp component_source(namespace, overrides) do
     case Map.get(overrides, namespace, Map.get(overrides, String.to_atom(namespace))) do
       source when is_binary(source) -> source
-      nil -> File.read!(Map.fetch!(@prelude_paths, namespace))
+      nil -> Map.fetch!(@prelude_sources, namespace)
     end
   end
 
@@ -154,7 +164,7 @@ defmodule PtcRunner.Kernel do
     if Map.has_key?(overrides, namespace) or Map.has_key?(overrides, String.to_atom(namespace)) do
       :memory
     else
-      {:file, Map.fetch!(@prelude_paths, namespace)}
+      {:file, Map.fetch!(@prelude_origin_paths, namespace)}
     end
   end
 

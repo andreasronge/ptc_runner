@@ -398,11 +398,12 @@ Record the resolution here when made:
   `lib/ptc_runner/kernel/`. This keeps the slice close to `Lisp.run/2`,
   `Tool`, and `LLM` contracts. Release/API stability remains D18.
 - **D3 — Prelude file home.** RESOLVED for M2 spike 2026-07-08:
-  `priv/preludes/agent/*.lisp`, referenced by `@external_resource` and included
-  in the package file list. This mirrors the inspectable `priv/prompts/`
-  convention while keeping the split policy source swappable in tests via
-  `PtcRunner.Kernel.compile_prelude/1` source overrides. Release/API stability
-  remains D18.
+  `priv/preludes/agent/*.lisp`, referenced by `@external_resource`, embedded
+  into `PtcRunner.Kernel` module attributes for default runtime use, and
+  included in the package file list plus release smoke required paths. This
+  mirrors the inspectable `priv/prompts/` convention while keeping the split
+  policy source swappable in tests via `PtcRunner.Kernel.compile_prelude/1`
+  source overrides. Release/API stability remains D18.
 - **D4 — Turn events.** Kernel emits `PtcRunner.TraceLog.TurnEvent` per
   llm/eval pair (recommended: keeps existing metrics/introspection working for
   A/B measurement) vs new minimal log. Supporting precedent:

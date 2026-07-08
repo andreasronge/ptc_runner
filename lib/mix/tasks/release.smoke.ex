@@ -22,6 +22,7 @@ defmodule Mix.Tasks.Release.Smoke do
 
   @package_dir Path.join(["tmp", "hex-unpack"])
   @required_package_paths [
+    "priv/preludes",
     "priv/prompts",
     "priv/spec",
     "priv/ptc_schema.json",
