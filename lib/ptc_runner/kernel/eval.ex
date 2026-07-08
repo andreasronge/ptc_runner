@@ -234,6 +234,7 @@ defmodule PtcRunner.Kernel.Eval do
           llm: llm,
           tools: Map.get(eval_case, :tools, %{}),
           max_turns: eval_case.max_turns,
+          prelude_source_overrides: Keyword.get(opts, :prelude_source_overrides, %{}),
           events: &Agent.update(events, fn current -> [sanitize_event(&1) | current] end)
         )
 
@@ -382,8 +383,55 @@ defmodule PtcRunner.Kernel.Eval do
     }
   end
 
+  defp sanitize_event(%{"event" => "prelude", "prelude" => prelude}) when is_map(prelude) do
+    %{
+      event: "prelude",
+      prelude: %{
+        source_hash: Map.get(prelude, :source_hash),
+        artifact_hash: Map.get(prelude, :artifact_hash),
+        protected_namespaces: Map.get(prelude, :protected_namespaces, []),
+        components:
+          prelude
+          |> Map.get(:components, [])
+          |> Enum.map(&sanitize_prelude_component/1)
+      }
+    }
+  end
+
   defp sanitize_event(%{"event" => event, "turn" => turn}) do
     %{event: event, turn: turn}
+  end
+
+  defp sanitize_prelude_component(component) when is_map(component) do
+    %{
+      id: Map.get(component, :id),
+      checksum: Map.get(component, :checksum),
+      source_hash: Map.get(component, :source_hash),
+      namespaces: Map.get(component, :namespaces, []),
+      origin: sanitize_origin(Map.get(component, :origin))
+    }
+  end
+
+  defp sanitize_origin(nil), do: nil
+
+  defp sanitize_origin(origin) when is_binary(origin) do
+    if safe_origin?(origin) and byte_size(origin) <= 160 do
+      origin
+    else
+      "redacted:" <> sha256(origin)
+    end
+  end
+
+  defp sanitize_origin(origin),
+    do: origin |> inspect(limit: 5, printable_limit: 160) |> sanitize_origin()
+
+  defp safe_origin?("file:priv/" <> _rest), do: true
+  defp safe_origin?("file:test/" <> _rest), do: true
+  defp safe_origin?("memory" <> _rest), do: true
+  defp safe_origin?(_origin), do: false
+
+  defp sha256(source) do
+    :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
   end
 
   defp duration_ms(started) do

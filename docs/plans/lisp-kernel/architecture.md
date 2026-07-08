@@ -394,6 +394,20 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     a focused live memory run passed 1/1, and the full six-case live run passed
     4/6. `context_aggregation` still failed after 5/5 in that full run, while
     `domain_tool` stayed red with the same scalar-extraction mismatch.
+17. S19 provenance evidence, 2026-07-08: `PtcRunner.Kernel.run/2` emits one
+    run-start `prelude` event when an `events` callback is supplied. The raw
+    event is sourced from `PtcRunner.Lisp.Prelude.trace_summary/1`, whose
+    component list is populated from `prelude.metadata.components`; the eval
+    runner report then preserves only bounded provenance fields: aggregate
+    `source_hash`, `artifact_hash`, protected namespaces, and per-component
+    `id`, `checksum`, `source_hash`, `namespaces`, and bounded/redacted
+    `origin`. The report trace does not include prelude source, prompt text,
+    model programs, raw feedback wording, raw eval values, or raw host-held
+    memory. Focused evidence:
+    `mix test test/ptc_runner/kernel/eval_test.exs test/ptc_runner/kernel/prelude_split_test.exs`.
+    The S19 frozen variants prove a feedback-only swap changes only the
+    `agent.feedback` component hash while `agent.prompt` and `agent.core`
+    hashes remain fixed.
 
 ## Open decisions
 

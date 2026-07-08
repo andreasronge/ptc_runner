@@ -71,6 +71,7 @@ defmodule PtcRunner.Kernel do
     with {:ok, memory_cap} <- memory_byte_cap(opts),
          opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
          {:ok, prelude} <- compile_prelude(opts),
+         :ok <- log_prelude(opts, prelude),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
          {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
@@ -145,6 +146,19 @@ defmodule PtcRunner.Kernel do
     |> Compiler.compile(opts)
   end
 
+  defp log_prelude(opts, prelude) do
+    events = Keyword.get(opts, :events)
+
+    if is_function(events, 1) do
+      events.(%{
+        "event" => "prelude",
+        "prelude" => Prelude.trace_summary(prelude)
+      })
+    end
+
+    :ok
+  end
+
   defp resolve_system_prompt(args, override) do
     system = override || Map.get(args, "system")
 
@@ -168,18 +182,27 @@ defmodule PtcRunner.Kernel do
   end
 
   defp component_source(namespace, overrides) do
-    case Map.get(overrides, namespace, Map.get(overrides, String.to_atom(namespace))) do
+    case component_override(namespace, overrides) do
+      %{source: source} when is_binary(source) -> source
+      %{"source" => source} when is_binary(source) -> source
+      {source, _origin} when is_binary(source) -> source
       source when is_binary(source) -> source
       nil -> Map.fetch!(@prelude_sources, namespace)
     end
   end
 
   defp component_origin(namespace, overrides) do
-    if Map.has_key?(overrides, namespace) or Map.has_key?(overrides, String.to_atom(namespace)) do
-      :memory
-    else
-      {:file, Map.fetch!(@prelude_origin_paths, namespace)}
+    case component_override(namespace, overrides) do
+      %{origin: origin} -> origin
+      %{"origin" => origin} -> origin
+      {_source, origin} -> origin
+      nil -> {:file, Map.fetch!(@prelude_origin_paths, namespace)}
+      _source -> :memory
     end
+  end
+
+  defp component_override(namespace, overrides) do
+    Map.get(overrides, namespace, Map.get(overrides, String.to_atom(namespace)))
   end
 
   defp normalize_llm_result({:ok, response}) do

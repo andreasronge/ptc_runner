@@ -1,7 +1,13 @@
 defmodule PtcRunner.Kernel.EvalTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Eval
+  alias PtcRunner.Lisp.Prelude
+
+  @variant_dir Path.expand("../../../priv/kernel_feedback_variants", __DIR__)
+  @feedback_a_path Path.join(@variant_dir, "feedback_a_default.lisp")
+  @feedback_b_path Path.join(@variant_dir, "feedback_b_memory_guidance.lisp")
 
   test "mini suite mock mode reports deterministic per-case counts" do
     assert {:ok, report} = Eval.run(suite: "mini", mode: :mock)
@@ -102,6 +108,90 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert Enum.any?(trace, &(&1.event == "memory"))
   end
 
+  test "feedback variant swap changes only the feedback component hash" do
+    {:ok, prelude_a} =
+      Kernel.compile_prelude(prelude_source_overrides: feedback_override(@feedback_a_path))
+
+    {:ok, prelude_b} =
+      Kernel.compile_prelude(prelude_source_overrides: feedback_override(@feedback_b_path))
+
+    components_a = components_by_id(Prelude.trace_summary(prelude_a))
+    components_b = components_by_id(Prelude.trace_summary(prelude_b))
+
+    assert components_a["agent.prompt"].source_hash == components_b["agent.prompt"].source_hash
+    assert components_a["agent.core"].source_hash == components_b["agent.core"].source_hash
+
+    refute components_a["agent.feedback"].source_hash ==
+             components_b["agent.feedback"].source_hash
+
+    assert components_a["agent.feedback"].origin ==
+             "file:priv/kernel_feedback_variants/feedback_a_default.lisp"
+
+    assert components_b["agent.feedback"].origin ==
+             "file:priv/kernel_feedback_variants/feedback_b_memory_guidance.lisp"
+
+    assert components_a["agent.feedback"].source_hash == sha256_file(@feedback_a_path)
+    assert components_b["agent.feedback"].source_hash == sha256_file(@feedback_b_path)
+  end
+
+  test "sanitized mock report attributes the run to the feedback variant source hash" do
+    assert {:ok, report_a} =
+             Eval.run(
+               suite: "mini",
+               mode: :mock,
+               case: "eval_retry",
+               prelude_source_overrides: feedback_override(@feedback_a_path)
+             )
+
+    assert {:ok, report_b} =
+             Eval.run(
+               suite: "mini",
+               mode: :mock,
+               case: "eval_retry",
+               prelude_source_overrides: feedback_override(@feedback_b_path)
+             )
+
+    component_a = report_a |> feedback_component_from_report()
+    component_b = report_b |> feedback_component_from_report()
+
+    assert component_a.source_hash == sha256_file(@feedback_a_path)
+    assert component_b.source_hash == sha256_file(@feedback_b_path)
+    refute component_a.source_hash == component_b.source_hash
+    assert component_a.namespaces == ["agent.feedback"]
+    assert component_b.namespaces == ["agent.feedback"]
+
+    inspected = inspect([report_a, report_b])
+    refute inspected =~ "(defn eval-feedback"
+    refute inspected =~ "(return 3)"
+    refute inspected =~ "Previous PTC-Lisp program did not return successfully"
+    refute inspected =~ "reuse the bounded defined names"
+  end
+
+  test "sanitized mock report redacts untrusted prelude component origin" do
+    secret = "sk-or-" <> String.duplicate("SECRET", 40)
+
+    override = %{
+      "agent.feedback" => %{
+        source: File.read!(@feedback_a_path),
+        origin: {:file, "/tmp/#{secret}/feedback_a_default.lisp"}
+      }
+    }
+
+    assert {:ok, report} =
+             Eval.run(
+               suite: "mini",
+               mode: :mock,
+               case: "eval_retry",
+               prelude_source_overrides: override
+             )
+
+    component = feedback_component_from_report(report)
+
+    assert String.starts_with?(component.origin, "redacted:")
+    assert byte_size(component.origin) == byte_size("redacted:") + 64
+    refute inspect(report) =~ secret
+  end
+
   test "live mode reports provider-specific missing key" do
     previous_env = System.get_env("OPENAI_API_KEY")
     previous_config = Application.get_env(:req_llm, :openai_api_key)
@@ -147,4 +237,29 @@ defmodule PtcRunner.Kernel.EvalTest do
 
   defp restore_config(_key, nil), do: :ok
   defp restore_config(key, value), do: Application.put_env(:req_llm, key, value)
+
+  defp feedback_override(path) do
+    origin =
+      path
+      |> Path.relative_to(File.cwd!())
+      |> then(&{:file, &1})
+
+    %{"agent.feedback" => %{source: File.read!(path), origin: origin}}
+  end
+
+  defp components_by_id(%{components: components}) do
+    Map.new(components, &{&1.id, &1})
+  end
+
+  defp feedback_component_from_report(%{cases: [%{trace: trace}]}) do
+    %{prelude: %{components: components}} = Enum.find(trace, &(&1.event == "prelude"))
+    Enum.find(components, &(&1.id == "agent.feedback"))
+  end
+
+  defp sha256_file(path) do
+    path
+    |> File.read!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
 end
