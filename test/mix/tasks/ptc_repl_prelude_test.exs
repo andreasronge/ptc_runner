@@ -87,9 +87,9 @@ defmodule Mix.Tasks.Ptc.ReplPreludeTest do
           Repl.run(["--prelude", path, "--show-prompt-inventory", "-e", "(+ 1 2)"])
         end)
 
-      assert output =~ "prelude capabilities"
+      assert output =~ "available symbols"
       assert output =~ "crm/get-user"
-      assert output =~ "(get-user id)"
+      assert output =~ "use: (crm/get-user id)"
       # And it still evaluates the expression.
       assert output =~ "3"
     end

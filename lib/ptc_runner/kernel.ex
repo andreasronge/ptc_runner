@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Step
   alias PtcRunner.Step.Public
+  alias PtcRunner.SymbolInventory
+  alias PtcRunner.Tool
 
   @outer_timeout 30_000
   @outer_heap_words 8_000_000
@@ -72,11 +74,15 @@ defmodule PtcRunner.Kernel do
          opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
          {:ok, prelude} <- compile_prelude(opts),
          :ok <- log_prelude(opts, prelude),
+         {:ok, symbol_inventory, symbol_inventory_meta} <-
+           render_symbol_inventory(mission, opts),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
          {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
-        "tool_names" => opts |> Keyword.get(:tools, %{}) |> Map.keys() |> Enum.sort()
+        "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
+        "symbol_inventory" => symbol_inventory,
+        "symbol_inventory_meta" => symbol_inventory_meta
       }
 
       program = ~S|(agent.core/run-mission data/mission data/cfg)|
@@ -97,6 +103,47 @@ defmodule PtcRunner.Kernel do
       after
         stop_agent(memory)
       end
+    end
+  end
+
+  defp render_symbol_inventory(mission, opts) do
+    facts =
+      SymbolInventory.project(
+        data: Map.get(mission, "context", %{}),
+        tools: Keyword.get(opts, :tools, %{}),
+        memory_summary: Keyword.get(opts, :memory_summary)
+      )
+
+    case SymbolInventory.render(
+           facts,
+           Keyword.get(opts, :symbol_inventory_renderer, :default),
+           Keyword.get(opts, :symbol_inventory_renderer_opts, [])
+         ) do
+      {:ok, rendered, meta} -> {:ok, rendered || "", meta}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp public_tool_names(tools) when is_map(tools) do
+    tools
+    |> Enum.map(fn {name, format} ->
+      {to_string(name), normalize_tool(to_string(name), format)}
+    end)
+    |> Enum.reject(fn {name, tool} ->
+      is_nil(tool) or Tool.private?(tool) or name in ["llm-complete", "eval-program", "log"]
+    end)
+    |> Enum.map(fn {name, _tool} -> name end)
+    |> Enum.sort()
+  end
+
+  defp public_tool_names(_tools), do: []
+
+  defp normalize_tool(name, %Tool{} = tool), do: %{tool | name: tool.name || name}
+
+  defp normalize_tool(name, format) do
+    case Tool.new(name, format) do
+      {:ok, tool} -> tool
+      {:error, _reason} -> nil
     end
   end
 

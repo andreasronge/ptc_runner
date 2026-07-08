@@ -72,6 +72,64 @@ defmodule PtcRunner.KernelTest do
     refute Enum.any?(messages, &(&1.role == :system))
   end
 
+  test "initial request includes cfg symbol inventory without private tools or secret samples" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return data/numbers)"}}]}
+        ],
+        parent
+      )
+
+    tools = %{
+      "sum" => {fn _ -> 12 end, signature: "(xs [:int]) -> :int", description: "Sum numbers."},
+      "hidden" => {fn _ -> :hidden end, visibility: :private, description: "Hidden."}
+    }
+
+    assert {:ok, %{"value" => [2, 4, 6]}} =
+             Kernel.run(
+               %{"task" => "compute", "context" => %{"numbers" => [2, 4, 6], "api_key" => "sk"}},
+               llm: llm,
+               tools: tools
+             )
+
+    assert_received {:llm_request,
+                     %{system: system, messages: [%{role: :user, content: content}]}}
+
+    assert system =~ "Use value symbols directly"
+    assert content =~ ";; === available symbols ==="
+    assert content =~ "data/numbers"
+    assert content =~ "use: data/numbers"
+    refute content =~ "(data/numbers"
+    assert content =~ "data/api_key"
+    refute content =~ ~s|sample: "sk"|
+    assert content =~ "tool/sum [xs]"
+    assert content =~ "use: (tool/sum {:xs xs})"
+    refute content =~ "tool/hidden"
+    refute content =~ "\"hidden\""
+    refute content =~ "tool/eval-program"
+    refute content =~ "(source"
+  end
+
+  test "invalid symbol inventory renderer fails closed before LLM call" do
+    parent = self()
+
+    llm = fn request ->
+      send(parent, {:llm_request, request})
+      {:ok, %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :bad)"}}]}}
+    end
+
+    assert {:error, %{reason: "invalid_symbol_inventory_renderer"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               symbol_inventory_renderer: :does_not_exist
+             )
+
+    refute_received {:llm_request, _}
+  end
+
   test "variant core missing system field fails closed before LLM call" do
     parent = self()
 
@@ -528,7 +586,7 @@ defmodule PtcRunner.KernelTest do
         )
       end)
 
-    assert_receive {:barrier, _first_id, first_pid}
+    assert_receive {:barrier, _first_id, first_pid}, 1_000
 
     refute_receive {:barrier, _second_id, _second_pid}, 100
     send(first_pid, :release)

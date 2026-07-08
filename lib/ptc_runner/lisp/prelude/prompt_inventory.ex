@@ -1,42 +1,17 @@
 defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   @moduledoc """
-  Deterministic, bounded prompt-inventory renderer for a compiled prelude
-  (Capability Prelude V1, plan §9).
+  Compatibility wrapper for rendering compiled-prelude prompt exports through
+  the shared sanitized symbol inventory.
 
-  The renderer is fed by the SAME `%PtcRunner.Lisp.Prelude.Export{}` records the
-  analyzer, evaluator, and discovery forms consult — there is no separate
-  prompt/discovery registry. It produces a compact, domain-blind-at-the-core
-  block that a deployment-specific prelude fills with its own namespace and
-  export names. The block is inserted into the SubAgent system prompt through
-  dynamic context assembly, NOT by editing static core prompt templates.
-
-  ## What it renders
-
-    * a per-namespace summary (namespace name + docstring) for namespaces that
-      have at least one `:prompt`-visible export;
-    * for each such namespace, up to `per_namespace_cap/0` prompt-visible
-      exports, each with its signature, short doc, and — only for an inferred
-      `:read`/`:write` backing — an effect hint (`:unknown` is omitted as noise,
-      but stays available via `(meta ...)` / `(ns-publics ...)`);
-    * a "more via `(ns-publics 'ns)`" line when a namespace has more
-      prompt-visible exports than the cap;
-    * a discovery hint noting that additional `:discoverable` exports (omitted
-      from the inventory by design) can be found through `doc`/`dir`/`apropos`/
-      `ns-publics`, and that `source` renders an export's defining form;
-    * a compact existing-ledger summary (`Tool calls made` / `Tool call
-      errors`) when ledger data is supplied.
-
-  ## Determinism + bounds
-
-  Output is fully determined by the export records and the supplied ledger
-  counts: namespaces and exports are sorted, and per-namespace export rendering
-  is capped at `per_namespace_cap/0`. `render/2` returns `nil` when there is no
-  prelude or no `:prompt`-visible export, so callers can filter the section out
-  of prompt assembly.
+  The renderer is fed by the same `%PtcRunner.Lisp.Prelude.Export{}` records the
+  analyzer, evaluator, and discovery forms consult. Export `kind` is normalized
+  to the inventory vocabulary: `:constant` renders as `:value`, while
+  `:function` renders as `:function`. Renderer output intentionally does not
+  advertise `(source ...)`; source discovery remains governed by D17.
   """
 
   alias PtcRunner.Lisp.Prelude
-  alias PtcRunner.Lisp.Prelude.Export
+  alias PtcRunner.SymbolInventory
 
   # Per-namespace cap on the number of prompt-visible exports rendered in
   # detail. Pinned in `prompt_inventory_test.exs`. The remaining exports are
@@ -73,28 +48,28 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   def render(nil, _opts), do: nil
 
   def render(%Prelude{} = prelude, opts) do
-    prompt_exports =
-      prelude
-      |> Prelude.prompt_exports()
-      |> visible_exports(Keyword.get(opts, :export_mask))
+    facts =
+      SymbolInventory.project(
+        prelude: prelude,
+        export_mask: Keyword.get(opts, :export_mask)
+      )
 
-    if prompt_exports == [] do
+    if facts == [] do
       nil
     else
       ledger_summary = ledger_lines(Keyword.get(opts, :ledger))
 
-      namespace_blocks =
-        prompt_exports
-        |> Enum.group_by(& &1.namespace)
-        |> Enum.sort_by(fn {namespace, _} -> namespace end)
-        |> Enum.map(fn {namespace, exports} ->
-          namespace_block(namespace, exports, namespace_doc(prelude, namespace))
-        end)
+      {bounded_facts, omitted} =
+        per_namespace_cap(facts, Keyword.get(opts, :cap, @per_namespace_cap))
+
+      {:ok, rendered, _meta} =
+        SymbolInventory.render(bounded_facts, Keyword.get(opts, :renderer, :default),
+          cap: length(bounded_facts),
+          omitted_count: omitted
+        )
 
       [
-        ";; === prelude capabilities ===",
-        "Curated, deployment-defined APIs. Call them as `(ns/name ...)`.",
-        Enum.join(namespace_blocks, "\n\n"),
+        rendered,
         discovery_hint(),
         ledger_summary
       ]
@@ -104,87 +79,26 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   end
 
   # ------------------------------------------------------------------
-  # Namespace + export rendering
+  # Ledger summary
   # ------------------------------------------------------------------
 
-  defp namespace_block(namespace, exports, doc) do
-    sorted = Enum.sort_by(exports, & &1.symbol)
-    shown = Enum.take(sorted, @per_namespace_cap)
-    omitted = length(sorted) - length(shown)
-
-    header =
-      case doc do
-        nil -> ";; #{namespace}"
-        "" -> ";; #{namespace}"
-        text -> ";; #{namespace} — #{compact(text)}"
-      end
-
-    export_lines = Enum.map(shown, &export_line(&1))
-
-    more_line =
-      if omitted > 0 do
-        ["  ;; +#{omitted} more — discover via (ns-publics '#{namespace})"]
-      else
-        []
-      end
-
-    Enum.join([header | export_lines] ++ more_line, "\n")
-  end
-
-  # `crm/get-user (get-user id) [read] — Return a CRM user by id.`
-  #
-  # The `[effect]` hint is rendered only for an inferred `:read`/`:write`
-  # backing. `:unknown` carries no usable signal — it is the fallback for both a
-  # pure local export AND a dynamic `tool/call` whose effect could not be
-  # inferred — so rendering it would either over-warn (on a pure helper) or
-  # under-warn (on a dynamic write). It is omitted to keep the inventory compact
-  # and honest; the effect stays available via `(meta ...)` / `(ns-publics ...)`.
-  defp export_line(%Export{} = export) do
-    base = "  #{export.ref} #{signature(export)}#{effect_hint(export.effect)}"
-
-    case compact(export.doc) do
-      "" -> base
-      doc -> base <> " — " <> doc
-    end
-  end
-
-  defp effect_hint(:unknown), do: ""
-  defp effect_hint(effect), do: " [#{effect}]"
-
-  defp signature(%Export{} = export), do: Export.signature(export)
-
-  defp visible_exports(exports, nil), do: exports
-
-  defp visible_exports(exports, export_mask) when is_map(export_mask) do
-    Enum.filter(exports, fn %Export{} = export ->
-      case Map.fetch(export_mask, export.namespace) do
-        {:ok, refs} -> masked_ref_member?(refs, export.ref)
-        :error -> true
-      end
+  defp per_namespace_cap(facts, cap) when is_integer(cap) and cap > 0 do
+    facts
+    |> Enum.group_by(&Map.get(&1, :namespace, ""))
+    |> Enum.sort_by(fn {namespace, _facts} -> namespace end)
+    |> Enum.map_reduce(0, fn {_namespace, namespace_facts}, omitted ->
+      sorted = Enum.sort_by(namespace_facts, & &1.ref)
+      shown = Enum.take(sorted, cap)
+      {shown, omitted + max(length(sorted) - length(shown), 0)}
     end)
+    |> then(fn {groups, omitted} -> {List.flatten(groups), omitted} end)
   end
 
-  defp visible_exports(exports, _export_mask), do: exports
-
-  defp masked_ref_member?(%MapSet{} = refs, ref), do: MapSet.member?(refs, ref)
-  defp masked_ref_member?(refs, ref) when is_list(refs), do: ref in refs
-  defp masked_ref_member?(_refs, _ref), do: true
-
-  defp namespace_doc(%Prelude{metadata: metadata}, namespace) do
-    metadata
-    |> Map.get(:namespaces, %{})
-    |> Map.get(namespace, %{})
-    |> Map.get(:doc)
-  end
-
-  # ------------------------------------------------------------------
-  # Discovery hint + ledger summary
-  # ------------------------------------------------------------------
+  defp per_namespace_cap(facts, _cap), do: {facts, 0}
 
   defp discovery_hint do
-    ";; More prelude exports may be available than shown here. " <>
-      "Use (ns-publics 'ns), (dir 'ns), (doc 'ns/name), or (apropos \"...\") to discover them, " <>
-      "and (source 'ns/name) to read an export's defining form (incl. reachable private helpers)."
+    ";; More prelude exports may be discoverable with (ns-publics 'ns), " <>
+      "(dir 'ns), (doc 'ns/name), or (apropos \"...\")."
   end
 
   defp ledger_lines(nil), do: nil
@@ -214,16 +128,4 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventory do
   end
 
   defp ledger_counts(_), do: {0, 0}
-
-  # ------------------------------------------------------------------
-  # Text helpers
-  # ------------------------------------------------------------------
-
-  defp compact(nil), do: ""
-
-  defp compact(text) when is_binary(text) do
-    text
-    |> String.split()
-    |> Enum.join(" ")
-  end
 end

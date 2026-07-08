@@ -60,7 +60,7 @@ defmodule PtcRunner.SubAgent.PreludeFeedbackCaptureTest do
         shown = Enum.map_join(messages, "\n", & &1.content)
 
         # The inventory block reaches the model...
-        assert shown =~ "prelude capabilities"
+        assert shown =~ "available symbols"
         assert shown =~ "crm/get-user"
         assert shown =~ "geo/rect-area"
         # ...the inferred tool-backed effect is shown...

@@ -22,13 +22,13 @@ defmodule PtcRunner.Kernel.FeedbackABTest do
 
     assert hashes == %{
              "A" =>
-               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+               {"0ed3068eef43509087f9b638fe13d1caa800a228d7540e54ff05a6e313773465",
                 "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474"},
              "B" =>
-               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+               {"0ed3068eef43509087f9b638fe13d1caa800a228d7540e54ff05a6e313773465",
                 "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"},
              "C" =>
-               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+               {"0ed3068eef43509087f9b638fe13d1caa800a228d7540e54ff05a6e313773465",
                 "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"}
            }
   end

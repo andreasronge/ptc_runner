@@ -16,8 +16,8 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   @variant_a_hash "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474"
   @variant_b_hash "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"
   @variant_c_feedback_hash "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"
-  @variant_c_prompt_hash "c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9"
-  @prompt_hash "c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9"
+  @variant_c_prompt_hash "0ed3068eef43509087f9b638fe13d1caa800a228d7540e54ff05a6e313773465"
+  @prompt_hash "0ed3068eef43509087f9b638fe13d1caa800a228d7540e54ff05a6e313773465"
   @core_hash "04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f"
 
   @type result :: %{

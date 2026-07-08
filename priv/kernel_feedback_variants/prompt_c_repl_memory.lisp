@@ -20,6 +20,9 @@
                   (if (empty? (mission "context"))
                     ""
                     (str "\nContext JSON: " (json/generate-string (mission "context"))))
+                  (if (empty? (cfg "symbol_inventory"))
+                    ""
+                    (str "\n\n" (cfg "symbol_inventory")))
                   (if (empty? (cfg "tool_names"))
                     ""
                     (str "\nGranted tools: " (json/generate-string (cfg "tool_names")))))})

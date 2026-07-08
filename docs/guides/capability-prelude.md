@@ -158,10 +158,13 @@ the namespace, then the global default `:prompt`):
   (tool/call {:server "crm" :tool "list_users" :args {}}))
 ```
 
-Prompt-visible exports are summarized in a compact, **deployment-defined**
-prompt inventory assembled dynamically — the core prompt templates stay
-domain-blind (they never mention `crm`). `:discoverable` exports are omitted
-from the inventory but still reachable via the discovery forms (§6).
+Prompt-visible exports are summarized in the shared symbol inventory assembled
+dynamically — the core prompt templates stay domain-blind (they never mention
+`crm`). Each entry carries an explicit kind and usage shape: `defn` exports are
+functions, while `def` exports are values used directly. `:discoverable` exports
+are omitted from the inventory but still reachable via the discovery forms (§6).
+The renderer output does not include prelude source; `(source ...)` remains a
+separate discovery form.
 
 > Visibility can only be **narrowed** by host policy. Prelude metadata is
 > advisory and can never broaden what is exposed.
@@ -343,8 +346,8 @@ configured.
 ## 8. Iterating with the REPL
 
 The REPL uses the **same** compiler, protected-namespace tables, export records,
-and prompt-inventory renderer as SubAgent execution — it is not a parallel
-implementation:
+and shared symbol-inventory renderer as SubAgent execution — it is not a
+parallel implementation:
 
 ```bash
 # Attach a prelude file and open the REPL

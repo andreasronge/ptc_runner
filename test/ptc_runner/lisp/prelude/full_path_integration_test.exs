@@ -119,12 +119,13 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
     inventory = PromptInventory.render(prelude, ledger: step.tool_calls)
 
     assert inventory =~ "crm/get-user"
-    assert inventory =~ "(get-user id)"
+    assert inventory =~ "use: (crm/get-user id)"
     assert inventory =~ "Return a CRM user by id."
     assert inventory =~ "[read]"
-    # The :discoverable export is omitted from the inventory but hinted.
+    # The :discoverable export is omitted from the inventory but discoverable.
     refute inventory =~ "List CRM users."
     assert inventory =~ "ns-publics"
+    refute inventory =~ "(source"
     # The private helper never appears.
     refute inventory =~ "normalize-id"
     # The ledger summary reflects the single tool call made above.

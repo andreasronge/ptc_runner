@@ -465,13 +465,20 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   A later live shakedown used the frozen cells and remains non-M3 descriptive
   evidence only: A = 22/30, B = 25/30; primary `context_aggregation` A = 2/5,
   B = 5/5.
-- [ ] **S20 — Symbol inventory rendering substrate**: unify model-visible
+- [x] **S20 — Symbol inventory rendering substrate**: unify model-visible
   rendering for `data/`, tools, user memory, and prelude exports behind a
   sanitized per-symbol projection with explicit `kind` (`value` vs
   `function`), type/sample/doc, and usage shape. Rendering policy must be
   swappable and later turn-aware without changing runtime authority. Autonomous
   brief:
   [`autonomous-symbol-inventory-rendering.md`](autonomous-symbol-inventory-rendering.md).
+  Result, 2026-07-08: `PtcRunner.SymbolInventory` now feeds the prelude prompt
+  inventory and kernel `cfg["symbol_inventory"]` / `cfg["symbol_inventory_meta"]`
+  contract. Prelude constants render as values, data entries render as direct
+  values, secret-like data samples are suppressed, public tools render as
+  functions, private/kernel tools are omitted, memory uses only
+  `memory_summary.entries`, renderer selection is fail-closed, and Phase 2
+  turn-aware/discovery alignment remains deferred.
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is

@@ -1,13 +1,7 @@
 defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
   @moduledoc """
-  P5 (plan §9): the deterministic, bounded prompt-inventory renderer.
-
-  The renderer is fed by the SAME `%Export{}` records the analyzer, evaluator,
-  and discovery forms consult — no separate registry. It emits prompt-visible
-  namespace summaries, prompt-visible export names + short docs + signature,
-  effect hints, a discovery hint for omitted `:discoverable` exports, and a
-  compact existing-ledger summary. Per-namespace export rendering is capped
-  (~5) with a "more via (ns-publics 'ns)" hint; the cap is PINNED here.
+  Prelude prompt inventory compatibility wrapper over the shared sanitized
+  symbol inventory renderer.
   """
   use ExUnit.Case, async: true
 
@@ -46,9 +40,9 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
       out = PromptInventory.render(prelude)
 
       assert is_binary(out)
-      # The prompt-visible export name with its signature.
+      # The prompt-visible export name with full usage shape.
       assert out =~ "crm/get-user"
-      assert out =~ "(get-user id)"
+      assert out =~ "use: (crm/get-user id)"
       # Its short doc.
       assert out =~ "Return a CRM user by id."
       # Its resolved effect hint (literal tool/call inference -> :read).
@@ -91,11 +85,11 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
 
       # The inferred-read export keeps its hint...
       assert out =~ "mix/fetch"
-      assert out =~ "(fetch id)"
+      assert out =~ "use: (mix/fetch id)"
       assert out =~ "[read]"
       # ...but the pure (:unknown) export renders no effect bracket.
       assert out =~ "mix/area"
-      assert out =~ "(area w h)"
+      assert out =~ "use: (mix/area w h)"
       refute out =~ "[unknown]"
     end
 
@@ -112,8 +106,8 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
 
       out = PromptInventory.render(prelude)
 
-      assert out =~ "(foo a b & rest)"
-      refute out =~ "(foo & args)"
+      assert out =~ "use: (mix/foo a b & rest)"
+      refute out =~ "(mix/foo & args)"
     end
 
     test "falls back to synthetic names for destructuring params" do
@@ -127,24 +121,44 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
           id)
         """)
 
-      assert PromptInventory.render(prelude) =~ "(pull arg1)"
+      assert PromptInventory.render(prelude) =~ "use: (mix/pull arg1)"
     end
 
-    test "renders a namespace summary with the namespace docstring", %{prelude: prelude} do
+    test "renders prelude def constants as values and defn exports as functions" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns cfg "Config." {:visibility :prompt})
+        (def default-limit "Default page limit." 25)
+        (defn cap "Cap n." [n] (min n default-limit))
+        """)
+
       out = PromptInventory.render(prelude)
-      assert out =~ "crm"
-      assert out =~ "CRM helpers."
+
+      assert out =~ "cfg/default-limit"
+      assert out =~ "; value"
+      assert out =~ "use: cfg/default-limit"
+      refute out =~ "(cfg/default-limit"
+
+      assert out =~ "cfg/cap [n]"
+      assert out =~ "; function"
+      assert out =~ "use: (cfg/cap n)"
+      assert out =~ "Default page limit."
     end
 
-    test "omits the :discoverable export detail but hints discovery", %{prelude: prelude} do
+    test "renders the shared symbol-inventory header", %{prelude: prelude} do
+      out = PromptInventory.render(prelude)
+      assert out =~ ";; === available symbols ==="
+      assert out =~ "Use value symbols directly"
+    end
+
+    test "omits the :discoverable export detail and source hint", %{prelude: prelude} do
       out = PromptInventory.render(prelude)
 
       # The :discoverable export (list-users) is NOT detailed in the inventory.
       refute out =~ "List CRM users."
-      # But the inventory hints that more is discoverable via ns-publics/doc.
       assert out =~ "ns-publics"
-      # ...and that `source` renders an export's defining form (issue #1095).
-      assert out =~ "(source 'ns/name)"
+      assert out =~ "apropos"
+      refute out =~ "(source"
     end
 
     test "the private helper never appears", %{prelude: prelude} do
@@ -194,7 +208,7 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
   end
 
   describe "per-namespace export cap is bounded and pinned" do
-    test "caps the rendered exports at ~5 and adds a 'more via (ns-publics 'ns)' hint" do
+    test "caps the rendered exports at ~5 and reports omitted count" do
       # 8 prompt-visible exports in one namespace: only the cap should render in
       # detail; the rest are summarized with a discovery hint.
       defs =
@@ -213,14 +227,36 @@ defmodule PtcRunner.Lisp.Prelude.PromptInventoryTest do
 
       rendered_count =
         1..8
-        |> Enum.count(fn i -> out =~ "(export-#{i})" end)
+        |> Enum.count(fn i -> out =~ "big/export-#{i}" end)
 
       assert rendered_count == cap
 
-      # The "more via" hint names the namespace and ns-publics.
-      assert out =~ "(ns-publics 'big)"
       # It states how many more exports exist (8 total - 5 shown = 3 more).
-      assert out =~ "3 more"
+      assert out =~ "+3 more symbols omitted"
+    end
+
+    test "applies the cap per prelude namespace, not globally" do
+      defs = fn prefix ->
+        Enum.map_join(1..6, "\n", fn i -> "(defn #{prefix}-#{i} \"Doc #{i}.\" [] #{i})" end)
+      end
+
+      source = """
+      (ns alpha "Alpha." {:visibility :prompt})
+      #{defs.("a")}
+      (ns beta "Beta." {:visibility :prompt})
+      #{defs.("b")}
+      """
+
+      {:ok, prelude} = Compiler.compile(source)
+      out = PromptInventory.render(prelude)
+
+      assert out =~ "alpha/a-1"
+      assert out =~ "alpha/a-5"
+      refute out =~ "alpha/a-6"
+      assert out =~ "beta/b-1"
+      assert out =~ "beta/b-5"
+      refute out =~ "beta/b-6"
+      assert out =~ "+2 more symbols omitted"
     end
   end
 end

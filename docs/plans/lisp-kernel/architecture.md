@@ -519,12 +519,15 @@ Record the resolution here when made:
 - **D18 — Release/API shape.** Whether kernel modules, eval harnesses, and
   preludes are experiment-internal, public experimental API, or shipped stable
   surface; includes package/release-smoke treatment for `priv/preludes`.
-- **D19 — Symbol inventory rendering.** Open for S20. The target is a shared
-  sanitized projection for `data/`, tools, user memory, and prelude exports
-  with explicit per-symbol `kind` (`value` vs `function`), type/sample/doc, and
-  usage shape. Rendering policy may be swapped and later made turn-aware, but
-  it must not grant capabilities, expose hidden exports, leak raw data/memory,
-  or move eval-input options into `RunEnv`.
+- **D19 — Symbol inventory rendering.** Phase 1 substrate landed 2026-07-08:
+  `PtcRunner.SymbolInventory` projects sanitized facts for `data/`, public
+  tools, memory-summary entries, and prompt-visible prelude exports with
+  per-symbol `kind` (`value` vs `function`), type/sample/doc, and usage shape.
+  The kernel prompt path passes rendered text and bounded metadata through
+  `cfg["symbol_inventory"]` / `cfg["symbol_inventory_meta"]`; renderers receive
+  only facts and may be swapped fail-closed. Turn-aware reminder policy remains
+  deferred. D17 is not resolved: source discovery remains a separate policy
+  question, but renderer output does not advertise or include prelude source.
 
 ## Out of scope for the experiment
 
