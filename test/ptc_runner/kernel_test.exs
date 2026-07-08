@@ -437,6 +437,49 @@ defmodule PtcRunner.KernelTest do
                      }}
   end
 
+  test "memory events report true counts when summary names are bounded" do
+    parent = self()
+
+    definitions =
+      1..30
+      |> Enum.map_join(" ", fn n -> "(def v#{n} #{n})" end)
+      |> then(&"(do #{&1})")
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => definitions}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return v30)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 30}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, events: &send(parent, {:event, &1}))
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "memory_summary" => %{
+                           "defined" => defined,
+                           "defined_count" => 30,
+                           "changed_count" => 30,
+                           "truncated" => true
+                         }
+                       }
+                     }}
+
+    assert length(defined) == 24
+
+    assert_received {:event,
+                     %{
+                       "event" => "memory",
+                       "defined_count" => 30,
+                       "changed_count" => 30
+                     }}
+  end
+
   test "inner model program respects caller tool-call cap" do
     parent = self()
 

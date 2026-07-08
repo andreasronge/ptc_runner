@@ -405,7 +405,9 @@ defmodule PtcRunner.Kernel do
 
     %{
       "defined" => defined,
+      "defined_count" => length(defined_names),
       "changed" => changed,
+      "changed_count" => length(changed_names),
       "entries" => entries,
       "truncated" =>
         defined_truncated? or changed_truncated? or entries_truncated? or child_truncated?,
@@ -476,8 +478,8 @@ defmodule PtcRunner.Kernel do
     events.(%{
       "event" => "memory",
       "memory_bytes" => Map.get(summary, "memory_bytes"),
-      "defined_count" => length(Map.get(summary, "defined", [])),
-      "changed_count" => length(Map.get(summary, "changed", []))
+      "defined_count" => Map.get(summary, "defined_count"),
+      "changed_count" => Map.get(summary, "changed_count")
     })
   end
 

@@ -133,17 +133,7 @@ accumulation across 10 repetitions.
 **Fail.** Pool corruption or leaked processes → route LLM calls through a
 host-side proxy process instead of calling from the sandbox.
 
-**Result.** First M3 data point, 2026-07-08. Host-held kernel memory is capped
-with the same retained-heap estimator family used by eval context
-(`:erts_debug.flat_size/1 * word_size` plus referenced binary bytes). The cap
-is fail-closed: the candidate memory is measured before commit; on breach the
-prior committed memory is preserved and `eval-program` returns a stable
-`memory_limit_exceeded` error with a summary of the prior memory. A focused
-test sets a small `kernel_memory_byte_cap`, proves a larger second definition
-is rejected, then successfully returns a prior `x` binding. Each eval also
-emits a bounded memory-size event (`memory_bytes`, defined/changed counts) via
-the kernel event/log surface. Command:
-`mix test test/ptc_runner/kernel_test.exs` passed 18/18.
+**Result.** _pending_
 
 ---
 
@@ -247,10 +237,10 @@ prior committed memory is preserved and `eval-program` returns a stable
 `memory_limit_exceeded` error with a summary of the prior memory. A focused
 test sets a small `kernel_memory_byte_cap`, proves a larger second definition
 is rejected, then successfully returns a prior `x` binding. Each eval also
-emits a bounded memory-size event (`memory_bytes`, defined/changed counts) via
-the kernel event/log surface. Commands:
+emits a bounded memory-size event (`memory_bytes`, true defined/changed counts)
+via the kernel event/log surface. Commands:
 `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`
-passed 25/25; `mix ptc.kernel_eval --suite mini` passed 5/5 in mock mode.
+passed 28/28; `mix ptc.kernel_eval --suite mini` passed 6/6 in mock mode.
 
 ---
 
