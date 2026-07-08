@@ -283,6 +283,15 @@ the answer.
   (`temperature`, `top_p`, `seed`, `max_tokens`, `reasoning.effort`,
   `provider.order`, `allow_fallbacks`), token/cost fields, and unsupported
   controls. (Feeds D9, D11.)
+- [x] **R16c — Retry transport shape, M1 slice** (answered by fix commits,
+  2026-07-08): prelude-built retry messages must be normalized to the
+  atom-keyed `ReqLLMAdapter.build_messages/1` contract; assistant retry
+  messages carry `content: nil` plus structured tool calls; eval feedback is
+  JSON with `type`, `instruction`, and `untrusted_eval_result`; the system
+  prompt travels once through the request `:system` channel; LLM
+  `{:error, reason}` becomes `transport_error` / `llm_transport_error`, not
+  model protocol feedback. Covered by mock tests and a two-turn live
+  DeepSeek/OpenRouter smoke.
 - [ ] **R17 — Experiment rigor plan**: choose primary endpoint/cell pair,
   baseline pass-rate estimate, MDE, alpha, power, N via
   `PtcRunner.Metrics.Statistics`, randomization/counterbalancing, multiple
@@ -418,11 +427,14 @@ one mission, mock-llm tests, one live smoke.
   kill, private-capability authorization, inner eval isolation, redacted
   tracing, untrusted envelope, golden prompt hygiene, extension-contract smoke,
   turn-event shape parity. Partial M1 spike coverage landed for happy path,
-  protocol retry, action hardening, program `fail`, private capability denial,
-  bounded projection, and prompt hygiene; budget/deadline/trace parity remain.
+  protocol retry, action hardening, transport error, caller-supplied system
+  prompt channel, adapter-boundary retry message structification, JSON
+  untrusted eval feedback, program `fail`, private capability denial, bounded
+  projection, and prompt hygiene; budget/deadline/trace parity remain.
 - [x] Tier 1 smoke file with a tiny no-tool arithmetic mission live on the
-  blessed command. The original eval-case #1 product-count oracle remains for
-  the later Tier 2 harness.
+  blessed command, plus a two-turn live retry smoke that forces the
+  assistant/tool-message transport path. The original eval-case #1
+  product-count oracle remains for the later Tier 2 harness.
 - [ ] First `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel`
   run recorded (Tier 2, kernel variant only — the task can exist in minimal
   form this early).
@@ -433,6 +445,10 @@ one mission, mock-llm tests, one live smoke.
 ## M2 — Multi-turn + prelude split
 
 The modular-config claim becomes real here.
+For an autonomous next-step spike that combines the prelude split with a tiny
+repeatable eval path, use
+[`autonomous-m2-prelude-eval-spike.md`](autonomous-m2-prelude-eval-spike.md)
+as the goal brief.
 
 - [ ] Multi-turn loop in `agent.core`: feedback message construction,
   max-turns wind-down, memory threading (per D1).

@@ -1,10 +1,33 @@
 # Lisp Kernel — Autonomous Spike Brief
 
-**Status:** draft goal brief for an autonomous Codex session on
-`exp/lisp-kernel`.
+**Status:** completed once as autonomous vertical-slice run on `exp/lisp-kernel`.
 
-Use this when starting a long-running goal. The `/goal` prompt should stay
-short and point here; this document carries the detailed contract.
+This document remains as the reusable goal brief. The first run produced the
+minimal kernel path and the follow-up retry-transport fixes.
+
+## First Run Outcome
+
+Completed 2026-07-08 in three commits:
+
+- `06db3337 feat(kernel): add native tool-call spike path`
+- `b49d822d fix(kernel): normalize native retry transport`
+- `2448a0e7 fix(kernel): structify retry tool-call messages`
+
+Evidence:
+
+- `PtcRunner.Kernel.run/2` exists with an embedded minimal
+  `agent/run-mission` prelude.
+- `PtcRunner.Kernel.Action.normalize/2` validates the V1 native action shape.
+- `ReqLLMAdapter` forwards `:tool_choice`.
+- Mock kernel tests cover happy path, protocol retry, transport error,
+  adapter-boundary retry messages, private capability denial, bounded
+  projection, prompt hygiene, and untrusted eval feedback.
+- Live DeepSeek/OpenRouter e2e covers a one-turn arithmetic mission and a
+  two-turn retry path that exercises assistant/tool messages.
+
+Still pending outside this run: S1/S2/S3/S5/S11, full Tier 2 evaluation,
+prelude file split, host-held memory decision, copy-volume/soak evidence, and
+replay/reporting infrastructure.
 
 ## Short Goal Prompt
 

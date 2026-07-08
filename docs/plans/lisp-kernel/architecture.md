@@ -323,6 +323,21 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     DeepSeek/OpenRouter probe returned exactly one tool call with
     `args: %{"program" => "(return 42)"}` plus token fields
     `input`, `output`, `cache_read`, `cache_creation`, and `total_cost`.
+12. Retry transport evidence, 2026-07-08: the kernel sends the system prompt
+    once through the LLM request `:system` channel, not as a synthetic system
+    message in the message list. Prelude-built retry messages are normalized
+    into the atom-keyed `ReqLLMAdapter.build_messages/1` contract before
+    transport. Assistant retry messages include `content: nil` and clean
+    atom-keyed tool-call structs; tool feedback is JSON with `type`,
+    `instruction`, and `untrusted_eval_result`, so eval output is data, not
+    instructions. `test/ptc_runner/kernel_test.exs` covers this adapter
+    boundary and `test/ptc_runner/kernel/e2e_test.exs` includes a live
+    two-turn DeepSeek retry smoke.
+13. LLM error handling evidence, 2026-07-08: `llm-complete` distinguishes LLM
+    transport failures from model protocol errors. `{:error, reason}` from the
+    callback becomes a prelude-visible `transport_error`, and the loop returns
+    a kernel error with reason `llm_transport_error`; it is not fed back to the
+    model as a recoverable protocol mistake.
 
 ## Open decisions
 

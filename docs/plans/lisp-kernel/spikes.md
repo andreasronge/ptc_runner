@@ -154,7 +154,13 @@ and return handling. Evidence:
 `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs`
 passed with scripted responses covering happy path, protocol retry,
 program-fail, private capability denial, bounded projection, and prompt
-hygiene.
+hygiene. Follow-up fix commits on 2026-07-08 showed that the first pass needed
+transport normalization for retries: the kernel now sends the system prompt
+through the request `:system` field, converts prelude-built messages into the
+atom-keyed `ReqLLMAdapter.build_messages/1` contract, emits assistant
+retry messages with `content: nil` plus structured tool calls, and wraps eval
+feedback as JSON containing `untrusted_eval_result`. A live two-turn
+DeepSeek/OpenRouter smoke now exercises that retry path.
 
 ---
 
@@ -236,7 +242,11 @@ empty/non-string/oversized `program`, and extra args including `commentary`.
 Valid actions preserve `program`, token usage, model, provider, and
 provider metadata. Malformed responses become deterministic
 `protocol_error` values before `eval-program` is invoked. Structured-output
-only and reasoning-metadata provider variants still belong to R16b.
+only and reasoning-metadata provider variants still belong to R16b. Follow-up
+coverage on 2026-07-08 accepts OpenAI-style nested function tool calls
+(`%{function: %{name:, arguments:}}`), decodes raw JSON `arguments`, and
+fails closed for wrong nested function names and malformed nested argument
+JSON.
 
 ---
 
