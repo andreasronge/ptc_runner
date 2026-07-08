@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel do
 
   alias PtcRunner.Kernel.Action
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
@@ -58,16 +59,6 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  @spec render_system_prompt() :: String.t()
-  def render_system_prompt do
-    "You are controlling PTC-Lisp through native tool calling.\n" <>
-      "PTC-Lisp uses Clojure-like prefix syntax.\n" <>
-      ~s|Call run_ptc_lisp exactly once per turn with JSON arguments {"program": "..."}.\n| <>
-      "Successful programs end with (return value); explicit failures use (fail value).\n" <>
-      "Read context key x as data/x and call granted tools as (tool/name args) inside the program.\n" <>
-      "Do not answer in prose."
-  end
-
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
     with {:ok, prelude} <- compile_prelude(opts),
@@ -103,8 +94,10 @@ defmodule PtcRunner.Kernel do
     tools = %{
       "llm-complete" =>
         {fn args ->
+           system = resolve_system_prompt(args, system_prompt)
+
            request = %{
-             system: system_prompt || Map.get(args, "system") || render_system_prompt(),
+             system: system,
              messages: normalize_messages(Map.get(args, "messages", [])),
              tools: [Action.tool_schema()],
              tool_choice: %{type: "tool", name: "run_ptc_lisp"}
@@ -114,7 +107,8 @@ defmodule PtcRunner.Kernel do
            |> llm.()
            |> normalize_llm_result()
            |> add_public_tool_call()
-         end, [signature: "(messages :any, turn :int) -> :map", visibility: :private]},
+         end,
+         [signature: "(system :string?, messages :any, turn :int) -> :map", visibility: :private]},
       "eval-program" =>
         {fn args ->
            args
@@ -135,6 +129,19 @@ defmodule PtcRunner.Kernel do
     namespace
     |> component_source(overrides)
     |> Compiler.compile(opts)
+  end
+
+  defp resolve_system_prompt(args, override) do
+    system = override || Map.get(args, "system")
+
+    if is_binary(system) and String.trim(system) != "" do
+      system
+    else
+      raise ExecutionError,
+        reason: :missing_system_prompt,
+        message: ~s|agent.core must pass a non-empty "system" field to llm-complete|,
+        data: %{tool: "llm-complete"}
+    end
   end
 
   defp component(namespace, %Prelude{} = prelude, overrides) do

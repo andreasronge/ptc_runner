@@ -2,7 +2,7 @@
   "Minimal native-action kernel loop."
   {:visibility :prompt})
 
-(defn action-summary
+(defn- action-summary
   "Return the default-safe trace projection for one model action."
   [action]
   (select-keys action ["kind" "reason" "model" "provider" "transport_error"]))

@@ -574,7 +574,16 @@ unstable and should not be promoted as solved.
 - **S13 — Bundle swap provenance:** two bundles differing in one
   `agent.feedback` component; confirm `prelude.metadata.components` +
   `source_hash` are sufficient to attribute a run to a policy variant in turn
-  logs (M3 depends on this attribution).
+  logs (M3 depends on this attribution). Pre-register the follow-on
+  feedback-only A/B before running it: feedback prelude is the only variable;
+  prompt prelude, cases, `max_turns`, model, and eval runner stay fixed; run
+  N repeats per case per variant via `--runs`; report pass counts per
+  case/variant. At temperature 0.0, repeats are highly correlated provider
+  nondeterminism, so the result is directional evidence that a policy variant
+  can or cannot recover a failure mode, not a statistical superiority claim.
+  Treat `domain_tool` scalar extraction and `context_aggregation` turn-limit
+  burn as separate ownership probes: a feedback-only miss on aggregation is
+  evidence that prompt policy may own that failure, not a stop condition.
 - **S15 — Streaming envelope:** mock streamed chunks from `llm-complete` and
   decide whether the prelude sees incremental events, the host callback sees
   them, or both. Gate: no provider-specific stream shape leaks into

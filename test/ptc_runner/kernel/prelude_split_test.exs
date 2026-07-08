@@ -121,6 +121,7 @@ defmodule PtcRunner.Kernel.PreludeSplitTest do
     assert Prelude.namespaces(prelude) == ["agent.core", "agent.feedback", "agent.prompt"]
 
     assert {:ok, core} = Prelude.fetch_export(prelude, "agent.core/run-mission")
+    assert :error = Prelude.fetch_export(prelude, "agent.core/action-summary")
     assert {:ok, system_message} = Prelude.fetch_export(prelude, "agent.prompt/system-message")
     assert {:ok, task_message} = Prelude.fetch_export(prelude, "agent.prompt/task-message")
     assert {:ok, protocol_error} = Prelude.fetch_export(prelude, "agent.feedback/protocol-error")
@@ -138,7 +139,8 @@ defmodule PtcRunner.Kernel.PreludeSplitTest do
                tools: kernel_private_tools()
              )
 
-    assert step.return == Kernel.render_system_prompt()
+    assert step.return =~ "You are controlling PTC-Lisp through native tool calling."
+    assert step.return =~ "run_ptc_lisp"
   end
 
   defp kernel_private_tools do

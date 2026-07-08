@@ -361,7 +361,9 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     the request-level system string in `agent.prompt/system-message`, and the
     host forwards it as the single request `:system` channel through the
     private `llm-complete` args. The explicit Elixir `:system_prompt` opt still
-    wins as a test/live override. Focused evidence:
+    wins as a test/live override. A variant `agent.core` that omits the
+    `"system"` arg now fails closed with `:missing_system_prompt`; there is no
+    Elixir default prompt renderer fallback. Focused evidence:
     `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/prelude_split_test.exs`.
     The same tests prove a feedback-only source override changes retry wording
     without changing the Elixir loop path.

@@ -412,9 +412,12 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
 - [ ] **S12 — Host-held state handle prototype**: owner process with monitor
   cleanup, stale-token errors, run-end invalidation, per-run byte caps, bounded
   projections, and concurrent access behavior under `pmap`.
-- [ ] **S13 — Cross-domain holdout + retrieval negative controls**: run the
-  blessed harness on non-demo cases and hostile retrieval semantics; report by
-  task/tool/oracle family instead of aggregate only.
+- [ ] **S13 — Bundle swap provenance + feedback-only A/B preregistration**:
+  prove `prelude.metadata.components` plus source hashes attribute a run to a
+  specific prelude variant before M3 compares feedback policies. Register the
+  A/B shape before running it: feedback prelude only varies; prompt prelude,
+  cases, `max_turns`, model, and runner stay fixed; N repeats per case per
+  variant report pass counts as directional evidence, not statistics.
 - [ ] **S14 — Release/replay artifact smoke**: package/release visibility for
   preludes plus offline replay from a sanitized Tier 2 report, no API key.
 

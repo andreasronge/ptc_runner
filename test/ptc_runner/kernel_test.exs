@@ -40,7 +40,8 @@ defmodule PtcRunner.KernelTest do
     assert_received {:llm_request, %{system: system_prompt, messages: first_messages}}
     assert_received {:llm_request, %{messages: retry_messages}}
 
-    assert system_prompt == Kernel.render_system_prompt()
+    assert system_prompt =~ "You are controlling PTC-Lisp through native tool calling."
+    assert system_prompt =~ "run_ptc_lisp"
     assert first_messages == [%{role: :user, content: "compute"}]
     assert [%{role: :user, content: feedback}] = Enum.drop(retry_messages, 1)
     assert feedback =~ "Protocol error"
@@ -64,6 +65,35 @@ defmodule PtcRunner.KernelTest do
     assert_received {:llm_request, %{system: "custom system", messages: messages}}
     assert [%{role: :user, content: "compute"}] = messages
     refute Enum.any?(messages, &(&1.role == :system))
+  end
+
+  test "variant core missing system field fails closed before LLM call" do
+    parent = self()
+
+    llm = fn request ->
+      send(parent, {:llm_request, request})
+      {:ok, %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :bad)"}}]}}
+    end
+
+    assert {:error, %{reason: "kernel_error", step: %{fail: fail}}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_source_overrides: %{
+                 "agent.core" => """
+                 (ns agent.core
+                   "Broken variant core for contract testing."
+                   {:visibility :prompt})
+
+                 (defn run-mission [mission cfg]
+                   (tool/llm-complete {"messages" [(agent.prompt/task-message mission cfg)]
+                                       "turn" 0}))
+                 """
+               }
+             )
+
+    assert fail.reason == :missing_system_prompt
+    assert fail.message =~ ~s|non-empty "system" field|
+    refute_received {:llm_request, _}
   end
 
   test "transport errors surface as kernel errors instead of model protocol feedback" do
@@ -333,8 +363,20 @@ defmodule PtcRunner.KernelTest do
     assert decoded_feedback["untrusted_eval_result"]["status"] == "continue"
   end
 
-  test "rendered prompt hygiene is native-tool-call only and domain blind" do
-    prompt = Kernel.render_system_prompt()
+  test "prelude-rendered prompt hygiene is native-tool-call only and domain blind" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => "ok"}} = Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert_received {:llm_request, %{system: prompt}}
 
     assert prompt =~ "run_ptc_lisp"
     refute prompt =~ "lisp_eval"
