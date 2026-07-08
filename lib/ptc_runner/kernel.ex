@@ -408,7 +408,7 @@ defmodule PtcRunner.Kernel do
   end
 
   defp commit_and_project_step(tag, step, prior_memory, opts) do
-    candidate_memory = step.memory || prior_memory
+    candidate_memory = step.memory
     cap = Keyword.get(opts, :kernel_memory_byte_cap, @memory_byte_cap)
     candidate_bytes = RetainedSize.bytes_with_cap(candidate_memory, cap)
 
@@ -600,7 +600,6 @@ defmodule PtcRunner.Kernel do
   end
 
   defp bound_list(list) when is_list(list), do: Enum.take(list, 8)
-  defp bound_list(_), do: []
 
   defp stop_agent(pid) do
     if Process.alive?(pid), do: Agent.stop(pid)
