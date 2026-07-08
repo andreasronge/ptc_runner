@@ -211,11 +211,16 @@ the answer.
   estimated tokens, live provider-reported prompt tokens for a dry M1 request,
   max-context failure shape, and what the kernel passes as `data/language-spec`.
   (Feeds `agent.prompt`, D11.)
-- [ ] **R5 — Bundle + deps API**: exact call shape for layered preludes
+- [x] **R5 — Bundle + deps API**: exact call shape for layered preludes
   without a `PreludeStore` (raw `Bundle.compile/1` is dep-blind by design —
   confirm whether `agent.core` calling `agent.feedback/*` requires
   `namespace_deps:` via `compile_precompiled/2` or a store-resolved attach).
-  (Feeds M2 prelude split.)
+  Answered 2026-07-08 for M2 2a: compile the dependency namespace first,
+  compile the dependent namespace with `deps: [feedback]` and
+  `namespace_deps: %{"agent.core" => ["agent.feedback"]}`, then assemble the
+  components with `Bundle.compile_precompiled/2` and the same
+  `namespace_deps:` map. Evidence:
+  `mix test test/ptc_runner/kernel/prelude_split_test.exs`.
 - [x] **R6 — Tool-arg/result normalization path** (answered by review round 1,
   2026-07-07): keys stringified, keyword values collapsed to strings
   (eval.ex ~1166–1270); closure tuples preserved (lisp.ex:1209) — recorded in
@@ -457,6 +462,8 @@ as the goal brief.
 - [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.
+  2026-07-08 M2 2a proof is complete for `agent.core -> agent.feedback`;
+  full `agent.core -> agent.prompt` + `agent.feedback` remains open.
 - [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
   wording).
 - [ ] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn

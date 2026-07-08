@@ -305,6 +305,41 @@ metadata, or unsafe raw prompt/response artifacts by default.
 
 ---
 
+## S9 — Cross-namespace kernel prelude compilation
+
+**Question.** Can the M2 kernel bundle compile a minimal
+`agent.core -> agent.feedback` dependency through the repo-supported prelude
+APIs, while keeping raw `Bundle.compile/1` dep-blind and kernel private tools
+scoped to the authorized core export?
+
+**Why it gates.** The prelude split is only useful if policy namespaces can be
+swapped independently and called from the loop. If cross-namespace refs require
+ad-hoc compiler behavior, or if prompt/feedback namespaces inherit kernel-tool
+authority from `agent.core`, M2 should stop before moving the embedded loop.
+
+**Method.** Compile `agent.feedback` first. Compile `agent.core` with
+`deps: [feedback]` and `namespace_deps: %{"agent.core" =>
+["agent.feedback"]}`. Assemble both with `Bundle.compile_precompiled/2` and
+the same `namespace_deps:` map. Also assert raw `Bundle.compile/1` over the
+same two sources fails with `unknown namespace`, and assert direct model/user
+calls to private kernel tools fail closed.
+
+**Pass.** `agent.core` calls `agent.feedback/eval-feedback` end-to-end through
+the assembled bundle; `agent.feedback/eval-feedback` has empty `tool_refs`;
+`agent.core/run-once` carries only `eval-program`, `llm-complete`, and `log`;
+direct `(tool/log ...)` fails with `:private_tool_unauthorized`.
+**Fail.** The bundle cannot compile without unsupported APIs, raw
+`Bundle.compile/1` accidentally gains dep visibility, or policy exports inherit
+private kernel tools.
+
+**Result.** PASS, 2026-07-08. Evidence:
+`mix test test/ptc_runner/kernel/prelude_split_test.exs` passed with 3 tests.
+The exact API shape is recorded in `architecture.md` fact 14 and `roadmap.md`
+R5. This proves Build Task 2a only; the full `agent.core -> agent.prompt` +
+`agent.feedback` graph is still unproven.
+
+---
+
 ## S10 — Pluggable private capability contract
 
 **Question.** Can the kernel grant a new private capability to a prelude export
@@ -455,7 +490,7 @@ missing or accidentally public, or trace defaults leak full prompts/messages.
 
 ## Candidate later spikes (register properly before running)
 
-- **S9 — Bundle swap provenance:** two bundles differing in one
+- **S13 — Bundle swap provenance:** two bundles differing in one
   `agent.feedback` component; confirm `prelude.metadata.components` +
   `source_hash` are sufficient to attribute a run to a policy variant in turn
   logs (M3 depends on this attribution).

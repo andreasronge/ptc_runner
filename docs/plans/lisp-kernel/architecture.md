@@ -188,7 +188,7 @@ Kernel.run(mission, cfg)
   1. bundle = compile the prelude components
        M1 (single namespace):  Bundle.compile([core_src])
        M2+ (layered):          Bundle.compile_precompiled(components,
-                                 namespace_deps: ...)   # exact shape: R5
+                                 namespace_deps: %{"agent.core" => ["agent.feedback"]})
        NOTE: raw Bundle.compile/1 is dep-blind BY DESIGN (bundle.ex:56-61) —
        each namespace compiles in isolation (namespace_deps defaults to %{},
        compiler.ex:145-167), so an undeclared cross-namespace ref like
@@ -337,6 +337,21 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     callback becomes a prelude-visible `transport_error`, and the loop returns
     a kernel error with reason `llm_transport_error`; it is not fed back to the
     model as a recoverable protocol mistake.
+14. M2 2a compile-path evidence, 2026-07-08:
+    `agent.core` can call public `agent.feedback/*` exports when the build uses
+    the repo-supported layered path. Exact shape:
+    first compile the dependency namespace, compile the dependent namespace with
+    `Compiler.compile(core_source, deps: [feedback], namespace_deps:
+    %{"agent.core" => ["agent.feedback"]})`, then assemble with
+    `Bundle.compile_precompiled([...], namespace_deps:
+    %{"agent.core" => ["agent.feedback"]})`. Raw `Bundle.compile/1` remains
+    dep-blind and fails with `unknown namespace` plus the `requires_preludes`
+    hint. Focused evidence:
+    `mix test test/ptc_runner/kernel/prelude_split_test.exs`. In that proof,
+    `agent.feedback/eval-feedback` carries empty `tool_refs`, while
+    `agent.core/run-once` carries exactly `eval-program`, `llm-complete`, and
+    `log`; direct model/user calls to private kernel tools still fail with
+    `:private_tool_unauthorized`.
 
 ## Open decisions
 
