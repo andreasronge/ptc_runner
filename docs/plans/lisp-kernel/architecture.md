@@ -401,7 +401,12 @@ Record the resolution here when made:
   value-threading is lossy for keyword values at the arg boundary; fact 9 adds
   copy/setup pressure for a growing memory map. The likely default is
   host-held memory unless the spikes show both semantics and copy volume remain
-  acceptable.
+  acceptable. M3 partial evidence, 2026-07-08: host-held native memory in
+  `Kernel.run/2` proves both value and closure persistence across retry turns
+  without exposing raw memory to the prelude. The host commits the memory map
+  returned by `Lisp.run/2`; runtime errors currently return prior memory, so
+  partial definitions before runtime errors are not commit-visible without a
+  lower-level evaluator change.
 - **D2 — Kernel module home.** RESOLVED for M1 spike 2026-07-07:
   `PtcRunner.Kernel` in core `lib/ptc_runner/`, with helpers under
   `lib/ptc_runner/kernel/`. This keeps the slice close to `Lisp.run/2`,
@@ -426,7 +431,12 @@ Record the resolution here when made:
   `"return" | "fail" | "error" | "continue"`, public `value` only for
   return/fail/continue, bounded `prints`, and error reason/message for host
   eval errors. It deliberately does not expose raw `%Step{}` or native memory.
-  M2 may revise this after S2/S5.
+  M3 partial update, 2026-07-08: the projection now adds bounded
+  `memory_summary` with sorted defined names, changed names, per-entry
+  kind/preview/truncation, summary truncation, omitted count, and measured
+  `memory_bytes`; raw memory remains host-only. Byte-cap breaches project as
+  stable `memory_limit_exceeded` eval errors and preserve prior committed
+  memory.
 - **D6 — turn_history.** Whether inner evals get `*1`/`*2`/`*3` threading in
   V1 (probably not; loop can pass prior results as context/memory).
 - **D7 — capability visibility.** RESOLVED 2026-07-07, sharpened for M2

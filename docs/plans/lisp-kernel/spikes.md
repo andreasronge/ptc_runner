@@ -84,7 +84,23 @@ host-held memory (or opaque memory token) and the spike documents why.
 Note: even on PASS, keyword-lossiness is a semantic divergence from today's
 host-side threading — D1 weighs that against the purity win.
 
-**Result.** _pending_
+**Result.** Partial kernel-path evidence, 2026-07-08. The M3 host-held memory
+implementation now starts a per-`Kernel.run/2` Agent, passes its native map to
+each inner `Lisp.run/2`, commits returned `step.memory` under a heap-oriented
+byte cap, and returns only a bounded `memory_summary` to `agent.core`.
+Deterministic kernel tests prove `(def x 41)` on turn 1 and `(return (+ x 1))`
+on turn 2 returns `42`; `(defn inc2 [n] (+ n 2))` on turn 1 and
+`(return (inc2 40))` on turn 2 also returns `42`, so closures round-trip
+through the host-held boundary. This resolves the closure survival risk for
+the kernel path without threading raw memory through the prelude.
+
+Pinned failure fact: the host commits whatever `Lisp.run/2` returns. A
+`(do (def x 41) (fail :bad))` step returns memory containing `x`, and the
+terminal fail projection includes that in `memory_summary`. A runtime error
+after a prior `def`, such as calling `41` as a function, currently returns the
+prior memory from `Lisp.run/2`; the host cannot commit partial definitions that
+the runtime does not return without extending evaluator semantics. Command:
+`mix test test/ptc_runner/kernel_test.exs` passed 18/18.
 
 ---
 
@@ -114,7 +130,17 @@ accumulation across 10 repetitions.
 **Fail.** Pool corruption or leaked processes → route LLM calls through a
 host-side proxy process instead of calling from the sandbox.
 
-**Result.** _pending_
+**Result.** First M3 data point, 2026-07-08. Host-held kernel memory is capped
+with the same retained-heap estimator family used by eval context
+(`:erts_debug.flat_size/1 * word_size` plus referenced binary bytes). The cap
+is fail-closed: the candidate memory is measured before commit; on breach the
+prior committed memory is preserved and `eval-program` returns a stable
+`memory_limit_exceeded` error with a summary of the prior memory. A focused
+test sets a small `kernel_memory_byte_cap`, proves a larger second definition
+is rejected, then successfully returns a prior `x` binding. Each eval also
+emits a bounded memory-size event (`memory_bytes`, defined/changed counts) via
+the kernel event/log surface. Command:
+`mix test test/ptc_runner/kernel_test.exs` passed 18/18.
 
 ---
 
@@ -210,7 +236,18 @@ result projection is untenable even for representative payloads -> D1 =
 host-held memory or opaque memory token, D5 = stricter projection caps, and the
 kernel design forbids returning raw large memory/results through the loop.
 
-**Result.** _pending_
+**Result.** First M3 data point, 2026-07-08. Host-held kernel memory is capped
+with the same retained-heap estimator family used by eval context
+(`:erts_debug.flat_size/1 * word_size` plus referenced binary bytes). The cap
+is fail-closed: the candidate memory is measured before commit; on breach the
+prior committed memory is preserved and `eval-program` returns a stable
+`memory_limit_exceeded` error with a summary of the prior memory. A focused
+test sets a small `kernel_memory_byte_cap`, proves a larger second definition
+is rejected, then successfully returns a prior `x` binding. Each eval also
+emits a bounded memory-size event (`memory_bytes`, defined/changed counts) via
+the kernel event/log surface. Commands:
+`mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`
+passed 25/25; `mix ptc.kernel_eval --suite mini` passed 5/5 in mock mode.
 
 ---
 

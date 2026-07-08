@@ -470,6 +470,11 @@ as the goal brief.
 
 - [ ] Multi-turn loop in `agent.core`: feedback message construction,
   max-turns wind-down, memory threading (per D1).
+  2026-07-08 M3 partial: memory threading now uses per-run host-held native
+  state in `Kernel.run/2`; deterministic tests prove `def` and `defn` survive
+  across retry turns, bounded `memory_summary` crosses back to the loop, and
+  memory cap breach fails closed while preserving prior state. Feedback wording,
+  mini-suite extension, and live payoff probe remain open.
 - [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.

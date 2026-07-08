@@ -265,6 +265,140 @@ defmodule PtcRunner.KernelTest do
              Kernel.run(%{"task" => "compute"}, llm: llm)
   end
 
+  test "inner eval def persists through host-held memory across retry turns" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def x 41)"}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (+ x 1))"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, events: &send(parent, {:event, &1}))
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "status" => "continue",
+                         "memory_summary" => %{
+                           "defined" => ["x"],
+                           "changed" => ["x"],
+                           "entries" => [%{"name" => "x", "kind" => "value", "preview" => "41"}]
+                         }
+                       }
+                     }}
+
+    assert_received {:event,
+                     %{
+                       "event" => "memory",
+                       "memory_bytes" => bytes,
+                       "defined_count" => 1,
+                       "changed_count" => 1
+                     }}
+
+    assert is_integer(bytes) and bytes > 0
+  end
+
+  test "inner eval defn closure persists through host-held memory across retry turns" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => "(defn inc2 [n] (+ n 2))"}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (inc2 40))"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42}} = Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+    assert summary["defined"] == ["inc2"]
+    assert summary["changed"] == ["inc2"]
+    assert [%{"name" => "inc2", "kind" => "function", "preview" => preview}] = summary["entries"]
+    assert preview =~ "#fn"
+  end
+
+  test "def before model fail is projected in memory summary before terminal failure" do
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{name: "run_ptc_lisp", args: %{"program" => "(do (def x 41) (fail :bad))"}}
+          ]
+        }
+      ])
+
+    assert {:error,
+            %{
+              "reason" => "model_program_failed",
+              "eval" => %{
+                "status" => "fail",
+                "memory_summary" => %{
+                  "defined" => ["x"],
+                  "changed" => ["x"],
+                  "entries" => [%{"name" => "x", "kind" => "value", "preview" => "41"}]
+                }
+              }
+            }} = Kernel.run(%{"task" => "compute"}, llm: llm)
+  end
+
+  test "memory byte cap fails closed and preserves prior committed memory" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(def x 1)"}}]},
+          %{
+            tool_calls: [
+              %{
+                name: "run_ptc_lisp",
+                args: %{"program" => ~S|(def too-big "abcdefghijklmnopqrstuvwxyz")|}
+              }
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return x)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 1}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               kernel_memory_byte_cap: 100,
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "status" => "error",
+                         "reason" => "memory_limit_exceeded",
+                         "memory_summary" => %{
+                           "defined" => ["x"],
+                           "changed" => [],
+                           "entries" => []
+                         }
+                       }
+                     }}
+  end
+
   test "inner model program respects caller tool-call cap" do
     parent = self()
 

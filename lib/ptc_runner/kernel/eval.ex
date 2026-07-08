@@ -356,6 +356,15 @@ defmodule PtcRunner.Kernel.Eval do
     }
   end
 
+  defp sanitize_event(%{"event" => "memory"} = event) do
+    %{
+      event: "memory",
+      memory_bytes: Map.get(event, "memory_bytes"),
+      defined_count: Map.get(event, "defined_count"),
+      changed_count: Map.get(event, "changed_count")
+    }
+  end
+
   defp sanitize_event(%{"event" => event, "turn" => turn}) do
     %{event: event, turn: turn}
   end

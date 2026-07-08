@@ -4,15 +4,22 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Kernel.Action
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Step
   alias PtcRunner.Step.Public
 
   @outer_timeout 30_000
   @outer_heap_words 8_000_000
   @inner_timeout 1_000
   @inner_heap_words 1_250_000
+  @memory_byte_cap 2_000_000
+  @word_bytes :erlang.system_info(:wordsize)
+  @summary_name_limit 24
+  @summary_entry_limit 8
+  @summary_preview_chars 160
 
   @prelude_dir Path.expand("../../priv/preludes/agent", __DIR__)
   @prelude_paths %{
@@ -62,7 +69,8 @@ defmodule PtcRunner.Kernel do
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
     with {:ok, prelude} <- compile_prelude(opts),
-         {:ok, tools} <- kernel_tools(mission, opts) do
+         {:ok, memory} <- Agent.start_link(fn -> %{} end),
+         {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
         "tool_names" => opts |> Keyword.get(:tools, %{}) |> Map.keys() |> Enum.sort()
@@ -70,22 +78,26 @@ defmodule PtcRunner.Kernel do
 
       program = ~S|(agent.core/run-mission data/mission data/cfg)|
 
-      case Lisp.run(program,
-             prelude: prelude,
-             tools: tools,
-             context: %{mission: mission, cfg: cfg},
-             filter_context: false,
-             timeout: Keyword.get(opts, :timeout, @outer_timeout),
-             max_heap: Keyword.get(opts, :max_heap, @outer_heap_words),
-             setup_max_heap: Keyword.get(opts, :setup_max_heap, @outer_heap_words * 2)
-           ) do
-        {:ok, step} -> unwrap_outer_step(step)
-        {:error, step} -> {:error, %{reason: "kernel_error", step: project_public_step(step)}}
+      try do
+        case Lisp.run(program,
+               prelude: prelude,
+               tools: tools,
+               context: %{mission: mission, cfg: cfg},
+               filter_context: false,
+               timeout: Keyword.get(opts, :timeout, @outer_timeout),
+               max_heap: Keyword.get(opts, :max_heap, @outer_heap_words),
+               setup_max_heap: Keyword.get(opts, :setup_max_heap, @outer_heap_words * 2)
+             ) do
+          {:ok, step} -> unwrap_outer_step(step)
+          {:error, step} -> {:error, %{reason: "kernel_error", step: project_public_step(step)}}
+        end
+      after
+        stop_agent(memory)
       end
     end
   end
 
-  defp kernel_tools(mission, opts) do
+  defp kernel_tools(mission, opts, memory) do
     llm = Keyword.fetch!(opts, :llm)
     events = Keyword.get(opts, :events)
     mission_tools = Keyword.get(opts, :tools, %{})
@@ -113,7 +125,7 @@ defmodule PtcRunner.Kernel do
         {fn args ->
            args
            |> Map.fetch!("program")
-           |> eval_program(mission, mission_tools, opts)
+           |> eval_program(mission, mission_tools, opts, memory, events)
          end, [signature: "(program :string) -> :map", visibility: :private]},
       "log" =>
         {fn args ->
@@ -278,54 +290,198 @@ defmodule PtcRunner.Kernel do
 
   defp add_public_tool_call(action), do: action
 
-  defp eval_program(program, mission, mission_tools, opts) do
-    case Lisp.run(program,
-           context: Map.get(mission, "context", %{}),
-           tools: mission_tools,
-           prelude: nil,
-           runtime: nil,
-           discovery_exec: nil,
-           timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
-           max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
-           max_tool_calls:
-             Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
-         ) do
-      {:ok, step} -> project_step(:ok, step)
-      {:error, step} -> project_step(:error, step)
+  defp eval_program(program, mission, mission_tools, opts, memory_agent, events) do
+    prior_memory = Agent.get(memory_agent, & &1)
+
+    result =
+      case Lisp.run(program,
+             context: Map.get(mission, "context", %{}),
+             tools: mission_tools,
+             prelude: nil,
+             runtime: nil,
+             discovery_exec: nil,
+             memory: prior_memory,
+             timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
+             max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
+             max_tool_calls:
+               Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
+           ) do
+        {:ok, step} -> commit_and_project_step(:ok, step, prior_memory, opts, memory_agent)
+        {:error, step} -> commit_and_project_step(:error, step, prior_memory, opts, memory_agent)
+      end
+
+    log_memory_size(events, result)
+    result
+  end
+
+  defp commit_and_project_step(tag, step, prior_memory, opts, memory_agent) do
+    candidate_memory = step.memory || prior_memory
+    memory_bytes = retained_size(candidate_memory)
+    cap = Keyword.get(opts, :kernel_memory_byte_cap, @memory_byte_cap)
+
+    if memory_bytes <= cap do
+      Agent.update(memory_agent, fn _ -> candidate_memory end)
+      project_step(tag, step, prior_memory, candidate_memory, memory_bytes)
+    else
+      error_step =
+        Step.error(
+          :memory_limit_exceeded,
+          "Kernel PTC-Lisp memory exceeded #{cap} bytes; previous memory was preserved.",
+          prior_memory,
+          %{limit_bytes: cap, candidate_bytes: memory_bytes}
+        )
+
+      project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
     end
   end
 
-  defp project_step(_tag, step) do
+  defp project_step(_tag, step, prior_memory, current_memory, memory_bytes) do
+    memory_summary = memory_summary(prior_memory, current_memory, memory_bytes)
+
     cond do
       match?({:__ptc_return__, _}, step.return) ->
         {:__ptc_return__, value} = step.return
 
         %{
           "status" => "return",
-          "value" => Public.value(value),
-          "prints" => bound_list(step.prints)
+          "value" => public_eval_value(value),
+          "prints" => bound_list(step.prints),
+          "memory_summary" => memory_summary
         }
 
       match?({:__ptc_fail__, _}, step.return) ->
         {:__ptc_fail__, value} = step.return
-        %{"status" => "fail", "value" => Public.value(value), "prints" => bound_list(step.prints)}
+
+        %{
+          "status" => "fail",
+          "value" => public_eval_value(value),
+          "prints" => bound_list(step.prints),
+          "memory_summary" => memory_summary
+        }
 
       step.fail ->
         %{
           "status" => "error",
           "reason" => to_string(step.fail.reason),
           "message" => step.fail.message,
-          "prints" => bound_list(step.prints)
+          "prints" => bound_list(step.prints),
+          "memory_summary" => memory_summary
         }
 
       true ->
         %{
           "status" => "continue",
-          "value" => Public.value(step.return),
-          "prints" => bound_list(step.prints)
+          "value" => public_eval_value(step.return),
+          "prints" => bound_list(step.prints),
+          "memory_summary" => memory_summary
         }
     end
   end
+
+  defp memory_summary(prior_memory, current_memory, memory_bytes) do
+    defined_names = current_memory |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+
+    changed_names =
+      current_memory
+      |> Enum.filter(fn {name, value} ->
+        Map.get(prior_memory, name, :__ptc_missing__) != value
+      end)
+      |> Enum.map(fn {name, _value} -> to_string(name) end)
+      |> Enum.sort()
+
+    {defined, defined_truncated?} = take_bounded(defined_names, @summary_name_limit)
+    {changed, changed_truncated?} = take_bounded(changed_names, @summary_name_limit)
+    {entry_names, entries_truncated?} = take_bounded(changed_names, @summary_entry_limit)
+
+    {entries, child_truncated?} =
+      Enum.map_reduce(entry_names, false, fn name, truncated? ->
+        {entry, entry_truncated?} = memory_entry(name, current_memory)
+        {entry, truncated? or entry_truncated?}
+      end)
+
+    omitted_count =
+      max(length(defined_names) - length(defined), 0) +
+        max(length(changed_names) - length(entry_names), 0)
+
+    %{
+      "defined" => defined,
+      "changed" => changed,
+      "entries" => entries,
+      "truncated" =>
+        defined_truncated? or changed_truncated? or entries_truncated? or child_truncated?,
+      "omitted_count" => omitted_count,
+      "memory_bytes" => memory_bytes
+    }
+  end
+
+  defp memory_entry(name, memory) do
+    {_raw_name, value} =
+      Enum.find(memory, fn {raw_name, _value} -> to_string(raw_name) == name end)
+
+    {preview, truncated?} =
+      Format.to_clojure(value, limit: 4, printable_limit: @summary_preview_chars)
+
+    {%{
+       "name" => name,
+       "kind" => memory_kind(value),
+       "preview" => preview,
+       "truncated" => truncated?
+     }, truncated?}
+  end
+
+  defp memory_kind({:closure, _params, _body, _env, _history, _metadata}), do: "function"
+  defp memory_kind(_), do: "value"
+
+  defp public_eval_value(value) do
+    value
+    |> Public.value()
+    |> Jason.encode!()
+    |> Jason.decode!()
+  rescue
+    _ ->
+      value
+      |> Format.to_clojure(limit: 4, printable_limit: @summary_preview_chars)
+      |> elem(0)
+  end
+
+  defp take_bounded(list, limit) do
+    bounded = Enum.take(list, limit)
+    {bounded, length(list) > length(bounded)}
+  end
+
+  defp retained_size(value) do
+    :erts_debug.flat_size(value) * @word_bytes + referenced_binary_size(value)
+  rescue
+    _ -> @memory_byte_cap + 1
+  end
+
+  defp referenced_binary_size(value) when is_binary(value),
+    do: :binary.referenced_byte_size(value)
+
+  defp referenced_binary_size(value) when is_list(value),
+    do: Enum.reduce(value, 0, &(referenced_binary_size(&1) + &2))
+
+  defp referenced_binary_size(value) when is_map(value) do
+    Enum.reduce(value, 0, fn {k, v}, acc ->
+      acc + referenced_binary_size(k) + referenced_binary_size(v)
+    end)
+  end
+
+  defp referenced_binary_size(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> referenced_binary_size()
+
+  defp referenced_binary_size(_value), do: 0
+
+  defp log_memory_size(events, %{"memory_summary" => summary}) when is_function(events, 1) do
+    events.(%{
+      "event" => "memory",
+      "memory_bytes" => Map.get(summary, "memory_bytes"),
+      "defined_count" => length(Map.get(summary, "defined", [])),
+      "changed_count" => length(Map.get(summary, "changed", []))
+    })
+  end
+
+  defp log_memory_size(_events, _result), do: :ok
 
   defp unwrap_outer_step(step) do
     case step.return do
@@ -345,4 +501,8 @@ defmodule PtcRunner.Kernel do
 
   defp bound_list(list) when is_list(list), do: Enum.take(list, 8)
   defp bound_list(_), do: []
+
+  defp stop_agent(pid) do
+    if Process.alive?(pid), do: Agent.stop(pid)
+  end
 end
