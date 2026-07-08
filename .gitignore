@@ -38,6 +38,7 @@ ptc_runner-*.tar
 
 # Eval Reports
 /demo/reports
+/reports/kernel_eval/
 
 # Dialyzer PLT files (machine-specific, large).
 /priv/plts/

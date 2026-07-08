@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel do
       "PTC-Lisp uses Clojure-like prefix syntax.\n" <>
       ~s|Call run_ptc_lisp exactly once per turn with JSON arguments {"program": "..."}.\n| <>
       "Successful programs end with (return value); explicit failures use (fail value).\n" <>
-      "Read mission context by map keys and call only granted tools from inside the program.\n" <>
+      "Read context key x as data/x and call granted tools as (tool/name args) inside the program.\n" <>
       "Do not answer in prose."
   end
 
@@ -70,7 +70,8 @@ defmodule PtcRunner.Kernel do
     with {:ok, prelude} <- compile_prelude(opts),
          {:ok, tools} <- kernel_tools(mission, opts) do
       cfg = %{
-        "max_turns" => Keyword.get(opts, :max_turns, 3)
+        "max_turns" => Keyword.get(opts, :max_turns, 3),
+        "tool_names" => opts |> Keyword.get(:tools, %{}) |> Map.keys() |> Enum.sort()
       }
 
       program = ~S|(agent.core/run-mission data/mission data/cfg)|

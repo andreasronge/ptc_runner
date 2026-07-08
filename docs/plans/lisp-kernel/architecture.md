@@ -365,6 +365,22 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     `mix test test/ptc_runner/kernel/action_test.exs test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/prelude_split_test.exs`.
     The same tests prove a feedback-only source override changes retry wording
     without changing the Elixir loop path.
+16. M2 mini eval evidence, 2026-07-08: `PtcRunner.Kernel.Eval` and
+    `mix ptc.kernel_eval --suite mini` provide the first repeatable kernel eval
+    path in `lib/` without `test/support` dependencies. It resolves live model
+    aliases through `PtcRunner.LLM.Registry` (`deepseek` ->
+    `openrouter:deepseek/deepseek-v4-flash`), defaults to deterministic mock
+    mode, and prints a sanitized markdown report with per-case status,
+    `action_count`, `eval_count`, failure reason, and bounded trace metadata.
+    The default report excludes raw prompts/messages, raw provider dumps, tool
+    call payloads, and API-key-looking strings; evidence:
+    `mix test test/ptc_runner/kernel/eval_test.exs`. Live DeepSeek evidence
+    after prompt-prelude context/tool syntax changes:
+    `mix ptc.kernel_eval --suite mini --live --model deepseek` returned 4/5
+    pass in one full run: arithmetic 1/1, context filter/count 3/3,
+    context aggregation failed after 5/5 with `turn_limit_exceeded`, domain
+    tool 2/2, forced eval retry 2/2. A separate single-case aggregation probe
+    passed 1/1, so aggregation is possible but unstable.
 
 ## Open decisions
 

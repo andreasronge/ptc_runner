@@ -265,12 +265,16 @@ the answer.
   failure shape, `baseline_bytes`, and term-size estimates. This turns BEAM
   process-copy pressure into a measured budget rather than an anecdote. (Feeds
   S5, D1, D5, Tier 2 thresholds.)
-- [ ] **R14 — Kernel eval model/config seam**: Tier 2 is a `lib/` mix task, so
+- [x] **R14 — Kernel eval model/config seam**: Tier 2 is a `lib/` mix task, so
   it cannot depend on `test/support/LLMSupport`. Move/reuse env loading, model
   alias resolution, and API-key checks from a lib-visible module; tests call
   that seam, not the reverse. The autonomous M2 mini-eval spike must implement
   this seam before enabling live `mix ptc.kernel_eval` mode; no second
-  live-eval env/key path.
+  live-eval env/key path. Answered 2026-07-08 by `PtcRunner.Kernel.Eval`:
+  `resolve_model/1` delegates to `PtcRunner.LLM.Registry`, live mode loads
+  `.env` through `PtcRunner.Dotenv`, checks provider key requirements through
+  `ReqLLMAdapter.requires_api_key?/1`, and builds `PtcRunner.LLM.callback/2`
+  directly.
 - [ ] **R15 — Security/redaction and trust policy**: define private
   kernel-tool ledger projection, prompt/action redaction, unsafe debug artifact
   policy, prelude trust/provenance policy, and inner eval denial defaults
@@ -470,7 +474,10 @@ as the goal brief.
 - [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
   wording).
 - [ ] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn
-  cross-dataset case, via Tier 2.
+  cross-dataset case, via Tier 2. M2 mini runner now has 5 tiny cases:
+  arithmetic, context filter/count, context aggregation, one granted domain
+  tool, and forced eval retry. Mock mode passes 5/5; live DeepSeek full-suite
+  run on 2026-07-08 passed 4/5, with aggregation still unstable.
 - [ ] Kernel emits turn events (per D4) so runs are measurable with existing
   tooling.
 - [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22

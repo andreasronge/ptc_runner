@@ -502,6 +502,58 @@ missing or accidentally public, or trace defaults leak full prompts/messages.
 
 ---
 
+## S12 — Mini kernel eval runner and DeepSeek probes
+
+**Question.** Can the kernel run a tiny repeatable eval suite from `lib/`
+without the full Tier 2 harness, and can DeepSeek handle tasks beyond
+arithmetic through the native `run_ptc_lisp` loop?
+
+**Why it gates.** M2 needs measurement before more policy is moved into
+preludes. The runner must not depend on `test/support`, must avoid raw prompt
+or provider dumps by default, and must make prelude policy changes observable.
+
+**Method.** Implement `PtcRunner.Kernel.Eval` plus
+`mix ptc.kernel_eval --suite mini`. Cases: arithmetic, context filter/count,
+context aggregation, one granted domain tool, and forced eval retry. Mock mode
+uses scripted tool calls. Live mode resolves `PTC_TEST_MODEL`/`--model` via
+`PtcRunner.LLM.Registry`; the `eval_retry` live case rewrites the first
+tool-call program to omit `(return ...)` so the retry path is deterministic.
+Reports print per-case status, action count, eval count, and failure reason
+without raw prompts/messages/provider dumps.
+
+**Pass.** Mock mode passes and the redaction test proves reports omit API-key
+strings, raw system prompt text, message payloads, tool-call payloads, and full
+programs. If `OPENROUTER_API_KEY` is present, a live DeepSeek run completes and
+records the full table, including failures.
+**Fail.** The mix task needs test-only helpers, leaks raw prompts/API material,
+or live DeepSeek cannot complete even arithmetic/retry cases.
+
+**Result.** PASS for the runner and partial PASS for live DeepSeek,
+2026-07-08. Evidence:
+`mix test test/ptc_runner/kernel/eval_test.exs` passed; `mix ptc.kernel_eval
+--suite mini` passed 5/5 in mock mode. Initial live DeepSeek full-suite run
+after the split passed 2/5: arithmetic and forced retry passed, while
+filter/count, aggregation, and domain tool hit `turn_limit_exceeded`.
+Prelude-only prompt changes then exposed generic context JSON, granted tool
+names, concrete `(tool/name args)` syntax, and `data/x` context access; no
+Elixir loop-logic change was needed. After those changes, `domain_tool` passed
+as a single live case in 2 actions/2 evals, `context_aggregation` passed as a
+single live case in 1 action/1 eval, and the final full live mini run passed
+4/5:
+
+| case | status | actions | evals | failure |
+| --- | --- | ---: | ---: | --- |
+| arithmetic | pass | 1 | 1 | |
+| context_filter_count | pass | 3 | 3 | |
+| context_aggregation | fail | 5 | 5 | turn_limit_exceeded |
+| domain_tool | pass | 2 | 2 | |
+| eval_retry | pass | 2 | 2 | |
+
+Conclusion: compact prompt-prelude wording materially changes live behavior,
+but aggregation recovery remains unstable and should not be promoted as solved.
+
+---
+
 ## Candidate later spikes (register properly before running)
 
 - **S13 — Bundle swap provenance:** two bundles differing in one
