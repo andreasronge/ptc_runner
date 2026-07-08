@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert report.suite == "mini"
     assert report.mode == :mock
     assert report.model == nil
-    assert length(report.cases) == 5
+    assert length(report.cases) == 6
     assert Enum.all?(report.cases, &(&1.status == :pass))
     assert Eval.passed?(report)
     assert Eval.failure_count(report) == 0
@@ -19,14 +19,19 @@ defmodule PtcRunner.Kernel.EvalTest do
              "context_filter_count" => 2,
              "context_aggregation" => 12,
              "domain_tool" => 9,
-             "eval_retry" => 3
+             "eval_retry" => 3,
+             "memory_persistence" => 42
            }
 
     retry = Enum.find(report.cases, &(&1.case == "eval_retry"))
     assert retry.action_count == 2
     assert retry.eval_count == 2
 
-    for case_result <- report.cases -- [retry] do
+    memory = Enum.find(report.cases, &(&1.case == "memory_persistence"))
+    assert memory.action_count == 2
+    assert memory.eval_count == 2
+
+    for case_result <- report.cases -- [retry, memory] do
       assert case_result.action_count == 1
       assert case_result.eval_count == 1
     end
@@ -39,6 +44,7 @@ defmodule PtcRunner.Kernel.EvalTest do
 
     assert markdown =~ "context_filter_count"
     assert markdown =~ "domain_tool"
+    assert markdown =~ "memory_persistence"
     refute markdown =~ "OPENROUTER_API_KEY"
     refute markdown =~ "sk-or-"
     refute markdown =~ "You are controlling PTC-Lisp"
@@ -73,6 +79,27 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert case_result.failure_reason =~ "expected_mismatch"
     refute Eval.passed?(report)
     assert Eval.failure_count(report) == 1
+  end
+
+  test "mock report trace redacts raw host-held memory values" do
+    secret = String.duplicate("SECRET-TRACE-", 40)
+
+    memory_case = %{
+      id: "redacted_memory",
+      task: "Store a large value, then return ok.",
+      context: %{},
+      expected: "ok",
+      max_turns: 3,
+      mock_programs: [~s|(do (def payload "#{secret}") (return :ok))|]
+    }
+
+    assert {:ok, report} = Eval.run_cases([memory_case], mode: :mock)
+    assert [%{status: :pass, trace: trace}] = report.cases
+    inspected = inspect(trace)
+
+    refute inspected =~ secret
+    refute inspected =~ "payload"
+    assert Enum.any?(trace, &(&1.event == "memory"))
   end
 
   test "live mode reports provider-specific missing key" do

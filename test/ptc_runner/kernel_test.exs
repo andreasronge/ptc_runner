@@ -333,6 +333,44 @@ defmodule PtcRunner.KernelTest do
     assert preview =~ "#fn"
   end
 
+  test "retry feedback renders bounded memory summary without dumping large values" do
+    parent = self()
+    large = String.duplicate("SECRET-BOUNDARY-", 40)
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => ~s|(def payload "#{large}")|}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => "ok"}} = Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert_received {:llm_request, %{messages: [%{role: :user}]}}
+    assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
+
+    decoded = Jason.decode!(feedback)
+    assert decoded["instruction"] =~ "memory_summary"
+    assert decoded["instruction"] =~ "defined names"
+
+    summary = decoded["untrusted_eval_result"]["memory_summary"]
+    assert summary["defined"] == ["payload"]
+    assert summary["changed"] == ["payload"]
+    assert summary["truncated"] == true
+
+    assert [%{"name" => "payload", "kind" => "value", "preview" => preview, "truncated" => true}] =
+             summary["entries"]
+
+    assert preview =~ "SECRET-BOUNDARY-"
+    refute feedback =~ large
+  end
+
   test "def before model fail is projected in memory summary before terminal failure" do
     llm =
       scripted_llm([

@@ -136,6 +136,15 @@ defmodule PtcRunner.Kernel.Eval do
         expected: 3,
         max_turns: 5,
         mock_programs: [~S|(+ 1 2)|, ~S|(return 3)|]
+      },
+      %{
+        id: "memory_persistence",
+        task:
+          "Define an intermediate value in one program, then use that defined name in the next program to return 42.",
+        context: %{},
+        expected: 42,
+        max_turns: 5,
+        mock_programs: [~S|(def x 41)|, ~S|(return (+ x 1))|]
       }
     ]
   end

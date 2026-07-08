@@ -616,8 +616,10 @@ take the next unused number (S20 at time of writing); do not reuse an ID.
   `source_hash` are sufficient to attribute a run to a policy variant in turn
   logs (M3 depends on this attribution). Pre-register the follow-on
   feedback-only A/B before running it: feedback prelude is the only variable;
-  prompt prelude, cases, `max_turns`, model, and eval runner stay fixed; run
-  N repeats per case per variant via `--runs`; report pass counts per
+  prompt prelude, cases, `max_turns`, model, eval runner, and host-held memory
+  behavior stay fixed; variants must preserve
+  `untrusted_eval_result.memory_summary` and may only change how they describe
+  it. Run N repeats per case per variant via `--runs`; report pass counts per
   case/variant. At temperature 0.0, repeats are highly correlated provider
   nondeterminism, so the result is directional evidence that a policy variant
   can or cannot recover a failure mode, not a statistical superiority claim.

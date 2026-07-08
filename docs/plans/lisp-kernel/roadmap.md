@@ -421,8 +421,10 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   prove `prelude.metadata.components` plus source hashes attribute a run to a
   specific prelude variant before M3 compares feedback policies. Register the
   A/B shape before running it: feedback prelude only varies; prompt prelude,
-  cases, `max_turns`, model, and runner stay fixed; N repeats per case per
-  variant report pass counts as directional evidence, not statistics.
+  cases, `max_turns`, model, runner, and host-held memory behavior stay fixed;
+  feedback variants must preserve the `untrusted_eval_result.memory_summary`
+  boundary and may only change wording. N repeats per case per variant report
+  pass counts as directional evidence, not statistics.
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is
@@ -473,8 +475,9 @@ as the goal brief.
   2026-07-08 M3 partial: memory threading now uses per-run host-held native
   state in `Kernel.run/2`; deterministic tests prove `def` and `defn` survive
   across retry turns, bounded `memory_summary` crosses back to the loop, and
-  memory cap breach fails closed while preserving prior state. Feedback wording,
-  mini-suite extension, and live payoff probe remain open.
+  memory cap breach fails closed while preserving prior state. Feedback now
+  tells variants to use `untrusted_eval_result.memory_summary`; live payoff
+  probe remains open.
 - [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.
@@ -486,10 +489,11 @@ as the goal brief.
 - [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
   wording).
 - [ ] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn
-  cross-dataset case, via Tier 2. M2 mini runner now has 5 tiny cases:
+  cross-dataset case, via Tier 2. M3 mini runner now has 6 tiny cases:
   arithmetic, context filter/count, context aggregation, one granted domain
-  tool, and forced eval retry. Mock mode passes 5/5; live DeepSeek full-suite
-  run on 2026-07-08 passed 4/5, with aggregation still unstable.
+  tool, forced eval retry, and memory persistence. Mock mode passes 6/6; the
+  latest recorded live DeepSeek full-suite run before memory passed 4/5 on
+  2026-07-08, with aggregation still unstable.
 - [ ] Kernel emits turn events (per D4) so runs are measurable with existing
   tooling.
 - [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
