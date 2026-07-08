@@ -438,9 +438,13 @@ Record the resolution here when made:
   M3 partial update, 2026-07-08: the projection now adds bounded
   `memory_summary` with sorted defined names, changed names, per-entry
   kind/preview/truncation, summary truncation, omitted count, and measured
-  `memory_bytes`; raw memory remains host-only. Byte-cap breaches project as
-  stable `memory_limit_exceeded` eval errors and preserve prior committed
-  memory.
+  `memory_bytes`; raw memory remains host-only. Compatibility decision:
+  this keeps the incumbent SubAgent memory concepts but uses kernel-shaped
+  names: `defined` is the bounded `stored_keys` equivalent, `changed`/`entries`
+  split the incumbent changed-preview map into names plus preview records, and
+  `truncated` preserves the incumbent truncation signal. Byte-cap breaches
+  project as stable `memory_limit_exceeded` eval errors and preserve prior
+  committed memory.
 - **D6 — turn_history.** Whether inner evals get `*1`/`*2`/`*3` threading in
   V1 (probably not; loop can pass prior results as context/memory).
 - **D7 — capability visibility.** RESOLVED 2026-07-07, sharpened for M2
