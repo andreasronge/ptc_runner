@@ -10,19 +10,26 @@ defmodule PtcRunner.Kernel.FeedbackABTest do
     assert result.mode == :mock
     assert result.model == nil
     assert result.seed == "s19-feedback-ab-order-v1"
-    assert length(result.cells) == 2
-    assert length(result.rows) == 2
-    assert Enum.sort(Enum.map(result.rows, & &1.cell)) == ["A", "B"]
+    assert length(result.cells) == 3
+    assert length(result.rows) == 3
+    assert Enum.sort(Enum.map(result.rows, & &1.cell)) == ["A", "B", "C"]
     assert Enum.all?(result.rows, &(&1.case == "eval_retry"))
     assert Enum.all?(result.rows, &(&1.status == :pass))
     assert FeedbackAB.passed?(result)
     assert FeedbackAB.failure_count(result) == 0
 
-    hashes = Map.new(result.rows, &{&1.cell, &1.feedback_hash})
+    hashes = Map.new(result.rows, &{&1.cell, {&1.prompt_hash, &1.feedback_hash}})
 
     assert hashes == %{
-             "A" => "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474",
-             "B" => "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"
+             "A" =>
+               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+                "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474"},
+             "B" =>
+               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+                "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"},
+             "C" =>
+               {"c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9",
+                "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"}
            }
   end
 
@@ -35,9 +42,12 @@ defmodule PtcRunner.Kernel.FeedbackABTest do
     assert markdown =~ "D4 canonical TurnEvents are not present"
     assert markdown =~ "| A |"
     assert markdown =~ "| B |"
+    assert markdown =~ "| C |"
     refute markdown =~ "(return 3)"
     refute markdown =~ "(defn eval-feedback"
     refute markdown =~ "Previous PTC-Lisp program did not return successfully"
+    refute markdown =~ "PTC-Lisp is Clojure-like and runs as an interactive REPL"
+    refute markdown =~ "Use value symbols directly"
   end
 
   test "invalid run setup returns a structured error" do

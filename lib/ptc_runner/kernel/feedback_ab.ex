@@ -8,12 +8,16 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   @seed "s19-feedback-ab-order-v1"
   @variant_a_path "priv/kernel_feedback_variants/feedback_a_default.lisp"
   @variant_b_path "priv/kernel_feedback_variants/feedback_b_memory_guidance.lisp"
+  @variant_c_feedback_path "priv/kernel_feedback_variants/feedback_c_no_memory_guidance.lisp"
+  @variant_c_prompt_path "priv/kernel_feedback_variants/prompt_c_repl_memory.lisp"
   @prompt_path "priv/preludes/agent/prompt.lisp"
   @core_path "priv/preludes/agent/core.lisp"
 
   @variant_a_hash "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474"
   @variant_b_hash "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"
-  @prompt_hash "827d9850b274a809f36782f3cd2c36191a5daf9b61fed3ebef381e4096cec29e"
+  @variant_c_feedback_hash "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"
+  @variant_c_prompt_hash "c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9"
+  @prompt_hash "c1c09812e251e3f594f20d357c44d4d41686d45da4c32ba4e50309cba68f6ba9"
   @core_hash "04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f"
 
   @type result :: %{
@@ -35,7 +39,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
     with :ok <- validate_suite(suite),
          :ok <- validate_runs(runs),
-         {:ok, cells} <- validated_cells(),
+         {:ok, cells} <- selected_cells(Keyword.get(opts, :cell)),
          {:ok, cases} <- selected_cases(Keyword.get(opts, :case)),
          {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)),
          :ok <- preflight_live(mode, model),
@@ -63,7 +67,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   def render_markdown(result) do
     rows =
       Enum.map(result.rows, fn row ->
-        "| #{row.replicate} | #{row.case} | #{row.cell} | #{row.status} | #{row.action_count} | #{row.eval_count} | #{row.feedback_hash} | #{row.failure_reason || ""} |"
+        "| #{row.replicate} | #{row.case} | #{row.cell} | #{row.status} | #{row.action_count} | #{row.eval_count} | #{row.prompt_hash} | #{row.feedback_hash} | #{row.failure_reason || ""} |"
       end)
 
     summary =
@@ -76,7 +80,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
       end)
 
     """
-    # S19 Feedback A/B Shakedown
+    # S19 Feedback Policy Shakedown
 
     evidence_level: non-M3 descriptive shakedown
     suite: #{result.suite}
@@ -87,8 +91,8 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
     ## Frozen Cells
 
-    | cell | label | source_hash |
-    | --- | --- | --- |
+    | cell | label | prompt_hash | feedback_hash |
+    | --- | --- | --- | --- |
     #{render_cells(result.cells)}
 
     ## Summary
@@ -99,8 +103,8 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
     ## Outcomes
 
-    | replicate | case | cell | status | actions | evals | feedback_hash | failure |
-    | ---: | --- | --- | --- | ---: | ---: | --- | --- |
+    | replicate | case | cell | status | actions | evals | prompt_hash | feedback_hash | failure |
+    | ---: | --- | --- | --- | ---: | ---: | --- | --- | --- |
     #{Enum.join(rows, "\n")}
 
     ## Claim Boundary
@@ -113,7 +117,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
   defp render_cells(cells) do
     Enum.map_join(cells, "\n", fn cell ->
-      "| #{cell.id} | #{cell.label} | #{cell.source_hash} |"
+      "| #{cell.id} | #{cell.label} | #{cell.prompt_hash} | #{cell.feedback_hash} |"
     end)
   end
 
@@ -150,12 +154,16 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   defp validated_cells do
     with :ok <- validate_file_hash(@variant_a_path, @variant_a_hash),
          :ok <- validate_file_hash(@variant_b_path, @variant_b_hash),
+         :ok <- validate_file_hash(@variant_c_feedback_path, @variant_c_feedback_hash),
+         :ok <- validate_file_hash(@variant_c_prompt_path, @variant_c_prompt_hash),
          :ok <- validate_file_hash(@prompt_path, @prompt_hash),
          :ok <- validate_file_hash(@core_path, @core_hash),
          {:ok, cell_a} <-
            validated_cell(
              "A",
              "default-memory-summary-guidance",
+             @prompt_path,
+             @prompt_hash,
              @variant_a_path,
              @variant_a_hash
            ),
@@ -163,27 +171,51 @@ defmodule PtcRunner.Kernel.FeedbackAB do
            validated_cell(
              "B",
              "reuse-listed-memory-names-guidance",
+             @prompt_path,
+             @prompt_hash,
              @variant_b_path,
              @variant_b_hash
+           ),
+         {:ok, cell_c} <-
+           validated_cell(
+             "C",
+             "system-repl-guidance-only",
+             @variant_c_prompt_path,
+             @variant_c_prompt_hash,
+             @variant_c_feedback_path,
+             @variant_c_feedback_hash
            ) do
-      {:ok, [cell_a, cell_b]}
+      {:ok, [cell_a, cell_b, cell_c]}
     end
   end
 
-  defp validated_cell(id, label, path, source_hash) do
-    override = feedback_override(path)
+  defp selected_cells(nil), do: validated_cells()
+
+  defp selected_cells(cell_id) when is_binary(cell_id) do
+    with {:ok, cells} <- validated_cells() do
+      case Enum.filter(cells, &(&1.id == cell_id)) do
+        [] -> {:error, {:unknown_cell, cell_id}}
+        selected -> {:ok, selected}
+      end
+    end
+  end
+
+  defp validated_cell(id, label, prompt_path, prompt_hash, feedback_path, feedback_hash) do
+    override = prelude_override(prompt_path, feedback_path)
 
     with {:ok, prelude} <- Kernel.compile_prelude(prelude_source_overrides: override),
          {:ok, components} <- components_by_id(Prelude.trace_summary(prelude)),
-         :ok <- assert_component_hash(components, "agent.prompt", @prompt_hash),
+         :ok <- assert_component_hash(components, "agent.prompt", prompt_hash),
          :ok <- assert_component_hash(components, "agent.core", @core_hash),
-         :ok <- assert_component_hash(components, "agent.feedback", source_hash) do
+         :ok <- assert_component_hash(components, "agent.feedback", feedback_hash) do
       {:ok,
        %{
          id: id,
          label: label,
-         source_path: path,
-         source_hash: source_hash,
+         prompt_path: prompt_path,
+         prompt_hash: prompt_hash,
+         feedback_path: feedback_path,
+         feedback_hash: feedback_hash,
          override: override
        }}
     end
@@ -228,8 +260,15 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     |> Enum.flat_map(&cell_order(&1, cells, seed))
     |> Enum.reduce_while({:ok, []}, fn block_cell, {:ok, rows} ->
       case run_cell_case(block_cell, suite, mode, model, opts) do
-        {:ok, row} -> {:cont, {:ok, [row | rows]}}
-        {:error, reason} -> {:halt, {:error, reason}}
+        {:ok, row} ->
+          if Keyword.get(opts, :stop_on_failure) == true and row.status != :pass do
+            {:halt, {:ok, [row | rows]}}
+          else
+            {:cont, {:ok, [row | rows]}}
+          end
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
     |> case do
@@ -239,30 +278,47 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   end
 
   defp run_cell_case({block, cell}, suite, mode, model, opts) do
-    case Eval.run_cases([block.case],
-           suite: suite,
-           mode: mode,
-           model: model,
-           runs: 1,
-           prelude_source_overrides: cell.override,
-           receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
-           max_tokens: Keyword.get(opts, :max_tokens, 512),
-           temperature: Keyword.get(opts, :temperature, 0.0)
-         ) do
-      {:ok, %{cases: [case_result]}} ->
-        case assert_report_provenance(case_result, cell) do
-          :ok ->
-            {:ok, row(block, cell, case_result)}
+    {unsafe_debug_agent, cleanup_debug} = unsafe_debug_agent(opts)
 
-          {:error, reason} ->
-            {:error, {:provenance_mismatch, block.case.id, block.replicate, cell.id, reason}}
-        end
+    try do
+      case Eval.run_cases([block.case],
+             suite: suite,
+             mode: mode,
+             model: model,
+             runs: 1,
+             prelude_source_overrides: cell.override,
+             receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
+             max_tokens: Keyword.get(opts, :max_tokens, 512),
+             temperature: Keyword.get(opts, :temperature, 0.0),
+             unsafe_debug: is_pid(unsafe_debug_agent),
+             unsafe_debug_agent: unsafe_debug_agent
+           ) do
+        {:ok, %{cases: [case_result]}} ->
+          case assert_report_provenance(case_result, cell) do
+            :ok ->
+              {:ok, row(block, cell, case_result)}
 
-      {:error, reason} ->
-        {:error, {:cell_run_failed, block.case.id, block.replicate, cell.id, reason}}
+            {:error, reason} ->
+              {:error, {:provenance_mismatch, block.case.id, block.replicate, cell.id, reason}}
+          end
 
-      other ->
-        {:error, {:unexpected_cell_result, block.case.id, block.replicate, cell.id, other}}
+        {:error, reason} ->
+          {:error, {:cell_run_failed, block.case.id, block.replicate, cell.id, reason}}
+
+        other ->
+          {:error, {:unexpected_cell_result, block.case.id, block.replicate, cell.id, other}}
+      end
+    after
+      cleanup_debug.()
+    end
+  end
+
+  defp unsafe_debug_agent(opts) do
+    if is_pid(Keyword.get(opts, :unsafe_debug_agent)) do
+      {:ok, agent} = Agent.start_link(fn -> [] end)
+      {agent, fn -> if Process.alive?(agent), do: Agent.stop(agent) end}
+    else
+      {nil, fn -> :ok end}
     end
   end
 
@@ -278,24 +334,67 @@ defmodule PtcRunner.Kernel.FeedbackAB do
       action_count: case_result.action_count,
       eval_count: case_result.eval_count,
       duration_ms: case_result.duration_ms,
-      feedback_hash: cell.source_hash
+      prompt_hash: cell.prompt_hash,
+      feedback_hash: cell.feedback_hash,
+      unsafe_trace: Map.get(case_result, :unsafe_trace)
     }
+  end
+
+  @spec render_unsafe_debug(result()) :: String.t()
+  def render_unsafe_debug(result) do
+    rows =
+      Enum.map_join(result.rows, "\n\n", fn row ->
+        """
+        ## #{row.cell} #{row.case} replicate #{row.replicate} - #{row.status}
+
+        failure: #{row.failure_reason || ""}
+        value: #{inspect(row.value, limit: 20, printable_limit: 500)}
+        prompt_hash: #{row.prompt_hash}
+        feedback_hash: #{row.feedback_hash}
+
+        ```elixir
+        #{inspect(row.unsafe_trace || [], pretty: true, limit: :infinity, printable_limit: :infinity)}
+        ```
+        """
+        |> String.trim()
+      end)
+
+    """
+    # UNSAFE S19 Feedback Debug Report
+
+    This report intentionally includes raw model-visible prompts/messages and
+    model-produced programs. Do not publish it as benchmark evidence.
+
+    suite: #{result.suite}
+    mode: #{result.mode}
+    model: #{result.model || "mock"}
+    runs_per_cell_case: #{result.runs}
+    seed: #{result.seed}
+
+    #{rows}
+    """
+    |> String.trim()
   end
 
   defp assert_report_provenance(%{trace: trace}, cell) do
     with %{prelude: %{components: components}} <- Enum.find(trace, &(&1.event == "prelude")),
+         prompt when is_map(prompt) <- Enum.find(components, &(&1.id == "agent.prompt")),
          component when is_map(component) <- Enum.find(components, &(&1.id == "agent.feedback")),
-         true <- component.source_hash == cell.source_hash do
+         true <- prompt.source_hash == cell.prompt_hash,
+         true <- component.source_hash == cell.feedback_hash do
       :ok
     else
       nil -> {:error, :missing_prelude_event}
-      false -> {:error, :feedback_hash_mismatch}
-      _ -> {:error, :missing_feedback_component}
+      false -> {:error, :component_hash_mismatch}
+      _ -> {:error, :missing_policy_component}
     end
   end
 
-  defp feedback_override(path) do
-    %{"agent.feedback" => %{source: File.read!(path), origin: {:file, path}}}
+  defp prelude_override(prompt_path, feedback_path) do
+    %{
+      "agent.prompt" => %{source: File.read!(prompt_path), origin: {:file, prompt_path}},
+      "agent.feedback" => %{source: File.read!(feedback_path), origin: {:file, feedback_path}}
+    }
   end
 
   defp components_by_id(%{components: components}) do

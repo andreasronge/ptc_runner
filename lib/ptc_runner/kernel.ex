@@ -118,6 +118,8 @@ defmodule PtcRunner.Kernel do
              tool_choice: %{type: "tool", name: "run_ptc_lisp"}
            }
 
+           log_unsafe_llm_request(events, opts, args, request)
+
            request
            |> llm.()
            |> normalize_llm_result()
@@ -157,6 +159,17 @@ defmodule PtcRunner.Kernel do
     end
 
     :ok
+  end
+
+  defp log_unsafe_llm_request(events, opts, args, request) do
+    if is_function(events, 1) and Keyword.get(opts, :unsafe_debug) == true do
+      events.(%{
+        "event" => "unsafe_llm_request",
+        "turn" => Map.get(args, "turn"),
+        "system" => request.system,
+        "messages" => request.messages
+      })
+    end
   end
 
   defp resolve_system_prompt(args, override) do

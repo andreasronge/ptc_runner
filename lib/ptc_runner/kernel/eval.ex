@@ -235,12 +235,15 @@ defmodule PtcRunner.Kernel.Eval do
           tools: Map.get(eval_case, :tools, %{}),
           max_turns: eval_case.max_turns,
           prelude_source_overrides: Keyword.get(opts, :prelude_source_overrides, %{}),
-          events: &Agent.update(events, fn current -> [sanitize_event(&1) | current] end)
+          unsafe_debug: Keyword.get(opts, :unsafe_debug, false),
+          events: &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1)
         )
 
       sanitized_events = Agent.get(events, &Enum.reverse/1)
 
-      build_case_result(eval_case, run_index, result, sanitized_events, started)
+      unsafe_trace = unsafe_trace(Keyword.get(opts, :unsafe_debug_agent))
+
+      build_case_result(eval_case, run_index, result, sanitized_events, unsafe_trace, started)
     after
       cleanup_llm.()
       stop_agent(events)
@@ -322,7 +325,21 @@ defmodule PtcRunner.Kernel.Eval do
 
   defp rewrite_first_program(response, _program), do: response
 
-  defp build_case_result(eval_case, run_index, result, events, started) do
+  defp record_event(events, unsafe_debug_agent, event) do
+    Agent.update(events, fn current -> [sanitize_event(event) | current] end)
+
+    if is_pid(unsafe_debug_agent) and Process.alive?(unsafe_debug_agent) do
+      Agent.update(unsafe_debug_agent, fn current -> [unsafe_event(event) | current] end)
+    end
+  end
+
+  defp unsafe_trace(nil), do: nil
+
+  defp unsafe_trace(agent) when is_pid(agent) do
+    if Process.alive?(agent), do: Agent.get(agent, &Enum.reverse/1)
+  end
+
+  defp build_case_result(eval_case, run_index, result, events, unsafe_trace, started) do
     {status, value, failure_reason} =
       case result do
         {:ok, %{"value" => value}} -> verify_expected(eval_case, value)
@@ -340,7 +357,8 @@ defmodule PtcRunner.Kernel.Eval do
       action_count: Enum.count(events, &(&1.event == "action")),
       eval_count: Enum.count(events, &(&1.event == "eval")),
       duration_ms: duration_ms(started),
-      trace: events
+      trace: events,
+      unsafe_trace: unsafe_trace
     }
   end
 
@@ -401,6 +419,41 @@ defmodule PtcRunner.Kernel.Eval do
   defp sanitize_event(%{"event" => event, "turn" => turn}) do
     %{event: event, turn: turn}
   end
+
+  defp unsafe_event(%{"event" => "unsafe_llm_request"} = event) do
+    %{
+      event: "unsafe_llm_request",
+      turn: Map.get(event, "turn"),
+      system: Map.get(event, "system"),
+      messages: Map.get(event, "messages")
+    }
+  end
+
+  defp unsafe_event(%{"event" => "action", "turn" => turn, "action" => action}) do
+    %{
+      event: "action",
+      turn: turn,
+      kind: Map.get(action, "kind") || Map.get(action, :kind),
+      program: Map.get(action, "program") || Map.get(action, :program),
+      reason: Map.get(action, "reason") || Map.get(action, :reason),
+      content: Map.get(action, "content") || Map.get(action, :content),
+      model: Map.get(action, "model") || Map.get(action, :model),
+      provider: Map.get(action, "provider") || Map.get(action, :provider)
+    }
+  end
+
+  defp unsafe_event(%{"event" => "eval", "turn" => turn, "result" => result}) do
+    %{
+      event: "eval",
+      turn: turn,
+      result: result
+    }
+  end
+
+  defp unsafe_event(%{"event" => "memory"} = event), do: event
+  defp unsafe_event(%{"event" => "prelude"} = event), do: sanitize_event(event)
+  defp unsafe_event(%{"event" => event, "turn" => turn}), do: %{event: event, turn: turn}
+  defp unsafe_event(event), do: %{event: "unknown", value: inspect(event, limit: 20)}
 
   defp sanitize_prelude_component(component) when is_map(component) do
     %{
