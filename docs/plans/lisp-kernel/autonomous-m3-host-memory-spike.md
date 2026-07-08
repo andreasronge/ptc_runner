@@ -30,9 +30,13 @@ Update docs with evidence, blockers, commands, and live results.
 ## Objective
 
 M2 proved policy lives in swappable preludes and gave the kernel an honest
-eval harness. The strict-oracle live run is 3/5; both red cases share a
-plausible root cause: every inner eval starts from `%{}`, so the model cannot
-build state incrementally across retries.
+eval harness. The strict-oracle live run is 3/5, and the two red cases have
+different plausible owners. `context_aggregation` burns all five turns and
+looks like statelessness: every inner eval starts from `%{}`, so the model
+cannot build state incrementally across retries — that is the case memory is
+expected to move. `domain_tool` returned `%{"score" => 9}` instead of `9` —
+a scalar-extraction miss that memory is not expected to fix; it stays in the
+live probe as a non-memory ownership control.
 
 This spike tests the next thesis:
 
@@ -57,6 +61,9 @@ Read first:
 - `lib/ptc_runner/kernel.ex`, `lib/ptc_runner/kernel/eval.ex`
 - `priv/preludes/agent/*.lisp`
 - `test/ptc_runner/kernel*` and `test/ptc_runner/kernel/`
+- `lib/ptc_runner/ptc_tool_protocol.ex` (`render_success_from_step/2`) and
+  `lib/ptc_runner/sub_agent/loop/turn_feedback.ex` (`execution_feedback/3`)
+  — the incumbent model-facing memory feedback surface
 
 Substrate facts, verified 2026-07-08: `Lisp.run/2` already accepts a
 `:memory` option and returns `step.memory`; a fail-closed `:memory_exceeded`
@@ -106,10 +113,17 @@ report it before touching anything.
      commit whatever memory the inner run returns, even when the program
      fails or errors, so definitions made before a failure survive the
      retry. Whichever way it goes, a `def`-then-`fail` test documents it.
-   - **Byte cap, fail-closed.** Add a per-run memory byte cap (suggested
-     1–2 MB for the spike) with a stable error reason
-     (e.g. `memory_limit_exceeded`), surfaced to the loop like other eval
-     errors — never a silent truncation or an ergonomic fallback. Heap
+   - **Byte cap, fail-closed — with pinned commit order.** Add a per-run
+     memory byte cap (suggested 1–2 MB for the spike). The accounting order
+     is part of the contract: measure the candidate `step.memory` first;
+     commit only if under the cap; on breach, preserve the prior committed
+     memory unchanged and surface a stable `memory_limit_exceeded` eval
+     error to the loop — retryable feedback, never a silent truncation or
+     an ergonomic fallback. The REPL-semantics rule above applies only to
+     candidates that pass the cap check. Estimator: heap-oriented — reuse
+     the existing `:erts_debug.flat_size/1` × word-size measurement in
+     `PtcRunner.Lisp.Eval.Context` (see the sizing rationale around
+     context.ex:471-496) rather than inventing a second sizing rule. Heap
      arithmetic to respect: sandbox memory costs ~1.7× amplification and
      the inner eval has 10 MB total, so uncapped memory silently eats the
      model program's own headroom.
@@ -130,6 +144,15 @@ report it before touching anything.
    Raw memory values never appear in the projection, the trace, or the
    events stream. Bound every list and preview; growing D5's projection
    shape beyond demonstrated need is out of scope.
+
+   **Compatibility decision required.** The incumbent SubAgent already has
+   a model-facing memory contract:
+   `PtcToolProtocol.render_success_from_step/2` and
+   `TurnFeedback.execution_feedback/3` expose changed keys, stored keys,
+   and truncation behavior. Before defining `memory_summary`, read both
+   and either reuse their vocabulary and truncation conventions or record
+   explicitly why the kernel diverges. One model-facing memory contract,
+   not two drifting ones.
 
 3. **Feedback renders the summary**
 
@@ -173,6 +196,9 @@ report it before touching anything.
    - re-run the full live mini suite; record the oracle-checked table;
    - watch `context_aggregation` specifically: does persistence turn the
      5-turn burn into convergence? Record turns/evals before vs after;
+   - treat `domain_tool` as the ownership control: it is expected to stay
+     red under memory (scalar extraction, not state). If it moves anyway,
+     record that as a finding in its own right;
    - record the new `memory_persistence` case live.
 
    Record results honestly either way — "memory did not move the red cases"
@@ -232,7 +258,9 @@ Stop and document evidence if:
 - Running the S19 feedback-policy A/B (it runs after this, against the
   amended contract).
 - Cross-run or cross-mission persistence.
-- Sessions, compaction, MCP, compiled agents, Tier 2, self-improvement.
+- The full Tier 2 parity/incumbent-comparison harness — the mini eval suite
+  itself is in scope and required.
+- Sessions, compaction, MCP, compiled agents, self-improvement.
 - Statistical claims of any kind from the live probe.
 
 ## Why Before Logging and the A/B
