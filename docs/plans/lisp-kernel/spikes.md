@@ -502,7 +502,7 @@ missing or accidentally public, or trace defaults leak full prompts/messages.
 
 ---
 
-## S12 — Mini kernel eval runner and DeepSeek probes
+## S18 — Mini kernel eval runner and DeepSeek probes
 
 **Question.** Can the kernel run a tiny repeatable eval suite from `lib/`
 without the full Tier 2 harness, and can DeepSeek handle tasks beyond
@@ -571,7 +571,10 @@ unstable and should not be promoted as solved.
 
 ## Candidate later spikes (register properly before running)
 
-- **S13 — Bundle swap provenance:** two bundles differing in one
+Spike IDs are claimed by both the registered sections above and this list —
+take the next unused number (S20 at time of writing); do not reuse an ID.
+
+- **S19 — Bundle swap provenance:** two bundles differing in one
   `agent.feedback` component; confirm `prelude.metadata.components` +
   `source_hash` are sufficient to attribute a run to a policy variant in turn
   logs (M3 depends on this attribution). Pre-register the follow-on
