@@ -33,6 +33,22 @@ defmodule PtcRunner.Kernel.ActionTest do
     assert %{kind: "tool_call", program: "(return :ok)"} = Action.normalize(response)
   end
 
+  test "accepts OpenAI-style nested function tool calls" do
+    response = %{
+      tool_calls: [
+        %{
+          id: "call_1",
+          function: %{
+            name: "run_ptc_lisp",
+            arguments: Jason.encode!(%{"program" => "(return 99)"})
+          }
+        }
+      ]
+    }
+
+    assert %{kind: "tool_call", program: "(return 99)"} = Action.normalize(response)
+  end
+
   test "malformed or ambiguous responses fail closed" do
     oversized = String.duplicate("x", 11)
 
@@ -43,6 +59,8 @@ defmodule PtcRunner.Kernel.ActionTest do
       {"missing tool call", %{content: nil}, "missing_tool_call"},
       {"multiple calls", %{tool_calls: [valid_call(), valid_call()]}, "multiple_tool_calls"},
       {"wrong tool", %{tool_calls: [%{name: "lisp_eval", args: %{"program" => "(return 1)"}}]},
+       "wrong_tool_name"},
+      {"wrong nested tool", %{tool_calls: [%{function: %{name: "lisp_eval", arguments: "{"}}]},
        "wrong_tool_name"},
       {"invalid json", %{tool_calls: [%{name: "run_ptc_lisp", arguments: "{"}]},
        "invalid_json_arguments"},

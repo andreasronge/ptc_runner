@@ -47,8 +47,8 @@ defmodule PtcRunner.Kernel.Action do
     with {:ok, map} <- response_map(response),
          :ok <- no_disallowed_content(map),
          {:ok, [call]} <- one_tool_call(map),
-         {:ok, args} <- call_args(call),
          :ok <- call_name(call),
+         {:ok, args} <- call_args(call),
          {:ok, program} <- program_arg(args, max_program_bytes) do
       Map.merge(meta, %{kind: "tool_call", program: program, reason: nil, content: nil})
     else
@@ -90,7 +90,7 @@ defmodule PtcRunner.Kernel.Action do
   end
 
   defp call_name(call) do
-    if field(call, :name) == @tool_name do
+    if call_name_value(call) == @tool_name do
       :ok
     else
       {:error, :wrong_tool_name}
@@ -103,6 +103,7 @@ defmodule PtcRunner.Kernel.Action do
       is_map(field(call, :args)) -> {:ok, field(call, :args)}
       is_map(field(call, :arguments)) -> {:ok, field(call, :arguments)}
       is_binary(field(call, :arguments)) -> decode_args(field(call, :arguments))
+      is_binary(function_field(call, :arguments)) -> decode_args(function_field(call, :arguments))
       true -> {:error, :decoded_non_map_arguments}
     end
   end
@@ -155,6 +156,15 @@ defmodule PtcRunner.Kernel.Action do
     do: Map.get(map, key, Map.get(map, to_string(key), default))
 
   defp map_field(_, _key, default), do: default
+
+  defp call_name_value(call), do: field(call, :name) || function_field(call, :name)
+
+  defp function_field(call, key) do
+    case field(call, :function) do
+      %{} = function -> field(function, key)
+      _ -> nil
+    end
+  end
 
   defp field(%{} = map, key), do: Map.get(map, key, Map.get(map, to_string(key)))
   defp field(_, _key), do: nil

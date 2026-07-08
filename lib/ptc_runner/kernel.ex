@@ -21,8 +21,10 @@ defmodule PtcRunner.Kernel do
          ". Call `run_ptc_lisp` with exactly one valid `program` string."))
 
   (defn- eval-feedback [result]
-    (str "Program did not return successfully. Result: " result
-         ". Call `run_ptc_lisp` again with a corrected program."))
+    (json/generate-string
+      {"type" "ptc_lisp_eval_feedback"
+       "instruction" "Previous PTC-Lisp program did not return successfully. Call run_ptc_lisp again with a corrected program."
+       "untrusted_eval_result" result}))
 
   (defn run-mission
     "Run the minimal native-action loop."
