@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
+  alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Step
   alias PtcRunner.Step.Public
 
@@ -16,7 +17,6 @@ defmodule PtcRunner.Kernel do
   @inner_timeout 1_000
   @inner_heap_words 1_250_000
   @memory_byte_cap 2_000_000
-  @word_bytes :erlang.system_info(:wordsize)
   @summary_name_limit 24
   @summary_entry_limit 8
   @summary_preview_chars 160
@@ -316,22 +316,24 @@ defmodule PtcRunner.Kernel do
 
   defp commit_and_project_step(tag, step, prior_memory, opts, memory_agent) do
     candidate_memory = step.memory || prior_memory
-    memory_bytes = retained_size(candidate_memory)
+    candidate_bytes = RetainedSize.bytes(candidate_memory)
     cap = Keyword.get(opts, :kernel_memory_byte_cap, @memory_byte_cap)
 
-    if memory_bytes <= cap do
-      Agent.update(memory_agent, fn _ -> candidate_memory end)
-      project_step(tag, step, prior_memory, candidate_memory, memory_bytes)
-    else
-      error_step =
-        Step.error(
-          :memory_limit_exceeded,
-          "Kernel PTC-Lisp memory exceeded #{cap} bytes; previous memory was preserved.",
-          prior_memory,
-          %{limit_bytes: cap, candidate_bytes: memory_bytes}
-        )
+    case candidate_bytes do
+      bytes when is_integer(bytes) and bytes <= cap ->
+        Agent.update(memory_agent, fn _ -> candidate_memory end)
+        project_step(tag, step, prior_memory, candidate_memory, bytes)
 
-      project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
+      bytes ->
+        error_step =
+          Step.error(
+            :memory_limit_exceeded,
+            "Kernel PTC-Lisp memory exceeded #{cap} bytes; previous memory was preserved.",
+            prior_memory,
+            %{limit_bytes: cap, candidate_bytes: candidate_bytes_detail(bytes)}
+          )
+
+        project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
     end
   end
 
@@ -364,6 +366,7 @@ defmodule PtcRunner.Kernel do
           "status" => "error",
           "reason" => to_string(step.fail.reason),
           "message" => step.fail.message,
+          "details" => Public.value(Map.get(step.fail, :details, %{})),
           "prints" => bound_list(step.prints),
           "memory_summary" => memory_summary
         }
@@ -452,27 +455,14 @@ defmodule PtcRunner.Kernel do
   end
 
   defp retained_size(value) do
-    :erts_debug.flat_size(value) * @word_bytes + referenced_binary_size(value)
-  rescue
-    _ -> @memory_byte_cap + 1
+    case RetainedSize.bytes(value) do
+      bytes when is_integer(bytes) -> bytes
+      :oversized -> 0
+    end
   end
 
-  defp referenced_binary_size(value) when is_binary(value),
-    do: :binary.referenced_byte_size(value)
-
-  defp referenced_binary_size(value) when is_list(value),
-    do: Enum.reduce(value, 0, &(referenced_binary_size(&1) + &2))
-
-  defp referenced_binary_size(value) when is_map(value) do
-    Enum.reduce(value, 0, fn {k, v}, acc ->
-      acc + referenced_binary_size(k) + referenced_binary_size(v)
-    end)
-  end
-
-  defp referenced_binary_size(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> referenced_binary_size()
-
-  defp referenced_binary_size(_value), do: 0
+  defp candidate_bytes_detail(:oversized), do: "oversized"
+  defp candidate_bytes_detail(bytes), do: bytes
 
   defp log_memory_size(events, %{"memory_summary" => summary}) when is_function(events, 1) do
     events.(%{

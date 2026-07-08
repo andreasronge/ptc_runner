@@ -236,11 +236,14 @@ is fail-closed: the candidate memory is measured before commit; on breach the
 prior committed memory is preserved and `eval-program` returns a stable
 `memory_limit_exceeded` error with a summary of the prior memory. A focused
 test sets a small `kernel_memory_byte_cap`, proves a larger second definition
-is rejected, then successfully returns a prior `x` binding. Each eval also
-emits a bounded memory-size event (`memory_bytes`, true defined/changed counts)
-via the kernel event/log surface. Commands:
+is rejected, then successfully returns a prior `x` binding. A follow-up fix
+extracted the retained-size estimator into a shared helper and pins that
+unsizeable candidates fail closed even when the active cap is higher than the
+kernel default. Each eval also emits a bounded memory-size event
+(`memory_bytes`, true defined/changed counts) via the kernel event/log surface.
+Commands:
 `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`
-passed 28/28; `mix ptc.kernel_eval --suite mini` passed 6/6 in mock mode.
+passed 29/29; `mix ptc.kernel_eval --suite mini` passed 6/6 in mock mode.
 
 ---
 

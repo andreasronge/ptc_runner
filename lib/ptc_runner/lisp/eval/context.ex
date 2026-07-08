@@ -32,6 +32,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
   identity + the canonical args hash), as are `:child_trace_id`/`:child_step`.
   """
 
+  alias PtcRunner.Lisp.RetainedSize
+
   @default_print_length 2000
   @default_tool_call_result_bytes 16_384
 
@@ -463,8 +465,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   defp compact_ledger_entry(tool_call, _cap), do: tool_call
 
-  @word_bytes :erlang.system_info(:wordsize)
-
   # Retained-HEAP estimate, conservative (never under-counts), in the same units
   # the sandbox bills (`max_heap`). Two parts:
   #
@@ -485,39 +485,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
   # when the flat heap is already under the cap — if it alone exceeds the cap we
   # truncate regardless, and the sum would only be larger.
   defp retained_size(value, cap) do
-    case heap_size(value) do
-      :oversized -> :oversized
-      heap when heap > cap -> heap
-      heap -> heap + referenced_binary_size(value)
-    end
+    RetainedSize.bytes_with_cap(value, cap)
   end
-
-  defp heap_size(value) do
-    :erts_debug.flat_size(value) * @word_bytes
-  rescue
-    # Defensive: treat an unsizeable term as oversized so it is previewed.
-    _ -> :oversized
-  end
-
-  # Sum of underlying parent byte sizes of binaries reachable in the term.
-  # Over-counts when sub-binaries share a parent — safe (biases toward
-  # truncation, never under toward retention).
-  defp referenced_binary_size(value) when is_binary(value),
-    do: :binary.referenced_byte_size(value)
-
-  defp referenced_binary_size(value) when is_list(value),
-    do: Enum.reduce(value, 0, &(referenced_binary_size(&1) + &2))
-
-  defp referenced_binary_size(value) when is_map(value),
-    do:
-      Enum.reduce(value, 0, fn {k, v}, acc ->
-        acc + referenced_binary_size(k) + referenced_binary_size(v)
-      end)
-
-  defp referenced_binary_size(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> referenced_binary_size()
-
-  defp referenced_binary_size(_value), do: 0
 
   defp preview(value, cap) do
     # Bump only the inspect budget so a tiny cap still yields a usable render;

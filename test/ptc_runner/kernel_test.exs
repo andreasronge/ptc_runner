@@ -3,6 +3,7 @@ defmodule PtcRunner.KernelTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.LLM.ReqLLMAdapter
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
@@ -428,8 +429,61 @@ defmodule PtcRunner.KernelTest do
                        "result" => %{
                          "status" => "error",
                          "reason" => "memory_limit_exceeded",
+                         "details" => %{
+                           "limit_bytes" => 100,
+                           "candidate_bytes" => candidate_bytes
+                         },
                          "memory_summary" => %{
                            "defined" => ["x"],
+                           "changed" => [],
+                           "entries" => []
+                         }
+                       }
+                     }}
+
+    assert is_integer(candidate_bytes) and candidate_bytes > 100
+  end
+
+  test "unmeasurable memory candidate fails closed under custom cap above default" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => ~S|(def bad (tool/bad {}))|}}
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    tools = %{"bad" => fn _args -> ~D[2026-07-08] end}
+
+    assert RetainedSize.bytes(%{bad: ~D[2026-07-08]}) == :oversized
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               tools: tools,
+               kernel_memory_byte_cap: 3_000_000,
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{
+                         "status" => "error",
+                         "reason" => "memory_limit_exceeded",
+                         "details" => %{
+                           "limit_bytes" => 3_000_000,
+                           "candidate_bytes" => "oversized"
+                         },
+                         "memory_summary" => %{
+                           "defined" => [],
                            "changed" => [],
                            "entries" => []
                          }
