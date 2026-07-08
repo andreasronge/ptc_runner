@@ -374,9 +374,12 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     sanitized markdown report with per-case status, `action_count`, `eval_count`,
     failure reason, and bounded trace metadata. The default report excludes raw
     prompts/messages, raw provider dumps, tool call payloads, and
-    API-key-looking strings; evidence:
-    `mix test test/ptc_runner/kernel/eval_test.exs`. Live DeepSeek evidence
-    after prompt-prelude context/tool syntax changes:
+    API-key-looking strings; the successful kernel return trace also keeps only
+    action summaries, not generated programs or public tool-call args. Inner
+    model evals receive the caller's `max_tool_calls` cap while still forcing
+    `prelude: nil`, `runtime: nil`, and `discovery_exec: nil`; evidence:
+    `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs`.
+    Live DeepSeek evidence after prompt-prelude context/tool syntax changes:
     `mix ptc.kernel_eval --suite mini --live --model deepseek` returned 3/5
     pass in the oracle-checked full run: arithmetic 1/1, context filter/count
     2/2, context aggregation failed after 5/5 with `turn_limit_exceeded`,

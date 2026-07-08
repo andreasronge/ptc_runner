@@ -162,11 +162,7 @@ defmodule PtcRunner.Kernel.Eval do
 
     cond do
       provider in [:amazon_bedrock, :bedrock] ->
-        ensure_any_env(model, [
-          "AWS_BEARER_TOKEN_BEDROCK",
-          "AWS_ACCESS_KEY_ID",
-          "AWS_SESSION_TOKEN"
-        ])
+        ensure_bedrock_credentials(model)
 
       is_atom(provider) ->
         case ReqLLM.Keys.get(provider, []) do
@@ -182,13 +178,22 @@ defmodule PtcRunner.Kernel.Eval do
     end
   end
 
-  defp ensure_any_env(model, keys) do
-    if Enum.any?(keys, &(System.get_env(&1) not in [nil, ""])) do
-      :ok
-    else
-      {:error, {:missing_api_key, Enum.join(keys, " or "), model}}
+  defp ensure_bedrock_credentials(model) do
+    cond do
+      present_env?("AWS_BEARER_TOKEN_BEDROCK") ->
+        :ok
+
+      present_env?("AWS_ACCESS_KEY_ID") and present_env?("AWS_SECRET_ACCESS_KEY") ->
+        :ok
+
+      true ->
+        {:error,
+         {:missing_api_key,
+          "AWS_BEARER_TOKEN_BEDROCK or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY", model}}
     end
   end
+
+  defp present_env?(key), do: System.get_env(key) not in [nil, ""]
 
   defp select_cases(nil), do: {:ok, mini_cases()}
 

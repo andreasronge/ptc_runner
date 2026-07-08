@@ -286,7 +286,9 @@ defmodule PtcRunner.Kernel do
            runtime: nil,
            discovery_exec: nil,
            timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
-           max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words)
+           max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
+           max_tool_calls:
+             Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
          ) do
       {:ok, step} -> project_step(:ok, step)
       {:error, step} -> project_step(:error, step)

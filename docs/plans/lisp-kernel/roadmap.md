@@ -273,8 +273,9 @@ the answer.
   live-eval env/key path. Answered 2026-07-08 by `PtcRunner.Kernel.Eval`:
   `resolve_model/1` delegates to `PtcRunner.LLM.Registry`, live mode loads
   `.env` through `PtcRunner.Dotenv`, checks key requirements through
-  `ReqLLMAdapter.requires_api_key?/1` plus resolved-provider key lookup, and
-  builds `PtcRunner.LLM.callback/2` directly.
+  `ReqLLMAdapter.requires_api_key?/1` plus resolved-provider key lookup
+  (including Bedrock bearer-token vs AWS key-pair validation), and builds
+  `PtcRunner.LLM.callback/2` directly.
 - [ ] **R15 — Security/redaction and trust policy**: define private
   kernel-tool ledger projection, prompt/action redaction, unsafe debug artifact
   policy, prelude trust/provenance policy, and inner eval denial defaults

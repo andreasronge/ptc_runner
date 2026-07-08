@@ -2,6 +2,11 @@
   "Minimal native-action kernel loop."
   {:visibility :prompt})
 
+(defn action-summary
+  "Return the default-safe trace projection for one model action."
+  [action]
+  (select-keys action ["kind" "reason" "model" "provider" "transport_error"]))
+
 (defn run-mission
   "Run the minimal native-action loop."
   [mission cfg]
@@ -14,7 +19,7 @@
                                        "messages" messages
                                        "turn" turn})]
         (tool/log {"event" "action" "turn" turn "action" action})
-        (let [actions2 (conj actions action)]
+        (let [actions2 (conj actions (action-summary action))]
           (case (action "kind")
           "tool_call"
             (let [result (tool/eval-program {"program" (action "program")})]

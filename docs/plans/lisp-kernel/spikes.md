@@ -521,7 +521,9 @@ provider-key preflight uses the resolved provider instead of assuming
 OpenRouter. The `eval_retry` live case rewrites the first
 tool-call program to omit `(return ...)` so the retry path is deterministic.
 Reports print per-case status, action count, eval count, and failure reason
-without raw prompts/messages/provider dumps.
+without raw prompts/messages/provider dumps. The kernel return trace keeps
+action summaries only; generated programs and public tool-call args stay out of
+default success traces.
 
 **Pass.** Mock mode passes against expected values and the redaction test proves
 reports omit API-key strings, raw system prompt text, message payloads,
@@ -535,7 +537,10 @@ or live DeepSeek cannot complete even arithmetic/retry cases.
 `mix test test/ptc_runner/kernel/eval_test.exs` passed; `mix ptc.kernel_eval
 --suite mini` passed 5/5 in mock mode with expected-value checks. A regression
 test proves a scripted wrong answer fails with `expected_mismatch`, and live
-mode now reports provider-specific missing key names before making requests.
+mode now reports provider-specific missing key names before making requests
+including the Bedrock bearer-token/key-pair distinction. Focused kernel tests
+also prove inner model programs inherit the caller's tool-call cap and returned
+success traces omit raw generated programs.
 Initial live DeepSeek full-suite run after the split passed 2/5: arithmetic and
 forced retry passed, while filter/count, aggregation, and domain tool hit
 `turn_limit_exceeded`.

@@ -14,8 +14,12 @@ defmodule PtcRunner.KernelTest do
         %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}]}
       ])
 
-    assert {:ok, %{"value" => 42, "trace" => %{"turns" => 1, "actions" => [_]}}} =
+    assert {:ok, %{"value" => 42, "trace" => %{"turns" => 1, "actions" => [action]}}} =
              Kernel.run(%{"task" => "compute"}, llm: llm)
+
+    assert action["kind"] == "tool_call"
+    refute Map.has_key?(action, "program")
+    refute Map.has_key?(action, "public_tool_call")
   end
 
   test "protocol error retries with feedback, then accepts a valid action" do
@@ -229,6 +233,47 @@ defmodule PtcRunner.KernelTest do
 
     assert {:ok, %{"value" => "recovered", "trace" => %{"turns" => 2}}} =
              Kernel.run(%{"task" => "compute"}, llm: llm)
+  end
+
+  test "inner model program respects caller tool-call cap" do
+    parent = self()
+
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{"program" => ~S|(do (tool/lookup {}) (tool/lookup {}) (return :uncapped))|}
+            }
+          ]
+        },
+        %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :recovered)"}}]}
+      ])
+
+    lookup = fn _args ->
+      send(parent, :lookup_called)
+      %{"ok" => true}
+    end
+
+    assert {:ok, %{"value" => "recovered"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               tools: %{"lookup" => lookup},
+               max_tool_calls: 1,
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received :lookup_called
+    refute_received :lookup_called
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{"status" => "error", "reason" => reason}
+                     }}
+
+    assert reason == "tool_call_limit_exceeded"
   end
 
   test "prelude export can call private kernel tools but user code cannot" do

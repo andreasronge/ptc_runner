@@ -87,6 +87,30 @@ defmodule PtcRunner.Kernel.EvalTest do
              Eval.run(suite: "mini", mode: :live, model: "openai:gpt")
   end
 
+  test "bedrock live preflight requires bearer token or AWS key pair" do
+    keys = [
+      "AWS_BEARER_TOKEN_BEDROCK",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN"
+    ]
+
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    Enum.each(keys, &System.delete_env/1)
+    System.put_env("AWS_ACCESS_KEY_ID", "access-only")
+
+    on_exit(fn ->
+      Enum.each(previous, fn {key, value} -> restore_env(key, value) end)
+    end)
+
+    assert {:error,
+            {:missing_api_key,
+             "AWS_BEARER_TOKEN_BEDROCK or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY",
+             "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"}} =
+             Eval.run(suite: "mini", mode: :live, model: "bedrock:haiku")
+  end
+
   defp restore_env(_key, nil), do: :ok
   defp restore_env(key, value), do: System.put_env(key, value)
 
