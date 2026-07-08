@@ -33,6 +33,37 @@ Interleave three activities, cheapest-first:
 - Honest reporting: pass rates over N runs for stochastic claims, no
   mock-data-presented-as-benchmark.
 
+### Seam and value-shape checklist (every boundary change)
+
+Re-ask these on every change touching a host↔prelude or host↔provider
+boundary. Each question exists because a review round found its class —
+answer them at brief-writing time, not at review time:
+
+- **Projection path.** When the substrate offers more than one result/memory
+  projection (public vs native), which one must this consumer use? Is that
+  declared in the provider's moduledoc, and pinned by a test at both ends of
+  the seam? Load-bearing path constraints go in the goal brief's task
+  contract, never only in "Read first" material. (M3: the kernel consumed
+  the normalizing path; runtime-callable aliases were silently dropped even
+  though S2 had recorded the fact.)
+- **Value-shape space.** Deterministic tests cover flows, not shapes. Any
+  boundary accepting arbitrary model-produced values needs a generative
+  property: sizing is total (integer or `:oversized`, never a raise),
+  previews respect bounds with honest truncation flags, feedback rendering
+  always returns a string, and whatever turn N defines is usable on turn
+  N+1. (M3 round 2: structs, runtime functions, and unencodable payloads
+  all broke paths the flow tests passed.)
+- **Shared-state atomicity.** All owner-process mutations are single atomic
+  operations (AGENTS.md rule). Deferring a hardening spike (S12) never
+  defers free correctness idioms.
+- **Config space.** Every caller-supplied option is validated fail-closed
+  with a stable error. Erlang term ordering makes `368 <= nil` true — an
+  unvalidated cap is a silently disabled cap.
+- **Boundary shapes.** The exact shape crossing a seam is pinned by a test
+  at both ends, plus one deterministic live path end-to-end. (M1: three
+  rounds of retry-transport bugs were invisible to mocks and a single-turn
+  smoke.)
+
 ## Testing & Evaluation Strategy
 
 One blessed path per tier. Future work (human or agent) extends these paths;
@@ -424,7 +455,8 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   cases, `max_turns`, model, runner, and host-held memory behavior stay fixed;
   feedback variants must preserve the `untrusted_eval_result.memory_summary`
   boundary and may only change wording. N repeats per case per variant report
-  pass counts as directional evidence, not statistics.
+  pass counts as directional evidence, not statistics. Autonomous brief:
+  [`autonomous-s19-feedback-provenance-prereg.md`](autonomous-s19-feedback-provenance-prereg.md).
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is
@@ -478,6 +510,16 @@ as the goal brief.
   memory cap breach fails closed while preserving prior state. Feedback now
   tells variants to use `untrusted_eval_result.memory_summary`; live payoff
   probe remains open.
+- [ ] Memory-boundary property test: generated definition forms (`def`,
+  `defn`, runtime-callable aliases like `(def add +)`, sets, nested
+  closures, large/unencodable values) round-trip through host-held memory —
+  pinning `RetainedSize` totality, preview bounds with honest flags,
+  `eval-feedback` string totality, and turn-N+1 usability of every surviving
+  definition. Retires the value-shape finding class from the M3 review
+  rounds; Formatter roundtrip property is the in-repo precedent.
+- [ ] Canonical memory-path declaration: `Lisp.run/2` moduledoc names which
+  memory projection host-side consumers (kernel, embedders) must use and
+  what the normalizing path is for — lands with the native-result-path fix.
 - [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.

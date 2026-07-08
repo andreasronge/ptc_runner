@@ -48,6 +48,10 @@ how it was verified.
   milliseconds (`duration_ms`).
 - Never nest multiple modules in one file. Avoid `mix deps.clean --all`.
 - After fixing a dialyzer/Credo issue, re-run the tool to verify — never assume.
+- Owner-process state (Agent, GenServer) is mutated only through single
+  atomic operations (`Agent.get_and_update/2`, or run the work inside the
+  owner). A separate `Agent.get` followed by `Agent.update` on the same
+  agent is a read-modify-write race and review-blocking.
 - Use `gh` for GitHub tasks. When touching LLM integrations, verify model IDs
   are current and check `.env` overrides.
 
