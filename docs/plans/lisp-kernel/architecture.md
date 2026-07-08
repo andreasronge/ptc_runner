@@ -37,6 +37,11 @@ becomes a prelude diff, A/B-measurable with zero Elixir changes.**
   `(llm/call ...)` as a granted capability, never a global builtin.
 - `docs/plans/future/model-visible-content-surfaces.md` — Treatment A
   (truncation hints) is the natural first A/B for the feedback prelude.
+- `docs/plans/lisp-kernel/autonomous-symbol-inventory-rendering.md` — the
+  follow-up substrate for presenting `data/`, tools, memory, and prelude
+  exports through one sanitized symbol inventory. It is prompt/rendering policy,
+  not runtime authority, and must stay compatible with the deferred `RunEnv`
+  split.
 
 ## Boundary: Mechanism (kernel) vs Policy (prelude)
 
@@ -408,6 +413,10 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     The S19 frozen variants prove a feedback-only swap changes only the
     `agent.feedback` component hash while `agent.prompt` and `agent.core`
     hashes remain fixed.
+18. Prompt syntax correction, 2026-07-08: the kernel prompt now teaches the
+    per-symbol distinction that caused the C probe failure: value symbols are
+    used directly, while only function symbols are called. This is a prompt
+    policy fix, not a runtime change; `(data/x)` is still not made callable.
 
 ## Open decisions
 
@@ -510,6 +519,12 @@ Record the resolution here when made:
 - **D18 — Release/API shape.** Whether kernel modules, eval harnesses, and
   preludes are experiment-internal, public experimental API, or shipped stable
   surface; includes package/release-smoke treatment for `priv/preludes`.
+- **D19 — Symbol inventory rendering.** Open for S20. The target is a shared
+  sanitized projection for `data/`, tools, user memory, and prelude exports
+  with explicit per-symbol `kind` (`value` vs `function`), type/sample/doc, and
+  usage shape. Rendering policy may be swapped and later made turn-aware, but
+  it must not grant capabilities, expose hidden exports, leak raw data/memory,
+  or move eval-input options into `RunEnv`.
 
 ## Out of scope for the experiment
 
