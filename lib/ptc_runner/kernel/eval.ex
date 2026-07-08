@@ -25,13 +25,22 @@ defmodule PtcRunner.Kernel.Eval do
   @spec run(keyword()) :: {:ok, result()} | {:error, term()}
   def run(opts \\ []) do
     suite = Keyword.get(opts, :suite, "mini")
+
+    with :ok <- validate_suite(suite),
+         {:ok, cases} <- select_cases(Keyword.get(opts, :case)) do
+      run_cases(cases, Keyword.put(opts, :suite, suite))
+    end
+  end
+
+  @doc false
+  @spec run_cases([map()], keyword()) :: {:ok, result()} | {:error, term()}
+  def run_cases(cases, opts \\ []) when is_list(cases) do
+    suite = Keyword.get(opts, :suite, "custom")
     mode = Keyword.get(opts, :mode, :mock)
     runs = Keyword.get(opts, :runs, 1)
 
-    with :ok <- validate_suite(suite),
-         :ok <- validate_runs(runs),
-         {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)),
-         {:ok, cases} <- select_cases(Keyword.get(opts, :case)) do
+    with :ok <- validate_runs(runs),
+         {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
       results =
         for run_index <- 1..runs,
             eval_case <- cases do
@@ -71,6 +80,7 @@ defmodule PtcRunner.Kernel.Eval do
         id: "arithmetic",
         task: "Return the integer result of 40 + 2.",
         context: %{},
+        expected: 42,
         max_turns: 3,
         mock_programs: [~S|(return (+ 40 2))|]
       },
@@ -85,6 +95,7 @@ defmodule PtcRunner.Kernel.Eval do
             %{"kind" => "keep"}
           ]
         },
+        expected: 2,
         max_turns: 5,
         mock_programs: [~S|(return (count (filter #(= (% "kind") "keep") data/items)))|]
       },
@@ -93,6 +104,7 @@ defmodule PtcRunner.Kernel.Eval do
         task:
           "Use context key numbers, available as data/numbers. Return the sum of all numbers.",
         context: %{"numbers" => [2, 4, 6]},
+        expected: 12,
         max_turns: 5,
         mock_programs: [~S|(return (reduce + data/numbers))|]
       },
@@ -103,6 +115,7 @@ defmodule PtcRunner.Kernel.Eval do
         tools: %{
           "lookup" => fn %{"id" => "alpha"} -> %{"score" => 9} end
         },
+        expected: 9,
         max_turns: 5,
         mock_programs: [~S|(return ((tool/lookup {"id" "alpha"}) "score"))|]
       },
@@ -110,6 +123,7 @@ defmodule PtcRunner.Kernel.Eval do
         id: "eval_retry",
         task: "Return the integer 3. If a previous program did not return, retry with return.",
         context: %{},
+        expected: 3,
         max_turns: 5,
         mock_programs: [~S|(+ 1 2)|, ~S|(return 3)|]
       }
@@ -136,10 +150,43 @@ defmodule PtcRunner.Kernel.Eval do
   defp resolve_model(other, _model), do: {:error, {:unknown_mode, other}}
 
   defp ensure_key(model) do
-    if ReqLLMAdapter.requires_api_key?(model) and is_nil(System.get_env("OPENROUTER_API_KEY")) do
-      {:error, {:missing_api_key, "OPENROUTER_API_KEY", model}}
+    if ReqLLMAdapter.requires_api_key?(model) do
+      ensure_provider_key(model)
     else
       :ok
+    end
+  end
+
+  defp ensure_provider_key(model) do
+    provider = Registry.provider_from_model(model)
+
+    cond do
+      provider in [:amazon_bedrock, :bedrock] ->
+        ensure_any_env(model, [
+          "AWS_BEARER_TOKEN_BEDROCK",
+          "AWS_ACCESS_KEY_ID",
+          "AWS_SESSION_TOKEN"
+        ])
+
+      is_atom(provider) ->
+        case ReqLLM.Keys.get(provider, []) do
+          {:ok, _key, _source} ->
+            :ok
+
+          {:error, _reason} ->
+            {:error, {:missing_api_key, ReqLLM.Keys.env_var_name(provider), model}}
+        end
+
+      true ->
+        :ok
+    end
+  end
+
+  defp ensure_any_env(model, keys) do
+    if Enum.any?(keys, &(System.get_env(&1) not in [nil, ""])) do
+      :ok
+    else
+      {:error, {:missing_api_key, Enum.join(keys, " or "), model}}
     end
   end
 
@@ -245,8 +292,8 @@ defmodule PtcRunner.Kernel.Eval do
   defp build_case_result(eval_case, run_index, result, events, started) do
     {status, value, failure_reason} =
       case result do
-        {:ok, %{"value" => value}} -> {:pass, value, nil}
-        {:ok, other} -> {:pass, other, nil}
+        {:ok, %{"value" => value}} -> verify_expected(eval_case, value)
+        {:ok, other} -> verify_expected(eval_case, other)
         {:error, %{"reason" => reason}} -> {:fail, nil, reason}
         {:error, other} -> {:fail, nil, inspect(other, limit: 5)}
       end
@@ -262,6 +309,19 @@ defmodule PtcRunner.Kernel.Eval do
       duration_ms: duration_ms(started),
       trace: events
     }
+  end
+
+  defp verify_expected(eval_case, value) do
+    case Map.fetch(eval_case, :expected) do
+      {:ok, ^value} ->
+        {:pass, value, nil}
+
+      {:ok, expected} ->
+        {:fail, value, "expected_mismatch expected=#{inspect(expected)} actual=#{inspect(value)}"}
+
+      :error ->
+        {:fail, value, "missing_expected"}
+    end
   end
 
   defp sanitize_event(%{"event" => "action", "turn" => turn, "action" => action}) do

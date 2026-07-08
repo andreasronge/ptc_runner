@@ -515,42 +515,50 @@ or provider dumps by default, and must make prelude policy changes observable.
 **Method.** Implement `PtcRunner.Kernel.Eval` plus
 `mix ptc.kernel_eval --suite mini`. Cases: arithmetic, context filter/count,
 context aggregation, one granted domain tool, and forced eval retry. Mock mode
-uses scripted tool calls. Live mode resolves `PTC_TEST_MODEL`/`--model` via
-`PtcRunner.LLM.Registry`; the `eval_retry` live case rewrites the first
+uses scripted tool calls and each case has an explicit expected value oracle.
+Live mode resolves `PTC_TEST_MODEL`/`--model` via `PtcRunner.LLM.Registry`;
+provider-key preflight uses the resolved provider instead of assuming
+OpenRouter. The `eval_retry` live case rewrites the first
 tool-call program to omit `(return ...)` so the retry path is deterministic.
 Reports print per-case status, action count, eval count, and failure reason
 without raw prompts/messages/provider dumps.
 
-**Pass.** Mock mode passes and the redaction test proves reports omit API-key
-strings, raw system prompt text, message payloads, tool-call payloads, and full
-programs. If `OPENROUTER_API_KEY` is present, a live DeepSeek run completes and
-records the full table, including failures.
+**Pass.** Mock mode passes against expected values and the redaction test proves
+reports omit API-key strings, raw system prompt text, message payloads,
+tool-call payloads, and full programs. If `OPENROUTER_API_KEY` is present, a
+live DeepSeek run completes and records the full table, including failures.
 **Fail.** The mix task needs test-only helpers, leaks raw prompts/API material,
 or live DeepSeek cannot complete even arithmetic/retry cases.
 
 **Result.** PASS for the runner and partial PASS for live DeepSeek,
 2026-07-08. Evidence:
 `mix test test/ptc_runner/kernel/eval_test.exs` passed; `mix ptc.kernel_eval
---suite mini` passed 5/5 in mock mode. Initial live DeepSeek full-suite run
-after the split passed 2/5: arithmetic and forced retry passed, while
-filter/count, aggregation, and domain tool hit `turn_limit_exceeded`.
+--suite mini` passed 5/5 in mock mode with expected-value checks. A regression
+test proves a scripted wrong answer fails with `expected_mismatch`, and live
+mode now reports provider-specific missing key names before making requests.
+Initial live DeepSeek full-suite run after the split passed 2/5: arithmetic and
+forced retry passed, while filter/count, aggregation, and domain tool hit
+`turn_limit_exceeded`.
 Prelude-only prompt changes then exposed generic context JSON, granted tool
 names, concrete `(tool/name args)` syntax, and `data/x` context access; no
 Elixir loop-logic change was needed. After those changes, `domain_tool` passed
 as a single live case in 2 actions/2 evals, `context_aggregation` passed as a
-single live case in 1 action/1 eval, and the final full live mini run passed
-4/5:
+single live case in 1 action/1 eval, and the first full live mini run passed
+4/5 under the original runtime-success-only status rule. After the harness was
+tightened to require expected-value matches, the oracle-checked full live run
+passed 3/5:
 
 | case | status | actions | evals | failure |
 | --- | --- | ---: | ---: | --- |
 | arithmetic | pass | 1 | 1 | |
-| context_filter_count | pass | 3 | 3 | |
+| context_filter_count | pass | 2 | 2 | |
 | context_aggregation | fail | 5 | 5 | turn_limit_exceeded |
-| domain_tool | pass | 2 | 2 | |
+| domain_tool | fail | 2 | 2 | `expected_mismatch expected=9 actual=%{"score" => 9}` |
 | eval_retry | pass | 2 | 2 | |
 
 Conclusion: compact prompt-prelude wording materially changes live behavior,
-but aggregation recovery remains unstable and should not be promoted as solved.
+but aggregation recovery and exact scalar extraction from tool results remain
+unstable and should not be promoted as solved.
 
 ---
 

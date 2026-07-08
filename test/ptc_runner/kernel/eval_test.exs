@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.EvalTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Eval
 
@@ -11,6 +11,14 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert report.model == nil
     assert length(report.cases) == 5
     assert Enum.all?(report.cases, &(&1.status == :pass))
+
+    assert Map.new(report.cases, &{&1.case, &1.value}) == %{
+             "arithmetic" => 42,
+             "context_filter_count" => 2,
+             "context_aggregation" => 12,
+             "domain_tool" => 9,
+             "eval_retry" => 3
+           }
 
     retry = Enum.find(report.cases, &(&1.case == "eval_retry"))
     assert retry.action_count == 2
@@ -45,4 +53,43 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert {:error, {:unknown_case, "missing"}} =
              Eval.run(suite: "mini", mode: :mock, case: "missing")
   end
+
+  test "mock cases fail when returned value does not match expected value" do
+    wrong_case = %{
+      id: "wrong_answer",
+      task: "Return the integer result of 40 + 2.",
+      context: %{},
+      expected: 42,
+      max_turns: 3,
+      mock_programs: [~S|(return 0)|]
+    }
+
+    assert {:ok, report} = Eval.run_cases([wrong_case], mode: :mock)
+    assert [case_result] = report.cases
+    assert case_result.status == :fail
+    assert case_result.value == 0
+    assert case_result.failure_reason =~ "expected_mismatch"
+  end
+
+  test "live mode reports provider-specific missing key" do
+    previous_env = System.get_env("OPENAI_API_KEY")
+    previous_config = Application.get_env(:req_llm, :openai_api_key)
+
+    System.delete_env("OPENAI_API_KEY")
+    Application.delete_env(:req_llm, :openai_api_key)
+
+    on_exit(fn ->
+      restore_env("OPENAI_API_KEY", previous_env)
+      restore_config(:openai_api_key, previous_config)
+    end)
+
+    assert {:error, {:missing_api_key, "OPENAI_API_KEY", "openai:gpt-4.1-mini"}} =
+             Eval.run(suite: "mini", mode: :live, model: "openai:gpt")
+  end
+
+  defp restore_env(_key, nil), do: :ok
+  defp restore_env(key, value), do: System.put_env(key, value)
+
+  defp restore_config(_key, nil), do: :ok
+  defp restore_config(key, value), do: Application.put_env(:req_llm, key, value)
 end
