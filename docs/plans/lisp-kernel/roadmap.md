@@ -256,12 +256,17 @@ the answer.
   2026-07-07): keys stringified, keyword values collapsed to strings
   (eval.ex ~1166–1270); closure tuples preserved (lisp.ex:1209) — recorded in
   architecture.md fact 8. S2 remains to measure the practical consequence.
-- [ ] **R7 — TraceLog/TraceContext contract**: minimal way for the kernel to emit
+- [x] **R7 — TraceLog/TraceContext contract**: minimal way for the kernel to emit
   `TurnEvent`s so existing `log/` introspection and `args_hash` duplicate-call
   metrics work on kernel runs; nested `TraceLog.with_trace`, outer loop trace
   vs inner model eval trace, `record_turn_event` vs `write_to_active`, child
   trace propagation, one-shot `TraceContext` cleanup, and nil-token handling.
-  (Feeds D4 and M3 measurement.)
+  Answered 2026-07-09 by D4 implementation: `Kernel.run/2` captures the parent
+  TraceContext before entering the sandbox, attaches it in the private tool
+  process, and emits via `TraceLog.record_turn_event/1`; tests prove JSONL and
+  MemorySink capture plus Session/SubAgent/Kernel shape parity. Implementation
+  brief:
+  [`autonomous-d4-kernel-turn-events.md`](autonomous-d4-kernel-turn-events.md).
 - [ ] **R8 — SubAgent loop autopsy** (already largely done in the
   investigation session): per-turn control flow of `loop.ex` driver_loop,
   `turn_feedback.ex`, retry/must-return phases — as the checklist of behaviors
@@ -559,8 +564,9 @@ as the goal brief.
   latest recorded live DeepSeek full-suite run passed 4/6 on 2026-07-08:
   memory persistence passed, domain-tool scalar extraction stayed red, and
   aggregation remained unstable.
-- [ ] Kernel emits turn events (per D4) so runs are measurable with existing
-  tooling.
+- [x] Kernel emits turn events (per D4) so runs are measurable with existing
+  tooling. Plan:
+  [`autonomous-d4-kernel-turn-events.md`](autonomous-d4-kernel-turn-events.md).
 - [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
   decisions; S11/S12 pass before widening live runs.
 - [ ] Parity per rule: Tier 2 run with `--variant kernel` AND

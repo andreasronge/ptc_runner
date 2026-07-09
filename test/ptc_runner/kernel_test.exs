@@ -6,6 +6,8 @@ defmodule PtcRunner.KernelTest do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.PreludeStore
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.MemorySink
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
   alias ReqLLM.ToolCall
@@ -578,8 +580,8 @@ defmodule PtcRunner.KernelTest do
 
             (defn run-mission [mission cfg]
               (let [parallel (pcalls
-                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"a\\"}) (def a 1))"}))
-                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"b\\"}) (def b 2))"})))
+                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"a\\"}) (def a 1))" "turn" 0}))
+                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"b\\"}) (def b 2))" "turn" 0})))
                     statuses (map #(% "status") parallel)
                     reasons (map #(% "reason") parallel)]
                 (return {"statuses" statuses
@@ -1076,7 +1078,6 @@ defmodule PtcRunner.KernelTest do
              role: "kernel_default",
              grant_fingerprint: "sha256:" <> _,
              prelude_store_access: :none,
-             symbol_inventory_renderer: :default,
              selected_refs: ["agent.core@1"],
              resolved_refs: resolved_refs
            } = prelude_summary.role_prelude_selection
@@ -1089,6 +1090,185 @@ defmodule PtcRunner.KernelTest do
     assert content =~ "agent.core/run-mission [mission cfg]"
     assert content =~ "agent.prompt/task-message [mission cfg]"
     refute content =~ "(ns agent.core"
+  end
+
+  test "role-backed kernel turn events include source-free role and prelude provenance" do
+    {:ok, store} = seeded_agent_prelude_store()
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}
+                       ],
+                       tokens: %{input: 3, output: 4}
+                     }
+                   ]),
+                 prelude_store: store,
+                 role_policy: kernel_role_policy(),
+                 role: "kernel_default",
+                 kernel_run_id: "role-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [turn] = MemorySink.events(sink)
+    assert turn["driver"] == "kernel"
+    assert turn["agent_id"] == "role-turn"
+    assert turn["role"] == "kernel_default"
+    assert "sha256:" <> _ = turn["grant_fingerprint"]
+    assert turn["turn"] == 1
+    assert turn["attempt"] == 1
+    assert turn["input_tokens"] == 3
+    assert turn["output_tokens"] == 4
+    assert turn["data"]["program"] == "(return (+ 40 2))"
+    assert [%{"components" => components}] = turn["data"]["preludes"]
+    assert Enum.map(components, & &1["id"]) == ~w(agent.prompt agent.feedback agent.core)
+
+    projection = turn["data"]["prelude_projection"]
+    assert projection["selected_refs"] == ["agent.core@1"]
+
+    assert Enum.map(projection["resolved_refs"], & &1["id"]) ==
+             ~w(agent.prompt agent.feedback agent.core)
+
+    assert turn["data"]["prelude_presentation"] == %{"symbol_inventory_renderer" => :default}
+
+    inspected = inspect(turn)
+    refute inspected =~ "(ns agent.core"
+    refute inspected =~ "(ns agent.prompt"
+    refute inspected =~ "system-message"
+  end
+
+  test "unsafe debug request payloads stay out of canonical kernel turn events" do
+    parent = self()
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm(
+                     [
+                       %{
+                         tool_calls: [
+                           %{name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+                         ]
+                       }
+                     ],
+                     parent
+                   ),
+                 unsafe_debug: true,
+                 events: &send(parent, {:event, &1}),
+                 kernel_run_id: "unsafe-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert_received {:event, %{"event" => "unsafe_llm_request", "system" => system}}
+    assert is_binary(system)
+
+    assert [turn] = MemorySink.events(sink)
+    inspected = inspect(turn)
+    refute inspected =~ system
+    refute inspected =~ "unsafe_llm_request"
+    refute inspected =~ "messages"
+    assert turn["data"]["program"] == "(return 42)"
+  end
+
+  test "kernel turn events classify explicit model program fail as failed" do
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:error, %{"reason" => "model_program_failed"}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(fail {:reason :bad})"}}
+                       ]
+                     }
+                   ]),
+                 kernel_run_id: "fail-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [turn] = MemorySink.events(sink)
+    assert turn["driver"] == "kernel"
+    assert turn["turn"] == 0
+    assert turn["attempt"] == 1
+    assert turn["committed"] == false
+    assert turn["status"] == "error"
+    assert turn["data"]["fail"]["reason"] == "bad"
+    assert turn["data"]["fail"]["message"] == "model program failed"
+
+    assert [summary] = TraceLog.Analyzer.sessions([turn])
+    assert summary.committed == 0
+    assert summary.failed == 1
+  end
+
+  test "kernel turn events keep attempts separate from committed turns across retry" do
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{content: "not a tool call"},
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+                       ]
+                     }
+                   ]),
+                 kernel_run_id: "retry-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [protocol, success] = MemorySink.events(sink)
+
+    assert protocol["turn"] == 0
+    assert protocol["attempt"] == 1
+    assert protocol["committed"] == false
+    assert protocol["status"] == "error"
+    assert protocol["data"]["turn_type"] == "protocol_error"
+
+    assert success["turn"] == 1
+    assert success["attempt"] == 2
+    assert success["committed"] == true
+    assert success["status"] == "ok"
+  end
+
+  test "variant agent.core missing eval turn fails closed" do
+    assert {:error, %{reason: "kernel_error", step: step}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: fn _ -> {:error, :unexpected_llm_call} end,
+               prelude_source_overrides: %{
+                 "agent.core" => """
+                 (ns agent.core
+                   "Stale variant missing eval-program turn."
+                   {:visibility :prompt})
+
+                 (defn run-mission [mission cfg]
+                   (tool/eval-program {"program" "(return 42)"}))
+                 """
+               }
+             )
+
+    assert step.fail.reason == :private_tool_args_error
+    assert step.fail.message =~ "Private tool 'eval-program' arguments failed validation"
+    assert step.fail.message =~ "turn: expected field"
   end
 
   test "role-backed prelude selection denies ungranted requested refs" do

@@ -1,10 +1,11 @@
 defmodule PtcRunner.TraceLog.TurnEvent do
   @moduledoc """
   Shared builder for the canonical *turn* event — the substrate-level record
-  of one driver turn, emitted identically by both turn drivers (plan D1):
+  of one driver turn, emitted identically by all turn drivers:
 
   - `PtcRunner.Session` turns (external LLM drives via MCP / `mix ptc.repl`), and
-  - the `PtcRunner.SubAgent` loop (the internal loop drives the LLM).
+  - the `PtcRunner.SubAgent` loop (the internal loop drives the LLM), and
+  - `PtcRunner.Kernel` turns (native tool-call kernel loop).
 
   Both drivers build their turn record through `build/1` so the top-level shape
   is identical and queryable through the same `PtcRunner.TraceLog.Analyzer`
@@ -18,18 +19,20 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   ## Top-level fields
 
       schema_version, event ("turn"),
-      driver ("session" | "sub_agent"),
+      driver ("session" | "sub_agent" | "kernel"),
       session_id, agent_id, agent_name, role, grant_fingerprint,
       turn, attempt, committed, status,
       duration_ms, input_tokens, output_tokens, total_tokens,
       data
 
-  `turn` is the committed-state counter (advances only when an attempt commits);
-  `attempt` is the monotonic per-attempt counter (advances on every attempt,
-  including failed ones); `committed` flags whether this attempt advanced
-  committed state. Failed/parse-error/budget-stop attempts are recorded with
-  `committed: false` so wasted work is visible without mutating driver state
-  (plan P2 notes).
+  `turn` is the canonical committed-turn counter (advances only when an attempt
+  succeeds); `attempt` is the monotonic per-attempt counter (advances on every
+  attempt, including failed ones); `committed` flags whether this attempt
+  advanced that canonical turn counter. Driver-local state can have finer
+  semantics: for example, the kernel may preserve PTC-Lisp memory from an
+  explicit `(fail ...)` eval while still recording the turn event as
+  `committed: false` because the model attempt did not produce a successful
+  kernel turn.
 
   ## `data` bag
 
@@ -67,9 +70,9 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   @doc """
   Builds the canonical turn-event map from normalized attributes.
 
-  Required: `:driver` (`:session` | `:sub_agent`). All other keys are optional
-  and default to nil / empty. `trace_id`/`timestamp`/`seq` are intentionally
-  omitted — the sink stamps them.
+  Required: `:driver` (`:session` | `:sub_agent` | `:kernel`). All other keys
+  are optional and default to nil / empty. `trace_id`/`timestamp`/`seq` are
+  intentionally omitted — the sink stamps them.
   """
   @spec build(attrs()) :: map()
   def build(attrs) do
@@ -100,7 +103,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   @doc """
   Renders a bounded, JSON-safe preview string for a turn result value.
 
-  Shared by both drivers so `result_preview` reads the same regardless of who
+  Shared by turn drivers so `result_preview` reads the same regardless of who
   produced the turn.
   """
   @spec preview(term(), keyword()) :: String.t()
@@ -229,7 +232,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   "namespaces" => ..., "components" => [...]}]`, or `[]` when no prelude was
   attached. The `components` key is omitted for single-source prelude artifacts.
 
-  Shared by both drivers so the provenance field (the single field that makes
+  Shared by turn drivers so the provenance field (the single field that makes
   A/B benchmarking and derivation provenance trivial, per the plan) reads
   identically whether a session or a SubAgent turn produced it.
   """

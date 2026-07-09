@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   @variant_c_feedback_hash "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"
   @variant_c_prompt_hash "82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746"
   @prompt_hash "82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746"
-  @core_hash "04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f"
+  @core_hash "7465d62ddc39b73969860acd45604bccbb3537aa2962ce662430d98cd5ed429a"
 
   @type result :: %{
           suite: String.t(),
@@ -109,8 +109,9 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
     ## Claim Boundary
 
-    This run is descriptive only. D4 canonical TurnEvents are not present, so
-    these outcomes do not support an M3 verdict or statistical superiority claim.
+    This run is descriptive only. Canonical TurnEvents may be available for
+    diagnostics, but this command does not supply the preregistered M3 sample
+    size, stopping rules, or statistical plan required for a superiority claim.
     """
     |> String.trim()
   end

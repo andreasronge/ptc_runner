@@ -268,18 +268,28 @@ selection as today. It must remain deterministic and keep the current
 `@external_resource` behavior for package/recompile safety.
 
 `PtcRunner.Kernel.run/2` should record role metadata in the existing sanitized
-prelude event/report path:
+prelude event/report path and in D4 kernel TurnEvents. D4 consuming code now
+expects the compiled prelude metadata key
+`prelude.metadata[:role_prelude_selection]` to have this bounded host-authored
+shape:
 
-- accepted role or nil;
-- grant fingerprint or nil;
-- requested refs or default-selected refs;
-- direct selected refs;
-- resolved dependency closure;
-- aggregate bundle hashes from `Prelude.trace_summary/1`;
-- renderer id from the run option, if supplied.
+- `:role` - accepted role or nil;
+- `:grant_fingerprint` - stable normalized grant fingerprint or nil;
+- `:selected_refs` - requested refs or role `default_preludes`;
+- `:resolved_refs` - resolved dependency closure with public ids, versions,
+  checksums, origins, namespaces, and required-by metadata;
+- `:prelude_store_access` - the role grant's current store authority.
 
 Do not include source text, prompt wording, raw mission context, raw memory, or
-private tool closures in this metadata.
+private tool closures in this metadata. Renderer choice remains run-level
+presentation policy in this plan; do not add `symbol_inventory_renderer` to the
+shared role grant. If kernel reports need presentation metadata, project it from
+the run option into the report/Event field separately from authority metadata.
+
+The role/store path must seed `agent.core` from the current source that passes
+`"turn"` to both `llm-complete` and `eval-program`. `eval-program` treats
+missing or non-integer `"turn"` as a fail-closed prelude contract error; do not
+keep compatibility with stale stored `agent.core` variants.
 
 ### Phase 4 - Prelude Store Loading Boundary
 
@@ -341,8 +351,16 @@ Add focused tests before considering any live run:
 - a role with no selected prelude permission fails closed;
 - role-selected kernel run produces the same mock result as the embedded
   default for a simple mission;
+- role-selected and embedded-default kernel runs produce equivalent D4
+  TurnEvent correlation for a simple mission, including one-based `attempt`,
+  committed `turn`, and matching `program`;
 - sanitized run metadata includes role/fingerprint/selected refs but no source
   or prompt text;
+- role-selected kernel TurnEvents include the expected source-free
+  `role_prelude_selection` projection (`role`, `grant_fingerprint`,
+  `selected_refs`, `resolved_refs`, and `prelude_store_access`);
+- stale stored `agent.core` sources that omit `eval-program` `"turn"` fail
+  closed instead of producing orphaned or misleading TurnEvents;
 - renderer selection remains a run option and is not accepted inside the shared
   role grant;
 - per-write `PreludeStore.write/5` origin is preserved in candidate provenance
@@ -413,7 +431,7 @@ The plan is complete when:
 - no-policy default behavior remains green and deterministic;
 - role-selected provenance is visible in sanitized reports/events;
 - tests prove role selection and embedded default compile equivalent `agent.*`
-  runtime behavior;
+  runtime behavior and equivalent D4 TurnEvent correlation;
 - `preludes` keeps MCP allowlist semantics and `default_preludes` supplies the
   non-interactive kernel default selection;
 - per-write origin is preserved through `PreludeStore.write/4`;

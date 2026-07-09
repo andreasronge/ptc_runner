@@ -6,6 +6,7 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel, as: LispKernel
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.{PreludeStore, Session, SubAgent, TraceLog}
   alias PtcRunner.TraceContext
@@ -33,8 +34,39 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
     path |> Analyzer.load() |> Analyzer.turn_events()
   end
 
-  describe "both drivers produce the same turn-event shape" do
-    test "session and SubAgent turns share top-level + data keys", %{tmp_dir: dir} do
+  defp kernel_llm(program, tokens \\ %{input: 11, output: 7}) do
+    fn _request ->
+      {:ok,
+       %{
+         tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => program}}],
+         tokens: tokens
+       }}
+    end
+  end
+
+  defp kernel_turn_events(dir, name, opts \\ []) do
+    path = Path.join(dir, "#{name}.jsonl")
+    program = Keyword.get(opts, :program, "(return 42)")
+    mission = Keyword.get(opts, :mission, %{"task" => "Compute"})
+    tools = Keyword.get(opts, :tools, %{})
+
+    {:ok, {:ok, _result}, ^path} =
+      TraceLog.with_trace(
+        fn ->
+          LispKernel.run(mission,
+            llm: kernel_llm(program),
+            tools: tools,
+            kernel_run_id: "kernel-#{name}"
+          )
+        end,
+        path: path
+      )
+
+    path |> Analyzer.load() |> Analyzer.turn_events()
+  end
+
+  describe "all drivers produce the same turn-event shape" do
+    test "session, SubAgent, and Kernel turns share top-level + data keys", %{tmp_dir: dir} do
       session_turns =
         session_turn_events(dir, "session", fn ->
           session = Session.new(session_id: "sess-A")
@@ -48,30 +80,43 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
           SubAgent.run(agent, llm: mock_llm(["(+ 1 2)", "(return 42)"]))
         end)
 
+      kernel_turns = kernel_turn_events(dir, "kernel-shape")
+
       assert session_turns != []
       assert sub_turns != []
+      assert kernel_turns != []
 
       session_event = hd(session_turns)
       sub_event = hd(sub_turns)
+      kernel_event = hd(kernel_turns)
 
       # Identical top-level shape across drivers (values differ; keys do not).
       assert Map.keys(session_event) |> Enum.sort() == Map.keys(sub_event) |> Enum.sort()
+      assert Map.keys(session_event) |> Enum.sort() == Map.keys(kernel_event) |> Enum.sort()
 
       assert Map.keys(session_event["data"]) |> Enum.sort() ==
                Map.keys(sub_event["data"]) |> Enum.sort()
 
+      assert Map.keys(session_event["data"]) |> Enum.sort() ==
+               Map.keys(kernel_event["data"]) |> Enum.sort()
+
       assert session_event["driver"] == "session"
       assert sub_event["driver"] == "sub_agent"
+      assert kernel_event["driver"] == "kernel"
       assert session_event["event"] == "turn"
       assert sub_event["event"] == "turn"
+      assert kernel_event["event"] == "turn"
 
       # The collector stamped correlation fields the builder left out.
       assert is_binary(session_event["trace_id"])
       assert is_integer(session_event["seq"])
       assert is_binary(session_event["timestamp"])
+      assert is_binary(kernel_event["trace_id"])
+      assert is_integer(kernel_event["seq"])
+      assert is_binary(kernel_event["timestamp"])
     end
 
-    test "both are queryable through the same Analyzer.sessions/1 call", %{tmp_dir: dir} do
+    test "all drivers are queryable through the same Analyzer.sessions/1 call", %{tmp_dir: dir} do
       session_turns =
         session_turn_events(dir, "s", fn ->
           session = Session.new(session_id: "sess-Q")
@@ -85,7 +130,9 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
           SubAgent.run(agent, llm: mock_llm(["(+ 1 1)", "(return 7)"]))
         end)
 
-      combined = session_turns ++ sub_turns
+      kernel_turns = kernel_turn_events(dir, "kernel-query")
+
+      combined = session_turns ++ sub_turns ++ kernel_turns
       summaries = Analyzer.sessions(combined)
 
       # One summary per correlation id (session_id for sessions, agent_id for
@@ -93,15 +140,21 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert Enum.any?(summaries, &(&1.correlation_id == "sess-Q" and &1.driver == "session"))
       assert Enum.any?(summaries, &(&1.driver == "sub_agent"))
 
+      assert Enum.any?(
+               summaries,
+               &(&1.correlation_id == "kernel-kernel-query" and &1.driver == "kernel")
+             )
+
       sess_summary = Enum.find(summaries, &(&1.correlation_id == "sess-Q"))
       assert sess_summary.turns == 2
       assert sess_summary.committed == 2
 
       assert Analyzer.session_turns(combined, "sess-Q") == session_turns
       assert "(inc a)" in Analyzer.programs(session_turns)
+      assert ["(return 42)"] == Analyzer.programs(kernel_turns)
     end
 
-    test "both drivers record hashed tool-call identity in canonical turn events", %{
+    test "all drivers record hashed tool-call identity in canonical turn events", %{
       tmp_dir: dir
     } do
       tools = %{"fetch" => fn %{"id" => id} -> %{"id" => id} end}
@@ -118,18 +171,28 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
           SubAgent.run(agent, llm: mock_llm([~S|(return (tool/fetch {:id 1}))|]))
         end)
 
+      kernel_turns =
+        kernel_turn_events(dir, "kernel-tools",
+          program: ~S|(return (tool/fetch {:id 1}))|,
+          tools: tools
+        )
+
       assert [session_call] = hd(session_turns)["data"]["tool_calls"]
       assert [sub_call] = hd(sub_turns)["data"]["tool_calls"]
+      assert [kernel_call] = hd(kernel_turns)["data"]["tool_calls"]
 
       assert session_call["tool"] == "fetch"
       assert sub_call["tool"] == "fetch"
+      assert kernel_call["tool"] == "fetch"
       assert is_binary(session_call["args_hash"])
       assert session_call["args_hash"] == sub_call["args_hash"]
+      assert session_call["args_hash"] == kernel_call["args_hash"]
       refute Map.has_key?(session_call, "args")
       refute Map.has_key?(sub_call, "args")
+      refute Map.has_key?(kernel_call, "args")
     end
 
-    test "both drivers record catalog discovery ops in canonical turn events", %{
+    test "Session and SubAgent record catalog discovery ops in canonical turn events", %{
       tmp_dir: dir
     } do
       discovery_exec = fn
@@ -452,6 +515,38 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
       assert summary.correlation_id == "mem-1"
       assert summary.turns == 2
       assert summary.committed == 2
+      assert summary.failed == 0
+    end
+
+    test "the default in-memory sink receives kernel turns" do
+      {:ok, sink} = TraceLog.start_memory_sink()
+
+      try do
+        assert {:ok, %{"value" => 42}} =
+                 LispKernel.run(%{"task" => "Compute"},
+                   llm: kernel_llm("(return 42)"),
+                   kernel_run_id: "kernel-memory"
+                 )
+      after
+        TraceLog.stop_memory_sink(sink)
+      end
+
+      events = MemorySink.events(sink)
+      assert length(events) == 1
+      assert [turn] = events
+      assert turn["event"] == "turn"
+      assert turn["driver"] == "kernel"
+      assert turn["agent_id"] == "kernel-memory"
+      assert turn["turn"] == 1
+      assert turn["attempt"] == 1
+      assert turn["data"]["program"] == "(return 42)"
+      assert turn["data"]["result_preview"] == "42"
+
+      assert [summary] = Analyzer.sessions(events)
+      assert summary.correlation_id == "kernel-memory"
+      assert summary.driver == "kernel"
+      assert summary.turns == 1
+      assert summary.committed == 1
       assert summary.failed == 0
     end
 

@@ -15,6 +15,9 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Step.Public
   alias PtcRunner.SymbolInventory
   alias PtcRunner.Tool
+  alias PtcRunner.TraceContext
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.TurnEvent
 
   @outer_timeout 30_000
   @outer_heap_words 8_000_000
@@ -118,12 +121,11 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp annotate_role_prelude(%Prelude{} = prelude, resolved, opts) do
+  defp annotate_role_prelude(%Prelude{} = prelude, resolved, _opts) do
     runtime = %{
       role: resolved.role,
       grant_fingerprint: resolved.grant_fingerprint,
       prelude_store_access: resolved.prelude_store_access,
-      symbol_inventory_renderer: Keyword.get(opts, :symbol_inventory_renderer, :default),
       selected_refs: Enum.map(resolved.selected_refs, &public_selected_ref/1),
       resolved_refs: Enum.map(resolved.resolved_refs, &public_resolved_ref/1)
     }
@@ -162,7 +164,8 @@ defmodule PtcRunner.Kernel do
          {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
            render_symbol_inventory(mission, opts, prelude),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
-         {:ok, tools} <- kernel_tools(mission, opts, memory) do
+         {:ok, turn_recorder} <- start_turn_recorder(prelude, opts),
+         {:ok, tools} <- kernel_tools(mission, opts, memory, turn_recorder) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
         "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
@@ -188,6 +191,7 @@ defmodule PtcRunner.Kernel do
         end
       after
         stop_agent(memory)
+        stop_agent(turn_recorder)
       end
     end
   end
@@ -247,7 +251,7 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp kernel_tools(mission, opts, memory) do
+  defp kernel_tools(mission, opts, memory, turn_recorder) do
     llm = Keyword.fetch!(opts, :llm)
     events = Keyword.get(opts, :events)
     mission_tools = Keyword.get(opts, :tools, %{})
@@ -267,18 +271,23 @@ defmodule PtcRunner.Kernel do
 
            log_unsafe_llm_request(events, opts, args, request)
 
-           request
-           |> llm.()
-           |> normalize_llm_result()
-           |> add_public_tool_call()
+           started_at = System.monotonic_time(:millisecond)
+
+           action =
+             request
+             |> llm.()
+             |> normalize_llm_result()
+             |> add_public_tool_call()
+
+           duration_ms = System.monotonic_time(:millisecond) - started_at
+           record_model_action(turn_recorder, args, action, duration_ms)
+           action
          end,
          [signature: "(system :string?, messages :any, turn :int) -> :map", visibility: :private]},
       "eval-program" =>
         {fn args ->
-           args
-           |> Map.fetch!("program")
-           |> eval_program(mission, mission_tools, opts, memory, events)
-         end, [signature: "(program :string) -> :map", visibility: :private]},
+           eval_program(args, mission, mission_tools, opts, memory, events, turn_recorder)
+         end, [signature: "(program :string, turn :int) -> :map", visibility: :private]},
       "log" =>
         {fn args ->
            if is_function(events, 1), do: events.(args)
@@ -318,6 +327,182 @@ defmodule PtcRunner.Kernel do
       })
     end
   end
+
+  defp start_turn_recorder(%Prelude{} = prelude, opts) do
+    state = %{
+      kernel_run_id:
+        Keyword.get(opts, :kernel_run_id, "kernel-#{System.unique_integer([:positive])}"),
+      prelude_trace: Prelude.trace_summary(prelude),
+      role_selection: Map.get(prelude.metadata, :role_prelude_selection),
+      prelude_presentation: prelude_presentation(opts),
+      trace_context: TraceContext.capture(),
+      attempt: 0,
+      committed_turn: 0,
+      pending: %{}
+    }
+
+    Agent.start_link(fn -> state end)
+  end
+
+  defp record_model_action(recorder, args, action, duration_ms) do
+    turn = normalize_turn(Map.get(args, "turn"))
+
+    action =
+      Agent.get_and_update(recorder, fn state ->
+        attempt = state.attempt + 1
+        action = pending_action(action, duration_ms, attempt)
+        state = %{state | attempt: attempt}
+
+        if action.kind in ["protocol_error", "transport_error"] do
+          {action, state}
+        else
+          {action, put_in(state, [:pending, turn], action)}
+        end
+      end)
+
+    if action.kind in ["protocol_error", "transport_error"] do
+      emit_kernel_turn(recorder, action, nil, 0)
+    end
+
+    :ok
+  end
+
+  defp record_eval_turn(recorder, turn, result, event_data, duration_ms) do
+    turn = normalize_turn(turn)
+
+    action =
+      Agent.get_and_update(recorder, fn state ->
+        {
+          Map.get(state.pending, turn),
+          %{state | pending: Map.delete(state.pending, turn)}
+        }
+      end)
+
+    emit_kernel_turn(recorder, action || pending_action(%{}, 0, nil), event_data, duration_ms)
+    result
+  end
+
+  defp pending_action(action, duration_ms, attempt) when is_map(action) do
+    %{
+      kind: Map.get(action, :kind),
+      program: Map.get(action, :program),
+      reason: Map.get(action, :reason),
+      tokens: Map.get(action, :tokens, %{}) || %{},
+      duration_ms: duration_ms,
+      attempt: attempt
+    }
+  end
+
+  defp emit_kernel_turn(recorder, action, event_data, eval_duration_ms) do
+    status = turn_status(action, event_data)
+    committed? = status == :ok
+
+    state =
+      Agent.get_and_update(recorder, fn state ->
+        event_turn = if committed?, do: state.committed_turn + 1, else: state.committed_turn
+        next_state = if committed?, do: %{state | committed_turn: event_turn}, else: state
+        {Map.put(state, :event_turn, event_turn), next_state}
+      end)
+
+    TraceContext.attach(state.trace_context)
+
+    if TraceLog.recording?() do
+      %{
+        driver: :kernel,
+        agent_id: state.kernel_run_id,
+        role: role_selection_value(state.role_selection, :role),
+        grant_fingerprint: role_selection_value(state.role_selection, :grant_fingerprint),
+        turn: state.event_turn,
+        attempt: action.attempt,
+        committed: committed?,
+        status: status,
+        duration_ms: action.duration_ms + (eval_duration_ms || 0),
+        input_tokens: token_value(action.tokens, :input),
+        output_tokens: token_value(action.tokens, :output),
+        total_tokens: token_value(action.tokens, :total),
+        program: action.program,
+        result_preview: Map.get(event_data || %{}, :result_preview),
+        prints: Map.get(event_data || %{}, :prints, []),
+        memory_diff: Map.get(event_data || %{}, :memory_diff),
+        tool_calls: Map.get(event_data || %{}, :tool_calls, []),
+        catalog_ops: Map.get(event_data || %{}, :catalog_ops, []),
+        fail: turn_fail(action, event_data),
+        preludes: TurnEvent.prelude_provenance(state.prelude_trace),
+        prelude_projection: role_prelude_projection(state.role_selection),
+        prelude_call_policy: role_prelude_call_policy(state.role_selection),
+        prelude_presentation: state.prelude_presentation,
+        turn_type: turn_type(action, event_data)
+      }
+      |> TurnEvent.build()
+      |> TraceLog.record_turn_event()
+    end
+
+    :ok
+  end
+
+  defp normalize_turn(turn) when is_integer(turn), do: turn
+
+  defp normalize_turn(turn) when is_binary(turn) do
+    case Integer.parse(turn) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp normalize_turn(_), do: nil
+
+  defp turn_status(%{kind: "tool_call"}, event_data) when is_map(event_data) do
+    case Map.get(event_data, :fail) do
+      nil -> :ok
+      _ -> :error
+    end
+  end
+
+  defp turn_status(_action, _event_data), do: :error
+
+  defp turn_type(%{kind: "protocol_error"}, _event_data), do: :protocol_error
+  defp turn_type(%{kind: "transport_error"}, _event_data), do: :transport_error
+  defp turn_type(_action, _event_data), do: :eval
+
+  defp turn_fail(%{kind: "protocol_error", reason: reason}, _event_data),
+    do: %{
+      reason: reason || "protocol_error",
+      message: "model response did not match kernel protocol"
+    }
+
+  defp turn_fail(%{kind: "transport_error", reason: reason}, _event_data),
+    do: %{reason: "transport_error", message: reason || "LLM transport error"}
+
+  defp turn_fail(_action, %{fail: fail}), do: fail
+  defp turn_fail(_action, _event_data), do: nil
+
+  defp role_selection_value(selection, key) when is_map(selection), do: Map.get(selection, key)
+  defp role_selection_value(_selection, _key), do: nil
+
+  defp role_prelude_projection(nil), do: nil
+
+  defp role_prelude_projection(selection) when is_map(selection) do
+    %{
+      "selected_refs" => Map.get(selection, :selected_refs, []),
+      "resolved_refs" => Map.get(selection, :resolved_refs, [])
+    }
+  end
+
+  defp role_prelude_call_policy(nil), do: nil
+
+  defp role_prelude_call_policy(selection) when is_map(selection) do
+    %{"prelude_store_access" => Map.get(selection, :prelude_store_access)}
+  end
+
+  defp prelude_presentation(opts) do
+    %{"symbol_inventory_renderer" => Keyword.get(opts, :symbol_inventory_renderer, :default)}
+  end
+
+  defp token_value(tokens, key) when is_map(tokens) do
+    Map.get(tokens, key, Map.get(tokens, to_string(key)))
+  end
+
+  defp token_value(_tokens, _key), do: nil
 
   defp resolve_system_prompt(args, override) do
     system = override || Map.get(args, "system")
@@ -490,16 +675,20 @@ defmodule PtcRunner.Kernel do
 
   defp add_public_tool_call(action), do: action
 
-  defp eval_program(program, mission, mission_tools, opts, memory_agent, events) do
-    result =
+  defp eval_program(args, mission, mission_tools, opts, memory_agent, events, turn_recorder) do
+    program = Map.fetch!(args, "program")
+    turn = fetch_eval_turn!(args)
+    started_at = System.monotonic_time(:millisecond)
+
+    {result, event_data} =
       case checkout_memory(memory_agent) do
         {:ok, prior_memory} ->
           try do
-            {result, next_memory} =
+            {result, next_memory, event_data} =
               run_inner_program(program, mission, mission_tools, opts, prior_memory)
 
             checkin_memory(memory_agent, next_memory)
-            result
+            {result, event_data}
           rescue
             e ->
               release_memory(memory_agent)
@@ -515,7 +704,35 @@ defmodule PtcRunner.Kernel do
       end
 
     log_memory_size(events, result)
+
+    record_eval_turn(
+      turn_recorder,
+      turn,
+      result,
+      event_data,
+      System.monotonic_time(:millisecond) - started_at
+    )
+
     result
+  end
+
+  defp fetch_eval_turn!(args) do
+    case Map.fetch(args, "turn") do
+      {:ok, turn} when is_integer(turn) and turn >= 0 ->
+        turn
+
+      {:ok, turn} ->
+        raise ExecutionError,
+          reason: :invalid_eval_program_turn,
+          message: ~s|agent.core must pass a non-negative integer "turn" to eval-program|,
+          data: %{tool: "eval-program", turn: inspect(turn, limit: 5, printable_limit: 100)}
+
+      :error ->
+        raise ExecutionError,
+          reason: :missing_eval_program_turn,
+          message: ~s|agent.core must pass "turn" to eval-program|,
+          data: %{tool: "eval-program"}
+    end
   end
 
   defp run_inner_program(program, mission, mission_tools, opts, prior_memory) do
@@ -564,7 +781,10 @@ defmodule PtcRunner.Kernel do
         %{}
       )
 
-    project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
+    result =
+      project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
+
+    {result, event_data(error_step, prior_memory, prior_memory, result)}
   end
 
   defp commit_and_project_step(tag, step, prior_memory, opts) do
@@ -574,7 +794,8 @@ defmodule PtcRunner.Kernel do
 
     case candidate_bytes do
       bytes when is_integer(bytes) and bytes <= cap ->
-        {project_step(tag, step, prior_memory, candidate_memory, bytes), candidate_memory}
+        result = project_step(tag, step, prior_memory, candidate_memory, bytes)
+        {result, candidate_memory, event_data(step, prior_memory, candidate_memory, result)}
 
       bytes ->
         error_step =
@@ -585,15 +806,61 @@ defmodule PtcRunner.Kernel do
             %{limit_bytes: cap, candidate_bytes: candidate_bytes_detail(bytes)}
           )
 
-        {project_step(
-           :error,
-           error_step,
-           prior_memory,
-           prior_memory,
-           retained_size(prior_memory)
-         ), prior_memory}
+        result =
+          project_step(
+            :error,
+            error_step,
+            prior_memory,
+            prior_memory,
+            retained_size(prior_memory)
+          )
+
+        {result, prior_memory, event_data(error_step, prior_memory, prior_memory, result)}
     end
   end
+
+  defp event_data(step, prior_memory, current_memory, result) do
+    %{
+      result_preview: result_preview(result),
+      prints: bound_list(Map.get(step, :prints)),
+      memory_diff: TurnEvent.memory_diff(prior_memory, current_memory),
+      tool_calls: turn_tool_calls(Map.get(step, :tool_calls)),
+      catalog_ops: turn_catalog_ops(Map.get(step, :catalog_ops)),
+      fail: eval_projection_fail(result, Map.get(step, :fail))
+    }
+  end
+
+  defp result_preview(%{"value" => value}), do: TurnEvent.preview(value)
+  defp result_preview(%{"reason" => reason, "message" => message}), do: "#{reason}: #{message}"
+  defp result_preview(result), do: TurnEvent.preview(result)
+
+  defp eval_projection_fail(%{"status" => "fail"} = result, _step_fail) do
+    value = Map.get(result, "value")
+
+    %{
+      reason: eval_fail_reason(value),
+      message: "model program failed"
+    }
+  end
+
+  defp eval_projection_fail(_result, step_fail), do: step_fail
+
+  defp eval_fail_reason(%{"reason" => reason}) when is_binary(reason), do: reason
+
+  defp eval_fail_reason(%{"reason" => reason}),
+    do: inspect(reason, limit: 5, printable_limit: 100)
+
+  defp eval_fail_reason(_value), do: "model_program_failed"
+
+  defp turn_tool_calls(calls) when is_list(calls),
+    do: Enum.map(calls, &TurnEvent.tool_call_summary/1)
+
+  defp turn_tool_calls(_), do: []
+
+  defp turn_catalog_ops(ops) when is_list(ops),
+    do: Enum.map(ops, &TurnEvent.catalog_op_summary/1)
+
+  defp turn_catalog_ops(_), do: []
 
   defp project_step(_tag, step, prior_memory, current_memory, memory_bytes) do
     memory_summary = memory_summary(prior_memory, current_memory, memory_bytes)

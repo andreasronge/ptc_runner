@@ -71,7 +71,7 @@ defmodule PtcRunner.TraceLog.Analyzer do
   # Cross-session turn-log queries (plan P2)
   #
   # These read the canonical `event: "turn"` records emitted by both turn
-  # drivers (session + SubAgent) through `PtcRunner.TraceLog.TurnEvent`, so a
+  # drivers (Session, SubAgent, Kernel) through `PtcRunner.TraceLog.TurnEvent`, so a
   # single trace spanning several sessions can be sliced per session. The
   # Elixir surface stays boring/data-oriented (plan P3): higher-level analysis
   # (dedup detection, cost aggregation) belongs in PTC-Lisp programs.

@@ -340,8 +340,8 @@ defmodule PtcRunner.TraceLog do
   so cross-session analysis works for either. Each collector stamps its own
   `trace_id`/`seq` on its copy of the event.
 
-  This is the single emission point shared by both turn drivers
-  (`PtcRunner.Session` and the `PtcRunner.SubAgent` loop). It never raises and
+  This is the single emission point shared by turn drivers (`PtcRunner.Session`,
+  the `PtcRunner.SubAgent` loop, and `PtcRunner.Kernel`). It never raises and
   is a no-op when nothing is recording. Build the event with
   `PtcRunner.TraceLog.TurnEvent.build/1`.
   """

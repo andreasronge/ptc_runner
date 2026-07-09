@@ -22,7 +22,8 @@
         (let [actions2 (conj actions (action-summary action))]
           (case (action "kind")
           "tool_call"
-            (let [result (tool/eval-program {"program" (action "program")})]
+            (let [result (tool/eval-program {"program" (action "program")
+                                             "turn" turn})]
               (tool/log {"event" "eval" "turn" turn "result" result})
               (case (result "status")
                 "return" (return {"value" (result "value")

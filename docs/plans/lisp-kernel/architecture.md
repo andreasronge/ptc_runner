@@ -445,14 +445,14 @@ Record the resolution here when made:
   mirrors the inspectable `priv/prompts/` convention while keeping the split
   policy source swappable in tests via `PtcRunner.Kernel.compile_prelude/1`
   source overrides. Release/API stability remains D18.
-- **D4 — Turn events.** Kernel emits `PtcRunner.TraceLog.TurnEvent` per
-  llm/eval pair (recommended: keeps existing metrics/introspection working for
-  A/B measurement) vs new minimal log. Supporting precedent:
-  `TraceLog.record_turn_event/1` is documented as *the single emission point
-  shared by both turn drivers* (Session and the SubAgent loop), and
-  `test/ptc_runner/trace_log/turn_log_integration_test.exs` asserts both
-  drivers emit the same top-level event shape — the kernel would become the
-  third driver under the same emission point and parity test.
+- **D4 — Turn events.** RESOLVED 2026-07-09: the kernel is the third
+  canonical `PtcRunner.TraceLog.TurnEvent` driver beside Session and SubAgent.
+  It emits one sanitized event per LLM/eval turn through
+  `TraceLog.record_turn_event/1`, preserving the existing `:events` /
+  `:unsafe_debug` channel as ephemeral harness/debug output. Focused evidence:
+  `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/kernel/eval_test.exs test/ptc_runner/kernel/feedback_ab_test.exs test/ptc_runner/trace_log/turn_log_integration_test.exs test/ptc_runner/trace_log/turn_event_test.exs`.
+  Autonomous plan:
+  [`autonomous-d4-kernel-turn-events.md`](autonomous-d4-kernel-turn-events.md).
 - **D5 — Step projection shape.** Initial M1 spike shape, verified
   2026-07-07: `eval-program` returns a bounded map with string status
   `"return" | "fail" | "error" | "continue"`, public `value` only for

@@ -39,7 +39,8 @@ defmodule PtcRunner.Kernel.FeedbackABTest do
     markdown = FeedbackAB.render_markdown(result)
 
     assert markdown =~ "non-M3 descriptive shakedown"
-    assert markdown =~ "D4 canonical TurnEvents are not present"
+    assert markdown =~ "Canonical TurnEvents may be available for"
+    assert markdown =~ "does not supply the preregistered M3 sample"
     assert markdown =~ "| A |"
     assert markdown =~ "| B |"
     assert markdown =~ "| C |"

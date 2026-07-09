@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.PreludeSplitTest do
     (do
       (tool/log {"event" "compile-proof"})
       (tool/llm-complete {"system" "compile proof system" "messages" [] "turn" 0})
-      (tool/eval-program {"program" "(return :ok)"})
+      (tool/eval-program {"program" "(return :ok)" "turn" 0})
       (agent.feedback/eval-feedback result cfg)))
   """
 
