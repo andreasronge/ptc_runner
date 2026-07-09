@@ -416,7 +416,7 @@ defmodule PtcRunner.Kernel do
         attempt: action.attempt,
         committed: committed?,
         status: status,
-        duration_ms: action.duration_ms + (eval_duration_ms || 0),
+        duration_ms: action.duration_ms + eval_duration_ms,
         input_tokens: token_value(action.tokens, :input),
         output_tokens: token_value(action.tokens, :output),
         total_tokens: token_value(action.tokens, :total),
