@@ -544,6 +544,18 @@ Record the resolution here when made:
   namespaced, cross-surface extension is designed. Verified by:
   `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/prelude_role_policy_test.exs test/ptc_runner/lisp/heap_rebaseline_test.exs`.
   MCP adapter unification and external loaders remain future work.
+- **D21 — Inner-eval domain prelude surface.** PROPOSED by S21 on 2026-07-09:
+  extend the existing role/PreludeStore model with a separately authorized
+  `inner_preludes` surface. Resolve and freeze loop and inner dependency
+  closures independently; reject namespace/component overlap, `agent.*`, and
+  upstream-backed inner exports; render only inner prompt exports to the model;
+  attach the inner artifact to every model `Lisp.run_native/2` while retaining
+  `runtime: nil`, `discovery_exec: nil`, strict limits, mission tools, and
+  host-held memory. TurnEvents and eval reports distinguish both artifacts and
+  carry evaluator-side aggregate inner-export invocation counts. This is an
+  infrastructure decision only; domain efficacy remains a later preregistered
+  experiment. Autonomous brief:
+  [`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
 
 ## Out of scope for the experiment
 

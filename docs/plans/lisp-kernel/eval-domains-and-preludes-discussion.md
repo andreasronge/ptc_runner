@@ -358,7 +358,15 @@ Minimum controls:
 
 ## Likely Next Step
 
-Before implementation, define the PTC-native eval contract:
+The missing runtime channel is now registered as S21, with an autonomous
+implementation brief:
+[`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
+S21 is deterministic infrastructure only. It separates the trusted loop bundle
+from a role-authorized model-callable inner bundle, keeps inner runtime
+authority nil, projects only callable inner exports, and adds separate
+provenance plus runtime invocation counts. It does not run the calendar pilot.
+
+Before implementing the calendar pilot, define the PTC-native eval contract:
 
 - case schema;
 - fixture generator interface;

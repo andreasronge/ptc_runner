@@ -484,6 +484,16 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   functions, private/kernel tools are omitted, memory uses only
   `memory_summary.entries`, renderer selection is fail-closed, and Phase 2
   turn-aware/discovery alignment remains deferred.
+- [ ] **S21 — Inner-eval domain prelude injection**: resolve a second,
+  explicitly role-authorized PreludeStore closure for model-authored inner
+  programs; keep it disjoint from the trusted `agent.*` loop bundle; project
+  only its prompt-visible exports through SymbolInventory; attach the same
+  frozen artifact across turns with `runtime: nil` and `discovery_exec: nil`;
+  reject `agent.*`, overlap, upstream-backed, dynamic-upstream, and ungranted
+  tool dependencies fail-closed; record separate source-free provenance and
+  honest evaluator-side invocation counts. Deterministic infrastructure only,
+  not a domain A/B. Autonomous brief:
+  [`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is
@@ -615,6 +625,22 @@ This must not introduce a second "profile" abstraction. Role is the authority
 and allowed-surface concept; the run supplies selected refs or uses the role
 default. Source loading is a separate host adapter concern that writes into the
 store before runtime.
+
+## Cross-Cut: Inner-Eval Domain Preludes
+
+S21 is the approved implementation spike for a model-callable prelude surface.
+It extends the existing role/PreludeStore authority model; it must not add a
+second profile abstraction or accept an ungoverned raw domain bundle. The role
+authorizes loop composition and inner callability separately, the store expands
+each dependency closure independently, and the kernel freezes two disjoint
+artifacts before starting the run. The inner artifact receives mission tools
+only and keeps `runtime: nil` / `discovery_exec: nil`.
+
+This is new cross-cutting infrastructure, not part of M3's feedback-policy A/B.
+No domain-effectiveness experiment may start merely because S21 passes. R10,
+R11, R12, R15, R17, and R18 plus a domain-specific preregistration remain the
+claim gate. Implementation brief:
+[`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
 
 ## Teardown (the clean start) — position
 

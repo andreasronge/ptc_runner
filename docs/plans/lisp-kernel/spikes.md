@@ -667,10 +667,48 @@ Do not treat these counts as statistical superiority evidence.
 
 ---
 
+### S21 — Inner-eval domain prelude injection
+
+**Question.** Can one kernel run resolve and freeze a second, explicitly
+role-authorized PreludeStore bundle that is callable by model-authored inner
+programs without exposing the trusted loop bundle or widening inner runtime
+authority?
+
+**Why it gates.** Role-backed selection currently compiles one outer bundle,
+while inner model programs still run with `prelude: nil`. Domain helpers can be
+rendered from an outer role-backed bundle but cannot be invoked by model code.
+Every domain-prelude experiment and any later prelude-improvement loop depends
+on closing that mismatch with attributable, fail-closed mechanics.
+
+**Method.** Follow
+[`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
+Add a separate inner-prelude role grant and dependency closure, validate the
+entire resolved closure against loop/`agent.*`/upstream authority overlap,
+project only inner exports through SymbolInventory, attach one frozen inner
+artifact across host-memory turns, add evaluator-side aggregate invocation
+counts, and split loop vs inner provenance in ephemeral reports and canonical
+TurnEvents. Use deterministic mock tests only.
+
+**Pass.** Pure and granted typed-tool domain exports are prompt-visible and
+callable across turns; loop/private/upstream authority remains unreachable;
+direct and transitive violations fail before the LLM; loop and inner hashes and
+runtime invocation counts are separately attributable without source leakage;
+the no-inner mini suite remains green.
+
+**Fail.** Inner callability requires the loop bundle, an upstream runtime, or a
+private kernel capability; role policy cannot express the separate authority;
+transitive dependencies bypass validation; memory and the frozen artifact do
+not coexist across turns; or honest invocation accounting requires an
+unbounded/incorrect ledger.
+
+**Result.** _pending_
+
+---
+
 ## Candidate later spikes (register properly before running)
 
 Spike IDs are claimed by both the registered sections above and this list —
-take the next unused number (S20 at time of writing); do not reuse an ID.
+take the next unused number (S22 at time of writing); do not reuse an ID.
 
 - **S15 — Streaming envelope:** mock streamed chunks from `llm-complete` and
   decide whether the prelude sees incremental events, the host callback sees
