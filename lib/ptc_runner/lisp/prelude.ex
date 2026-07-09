@@ -162,6 +162,8 @@ defmodule PtcRunner.Lisp.Prelude do
     * `exports` — one `export_summary` per PUBLIC export (no callables/env).
     * `components` — selected source component provenance when the artifact was
       produced by `PtcRunner.Lisp.Prelude.Bundle`; otherwise `[]`.
+    * `role_prelude_selection` — optional sanitized role-backed kernel
+      selection provenance; `nil` for direct/embedded prelude attachment.
   """
   @type export_summary :: %{
           ref: String.t(),
@@ -181,7 +183,8 @@ defmodule PtcRunner.Lisp.Prelude do
           protected_namespaces: [String.t()],
           host_policy_hash: String.t() | nil,
           exports: [export_summary()],
-          components: [map()]
+          components: [map()],
+          role_prelude_selection: map() | nil
         }
 
   @doc """
@@ -206,7 +209,8 @@ defmodule PtcRunner.Lisp.Prelude do
       protected_namespaces: prelude.namespaces,
       host_policy_hash: nil,
       exports: export_summaries,
-      components: Map.get(prelude.metadata, :components, [])
+      components: Map.get(prelude.metadata, :components, []),
+      role_prelude_selection: Map.get(prelude.metadata, :role_prelude_selection)
     }
   end
 

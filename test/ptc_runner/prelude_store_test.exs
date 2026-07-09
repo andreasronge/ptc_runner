@@ -689,6 +689,66 @@ defmodule PtcRunner.PreludeStoreTest do
     assert {:ok, _} = Jason.encode(%{origin: origin})
   end
 
+  test "write/5 origin overrides store default without using metadata" do
+    {:ok, store} = PreludeStore.new(origin: {:memory, "store-default"})
+
+    assert {:ok, _} =
+             PreludeStore.write(store, "paged", @paged_v1, %{}, origin: {:file, "seed/paged.clj"})
+
+    assert [%{origin: "file:seed/paged.clj"}] = PreludeStore.list(store)
+    assert {:ok, candidate} = PreludeStore.read(store, "paged")
+    assert candidate.origin == {:file, "seed/paged.clj"}
+    assert candidate.metadata == %{}
+
+    assert {:ok, _} = PreludeStore.write(store, "other", "(ns other)", %{})
+    assert {:ok, other} = PreludeStore.read(store, "other")
+    assert other.origin == {:memory, "store-default"}
+  end
+
+  test "write/5 rejects invalid origin options fail closed" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{}, origin: {:file, :not_a_path})
+
+    assert message =~ "origin must be"
+    assert PreludeStore.list(store) == []
+
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{}, origin: "metadata-ish")
+
+    assert message =~ "origin must be"
+    assert PreludeStore.list(store) == []
+  end
+
+  test "write/5 rejects malformed option lists without raising" do
+    {:ok, store} = PreludeStore.new()
+
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{}, [{"origin", {:file, "x"}}])
+
+    assert message =~ "keyword list"
+    assert PreludeStore.list(store) == []
+
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.write(store, "paged", @paged_v1, %{}, [:bad])
+
+    assert message =~ "keyword list"
+    assert PreludeStore.list(store) == []
+  end
+
+  test "new/1 rejects invalid store-level origin before writes" do
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.new(origin: "seed")
+
+    assert message =~ "origin must be"
+
+    assert {:error, %{reason: :invalid_argument, message: message}} =
+             PreludeStore.new(origin: {:file, :not_a_path})
+
+    assert message =~ "origin must be"
+  end
+
   test "public projections keep bounds even with bad options and preserve utf-8" do
     source = """
     (ns paged)

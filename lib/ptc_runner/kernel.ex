@@ -9,6 +9,8 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.PreludeRolePolicy
+  alias PtcRunner.PreludeRuntime
   alias PtcRunner.Step
   alias PtcRunner.Step.Public
   alias PtcRunner.SymbolInventory
@@ -48,6 +50,30 @@ defmodule PtcRunner.Kernel do
 
   @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
   def compile_prelude(opts \\ []) when is_list(opts) do
+    if role_backed_prelude?(opts) do
+      compile_role_backed_prelude(opts)
+    else
+      compile_embedded_prelude(opts)
+    end
+  end
+
+  defp compile_role_backed_prelude(opts) do
+    with {:ok, policy} <- role_policy(opts),
+         {:ok, grant} when not is_nil(grant) <-
+           PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)),
+         {:ok, resolved} <-
+           PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, opts) do
+      {:ok, annotate_role_prelude(resolved.prelude, resolved, opts)}
+    else
+      {:ok, nil} ->
+        {:error, %{reason: :role_required, message: "role is required for role-backed preludes"}}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp compile_embedded_prelude(opts) do
     overrides = Keyword.get(opts, :prelude_source_overrides, %{})
 
     with {:ok, prompt} <- compile_component("agent.prompt", overrides),
@@ -68,6 +94,65 @@ defmodule PtcRunner.Kernel do
     end
   end
 
+  defp role_backed_prelude?(opts) do
+    Keyword.has_key?(opts, :role_policy)
+  end
+
+  defp role_policy(opts) do
+    case Keyword.fetch(opts, :role_policy) do
+      {:ok, %PreludeRolePolicy{} = policy} ->
+        {:ok, policy}
+
+      {:ok, policy} when is_map(policy) ->
+        PreludeRolePolicy.from_map(policy)
+
+      {:ok, _policy} ->
+        {:error, %{reason: :invalid_policy, message: ":role_policy must be a map"}}
+
+      :error ->
+        {:error,
+         %{
+           reason: :role_policy_required,
+           message: ":role_policy is required for role-backed prelude selection"
+         }}
+    end
+  end
+
+  defp annotate_role_prelude(%Prelude{} = prelude, resolved, opts) do
+    runtime = %{
+      role: resolved.role,
+      grant_fingerprint: resolved.grant_fingerprint,
+      prelude_store_access: resolved.prelude_store_access,
+      symbol_inventory_renderer: Keyword.get(opts, :symbol_inventory_renderer, :default),
+      selected_refs: Enum.map(resolved.selected_refs, &public_selected_ref/1),
+      resolved_refs: Enum.map(resolved.resolved_refs, &public_resolved_ref/1)
+    }
+
+    %{prelude | metadata: Map.put(prelude.metadata, :role_prelude_selection, runtime)}
+  end
+
+  defp public_selected_ref(ref) when is_binary(ref), do: ref
+
+  defp public_selected_ref(ref) when is_map(ref) do
+    ref
+    |> Map.take([:id, :version, :checksum, "id", "version", "checksum"])
+    |> Enum.map(fn {key, value} -> {to_string(key), value} end)
+    |> Map.new()
+  end
+
+  defp public_selected_ref(ref), do: inspect(ref, limit: 5, printable_limit: 100)
+
+  defp public_resolved_ref(ref) when is_map(ref) do
+    %{
+      id: Map.get(ref, :id),
+      version: Map.get(ref, :version),
+      checksum: Map.get(ref, :checksum),
+      namespaces: Map.get(ref, :namespaces, []),
+      origin: Map.get(ref, :origin),
+      required_by: Map.get(ref, :required_by, [])
+    }
+  end
+
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
     with {:ok, memory_cap} <- memory_byte_cap(opts),
@@ -75,7 +160,7 @@ defmodule PtcRunner.Kernel do
          {:ok, prelude} <- compile_prelude(opts),
          :ok <- log_prelude(opts, prelude),
          {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
-           render_symbol_inventory(mission, opts),
+           render_symbol_inventory(mission, opts, prelude),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
          {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
@@ -107,11 +192,12 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp render_symbol_inventory(mission, opts) do
+  defp render_symbol_inventory(mission, opts, prelude) do
     facts =
       SymbolInventory.project(
         data: Map.get(mission, "context", %{}),
         tools: Keyword.get(opts, :tools, %{}),
+        prelude: role_backed_inventory_prelude(prelude),
         memory_summary: Keyword.get(opts, :memory_summary)
       )
 
@@ -123,6 +209,10 @@ defmodule PtcRunner.Kernel do
       {:ok, rendered, meta} -> {:ok, Enum.map(facts, &string_key_fact/1), rendered || "", meta}
       {:error, error} -> {:error, error}
     end
+  end
+
+  defp role_backed_inventory_prelude(%Prelude{metadata: metadata} = prelude) do
+    if Map.has_key?(metadata, :role_prelude_selection), do: prelude
   end
 
   defp string_key_fact(fact) when is_map(fact) do

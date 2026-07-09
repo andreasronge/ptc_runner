@@ -169,6 +169,31 @@ role being allowed to directly request or edit those dependencies.
 
 ## Implementation Plan
 
+## Implementation Notes
+
+The core implementation copies the MCP role semantics that the kernel can
+enforce without depending on `ptc_runner_mcp`: role-name validation, exact
+`id@version` prelude grants, role default selection, requested-ref allowlist
+checks, no/read/write prelude-store authority as data, and a stable grant
+fingerprint over normalized grant data. Runtime selection then delegates the
+dependency closure and bundle compilation to `PtcRunner.PreludeStore.Selection`.
+
+MCP-only semantics remain MCP-owned: session modes, PTC tool grants, upstream
+tool grants, credentials, strict transitive session calls, outer MCP tool
+filtering, HTTP/file/env role parsing, and prelude export projection based on
+tool/upstream grants. The kernel rejects those keys in its shared role shape
+because it has no enforcement point for them in this plan. Presentation policy
+also remains run-level (`:symbol_inventory_renderer`) rather than a role key.
+
+Core JSON-style map parsing is owned by `PtcRunner.PreludeRolePolicy.from_map/1`.
+The module accepts string or existing atom keys without creating atoms from
+untrusted strings. The no-policy default remains the embedded agent prelude
+bundle; role-backed selection is entered only when a caller supplies an explicit
+`:role_policy`, so generic forwarded `:role` or `:preludes` options do not
+accidentally replace the embedded kernel prelude. Loading source from files,
+HTTP, databases, or MCP is still outside runtime selection; hosts seed
+candidates into `PreludeStore` before calling the kernel.
+
 ### Phase 1 - Research and Boundary Extraction
 
 Read and record facts before editing:
@@ -234,7 +259,7 @@ Validation must fail closed with stable errors for:
 Teach `PtcRunner.Kernel.compile_prelude/1` or a helper below it to choose one
 of two paths:
 
-1. **Role/store path** when `:prelude_store`, role policy/options, and either
+1. **Role/store path** when `:prelude_store`, explicit `:role_policy`, and either
    requested `:preludes` or role `default_preludes` are supplied.
 2. **Embedded default path** when no role/store is supplied.
 

@@ -5,6 +5,7 @@ defmodule PtcRunner.KernelTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.PreludeStore
   alias ReqLLM.Message
   alias ReqLLM.Message.ContentPart
   alias ReqLLM.ToolCall
@@ -1044,6 +1045,77 @@ defmodule PtcRunner.KernelTest do
     assert step.fail.reason == :private_tool_unauthorized
   end
 
+  test "role-backed prelude selection resolves default refs through PreludeStore" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(),
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:event, %{"event" => "prelude", "prelude" => prelude_summary}}
+    assert_received {:llm_request, %{messages: [%{role: :user, content: content}]}}
+
+    assert Enum.map(prelude_summary.components, & &1.id) ==
+             ~w(agent.prompt agent.feedback agent.core)
+
+    assert %{
+             role: "kernel_default",
+             grant_fingerprint: "sha256:" <> _,
+             prelude_store_access: :none,
+             symbol_inventory_renderer: :default,
+             selected_refs: ["agent.core@1"],
+             resolved_refs: resolved_refs
+           } = prelude_summary.role_prelude_selection
+
+    assert Enum.map(resolved_refs, & &1.id) == ~w(agent.prompt agent.feedback agent.core)
+    assert Enum.map(resolved_refs, & &1.required_by) == [["agent.core"], ["agent.core"], []]
+
+    refute Enum.any?(resolved_refs, &Map.has_key?(&1, :form_graph))
+
+    assert content =~ "agent.core/run-mission [mission cfg]"
+    assert content =~ "agent.prompt/task-message [mission cfg]"
+    refute content =~ "(ns agent.core"
+  end
+
+  test "role-backed prelude selection denies ungranted requested refs" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    assert {:error, %{reason: :prelude_not_granted, message: message}} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy:
+                 kernel_role_policy(
+                   preludes: ["agent.prompt@1"],
+                   default_preludes: ["agent.prompt@1"]
+                 ),
+               role: "kernel_default",
+               preludes: ["agent.core@1"]
+             )
+
+    assert message =~ "preludes[0] is not granted"
+  end
+
+  test "prelude and role options do not trigger role-backed mode without role_policy" do
+    assert {:ok, prelude} =
+             Kernel.compile_prelude(role: "forwarded", preludes: ["agent.core@1"])
+
+    assert Map.get(prelude.metadata, :role_prelude_selection) == nil
+  end
+
   test "feedback policy can be swapped without changing kernel loop logic" do
     parent = self()
 
@@ -1121,5 +1193,40 @@ defmodule PtcRunner.KernelTest do
         [] -> {{:ok, %{content: "no scripted response"}}, []}
       end)
     end
+  end
+
+  defp seeded_agent_prelude_store do
+    {:ok, store} = PreludeStore.new()
+    {:ok, _prompt} = PreludeStore.write(store, "agent.prompt", agent_prelude_source("prompt"))
+
+    {:ok, _feedback} =
+      PreludeStore.write(store, "agent.feedback", agent_prelude_source("feedback"))
+
+    {:ok, _core} =
+      PreludeStore.write(store, "agent.core", agent_prelude_source("core"), %{
+        "requires_preludes" => ["agent.prompt@1", "agent.feedback@1"]
+      })
+
+    {:ok, store}
+  end
+
+  defp agent_prelude_source(name) do
+    File.read!(Path.expand("../../priv/preludes/agent/#{name}.lisp", __DIR__))
+  end
+
+  defp kernel_role_policy(opts \\ []) do
+    preludes = Keyword.get(opts, :preludes, ~w(agent.prompt@1 agent.feedback@1 agent.core@1))
+    default_preludes = Keyword.get(opts, :default_preludes, ["agent.core@1"])
+
+    %{
+      "default_role" => "kernel_default",
+      "roles" => %{
+        "kernel_default" => %{
+          "prelude_store_access" => "none",
+          "preludes" => preludes,
+          "default_preludes" => default_preludes
+        }
+      }
+    }
   end
 end

@@ -51,25 +51,93 @@ defmodule PtcRunner.PreludeStore do
   @doc false
   @spec validate_opts(keyword()) :: :ok | {:error, map()}
   def validate_opts(opts) when is_list(opts) do
-    [
-      {:max_source_bytes, @default_max_source_bytes},
-      {:max_versions, 1_000},
-      {:max_ids, @default_max_ids},
-      {:max_total_bytes, @default_max_total_bytes},
-      {:max_metadata_bytes, @default_max_metadata_bytes},
-      {:compile_timeout, @default_compile_timeout},
-      {:compile_max_heap, @default_compile_max_heap}
-    ]
-    |> Enum.reduce_while(:ok, fn {key, default}, :ok ->
-      case validate_positive_integer(opts, key, default) do
-        :ok -> {:cont, :ok}
-        {:error, _} = error -> {:halt, error}
-      end
-    end)
+    with :ok <- validate_keyword_opts(opts, "PreludeStore options"),
+         :ok <- validate_store_origin(opts) do
+      [
+        {:max_source_bytes, @default_max_source_bytes},
+        {:max_versions, 1_000},
+        {:max_ids, @default_max_ids},
+        {:max_total_bytes, @default_max_total_bytes},
+        {:max_metadata_bytes, @default_max_metadata_bytes},
+        {:compile_timeout, @default_compile_timeout},
+        {:compile_max_heap, @default_compile_max_heap}
+      ]
+      |> Enum.reduce_while(:ok, fn {key, default}, :ok ->
+        case validate_positive_integer(opts, key, default) do
+          :ok -> {:cont, :ok}
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
+    end
   end
 
   def validate_opts(_opts),
     do: {:error, error(:invalid_config, "PreludeStore options must be a keyword list")}
+
+  defp validate_keyword_opts(opts, context) do
+    if Keyword.keyword?(opts) do
+      :ok
+    else
+      {:error, error(:invalid_argument, "#{context} must be a keyword list")}
+    end
+  end
+
+  defp validate_store_origin(opts) do
+    if Keyword.has_key?(opts, :origin) do
+      opts
+      |> Keyword.fetch!(:origin)
+      |> validate_origin()
+      |> case do
+        {:ok, _origin} -> :ok
+        {:error, _} = error -> error
+      end
+    else
+      :ok
+    end
+  end
+
+  defp validate_write_opts(opts) when is_list(opts) do
+    with :ok <- validate_keyword_opts(opts, "write/5 options") do
+      case Keyword.keys(opts) -- [:origin] do
+        [] ->
+          :ok
+
+        keys ->
+          {:error,
+           error(
+             :invalid_argument,
+             "write/5 contains unknown option(s): #{Enum.map_join(keys, ", ", &inspect/1)}"
+           )}
+      end
+    end
+  end
+
+  defp validate_write_opts(_opts),
+    do: {:error, error(:invalid_argument, "write/5 options must be a keyword list")}
+
+  defp write_origin(store, opts) do
+    origin =
+      if Keyword.has_key?(opts, :origin) do
+        Keyword.fetch!(opts, :origin)
+      else
+        Keyword.get(store.opts, :origin, {:memory, store.pid})
+      end
+
+    validate_origin(origin)
+  end
+
+  defp validate_origin(nil), do: {:ok, nil}
+  defp validate_origin({:file, path} = origin) when is_binary(path), do: {:ok, origin}
+  defp validate_origin({:memory, _ref} = origin), do: {:ok, origin}
+  defp validate_origin({:upstream, _ref} = origin), do: {:ok, origin}
+
+  defp validate_origin(origin) do
+    {:error,
+     error(
+       :invalid_argument,
+       "origin must be nil, {:file, path}, {:memory, ref}, or {:upstream, ref}, got: #{inspect(origin, limit: 5)}"
+     )}
+  end
 
   @doc "Returns one bounded current row per prelude id, sorted by id."
   @spec list(t()) :: [map()]
@@ -425,14 +493,28 @@ defmodule PtcRunner.PreludeStore do
   The compiled namespace list must be exactly `[id]`. Stored source and metadata
   are untrusted; public projections bound and filter them.
   """
+  @spec write(t(), String.t(), String.t()) :: {:ok, map()} | {:error, map()}
   @spec write(t(), String.t(), String.t(), map()) :: {:ok, map()} | {:error, map()}
-  def write(store, id, source, metadata \\ %{})
+  @spec write(t(), String.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, map()}
+  def write(store, id, source), do: write(store, id, source, %{})
 
   def write(%__MODULE__{} = store, id, source, metadata)
       when is_binary(id) and is_binary(source) and is_map(metadata) do
+    write(store, id, source, metadata, [])
+  end
+
+  def write(%__MODULE__{}, _id, _source, _metadata) do
+    {:error,
+     error(:invalid_argument, "write/4 requires string id, string source, and map metadata")}
+  end
+
+  def write(%__MODULE__{} = store, id, source, metadata, write_opts)
+      when is_binary(id) and is_binary(source) and is_map(metadata) do
     opts = store.opts
 
-    with :ok <- validate_id(id),
+    with :ok <- validate_write_opts(write_opts),
+         {:ok, origin} <- write_origin(store, write_opts),
+         :ok <- validate_id(id),
          :ok <-
            check_source_bound(
              source,
@@ -467,7 +549,7 @@ defmodule PtcRunner.PreludeStore do
         version: 0,
         source: source,
         compiled: compiled,
-        origin: Keyword.get(opts, :origin, {:memory, store.pid}),
+        origin: origin,
         metadata: final_metadata,
         created_at: DateTime.utc_now()
       }
@@ -476,9 +558,12 @@ defmodule PtcRunner.PreludeStore do
     end
   end
 
-  def write(%__MODULE__{}, _id, _source, _metadata) do
+  def write(%__MODULE__{}, _id, _source, _metadata, _write_opts) do
     {:error,
-     error(:invalid_argument, "write/4 requires string id, string source, and map metadata")}
+     error(
+       :invalid_argument,
+       "write/5 requires string id, string source, map metadata, and keyword options"
+     )}
   end
 
   @doc """
