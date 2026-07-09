@@ -590,6 +590,21 @@ preregistration doc is the gate, and it freezes the bundle `source_hash`es).
 **Overall exit:** after M3, write a verdict section in architecture.md —
 promote (execute §Teardown as M4), iterate, or archive with findings.
 
+## Cross-Cut: Role-Backed Prelude Selection
+
+The next configuration cleanup is documented in
+[`autonomous-role-backed-prelude-selection.md`](autonomous-role-backed-prelude-selection.md).
+It is not an M3 benchmark and should not be run as an A/B. Its purpose is to
+bridge the kernel experiment with the existing MCP role model: `Kernel.run/2`
+should eventually resolve `agent.*` preludes from a `PreludeStore` by checking
+requested/default refs against a role allowlist, while embedded
+`priv/preludes/agent/*.lisp` remains the default seed path.
+
+This must not introduce a second "profile" abstraction. Role is the authority
+and allowed-surface concept; the run supplies selected refs or uses the role
+default. Source loading is a separate host adapter concern that writes into the
+store before runtime.
+
 ## Teardown (the clean start) — position
 
 Deletion is expected in a 0.x repo when it reduces obsolete surface area. The
