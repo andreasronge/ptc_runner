@@ -598,13 +598,14 @@ promote (execute §Teardown as M4), iterate, or archive with findings.
 
 ## Cross-Cut: Role-Backed Prelude Selection
 
-The next configuration cleanup is documented in
+The role-backed prelude selection cleanup is documented in
 [`autonomous-role-backed-prelude-selection.md`](autonomous-role-backed-prelude-selection.md).
-It is not an M3 benchmark and should not be run as an A/B. Its purpose is to
-bridge the kernel experiment with the existing MCP role model: `Kernel.run/2`
-should eventually resolve `agent.*` preludes from a `PreludeStore` by checking
-requested/default refs against a role allowlist, while embedded
-`priv/preludes/agent/*.lisp` remains the default seed path.
+It is not an M3 benchmark and should not be run as an A/B. The core substrate is
+partially implemented: `Kernel.run/2` can resolve `agent.*` preludes from a
+`PreludeStore` by checking requested/default refs against a role allowlist, while
+embedded `priv/preludes/agent/*.lisp` remains the no-policy default seed path.
+The remaining work is closeout hardening: embedded-vs-role bundle equivalence,
+D4 TurnEvent correlation parity, parser/config edge cases, and final docs.
 
 This must not introduce a second "profile" abstraction. Role is the authority
 and allowed-surface concept; the run supplies selected refs or uses the role

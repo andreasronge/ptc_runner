@@ -1,16 +1,53 @@
 # Lisp Kernel - Autonomous Role-Backed Prelude Selection Plan
 
-**Status:** goal brief for a future autonomous Codex session on
-`exp/lisp-kernel`. Written 2026-07-09 after the symbol-inventory work and the
-decision to reuse the existing MCP role concept instead of adding a separate
-kernel "profile" abstraction.
+**Status:** implementation substrate partially landed on `exp/lisp-kernel`;
+closeout/hardening brief updated 2026-07-09 after D4 kernel TurnEvents. The
+core resolver/runtime path exists; the remaining work is to close parity,
+documentation, and regression gaps before marking D20 resolved.
 
 This plan is not an A/B run and not a live benchmark. It replaces the kernel's
 hardcoded `priv/preludes/agent/*.lisp` selection path with a role-resolved
-PreludeStore path, while keeping today's embedded defaults as a bootstrapping
-source. The goal is one concept for future configuration: **role decides
-authority and allowed prelude surface; the run requests a selected surface
-within that role, or uses the role's default selection**.
+PreludeStore path, while keeping today's embedded defaults as the no-policy
+bootstrap source. The goal is one concept for future configuration: **role
+decides authority and allowed prelude surface; the run requests a selected
+surface within that role, or uses the role's default selection**.
+
+## Current Implementation Audit
+
+Already present as of commit `566487cb`:
+
+- `PtcRunner.PreludeRolePolicy.from_map/1` parses the kernel-owned role subset
+  without creating atoms from untrusted strings.
+- `PtcRunner.PreludeRolePolicy.resolve/2` applies default-role lookup and stable
+  grant fingerprinting.
+- `PtcRunner.PreludeRolePolicy.selected_refs/2` keeps `preludes` as an
+  allowlist and uses `default_preludes` only when the run omits a request.
+- `PtcRunner.PreludeRuntime.resolve/3` delegates selected refs and dependency
+  closure to `PreludeStore.Selection.resolve!/3`.
+- `PtcRunner.Kernel.compile_prelude/1` enters role-backed mode only when
+  `:role_policy` is supplied; otherwise it uses the embedded `agent.*` bundle.
+- `PtcRunner.Kernel.run/2` records source-free
+  `prelude.metadata[:role_prelude_selection]` and D4 TurnEvents consume it.
+- `PreludeStore.write/5` accepts a validated per-write `origin:` option while
+  preserving the existing store-level origin default.
+- Deterministic tests cover basic role parsing, unknown MCP-only keys,
+  default-prelude allowlist failures, duplicate grants, role-backed kernel
+  execution, source-free provenance, and per-write origin validation.
+
+Known gaps before D20 should be called resolved:
+
+- The plan still needs explicit closeout tests proving embedded-default and
+  role-selected bundles have equivalent component hashes/runtime behavior and
+  D4 TurnEvent correlation.
+- `PtcRunner.PreludeRolePolicy` should cover more parser edge cases:
+  requested-ref checksum pins, invalid default role, empty/invalid roles, atom
+  keys vs string keys, invalid requested `preludes:` type, and checksum mismatch
+  surfacing from `PreludeStore.Selection`.
+- Kernel role-backed mode should have focused tests for missing/invalid
+  `:prelude_store`, missing/invalid `:role_policy`, unknown role, no selected
+  preludes, and explicit requested refs overriding `default_preludes`.
+- Docs still describe the work as mostly future work and should be updated once
+  closeout passes.
 
 ## Short Goal Prompt
 
@@ -194,6 +231,121 @@ accidentally replace the embedded kernel prelude. Loading source from files,
 HTTP, databases, or MCP is still outside runtime selection; hosts seed
 candidates into `PreludeStore` before calling the kernel.
 
+## Remaining Closeout Plan
+
+Work risk-first. Do not broaden into MCP refactors, store editor tools, live
+model runs, or presentation-policy design.
+
+### Phase A - Equivalence Harness
+
+Add a helper in `test/ptc_runner/kernel_test.exs` or a focused
+`kernel/role_prelude_selection_test.exs` that builds both paths from the same
+committed source:
+
+1. Embedded path: `Kernel.compile_prelude/1` with no `:role_policy`.
+2. Store path: seed `agent.prompt`, `agent.feedback`, and current `agent.core`
+   into `PreludeStore`; write `agent.core` with
+   `requires_preludes: ["agent.prompt@1", "agent.feedback@1"]`; run
+   `Kernel.compile_prelude/1` with `prelude_store:`, `role_policy:`, and
+   `role: "kernel_default"`.
+
+Assert:
+
+- `Prelude.trace_summary/1` component ids, checksums/source hashes, namespaces,
+  and bundle checksum match between embedded and role-selected paths;
+- the selected path's `role_prelude_selection` contains exactly `role`,
+  `grant_fingerprint`, `prelude_store_access`, `selected_refs`, and
+  `resolved_refs` (no renderer, source, form graph, prompt text, or raw
+  metadata);
+- `Kernel.run/2` returns the same mock value for both paths;
+- a `TraceLog.MemorySink` around both runs shows the same D4 correlation shape:
+  first success has `attempt: 1`, `turn: 1`, same program, same prelude
+  components, and role fields only on the role-selected run.
+
+This is the proving test for "role-selected bundle behaves like embedded
+bundle" and should fail before any D20 closeout claim if the seeded sources or
+metadata drift.
+
+### Phase B - Parser and Config-Space Closure
+
+Extend `test/ptc_runner/prelude_role_policy_test.exs` with focused cases for:
+
+- atom keys and string keys both parse without creating new atoms;
+- invalid `default_role` and unknown requested role fail closed with stable
+  reasons;
+- empty roles plus requested role preserves the existing
+  `:role_policy_required` behavior;
+- invalid role names and invalid prelude ids fail closed;
+- invalid `prelude_store_access` fails closed;
+- `selected_refs/2` rejects non-list `preludes:` requests;
+- requested refs can be checksum-pinned maps, and those pins are preserved in
+  `selected_refs`;
+- unknown keys at top level and inside grants remain rejected.
+
+Extend kernel tests for:
+
+- missing `:prelude_store` under role-backed mode;
+- invalid `:prelude_store`;
+- invalid `:role_policy` type;
+- unknown role;
+- role with `default_preludes: []` fails as `:missing_prelude_selection`;
+- explicit `preludes:` request overrides `default_preludes` but is still
+  checked against the allowlist;
+- checksum mismatch from `PreludeStore.Selection` surfaces before any LLM call.
+
+### Phase C - Store-Origin Boundary Check
+
+The per-write origin API already exists. Add only missing coverage if absent:
+
+- origin appears in `resolved_refs` public metadata used by
+  `role_prelude_selection`;
+- invalid origin options cannot be smuggled through metadata;
+- dependency-pinned candidates preserve their own public origins in the
+  resolved closure.
+
+Do not build filesystem/HTTP/database adapters in this phase.
+
+### Phase D - Documentation and Registration
+
+After Phases A-C pass:
+
+- update this plan's status to "implemented";
+- update `docs/plans/lisp-kernel/architecture.md` D20 from "Proposed" to
+  "Resolved" with the exact test command;
+- update `docs/plans/lisp-kernel/roadmap.md` Cross-Cut section to say role
+  backed prelude selection is implemented for the kernel substrate, while MCP
+  adapter unification and external loaders remain future work;
+- add a short note that the kernel core role schema is intentionally not the
+  full MCP grant schema: MCP owns tools, modes, credentials, upstream grants,
+  and strict-transitive behavior.
+
+### Phase E - Verification and Review Gate
+
+Run:
+
+```sh
+mix test test/ptc_runner/prelude_role_policy_test.exs \
+  test/ptc_runner/kernel_test.exs \
+  test/ptc_runner/kernel/prelude_split_test.exs \
+  test/ptc_runner/prelude_store_test.exs \
+  test/ptc_runner/sub_agent/prelude_deps_integration_test.exs \
+  test/ptc_runner/trace_log/turn_log_integration_test.exs
+```
+
+Then run:
+
+```sh
+mix precommit
+```
+
+Finish with an independent `codex-review` pass over the D20 closeout diff.
+
+## Historical Implementation Plan
+
+The following phases describe the original implementation path. Most substrate
+items in Phases 1-4 have already landed; use the Remaining Closeout Plan above
+for the next autonomous session.
+
 ### Phase 1 - Research and Boundary Extraction
 
 Read and record facts before editing:
@@ -334,6 +486,9 @@ All adapters must write through `PreludeStore.write/4` so compilation,
 dependency pinning, checksums, and public projections stay shared.
 
 ### Phase 5 - Deterministic Tests
+
+Partially covered by current tests. The closeout plan above names the remaining
+coverage required before marking D20 resolved.
 
 Add focused tests before considering any live run:
 
