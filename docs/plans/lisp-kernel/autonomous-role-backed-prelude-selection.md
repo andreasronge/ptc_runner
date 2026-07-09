@@ -245,14 +245,19 @@ committed source:
 1. Embedded path: `Kernel.compile_prelude/1` with no `:role_policy`.
 2. Store path: seed `agent.prompt`, `agent.feedback`, and current `agent.core`
    into `PreludeStore`; write `agent.core` with
-   `requires_preludes: ["agent.prompt@1", "agent.feedback@1"]`; run
-   `Kernel.compile_prelude/1` with `prelude_store:`, `role_policy:`, and
-   `role: "kernel_default"`.
+   `requires_preludes: ["agent.prompt@1", "agent.feedback@1"]`; pass
+   `origin: {:file, "priv/preludes/agent/<name>.lisp"}` for each seeded
+   component when asserting full component equality. Run `Kernel.compile_prelude/1`
+   with `prelude_store:`, `role_policy:`, and `role: "kernel_default"`.
 
 Assert:
 
-- `Prelude.trace_summary/1` component ids, checksums/source hashes, namespaces,
-  and bundle checksum match between embedded and role-selected paths;
+- `Prelude.trace_summary/1` top-level `source_hash` and `artifact_hash` match,
+  and component ids, versions, checksums, source hashes, namespaces, and origins
+  match between embedded and role-selected paths. If a test intentionally seeds
+  store candidates with non-file origins, compare only ids, versions, checksums,
+  source hashes, and namespaces, and separately assert the projected origins are
+  bounded and source-free;
 - the selected path's `role_prelude_selection` contains exactly `role`,
   `grant_fingerprint`, `prelude_store_access`, `selected_refs`, and
   `resolved_refs` (no renderer, source, form graph, prompt text, or raw
@@ -260,7 +265,9 @@ Assert:
 - `Kernel.run/2` returns the same mock value for both paths;
 - a `TraceLog.MemorySink` around both runs shows the same D4 correlation shape:
   first success has `attempt: 1`, `turn: 1`, same program, same prelude
-  components, and role fields only on the role-selected run.
+  components. `role` and `grant_fingerprint` keys exist in both TurnEvents;
+  assert nil values for the embedded run and populated values for the
+  role-selected run.
 
 This is the proving test for "role-selected bundle behaves like embedded
 bundle" and should fail before any D20 closeout claim if the seeded sources or
@@ -338,7 +345,9 @@ Then run:
 mix precommit
 ```
 
-Finish with an independent `codex-review` pass over the D20 closeout diff.
+Required repo-local gate ends at `mix precommit`. If the environment provides
+the Codex review skill, also run an independent `codex-review` pass over the D20
+closeout diff before committing.
 
 ## Historical Implementation Plan
 
@@ -447,7 +456,7 @@ keep compatibility with stale stored `agent.core` variants.
 
 Do not implement database/HTTP loading in this session. Instead, define and pin
 the load-to-store boundary so future adapters can be added without changing
-`Kernel.run/2`. This phase must extend `PreludeStore.write/4` with a
+`Kernel.run/2`. This phase must extend `PreludeStore.write/5` with a
 per-write origin option rather than demoting origin into untrusted metadata.
 Origin is host-asserted provenance, projected through
 `PreludeCandidate.public_origin/2`, and should not compete with
@@ -482,7 +491,7 @@ Adapters may later produce that shape from:
 - upstream MCP resource/tool;
 - generated source.
 
-All adapters must write through `PreludeStore.write/4` so compilation,
+All adapters must write through `PreludeStore.write/5` so compilation,
 dependency pinning, checksums, and public projections stay shared.
 
 ### Phase 5 - Deterministic Tests
@@ -575,7 +584,7 @@ mix precommit
   `requires_preludes`.
 - Stop and report if kernel role unification requires accepting a grant key
   that has no kernel enforcement point.
-- Stop and report if per-write origin cannot be added to `PreludeStore.write/4`
+- Stop and report if per-write origin cannot be added to `PreludeStore.write/5`
   without weakening existing store bounds or provenance redaction.
 
 ## Launch Criteria
@@ -589,7 +598,7 @@ The plan is complete when:
   runtime behavior and equivalent D4 TurnEvent correlation;
 - `preludes` keeps MCP allowlist semantics and `default_preludes` supplies the
   non-interactive kernel default selection;
-- per-write origin is preserved through `PreludeStore.write/4`;
+- per-write origin is preserved through `PreludeStore.write/5`;
 - docs explain that roles, not profiles, are the unified selection/authority
   concept for kernel and MCP surfaces.
 
