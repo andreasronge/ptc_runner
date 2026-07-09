@@ -96,8 +96,7 @@ defmodule PtcRunner.Kernel.Eval do
       },
       %{
         id: "context_filter_count",
-        task:
-          ~S|Use context key items, available as data/items. Return the count of items where kind is "keep".|,
+        task: ~S|Return the count of items where kind is "keep".|,
         context: %{
           "items" => [
             %{"kind" => "keep"},
@@ -111,8 +110,7 @@ defmodule PtcRunner.Kernel.Eval do
       },
       %{
         id: "context_aggregation",
-        task:
-          "Use context key numbers, available as data/numbers. Return the sum of all numbers.",
+        task: "Return the sum of all numbers.",
         context: %{"numbers" => [2, 4, 6]},
         expected: 12,
         max_turns: 5,

@@ -12,17 +12,48 @@
        "Use value symbols directly, e.g. data/items. Call only function symbols, e.g. (tool/name args). Context key x is available as data/x.\n"
        "Do not answer in prose."))
 
+(defn- optional-detail
+  [prefix value]
+  (if (empty? value) "" (str prefix value)))
+
+(defn- symbol-label
+  [fact]
+  (if (= (fact "kind") "function")
+    (str (fact "ref") " [" (str/join " " (fact "params")) "]")
+    (fact "ref")))
+
+(defn- symbol-detail
+  [fact]
+  (if (= (fact "kind") "function")
+    (str "function"
+         (optional-detail " [" (fact "effect"))
+         (if (empty? (fact "effect")) "" "]")
+         ", use: " (fact "usage")
+         (optional-detail " - " (fact "doc")))
+    (str "value"
+         (optional-detail " " (fact "type"))
+         (optional-detail ", sample: " (fact "sample"))
+         ", use: " (fact "usage")
+         (optional-detail " - " (fact "doc")))))
+
+(defn- symbol-line
+  [fact]
+  (str (symbol-label fact) " ; " (symbol-detail fact)))
+
+(defn render-symbols
+  "Render sanitized symbol facts supplied by the host."
+  [cfg]
+  (let [facts (cfg "symbol_facts")]
+    (if (empty? facts)
+      (cfg "symbol_inventory")
+      (str ";; === available symbols ===\n"
+           "Use value symbols directly. Call only function symbols.\n"
+           (str/join "\n" (map symbol-line facts))))))
+
 (defn task-message
   "Render the initial user task message."
   [mission cfg]
-  {"role" "user"
-   "content" (str (mission "task")
-                  (if (empty? (mission "context"))
-                    ""
-                    (str "\nContext JSON: " (json/generate-string (mission "context"))))
-                  (if (empty? (cfg "symbol_inventory"))
-                    ""
-                    (str "\n\n" (cfg "symbol_inventory")))
-                  (if (empty? (cfg "tool_names"))
-                    ""
-                    (str "\nGranted tools: " (json/generate-string (cfg "tool_names")))))})
+  (let [symbols (render-symbols cfg)]
+    {"role" "user"
+     "content" (str (if (empty? symbols) "" (str symbols "\n\n"))
+                    "<mission>\n" (mission "task") "\n</mission>")}))

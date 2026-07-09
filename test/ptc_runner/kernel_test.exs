@@ -47,7 +47,7 @@ defmodule PtcRunner.KernelTest do
 
     assert system_prompt =~ "You are controlling PTC-Lisp through native tool calling."
     assert system_prompt =~ "run_ptc_lisp"
-    assert first_messages == [%{role: :user, content: "compute"}]
+    assert first_messages == [%{role: :user, content: "<mission>\ncompute\n</mission>"}]
     assert [%{role: :user, content: feedback}] = Enum.drop(retry_messages, 1)
     assert feedback =~ "Protocol error"
     assert feedback =~ "run_ptc_lisp"
@@ -68,7 +68,7 @@ defmodule PtcRunner.KernelTest do
              Kernel.run(%{"task" => "compute"}, llm: llm, system_prompt: "custom system")
 
     assert_received {:llm_request, %{system: "custom system", messages: messages}}
-    assert [%{role: :user, content: "compute"}] = messages
+    assert [%{role: :user, content: "<mission>\ncompute\n</mission>"}] = messages
     refute Enum.any?(messages, &(&1.role == :system))
   end
 
@@ -100,6 +100,8 @@ defmodule PtcRunner.KernelTest do
 
     assert system =~ "Use value symbols directly"
     assert content =~ ";; === available symbols ==="
+    assert content =~ "<mission>\ncompute\n</mission>"
+    refute content =~ "Context JSON"
     assert content =~ "data/numbers"
     assert content =~ "use: data/numbers"
     refute content =~ "(data/numbers"

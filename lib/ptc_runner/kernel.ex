@@ -74,13 +74,14 @@ defmodule PtcRunner.Kernel do
          opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
          {:ok, prelude} <- compile_prelude(opts),
          :ok <- log_prelude(opts, prelude),
-         {:ok, symbol_inventory, symbol_inventory_meta} <-
+         {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
            render_symbol_inventory(mission, opts),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
          {:ok, tools} <- kernel_tools(mission, opts, memory) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
         "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
+        "symbol_facts" => symbol_facts,
         "symbol_inventory" => symbol_inventory,
         "symbol_inventory_meta" => symbol_inventory_meta
       }
@@ -119,10 +120,19 @@ defmodule PtcRunner.Kernel do
            Keyword.get(opts, :symbol_inventory_renderer, :default),
            Keyword.get(opts, :symbol_inventory_renderer_opts, [])
          ) do
-      {:ok, rendered, meta} -> {:ok, rendered || "", meta}
+      {:ok, rendered, meta} -> {:ok, Enum.map(facts, &string_key_fact/1), rendered || "", meta}
       {:error, error} -> {:error, error}
     end
   end
+
+  defp string_key_fact(fact) when is_map(fact) do
+    fact
+    |> Enum.map(fn {key, value} -> {to_string(key), string_key_fact_value(value)} end)
+    |> Map.new()
+  end
+
+  defp string_key_fact_value(value) when is_atom(value), do: Atom.to_string(value)
+  defp string_key_fact_value(value), do: value
 
   defp public_tool_names(tools) when is_map(tools) do
     tools
