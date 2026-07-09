@@ -621,8 +621,9 @@ defmodule PtcRunner.KernelTest do
     assert_received {:llm_request, %{messages: [_, _, %{role: :tool, content: feedback}]}}
 
     decoded = Jason.decode!(feedback)
-    assert decoded["instruction"] =~ "memory_summary"
-    assert decoded["instruction"] =~ "defined names"
+
+    assert decoded["instruction"] ==
+             "Previous PTC-Lisp program did not return successfully. Call run_ptc_lisp again with a corrected program that ends in (return value)."
 
     summary = decoded["untrusted_eval_result"]["memory_summary"]
     assert summary["defined"] == ["payload"]

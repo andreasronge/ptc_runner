@@ -12,7 +12,7 @@
   "Render feedback for a program that did not return."
   [result cfg]
   (let [payload {"type" "ptc_lisp_eval_feedback"
-                 "instruction" "Previous PTC-Lisp program did not return successfully. Call run_ptc_lisp again with a corrected program that ends in (return value). If untrusted_eval_result.memory_summary is present, its defined names are available in the next PTC-Lisp program; use only the bounded previews shown there."
+                 "instruction" "Previous PTC-Lisp program did not return successfully. Call run_ptc_lisp again with a corrected program that ends in (return value)."
                  "untrusted_eval_result" result}]
     (or (json/generate-string payload)
         (str "PTC-Lisp eval feedback: " (result "status") " " (result "reason")))))
