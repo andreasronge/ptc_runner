@@ -10,6 +10,86 @@ function calls. This plan is not an A/B run. It builds the substrate that makes
 bounded, swappable renderer. Turn-aware reminder policy is Phase 2 and must not
 expand the Phase 1 implementation unless explicitly requested.
 
+## 2026-07-09 Amendment - Kernel Prompt Parity With SubAgent
+
+The first symbol-inventory implementation proved the useful substrate, but the
+current kernel prompt shape is still more verbose and more redundant than the
+tested `SubAgent` prompt shape. In particular, the mini eval cases currently
+carry task prose such as:
+
+```text
+Use context key numbers, available as data/numbers. Return the sum of all
+numbers.
+```
+
+That wording is test-harness scaffolding, not an API contract. Users should be
+able to write the mission naturally:
+
+```text
+Return the sum of all numbers.
+```
+
+and the runtime should separately render the Lisp-visible symbols:
+
+```text
+;; === data/ ===
+data/numbers ; value list[3], sample: [2 4 6], use: data/numbers
+
+<mission>
+Return the sum of all numbers.
+</mission>
+```
+
+The next implementation step is therefore **prompt parity**, not another live
+A/B: make the kernel prompt composition closer to `SubAgent` while preserving
+the kernel's prelude-configurable prompt policy.
+
+Design boundary:
+
+- host/Elixir owns the sanitized projection of facts and all authority filters;
+- `agent.prompt` owns compact model-visible rendering and message placement;
+- eval case task text must not duplicate symbol availability hints that the
+  inventory already renders;
+- raw `Context JSON` should be removed from the default kernel prompt unless a
+  debug or explicit renderer policy opts into it;
+- retry feedback may later include a compact symbol reminder, but that remains
+  Phase 2 unless explicitly requested.
+
+Implementation direction:
+
+1. Pass sanitized `symbol_facts` into `cfg` in addition to the rendered
+   fallback inventory and metadata.
+2. Add a compact `agent.prompt/render-symbols` helper in the prompt prelude.
+   The helper renders already-sanitized facts; it must not receive raw tools,
+   raw memory, private prelude env, or raw host context.
+3. Change `agent.prompt/task-message` to render symbols plus
+   `<mission>...</mission>`, matching the tested `SubAgent` mental model.
+4. Keep renderer choice prelude/config driven: a cell can swap prompt wording
+   by swapping `agent.prompt`, while the host still validates renderer inputs
+   and caps.
+5. Update `PtcRunner.Kernel.Eval.mini_cases/0` so context cases use natural
+   task text and rely on rendered inventory for `data/*` visibility.
+6. Add golden unsafe-debug/mock tests for first-turn and retry-turn request
+   shape, proving:
+   - mission text has no duplicated `available as data/x` wording;
+   - `data/x` appears in the symbol inventory as a value with `use: data/x`;
+   - default prompt does not include raw `Context JSON`;
+   - the system prompt stays domain-blind;
+   - retry history remains valid provider message history.
+
+Validation before any live model run:
+
+```sh
+mix test test/ptc_runner/kernel_test.exs \
+  test/ptc_runner/kernel/eval_test.exs \
+  test/ptc_runner/kernel/feedback_ab_test.exs \
+  test/ptc_runner/symbol_inventory_test.exs
+```
+
+Only after deterministic prompt-shape tests pass should a new live smoke be
+run. That smoke is descriptive and diagnostic only; it supersedes neither the
+S19 feedback-only A/B nor any future preregistered M3 comparison.
+
 ## Short Goal Prompt
 
 ```text
