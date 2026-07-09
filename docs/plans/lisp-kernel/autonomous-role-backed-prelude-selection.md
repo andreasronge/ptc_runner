@@ -32,7 +32,8 @@ Already present as of commit `566487cb`:
   preserving the existing store-level origin default.
 - Deterministic tests cover basic role parsing, unknown MCP-only keys,
   default-prelude allowlist failures, duplicate grants, role-backed kernel
-  execution, source-free provenance, and per-write origin validation.
+  execution, source-free provenance, stale-core `turn` fail-closed behavior, and
+  per-write origin validation.
 
 Known gaps before D20 should be called resolved:
 
@@ -204,8 +205,6 @@ Do not collapse these concepts. A run may request `agent.core`, which pulls
 `agent.prompt` and `agent.feedback` as dependencies; that is different from a
 role being allowed to directly request or edit those dependencies.
 
-## Implementation Plan
-
 ## Implementation Notes
 
 The core implementation copies the MCP role semantics that the kernel can
@@ -345,9 +344,16 @@ Then run:
 mix precommit
 ```
 
+If any closeout change touches `mcp_server/`, also run:
+
+```sh
+mix test mcp_server/test/ptc_runner_mcp/sessions_lifecycle_test.exs \
+  mcp_server/test/ptc_runner_mcp/http/router_admin_test.exs
+```
+
 Required repo-local gate ends at `mix precommit`. If the environment provides
-the Codex review skill, also run an independent `codex-review` pass over the D20
-closeout diff before committing.
+the Codex review skill, also run an independent `codex review` pass over the
+D20 closeout diff before committing.
 
 ## Historical Implementation Plan
 
@@ -510,7 +516,7 @@ Add focused tests before considering any live run:
   allowlist;
 - role selection resolves exact store refs into the same `agent.*` bundle as
   the embedded default when `agent.core` is seeded with
-  `requires_preludes: ["agent.prompt", "agent.feedback"]`;
+  `requires_preludes: ["agent.prompt@1", "agent.feedback@1"]`;
 - dependency closure is recorded and dependency refs cannot silently drift;
 - a role with no selected prelude permission fails closed;
 - role-selected kernel run produces the same mock result as the embedded
